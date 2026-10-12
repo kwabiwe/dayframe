@@ -22,6 +22,48 @@ describe("Settings detail (audit A8b)", () => {
     expect(settings).toMatch(/<HealthTypeSheet[\s\S]*?<ActivityPickerSheet[\s\S]*?<\/HealthTypeSheet>/);
   });
 
+  it("lifts the Apple Health type sheet through SwipeDismissSheet's keyboard hand-off, not a separate offset (Codex r1 on #355)", () => {
+    const sheet = settings.slice(settings.indexOf("function HealthTypeSheet("), settings.indexOf("function LocationInformationSheet("));
+    // The keyboard geometry is the shared one (useContentSizedSheetKeyboard, unit-tested in
+    // contentSizedSheetKeyboard.test.tsx), handed to the sheet that owns translation.
+    expect(sheet).toContain("const sheetKeyboard = useContentSizedSheetKeyboard({");
+    expect(sheet).toContain("keyboardInset={sheetKeyboard.keyboardInset}");
+    expect(sheet).toContain("onGestureStart={() => Keyboard.dismiss()}");
+    expect(sheet).not.toContain("translateYOffset");
+    expect(sheet).not.toContain("Animated.timing");
+    expect(sheet).not.toContain("automaticallyAdjustKeyboardInsets");
+    // Content-sized: a max height (85 % via the shared layout), never a fixed height.
+    expect(sheet).toContain("style={[styles.activeEditSheet, { maxHeight: sheetKeyboard.sheetMaxHeight }]}");
+    expect(sheet).not.toMatch(/\{ height: Math\.round\(windowHeight/);
+    expect(sheet).toContain("paddingBottom: sheetKeyboard.contentPaddingBottom");
+    expect(sheet).toContain("sheetKeyboard.keyboardSpaceStyle");
+    // Name is revealed whenever the layout settles with the keyboard up, unanimated under Reduce Motion.
+    expect(sheet).toContain("scrollRef.current?.scrollToEnd({ animated: !reduceMotion });");
+    expect(sheet).toContain("onLayout={sheetKeyboard.onScrollLayout}");
+    expect(sheet).toContain("sheetKeyboard.revealWhenSettled();");
+    expect(sheet).toContain("ref={scrollRef}");
+    const hook = readFileSync(resolve(__dirname, "../../lib/contentSizedSheetKeyboard.ts"), "utf8");
+    expect(hook).toContain("keyboardInsetFromScreenY({");
+    expect(hook).toContain('Keyboard.addListener("keyboardDidHide"');
+    expect(hook).toContain("if (reduceMotion || duration === null) {");
+    // The hand-off is released only once the keyboard has gone and the space has settled.
+    expect(hook).toContain("if (target.current === 0 && leaving.current.keyboardGone && leaving.current.spaceSettled) {");
+  });
+
+  it("reads every remembered account-scoped store for the owner its read started for (Codex r3–r4 on #355)", () => {
+    const reads = settings.slice(settings.indexOf("const refreshReviewDiagnostics = useCallback("), settings.indexOf("// Queue reads: the latest one started wins"));
+    expect(reads.match(/const startedFor = await beginRememberedSettingsRead\(\);/g)).toHaveLength(3);
+    expect(reads).toContain("const state = await readReviewSyncStateForOwner(startedFor.owner);");
+    expect(reads).not.toContain("getReviewSyncDiagnostics()");
+    expect(reads).not.toContain("listReviewSyncIssues()");
+    expect(reads).toContain("getTimeEntryOutboxDiagnostics(startedFor.owner)");
+    expect(reads).toContain("listTimeEntrySyncIssues(startedFor.owner)");
+    expect(reads).toContain("getTimerStopOutboxDiagnostics(startedFor.owner)");
+    expect(reads).toContain("listTimerStopSyncIssues(startedFor.owner)");
+    const nudge = settings.slice(settings.indexOf("const refreshReviewNudge = useCallback("), settings.indexOf("async function toggleReviewNudge("));
+    expect(nudge.match(/const owner = startedFor\.owner;/g)).toHaveLength(2);
+  });
+
   it("keeps a row's switch separate from the text that opens more", () => {
     expect(blocks).toContain("if (onPress && control) {");
     expect(blocks).toContain("rowPressArea:");

@@ -199,6 +199,8 @@ function createStyles(theme: MobileTheme) {
       backgroundColor: theme.background
     },
     // Blocks parity step 6a-1: the Settings index (prototype grouped lists).
+    // A row control slot that keeps 44 points whether or not its control is showing.
+    settingsControlSlot: { alignItems: "flex-end", justifyContent: "center", minHeight: 44 },
     settingsBlocksStack: {
       gap: 22
     },

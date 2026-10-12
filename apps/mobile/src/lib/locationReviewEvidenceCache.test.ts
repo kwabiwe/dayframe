@@ -286,6 +286,30 @@ describe("Location Review evidence cache orchestration", () => {
     expect(getLocationReviewEvidencePrefetchDiagnostics().attempted).toBe(
       attemptedBefore + 2
     );
+    // The counters describe this account only (Codex r6 on #355).
+    expect(getLocationReviewEvidencePrefetchDiagnostics(owner).attempted).toBe(attemptedBefore + 2);
+    expect(getLocationReviewEvidencePrefetchDiagnostics({ workspaceId: "other-workspace", userId: owner.userId })).toEqual({
+      attempted: 0, completed: 0, stopped: 0, idleStopped: 0, lastOutcome: "idle"
+    });
+  });
+
+  it("starts the prefetch counters over for another account and never adds an earlier account's run (Codex r6 on #355)", async () => {
+    const evidence = evidenceFixture();
+    fetchLocationReviewEvidence.mockResolvedValue(evidence);
+    const prefetcher = createLocationReviewEvidencePrefetcher();
+    prefetcher.start({ ...owner, reviewItemIds: [evidence.reviewItemId], initialDelayMilliseconds: 0, yieldMilliseconds: 0 });
+    await vi.waitFor(() => {
+      expect(getLocationReviewEvidencePrefetchDiagnostics(owner).lastOutcome).toBe("complete");
+    });
+    const other = { workspaceId: "other-workspace", userId: owner.userId };
+    const otherPrefetcher = createLocationReviewEvidencePrefetcher();
+    otherPrefetcher.start({ ...other, reviewItemIds: [], initialDelayMilliseconds: 0, yieldMilliseconds: 0 });
+    expect(getLocationReviewEvidencePrefetchDiagnostics(other).attempted).toBe(0);
+    expect(getLocationReviewEvidencePrefetchDiagnostics(owner).attempted).toBe(0);
+    // The earlier account's prefetcher stopping later adds nothing to the other account's counters.
+    prefetcher.stop();
+    expect(getLocationReviewEvidencePrefetchDiagnostics(other)).toMatchObject({ stopped: 0, idleStopped: 0 });
+    otherPrefetcher.stop();
   });
 
   it("does not prefetch another payload after the account cache reaches its cap", async () => {

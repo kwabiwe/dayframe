@@ -304,6 +304,39 @@ let lastEvidencePayloadBytes: number | null = null;
 let lastLocalMutationAction: string | null = null;
 let lastLocalMutationCommitDurationMs: number | null = null;
 let lastLocalMutationCommittedAt: string | null = null;
+// Bumped whenever the counters above are reset for another account.
+let processDiagnosticsEpoch = 0;
+
+/**
+ * The in-process cache and mutation counters describe the store's active account: they start over
+ * when the store's account changes or is cleared, so one account's activity never shows as
+ * another's (Codex r5 on #355).
+ */
+function resetProcessReviewDiagnostics() {
+  reviewCacheHitCount = 0;
+  reviewCacheMissCount = 0;
+  lastReviewCacheAgeMs = null;
+  evidenceCacheHitCount = 0;
+  evidenceCacheMissCount = 0;
+  lastEvidenceCacheAgeMs = null;
+  lastEvidencePayloadBytes = null;
+  lastLocalMutationAction = null;
+  lastLocalMutationCommitDurationMs = null;
+  lastLocalMutationCommittedAt = null;
+  processDiagnosticsEpoch += 1;
+}
+
+/**
+ * Taken when an operation that updates those counters starts: its update lands only while no
+ * account change or clear has happened since (each bumps the epoch), so a late completion from one
+ * account never writes into another's counters (Codex r6 on #355).
+ */
+function captureDiagnosticsWriter() {
+  const epoch = processDiagnosticsEpoch;
+  return (write: () => void) => {
+    if (epoch === processDiagnosticsEpoch) write();
+  };
+}
 const serialiseReviewMutation = createSerialMutationQueue();
 const listeners = new Set<() => void>();
 
@@ -527,9 +560,15 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
   const now = new Date().toISOString();
   const db = await database();
 
+  let accountChanged = false;
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
       const previousAccount = await activeAccount(transaction);
+      if (previousAccount?.account_key !== key) {
+        // The counters describe the store's account: they start over for a new one (also from none).
+        accountChanged = true;
+        resetProcessReviewDiagnostics();
+      }
       if (previousAccount && previousAccount.account_key !== key) {
         await transaction.runAsync(
           "delete from review_account_context where account_key = ?",
@@ -632,6 +671,8 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
       await pruneLocationReviewEvidenceCacheForAccount(transaction, key, now);
     })
   );
+  // Again once committed: an operation that started while the switch was in progress never lands.
+  if (accountChanged) resetProcessReviewDiagnostics();
 
   emitChange();
   return projectReviewBootstrap(
@@ -648,9 +689,15 @@ export async function activateReviewAccount(input: {
   const db = await database();
   const key = accountKey(input);
   const now = new Date().toISOString();
+  let accountChanged = false;
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
       const previousAccount = await activeAccount(transaction);
+      if (previousAccount?.account_key !== key) {
+        // The counters describe the store's account: they start over for a new one (also from none).
+        accountChanged = true;
+        resetProcessReviewDiagnostics();
+      }
       if (previousAccount && previousAccount.account_key !== key) {
         await transaction.runAsync(
           "delete from review_account_context where account_key = ?",
@@ -689,6 +736,8 @@ export async function activateReviewAccount(input: {
       );
     })
   );
+  // Again once committed: an operation that started while the switch was in progress never lands.
+  if (accountChanged) resetProcessReviewDiagnostics();
   emitChange();
 }
 
@@ -696,10 +745,11 @@ export async function loadCachedReviewBootstrap(): Promise<{
   bootstrap: MobileBootstrap;
   cachedAt: string | null;
 } | null> {
+  const record = captureDiagnosticsWriter();
   const db = await database();
   const account = await activeAccount(db);
   if (!account) {
-    reviewCacheMissCount += 1;
+    record(() => { reviewCacheMissCount += 1; });
     return null;
   }
   const categories = await db.getAllAsync<CachedCategoryRow>(
@@ -761,11 +811,13 @@ export async function loadCachedReviewBootstrap(): Promise<{
     db
   );
   if (!cachedAt) {
-    reviewCacheMissCount += 1;
+    record(() => { reviewCacheMissCount += 1; });
     return null;
   }
-  reviewCacheHitCount += 1;
-  lastReviewCacheAgeMs = ageMilliseconds(cachedAt);
+  record(() => {
+    reviewCacheHitCount += 1;
+    lastReviewCacheAgeMs = ageMilliseconds(cachedAt);
+  });
   return {
     cachedAt,
     bootstrap: {
@@ -827,6 +879,7 @@ export async function loadCachedLocationReviewEvidence(
   fetchedAt: string;
   expiresAt: string;
 } | null> {
+  const record = captureDiagnosticsWriter();
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return null;
@@ -838,11 +891,11 @@ export async function loadCachedLocationReviewEvidence(
     reviewItemId
   );
   if (!row) {
-    evidenceCacheMissCount += 1;
+    record(() => { evidenceCacheMissCount += 1; });
     return null;
   }
   if (!isFutureIso(row.expires_at)) {
-    evidenceCacheMissCount += 1;
+    record(() => { evidenceCacheMissCount += 1; });
     await serialiseReviewMutation(() =>
       db.runAsync(
         `delete from location_review_evidence_cache
@@ -868,16 +921,18 @@ export async function loadCachedLocationReviewEvidence(
         reviewItemId
       )
     );
-    evidenceCacheHitCount += 1;
-    lastEvidenceCacheAgeMs = ageMilliseconds(row.fetched_at);
-    lastEvidencePayloadBytes = Math.max(0, Number(row.byte_size) || 0);
+    record(() => {
+      evidenceCacheHitCount += 1;
+      lastEvidenceCacheAgeMs = ageMilliseconds(row.fetched_at);
+      lastEvidencePayloadBytes = Math.max(0, Number(row.byte_size) || 0);
+    });
     return {
       evidence,
       fetchedAt: row.fetched_at,
       expiresAt: row.expires_at
     };
   } catch {
-    evidenceCacheMissCount += 1;
+    record(() => { evidenceCacheMissCount += 1; });
     await serialiseReviewMutation(() =>
       db.runAsync(
         `delete from location_review_evidence_cache
@@ -1056,6 +1111,13 @@ export async function getLocationReviewEvidenceCacheDiagnostics(): Promise<
       newestFetchedAt: null
     };
   }
+  return evidenceCacheDiagnosticsForAccount(db, account);
+}
+
+async function evidenceCacheDiagnosticsForAccount(
+  db: SQLite.SQLiteDatabase,
+  account: AccountRow
+): Promise<LocationReviewEvidenceCacheDiagnostics> {
   const row = await db.getFirstAsync<{
     item_count: number;
     total_bytes: number;
@@ -1785,6 +1847,7 @@ export async function enqueueReviewMutation(input: {
   let idempotent = false;
   let persistedEnvelope = envelope;
   const localCommitStartedAt = Date.now();
+  const record = captureDiagnosticsWriter();
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (!account || account.account_key !== key) throw new Error("Review data is not configured for this account.");
@@ -1868,9 +1931,11 @@ export async function enqueueReviewMutation(input: {
       );
     }
   }));
-  lastLocalMutationAction = mutation.action;
-  lastLocalMutationCommitDurationMs = Date.now() - localCommitStartedAt;
-  lastLocalMutationCommittedAt = new Date().toISOString();
+  record(() => {
+    lastLocalMutationAction = mutation.action;
+    lastLocalMutationCommitDurationMs = Date.now() - localCommitStartedAt;
+    lastLocalMutationCommittedAt = new Date().toISOString();
+  });
   emitChange();
   return { envelope: persistedEnvelope, idempotent };
 }
@@ -2109,6 +2174,13 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return emptyDiagnostics();
+  return reviewSyncDiagnosticsForAccount(db, account);
+}
+
+async function reviewSyncDiagnosticsForAccount(
+  db: SQLite.SQLiteDatabase,
+  account: AccountRow
+): Promise<ReviewSyncDiagnostics> {
   const row = await db.getFirstAsync<CountRow>(
     `select
        count(*) filter (where state in ('pending', 'in_flight')) as pending_count,
@@ -2145,7 +2217,7 @@ export async function getReviewSyncDiagnostics(): Promise<ReviewSyncDiagnostics>
     where account_key=? and state='retry_wait' and reconciliation_attempt_count=0`,account.account_key);
   const checkingCount = Number(diagnostics.checking_count) || 0;
   const dueDates=[diagnostics.next_retry_at,escalation?.due,diagnostics.checking_due_at].filter((value):value is string=>Boolean(value)).sort();
-  const evidenceCache = await getLocationReviewEvidenceCacheDiagnostics();
+  const evidenceCache = await evidenceCacheDiagnosticsForAccount(db, account);
   return {
     pendingCount,
     presentationReads: [...presentationReads.values()]
@@ -2215,6 +2287,50 @@ export async function listReviewSyncIssues() {
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return [];
+  return reviewSyncIssuesForAccount(db, account);
+}
+
+/**
+ * Settings' remembered reads (Codex r4 on #355): this store keeps its own active account, which can
+ * differ from the app's active account while accounts reconcile. The diagnostics and rejected
+ * issues are read only when the store's active account is `owner`, every query keyed to that one
+ * account; otherwise null (nothing to show for `owner` here).
+ */
+export async function readReviewSyncStateForOwner(owner: { userId: string; workspaceId: string }) {
+  return readOwnedReviewState(owner, async (db, account) => ({
+    diagnostics: await reviewSyncDiagnosticsForAccount(db, account),
+    issues: await reviewSyncIssuesForAccount(db, account)
+  }));
+}
+
+/**
+ * The support export's Review section (Codex r6 on #355): the diagnostics and every saved Review
+ * change of `owner` only, under the same rules as `readReviewSyncStateForOwner`; null when the
+ * store holds another account (or moved during the read).
+ */
+export async function readReviewSupportExportForOwner(owner: { userId: string; workspaceId: string }) {
+  return readOwnedReviewState(owner, async (db, account) => ({
+    diagnostics: await reviewSyncDiagnosticsForAccount(db, account),
+    mutations: await reviewSyncDiagnosticMutationsForAccount(db, account)
+  }));
+}
+
+async function readOwnedReviewState<Result>(
+  owner: { userId: string; workspaceId: string },
+  read: (db: SQLite.SQLiteDatabase, account: AccountRow) => Promise<Result>
+): Promise<Result | null> {
+  const db = await database();
+  const epoch = processDiagnosticsEpoch;
+  const account = await activeAccount(db);
+  if (!account || account.account_key !== accountKey(owner)) return null;
+  const result = await read(db, account);
+  // The store moved to another account during the read (even and back): its in-process counters
+  // may no longer be this account's, so nothing is returned.
+  if (epoch !== processDiagnosticsEpoch || (await activeAccount(db))?.account_key !== account.account_key) return null;
+  return result;
+}
+
+async function reviewSyncIssuesForAccount(db: SQLite.SQLiteDatabase, account: AccountRow) {
   return await db.getAllAsync<{
     clientMutationId: string;
     reviewItemId: string;
@@ -2243,6 +2359,13 @@ export async function listReviewSyncDiagnosticMutations(): Promise<
   const db = await database();
   const account = await activeAccount(db);
   if (!account) return [];
+  return reviewSyncDiagnosticMutationsForAccount(db, account);
+}
+
+async function reviewSyncDiagnosticMutationsForAccount(
+  db: SQLite.SQLiteDatabase,
+  account: AccountRow
+): Promise<ReviewSyncDiagnosticMutation[]> {
   return await db.getAllAsync<ReviewSyncDiagnosticMutation>(
     `select client_mutation_id as "clientMutationId",
             review_item_id as "reviewItemId",
@@ -2295,6 +2418,7 @@ export async function discardReviewSyncIssue(clientMutationId: string) {
 
 export async function clearActiveReviewAccountData() {
   presentationReads.clear();
+  resetProcessReviewDiagnostics();
   const db = await database();
   await serialiseReviewMutation(() =>
     db.withExclusiveTransactionAsync(async (transaction) => {
@@ -2315,6 +2439,9 @@ export async function clearActiveReviewAccountData() {
       );
     })
   );
+  // Again once cleared: an operation that started before the clear finished never lands.
+  presentationReads.clear();
+  resetProcessReviewDiagnostics();
   emitChange();
 }
 

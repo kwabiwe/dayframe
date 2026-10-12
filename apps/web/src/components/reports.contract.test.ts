@@ -108,6 +108,40 @@ describe("Reports in Blocks audit fixes (W8)", () => {
   });
 });
 
+describe("Reports staging feedback I1–I3", () => {
+  it("traces from blocks with a neutral inner focus ring and no transitions under Reduce Motion (I1)", () => {
+    // The day column or month cell is the hit area, never the 2–3 px block (review 3).
+    expect(rule(".df-tblock")).toContain("pointer-events: none");
+    expect(panelSource).toContain("{...pointerProps}");
+    // Touch picks a day; its activities are 44 px rows in a panel that collapses at once under
+    // Reduce Motion (review 3).
+    expect(rule(".df-day-pick-row")).toContain("min-height: 44px");
+    expect(rule(".df-day-pick-close")).toContain("height: 44px");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-day-pick \{\s*transition: none;/);
+    // React never sets the panel's inert: the layout effect does, after focus has left (review r4).
+    expect(panelSource).not.toMatch(/\binert=\{/);
+    expect(panelSource).toContain('panel.setAttribute("inert", "")');
+    // Day targets on phones (review r3, r4): every day column and month cell at least 44 px, 2 px
+    // gaps and 14 px card sides (a week and a month fit at 375 px), scrolling inside the card.
+    expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-report-blocks \{\s*padding-right: 14px;\s*padding-left: 14px;\s*\}\s*\.df-wblocks \{\s*grid-auto-columns: minmax\(44px, 1fr\);\s*gap: 2px;\s*overflow-x: auto;/);
+    expect(styles).toMatch(/\.df-month \{\s*grid-template-columns: repeat\(7, minmax\(44px, 1fr\)\);\s*gap: 2px;\s*overflow-x: auto;/);
+    // 7 × 44 + 6 × 2 fits a 375 px phone's card (375 − 2 × 12 page − 2 × 14 card = 323).
+    expect(7 * 44 + 6 * 2).toBeLessThanOrEqual(375 - 2 * 12 - 2 * 14);
+    expect(rule(".df-wb[data-roving-key]:focus-visible,\n.df-mday[data-roving-key]:focus-visible")).toContain("outline-offset: -2px");
+    expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
+    expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
+    expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-tblock,\s*\.df-donut-seg \{\s*transition: none;/);
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-wb-stack > \.df-tblock \{\s*animation: none;/);
+  });
+
+  it("draws the Filter button with a generic funnel before its label (I3)", () => {
+    expect(filtersSource).toMatch(/import \{[^}]*\bFunnel\b[^}]*\} from "lucide-react"/);
+    expect(filtersSource).toMatch(/className="df-rbtn df-rbtn--sm df-report-filter-button"/);
+    expect(filtersSource).toMatch(/<Funnel aria-hidden="true" size=\{16\} \/>\s*Filter\{/);
+  });
+});
+
 describe("Reports rows and Filter dialog in Blocks (W8b)", () => {
   it("ends Reports at Where it went, collapsed Tags and More insights, and Blocks rows (UIA-303)", () => {
     expect(overviewSource).not.toContain("report-allocation-title");

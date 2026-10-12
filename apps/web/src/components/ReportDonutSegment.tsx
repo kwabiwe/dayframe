@@ -22,8 +22,8 @@ export function ReportDonutSegment({
   offset: number;
   /** Keyboard focus arriving (true) or leaving (false), for a focus ring drawn beside the slice. */
   onFocusChange?: (focused: boolean) => void;
-  /** Hover or focus (true) and their end (false), for cross-highlighting. */
-  onHighlight?: (on: boolean) => void;
+  /** Hover or focus (true) and their end (false), for cross-highlighting; each source is tracked apart. */
+  onHighlight?: (on: boolean, source: "hover" | "focus") => void;
   radius: number;
   stroke: string;
   totalLength: number;
@@ -54,17 +54,17 @@ export function ReportDonutSegment({
       strokeDasharray={`${dash} ${totalLength - dash}`}
       strokeDashoffset={offset}
       onBlur={() => {
-        onHighlight?.(false);
+        onHighlight?.(false, "focus");
         onFocusChange?.(false);
       }}
       onClick={activate}
       onFocus={() => {
-        onHighlight?.(true);
+        onHighlight?.(true, "focus");
         onFocusChange?.(true);
       }}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => onHighlight?.(true)}
-      onMouseLeave={() => onHighlight?.(false)}
+      onMouseEnter={() => onHighlight?.(true, "hover")}
+      onMouseLeave={() => onHighlight?.(false, "hover")}
     />
   );
 }

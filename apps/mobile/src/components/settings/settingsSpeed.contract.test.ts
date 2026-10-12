@@ -23,7 +23,7 @@ describe("Settings opens instantly (I1)", () => {
     expect(body).toContain("const [initialSeed, setTodaySeed] = useState(() => cachedSnapshot?.data ? null : readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()));");
     expect(body).toContain("[subscribeMobileSignedOut(drop), subscribeAuthenticatedSession(drop), subscribeActiveMobileAccount(drop)]");
     expect(body).toContain("const todaySeed = initialSeed && readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) === initialSeed ? initialSeed : null;");
-    expect(body.match(/todaySeed\b/g)).toHaveLength(3);
+    expect(body.match(/todaySeed\b/g)).toHaveLength(4); // defined, user, workspace label, Activities summary
     expect(body).not.toMatch(/setData(AndCache)?\((initialSeed|todaySeed)/);
     // Up to the first effect after the seed's subscription effect.
     const seedEffect = body.indexOf("useEffect(", body.indexOf("const [initialSeed"));
