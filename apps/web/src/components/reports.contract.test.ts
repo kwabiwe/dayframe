@@ -85,7 +85,10 @@ describe("Reports in Blocks audit fixes (W8)", () => {
     expect(rangeSource).toContain("Custom…");
     expect(rangeSource).not.toContain("<select");
     expect(rule(".df-report-panel")).toContain("align-items: stretch");
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-range-menu \{\s*animation: none;/);
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-range-menu,\s*\.df-range-menu\.is-closing \{\s*animation: none;/);
+    // The phone sheet sits above the tab bar (z-index 40), clear of the safe area, with a close control.
+    expect(styles).toMatch(/\.df-range-menu \{\s*position: fixed;\s*z-index: 70;[^}]*safe-area-inset-bottom/);
+    expect(rangeSource).toContain("Close date ranges");
     expect(styles).toMatch(/\.df-range-menu \{[^}]*max-width: calc\(100vw - 24px\)/);
   });
 

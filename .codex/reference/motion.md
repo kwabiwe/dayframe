@@ -323,6 +323,16 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web Reports range menu (audit W8, UIA-304)
+
+- Trigger: the range text button under the Reports title (‹ range ›). Single owner: `ReportRangeControls`' `menu` state (`closed` / `open` / `closing`); nothing else animates it.
+- Entrance: opacity 0 → 1 over 120ms (ease-out). Desktop: a popover under the trigger; under 640px a bottom sheet above the phone tab bar (z-index 70 over the bar's 40, `bottom: calc(12px + env(safe-area-inset-bottom))`, 44px items, visible 44px close control).
+- Update: choosing a preset closes the menu and navigates; the head row and the page around the trigger never move.
+- Exit: state `closing` keeps it mounted while it fades 1 → 0 over 120ms (ease-in, pointer-events off), then unmounts on `animationend` with a timer fallback. Escape and the close control return focus to the trigger; Tab and outside clicks close without moving focus; "Custom…" closes it and opens the dates dialog, whose Cancel/Escape/Apply return focus to the trigger.
+- Interruption: reopening mid-exit returns to `open` and cancels the pending unmount; rapid toggles never leave a stale menu.
+- Reduce Motion: no entrance or exit animation; open and close are immediate.
+- Evidence: `reportRangeControls.dom.test.tsx` (focus, arrows/Home/End/Escape/Tab, mid-exit reopen, Reduce Motion, dialog focus return) and `reports.contract.test.ts` (Reduce Motion CSS, phone sheet over the tab bar).
+
 ## Web Review (Blocks parity step 13)
 
 - Trigger: Log it / Skip (buttons, Y / N, Enter in "Log as"), a queue row or ↑ ↓ choosing a card, Undo (toast button or ⌘Z/Ctrl+Z), a held save failing or finding the suggestion changed, the queue emptying.

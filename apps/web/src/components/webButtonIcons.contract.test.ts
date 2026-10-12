@@ -21,7 +21,7 @@ function files(directory: string): string[] {
 // listbox and popover rows, chips and activity blocks — plus the Review deck's decision row
 // (Log it / Skip / Edit name with their keys), as on the iPhone deck and the prototype.
 const PRIMARY = /\b(?:df-rbtn--live|df-rbtn--primary|ui-button-primary|industrial-button-primary|landing-primary-action)\b/;
-const NOT_A_TEXT_BUTTON = /\b(?:df-nav|df-tabbar|df-brand|df-side-search|df-profile-pop-rows|df-rchip|df-fchip|df-quick-button|df-lnew|swiss-category-trigger|timeline-period-trigger|dayframe-date-time-trigger|swiss-timer-actions-menu|fill-list-action|swiss-task-suggestions-list|calendar-entry-primary)\b/;
+const NOT_A_TEXT_BUTTON = /\b(?:df-nav|df-tabbar|df-brand|df-side-search|df-profile-pop-rows|df-rchip|df-fchip|df-quick-button|df-lnew|swiss-category-trigger|timeline-period-trigger|df-range-trigger|dayframe-date-time-trigger|swiss-timer-actions-menu|fill-list-action|swiss-task-suggestions-list|calendar-entry-primary)\b/;
 // SignOutControl draws its icon only when the profile menu's row asks for it (showIcon).
 const EXEMPT_FILES = new Set(["src/components/review/ReviewDeck.tsx", "src/components/TimerPanel.tsx", "src/components/SignOutControl.tsx"]);
 const CANDIDATES = new Set(["button", "a", "Link", "Button", "summary"]);

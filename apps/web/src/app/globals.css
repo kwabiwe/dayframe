@@ -963,7 +963,6 @@ textarea.ui-control {
   outline-offset: 2px;
 }
 
-
 .category-data-marker {
   width: 12px;
   height: 12px;
@@ -3822,7 +3821,6 @@ kbd {
   margin: 0 auto;
 }
 
-.report-range-controls,
 .report-filter-panel,
 .report-trend,
 .report-allocation,
@@ -3832,67 +3830,8 @@ kbd {
   min-width: 0;
 }
 
-.report-range-controls,
 .report-filter-panel {
   padding: var(--web-gap-lg) var(--web-panel-padding);
-}
-
-.report-range-primary {
-  display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(280px, 1fr) auto;
-  align-items: end;
-  gap: 16px;
-}
-
-.report-range-preset {
-  min-width: 0;
-}
-
-.report-range-navigation {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
-  align-items: center;
-  justify-self: center;
-  gap: 10px;
-  width: min(100%, 460px);
-}
-
-.report-range-navigation > div {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  text-align: center;
-}
-
-.report-range-navigation strong {
-  overflow-wrap: anywhere;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.report-range-navigation span,
-.report-range-note {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.report-range-nav-button {
-  display: inline-grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  color: var(--foreground);
-}
-
-.report-range-nav-button:hover {
-  background: var(--surface-muted);
-}
-
-.report-range-nav-button.is-disabled {
-  color: var(--disabled);
-  cursor: not-allowed;
 }
 
 .report-custom-range {
@@ -3912,10 +3851,6 @@ kbd {
 .report-custom-actions {
   display: flex;
   gap: 8px;
-}
-
-.report-range-note {
-  margin: 10px 0 0;
 }
 
 .report-filter-heading,
@@ -4718,20 +4653,11 @@ kbd {
 }
 
 @media (max-width: 760px) {
-  .report-range-primary,
   .report-primary-filters,
   .report-more-filter-grid,
   .report-analysis-grid,
   .report-secondary-grid {
     grid-template-columns: 1fr;
-  }
-
-  .report-range-primary {
-    align-items: stretch;
-  }
-
-  .report-range-navigation {
-    justify-self: stretch;
   }
 
   .report-custom-range,
@@ -5970,7 +5896,6 @@ kbd {
   font-weight: 600;
 }
 
-
 .timeline-range-controls {
   display: flex;
   min-width: 0;
@@ -6949,12 +6874,6 @@ kbd {
   font-size: 12px;
   font-weight: 650;
 }
-
-
-
-
-
-
 
 .swiss-day-header,
 .swiss-list-header {
@@ -8964,7 +8883,6 @@ dialog.ui-dialog.manual-entry-dialog {
   border-color: var(--control-border);
 }
 
-
 .timeline-range-controls {
   justify-content: flex-end;
 }
@@ -9556,7 +9474,6 @@ dialog.ui-dialog.manual-entry-dialog {
 .df-tabbar {
   display: none;
 }
-
 
 @media (max-width: 860px) {
   .swiss-app-shell {
@@ -10905,7 +10822,6 @@ dialog.ui-dialog.df-palette {
 .df-toast.is-exiting {
   animation: df-toast-out 160ms ease-in both;
 }
-
 
 .df-toast-swatch {
   width: 12px;
@@ -13703,7 +13619,6 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 8px 10px;
 }
 
-
 /* UIA-205: discarding changes is destructive, so its confirm reads as danger, not coral. */
 .calendar-compact-discard-confirm {
   background: var(--surface-muted);
@@ -14091,8 +14006,29 @@ dialog.ui-dialog.df-rf-dialog {
   }
 }
 
+/* Exit: kept mounted while it fades; the component unmounts it on animationend. */
+.df-range-menu.is-closing {
+  pointer-events: none;
+  animation: df-range-menu-out 120ms ease-in both;
+}
+
+@keyframes df-range-menu-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+.df-range-menu-close {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .df-range-menu {
+  .df-range-menu,
+  .df-range-menu.is-closing {
     animation: none;
   }
 }
@@ -14123,13 +14059,30 @@ dialog.ui-dialog.df-rf-dialog {
     width: 44px;
   }
 
+  /* A bottom sheet above the phone tab bar (z-index 40), clear of the home indicator. */
   .df-range-menu {
     position: fixed;
+    z-index: 70;
     top: auto;
     right: 12px;
-    bottom: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     left: 12px;
     max-width: calc(100vw - 24px);
+    max-height: min(520px, calc(100dvh - 24px - env(safe-area-inset-bottom, 0px)));
+    padding-top: 52px;
+  }
+
+  .df-range-menu-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 !important;
+    color: var(--text-secondary);
   }
 }
 
