@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* X3: every activity/category marker is a small rounded-square block, never a round dot.
+   Percentage keeps the Blocks chip proportion (~4px on a 12px marker) at any marker size. */
+:root {
+  --activity-marker-radius: 30%;
+}
+
 :root,
 :root[data-theme="light"] {
   --background: #f4f6f9;
@@ -969,7 +975,7 @@ textarea.ui-control {
   height: 12px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .category-data-marker.is-uncategorized {
@@ -3363,6 +3369,35 @@ kbd {
   font-size: 14px;
 }
 
+/* Sign-up's password rule and the quiet "Forgot password?" under Log in's password (UIA-317/318). */
+.auth-hint {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.auth-forgot,
+.auth-link-button {
+  justify-self: start;
+  min-height: 44px;
+  margin: -6px 0 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.auth-link-button {
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .auth-page {
   display: grid;
   min-height: 100vh;
@@ -3381,6 +3416,7 @@ kbd {
 }
 
 .auth-card form > p a,
+.auth-switch--standalone a,
 .landing-footer a {
   display: inline-flex;
   min-width: 44px;
@@ -3389,7 +3425,8 @@ kbd {
   justify-content: center;
 }
 
-.auth-card form > p a {
+.auth-card form > p a,
+.auth-switch--standalone a {
   color: var(--text-primary);
   font-weight: 700;
   text-decoration: underline;
@@ -3417,7 +3454,8 @@ kbd {
   place-items: center;
   transform: translateY(-50%);
   border: 0;
-  border-radius: 10px;
+  /* Icon-only actions are round (UIA-319). */
+  border-radius: 999px;
   background: transparent;
   color: var(--muted);
 }
@@ -4091,14 +4129,14 @@ kbd {
 .report-filter-chip-dot {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-filter-option-dot.is-uncategorized,
 .report-category-marker.is-uncategorized,
 .report-entry-category i.is-uncategorized {
   border: 1px solid var(--text-secondary);
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
   background: repeating-linear-gradient(45deg, var(--surface-muted) 0 2px, var(--text-secondary) 2px 3px) !important;
 }
 
@@ -4380,7 +4418,7 @@ kbd {
 .report-category-marker {
   width: 10px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   background: var(--category-color);
 }
 
@@ -4588,7 +4626,7 @@ kbd {
   width: 10px;
   height: 10px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .report-entry-duration {
@@ -6494,7 +6532,7 @@ kbd {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-task-suggestions-list svg {
@@ -6642,7 +6680,7 @@ kbd {
   height: 20px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 
@@ -6777,7 +6815,7 @@ kbd {
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .swiss-focus-dot.is-muted {
@@ -8272,7 +8310,7 @@ dialog.ui-dialog.manual-entry-dialog {
   height: 9px;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--activity-marker-radius);
   box-shadow: none;
 }
 
@@ -12058,8 +12096,10 @@ dialog.ui-dialog.df-palette {
   opacity: 0.85;
 }
 
+/* The card's Edit spans the card, as in the prototype (UIA-316). */
 .df-lcard > .df-rbtn {
-  justify-self: start;
+  justify-self: stretch;
+  justify-content: center;
 }
 
 .df-lnew {
@@ -12310,6 +12350,16 @@ dialog.ui-dialog.df-ce-dialog {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
+}
+
+.df-place-new .df-srow-text {
+  display: grid;
+  min-width: 0;
+}
+
+.df-place-new .df-srow-text small {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .df-tag-new-field {
@@ -13515,7 +13565,7 @@ dialog.ui-dialog.df-rf-dialog {
 
 .df-cal-day-bars i {
   width: 5px;
-  border-radius: 2px;
+  border-radius: var(--activity-marker-radius);
 }
 
 .df-cal-day-bars .df-cal-day-none {

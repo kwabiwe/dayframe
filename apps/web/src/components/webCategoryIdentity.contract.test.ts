@@ -27,9 +27,9 @@ describe("web category identity contract", () => {
     );
   });
 
-  it("keeps category markers circular and borders only Uncategorized", () => {
+  it("keeps category markers block-shaped and borders only Uncategorized", () => {
     expect(styles).toMatch(
-      /\.category-data-marker\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*999px;/s
+      /\.category-data-marker\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*var\(--activity-marker-radius\);/s
     );
     expect(allocation).toContain("category-data-marker");
   });

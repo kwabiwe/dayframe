@@ -323,6 +323,14 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web sign-in card (audit W14, UIA-317)
+
+- Trigger: Forgot password? and Back to Log in, Log in ↔ Create account, Opening Dayframe, an error or notice line, the reset email's sent reply, and on the reset page the form giving way to "Password changed" or "link expired".
+- Owner: `AuthCardMotion` is the only owner, and it is the card itself (the `.auth-card` surface, radius, shadow and width), mounted while its views change; the views inside are plain `.auth-card-view` content. A `ResizeObserver` on its inner wrapper resizes the visible card from its current height to the new natural height with the `sheet` spring (a resize during a resize starts from where the card is); a new view fades in with a 6 px rise (180 ms), and so does a card reached by client navigation between Log in and Create account (separate pages); the first card of a page load appears as rendered. Error and notice lines resize the card without fading the view.
+- Interruption: a newer view or size cancels the running animation and starts from the current state; nothing else animates the card. Submission keeps its existing locks (one request at a time; Back stays available on the reset request).
+- Focus: unchanged — each view moves focus to its heading as before (Reset password, Back to Log in, the sent reply, the reset outcome); errors keep focus and are announced.
+- Reduce Motion: no resize and no rise; a new view fades in over 90 ms.
+
 ## Web Review (Blocks parity step 13)
 
 - Trigger: Log it / Skip (buttons, Y / N, Enter in "Log as"), a queue row or ↑ ↓ choosing a card, Undo (toast button or ⌘Z/Ctrl+Z), a held save failing or finding the suggestion changed, the queue emptying.

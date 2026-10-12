@@ -1,3 +1,5 @@
+import { isSignedOutPath } from "@/lib/signed-out-paths";
+
 type ClientAuthEnvironment = {
   pathname: string;
   redirect: (href: string) => void;
@@ -25,7 +27,7 @@ export async function handleClientAuthResponse(
   if (response.status !== 401) return false;
   const code = await publicAuthErrorCode(response);
   if (!code || !LOGIN_REDIRECT_CODES.has(code)) return false;
-  if (!environment || environment.pathname === "/login" || environment.pathname === "/signup") {
+  if (!environment || isSignedOutPath(environment.pathname)) {
     return true;
   }
 

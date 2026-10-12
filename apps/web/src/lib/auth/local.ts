@@ -147,6 +147,7 @@ export async function signupLocalAccount(input: z.input<typeof SignupInputSchema
 
   try {
     await client.query("begin");
+    const authenticatedAt = await databaseNow(client);
     const existing = await client.query("select id from users where email = $1", [email]);
     if (existing.rowCount) {
       throw new AuthError("An account already exists for this email.", 409);
@@ -170,7 +171,7 @@ export async function signupLocalAccount(input: z.input<typeof SignupInputSchema
       [workspace.rows[0].id, user.rows[0].id]
     );
     await seedDefaultWorkspaceData(client, workspace.rows[0].id);
-    const auth = await createSession(client, user.rows[0].id, workspace.rows[0].id, userAgent);
+    const auth = await createSession(client, user.rows[0].id, workspace.rows[0].id, userAgent, authenticatedAt);
 
     await client.query("commit");
     return toAuthPayload(auth.token, auth.expiresAt, user.rows[0], workspace.rows[0]);
@@ -185,6 +186,8 @@ export async function signupLocalAccount(input: z.input<typeof SignupInputSchema
 export async function loginLocalAccount(input: z.input<typeof LoginInputSchema>, userAgent?: string | null) {
   const parsed = LoginInputSchema.parse(input);
   const email = normalizeEmail(parsed.email);
+  // Taken before the password check: a reset since then refuses this sign-in (createSession).
+  const authenticatedAt = await databaseNow();
   const user = await query<UserRow>(
     `select id, email, name, password_hash as "passwordHash"
      from users
@@ -199,13 +202,8 @@ export async function loginLocalAccount(input: z.input<typeof LoginInputSchema>,
   const workspace = await getDefaultWorkspaceForUser(userRow.id);
   if (!workspace) throw new AuthError("No workspace membership exists for this account.");
 
-  const client = await pool.connect();
-  try {
-    const auth = await createSession(client, userRow.id, workspace.id, userAgent);
-    return toAuthPayload(auth.token, auth.expiresAt, userRow, workspace);
-  } finally {
-    client.release();
-  }
+  const auth = await createSessionInTransaction(userRow.id, workspace.id, userAgent, authenticatedAt);
+  return toAuthPayload(auth.token, auth.expiresAt, userRow, workspace);
 }
 
 export async function resolveLocalSession(
@@ -304,12 +302,31 @@ export async function switchLocalSessionWorkspace(token: string | null | undefin
   return result.rows[0];
 }
 
+/**
+ * Starts a Dayframe sign-in. Call it inside a transaction: the user row's share lock is held until
+ * that transaction ends, so a password reset (`endSignInsAfterPasswordChange`, which takes the
+ * same row's update lock) either commits first, and this sees its fence, or waits, and then revokes
+ * this session. `authenticatedAt` is the database time taken before the password was checked; a
+ * reset at or after it refuses the session (UIA-317).
+ */
 export async function createSession(
   client: pg.PoolClient,
   userId: string,
   workspaceId: string,
-  userAgent?: string | null
+  userAgent: string | null | undefined,
+  authenticatedAt: Date
 ) {
+  const signer = await client.query("select id from users where id = $1 for share", [userId]);
+  if (signer.rowCount === 0) throw new AuthError("This account is not available.", 401);
+  // A separate statement after the lock: it reads with a fresh snapshot, so a reset that committed
+  // while this waited is seen.
+  const fence = await client.query(
+    "select 1 from user_session_fences where user_id = $1 and sessions_valid_after >= $2::timestamptz",
+    [userId, authenticatedAt]
+  );
+  if (fence.rowCount) {
+    throw new AuthError("Your password was just changed. Log in with the new one.", 401);
+  }
   const token = generateSessionToken();
   const expiresAt = new Date(Date.now() + APP_SESSION_TTL_SECONDS * 1000);
   await client.query(
@@ -319,6 +336,69 @@ export async function createSession(
   );
 
   return { token, expiresAt };
+}
+
+/**
+ * After a password change: refuses every sign-in authenticated before now and revokes every
+ * Dayframe session for the user, in one transaction under the user row's update lock (ordered
+ * against createSession). Fails closed when the user has no Dayframe row, so a caller never
+ * reports a reset as done without a fence (UIA-317).
+ */
+export async function endSignInsAfterPasswordChange(userId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const user = await client.query("select id from users where id = $1 for update", [userId]);
+    if (user.rowCount === 0) throw new AuthError("Dayframe couldn't finish the reset. Try again.", 503);
+    // The time is read after the lock (clock_timestamp, not the transaction's start), and a fence
+    // only ever moves forward: a slower reset that began earlier can never pull a newer one back.
+    await client.query(
+      `insert into user_session_fences (user_id, sessions_valid_after, updated_at)
+       values ($1, clock_timestamp(), clock_timestamp())
+       on conflict (user_id) do update
+       set sessions_valid_after = greatest(user_session_fences.sessions_valid_after, excluded.sessions_valid_after),
+           updated_at = excluded.updated_at`,
+      [userId]
+    );
+    await client.query("update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null", [userId]);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Runs createSession in its own transaction, so its lock lasts until the session row is committed.
+ */
+export async function createSessionInTransaction(
+  userId: string,
+  workspaceId: string,
+  userAgent: string | null | undefined,
+  authenticatedAt: Date
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const session = await createSession(client, userId, workspaceId, userAgent, authenticatedAt);
+    await client.query("commit");
+    return session;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** The database's time, for `createSession`'s authenticatedAt (taken before the password check). */
+export async function databaseNow(client: Pick<pg.PoolClient, "query"> = pool): Promise<Date> {
+  const result = await client.query<{ at: Date }>("select now() as at");
+  const at = result.rows[0]?.at;
+  if (!at) throw new AuthError("Dayframe couldn't sign you in. Try again in a moment.", 503);
+  return at;
 }
 
 export async function getDefaultWorkspaceForUser(userId: string) {
