@@ -15,6 +15,9 @@ import {
   ribbonHitAt,
   staleEditError,
   todayBlocks,
+  ribbonDrawnHitAt,
+  ribbonNextStartMs,
+  ribbonReach,
   withMinimumSpan,
   type TodayEntry
 } from "@/lib/today-view";
@@ -211,6 +214,31 @@ describe("Review on Today", () => {
     const entries = withMinimumSpan([{ id: "short", fromMs: 1000, toMs: 1010 }], 500);
     expect(ribbonHitAt(1300, entries, [])).toEqual({ kind: "entry", id: "short" });
     expect(ribbonHitAt(1600, entries, [])).toEqual({ kind: "gap", atMs: 1600 });
+  });
+
+  it("a minimum-width block never reaches over the next block (X2, Codex r3)", () => {
+    const all = [{ id: "a", fromMs: 1000, toMs: 1010 }, { id: "b", fromMs: 1100, toMs: 5000 }];
+    const reached = ribbonReach(all, all, 500);
+    expect(reached[0].toMs).toBe(1100); // stops where b starts, not at 1500
+    expect(reached[1].toMs).toBe(5000);
+    expect(ribbonNextStartMs(all[0], all)).toBe(1100);
+    // Overlapping in time: no clamp (they stack, later on top).
+    const overlapping = [{ id: "a", fromMs: 1000, toMs: 2000 }, { id: "b", fromMs: 1500, toMs: 3000 }];
+    expect(ribbonNextStartMs(overlapping[0], overlapping)).toBeNull();
+  });
+
+  it("a tap selects the block drawn under it (X2, Codex r3)", () => {
+    // 300 px track over a day: 12:00–12:01 then 12:01–13:00; minimum 3 px, gap 1 px.
+    const day = 86_400_000;
+    const px = (value: number) => (value / 300) * day;
+    const at = (hour: number, minute: number) => (hour * 60 + minute) * 60_000;
+    const entries = [{ id: "a", fromMs: at(12, 0), toMs: at(12, 1) }, { id: "b", fromMs: at(12, 1), toMs: at(13, 0) }];
+    const options = { minimumMs: px(3), halfGapMs: px(0.5) };
+    // a reaches only to b's start (150.21 px), so it is drawn 150.5–149.7: hidden by the gap; b from 150.71.
+    expect(ribbonDrawnHitAt(px(151), entries, [], options)).toEqual({ kind: "entry", id: "b" });
+    expect(ribbonDrawnHitAt(px(160), entries, [], options)).toEqual({ kind: "entry", id: "b" });
+    // In the gap itself, the full reach still answers.
+    expect(ribbonDrawnHitAt(px(150.6), entries, [], options).kind).toBe("entry");
   });
 });
 

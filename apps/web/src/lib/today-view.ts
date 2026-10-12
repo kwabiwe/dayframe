@@ -242,11 +242,54 @@ export function withMinimumSpan<T extends { fromMs: number; toMs: number }>(span
 }
 
 export const RIBBON_MIN_BLOCK_PX = 3;
+/** Neighbouring ribbon blocks sit 1 px apart (X2): half a pixel of transparent edge on each side. */
+export const RIBBON_GAP_PX = 1;
+
+/**
+ * Where the next block starts after this one, when it starts at or after this one ends (so the
+ * minimum width never reaches over it), or null.
+ */
+export function ribbonNextStartMs(item: { fromMs: number; toMs: number }, all: ReadonlyArray<{ fromMs: number; toMs: number }>) {
+  let next: number | null = null;
+  for (const other of all) {
+    if (other === item || other.fromMs < item.toMs || other.fromMs <= item.fromMs) continue;
+    if (next === null || other.fromMs < next) next = other.fromMs;
+  }
+  return next;
+}
+
+/** A block's reach on the ribbon: its time, at least the minimum, never past the next block's start. */
+export function ribbonReach<T extends { fromMs: number; toMs: number }>(spans: readonly T[], all: ReadonlyArray<{ fromMs: number; toMs: number }>, minimumMs: number): T[] {
+  return spans.map((item) => {
+    const next = ribbonNextStartMs(item, all);
+    const reach = Math.max(item.toMs, item.fromMs + minimumMs);
+    return { ...item, toMs: next === null ? reach : Math.min(reach, next) };
+  });
+}
 
 export type RibbonHit =
   | { kind: "entry"; id: string }
   | { kind: "pending"; id: string }
   | { kind: "gap"; atMs: number };
+
+/**
+ * What a tap or hover lands on, as drawn: each block's reach (ribbonReach) less half the gap on each
+ * side wins first; only in a gap between drawn blocks does the full reach answer.
+ */
+export function ribbonDrawnHitAt(
+  atMs: number,
+  entries: ReadonlyArray<{ id: string; fromMs: number; toMs: number; startedMs?: number }>,
+  pending: ReadonlyArray<{ id: string; fromMs: number; toMs: number }>,
+  { minimumMs, halfGapMs }: { minimumMs: number; halfGapMs: number }
+): RibbonHit {
+  const all = [...entries, ...pending];
+  const reachedEntries = ribbonReach(entries, all, minimumMs);
+  const reachedPending = ribbonReach(pending, all, minimumMs);
+  const drawn = <T extends { fromMs: number; toMs: number }>(spans: T[]) =>
+    spans.map((item) => ({ ...item, fromMs: item.fromMs + halfGapMs, toMs: item.toMs - halfGapMs }));
+  const visible = ribbonHitAt(atMs, drawn(reachedEntries), drawn(reachedPending));
+  return visible.kind === "gap" ? ribbonHitAt(atMs, reachedEntries, reachedPending) : visible;
+}
 
 /** What sits under a point on the day ribbon: an entry (newest wins), else a Review span, else a gap. */
 export function ribbonHitAt(
