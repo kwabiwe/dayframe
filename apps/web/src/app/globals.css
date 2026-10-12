@@ -5672,12 +5672,13 @@ kbd {
   transition: transform 140ms ease;
 }
 
+/* On in green, as on iPhone; coral stays for recording and the primary action (UIA-308). */
 .place-suggestion-toggle input:checked {
-  background: var(--accent);
+  background: var(--success);
 }
 
 .place-suggestion-toggle input:checked::before {
-  background: var(--on-accent);
+  background: #fff;
   transform: translateX(22px);
 }
 
@@ -5723,7 +5724,8 @@ kbd {
     grid-template-columns: 44px minmax(0, 1fr);
   }
 
-  .place-selected-result .ui-button {
+  .place-selected-result .ui-button,
+  .place-selected-result .df-rbtn {
     grid-column: 2;
     justify-self: start;
   }
@@ -13982,6 +13984,163 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--text-secondary);
   font-size: 13px;
 }
+
+/* Place editor in Blocks (UIA-308), matching iPhone's place editor (7b): "‹ Places" back,
+   the display-face title, titled groups on fill cards, neutral selection, a green switch and
+   coral only for Save. */
+.df-pe-page {
+  display: grid;
+  width: min(100%, 760px);
+  gap: 14px;
+  margin: 0 auto;
+  padding: 20px 32px 96px;
+}
+
+.df-pe-back {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-self: start;
+  gap: 2px;
+  margin-left: -6px;
+  border-radius: 999px;
+  padding: 0 10px 0 4px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.df-pe-back-mark {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.df-pe-back:hover {
+  color: var(--text-primary);
+}
+
+.df-pe-back:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.df-pe.place-editor {
+  width: 100%;
+  gap: 14px;
+}
+
+.df-pe-group {
+  display: grid;
+  gap: 14px;
+  overflow: visible;
+}
+
+.df-pe-group > h2 {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Inset fields without idle outlines (UIA-308); focus keeps its neutral border and an invalid
+   field its danger border. */
+.df-pe .ui-control:not(:focus):not([aria-invalid="true"]),
+.df-pe .place-search-control:not(:focus-within) {
+  border-color: transparent;
+}
+
+.df-pe .place-selected-result {
+  background: var(--surface-inset);
+}
+
+.df-pe .place-selected-icon {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-pe .place-current-location {
+  justify-self: start;
+}
+
+.df-pe-seg {
+  display: inline-flex;
+  justify-self: start;
+  gap: 2px;
+  border-radius: 999px;
+  padding: 4px;
+  background: var(--surface-inset);
+}
+
+.df-pe-seg label {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The radio itself is visually hidden but stays focusable for keyboards and screen readers. */
+.df-pe-seg input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.df-pe-seg span {
+  display: inline-flex;
+  min-width: 72px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.df-pe-seg label:hover span,
+.df-pe-seg input:checked + span {
+  color: var(--text-primary);
+}
+
+.df-pe-seg input:checked + span {
+  background: var(--surface-raised);
+}
+
+.df-pe-seg input:focus-visible + span {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.df-pe-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+.df-pe-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+.df-pe .place-editor-status:not(.is-error) {
+  background: var(--surface-inset);
+  color: var(--text-primary);
+}
+
+@media (max-width: 760px) {
+  .df-pe-page {
+    padding: 12px 16px 120px;
+  }
+
+  .df-pe-seg span {
+    min-height: 44px;
+  }
+}
+
 
 /*
  * Reports head (audit W8, UIA-304): one row — title with ‹ range › on the left; Filter · Week ·

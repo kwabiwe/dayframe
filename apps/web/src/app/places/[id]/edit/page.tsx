@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { PageHeader } from "@/components/PageHeader";
+import { PlaceEditorPage } from "@/components/PlaceEditorPage";
 import { PlaceEditor } from "@/components/PlaceEditor";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
@@ -18,19 +18,16 @@ export default async function EditPlacePage({
   if (!place) notFound();
 
   return (
-    <>
-      <PageHeader
-        title="Edit place"
-        description="Update the location and visit-suggestion defaults without changing existing blocks."
+    <PlaceEditorPage
+      subtitle="Changes apply to new visits. Past blocks stay as they are."
+      title="Edit place"
+    >
+      <PlaceEditor
+        categories={data.categories}
+        mode="edit"
+        place={place}
+        places={data.places}
       />
-      <div className="place-editor-page px-5 pb-8 md:px-8">
-        <PlaceEditor
-          categories={data.categories}
-          mode="edit"
-          place={place}
-          places={data.places}
-        />
-      </div>
-    </>
+    </PlaceEditorPage>
   );
 }

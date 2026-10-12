@@ -80,7 +80,8 @@ function ConfiguredPlaceMap({
   useEffect(() => {
     if (!containerRef.current) return;
     const initialCoordinate = coordinateRef.current;
-    const accent = getComputedStyle(containerRef.current).getPropertyValue("--accent").trim();
+    // Map pins and areas are never coral (brand guide: coral is recording and the primary action).
+    const accent = getComputedStyle(containerRef.current).getPropertyValue("--text-primary").trim();
     const map = new maplibregl.Map({
       attributionControl: { compact: false },
       center: [initialCoordinate.longitude, initialCoordinate.latitude],

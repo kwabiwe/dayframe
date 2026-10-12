@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { PlaceRoleSchema, placeRoleLabel } from "@dayframe/shared";
-import { PageHeader } from "@/components/PageHeader";
+import { PlaceEditorPage } from "@/components/PlaceEditorPage";
 import { PlaceEditor } from "@/components/PlaceEditor";
 import { resolvePageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
@@ -26,20 +26,17 @@ export default async function NewPlacePage({
   const role = parsedRole.success ? parsedRole.data : null;
 
   return (
-    <>
-      <PageHeader
-        title={role ? `Add ${placeRoleLabel(role)}` : learnedPlace ? "Save learned place" : "New place"}
-        description="Search first, then review the name, centre, radius and visit suggestions before saving."
+    <PlaceEditorPage
+      subtitle="Search for the place, check its centre and size, then save."
+      title={role ? `Add ${placeRoleLabel(role)}` : learnedPlace ? "Save learned place" : "New place"}
+    >
+      <PlaceEditor
+        categories={data.categories}
+        learnedPlace={learnedPlace}
+        mode={learnedPlace ? "learned" : "create"}
+        places={data.places}
+        role={role}
       />
-      <div className="place-editor-page px-5 pb-8 md:px-8">
-        <PlaceEditor
-          categories={data.categories}
-          learnedPlace={learnedPlace}
-          mode={learnedPlace ? "learned" : "create"}
-          places={data.places}
-          role={role}
-        />
-      </div>
-    </>
+    </PlaceEditorPage>
   );
 }
