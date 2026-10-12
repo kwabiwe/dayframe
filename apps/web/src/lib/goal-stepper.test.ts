@@ -121,8 +121,8 @@ describe("the tab's goal drafts (Codex r7)", () => {
     // Page data read before the save (500) still shows the accepted 9h; read after it (1 500), the page's.
     expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 500)).toBe(540);
     expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 720, 1_500)).toBe(720);
-    goalDrafts.retire("user-1", 1_500);
-    expect(goalDrafts.get("user-1").dailyGoalMinutes).toBeUndefined();
+    // An older snapshot shown again (a late load, a rollback, server-rendered data) never hides it.
+    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
   });
 
   it("a failure drops only its own tap; a newer tap and the accepted value stay", () => {

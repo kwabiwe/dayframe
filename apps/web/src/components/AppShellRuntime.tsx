@@ -66,9 +66,10 @@ type RuntimeContext = {
   loadDate: (date: string) => Promise<DateLoadOutcome>;
   openManualEntry: () => void;
   /**
-   * When the request behind the data now shown was sent (ms since the epoch; 0 until one has
-   * loaded here). Only loads from the server move it; optimistic, cached and server-rendered data
-   * keep it. Something saved before this time is in `data`.
+   * When the account data now shown was read (ms since the epoch): the send time of the server load
+   * it came from; a snapshot shown again (a rollback, a late period load) reports its own; data
+   * derived from it (optimistic, cached periods) keeps it; server-rendered data is 0 (unknown).
+   * Something saved before this time is in `data`.
    */
   dataReadAt: number;
   refresh: (options?: { force?: boolean }) => Promise<BootstrapData | null>;
@@ -95,6 +96,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const searchParams = useSearchParams();
   const selectedDate = timelineStateFromSearchParams(searchParams).date;
   const [data, setData] = useState<BootstrapData | null>(null);
+  // When the account data now shown was read (see commitData); per snapshot, never a global high
+  // mark, so an older snapshot shown again (a late period load, a rollback) reports its own age.
+  const [dataReadAt, setDataReadAt] = useState(0);
+  const readAtByDataRef = useRef(new WeakMap<BootstrapData, number>());
   const [timerDraft, setTimerDraftState] = useState<TimerDraft>(() => timerDraftForEntry(null));
   const [isTimerBusy, setIsTimerBusy] = useState(false);
   const [timerError, setTimerError] = useState<string | null>(null);
@@ -125,10 +130,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return () => gate.dispose();
   }, []);
 
-  const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource) => {
+  const commitData = useCallback((incoming: BootstrapData | null, source: BootstrapCommitSource, sentAt?: number) => {
     const nextData = incoming
       ? reconcileTimerBootstrap(dataRef.current, incoming, source)
       : null;
+    // When the account data in this snapshot was read: a server load's send time; a snapshot
+    // shown before (a rollback) keeps its own; server-rendered data is of unknown age (0); data
+    // derived from the current snapshot (optimistic, cached periods, authoritative patches) keeps
+    // the current snapshot's.
+    const readAt = sentAt
+      ?? (incoming ? readAtByDataRef.current.get(incoming) : undefined)
+      ?? (source === "hydrate" ? 0 : (dataRef.current ? readAtByDataRef.current.get(dataRef.current) : undefined) ?? 0);
+    if (nextData) readAtByDataRef.current.set(nextData, readAt);
+    setDataReadAt(nextData ? readAt : 0);
     dataRef.current = nextData;
     lastCommitAtRef.current = nextData ? Date.now() : 0;
     if (nextData && source !== "optimistic") {
@@ -148,11 +162,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
     }
     setData(nextData);
-  }, []);
-
-  const [dataReadAt, setDataReadAt] = useState(0);
-  const markDataRead = useCallback((sentAt: number) => {
-    setDataReadAt((current) => Math.max(current, sentAt));
   }, []);
 
   const setTimerDraft = useCallback((draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => {
@@ -191,13 +200,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       // A newer load (or a mutation's own data) may have landed while this body was read: an
       // older answer never replaces it.
       if (requestId !== refreshRequestRef.current) return dataRef.current;
-      commitData(payload, "canonical");
-      markDataRead(sentAt);
+      commitData(payload, "canonical", sentAt);
       return payload;
     } catch {
       return dataRef.current;
     }
-  }, [commitData, markDataRead, selectedDate]);
+  }, [commitData, selectedDate]);
 
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
     const cached = dateDataCacheRef.current.get(date);
@@ -223,8 +231,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
         throw new Error("The period response did not match the requested date.");
       }
-      commitData(payload, "canonical");
-      markDataRead(sentAt);
+      commitData(payload, "canonical", sentAt);
       return { ok: true };
     } catch {
       const error = "Couldn’t load that period. Your current view is unchanged.";
@@ -236,7 +243,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsDateLoading(false);
       }
     }
-  }, [commitData, markDataRead]);
+  }, [commitData]);
 
   useLayoutEffect(() => {
     const cached = dateDataCacheRef.current.get(selectedDate);

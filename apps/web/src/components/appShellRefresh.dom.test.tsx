@@ -52,6 +52,20 @@ describe("AppShellRuntime refresh", () => {
     expect(Number(screen.getByTestId("read-at").textContent)).toBe(readAt);
   });
 
+  it("reports each snapshot's own read time: a server load its send time, server-rendered data 0 (Codex r8)", async () => {
+    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    await act(async () => answers[0]?.(bootstrap(540)));
+    await waitFor(() => expect(screen.getByTestId("goal").textContent).toBe("540"));
+    expect(Number(screen.getByTestId("read-at").textContent)).toBeGreaterThan(0);
+    // Older server-rendered data shown again reports an unknown age, not the newer load's.
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    expect(screen.getByTestId("goal").textContent).toBe("480");
+    expect(screen.getByTestId("read-at").textContent).toBe("0");
+  });
+
   it("moves the read time only for a load from the server, never for a failure or hydration (Codex r7)", async () => {
     render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
     fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));

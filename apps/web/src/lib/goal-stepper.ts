@@ -209,17 +209,6 @@ export const goalDrafts = {
       }
       return next;
     });
-  },
-  /** Page data read after an accepted value replaces it: that value is retired. */
-  retire(userId: string, dataReadAt: number) {
-    updateDrafts(userId, (drafts) => {
-      let next = drafts;
-      for (const field of Object.keys(drafts) as GoalField[]) {
-        const draft = next[field];
-        if (draft?.accepted && draft.accepted.at < dataReadAt) next = withField(next, field, { ...draft, accepted: undefined });
-      }
-      return next;
-    });
   }
 };
 

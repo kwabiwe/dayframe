@@ -22,7 +22,9 @@ import {
  * Settings › Your day (UIA-309): the iPhone's goal steppers. A tap changes the goal at once; it is
  * saved a moment after the last tap (no Save button), and leaving the page saves a pending change.
  * What is shown comes from the tab-wide goal drafts (`goalDrafts`): a tap until its save settles,
- * then the value the account accepted until page data read after it arrives, then the page's data.
+ * then the value the account accepted while the page's data was read before it, then the page's
+ * data. Data read later (also a change made elsewhere since) shows; an older snapshot shown again
+ * (a late load, a rollback) never hides an accepted goal.
  */
 type SaveContext = { revisions: Partial<Record<GoalField, number>> };
 
@@ -53,11 +55,6 @@ export function GoalSettings({
     latest.current.refresh = refresh;
     latest.current.router = router;
   }, [refresh, router]);
-
-  // Page data read after an accepted save shows from then on (also a change made elsewhere since).
-  useEffect(() => {
-    goalDrafts.retire(userId, dataReadAt);
-  }, [dataReadAt, userId]);
 
   useEffect(() => {
     const state = latest.current;

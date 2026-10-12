@@ -139,6 +139,21 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Daily goal: 13h" })).toBeTruthy();
   });
 
+  it("an older snapshot shown again after fresh data never brings back the old goal (Codex r8)", async () => {
+    vi.useFakeTimers();
+    const view = render(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); }); // 9h accepted
+    // Fresh data with 9h, then a stale 8h snapshot (a late period load, a rollback, server-rendered).
+    mocks.runtime.dataReadAt = Date.now() + 1;
+    view.rerender(<GoalSettings dailyGoalMinutes={540} userId="user-1" weeklyGoalMinutes={2400} />);
+    mocks.runtime.dataReadAt = 0;
+    view.rerender(<GoalSettings dailyGoalMinutes={480} userId="user-1" weeklyGoalMinutes={2400} />);
+    expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
+  });
+
   it("remembers an accepted goal across visits to Settings (Codex r7)", async () => {
     vi.useFakeTimers();
     let release: () => void = () => undefined;
