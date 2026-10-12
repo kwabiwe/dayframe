@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
@@ -60,7 +60,8 @@ export function QuickStartMosaic({
   const frames = width > 0 && columns.length ? quickStartTileFrames(columns, width) : [];
   // Decided once, on the render that first shows tiles: only the app's first paint drops them in.
   const dropIn = useRef<boolean | null>(null);
-  if (dropIn.current === null && frames.length) dropIn.current = !mosaicDroppedIn && !reduceMotion;
+  // Never while the app is in the background (a location relaunch draws Today unseen; Trello 210).
+  if (dropIn.current === null && frames.length) dropIn.current = !mosaicDroppedIn && !reduceMotion && AppState.currentState === "active";
   useEffect(() => {
     if (width > 0) painted.current = true;
     if (frames.length) mosaicDroppedIn = true;
@@ -88,7 +89,7 @@ export function QuickStartMosaic({
       >
         {frames.map((tile, index) => (
           <Reanimated.View
-            entering={painted.current ? tileEntering : undefined}
+            entering={painted.current && AppState.currentState === "active" ? tileEntering : undefined}
             exiting={tileExiting}
             key={tile.id}
             layout={tileLayout}

@@ -265,6 +265,8 @@ export function useBlockPop({ entryId, request }: { entryId: string; request: La
 
 /** The first-paint drop-in (Blocks prototype): tiles fall 18 points from 92 % with a short stagger. */
 export const DROP_IN = { distance: 18, fromScale: 0.92, firstDelayMs: 80, staggerMs: 45, fadeMs: 160 } as const;
+/** After its delay, a drop-in is forced to rest this long later whether or not its frames ran. */
+export const DROP_IN_SETTLE_MS = 900;
 
 /**
  * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
@@ -283,14 +285,22 @@ export function useDropIn({ index, play }: { index: number; play: boolean }) {
     translateY.value = withDelay(delay, withSpring(0, spring));
     scale.value = withDelay(delay, withSpring(1, spring));
     opacity.value = withDelay(delay, withTiming(1, { duration: DROP_IN.fadeMs, reduceMotion: ReduceMotion.Never }));
-    return () => {
+    // An interrupted drop-in settles at rest rather than leaving a tile hidden.
+    const settle = () => {
       cancelAnimation(translateY);
       cancelAnimation(scale);
       cancelAnimation(opacity);
-      // An interrupted drop-in settles at rest rather than leaving a tile hidden.
       translateY.value = 0;
       scale.value = 1;
       opacity.value = 1;
+    };
+    // Safety net (Trello 210, the "Switch to" tiles once stayed invisible): if the frames never
+    // run — the app was drawn in the background or the phone dropped frames — the tile is at rest
+    // shortly after the drop-in should have ended, so it can never stay hidden.
+    const fallback = setTimeout(settle, delay + DROP_IN_SETTLE_MS);
+    return () => {
+      clearTimeout(fallback);
+      settle();
     };
     // Plays once per mount; the index is fixed at that moment.
   }, []);
