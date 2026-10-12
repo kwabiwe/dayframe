@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   REVIEW_DECISION_PAYLOAD_KEY,
   REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY,
+  foldReviewText,
   isOwnerAuthoredReviewDescription,
   reviewSuggestedTitles,
   withoutServerReviewDecision
@@ -22,6 +23,22 @@ describe("owner-authored Review description signal (E1)", () => {
     expect(isOwnerAuthoredReviewDescription("Visit Sample Park", ["Visit Example Clinic", "Visit Sample Park"])).toBe(false);
     // The owner's own words are not filtered further, even when they name a place.
     expect(isOwnerAuthoredReviewDescription("Dentist at Example Clinic", suggested)).toBe(true);
+  });
+
+  it("folds Unicode case, compatibility forms and spacing before comparing (Codex r4)", () => {
+    const same = [
+      ["Visit Weißensee", "VISIT WEISSENSEE"],
+      ["Visit ẞtraße", "visit sstrasse"],
+      ["Café".normalize("NFC"), "CAFÉ".normalize("NFD")],
+      ["Ｖｉｓｉｔ　Ｅｘａｍｐｌｅ", "visit example"],
+      ["ﬁeld", "FIELD"],
+      ["İzmir", "izmir"],
+      ["ızmir", "IZMIR"],
+      ["  Visit\tSample   Park ", "visit sample park"]
+    ];
+    for (const [left, right] of same) expect(foldReviewText(left)).toBe(foldReviewText(right));
+    expect(foldReviewText("Café")).not.toBe(foldReviewText("Cafe"));
+    expect(isOwnerAuthoredReviewDescription("VISIT WEISSENSEE", ["Visit Weißensee"])).toBe(false);
   });
 
   it("compares with the full suggested-title history, never a correction part's own title", () => {

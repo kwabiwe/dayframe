@@ -374,3 +374,80 @@ function lockedStay() {
     centreLongitude: 0.47
   };
 }
+
+describe("owner-authored Review signal through the Review service (E1, Codex r4)", () => {
+  function reviewClient(title: string, history: string[] | null = null) {
+    return {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) {
+          return {
+            rows: [{
+              id: "review-1",
+              eventId: "event-1",
+              status: "open",
+              title,
+              confidence: "high",
+              suggestedCategoryId: null,
+              suggestedPlaceId: null,
+              suggestedStartedAt: "2026-07-27T10:00:00.000Z",
+              suggestedStoppedAt: "2026-07-27T11:00:00.000Z",
+              segmentId: "segment-1",
+              segmentKind: "stay",
+              timeAway: false,
+              segmentStatus: "review",
+              deviceId: "device-1",
+              algorithmVersion: "location-v2.0",
+              learnedPlaceId: null,
+              placeMatchKind: null,
+              centreLatitude: null,
+              centreLongitude: null,
+              reviewSuggestedTitles: history,
+              correctionEvent: false
+            }]
+          };
+        }
+        if (statement.includes("from stay_segments") && statement.includes("for update nowait")) {
+          return { rows: [{ id: "segment-1" }] };
+        }
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
+        return { rows: [] };
+      })
+    } as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+  }
+
+  async function marked(title: string, description: string, history: string[] | null = null) {
+    const client = reviewClient(title, history);
+    await expect(resolveLocationReviewActionWithClient(
+      client,
+      "review-1",
+      { action: "edit_and_confirm", edit: { description } },
+      session
+    )).resolves.toMatchObject({ entryId: "entry-1", status: "accepted" });
+    return client.query.mock.calls.some(([statement, values]) =>
+      String(statement).includes("update activity_events") &&
+      Array.isArray(values) &&
+      values.includes("dayframeReviewDecision")
+    );
+  }
+
+  it.each([
+    ["sharp s and SS", "Visit Weißensee", "VISIT WEISSENSEE"],
+    ["capital sharp s", "Visit ẞtraße", "visit sstrasse"],
+    ["NFC and NFD accents", "Visit Café Exemple".normalize("NFC"), "visit café exemple".normalize("NFD")],
+    ["fullwidth letters", "Visit Example", "Ｖｉｓｉｔ　Ｅｘａｍｐｌｅ"],
+    ["the fi ligature", "Visit Sample Field", "visit sample ﬁeld"],
+    ["the dotted capital I", "Visit İzmir Park", "visit izmir park"],
+    ["the dotless i", "Visit Izmir Park", "VISIT ızmir park"]
+  ])("never marks a suggested title edited only by %s", async (_label, title, description) => {
+    expect(await marked(title, description)).toBe(false);
+  });
+
+  it("folds the replay title history the same way", async () => {
+    // Replay retitled the item; the stale editor submits a case variant of the older title.
+    expect(await marked("Visit New Park", "VISIT WEISSENSEE", ["Visit Weißensee", "Visit New Park"])).toBe(false);
+  });
+
+  it("marks the owner's own words, non-ASCII included", async () => {
+    expect(await marked("Visit Weißensee", "Schwimmen im Weißensee")).toBe(true);
+  });
+});

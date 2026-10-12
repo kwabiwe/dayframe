@@ -17,23 +17,41 @@ export type ReviewDecisionPayload = { ownerAuthoredDescription: true };
  */
 export const REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY = "reviewSuggestedTitles";
 
-function normalizedReviewText(value: unknown) {
+/**
+ * Caseless comparison key for Review titles: compatibility normalisation (fullwidth letters,
+ * ligatures such as "ﬁ", NFC/NFD accents), full Unicode case folding approximated by upper- then
+ * lower-casing (so "ß" matches "SS"), the dotted capital I folded like a plain "i", and repeated
+ * whitespace collapsed. Every owner-authored comparison, including the title history, uses it.
+ */
+export function foldReviewText(value: unknown) {
   if (typeof value !== "string") return "";
-  return value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
+  return value
+    .normalize("NFKC")
+    // Twice, so the capital sharp s ("ẞ" → "ß" → "SS") folds like "ß" and "SS".
+    .toUpperCase()
+    .toLowerCase()
+    .toUpperCase()
+    .toLowerCase()
+    .normalize("NFKD")
+    // "İ" lower-cases to "i" + combining dot above; fold it like "i" (and "ı" already became "i").
+    .replace(/i\u0307/gu, "i")
+    .normalize("NFKC")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 /**
  * True only when a non-empty saved description differs from every title Dayframe suggested
- * (ignoring case, Unicode form and repeated spaces). A suggestion accepted as is, or edited back
+ * (compared with `foldReviewText`: Unicode case folding, compatibility forms, repeated spaces). A suggestion accepted as is, or edited back
  * to it, is Dayframe's text, not the owner's.
  */
 export function isOwnerAuthoredReviewDescription(
   description: string | null | undefined,
   suggestedTitles: readonly (string | null | undefined)[]
 ) {
-  const key = normalizedReviewText(description);
+  const key = foldReviewText(description);
   if (!key) return false;
-  return !suggestedTitles.some((title) => normalizedReviewText(title) === key);
+  return !suggestedTitles.some((title) => foldReviewText(title) === key);
 }
 
 /**
