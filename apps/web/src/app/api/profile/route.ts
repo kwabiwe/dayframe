@@ -93,17 +93,26 @@ export async function PATCH(request: Request) {
       ]);
     }
 
+    let goals: { dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: number } | undefined;
     if (dailyGoalMinutes !== undefined || weeklyGoalMinutes !== undefined) {
-      await query(
+      // The server orders goal changes: each one bumps goals_revision in the same row update, and
+      // the reply carries the goals as stored with that revision (UIA-309).
+      const updated = await query<{ dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: string | number }>(
         `update users
          set daily_goal_minutes = coalesce($1, daily_goal_minutes),
-             weekly_goal_minutes = coalesce($2, weekly_goal_minutes)
-         where id = $3`,
+             weekly_goal_minutes = coalesce($2, weekly_goal_minutes),
+             goals_revision = goals_revision + 1
+         where id = $3
+         returning daily_goal_minutes as "dailyGoalMinutes",
+                   weekly_goal_minutes as "weeklyGoalMinutes",
+                   goals_revision as "goalsRevision"`,
         [dailyGoalMinutes ?? null, weeklyGoalMinutes ?? null, session.userId]
       );
+      const row = updated.rows[0];
+      if (row) goals = { ...row, goalsRevision: Number(row.goalsRevision) };
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(goals ? { ok: true, goals } : { ok: true });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

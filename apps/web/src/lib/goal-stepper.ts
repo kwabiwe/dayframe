@@ -48,7 +48,7 @@ export type GoalSave<Context> = { changes: GoalChanges; context: Context };
  * over); every outcome is reported with it, accepted or failed, and `onSettled` tells the caller
  * when its latest save is done.
  */
-export function createGoalSaver<Context>({
+export function createGoalSaver<Context, Result = void>({
   clearTimer = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
   delayMs = GOAL_SAVE_DELAY_MS,
   onAccepted,
@@ -62,14 +62,14 @@ export function createGoalSaver<Context>({
   delayMs?: number;
   /** Two taps folded into one save: how their contexts combine (the later one by default). */
   mergeContext?: (earlier: Context, later: Context) => Context;
-  onAccepted?: (saved: GoalSave<Context>) => void;
+  onAccepted?: (saved: GoalSave<Context>, result: Result) => void;
   onFailed: (failed: GoalSave<Context>, error: unknown) => void;
   /**
    * Nothing pending and nothing in flight any more (`busy` false), or work began again (true).
    * `lastAccepted` tells whether the save that finished last was accepted.
    */
   onBusyChange?: (busy: boolean, lastAccepted: boolean) => void;
-  save: (changes: GoalChanges) => Promise<void>;
+  save: (changes: GoalChanges) => Promise<Result>;
   setTimer?: (callback: () => void, ms: number) => TimerHandle;
 }) {
   let timer: TimerHandle | null = null;
@@ -88,9 +88,9 @@ export function createGoalSaver<Context>({
   function send(change: GoalSave<Context>) {
     inFlight += 1;
     tabQueue = tabQueue.catch(() => undefined).then(() => save(change.changes).then(
-      () => {
+      (result) => {
         inFlight -= 1;
-        onAccepted?.(change);
+        onAccepted?.(change, result);
         updateBusy(true);
       },
       (error: unknown) => {
@@ -142,20 +142,26 @@ export function createGoalSaver<Context>({
 }
 
 /**
- * What this tab knows about one goal beyond the page's data: the latest tap not yet settled
- * (`tap`, numbered by `revision`), and the last value the account accepted from this tab with the
- * time it was accepted (`accepted`). Kept for the whole tab, per account, so leaving and reopening
- * Settings never forgets either.
+ * The account's goals as the server stored them, with the server's `goalsRevision`: every goal
+ * change bumps it in the same update, so a higher revision is always the newer goal, whichever
+ * way it arrived (a page load, a save's reply) and however late.
  */
-export type GoalDraft = {
-  tap?: { value: number; revision: number };
-  accepted?: { value: number; at: number };
-};
-export type GoalDrafts = Readonly<Partial<Record<GoalField, GoalDraft>>>;
+export type ServerGoals = TimeGoalMinutes & { goalsRevision: number };
 
-const EMPTY_DRAFTS: GoalDrafts = Object.freeze({});
+/**
+ * What this tab knows about an account's goals beyond the page in front of it: the newest goals
+ * it has seen from the server (`known`), and per goal the latest tap not yet settled (`taps`,
+ * numbered by revision). Kept for the whole tab, per account, so leaving and reopening Settings
+ * never forgets either.
+ */
+export type GoalDrafts = Readonly<{
+  known?: ServerGoals;
+  taps: Readonly<Partial<Record<GoalField, { value: number; revision: number }>>>;
+}>;
+
+const EMPTY_DRAFTS: GoalDrafts = Object.freeze({ taps: Object.freeze({}) });
 let draftsByUser = new Map<string, GoalDrafts>();
-let draftRevision = 0;
+let tapRevision = 0;
 const draftListeners = new Set<() => void>();
 
 function updateDrafts(userId: string, update: (current: GoalDrafts) => GoalDrafts) {
@@ -166,10 +172,21 @@ function updateDrafts(userId: string, update: (current: GoalDrafts) => GoalDraft
   for (const listener of draftListeners) listener();
 }
 
-function withField(drafts: GoalDrafts, field: GoalField, draft: GoalDraft): GoalDrafts {
-  const next = { ...drafts };
-  if (draft.tap || draft.accepted) next[field] = draft;
-  else delete next[field];
+/** The newer of two server copies by revision; an equal revision keeps the one already held. */
+export function newerGoals(held: ServerGoals | undefined, incoming: ServerGoals | undefined) {
+  if (!incoming) return held;
+  if (!held || incoming.goalsRevision > held.goalsRevision) return incoming;
+  return held;
+}
+
+function withoutTaps(taps: GoalDrafts["taps"], fields: GoalField[], revisions: Partial<Record<GoalField, number>>) {
+  let next = taps;
+  for (const field of fields) {
+    if (next[field] && next[field]!.revision === revisions[field]) {
+      next = { ...next };
+      delete (next as Record<string, unknown>)[field];
+    }
+  }
   return next;
 }
 
@@ -181,48 +198,49 @@ export const goalDrafts = {
       draftListeners.delete(listener);
     };
   },
+  /** Goals read from the server (the page's data): kept only if newer than what the tab knows. */
+  observe(userId: string, goals: ServerGoals) {
+    updateDrafts(userId, (drafts) => {
+      const known = newerGoals(drafts.known, goals);
+      return known === drafts.known ? drafts : { ...drafts, known };
+    });
+  },
   /** A stepper tap: shown at once, until its save settles. Returns the tap's revision. */
   tap(userId: string, field: GoalField, value: number) {
-    const revision = ++draftRevision;
-    updateDrafts(userId, (drafts) => withField(drafts, field, { ...drafts[field], tap: { value, revision } }));
+    const revision = ++tapRevision;
+    updateDrafts(userId, (drafts) => ({ ...drafts, taps: { ...drafts.taps, [field]: { value, revision } } }));
     return revision;
   },
-  /** A save the account accepted: its values are the account's from `at`; their taps are settled. */
-  accept(userId: string, changes: GoalChanges, revisions: Partial<Record<GoalField, number>>, at: number) {
-    updateDrafts(userId, (drafts) => {
-      let next = drafts;
-      for (const [field, value] of Object.entries(changes) as Array<[GoalField, number]>) {
-        const draft = next[field] ?? {};
-        const settled = draft.tap?.revision === revisions[field];
-        next = withField(next, field, { tap: settled ? undefined : draft.tap, accepted: { value, at } });
-      }
-      return next;
-    });
+  /**
+   * A save the server accepted, with the goals it stored: they count only if newer than what the
+   * tab already knows (a change made elsewhere after this save keeps winning); its taps settle.
+   */
+  accept(userId: string, changes: GoalChanges, revisions: Partial<Record<GoalField, number>>, stored: ServerGoals | undefined) {
+    updateDrafts(userId, (drafts) => ({
+      known: newerGoals(drafts.known, stored),
+      taps: withoutTaps(drafts.taps, Object.keys(changes) as GoalField[], revisions)
+    }));
   },
   /** A save that failed: its taps (unless a newer tap replaced them) go, so the goal falls back. */
   fail(userId: string, changes: GoalChanges, revisions: Partial<Record<GoalField, number>>) {
     updateDrafts(userId, (drafts) => {
-      let next = drafts;
-      for (const field of Object.keys(changes) as GoalField[]) {
-        const draft = next[field];
-        if (draft?.tap && draft.tap.revision === revisions[field]) next = withField(next, field, { ...draft, tap: undefined });
-      }
-      return next;
+      const taps = withoutTaps(drafts.taps, Object.keys(changes) as GoalField[], revisions);
+      return taps === drafts.taps ? drafts : { ...drafts, taps };
     });
   }
 };
 
 /**
- * The goal Settings shows: the latest tap still being saved; else the account's value as last
- * accepted from this tab, while the page's data was read before that; else the page's data.
+ * The goal Settings shows: the latest tap still being saved; else the newest server copy the tab
+ * has seen, the page's own data included (higher `goalsRevision` wins).
  */
-export function shownGoal(draft: GoalDraft | undefined, pageValue: number, dataReadAt: number) {
-  if (draft?.tap) return draft.tap.value;
-  if (draft?.accepted && draft.accepted.at >= dataReadAt) return draft.accepted.value;
-  return pageValue;
+export function shownGoal(drafts: GoalDrafts, field: GoalField, page: ServerGoals) {
+  const tap = drafts.taps[field];
+  if (tap) return tap.value;
+  return (newerGoals(drafts.known, page) ?? page)[field];
 }
 
 export function __resetGoalDraftsForTests() {
   draftsByUser = new Map();
-  draftRevision = 0;
+  tapRevision = 0;
 }

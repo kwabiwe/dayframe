@@ -146,6 +146,25 @@ describe("PATCH /api/profile", () => {
       [495, 2430, baseSession.userId]
     );
   });
+
+  it("bumps the goals revision in the same update and replies with the stored goals (UIA-309)", async () => {
+    mocks.query.mockImplementation(async (text: string) => (
+      text.includes("goals_revision")
+        ? { rows: [{ dailyGoalMinutes: 540, weeklyGoalMinutes: 2400, goalsRevision: "7" }] }
+        : { rows: [] }
+    ));
+    const response = await PATCH(jsonRequest({ dailyGoalMinutes: 540 }));
+    const update = mocks.query.mock.calls.find(([text]) => String(text).includes("daily_goal_minutes"))!;
+    expect(String(update[0])).toContain("goals_revision = goals_revision + 1");
+    expect(String(update[0])).toContain("returning");
+    expect(await response.json()).toEqual({ ok: true, goals: { dailyGoalMinutes: 540, weeklyGoalMinutes: 2400, goalsRevision: 7 } });
+  });
+
+  it("leaves the goals revision alone when no goal changes", async () => {
+    const response = await PATCH(jsonRequest({ name: "Demo User" }));
+    expect(await response.json()).toEqual({ ok: true });
+    expect(mocks.query.mock.calls.some(([text]) => String(text).includes("goals_revision"))).toBe(false);
+  });
 });
 
 function jsonRequest(body: unknown) {

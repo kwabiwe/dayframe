@@ -43,49 +43,19 @@ describe("AppShellRuntime refresh", () => {
     await waitFor(() => expect(answers).toHaveLength(2));
     await act(async () => answers[1]?.(bootstrap(600)));
     await waitFor(() => expect(screen.getByTestId("goal").textContent).toBe("600"));
-    const readAt = Number(screen.getByTestId("read-at").textContent);
-    expect(readAt).toBeGreaterThan(0);
     await act(async () => answers[0]?.(bootstrap(540)));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     // The older body arrived last: it is dropped.
     expect(screen.getByTestId("goal").textContent).toBe("600");
-    expect(Number(screen.getByTestId("read-at").textContent)).toBe(readAt);
-  });
-
-  it("reports each snapshot's own read time: a server load its send time, server-rendered data 0 (Codex r8)", async () => {
-    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(answers).toHaveLength(1));
-    await act(async () => answers[0]?.(bootstrap(540)));
-    await waitFor(() => expect(screen.getByTestId("goal").textContent).toBe("540"));
-    expect(Number(screen.getByTestId("read-at").textContent)).toBeGreaterThan(0);
-    // Older server-rendered data shown again reports an unknown age, not the newer load's.
-    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
-    expect(screen.getByTestId("goal").textContent).toBe("480");
-    expect(screen.getByTestId("read-at").textContent).toBe("0");
-  });
-
-  it("moves the read time only for a load from the server, never for a failure or hydration (Codex r7)", async () => {
-    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
-    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
-    expect(screen.getByTestId("read-at").textContent).toBe("0");
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => expect(answers).toHaveLength(1));
-    await act(async () => answers[0]?.(null));
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-    expect(screen.getByTestId("read-at").textContent).toBe("0");
-    expect(screen.getByTestId("goal").textContent).toBe("480");
   });
 });
 
 function Harness() {
-  const { data, dataReadAt, hydrate, refresh } = useAppShellRuntime();
+  const { data, hydrate, refresh } = useAppShellRuntime();
   return <>
     <button onClick={() => hydrate(bootstrap(480))}>Hydrate</button>
     <button onClick={() => void refresh({ force: true })}>Refresh</button>
     <output data-testid="goal">{data?.user.dailyGoalMinutes ?? ""}</output>
-    <output data-testid="read-at">{dataReadAt}</output>
   </>;
 }
 

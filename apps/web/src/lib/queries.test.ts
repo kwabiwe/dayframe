@@ -5,7 +5,8 @@ import {
   getBootstrapData,
   getCategoryUsageRanks,
   getNormalizationContext,
-  getTaskSuggestions
+  getTaskSuggestions,
+  getUser
 } from "./queries";
 import type { RequestSession } from "./session";
 
@@ -272,5 +273,32 @@ describe("time-entry range query", () => {
       "2026-07-27T00:00:00.000Z",
       300
     ]);
+  });
+});
+
+describe("getUser goals revision (UIA-309)", () => {
+  beforeEach(async () => {
+    mocks.query.mockReset();
+    const db = await import("./db");
+    vi.mocked(db.isUndefinedColumnError).mockReset().mockReturnValue(false);
+  });
+
+  it("returns the goals with the server's revision as a number", async () => {
+    mocks.query.mockResolvedValue({ rows: [{ id: "user-1", email: "a@b.c", name: "A", dailyGoalMinutes: 480, weeklyGoalMinutes: 2400, goalsRevision: "12" }] });
+    await expect(getUser(session)).resolves.toMatchObject({ goalsRevision: 12 });
+    expect(String(mocks.query.mock.calls[0][0])).toContain('goals_revision as "goalsRevision"');
+  });
+
+  it("names the migration when goals_revision is missing", async () => {
+    const db = await import("./db");
+    vi.mocked(db.isUndefinedColumnError).mockImplementation((_error, column) => column === "goals_revision");
+    mocks.query.mockRejectedValue(Object.assign(new Error('column "goals_revision" does not exist'), { code: "42703" }));
+    await expect(getUser(session)).rejects.toThrow("users.goals_revision missing");
+    expect(db.missingRequiredColumnError).toHaveBeenCalledWith(
+      "users",
+      "goals_revision",
+      "supabase/migrations/202610120002_user_goals_revision.sql",
+      expect.any(Error)
+    );
   });
 });

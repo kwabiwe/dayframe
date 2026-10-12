@@ -54,6 +54,7 @@ export default function SettingsPage() {
               // A different account gets a fresh control: no draft or save crosses over.
               key={data.user.id}
               dailyGoalMinutes={data.user.dailyGoalMinutes}
+              goalsRevision={data.user.goalsRevision ?? 0}
               userId={data.user.id}
               weeklyGoalMinutes={data.user.weeklyGoalMinutes}
             />

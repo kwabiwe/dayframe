@@ -110,30 +110,40 @@ describe("goal steppers (UIA-309)", () => {
   });
 });
 
-describe("the tab's goal drafts (Codex r7)", () => {
+describe("the tab's goal drafts (Codex r7, r9)", () => {
   beforeEach(() => __resetGoalDraftsForTests());
+  const goals = (daily: number, revision: number) => ({ dailyGoalMinutes: daily, weeklyGoalMinutes: 2400, goalsRevision: revision });
 
-  it("shows a tap, then the accepted value until page data read after it, then the page's", () => {
+  it("shows a tap, then the newest server copy by revision, whichever way it arrived", () => {
     const tap = goalDrafts.tap("user-1", "dailyGoalMinutes", 540);
-    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
-    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: tap }, 1_000);
-    expect(goalDrafts.get("user-1").dailyGoalMinutes?.tap).toBeUndefined();
-    // Page data read before the save (500) still shows the accepted 9h; read after it (1 500), the page's.
-    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 500)).toBe(540);
-    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 720, 1_500)).toBe(720);
-    // An older snapshot shown again (a late load, a rollback, server-rendered data) never hides it.
-    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(480, 1))).toBe(540);
+    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: tap }, goals(540, 2));
+    expect(goalDrafts.get("user-1").taps.dailyGoalMinutes).toBeUndefined();
+    // An older page (revision 1) still shows the accepted 9h; a newer one (revision 3), the page's.
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(480, 1))).toBe(540);
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(720, 3))).toBe(720);
+    goalDrafts.observe("user-1", goals(720, 3));
+    // A stale page after that keeps the newest (Codex r9).
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(480, 1))).toBe(720);
   });
 
-  it("a failure drops only its own tap; a newer tap and the accepted value stay", () => {
+  it("a reply older than what the tab already knows never replaces it (Codex r9)", () => {
+    const tap = goalDrafts.tap("user-1", "dailyGoalMinutes", 540);
+    goalDrafts.observe("user-1", goals(720, 3)); // changed elsewhere after the save was stored at 2
+    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: tap }, goals(540, 2));
+    expect(goalDrafts.get("user-1").known).toEqual(goals(720, 3));
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(480, 1))).toBe(720);
+  });
+
+  it("a failure drops only its own tap; a newer tap and the newest server copy stay", () => {
     const first = goalDrafts.tap("user-1", "dailyGoalMinutes", 540);
-    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: first }, 1_000);
+    goalDrafts.accept("user-1", { dailyGoalMinutes: 540 }, { dailyGoalMinutes: first }, goals(540, 2));
     const second = goalDrafts.tap("user-1", "dailyGoalMinutes", 600);
     const third = goalDrafts.tap("user-1", "dailyGoalMinutes", 660);
     goalDrafts.fail("user-1", { dailyGoalMinutes: 600 }, { dailyGoalMinutes: second });
-    expect(goalDrafts.get("user-1").dailyGoalMinutes?.tap?.value).toBe(660);
+    expect(goalDrafts.get("user-1").taps.dailyGoalMinutes?.value).toBe(660);
     goalDrafts.fail("user-1", { dailyGoalMinutes: 660 }, { dailyGoalMinutes: third });
-    expect(shownGoal(goalDrafts.get("user-1").dailyGoalMinutes, 480, 0)).toBe(540);
+    expect(shownGoal(goalDrafts.get("user-1"), "dailyGoalMinutes", goals(480, 1))).toBe(540);
   });
 
   it("keeps each account's drafts apart and tells listeners about changes", () => {
@@ -141,7 +151,7 @@ describe("the tab's goal drafts (Codex r7)", () => {
     const unsubscribe = goalDrafts.subscribe(listener);
     goalDrafts.tap("user-1", "weeklyGoalMinutes", 2700);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(goalDrafts.get("user-2")).toEqual({});
+    expect(goalDrafts.get("user-2")).toEqual({ taps: {} });
     unsubscribe();
     goalDrafts.tap("user-1", "weeklyGoalMinutes", 3000);
     expect(listener).toHaveBeenCalledTimes(1);

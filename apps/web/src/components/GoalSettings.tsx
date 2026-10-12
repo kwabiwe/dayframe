@@ -15,6 +15,7 @@ import {
   nextGoalMinutes,
   shownGoal,
   type GoalField,
+  type ServerGoals,
   type TimeGoalMinutes
 } from "@/lib/goal-stepper";
 
@@ -22,34 +23,43 @@ import {
  * Settings › Your day (UIA-309): the iPhone's goal steppers. A tap changes the goal at once; it is
  * saved a moment after the last tap (no Save button), and leaving the page saves a pending change.
  * What is shown comes from the tab-wide goal drafts (`goalDrafts`): a tap until its save settles,
- * then the value the account accepted while the page's data was read before it, then the page's
- * data. Data read later (also a change made elsewhere since) shows; an older snapshot shown again
- * (a late load, a rollback) never hides an accepted goal.
+ * then the newest goals the server has handed this tab, ordered by the server's `goalsRevision`
+ * (the page's data, a save's reply). A late page load or a delayed reply carrying an older
+ * revision never hides a newer goal, including one changed elsewhere.
  */
 type SaveContext = { revisions: Partial<Record<GoalField, number>> };
 
 export function GoalSettings({
   dailyGoalMinutes,
+  goalsRevision,
   userId,
   weeklyGoalMinutes
 }: {
   dailyGoalMinutes: number;
+  /** The server's revision of these goals (bumped by every goal change). */
+  goalsRevision: number;
   /** The account these goals belong to: a save never lands on another account signed in since. */
   userId: string;
   weeklyGoalMinutes: number;
 }) {
   const router = useRouter();
-  const { dataReadAt, refresh } = useAppShellRuntime();
+  const { refresh } = useAppShellRuntime();
   const drafts = useSyncExternalStore(goalDrafts.subscribe, () => goalDrafts.get(userId), () => goalDrafts.get(userId));
   const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
+  const page: ServerGoals = { dailyGoalMinutes, weeklyGoalMinutes, goalsRevision };
   const goals: TimeGoalMinutes = {
-    dailyGoalMinutes: shownGoal(drafts.dailyGoalMinutes, dailyGoalMinutes, dataReadAt),
-    weeklyGoalMinutes: shownGoal(drafts.weeklyGoalMinutes, weeklyGoalMinutes, dataReadAt)
+    dailyGoalMinutes: shownGoal(drafts, "dailyGoalMinutes", page),
+    weeklyGoalMinutes: shownGoal(drafts, "weeklyGoalMinutes", page)
   };
+
+  // The page's data joins what the tab knows (kept only if its revision is newer).
+  useEffect(() => {
+    goalDrafts.observe(userId, { dailyGoalMinutes, weeklyGoalMinutes, goalsRevision });
+  }, [dailyGoalMinutes, goalsRevision, userId, weeklyGoalMinutes]);
   // Read by the saver after a save lands (also after Settings closed: Today and Reports still
   // pick up the new goal at once).
-  const latest = useRef({ mounted: false, refresh, router });
-  const saverRef = useRef<ReturnType<typeof createGoalSaver<SaveContext>> | null>(null);
+  const latest = useRef({ mounted: false, refresh, router, lastSaveIsNewest: true });
+  const saverRef = useRef<ReturnType<typeof createGoalSaver<SaveContext, ServerGoals | undefined>> | null>(null);
 
   useEffect(() => {
     latest.current.refresh = refresh;
@@ -59,7 +69,7 @@ export function GoalSettings({
   useEffect(() => {
     const state = latest.current;
     state.mounted = true;
-    const saver = createGoalSaver<SaveContext>({
+    const saver = createGoalSaver<SaveContext, ServerGoals | undefined>({
       save: async (changes) => {
         const response = await clientFetch("/api/profile", {
           method: "PATCH",
@@ -69,10 +79,18 @@ export function GoalSettings({
           keepalive: true
         });
         if (!response.ok) throw new Error("not saved");
+        const body = (await response.json().catch(() => null)) as { goals?: ServerGoals } | null;
+        return body?.goals;
       },
       mergeContext: (earlier, later) => ({ revisions: { ...earlier.revisions, ...later.revisions } }),
       // The tab's drafts outlive this visit: a save that lands after Settings closed still counts.
-      onAccepted: ({ changes, context }) => goalDrafts.accept(userId, changes, context.revisions, Date.now()),
+      onAccepted: ({ changes, context }, stored) => {
+        goalDrafts.accept(userId, changes, context.revisions, stored);
+        // "Saved" only when this save is still the newest goal: a change made elsewhere after it
+        // is what the page shows instead.
+        const known = goalDrafts.get(userId).known;
+        state.lastSaveIsNewest = !stored || !known || known.goalsRevision <= stored.goalsRevision;
+      },
       onFailed: ({ changes, context }) => {
         // Only the goals this save carried, and only if no newer tap changed them since: each
         // falls back to the value the account last accepted from this tab, or the page's.
@@ -81,7 +99,7 @@ export function GoalSettings({
       },
       onBusyChange: (busy, lastAccepted) => {
         if (busy) return;
-        if (state.mounted && lastAccepted) setStatus({ kind: "saved", text: "Saved" });
+        if (state.mounted && lastAccepted && state.lastSaveIsNewest) setStatus({ kind: "saved", text: "Saved" });
         // Everything is saved (or failed): reload once, so every accepted write reaches the app.
         void state.refresh({ force: true }).then(() => state.router.refresh()).catch(() => undefined);
       }
