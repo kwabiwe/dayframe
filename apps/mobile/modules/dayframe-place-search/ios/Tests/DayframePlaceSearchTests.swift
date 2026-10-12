@@ -302,6 +302,62 @@ final class DayframePlaceSearchTests: XCTestCase {
     }
   }
 
+  // Codex r1 on #358: a list that finished just before a cancel resumes after a reopened screen
+  // has started again with the same request id. It must neither publish nor resolve.
+  func testListFinishedBeforeCancelNeverPublishesUnderAReusedRequestId() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["stale-id", "fresh-id"].makeIterator() // the stale list would take the first
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let first = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    // The reopened screen's search is queued before the old list's answer resumes its task.
+    let second = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    searcher.completeNearby(.success([nearby("Old cafe", distance: 40, relevance: 0, category: .cafe)]))
+    coordinator.cancel()
+    await XCTAssertThrowsErrorAsync(try await first.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
+    }
+    // The stale list registered nothing, so its pick cannot resolve under the reused id.
+    XCTAssertThrowsError(try coordinator.resolve(id: "stale-id", requestId: "nearby-1")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+    searcher.completeNearby(.success([nearby("New cafe", distance: 50, relevance: 0, category: .cafe)]))
+    let fresh = try await second.value
+    XCTAssertEqual(fresh.map(\.title), ["New cafe"])
+    XCTAssertEqual(try coordinator.resolve(id: fresh[0].id, requestId: "nearby-1").name, "New cafe")
+  }
+
+  func testPickFromACancelledListNeverResolvesAfterARestartWithTheSameRequestId() async throws {
+    let searcher = FakeNearbySearcher()
+    var ids = ["old-id", "new-id"].makeIterator()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { ids.next() ?? "fallback" })
+    let first = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("Old cafe", distance: 40, relevance: 0, category: .cafe)]))
+    _ = try await first.value
+    XCTAssertEqual(try coordinator.resolve(id: "old-id", requestId: "nearby-1").name, "Old cafe")
+
+    coordinator.cancel()
+    let second = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    // Still loading under the same request id: the old pick is refused.
+    XCTAssertThrowsError(try coordinator.resolve(id: "old-id", requestId: "nearby-1")) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
+    }
+    searcher.completeNearby(.success([nearby("New cafe", distance: 50, relevance: 0, category: .cafe)]))
+    _ = try await second.value
+    XCTAssertThrowsError(try coordinator.resolve(id: "old-id", requestId: "nearby-1"))
+    XCTAssertEqual(try coordinator.resolve(id: "new-id", requestId: "nearby-1").name, "New cafe")
+  }
+
   func testRequestIdPropagationAndSerializableSuggestionDTO() {
     let harness = Harness(ids: ["opaque-1"])
     var received: (String, [PlaceSearchSuggestionValue])?

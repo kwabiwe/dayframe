@@ -175,9 +175,17 @@ describe("place search provider", () => {
 });
 
 describe("nearby point of interest controller", () => {
-  const poi = (title: string, distanceMeters: number, id = title, requestId = "nearby-1") => ({
+  const poi = (title: string, distanceMeters: number, id = title, requestId = "nearby-x") => ({
     id, requestId, title, subtitle: null, distanceMeters
   });
+  /** A fake native search that answers for the request it was given. */
+  const answering = (...lists: Array<Array<ReturnType<typeof poi>>>) => {
+    let call = 0;
+    return vi.fn(async ({ requestId }: { requestId: string }) => ({
+      requestId,
+      places: (lists[Math.min(call++, lists.length - 1)] ?? []).map((place) => ({ ...place, requestId }))
+    }));
+  };
   const resolved = {
     suggestionId: "a",
     title: "Example Cafe",
@@ -197,10 +205,7 @@ describe("nearby point of interest controller", () => {
   });
 
   it("asks for five places within 400 metres and shows them nearest first as given", async () => {
-    const search = vi.fn().mockResolvedValue({
-      requestId: "nearby-1",
-      places: Array.from({ length: 7 }, (_, index) => poi(`Place ${index}`, 50 + index))
-    });
+    const search = answering(Array.from({ length: 7 }, (_, index) => poi(`Place ${index}`, 50 + index)));
     const states: NearbyPointOfInterestState[] = [];
     const controller = new NearbyPointOfInterestController(
       { search, resolve: vi.fn(), cancel: vi.fn().mockResolvedValue(undefined) },
@@ -211,7 +216,7 @@ describe("nearby point of interest controller", () => {
     await controller.load({ latitude: 10, longitude: 20 });
 
     expect(search).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: "nearby-1",
+      requestId: expect.stringMatching(/^nearby-\d+$/),
       radiusMeters: 400,
       limit: 5
     }));
@@ -226,9 +231,7 @@ describe("nearby point of interest controller", () => {
 
   it("resolves a picked place from the current list only", async () => {
     const resolve = vi.fn().mockResolvedValue(resolved);
-    const search = vi.fn()
-      .mockResolvedValueOnce({ requestId: "nearby-1", places: [poi("Example Cafe", 40, "a")] })
-      .mockResolvedValueOnce({ requestId: "nearby-2", places: [poi("Example Cafe", 40, "b", "nearby-2")] });
+    const search = answering([poi("Example Cafe", 40, "a")], [poi("Example Cafe", 40, "b")]);
     const states: NearbyPointOfInterestState[] = [];
     const controller = new NearbyPointOfInterestController(
       { search, resolve, cancel: vi.fn().mockResolvedValue(undefined) },
@@ -254,6 +257,28 @@ describe("nearby point of interest controller", () => {
     controller.dispose();
   });
 
+  it("never reuses a request id across controllers, so a reopened screen cannot accept an old pick", async () => {
+    const resolve = vi.fn().mockResolvedValue(resolved);
+    const firstStates: NearbyPointOfInterestState[] = [];
+    const reopened = new NearbyPointOfInterestController(
+      { search: answering([poi("Example Cafe", 40, "a")]), resolve, cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => firstStates.push(state)
+    );
+    const oldStates: NearbyPointOfInterestState[] = [];
+    const old = new NearbyPointOfInterestController(
+      { search: answering([poi("Example Cafe", 40, "a")]), resolve, cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => oldStates.push(state)
+    );
+    await old.load({ latitude: 10, longitude: 20 });
+    old.dispose();
+    await reopened.load({ latitude: 10, longitude: 20 });
+    const stalePick = oldStates.at(-1)!.places[0];
+    expect(stalePick.requestId).not.toBe(firstStates.at(-1)!.requestId);
+    await expect(reopened.resolve(stalePick)).rejects.toMatchObject({ code: "stale_suggestion" });
+    expect(resolve).not.toHaveBeenCalled();
+    reopened.dispose();
+  });
+
   it("ignores stale results after cancellation", async () => {
     let resolveSearch!: (value: { requestId: string; places: [] }) => void;
     const search = vi.fn().mockImplementation(() => new Promise<{ requestId: string; places: [] }>((resolve) => {
@@ -266,7 +291,7 @@ describe("nearby point of interest controller", () => {
     );
     const pending = controller.load({ latitude: 10, longitude: 20 });
     await controller.cancel();
-    resolveSearch({ requestId: "nearby-1", places: [] });
+    resolveSearch({ requestId: search.mock.calls[0][0].requestId, places: [] });
     await pending;
     expect(states.at(-1)).toMatchObject({ status: "idle", places: [] });
     controller.dispose();

@@ -168,6 +168,9 @@ export function LocationReviewCorrectionEditor({
   const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
   const [saveForFuture, setSaveForFuture] = useState(false);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
+  // Each nearby or search pick takes a token; any later place or search interaction takes a new
+  // one, so a pick that resolves late never overwrites newer input (Codex r1 on #358).
+  const placePickTokenRef = useRef(0);
   const [selectedSplitAt, setSelectedSplitAt] = useState<string | null>(null);
   const [startTimeText, setStartTimeText] = useState(() => formatLocationReviewTimeInput(startAt));
   const [stopTimeText, setStopTimeText] = useState(() => stopAt ? formatLocationReviewTimeInput(stopAt) : "");
@@ -306,8 +309,15 @@ export function LocationReviewCorrectionEditor({
     ? formatLocationReviewDuration(editableWindow.value.startedAt, editableWindow.value.stoppedAt)
     : "—";
 
+  /** A later place or search interaction: any pick still resolving is dropped when it lands. */
+  function supersedePlacePick() {
+    placePickTokenRef.current += 1;
+    setResolvingSuggestion(false);
+  }
+
   function changeSearchQuery(value: string) {
     // Typing never drops a place already chosen; it stays the selected row until another is picked.
+    supersedePlacePick();
     setSearchQuery(value);
     const bias = selectPlaceSearchBias({
       selectedCoordinate: selectedPoint,
@@ -322,10 +332,13 @@ export function LocationReviewCorrectionEditor({
   }
 
   async function chooseSuggestion(suggestion: PlaceSearchState["suggestions"][number]) {
-    if (!controllerRef.current || resolvingSuggestion) return;
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const token = ++placePickTokenRef.current;
     setResolvingSuggestion(true);
     try {
-      const result = await controllerRef.current.resolve(suggestion);
+      const result = await controller.resolve(suggestion);
+      if (token !== placePickTokenRef.current) return;
       const name = result.name?.trim() || result.title.trim();
       const resolved = {
         name,
@@ -342,20 +355,23 @@ export function LocationReviewCorrectionEditor({
       setSearchState(emptySearchState);
       setEditingCentre(false);
     } catch (error) {
+      if (token !== placePickTokenRef.current) return;
       const message = friendlyPlaceSearchError(error);
       if (message) Alert.alert("Place search", message);
     } finally {
-      setResolvingSuggestion(false);
+      if (token === placePickTokenRef.current) setResolvingSuggestion(false);
     }
   }
 
   async function chooseNearbyPlace(place: NearbyPointOfInterestState["places"][number]) {
     const controller = nearbyControllerRef.current;
-    if (!controller || resolvingSuggestion) return;
+    if (!controller) return;
+    const token = ++placePickTokenRef.current;
     setResolvingSuggestion(true);
     try {
       // The coordinate crosses from MapKit only now, for the one place picked.
       const result = await controller.resolve(place);
+      if (token !== placePickTokenRef.current) return;
       setNewPlace({
         name: result.name?.trim() || result.title.trim(),
         formattedAddress: result.formattedAddress || result.subtitle,
@@ -370,15 +386,17 @@ export function LocationReviewCorrectionEditor({
       void controllerRef.current?.cancel();
       setEditingCentre(false);
     } catch (error) {
+      if (token !== placePickTokenRef.current) return;
       // Said inline under Nearby (never a system alert): the list was replaced while picking.
       const message = friendlyPlaceSearchError(error);
       if (message) setNearbyState((current) => ({ ...current, message }));
     } finally {
-      setResolvingSuggestion(false);
+      if (token === placePickTokenRef.current) setResolvingSuggestion(false);
     }
   }
 
   function clearPlaceSearch() {
+    supersedePlacePick();
     setSearchQuery("");
     setSearchState(emptySearchState);
     void controllerRef.current?.cancel();
@@ -419,6 +437,7 @@ export function LocationReviewCorrectionEditor({
       Alert.alert("Use map pin", "Move the pin if needed and enter a place name first.");
       return;
     }
+    supersedePlacePick();
     setNewPlace({
       name: manualPlaceName.trim(),
       formattedAddress: null,
@@ -463,6 +482,7 @@ export function LocationReviewCorrectionEditor({
 
   async function recordSuggestion() {
     if (saving) return;
+    supersedePlacePick();
     Keyboard.dismiss();
     const edit = parsedEdit();
     if (!edit) return;
@@ -488,6 +508,7 @@ export function LocationReviewCorrectionEditor({
 
   async function recordWithoutPlace() {
     if (saving) return;
+    supersedePlacePick();
     Keyboard.dismiss();
     const edit = parsedEdit();
     if (!edit) return;
@@ -504,6 +525,7 @@ export function LocationReviewCorrectionEditor({
 
   async function recordOnce() {
     if (saving) return;
+    supersedePlacePick();
     const edit = parsedEdit();
     if (!edit) return;
     await onResolve(

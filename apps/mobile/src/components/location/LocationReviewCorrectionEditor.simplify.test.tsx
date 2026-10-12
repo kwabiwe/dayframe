@@ -195,7 +195,7 @@ describe("Where were you? (D2, D3)", () => {
     await render(stay({ matched: false }));
     expect(native.resolveNearby).not.toHaveBeenCalled();
     await press(byTestId("location-evidence-nearby-0")[0]);
-    expect(native.resolveNearby).toHaveBeenCalledWith({ id: "poi-a", requestId: "nearby-1" });
+    expect(native.resolveNearby).toHaveBeenCalledWith({ id: "poi-a", requestId: expect.stringMatching(/^nearby-\d+$/) });
     // The chosen place is the selected row (with Remove) and leaves the nearby list.
     const chosen = tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string");
     expect(chosen.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState.checked])).toEqual([["Example Bakery, 2 Example Road", true]]);
@@ -206,6 +206,44 @@ describe("Where were you? (D2, D3)", () => {
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "record_poi_once", name: "Example Bakery" });
     // Remove goes back to no place.
     await press(byLabel("Remove Example Bakery")[0]);
+    expect(texts("Record visit")).toHaveLength(1);
+  });
+
+  // Codex r1 on #358: a pick that resolves late never overwrites what the person did meanwhile.
+  function deferNearbyResolution() {
+    let finish!: () => void;
+    native.resolveNearby.mockImplementation(() => new Promise((done) => {
+      finish = () => done({
+        suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
+        formattedAddress: "2 Example Road", latitude: 10.0001, longitude: 20.0001
+      });
+    }));
+    return () => finish();
+  }
+
+  it("drops a late nearby pick after the saved match is chosen", async () => {
+    const finish = deferNearbyResolution();
+    await render(stay({ matched: true }));
+    // Pick a nearby place, then choose the matched place before the pick resolves.
+    let pick!: Promise<void>;
+    act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
+    await press(tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string")[0]);
+    await act(async () => { finish(); await pick; });
+    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    await press(primary());
+    expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "edit_and_confirm" });
+    expect(onResolve.mock.calls[0][0].action).not.toBe("record_poi_once");
+  });
+
+  it("drops a late nearby pick after a newer query is typed, keeping the query", async () => {
+    const finish = deferNearbyResolution();
+    await render(stay({ matched: false }));
+    let pick!: Promise<void>;
+    act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
+    await act(async () => byLabel("Search places")[0].props.onChangeText("Lib"));
+    await act(async () => { finish(); await pick; });
+    expect(byLabel("Search places")[0].props.value).toBe("Lib");
+    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
     expect(texts("Record visit")).toHaveLength(1);
   });
 

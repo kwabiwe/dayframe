@@ -116,17 +116,19 @@ final class NearbyPointOfInterestCoordinator {
 
   private let searcher: NearbyPointOfInterestSearching
   private let idFactory: () -> String
-  private var activeRequestId: String?
+  /// Bumped on every start, cancel and teardown. A search, a callback or a published list belongs
+  /// to the generation it started in, so nothing from an earlier one can publish or resolve, even
+  /// when a reopened screen reuses the same request id (Codex r1 on #358).
+  private var generation = 0
   private var pending: (
-    requestId: String,
+    generation: Int,
     continuation: CheckedContinuation<[NearbyPointOfInterestValue], Error>
   )?
-  /// The last published generation: opaque id -> place. Replaced by the next search and cleared
-  /// by cancel and teardown, so an id from an older list never resolves.
+  /// The published list: opaque id -> place, for `registryGeneration` only. Replaced by the next
+  /// search and cleared by cancel and teardown, so an id from an older list never resolves.
+  private var registryGeneration: Int?
   private var registryRequestId: String?
   private var registry: [String: NearbyPointOfInterestValue] = [:]
-  /// The newest search asked for; an older search that finishes late never publishes.
-  private var latestRequestId: String?
 
   init(
     searcher: NearbyPointOfInterestSearching,
@@ -145,17 +147,19 @@ final class NearbyPointOfInterestCoordinator {
     radiusMeters: Double,
     limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
   ) async throws -> [NearbyPointOfInterestSuggestionValue] {
-    let places = try await search(
-      requestId: requestId,
+    let (started, places) = try await run(
       latitude: latitude,
       longitude: longitude,
       radiusMeters: radiusMeters,
       limit: limit
     )
-    guard latestRequestId == requestId else {
+    // A list that finished just before a cancel or a newer start resumes here late: it must not
+    // publish, whatever its request id.
+    guard started == generation else {
       throw PlaceSearchCoordinatorError.cancelled
     }
     registry.removeAll(keepingCapacity: true)
+    registryGeneration = started
     registryRequestId = requestId
     return places.map { place in
       let id = idFactory()
@@ -170,11 +174,13 @@ final class NearbyPointOfInterestCoordinator {
     }
   }
 
-  /// The picked place of the current generation, with its coordinate. A stale or unknown id is
-  /// rejected. The registry stays until the next search, so another place from the same list
-  /// can still be picked.
+  /// The picked place of the current list, with its coordinate. A stale or unknown id is
+  /// rejected. The list stays until the next search, so another place from it can still be
+  /// picked.
   func resolve(id: String, requestId: String) throws -> ResolvedPlaceSearchValue {
-    guard requestId == registryRequestId, let place = registry[id] else {
+    guard registryGeneration == generation,
+          requestId == registryRequestId,
+          let place = registry[id] else {
       throw PlaceSearchCoordinatorError.staleSuggestion
     }
     return ResolvedPlaceSearchValue(
@@ -194,8 +200,18 @@ final class NearbyPointOfInterestCoordinator {
     radiusMeters: Double,
     limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
   ) async throws -> [NearbyPointOfInterestValue] {
+    try await run(latitude: latitude, longitude: longitude, radiusMeters: radiusMeters, limit: limit).places
+  }
+
+  private func run(
+    latitude: Double,
+    longitude: Double,
+    radiusMeters: Double,
+    limit: Int
+  ) async throws -> (generation: Int, places: [NearbyPointOfInterestValue]) {
     cancel()
-    latestRequestId = requestId
+    generation &+= 1
+    let started = generation
     let cappedLimit = min(max(limit, 1), Self.maximumLimit)
     guard latitude.isFinite,
           longitude.isFinite,
@@ -206,23 +222,20 @@ final class NearbyPointOfInterestCoordinator {
       throw PlaceSearchCoordinatorError.searchUnavailable
     }
 
-    activeRequestId = requestId
-    return try await withCheckedThrowingContinuation { continuation in
-      pending = (requestId, continuation)
+    let places: [NearbyPointOfInterestValue] = try await withCheckedThrowingContinuation { continuation in
+      pending = (started, continuation)
       searcher.searchNearby(
         center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
         radiusMeters: radiusMeters
       ) { [weak self] result in
-        guard let self,
-              self.activeRequestId == requestId,
-              self.pending?.requestId == requestId else { return }
+        guard let self, self.isPending(started) else { return }
         switch result {
         case .failure(let error):
-          self.finish(requestId: requestId, result: .failure(error))
+          self.finish(generation: started, result: .failure(error))
         case .success(let nearby):
           guard let context = Self.contextQuery(from: nearby) else {
             self.finish(
-              requestId: requestId,
+              generation: started,
               result: .success(Self.presented(nearby, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
             )
             return
@@ -232,9 +245,7 @@ final class NearbyPointOfInterestCoordinator {
             center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
             radiusMeters: radiusMeters
           ) { [weak self] contextResult in
-            guard let self,
-                  self.activeRequestId == requestId,
-                  self.pending?.requestId == requestId else { return }
+            guard let self, self.isPending(started) else { return }
             let values: [NearbyPointOfInterestValue]
             switch contextResult {
             case .success(let contextual):
@@ -243,19 +254,20 @@ final class NearbyPointOfInterestCoordinator {
               values = nearby
             }
             self.finish(
-              requestId: requestId,
+              generation: started,
               result: .success(Self.presented(values, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
             )
           }
         }
       }
     }
+    return (started, places)
   }
 
   func cancel() {
     searcher.cancel()
-    activeRequestId = nil
-    latestRequestId = nil
+    generation &+= 1
+    registryGeneration = nil
     registryRequestId = nil
     registry.removeAll(keepingCapacity: false)
     guard let pending else { return }
@@ -410,15 +422,16 @@ final class NearbyPointOfInterestCoordinator {
     "station", "store", "superstore", "the", "uk"
   ]
 
+  private func isPending(_ started: Int) -> Bool {
+    generation == started && pending?.generation == started
+  }
+
   private func finish(
-    requestId: String,
+    generation started: Int,
     result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>
   ) {
-    guard activeRequestId == requestId,
-          let pending,
-          pending.requestId == requestId else { return }
+    guard isPending(started), let pending else { return }
     self.pending = nil
-    activeRequestId = nil
     pending.continuation.resume(with: result.mapError { $0 as Error })
   }
 

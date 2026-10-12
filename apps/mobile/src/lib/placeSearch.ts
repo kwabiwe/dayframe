@@ -283,8 +283,18 @@ export class PlaceSearchController {
   }
 }
 
+/**
+ * Nearby request ids are unique across every controller in the process, so a reopened screen never
+ * reuses one (the native side also keeps its own generation; Codex r1 on #358).
+ */
+let nearbyRequestCounter = 0;
+function nextNearbyRequestId() {
+  nearbyRequestCounter += 1;
+  return `nearby-${nearbyRequestCounter}`;
+}
+
 export class NearbyPointOfInterestController {
-  private requestSequence = 0;
+  private currentRequestId: string | null = null;
   private disposed = false;
 
   constructor(
@@ -295,7 +305,8 @@ export class NearbyPointOfInterestController {
 
   async load(center: PlaceSearchCoordinate) {
     if (this.disposed || !isCoordinate(center)) return;
-    const requestId = `nearby-${++this.requestSequence}`;
+    const requestId = nextNearbyRequestId();
+    this.currentRequestId = requestId;
     this.onStateChange({ requestId, status: "loading", places: [], message: null });
     try {
       const result = await this.provider.search({
@@ -339,7 +350,7 @@ export class NearbyPointOfInterestController {
 
   cancel() {
     if (this.disposed) return Promise.resolve();
-    this.requestSequence += 1;
+    this.currentRequestId = null;
     this.onStateChange({ requestId: null, status: "idle", places: [], message: null });
     return this.provider.cancel();
   }
@@ -347,12 +358,12 @@ export class NearbyPointOfInterestController {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    this.requestSequence += 1;
+    this.currentRequestId = null;
     void this.provider.cancel();
   }
 
   private isCurrent(requestId: string) {
-    return requestId === `nearby-${this.requestSequence}`;
+    return requestId === this.currentRequestId;
   }
 }
 
