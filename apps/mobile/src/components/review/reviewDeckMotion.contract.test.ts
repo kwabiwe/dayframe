@@ -91,7 +91,10 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("names a logged card's toast by its Log as name (staging feedback C2)", () => {
-    expect(screen).toMatch(/const decisionName = reviewDeckDecisionName\(\{\s*logged,\s*typedName: logAsNames\.current\.get\(item\.id\),/);
+    expect(screen).toMatch(/const decisionName = reviewDeckDecisionName\(\{\s*logged,\s*cardTitle: [^\n]*\n\s*edit: logged \? deckLogAsEdit\(item\) : null,\s*isLocationV2Commute: isLocationV2Commute\(item\),/);
+    // The toast's name and the saved edit come from the same edit.
+    expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
+    expect(screen).toContain("AccessibilityInfo.announceForAccessibility(`${held.title} is back.`);");
     expect(screen).toContain("title: decisionName,");
     expect(screen).toContain('`${logged ? "Logged" : "Skipped"} ${decisionName}. Undo is available for a few seconds.`');
     expect(screen).not.toContain("title: card?.title ?? reviewItemTitle(item),");
@@ -155,7 +158,8 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toContain('testID="review-deck-log-as-activity"');
     expect(screen).toContain("<ActivityPickerSheet");
     // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
-    expect(screen).toMatch(/const edit = held\.logged\s*\? reviewLogAsEdit\(/);
+    expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
+    expect(screen).toMatch(/function deckLogAsEdit\(item: MobileReviewItem\) \{\s*return reviewLogAsEdit\(\{/);
     expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
     // The field is uncontrolled and its touches never start a throw.
     expect(deck).toContain("defaultValue={card.logAsName}");

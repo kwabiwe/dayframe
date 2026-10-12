@@ -1125,13 +1125,15 @@ export default function ReviewScreen() {
     const item = source.item;
     const logged = direction === 1;
     const block = deckLoggedBlock(item);
-    // C2: a logged card's toast names what was logged (the "Log as" name), not the detector title.
+    // C2: a logged card's toast names the block as it will be listed, from what this decision
+    // sends (the same edit the hold saves), not the detector title.
     const decisionName = reviewDeckDecisionName({
       logged,
-      typedName: logAsNames.current.get(item.id),
-      // The same default the saved edit uses (reviewLogAsEdit), so the toast and the entry agree.
-      defaultName: item.title,
-      cardTitle: card?.title ?? reviewItemTitle(item)
+      cardTitle: card?.title ?? reviewItemTitle(item),
+      edit: logged ? deckLogAsEdit(item) : null,
+      isLocationV2Commute: isLocationV2Commute(item),
+      suggestionTitle: item.title,
+      activityName: card?.activityName ?? reviewItemCategoryName(item)
     });
     deckTokenSequence.current += 1;
     recordDeckDecision(logged ? { ...block, color: card?.color ?? block.color } : null);
@@ -1155,6 +1157,21 @@ export default function ReviewScreen() {
     AccessibilityInfo.announceForAccessibility(
       `${logged ? "Logged" : "Skipped"} ${decisionName}. Undo is available for a few seconds.`
     );
+  }
+
+  // What logging this card sends: an edit only when its "Log as" name or activity really changed
+  // (reviewLogAs.ts). The toast's name (at the throw) and the saved edit (when the hold ends) both
+  // read it, so they agree.
+  function deckLogAsEdit(item: MobileReviewItem) {
+    return reviewLogAsEdit({
+      draftName: logAsNames.current.get(item.id),
+      draftCategoryId: activeLogAsCategoryId(logAsDraftsRef.current.get(item.id)?.categoryId, dataRef.current?.categories),
+      defaultName: item.title?.trim() || reviewItemTitle(item),
+      suggestedCategoryId: item.suggestedCategoryId,
+      isLocationV2: hasV2LocationEvidence(item),
+      startedAt: hasSuggestedTimeWindow(item) ? item.suggestedStartedAt : null,
+      stoppedAt: hasSuggestedTimeWindow(item) ? item.suggestedStoppedAt : null
+    });
   }
 
   function requestDeckThrow(direction: ReviewDeckDirection) {
@@ -1494,17 +1511,7 @@ export default function ReviewScreen() {
       undoCount();
     };
     let started: boolean;
-    const edit = held.logged
-      ? reviewLogAsEdit({
-          draftName: logAsNames.current.get(item.id),
-          draftCategoryId: activeLogAsCategoryId(logAsDraftsRef.current.get(item.id)?.categoryId, dataRef.current?.categories),
-          defaultName: item.title?.trim() || reviewItemTitle(item),
-          suggestedCategoryId: item.suggestedCategoryId,
-          isLocationV2: hasV2LocationEvidence(item),
-          startedAt: hasSuggestedTimeWindow(item) ? item.suggestedStartedAt : null,
-          stoppedAt: hasSuggestedTimeWindow(item) ? item.suggestedStoppedAt : null
-        })
-      : null;
+    const edit = held.logged ? deckLogAsEdit(item) : null;
     if (edit) {
       started = resolveItem(item, { action: "edit_and_confirm", edit }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
     } else if (held.logged) {
@@ -2585,6 +2592,11 @@ function reviewItemSummary(item: MobileReviewItem) {
   if (notes) return blockWordingForServerMessage(notes);
   if (isHealthReviewItem(item)) return "Review this Health activity before it is added.";
   return "Review this suggested time before it is added.";
+}
+
+/** A Location V2 journey (not time away): the server stores it with only a typed name. */
+function isLocationV2Commute(item: MobileReviewItem) {
+  return hasV2LocationEvidence(item) && item.eventType === "commute_detected" && !isTimeAwayReviewItem(item);
 }
 
 function reviewItemCategoryName(item: MobileReviewItem) {

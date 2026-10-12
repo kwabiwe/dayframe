@@ -86,25 +86,62 @@ describe("reviewLogAsEditorName (details sheet hand-off)", () => {
   });
 });
 
-describe("reviewDeckDecisionName (staging feedback C2)", () => {
-  const commute = { defaultName: "School run", cardTitle: "Commute detected" };
+describe("reviewDeckDecisionName (staging feedback C2, Codex r1)", () => {
+  const window = { startedAt: "2026-10-07T08:00:00.000Z", stoppedAt: "2026-10-07T08:25:00.000Z" };
+  // A Location V2 commute card: heading "Commute detected", suggestion title "School run".
+  const commute = {
+    defaultName: "School run",
+    suggestedCategoryId: "commute",
+    isLocationV2: true,
+    ...window
+  };
+  const commuteEdit = (draftName: string | undefined, draftCategoryId: string | undefined) =>
+    reviewLogAsEdit({ ...commute, draftName, draftCategoryId });
+  const commuteName = (edit: ReturnType<typeof reviewLogAsEdit>, activityName: string) =>
+    reviewDeckDecisionName({
+      logged: true,
+      cardTitle: "Commute detected",
+      edit,
+      isLocationV2Commute: true,
+      suggestionTitle: "School run",
+      activityName
+    });
 
-  it("names a logged card by the name it was logged as, not the detector title", () => {
-    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: undefined })).toBe("School run");
-    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: "  Drop-off  " })).toBe("Drop-off");
+  it("names an activity-only commute change by the activity the block shows (no description is stored)", () => {
+    const edit = commuteEdit(undefined, "driving");
+    expect(edit?.description).toBeUndefined();
+    expect(commuteName(edit, "Driving")).toBe("Driving");
   });
 
-  it("falls back to the default name when the field was cleared, then to the card title", () => {
-    expect(reviewDeckDecisionName({ ...commute, logged: true, typedName: "   " })).toBe("School run");
-    expect(reviewDeckDecisionName({ logged: true, typedName: undefined, defaultName: null, cardTitle: "Commute detected" })).toBe(
-      "Commute detected"
-    );
-    expect(reviewDeckDecisionName({ logged: true, typedName: "", defaultName: "  ", cardTitle: "Suggested activity" })).toBe(
-      "Suggested activity"
-    );
+  it("names a plain commute confirm by its activity, and a typed commute name by that name", () => {
+    expect(commuteName(null, "Commute")).toBe("Commute");
+    expect(commuteName(commuteEdit("  Drop-off  ", undefined), "Commute")).toBe("Drop-off");
+    // Typing the default name back changes nothing, so nothing is sent.
+    expect(commuteName(commuteEdit("School run", undefined), "Commute")).toBe("Commute");
   });
 
-  it("names a skipped card by its title, whatever was typed", () => {
-    expect(reviewDeckDecisionName({ ...commute, logged: false, typedName: "Drop-off" })).toBe("Commute detected");
+  it("names a stay or generic moment by the sent name, else the suggestion's title, never the detector heading", () => {
+    const stay = { logged: true, cardTitle: "Visit at a place", isLocationV2Commute: false, suggestionTitle: "School run", activityName: "Errands" };
+    expect(reviewDeckDecisionName({ ...stay, edit: null })).toBe("School run");
+    const activityOnly = reviewLogAsEdit({ ...commute, draftName: undefined, draftCategoryId: "errands" });
+    expect(reviewDeckDecisionName({ ...stay, edit: activityOnly })).toBe("School run");
+    const generic = reviewLogAsEdit({ ...base, draftCategoryId: "exercise" });
+    expect(reviewDeckDecisionName({ ...stay, cardTitle: "Outdoor Walk", suggestionTitle: "Outdoor Walk", activityName: "Exercise", edit: generic })).toBe(
+      "Outdoor Walk"
+    );
+    expect(reviewDeckDecisionName({ ...stay, suggestionTitle: null, edit: null })).toBe("Errands");
+  });
+
+  it("names a skipped card by its heading, whatever was typed", () => {
+    expect(
+      reviewDeckDecisionName({
+        logged: false,
+        cardTitle: "Commute detected",
+        edit: commuteEdit("Drop-off", "driving"),
+        isLocationV2Commute: true,
+        suggestionTitle: "School run",
+        activityName: "Driving"
+      })
+    ).toBe("Commute detected");
   });
 });

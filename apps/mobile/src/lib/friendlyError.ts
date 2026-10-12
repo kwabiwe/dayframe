@@ -1,15 +1,17 @@
 import {
   isMobileTransportFailure,
   isRetryableMobileConnectivityFailure,
+  MobileApiResponseError,
   MobileRequestTimeoutError
 } from "./mobile-network";
 
 /**
- * Plain words for a failed request on iPhone (staging feedback B2). A native or transport error
- * ("fetch failed: UnexpectedException: The Internet connection appears to be offline. (at
- * ExpoModulesCore/Promise.swift:56)") is never shown as it is: an offline failure says so in one
- * line, a slow or busy server gets the caller's own fallback, and only a short, readable server
- * message (e.g. "Place name is required") is kept.
+ * Plain words for a failed request on iPhone (staging feedback B2). What is shown is decided by
+ * where the error came from, not by how it reads: only a sentence from our own API's error body
+ * (`MobileApiResponseError` with `fromServerBody`, a 4xx such as "Place name is required", however
+ * long) is shown as it is. Everything else (a native rejection such as "fetch failed:
+ * UnexpectedException: … Promise.swift:56" or "… Caused by: database is locked", a JS stack, a
+ * local store error, a 5xx) is the screen's own fallback, or the offline / slow line below.
  */
 export const OFFLINE_ACTION_MESSAGE = "You're offline. Try again when you're connected.";
 export const SLOW_CONNECTION_MESSAGE = "The connection is too slow right now. Try again in a moment.";
@@ -20,13 +22,9 @@ export type MobileFailureKind = "offline" | "slow" | "unavailable" | "other";
 const NATIVE_OFFLINE_PATTERN =
   /internet connection appears to be offline|not connected to the internet|could not connect to the server|hostname could not be found|network connection was lost/i;
 
-/** Text that is a native exception, a stack position or a parser complaint, never a sentence for people. */
-const RAW_ERROR_PATTERN =
-  /ExpoModulesCore|UnexpectedException|Exception:|\.swift:\d+|\.mm?:\d+|Error Domain=|NSURLErrorDomain|NSCocoaErrorDomain|^fetch failed|JSON Parse error|Unexpected token|is not a function|undefined is not|null is not|Cannot read propert|TypeError|SyntaxError|SQLITE_|\(at [^)]*:\d+\)/i;
-
-const READABLE_MESSAGE_LIMIT = 160;
-
 export function mobileFailureKind(error: unknown): MobileFailureKind {
+  // Our server answered, so the connection worked whatever its words say.
+  if (error instanceof MobileApiResponseError) return error.statusCode >= 500 ? "unavailable" : "other";
   if (isMobileTransportFailure(error)) return "offline";
   if (error instanceof Error && error.name !== "AbortError" && NATIVE_OFFLINE_PATTERN.test(error.message)) return "offline";
   if (error instanceof MobileRequestTimeoutError) return "slow";
@@ -34,10 +32,11 @@ export function mobileFailureKind(error: unknown): MobileFailureKind {
   return "other";
 }
 
-/** A message short and plain enough to show as it is. */
-export function isReadableErrorMessage(message: string) {
-  const trimmed = message.trim();
-  return trimmed.length > 0 && trimmed.length <= READABLE_MESSAGE_LIMIT && !RAW_ERROR_PATTERN.test(trimmed);
+/** A sentence our own API wrote for people (a 4xx error body), safe to show as it is. */
+export function serverErrorSentence(error: unknown) {
+  if (!(error instanceof MobileApiResponseError) || !error.fromServerBody) return null;
+  if (error.statusCode < 400 || error.statusCode >= 500) return null;
+  return error.message.trim() || null;
 }
 
 /**
@@ -50,9 +49,7 @@ export function friendlyMobileErrorMessage(error: unknown, fallback: string) {
       return OFFLINE_ACTION_MESSAGE;
     case "slow":
       return SLOW_CONNECTION_MESSAGE;
-    case "unavailable":
-      return fallback;
     default:
-      return error instanceof Error && isReadableErrorMessage(error.message) ? error.message.trim() : fallback;
+      return serverErrorSentence(error) ?? fallback;
   }
 }

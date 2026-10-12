@@ -29,7 +29,7 @@ import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
+import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
@@ -322,8 +322,11 @@ export default function PlacesScreen() {
   const slots = placeRoleSlots(rolePlaces);
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
+  const pageState = placesPageState(Boolean(data), Boolean(loadFailure));
+
   function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
-    if (roleSaving.current) return;
+    // Only from a list that was read: an unknown list never sends Set straight to adding a place.
+    if (roleSaving.current || !dataRef.current) return;
     setStatusMessage(null);
     // Nothing saved to choose from yet: go straight to adding the place into the slot.
     if (mode === "choose" && places.length === 0) {
@@ -407,7 +410,18 @@ export default function PlacesScreen() {
             </Reanimated.View>
           ) : null}
 
-          {!data && loadFailure ? (
+          {pageState === "pending" ? (
+            // Before the first read settles: a quiet line in the groups' place (no spinner, and
+            // never "Not set" or "Nothing saved yet" for places not yet known).
+            <Text
+              {...mobileTextProps("body")}
+              accessibilityLiveRegion="polite"
+              style={[styles.placesStatus, styles.placesPending]}
+              testID="places-pending"
+            >
+              Loading your places…
+            </Text>
+          ) : pageState === "failed" && loadFailure ? (
             <BlocksEmptyState
               actionAccessibilityLabel="Try loading your places again"
               actionLabel="Try again"

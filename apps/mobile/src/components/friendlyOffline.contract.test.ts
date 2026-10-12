@@ -36,8 +36,25 @@ describe("friendly offline states (staging feedback B1, B2)", () => {
     expect(load).not.toContain("Alert.alert");
     expect(load).toContain('setLoadFailure({ offline: mobileFailureKind(error) === "offline" });');
     expect(load).toContain("} else if (options?.refresh) {");
-    expect(places).toContain("{!data && loadFailure ? (");
     expect(places).toContain('testID="places-unavailable"');
+  });
+
+  it("draws Home/Work and the place groups only from a list that was read (Codex r1)", () => {
+    expect(places).toContain("const pageState = placesPageState(Boolean(data), Boolean(loadFailure));");
+    // Pending first, then failed; the groups are the last branch, reached only when ready.
+    const branches = places.slice(places.indexOf('{pageState === "pending" ? ('), places.indexOf('<SettingsBlockGroup foot="Trips and time away'));
+    expect(branches).toContain('testID="places-pending"');
+    expect(branches).toContain("Loading your places…");
+    expect(branches).toContain(') : pageState === "failed" && loadFailure ? (');
+    expect(branches).not.toMatch(/ActivityIndicator|RefreshControl/);
+    // Set never opens adding a place from an unknown list.
+    expect(places).toContain("if (roleSaving.current || !dataRef.current) return;");
+  });
+
+  it("lets the empty state's explanation scale without a cap (body role) and keeps 44-point Try again", () => {
+    const empty = read("src/components/blocks/BlocksEmptyState.tsx");
+    expect(empty).toMatch(/mobileTextProps\("body"\)\} style=\{\[emptyStyles\.message/);
+    expect(empty).toContain("minHeight: 44");
   });
 
   it("never passes error.message straight into an Alert on iPhone screens outside Settings", () => {

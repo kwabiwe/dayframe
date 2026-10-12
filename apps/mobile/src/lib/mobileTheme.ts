@@ -492,6 +492,7 @@ function createStyles(theme: MobileTheme) {
     placesBlockSuggested: { opacity: 0.75 },
     placesEmpty: { minHeight: 52, justifyContent: "center", paddingHorizontal: 16 },
     placesStatus: { color: theme.textSecondary, fontFamily: monoFont, fontSize: 13, textAlign: "center" },
+    placesPending: { paddingVertical: 32 },
     settingsActivityPin: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
     settingsActivityPinOn: { backgroundColor: theme.surfaceInset },
     healthNameRow: {

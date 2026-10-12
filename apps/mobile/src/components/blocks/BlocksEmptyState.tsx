@@ -44,7 +44,8 @@ export function BlocksEmptyState({
         <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={[emptyStyles.title, { color: theme.textPrimary }]}>
           {title}
         </Text>
-        <Text {...mobileTextProps("metadata")} style={[emptyStyles.message, { color: theme.textSecondary }]}>
+        {/* Explanation copy scales without a cap (brand guide: body role). */}
+        <Text {...mobileTextProps("body")} style={[emptyStyles.message, { color: theme.textSecondary }]}>
           {message}
         </Text>
       </View>
