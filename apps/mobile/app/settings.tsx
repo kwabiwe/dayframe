@@ -143,7 +143,6 @@ import {
   settingsLocationDisplay,
   shownSyncHelpCounts,
   useSettingsLastKnown,
-  useSettingsLastKnownReady,
   type SettingsLastKnownDisplay
 } from "@/lib/settingsLastKnown";
 import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
@@ -153,6 +152,7 @@ import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmRequest } from "
 import { bindConfirmToSession, captureConfirmAuthority, captureLogoutRecovery, confirmAuthorityStillCurrent, logoutRecoveryStillCurrent, type ConfirmAuthority } from "@/lib/confirmAuthority";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import { BlocksInfoSheet, type BlocksInfoRow } from "@/components/blocks/BlocksInfoSheet";
+import { SettingsHydrationGate } from "@/components/settings/SettingsHydrationGate";
 import { blocksNavOrigin, settingsBackLabel, settingsSectionTitle } from "@/lib/blocksNav";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { createGoalSaver, publishSavedTimeGoals, type TimeGoals } from "@/lib/settingsGoals";
@@ -215,8 +215,6 @@ import { healthMappingWriter } from "@/lib/healthMappingOwner";
 
 type Category = MobileBootstrap["categories"][number];
 const GOAL_SAVE_DELAY_MS = 600;
-// A Settings page opened during launch hydration holds its rows out of sight until it settles.
-const HIDDEN_UNTIL_HYDRATED = { opacity: 0 } as const;
 const ACCOUNT_CHANGED_NOTICE = "Your account changed, so nothing was changed.";
 const SIGN_IN_UNREADABLE_NOTICE = "Unlock your iPhone and try again.";
 // D1: the same theme names on iPhone and web.
@@ -462,9 +460,6 @@ export default function SettingsScreen() {
   // the first open after a launch paints at once. DISPLAY ONLY: it feeds the `shown…` values below,
   // which only rows, labels and switch positions read; every action reads the live state instead.
   const lastKnown = useSettingsLastKnown();
-  // Opened while launch hydration is still running (rare: it starts before any screen renders),
-  // the rows wait for it (bounded) and then show once, instead of flipping from empty.
-  const lastKnownReady = useSettingsLastKnownReady();
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
@@ -2080,12 +2075,10 @@ export default function SettingsScreen() {
           />
         }
       >
-        <View
-          accessibilityElementsHidden={!lastKnownReady}
-          importantForAccessibility={lastKnownReady ? "auto" : "no-hide-descendants"}
-          pointerEvents={lastKnownReady ? "auto" : "none"}
-          style={[styles.contentStack, lastKnownReady ? null : HIDDEN_UNTIL_HYDRATED]}
-        >
+        {/* Opened while launch hydration is still running (rare: it starts before any screen
+            renders), the rows mount only once it settles (bounded), with their hydrated values. */}
+        <SettingsHydrationGate>
+        <View style={styles.contentStack}>
           {settingsSection === "index" ? (
             <View style={styles.settingsBlocksStack}>
               <SettingsAccountCard
@@ -2850,6 +2843,7 @@ export default function SettingsScreen() {
             </View>
           ) : null}
         </View>
+        </SettingsHydrationGate>
       </ScrollView>
       {activityEditor ? (
         <ActivityEditorSheet

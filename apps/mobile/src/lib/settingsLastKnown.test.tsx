@@ -48,10 +48,48 @@ vi.mock("expo-secure-store", () => ({
   }
 }));
 
+// Animated records what the real SettingsSwitch does with its thumb (Codex r2 on #365).
+const animations = vi.hoisted(() => ({
+  positions: [] as Array<{ value: number }>,
+  slides: [] as Array<{ toValue: number }>,
+  reduceMotion: false
+}));
 vi.mock("react-native", () => ({
   NativeModules: {},
-  Platform: { OS: "ios" }
+  Platform: { OS: "ios" },
+  Animated: {
+    Value: class {
+      value: number;
+      constructor(value: number) {
+        this.value = value;
+        animations.positions.push(this);
+      }
+      setValue(next: number) {
+        this.value = next;
+      }
+      interpolate() {
+        return 0;
+      }
+    },
+    View: "AnimatedView",
+    timing: (_position: unknown, config: { toValue: number }) => {
+      animations.slides.push({ toValue: config.toValue });
+      return { start() {}, stop() {} };
+    }
+  },
+  Easing: { cubic: () => 0, out: (easing: unknown) => easing },
+  Pressable: "Pressable",
+  Text: "Text",
+  View: "View",
+  StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 }
 }));
+vi.mock("react-native-reanimated", () => ({
+  LayoutAnimationConfig: ({ children }: { children: unknown }) => children
+}));
+vi.mock("./motion", () => ({ useReduceMotionPreference: () => animations.reduceMotion }));
+vi.mock("./mobileTypography", () => ({ mobileTextProps: () => ({}) }));
+vi.mock("../components/icons/DayframeIcon", () => ({ ActivityIcon: "ActivityIcon", DayframeIcon: "DayframeIcon" }));
+vi.mock("../components/accessibility/diagnostics", () => ({ recordMobileLayout() {}, recordMobileTextLayout() {} }));
 
 vi.mock("./config", () => ({
   DAYFRAME_API_BASE: "https://dayframe-staging.vercel.app"
@@ -150,6 +188,9 @@ beforeEach(() => {
   disk.heldReads.clear();
   keychain.clear();
   keychainState.locked = false;
+  animations.positions.length = 0;
+  animations.slides.length = 0;
+  animations.reduceMotion = false;
 });
 
 afterEach(() => {
@@ -657,5 +698,138 @@ describe("Codex r1 on #365: ownership, account lifetimes, renewal and first-fram
     // ...and nothing from that earlier A lifetime reached the screen or the device.
     expect(published).toEqual([]);
     expect(storedPayload(A)).toBeNull();
+  });
+});
+
+describe("Codex r2 on #365: hydrated controls never slide on reveal; B→A sessions are replacements", () => {
+  /** Settings' rows as `app/settings.tsx` mounts them: inside the hydration gate, from the shown values. */
+  async function mountSleepRow(app: Awaited<ReturnType<typeof launch>>) {
+    const { SettingsHydrationGate } = await import("../components/settings/SettingsHydrationGate");
+    const { SettingsSwitch } = await import("../components/settings/SettingsBlocks");
+    const theme = { borderStrong: "grey", success: "green" } as never;
+    function Page() {
+      const lastKnown = app.lastKnown.useSettingsLastKnown();
+      return app.react.createElement(
+        SettingsHydrationGate,
+        null,
+        app.react.createElement(SettingsSwitch, {
+          label: "Sleep",
+          onValueChange: () => undefined,
+          theme,
+          value: lastKnown?.healthImportPreferences?.sleep ?? false
+        })
+      );
+    }
+    let tree!: import("react-test-renderer").ReactTestRenderer;
+    app.renderer.act(() => {
+      tree = app.renderer.create(app.react.createElement(Page));
+    });
+    return {
+      thumb: () => animations.positions.at(-1)?.value,
+      switches: () => tree.root.findAll((node) => node.props.accessibilityRole === "switch"),
+      unmount: () => app.renderer.act(() => tree.unmount())
+    };
+  }
+
+  it("mounted mid-hydration, the switch appears with its stored position and never slides", async () => {
+    await persistFor(A, { healthImportPreferences: { sleep: true } });
+    let release!: () => void;
+    disk.heldReads.set(storedKeys()[0], new Promise<void>((resolve) => { release = resolve; }));
+    const app = await launch();
+    const priming = app.lastKnown.primeSettingsLastKnown();
+    const page = await mountSleepRow(app);
+    // Nothing is mounted (or shown) while the stored read is open.
+    expect(page.switches()).toHaveLength(0);
+    expect(animations.positions).toHaveLength(0);
+    await app.renderer.act(async () => {
+      release();
+      await priming;
+      await app.settle();
+    });
+    // At reveal: the thumb was created on, and no slide was scheduled.
+    expect(page.switches()).toHaveLength(1);
+    expect(page.switches()[0].props.accessibilityState).toMatchObject({ checked: true });
+    expect(animations.positions).toHaveLength(1);
+    expect(page.thumb()).toBe(1);
+    expect(animations.slides).toEqual([]);
+    // A real change after the reveal still slides.
+    await app.renderer.act(async () => {
+      app.lastKnown.recordSettingsLastKnown({ healthImportPreferences: { sleep: false } }, app.remembered.captureRememberedSettingsBinding());
+      await app.settle();
+    });
+    expect(animations.slides).toEqual([{ toValue: 0 }]);
+    page.unmount();
+  });
+
+  it("with Reduce Motion, the hydrated switch is in place at reveal with no slide", async () => {
+    await persistFor(A, { healthImportPreferences: { sleep: true } });
+    let release!: () => void;
+    disk.heldReads.set(storedKeys()[0], new Promise<void>((resolve) => { release = resolve; }));
+    const app = await launch();
+    animations.reduceMotion = true;
+    const priming = app.lastKnown.primeSettingsLastKnown();
+    const page = await mountSleepRow(app);
+    await app.renderer.act(async () => {
+      release();
+      await priming;
+      await app.settle();
+    });
+    expect(page.thumb()).toBe(1);
+    expect(animations.slides).toEqual([]);
+    page.unmount();
+  });
+
+  it("opened after hydration, the switch starts in place and an equal live read does not slide", async () => {
+    await persistFor(A, { healthImportPreferences: { sleep: true } });
+    const app = await launch();
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    const page = await mountSleepRow(app);
+    expect(page.switches()).toHaveLength(1);
+    expect(page.thumb()).toBe(1);
+    await app.renderer.act(async () => {
+      app.lastKnown.recordSettingsLastKnown({ healthImportPreferences: { sleep: true } }, app.remembered.captureRememberedSettingsBinding());
+      await app.settle();
+    });
+    expect(animations.slides).toEqual([]);
+    page.unmount();
+  });
+
+  it("a new session for A after a restored session of B is a replacement: A's old values never come back", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    // An interrupted replacement left B's session in the Keychain with A still the active account.
+    keychain.set("dayframe.localSessionToken.v2", JSON.stringify({ version: 1, token: "token-b", userId: B.userId, workspaceId: B.workspaceId }));
+    const app = await launch();
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true });
+    await app.session.setSessionToken("token-a-new", A);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedKeys()).toEqual([]);
+  });
+
+  it("a new session for A replacing a never-read session is a replacement too", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    const app = await launch();
+    await app.account.readActiveMobileAccount();
+    // The outgoing session was never read in this process: nothing proves it was A's.
+    await app.session.setSessionToken("token-a-new", A);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toBeNull();
+    expect(storedKeys()).toEqual([]);
+  });
+
+  it("A's session renewed by a new session for A keeps the values (memory and disk)", async () => {
+    await persistFor(A, { healthAccessGranted: true });
+    const app = await launch();
+    await app.lastKnown.primeSettingsLastKnown();
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toEqual({ healthAccessGranted: true });
+    await app.session.setSessionToken("token-a-renewed", A);
+    await app.settle();
+    expect(app.lastKnown.readSettingsLastKnown()).toEqual({ healthAccessGranted: true });
+    expect(storedPayload(A)?.values).toEqual({ healthAccessGranted: true });
   });
 });

@@ -16,6 +16,7 @@ import type { ReviewNudgePermission } from "./reviewNudgeNative";
 import {
   currentSessionGeneration,
   peekAuthenticatedSessionOwner,
+  peekSessionHandOver,
   readAuthenticatedSessionSnapshot,
   subscribeAuthenticatedSession
 } from "./secure-session";
@@ -519,8 +520,8 @@ export function useSettingsLastKnown(): SettingsLastKnownDisplay | null {
  * Whether a Settings page may show its rows (Codex r1 on #365: first-frame hydration must be
  * deterministic). Hydration starts when the root layout module is evaluated, so a page opened by
  * the user finds it settled and is ready on its first render. A page that mounts while it is still
- * running (a deep link at launch) holds its rows hidden — no row shows a placeholder that then
- * flips — until it settles or `waitMs` passes, then shows them once. It never goes back to hidden.
+ * running (a deep link at launch) mounts no rows (`SettingsHydrationGate`) until it settles or
+ * `waitMs` passes, so its controls are created with their hydrated values. It never goes back.
  */
 export function useSettingsLastKnownReady(waitMs = SETTINGS_LAST_KNOWN_FIRST_PAINT_WAIT_MS) {
   const [ready, setReady] = useState(isSettingsLastKnownSettled);
@@ -546,19 +547,35 @@ subscribeMobileSignedOut(() => {
   void clearSettingsLastKnown();
 });
 
-// A new authenticated session. Renewing the same account's session (a new token for the account
-// that is already active) is not a sign-out (mobile-permissions: same-owner refresh): its values
-// stay, rebound to the new session, while work started in the old one stays fenced (its bindings
-// carry the old generation, and the storage epoch moves on). Any other new session — a sign-in
-// after a sign-out, another account's token, a sign-out or invalidation — clears.
+/**
+ * Whether the session change that produced `generation` renewed the same account's session: the
+ * session it replaced (as this process had loaded it) and the one it installed both belong to the
+ * active account, and so do any held values. Sessions are per backend (one API base per build), so
+ * the backend is the same by construction. An outgoing session that was never read, belonged to
+ * another account (an interrupted replacement: Codex r2 on #365) or was signed out is not a renewal.
+ */
+function isSameAccountRenewal(generation: number) {
+  const handOver = peekSessionHandOver();
+  if (!handOver || handOver.generation !== generation) return false;
+  const { outgoingOwner, incomingOwner } = handOver;
+  const activeOwner = getActiveMobileAccountSnapshot();
+  if (!outgoingOwner || !incomingOwner || !activeOwner) return false;
+  if (!mobileAccountOwnersEqual(outgoingOwner, incomingOwner) || !mobileAccountOwnersEqual(incomingOwner, activeOwner)) return false;
+  if (!mobileAccountOwnersEqual(peekAuthenticatedSessionOwner(), incomingOwner)) return false;
+  return !held || mobileAccountOwnersEqual(held.binding.owner, incomingOwner);
+}
+
+// A new authenticated session. Renewing the same account's session (A's session replaced by a new
+// session for A) is not a sign-out (mobile-permissions: same-owner refresh): its values stay,
+// rebound to the new session, while work started in the old one stays fenced (its bindings carry
+// the old generation, and the storage epoch moves on). Any other new session — a sign-in after a
+// sign-out, another account's token, a session for A replacing B's, a sign-out or invalidation —
+// clears.
 subscribeAuthenticatedSession(() => {
   const generation = currentSessionGeneration();
   if (generation === observedGeneration) return;
   observedGeneration = generation;
-  const sessionOwner = peekAuthenticatedSessionOwner();
-  const activeOwner = getActiveMobileAccountSnapshot();
-  const renewal = Boolean(sessionOwner) && Boolean(activeOwner) && mobileAccountOwnersEqual(sessionOwner, activeOwner) &&
-    (!held || mobileAccountOwnersEqual(held.binding.owner, sessionOwner));
+  const renewal = isSameAccountRenewal(generation);
   if (!renewal) {
     void clearSettingsLastKnown();
     return;

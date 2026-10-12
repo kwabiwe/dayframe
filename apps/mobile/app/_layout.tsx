@@ -14,8 +14,8 @@ import { primeSettingsLastKnown } from "@/lib/settingsLastKnown";
 
 // A4 (Codex r1 on #365): Settings' last-known display values start loading when this module is
 // evaluated, before any screen renders, so Settings opened by the user finds them ready on its
-// first frame; a page that mounts while they are still loading waits (bounded) instead of
-// flipping (useSettingsLastKnownReady).
+// first frame; a page that mounts while they are still loading mounts its rows only once they
+// settle (bounded; SettingsHydrationGate) instead of flipping.
 void primeSettingsLastKnown();
 
 export default function RootLayout() {

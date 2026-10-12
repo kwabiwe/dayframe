@@ -65,9 +65,13 @@ describe("Settings' last-known values are display only (A4)", () => {
     const prime = layout.indexOf("void primeSettingsLastKnown();");
     expect(prime).toBeGreaterThan(-1);
     expect(prime).toBeLessThan(layout.indexOf("export default function RootLayout()"));
-    expect(settings).toContain("const lastKnownReady = useSettingsLastKnownReady();");
-    expect(settings).toContain("style={[styles.contentStack, lastKnownReady ? null : HIDDEN_UNTIL_HYDRATED]}");
-    expect(settings).toContain('importantForAccessibility={lastKnownReady ? "auto" : "no-hide-descendants"}');
+    // The rows mount only once hydration settles (bounded), so controls start at their hydrated
+    // values instead of sliding from defaults (Codex r2 on #365).
+    expect(settings).toContain("<SettingsHydrationGate>\n        <View style={styles.contentStack}>");
+    expect(settings).toContain("        </View>\n        </SettingsHydrationGate>\n      </ScrollView>");
+    const gate = readFileSync(join(mobileRoot, "src/components/settings/SettingsHydrationGate.tsx"), "utf8");
+    expect(gate).toContain("if (!ready) return null;");
+    expect(gate).toContain("<LayoutAnimationConfig skipEntering>{children}</LayoutAnimationConfig>");
   });
 
   it("reads the activity queue for the account its read started for (Codex r1 on #365)", () => {
