@@ -331,11 +331,11 @@ describe("Reports blocks and Where it went", () => {
     await pointer(document.body, "pointerdown", 600, 600, "touch");
     expect(container.querySelector(".df-day-pick")?.contains(document.activeElement)).toBe(false);
     expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    // New data that leaves the day without blocks: focus goes to the blocks card.
+    // New data that leaves the day without blocks: focus goes to the day itself, now its own stop.
     await open(120);
     await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
     await view.rerender(week(false));
-    expect(document.activeElement).toBe(container.querySelector(".df-report-blocks"));
+    expect(document.activeElement).toBe(container.querySelector('li[data-trace-day="d7"]'));
     await act(async () => view.root.unmount());
   });
 
@@ -429,10 +429,75 @@ describe("Reports blocks and Where it went", () => {
     expect(view.centre()).toBe("1hNo activity");
     await view.rerender(week(false));
     expect(view.container.querySelector('button[aria-label="No activity, 30m, Day 7"]')).toBeNull();
-    expect(view.container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
-    expect(view.centre()).toBe("10hlogged this week");
-    // The roving tab stop falls back to the first block that is still there.
-    expect(view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')?.tabIndex).toBe(0);
+    // The removed block's trace is gone; focus (lost with the block, review r4) returns to the
+    // card's tab stop, the first block still there, which traces as any focused block does.
+    const work = view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 9h, Day 5"]')!;
+    expect(work.tabIndex).toBe(0);
+    expect(document.activeElement).toBe(work);
+    expect(view.centre()).toBe("9hWork");
+    await act(async () => view.root.unmount());
+  });
+
+  it("reaches every day from the keyboard when only the first day has time, in the strip and the month grid (review r4)", async () => {
+    for (const preset of ["this-week", "this-month"]) {
+      const view = await mount(
+        <ReportsBlocksPanel blocks={reportBlocksModel(report(preset), formatDuration)} land={land} slices={slices} totalLabel="logged" totalSeconds={10 * 3600} />
+      );
+      const stops = [...view.container.querySelectorAll<HTMLElement>("[data-roving-key]")];
+      // Two blocks on Day 5, then one stop per empty day; one tab stop in all.
+      expect(stops).toHaveLength(8);
+      expect(stops.filter((stop) => stop.tabIndex === 0)).toHaveLength(1);
+      await act(async () => stops[0].focus());
+      for (let step = 0; step < 6; step += 1) {
+        await act(async () => {
+          document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+        });
+      }
+      expect(document.activeElement?.getAttribute("aria-label")).toBe("Day 11: 0m logged");
+      expect(view.container.querySelector(".df-wblocks, .df-month")?.classList.contains("has-hot")).toBe(false);
+      await act(async () => view.root.unmount());
+    }
+  });
+
+  it("moves focus out of the panel before it turns inert when new data closes it (review r4)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    await pointer(list, "pointerdown", 120, 100, "touch");
+    await pointer(list, "pointerup", 120, 100, "touch");
+    const panel = view.container.querySelector<HTMLElement>(".df-day-pick")!;
+    expect(panel.hasAttribute("inert")).toBe(false);
+    await act(async () => panel.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
+    const focusWhenInert: Array<Element | null> = [];
+    const setAttribute = Element.prototype.setAttribute;
+    const spy = vi.spyOn(Element.prototype, "setAttribute").mockImplementation(function (this: Element, name: string, value: string) {
+      if (name === "inert" && this === panel) focusWhenInert.push(document.activeElement);
+      setAttribute.call(this, name, value);
+    });
+    await view.rerender(week(true, slices.map((slice) => ({ ...slice }))));
+    spy.mockRestore();
+    expect(panel.hasAttribute("inert")).toBe(true);
+    expect(focusWhenInert).toHaveLength(1);
+    expect(panel.contains(focusWhenInert[0])).toBe(false);
+    expect(focusWhenInert[0]?.getAttribute("aria-label")).toBe("No activity, 30m, Day 7");
+    await act(async () => view.root.unmount());
+  });
+
+  it("hands focus to Where it went before new data removes the whole blocks card (review r4)", async () => {
+    const view = await mount(week());
+    await act(async () => view.container.querySelector<HTMLButtonElement>('button[aria-label="Work, 2h, Day 7"]')!.focus());
+    let focusAtRemoval: Element | null = null;
+    const card = view.container.querySelector(".df-report-blocks")!;
+    const removeChild = Node.prototype.removeChild;
+    const spy = vi.spyOn(Node.prototype, "removeChild").mockImplementation(function <T extends Node>(this: Node, child: T): T {
+      if ((child as Node) === card) focusAtRemoval = document.activeElement;
+      return removeChild.call(this, child) as T;
+    });
+    await view.rerender(<ReportsBlocksPanel blocks={null} land={land} slices={slices} totalLabel="logged" totalSeconds={10 * 3600} />);
+    spy.mockRestore();
+    expect(view.container.querySelector(".df-report-blocks")).toBeNull();
+    const where = view.container.querySelector(".df-where");
+    expect(focusAtRemoval).toBe(where);
+    expect(document.activeElement).toBe(where);
     await act(async () => view.root.unmount());
   });
 
@@ -469,7 +534,11 @@ describe("Reports blocks and Where it went", () => {
     // Up is the next block in the stack (stacks grow upwards).
     await key("ArrowUp");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("No activity, 1h, Day 5");
-    // Right goes to the next day with blocks (Day 6 is empty) and keeps the activity.
+    // Right goes to the next day; an empty day (Day 6) is a stop of its own (review r4) …
+    await key("ArrowRight");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Day 6: 0m logged");
+    expect(document.activeElement?.tagName).toBe("LI");
+    // … that traces nothing; the next day with the activity keeps it.
     await key("ArrowRight");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("No activity, 30m, Day 7");
     expect(container.querySelector(".df-donut-center")?.textContent).toBe("1hNo activity");
@@ -477,9 +546,13 @@ describe("Reports blocks and Where it went", () => {
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 2h, Day 7");
     await key("Home");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 9h, Day 5");
+    // End reaches the last day, empty or not (review r4: trailing empty days are reachable).
     await key("End");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Work, 2h, Day 7");
-    expect(blocks.map((block) => block.tabIndex)).toEqual([-1, -1, -1, 0]);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Day 11: 0m logged");
+    expect(blocks.map((block) => block.tabIndex)).toEqual([-1, -1, -1, -1]);
+    expect((document.activeElement as HTMLElement).tabIndex).toBe(0);
+    await key("ArrowLeft");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Day 10: 0m logged");
     await act(async () => root.unmount());
   });
 

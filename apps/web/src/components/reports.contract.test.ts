@@ -118,12 +118,16 @@ describe("Reports staging feedback I1–I3", () => {
     expect(rule(".df-day-pick-row")).toContain("min-height: 44px");
     expect(rule(".df-day-pick-close")).toContain("height: 44px");
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-day-pick \{\s*transition: none;/);
-    expect(panelSource).toContain("inert={!pickedDay}");
-    // Day targets on phones (review r3): at least 40 px + 4 px gap per week day, 44 px columns
-    // scrolling inside the card past seven days, 41 px + 3 px month cells; the page never scrolls.
-    expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-wblocks \{\s*grid-auto-columns: minmax\(40px, 1fr\);\s*overflow-x: auto;/);
-    expect(styles).toMatch(/\.df-wblocks\.is-long \{\s*grid-auto-columns: minmax\(44px, 1fr\);/);
-    expect(styles).toMatch(/\.df-month \{\s*grid-template-columns: repeat\(7, minmax\(41px, 1fr\)\);\s*overflow-x: auto;/);
+    // React never sets the panel's inert: the layout effect does, after focus has left (review r4).
+    expect(panelSource).not.toMatch(/\binert=\{/);
+    expect(panelSource).toContain('panel.setAttribute("inert", "")');
+    // Day targets on phones (review r3, r4): every day column and month cell at least 44 px, 2 px
+    // gaps and 14 px card sides (a week and a month fit at 375 px), scrolling inside the card.
+    expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-report-blocks \{\s*padding-right: 14px;\s*padding-left: 14px;\s*\}\s*\.df-wblocks \{\s*grid-auto-columns: minmax\(44px, 1fr\);\s*gap: 2px;\s*overflow-x: auto;/);
+    expect(styles).toMatch(/\.df-month \{\s*grid-template-columns: repeat\(7, minmax\(44px, 1fr\)\);\s*gap: 2px;\s*overflow-x: auto;/);
+    // 7 × 44 + 6 × 2 fits a 375 px phone's card (375 − 2 × 12 page − 2 × 14 card = 323).
+    expect(7 * 44 + 6 * 2).toBeLessThanOrEqual(375 - 2 * 12 - 2 * 14);
+    expect(rule(".df-wb[data-roving-key]:focus-visible,\n.df-mday[data-roving-key]:focus-visible")).toContain("outline-offset: -2px");
     expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
     expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
     expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");

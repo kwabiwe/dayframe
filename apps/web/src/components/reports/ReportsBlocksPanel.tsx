@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
@@ -16,6 +16,8 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const RADIUS = 46;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const blockKey = (day: ReportBlocksDay, blockId: string) => `${day.key}|${blockId}`;
+/** A day without blocks is a keyboard stop itself, so arrows reach every day (review r4). */
+const dayItemKey = (day: ReportBlocksDay) => `${day.key}|`;
 
 /**
  * What is tracing an activity, each tracked apart so ending one never clears another: a pointer
@@ -143,6 +145,21 @@ export function ReportsBlocksPanel({
 
   const blocksRef = useRef<HTMLElement | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
+  const whereRef = useRef<HTMLElement | null>(null);
+  // When new data takes the whole blocks card away (a range with no blocks card), focus inside it
+  // moves to "Where it went" before the card leaves the document (review r4): React runs a ref's
+  // cleanup before it removes the node. Stable, so it never runs on an ordinary re-render.
+  const cardRefCallback = useCallback((node: HTMLElement | null) => {
+    cardRef.current = node;
+    if (!node) return;
+    return () => {
+      if (document.activeElement instanceof Node && node.contains(document.activeElement)) whereRef.current?.focus();
+      cardRef.current = null;
+    };
+  }, []);
+  // Whether focus is in the blocks card, to bring it back when new data removes the focused
+  // block without a blur.
+  const cardHasFocus = useRef(false);
   const pickedDay = blocks?.days.find((day) => day.key === pickedKey) ?? null;
   const panelRef = useRef<HTMLDivElement | null>(null);
   // Closing makes the panel inert; focus inside it (a row or Close) returns to the picked day's
@@ -154,14 +171,29 @@ export function ReportsBlocksPanel({
     if (!panel || !(document.activeElement instanceof Node) || !panel.contains(document.activeElement)) return;
     const dayKey = panel.dataset.dayKey;
     const day = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-trace-day]") ?? [])].find((element) => element.dataset.traceDay === dayKey);
-    const target = day?.querySelector<HTMLElement>("[data-block-key]") ?? cardRef.current;
+    const target = day?.querySelector<HTMLElement>("[data-roving-key]") ?? (day?.matches("[data-roving-key]") ? day : null) ?? cardRef.current;
     target?.focus();
   };
   const restoreFocusRef = useRef(restoreFocus);
   const panelOpen = pickedDay !== null;
+  // The panel's `inert` is set here, after focus has left it (review r4): set by React, it would
+  // land in the commit before any effect could move focus out.
   useLayoutEffect(() => {
     restoreFocusRef.current = restoreFocus;
-    if (!panelOpen) restoreFocus();
+    const panel = panelRef.current;
+    if (panel) {
+      if (panelOpen) panel.removeAttribute("inert");
+      else {
+        restoreFocus();
+        if (!panel.hasAttribute("inert")) panel.setAttribute("inert", "");
+      }
+    }
+    // A focused block that new data removed takes focus with it: hand it to the card's tab stop.
+    const active = document.activeElement;
+    if (cardHasFocus.current && (active === null || active === document.body)) {
+      const items = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [])];
+      (items.find((element) => element.tabIndex === 0) ?? cardRef.current)?.focus();
+    }
   });
   const closeDay = () => {
     restoreFocus();
@@ -232,32 +264,49 @@ export function ReportsBlocksPanel({
   };
   // The blocks are one tab stop: the last block focused (else the first) takes Tab, and arrow keys
   // move between days (left/right) and within a day's stack (up/down), Home/End to the ends.
+  // Days without blocks are stops too, so every day — trailing empty days included — is reachable
+  // and scrolled into view by focus in the phone strip and month grid (review r4).
   const [rovingKey, setRovingKey] = useState<string | null>(null);
-  const blockKeys = blocks ? blocks.days.flatMap((day) => day.blocks.map((block) => blockKey(day, block.id))) : [];
-  const tabKey = rovingKey !== null && blockKeys.includes(rovingKey) ? rovingKey : blockKeys[0] ?? null;
+  const rovingKeys = blocks
+    ? blocks.days.flatMap((day) => (day.blocks.length ? day.blocks.map((block) => blockKey(day, block.id)) : [dayItemKey(day)]))
+    : [];
+  const tabKey = rovingKey !== null && rovingKeys.includes(rovingKey) ? rovingKey : rovingKeys[0] ?? null;
   const moveFocus = (event: KeyboardEvent<HTMLElement>, day: ReportBlocksDay, index: number) => {
     if (!blocks) return;
-    const days = blocks.days.filter((entry) => entry.blocks.length > 0);
-    const at = days.findIndex((entry) => entry.key === day.key);
+    const at = blocks.days.findIndex((entry) => entry.key === day.key);
     let target: string | null = null;
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       // Stacks grow upwards (column-reverse): up is the next block in the day.
       const next = day.blocks[index + (event.key === "ArrowUp" ? 1 : -1)];
       target = next ? blockKey(day, next.id) : null;
     } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      const other = days[at + (event.key === "ArrowRight" ? 1 : -1)];
+      const other = blocks.days[at + (event.key === "ArrowRight" ? 1 : -1)];
       if (other) {
         const same = other.blocks.find((block) => block.id === day.blocks[index]?.id);
-        target = blockKey(other, (same ?? other.blocks[Math.min(index, other.blocks.length - 1)]).id);
+        const fallback = other.blocks[Math.min(index, other.blocks.length - 1)];
+        target = same || fallback ? blockKey(other, (same ?? fallback).id) : dayItemKey(other);
       }
     } else if (event.key === "Home" || event.key === "End") {
-      target = (event.key === "Home" ? blockKeys[0] : blockKeys[blockKeys.length - 1]) ?? null;
+      target = (event.key === "Home" ? rovingKeys[0] : rovingKeys[rovingKeys.length - 1]) ?? null;
     } else return;
     event.preventDefault();
     if (!target) return;
     setRovingKey(target);
-    const blocksInView = blocksRef.current?.querySelectorAll<HTMLElement>("[data-block-key]") ?? [];
-    [...blocksInView].find((element) => element.dataset.blockKey === target)?.focus();
+    const items = blocksRef.current?.querySelectorAll<HTMLElement>("[data-roving-key]") ?? [];
+    const element = [...items].find((item) => item.dataset.rovingKey === target);
+    element?.focus();
+    element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
+  /** An empty day's own keyboard stop: named by its day, it traces nothing. */
+  const emptyDayProps = (day: ReportBlocksDay) => {
+    if (day.blocks.length) return {};
+    const key = dayItemKey(day);
+    return {
+      "data-roving-key": key,
+      onFocus: () => setRovingKey(key),
+      onKeyDown: (event: KeyboardEvent<HTMLElement>) => moveFocus(event, day, 0),
+      tabIndex: key === tabKey ? 0 : -1
+    };
   };
   const traceProps = (day: ReportBlocksDay, block: ReportBlocksDay["blocks"][number], index: number) => {
     const key = blockKey(day, block.id);
@@ -268,6 +317,7 @@ export function ReportsBlocksPanel({
       className: `df-tblock ${block.color ? "df-block" : "df-wb-none"}${hotIds?.has(block.id) ? " is-hot" : ""}`,
       "data-block-key": key,
       "data-key": block.id,
+      "data-roving-key": key,
       // Blocks take no pointer events (the day is the hit area); focus and activation come from
       // the keyboard and assistive technology. Leaving a block ends its focus and any pin it set.
       onBlur: () =>
@@ -297,9 +347,13 @@ export function ReportsBlocksPanel({
         <section
           aria-labelledby="df-report-blocks-title"
           className="df-card df-report-blocks"
-          ref={(node) => {
-            cardRef.current = node;
+          onBlur={(event) => {
+            if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) cardHasFocus.current = false;
           }}
+          onFocus={() => {
+            cardHasFocus.current = true;
+          }}
+          ref={cardRefCallback}
           tabIndex={-1}
         >
           <div className="df-card-head">
@@ -322,7 +376,7 @@ export function ReportsBlocksPanel({
               style={{ "--df-wb-height": "230px", "--df-land": land.easing, "--df-land-ms": `${land.durationMs}ms` } as CSSProperties}
             >
               {blocks.days.map((day) => (
-                <li aria-label={day.accessibleName} className={`df-wb${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key}>
+                <li aria-label={day.accessibleName} className={`df-wb${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key} {...emptyDayProps(day)}>
                   <span className="df-wb-stack">
                     {day.blocks.map((block, index) => (
                       <button key={block.id} {...traceProps(day, block, index)} />
@@ -349,7 +403,7 @@ export function ReportsBlocksPanel({
               {WEEKDAYS.map((weekday) => <span aria-hidden="true" className="df-dow" key={weekday}>{weekday}</span>)}
               {Array.from({ length: blocks.leadingBlanks }, (_, index) => <span aria-hidden="true" className="df-mday is-empty" key={`blank-${index}`} />)}
               {blocks.days.map((day) => (
-                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key} role="group">
+                <span aria-label={day.accessibleName} className={`df-mday${day.isToday ? " is-today" : ""}${day.key === pickedKey ? " is-picked" : ""}`} data-trace-day={day.key} key={day.key} role="group" {...emptyDayProps(day)}>
                   <em aria-hidden="true">{day.dateNumber}</em>
                   <span className="df-mday-stack">
                     {day.blocks.map((block, index) => (
@@ -360,7 +414,7 @@ export function ReportsBlocksPanel({
               ))}
             </div>
           )}
-          <div className={`df-day-pick${pickedDay ? " is-open" : ""}`} data-day-key={shownDay?.key} inert={!pickedDay} ref={panelRef}>
+          <div className={`df-day-pick${pickedDay ? " is-open" : ""}`} data-day-key={shownDay?.key} ref={panelRef}>
             <div className="df-day-pick-body">
               {shownDay ? (
                 <>
@@ -402,7 +456,7 @@ export function ReportsBlocksPanel({
         </section>
       ) : null}
 
-      <section aria-labelledby="df-where-title" className="df-card df-where">
+      <section aria-labelledby="df-where-title" className="df-card df-where" ref={whereRef} tabIndex={-1}>
         <div className="df-card-head">
           <h2 id="df-where-title">Where it went</h2>
           <span className="df-faint">{slices.length} {slices.length === 1 ? "activity" : "activities"}</span>

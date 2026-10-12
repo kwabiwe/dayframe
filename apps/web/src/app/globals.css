@@ -13061,28 +13061,47 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 /*
- * Touch targets for picking a day (review r3): under 640 px a day column is at least 40 px plus
- * its 4 px gap share (a 44 px target; 42 + 4 for a week at 375 px), and a range of more than seven
- * days scrolls sideways inside the card with 44 px columns instead of squeezing. Month cells are
- * at least 41 px plus their 3 px gap (43 + 3 at 375 px). The page itself never scrolls sideways.
+ * Touch targets for picking a day (review r3, r4): under 640 px every day column and month cell
+ * is at least 44 px wide, with 2 px gaps and 14 px card sides so a week and a month still fit at
+ * 375 px (7 × 44 + 6 × 2 = 320 of 323 px); narrower screens and ranges of more than seven days
+ * scroll sideways inside the card. The page itself never scrolls sideways.
  */
 @media (max-width: 640px) {
+  .df-report-blocks {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
   .df-wblocks {
-    grid-auto-columns: minmax(40px, 1fr);
+    grid-auto-columns: minmax(44px, 1fr);
+    gap: 2px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
 
   .df-wblocks.is-long {
-    grid-auto-columns: minmax(44px, 1fr);
     padding-bottom: 6px;
   }
 
   .df-month {
-    grid-template-columns: repeat(7, minmax(41px, 1fr));
+    grid-template-columns: repeat(7, minmax(44px, 1fr));
+    gap: 2px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
+}
+
+/* An empty day is a keyboard stop too (review r4): the neutral ring sits inside its column. */
+.df-wb[data-roving-key]:focus-visible,
+.df-mday[data-roving-key]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.df-wb[data-roving-key]:focus:not(:focus-visible),
+.df-mday[data-roving-key]:focus:not(:focus-visible),
+.df-where:focus {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
