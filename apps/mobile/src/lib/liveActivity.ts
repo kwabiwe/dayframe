@@ -30,7 +30,8 @@ type DayframeLiveActivityModule = {
     apiBase?: string | null,
     categoryName?: string | null,
     categoryColor?: string | null,
-    startedAt?: string | null
+    startedAt?: string | null,
+    categoryColorLight?: string | null
   ): Promise<boolean | { started: boolean; activityId?: string | null }>;
   pushToken?(activityId: string): Promise<{
     token?: string | null;
@@ -203,17 +204,26 @@ function unavailableNativeConvergence(): NativeConvergence {
   };
 }
 
+/** The activity's block fill in each palette; the Live Activity follows the phone's appearance. */
+function liveActivityFills(entry: LiveActivityEntry) {
+  if (!entry.categoryName) return { dark: null, light: null };
+  const value = entry.categoryColor ?? entry.categoryName;
+  return {
+    dark: paletteColorFor(value, entry.categoryName, "dark"),
+    light: paletteColorFor(value, entry.categoryName, "light")
+  };
+}
+
 function startNativeActivity(entry: LiveActivityEntry) {
-  const categoryColor = entry.categoryName
-    ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
-    : null;
+  const fills = liveActivityFills(entry);
   return nativeLiveActivity!.start(
     displayLiveActivityTitle(entry),
     isUuid(entry.id) ? entry.id : null,
     DAYFRAME_API_BASE,
     entry.categoryName,
-    categoryColor,
-    entry.startedAt
+    fills.dark,
+    entry.startedAt,
+    fills.light
   );
 }
 
@@ -226,10 +236,8 @@ function nativeStartSucceeded(
 function liveActivityKey(entry: LiveActivityEntry | null) {
   if (!entry) return "idle";
   const title = displayLiveActivityTitle(entry);
-  const categoryColor = entry.categoryName
-    ? paletteColorFor(entry.categoryColor ?? entry.categoryName, entry.categoryName, "dark")
-    : null;
-  return [entry.id, entry.startedAt, title, entry.categoryName ?? "", categoryColor ?? ""].join("|");
+  const fills = liveActivityFills(entry);
+  return [entry.id, entry.startedAt, title, entry.categoryName ?? "", fills.dark ?? "", fills.light ?? ""].join("|");
 }
 
 function displayLiveActivityTitle(entry: LiveActivityEntry) {

@@ -464,7 +464,7 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
-  it("fails closed when migrating an old unscoped queued timer Stop", async () => {
+  it("fails closed when migrating an old unscoped queued Stop", async () => {
     asyncStore.set(
       "dayframe.offlineQueue.v1",
       JSON.stringify([
@@ -2779,7 +2779,7 @@ describe("mobile API client", () => {
 
   it("recognizes network failures as timer-queue fallback candidates", () => {
     expect(isNetworkTimerError(new TypeError("Network request failed"))).toBe(true);
-    expect(isNetworkTimerError(new Error("Timer action failed: 500"))).toBe(false);
+    expect(isNetworkTimerError(new Error("The block action failed: 500"))).toBe(false);
   });
 });
 
@@ -2892,5 +2892,26 @@ describe("evening Review reminder lifecycle", () => {
     reviewNudge.cancel.mockClear();
     publishMobileSignedOut();
     await vi.waitFor(() => expect(reviewNudge.cancel).toHaveBeenCalled());
+  });
+});
+
+describe("server messages in block wording (UIA-100)", () => {
+  it("says block where an older server says time entry or timer", async () => {
+    const { blockWordingForServerMessage } = await import("./api");
+    expect(blockWordingForServerMessage("Time entry not found.")).toBe("Block not found.");
+    expect(blockWordingForServerMessage("One or more time entries were not found.")).toBe("One or more blocks were not found.");
+    expect(blockWordingForServerMessage("There is no running timer to stop.")).toBe("There is no running block to stop.");
+    expect(blockWordingForServerMessage("Category not found.")).toBe("Category not found.");
+    expect(blockWordingForServerMessage("Entries can be no longer than 24 hours.")).toBe("Blocks can be no longer than 24 hours.");
+    expect(blockWordingForServerMessage("This entry overlaps 2 entries.")).toBe("This block overlaps 2 blocks.");
+    // A Review note the server writes (Codex r6).
+    expect(blockWordingForServerMessage("This Health source revision needs review because its prior decisions or entry links are ambiguous."))
+      .toBe("This Health source revision needs review because its prior decisions or block links are ambiguous.");
+  });
+
+  it("an edit the server rejects with an entry message reaches the alert as block wording (Codex r5)", async () => {
+    storeBoundSession("session-token");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: "Entries can be no longer than 24 hours." }, 400))));
+    await expect(updateTimeEntry("entry-1", { description: "Long" })).rejects.toThrow("Blocks can be no longer than 24 hours.");
   });
 });

@@ -70,7 +70,7 @@ export default function DashboardTabsLayout() {
             its press (VoiceOver's double-tap) still reaches the orb's tap action. */}
         <NativeTabs.Trigger
           // A system "search" item keeps its own title, so VoiceOver needs the label set here.
-          accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}
+          accessibilityLabel={timerRunning ? "Stop recording" : "Start a block"}
           disabled
           // On iPad or before iOS 26 there is no orb, so there is no slot either. Fixed for the
           // process: toggling a trigger's visibility re-keys the tab view and remounts every tab.
@@ -82,7 +82,7 @@ export default function DashboardTabsLayout() {
           role="search"
         >
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.orb} renderingMode="template" />
-          <NativeTabs.Trigger.Label>{timerRunning ? "Stop timer" : "Start a block"}</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Label>{timerRunning ? "Stop recording" : "Start a block"}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
       </NativeTabs>
     </DayframeDashboardProvider>

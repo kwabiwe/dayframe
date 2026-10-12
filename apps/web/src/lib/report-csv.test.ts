@@ -26,6 +26,8 @@ describe("report CSV", () => {
     expect(csv).toContain('"Family, Café 日本語"');
     expect(csv).toContain("Uncategorized,No place,Web app");
     expect(csv).not.toMatch(/confidence|rawPayload|workspaceId|userId|reviewStatus/i);
+    // The CSV keeps its own duration cells ("1h 00m"), whatever the interface shows.
+    expect(csv).toContain(",1h 00m,");
   });
 
   it("labels a running row without inventing a finish time", () => {

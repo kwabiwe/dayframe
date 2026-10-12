@@ -21,7 +21,7 @@ import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
-import { calendarEntryLocalDayOffset, formatCalendarEntryCompactDuration } from "@/lib/calendar-entry-compact-editor";
+import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -498,7 +498,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               <small>Started {formatTime(active.startedAt)}</small>
             </button>
           ) : (
-            <span className="df-cmd-clock is-idle" aria-label="Timer is idle. Elapsed time 00:00.">
+            <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
               {formatClockDuration(0)}
             </span>
           )}
@@ -605,7 +605,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           type={active ? "button" : "submit"}
           disabled={Boolean(active) && isTimerBusy}
           aria-busy={(Boolean(active) && isTimerBusy) || undefined}
-          aria-label={active ? "Stop timer" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start timer"}
+          aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           onClick={() => {
             if (active) void stopTimer();
           }}
@@ -629,7 +629,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 aria-haspopup="menu"
                 className="df-cmd-icon"
                 disabled={isTimerBusy}
-                label="More timer actions"
+                label="More block actions"
                 onClick={() => setTimerActionsOpen((open) => !open)}
                 ref={timerActionsTriggerRef}
               >
@@ -684,7 +684,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 <span className="df-cmd-hint">logs a finished block ending now</span>
               </>
             ) : (
-              <span className="df-cmd-hint">Enter starts the timer</span>
+              <span className="df-cmd-hint">Enter starts a block</span>
             )}
           </>
         ) : !active && commandFocused && !timerDraft.description ? (
@@ -780,7 +780,8 @@ function ManualEntryDialog({
     const stoppedAt = dateTimeLocalInputToIso(stoppedAtDraft);
     if (!startedAt || !stoppedAt) return "—";
     const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
-    return seconds > 0 ? formatCalendarEntryCompactDuration(seconds) : "—";
+    // A read-only label, so the one Dayframe duration (the field itself takes H:MM).
+    return seconds > 0 ? formatDuration(seconds) : "—";
   }, [startedAtDraft, stoppedAtDraft]);
   const finishDayOffset = useMemo(() => calendarEntryLocalDayOffset(
     startedAtDraft.slice(0, 10),
@@ -879,7 +880,7 @@ function ManualEntryDialog({
           <label htmlFor="manual-entry-description">Description</label>
           <div ref={descriptionInteractionRef}>
             <InlineTagInput
-              ariaLabel="Manual time entry description"
+              ariaLabel="Manual block description"
               className="manual-entry-inline-tags time-entry-quick-tags"
               inputId="manual-entry-description"
               inputRef={descriptionInputRef}

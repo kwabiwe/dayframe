@@ -105,6 +105,7 @@ export * from "./location";
 export * from "./reviewMutations";
 export * from "./reviewPresentation";
 export * from "./timeIntervals";
+export * from "./durations";
 
 export const DEMO_USER_ID = "00000000-0000-4000-8000-000000000001";
 export const DEMO_WORKSPACE_ID = "00000000-0000-4000-8000-000000000010";
@@ -1459,8 +1460,8 @@ export function normalizeActivityEvent(
       action: "stop_timer",
       confidence: sourceConfidence,
       reviewStatus: "confirmed",
-      title: "Stop current timer",
-      reason: "Explicit stop actions close the active primary timer.",
+      title: "Stop the running block",
+      reason: "Explicit stops end the running block.",
       shouldClosePrevious: false
     };
   }
@@ -1575,7 +1576,7 @@ export function normalizeActivityEvent(
         : isHome
           ? "Home exits are ambiguous and stay review-first by default."
           : matchingRule?.enabled && matchingRule.action === "stop_timer"
-            ? "Location rules create after-the-fact review candidates instead of stopping live timers."
+            ? "Location rules create after-the-fact review candidates instead of stopping running blocks."
             : "Place visits are review-first by default, even for saved places. Confirm this completed visit before Dayframe turns it into tracked time.",
       shouldClosePrevious: false
     };
@@ -1682,7 +1683,7 @@ export function normalizeActivityEvent(
       confidence: "hint",
       reviewStatus: "needs_review",
       title: event.description ?? "Review calendar hint",
-      reason: "Calendar entries are hints until a person confirms the mapping.",
+      reason: "Calendar events are hints until a person confirms the mapping.",
       shouldClosePrevious: false
     };
   }
@@ -1731,7 +1732,7 @@ export function normalizeActivityEvent(
       categoryId: event.categoryId ?? findCategoryByName(context.categories, "Health")?.id,
       title: event.description ?? healthWorkoutLabel(workoutType),
       reason: autoConfirm
-        ? "High-confidence Health workouts can become completed time entries automatically."
+        ? "High-confidence Health workouts can become completed blocks automatically."
         : "Health workouts are reviewed when the type, duration, or confidence is uncertain.",
       shouldClosePrevious: false
     };

@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -14,6 +15,7 @@ import {
 import Reanimated from "react-native-reanimated";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
+  DAYFRAME_BLOCKS,
   paletteColorFor,
   placeDisplayName,
   travelModeLabel,
@@ -1135,12 +1137,10 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(startedAt);
   const start = formatTime(evidence.segment.startedAt);
   const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
-  const durationMinutes = stoppedAt
-    ? Math.max(0, Math.round((stoppedAt.getTime() - startedAt.getTime()) / 60_000))
-    : null;
+  const durationSeconds = stoppedAt ? Math.max(0, (stoppedAt.getTime() - startedAt.getTime()) / 1000) : null;
   const approximateArrival = evidence.segment.approximateArrival;
   const prefix = approximateArrival ? "Approximate arrival · " : "";
-  const duration = durationMinutes === null ? "" : ` · ${durationMinutes}m${approximateArrival ? " estimated" : ""}`;
+  const duration = durationSeconds === null ? "" : ` · ${formatDuration(durationSeconds)}${approximateArrival ? " estimated" : ""}`;
   return `${prefix}${date} · ${start}–${stop}${duration}`;
 }
 
@@ -1149,15 +1149,7 @@ function formatTime(value: string) {
 }
 
 function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
-  const durationMinutes = Math.max(
-    0,
-    Math.round((Date.parse(stoppedAt) - Date.parse(startedAt)) / 60_000)
-  );
-  const hours = Math.floor(durationMinutes / 60);
-  const minutes = durationMinutes % 60;
-  if (hours === 0) return `${minutes}m`;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  return formatDuration(Math.max(0, (Date.parse(stoppedAt) - Date.parse(startedAt)) / 1000));
 }
 
 function createEditorStyles(theme: MobileTheme) {
@@ -1229,7 +1221,7 @@ function createEditorStyles(theme: MobileTheme) {
       fontSize: 15,
       paddingVertical: 9
     },
-    iconButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+    iconButton: { width: 44, height: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
     suggestionList: { borderRadius: 14, backgroundColor: theme.surfaceMuted, overflow: "hidden" },
     suggestionRow: {
       minHeight: 52,

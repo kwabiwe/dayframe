@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatExportDuration,
   dateTimeLocalInputToIso,
   formatActivityEventLabel,
   durationInputValue,
-  formatCompactHoursMinutes,
   parseDurationInput
 } from "./format";
 
@@ -49,21 +49,19 @@ describe("duration form helpers", () => {
   });
 });
 
-describe("formatCompactHoursMinutes", () => {
-  it.each([
-    [0, "0:00"],
-    [59, "0:00"],
-    [60, "0:01"],
-    [3660, "1:01"],
-    [360_060, "100:01"]
-  ])("formats %i seconds as %s", (seconds, expected) => {
-    expect(formatCompactHoursMinutes(seconds)).toBe(expected);
-  });
-});
 
 describe("activity event labels", () => {
   it("labels time away as itself, never as a detected commute (round 3 finding 3)", () => {
     expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: true })).toBe("Time away");
     expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: false })).toBe("Commute detected");
+  });
+});
+
+describe("formatExportDuration", () => {
+  it("keeps the report CSV's duration cells as they were", () => {
+    expect(formatExportDuration(3600)).toBe("1h 00m");
+    expect(formatExportDuration(3900)).toBe("1h 05m");
+    expect(formatExportDuration(59.5)).toBe("1m");
+    expect(formatExportDuration(0)).toBe("0m");
   });
 });

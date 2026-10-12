@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -175,7 +176,7 @@ export default function PlacesScreen() {
     confirmSheet.confirm({
       eyebrow: "Place suggestion",
       title: "Ignore learned place?",
-      message: "Ignore hides this learned location from save suggestions. It will not create or confirm any time entries.",
+      message: "Ignore hides this learned location from save suggestions. It will not create or confirm any blocks.",
       confirmLabel: "Ignore",
       tone: "neutral",
       onConfirm: () => {
@@ -797,11 +798,7 @@ function sortPlaces(places: MobilePlace[]) {
 }
 
 function formatDwell(seconds: number) {
-  const minutes = Math.max(0, Math.round(Number(seconds) / 60));
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+  return formatDuration(Number(seconds));
 }
 
 function learnedPlaceCategoryLabel(learnedPlace: MobileLearnedPlace, categories: Category[]) {
@@ -835,7 +832,7 @@ const learnedSheetStyles = StyleSheet.create({
   headTitle: { flex: 1, gap: 2, minWidth: 0 },
   eyebrow: { fontSize: 11, fontWeight: "700", letterSpacing: 0.9 },
   title: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 22 },
-  close: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  close: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   body: { gap: 16 },
   actions: { gap: 10 },
   actionRow: { flexDirection: "row", gap: 10 },

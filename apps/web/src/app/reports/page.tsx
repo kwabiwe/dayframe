@@ -1,4 +1,3 @@
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ReportDetailsTable } from "@/components/ReportDetailsTable";
@@ -67,7 +66,6 @@ export default async function ReportsPage({
             </Link>
           </nav>
           <Link aria-label="Export filtered report as CSV" className="df-rbtn df-rbtn--sm" href={reportExportHref(report.appliedFilters)}>
-            <DayframeIcon glyph="download" size={16}/>
             Export
           </Link>
         </div>
@@ -93,7 +91,7 @@ export default async function ReportsPage({
       />
       {report.additionalOverlappingActivitySeconds > 0 ? (
         <p className="report-metric-explainer">
-          Total logged counts every entry in full; Total framed (time covered) counts overlapping time once.
+          Total logged counts every block in full; Total framed (time covered) counts overlapping time once.
         </p>
       ) : null}
       <ReportsOverview report={report} showTrend={reportBlocksLayout(report) === null} />

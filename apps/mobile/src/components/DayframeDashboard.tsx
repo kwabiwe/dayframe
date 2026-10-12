@@ -51,6 +51,9 @@ import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
+import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
+import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
+import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -102,6 +105,7 @@ import {
   signup,
   syncQueue,
   type MobileBootstrap,
+  type MobileReviewItem,
   type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
@@ -1603,9 +1607,56 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [data?.activeEntry, data?.entries]
   );
   const hapticsEnabled = useHapticsPreference();
+  // UIA-060: once the bootstrap's open Review list is at its cap, the Calendar also draws open
+  // suggestions from Today's cached scoped Review window (60 days, its own completeness), so a
+  // burst of newer suggestions never hides a recent day's Review block.
+  const [scopedReviewItems, setScopedReviewItems] = useState<MobileReviewItem[]>([]);
+  const reviewListAtCap = bootstrapReviewListMayBeIncomplete(data);
+  const scopedOwner = useMemo(() => reviewOwner(data), [data]);
+  const scopedOwnerKey = scopedOwner ? `${scopedOwner.backendId}:${scopedOwner.workspaceId}:${scopedOwner.userId}` : null;
+  const scopedDayKey = localDayKey(minuteNow);
+  useEffect(() => {
+    if (!reviewListAtCap || !scopedOwner) {
+      setScopedReviewItems([]);
+      return;
+    }
+    const timeZone = currentTimeZone();
+    if (!timeZone) return;
+    let current = true;
+    let sequence = 0;
+    // Re-read whenever Review's cache or local decisions change (Today caching a newer window, a
+    // decision made here), always for today's window scope.
+    const read = () => {
+      const mine = ++sequence;
+      Promise.all([
+        // Today's window, or the day before's until Today caches the new one (midnight, offline).
+        newestCachedReviewWindow(scopedDayKey, (dayKey) =>
+          readReviewPresentationSnapshot({ owner: scopedOwner, response: { scope: windowScopeFor(dayKey, timeZone) } })),
+        readSuppressedReviewItemIds(scopedOwner)
+      ])
+        .then(([snapshot, suppressed]) => {
+          if (current && mine === sequence) setScopedReviewItems(scopedOpenReviewItems(snapshot, suppressed));
+        })
+        .catch(() => undefined);
+    };
+    read();
+    const unsubscribe = subscribeReviewSync(read);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+    // scopedOwner is keyed by scopedOwnerKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewListAtCap, scopedOwnerKey, scopedDayKey]);
+  const calendarData = useMemo(
+    () => data && reviewListAtCap
+      ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems, true) }
+      : data,
+    [data, reviewListAtCap, scopedReviewItems]
+  );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
-      data,
+      data: calendarData,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -1618,7 +1669,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [
       calendarTransitionDirection,
-      data,
+      calendarData,
       hapticsEnabled,
       minuteNow,
       reduceMotion,
@@ -1972,7 +2023,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         description: suggestion.description,
         tagNames: suggestion.tagNames
       },
-      "Timer not saved"
+      "Block not saved"
     );
   }
 
@@ -2022,15 +2073,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         requestImmediateDelivery: connectivityCurrent.current.isOnline
       });
       if (!queue.some((item) => item.localId === optimisticId && item.type === "timer_start")) {
-        throw new Error("The offline timer start could not be queued.");
+        throw new Error("The block couldn't be saved on this iPhone to send later.");
       }
     } catch {
       if (options.blankStartToken !== undefined) {
         blankTimerStartGate.current.release(options.blankStartToken);
       }
       Alert.alert(
-        "Timer not started",
-        "Dayframe could not save this timer on your iPhone. Check available storage and try again."
+        "Block not started",
+        "Dayframe could not save this block on your iPhone. Check available storage and try again."
       );
       return false;
     }
@@ -2116,8 +2167,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       optimisticId
     ));
     Alert.alert(
-      "Timer not started",
-      "Dayframe could not start this timer because the saved request was rejected. Check Settings, Sync help for details."
+      "Block not started",
+      "Dayframe could not start this block because the saved request was rejected. Check Settings › Sync help for details."
     );
     setPresentedActiveEntry((current) => current?.id === optimisticId ? null : current);
   }
@@ -2126,7 +2177,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return saveTimeEntryOptimistically(
       entryId,
       patch,
-      "Timer not saved",
+      "Block not saved",
       { awaitPersistence: true }
     );
   }
@@ -2135,7 +2186,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return saveTimeEntryOptimistically(
       entryId,
       patch,
-      "Entry not saved",
+      "Block not saved",
       { awaitPersistence: true }
     );
   }
@@ -2271,15 +2322,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       stopBackgroundReservation = persisted.backgroundReservation;
     } catch {
       Alert.alert(
-        "Timer not stopped",
+        "Block not stopped",
         "Dayframe could not save this Stop on your iPhone. Check available storage and try again."
       );
       return false;
     }
     if (pendingStop.failureKind === "permanent") {
       Alert.alert(
-        "Timer Stop needs attention",
-        "Open Settings > Sync help to retry or discard the rejected Stop."
+        "Stop needs attention",
+        "Open Settings › Sync help to retry or discard the Stop."
       );
       return false;
     }
@@ -2363,7 +2414,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       await removeTimeEntryCommands(commandIds).catch(() => undefined);
       getDeletionCoordinator().invalidate(token);
       Alert.alert(
-        entries.length > 1 ? "Entries not deleted" : "Entry not deleted",
+        entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
         "Dayframe could not save this deletion on your iPhone. Check available storage and try again."
       );
       return false;
@@ -2400,13 +2451,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           optimisticTimerIds.current
         ));
         Alert.alert(
-          currentIds.length > 1 ? "Entries not deleted" : "Entry not deleted",
-          "Dayframe could not finish saving this deletion on your iPhone. The time entry was restored; check available storage and try again."
+          currentIds.length > 1 ? "Blocks not deleted" : "Block not deleted",
+          `Dayframe could not finish saving this deletion on your iPhone. ${currentIds.length > 1 ? "The blocks were" : "The block was"} restored; check available storage and try again.`
         );
         AccessibilityInfo.announceForAccessibility(
           currentIds.length > 1
-            ? "Time entries restored because deletion failed."
-            : "Time entry restored because deletion failed."
+            ? "Blocks restored because they couldn't be deleted."
+            : "Block restored because it couldn't be deleted."
         );
         return;
       }
@@ -2480,7 +2531,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       playHaptic("undoRestore");
       setRowLanding(nextLandingRequest(pendingDeletion.entries.map((entry) => entry.id)));
       AccessibilityInfo.announceForAccessibility(
-        pendingDeletion.entries.length > 1 ? "Time entries restored." : "Time entry restored."
+        pendingDeletion.entries.length > 1 ? "Blocks restored." : "Block restored."
       );
     }
   }
@@ -2652,7 +2703,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           >
             <Text style={styles.sectionTitle}>Opening Dayframe…</Text>
             <Text style={styles.muted}>
-              Loading your latest timers and saved activity.
+              Loading your latest blocks and saved activity.
             </Text>
           </View>
         </View>
@@ -2671,7 +2722,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             <Text style={styles.authBody}>
               {authView === "signup"
                 ? "Create your Dayframe account and personal workspace."
-                : "Use your Dayframe account to sync timers, places and Apple Health with your workspace."}
+                : "Use your Dayframe account to sync blocks, places and Apple Health with your workspace."}
             </Text>
             {authView === "signup" ? (
               <>
@@ -2788,7 +2839,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               onPress={submitAuth}
             >
               <Text style={[styles.primaryButtonText, styles.authPrimaryButtonText]}>
-                {authSubmitting ? "Working..." : authView === "signup" ? "Create account" : "Log in"}
+                {authSubmitting ? "Working…" : authView === "signup" ? "Create account" : "Log in"}
               </Text>
             </Pressable>
             <View style={styles.authSwitchRow}>
@@ -2954,7 +3005,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               presentActiveEditor("existing_active_timer");
             },
             onOpenCompleted: presentCompletedEntry,
-            onOpenReview: () => router.push("/review")
+            // UIA-063: that suggestion on top of the deck, as a ribbon tap opens it; a crowd of
+            // only older needs-review entries ("") opens the Review list.
+            onOpenReview: (reviewItemId) => reviewItemId
+              ? router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })
+              : router.push("/review")
           }
         );
       };

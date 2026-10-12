@@ -4,7 +4,7 @@
 // and nothing here starts a timer or logs time. The screen owns permissions and the step state;
 // `src/lib/onboarding.ts` holds the order and the words.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
+import { AccessibilityInfo, AppState, Linking, Pressable, ScrollView, StyleSheet, Text, View, findNodeHandle } from "react-native";
 import * as Location from "expo-location";
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -29,7 +29,7 @@ import Svg, { Defs, Path, Pattern, Rect } from "react-native-svg";
 import { ActivityIcon, DayframeIcon } from "@/components/icons/DayframeIcon";
 import { colorWithAlpha } from "@/components/today/todayBlocksLayout";
 import { AuthRequiredError, ensureAutomaticLoggingCategories, fetchBootstrap, updateCategory, type MobileBootstrap } from "@/lib/api";
-import { getLocationVisitDiagnostics, setLocationLearningEnabled } from "@/lib/geofence";
+import { getLocationVisitDiagnostics, locationAccessNeedsIosSettings, requestAlwaysLocationPermission, requestForegroundLocationPermission, setLocationLearningEnabled } from "@/lib/geofence";
 import { playHaptic } from "@/lib/haptics";
 import {
   getHealthImportPreferences,
@@ -189,12 +189,17 @@ export default function OnboardingScreen() {
     playHaptic("tick");
   }
 
+  // One step at a time. A ref, not `busy`: callbacks kept by effects (the return from iOS
+  // Settings or from the permission sheet) would otherwise read a stale `busy` and run twice.
+  const running = useRef(false);
   async function run(work: (epoch: number) => Promise<void>) {
-    if (busy) return;
+    if (running.current) return;
+    running.current = true;
     setBusy(true);
     try {
       await work(sessionEpoch.current);
     } finally {
+      running.current = false;
       if (mounted.current) setBusy(false);
     }
   }
@@ -202,7 +207,7 @@ export default function OnboardingScreen() {
   // Location, first ask: While Using. iOS shows its own prompt; ours explains first.
   function allowLocation() {
     void run(async (epoch) => {
-      const foreground = await Location.requestForegroundPermissionsAsync().catch(() => null);
+      const foreground = await requestForegroundLocationPermission().catch(() => null);
       if (!(await stillHere(epoch))) return;
       if (!foreground?.granted) {
         setAnswers((current) => ({ ...current, location: "off" }));
@@ -219,10 +224,47 @@ export default function OnboardingScreen() {
     });
   }
 
+  // UIA-111: iOS shows the Always upgrade once. When it was already used (on this iPhone, perhaps
+  // for another account) the step offers iOS Settings instead of a prompt that would not appear,
+  // and coming back from iOS Settings with Always allowed finishes the step.
+  const [alwaysNeedsSettings, setAlwaysNeedsSettings] = useState(false);
+  const awaitingAlways = step === "location" && answers.locationStage === "upgrade" && !answers.location;
+  useEffect(() => {
+    if (!awaitingAlways) return;
+    let current = true;
+    const check = async () => {
+      // While a step is running (the Always sheet itself makes the app inactive, then active) that
+      // step finishes the answer; this check is for coming back from iOS Settings.
+      if (running.current) return;
+      const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
+      if (!current || running.current) return;
+      if (background?.granted) {
+        turnOnSuggestions();
+        return;
+      }
+      const needed = await locationAccessNeedsIosSettings().catch(() => false);
+      if (current) setAlwaysNeedsSettings(needed);
+    };
+    void check();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void check();
+    });
+    return () => {
+      current = false;
+      subscription.remove();
+    };
+    // turnOnSuggestions only starts the shared run; the check follows the step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awaitingAlways]);
+
   // Location, second ask: Always, so trips aren't missed with the phone locked.
   function askAlways() {
+    if (alwaysNeedsSettings) {
+      void Linking.openSettings();
+      return;
+    }
     void run(async (epoch) => {
-      const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+      const background = await requestAlwaysLocationPermission().catch(() => null);
       if (!(await stillHere(epoch))) return;
       if (background?.granted) await finishAlways(epoch);
       else keepWhileUsing();
@@ -427,7 +469,7 @@ export default function OnboardingScreen() {
   }
 
   const chrome = onboardingChrome(step);
-  const content = stepContent(step, answers);
+  const content = stepContent(step, answers, alwaysNeedsSettings);
   // Opened again from Settings: the first step can be closed (UIA-091); first sign-in has no way out.
   const fromSettings = [openedFrom].flat()[0] === "settings";
 
@@ -545,6 +587,7 @@ export default function OnboardingScreen() {
           onConnectHealth={connectHealth}
           onTurnOnReminders={turnOnReminders}
           onAskAlways={askAlways}
+          alwaysNeedsSettings={alwaysNeedsSettings}
           onContinue={() => go(nextOnboardingStep(step), 1)}
           onTurnOnSuggestions={turnOnSuggestions}
           onFinish={finish}
@@ -578,7 +621,7 @@ type StepContent = {
   result: { on: boolean; text: string } | null;
 };
 
-function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepContent {
+function stepContent(step: OnboardingStep, answers: OnboardingAnswers, alwaysNeedsSettings = false): StepContent {
   switch (step) {
     case "welcome":
       return {
@@ -595,7 +638,9 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepCont
         glyph: { name: DAYFRAME_APP_ICONS.places, color: "red" },
         title: upgrade ? "One more step for drives" : "Suggest visits and journeys",
         lede: upgrade
-          ? "iOS will now ask whether Dayframe can use location when it isn't open. Choose Change to Always Allow so trips aren't missed while your phone is in your pocket."
+          ? alwaysNeedsSettings
+            ? "iOS has already asked about Always on this iPhone, so it won't ask again. In iPhone Settings, open Location and choose Always so trips aren't missed while your phone is in your pocket."
+            : "iOS will now ask whether Dayframe can use location when it isn't open. Choose Change to Always Allow so trips aren't missed while your phone is in your pocket."
           : "Dayframe notices when you arrive, leave and travel, and suggests them as blocks for you to confirm.",
         bullets: upgrade || answers.location ? [] : [
           { glyph: "check", text: "You stay in charge. Suggestions go to Review. Only places you trust can log on their own, and only if you turn that on." },
@@ -662,6 +707,7 @@ function stepContent(step: OnboardingStep, answers: OnboardingAnswers): StepCont
 }
 
 function StepActions({
+  alwaysNeedsSettings,
   answers,
   busy,
   onAllowLocation,
@@ -677,6 +723,8 @@ function StepActions({
   step,
   theme
 }: {
+  /** The Always prompt was already used: the step opens iOS Settings instead (UIA-111). */
+  alwaysNeedsSettings: boolean;
   answers: OnboardingAnswers;
   busy: boolean;
   onAllowLocation: () => void;
@@ -704,7 +752,7 @@ function StepActions({
   if (step === "location" && !answers.location) {
     return answers.locationStage === "upgrade" ? (
       <>
-        <PrimaryButton busy={busy} label="Continue to iOS prompt" onPress={onAskAlways} testID="onboarding-location-always" theme={theme} />
+        <PrimaryButton busy={busy} label={alwaysNeedsSettings ? "Open Settings" : "Continue to iOS prompt"} onPress={onAskAlways} testID="onboarding-location-always" theme={theme} />
         <SecondaryButton disabled={busy} label="Keep while using only" onPress={onKeepWhileUsing} testID="onboarding-location-while" theme={theme} />
       </>
     ) : (
@@ -1206,7 +1254,7 @@ const styles = StyleSheet.create({
   top: { alignItems: "center", flexDirection: "row", minHeight: 56, paddingHorizontal: 16 },
   topSide: { minWidth: 72 },
   topRight: { alignItems: "flex-end" },
-  back: { alignItems: "center", borderRadius: 22, height: 44, justifyContent: "center", width: 44 },
+  back: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, height: 44, justifyContent: "center", width: 44 },
   later: { alignItems: "center", justifyContent: "center", minHeight: 44, minWidth: 64, paddingHorizontal: 6 },
   laterText: { fontSize: 15, fontWeight: "600" },
   progress: { alignItems: "center", flex: 1, flexDirection: "row", gap: 6, justifyContent: "center" },

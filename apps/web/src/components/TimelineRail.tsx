@@ -28,7 +28,7 @@ export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
         <div className="min-h-[456px] p-4">
           <div className="space-y-3">
             {sorted.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">No entries for this timeline yet.</p>
+              <p className="text-sm text-[var(--muted)]">Nothing framed here yet.</p>
             ) : null}
             {sorted.map((entry) => (
               <article

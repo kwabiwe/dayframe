@@ -27,8 +27,8 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
     <section className="fill-group-surface report-details" aria-labelledby="report-details-title">
       <header className="report-section-header report-details-header">
         <div>
-          <h2 id="report-details-title">Matching entries</h2>
-          <p>{report.pagination.totalEntries} entr{report.pagination.totalEntries === 1 ? "y" : "ies"} make up these totals.</p>
+          <h2 id="report-details-title">Matching blocks</h2>
+          <p>{report.pagination.totalEntries === 1 ? "1 block makes" : `${report.pagination.totalEntries} blocks make`} up these totals.</p>
         </div>
         <label className="report-sort-control">
           <span>Sort</span>
@@ -42,11 +42,11 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
       {report.entries.length > 0 ? (
         <div className="report-detail-table-scroll">
           <table className="report-detail-table">
-            <caption>Individual time entries matching the active report filters</caption>
+            <caption>Individual blocks matching the active report filters</caption>
             <thead>
               <tr>
                 <th>Date and time</th>
-                <th>Task and tags</th>
+                <th>Description and tags</th>
                 <th>Activity</th>
                 <th>Place</th>
                 <th>Duration</th>
@@ -60,15 +60,15 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
                     <strong>{formatDate(entry.startedAt)}</strong>
                     <span>{formatTime(entry.startedAt)}–{entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}</span>
                   </td>
-                  <td data-label="Task and tags" className="report-entry-task">
+                  <td data-label="Description and tags" className="report-entry-task">
                     <strong>{timeEntryTitle(entry)}</strong>
                     <TagMetadata tagNames={entry.tagNames} />
                     {entry.isRunning ? <span className="report-running-pill">Running</span> : null}
                     {entry.overlapCount > 0 ? (
                       <span
                         className="overlap-marker"
-                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
-                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "entry" : "entries"}`}
+                        title={`${formatDuration(entry.overlapSeconds)} overlaps ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
+                        aria-label={`Overlap: ${formatDuration(entry.overlapSeconds)} shared with ${entry.overlapCount} other ${entry.overlapCount === 1 ? "block" : "blocks"}`}
                       >
                         Overlap · {formatDuration(entry.overlapSeconds)}
                       </span>
@@ -98,13 +98,13 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
         </div>
       ) : (
         <div className="report-empty-details">
-          <strong>No matching entries</strong>
+          <strong>No matching blocks</strong>
           <p>Remove a filter or choose another date range to see tracked time.</p>
         </div>
       )}
 
       {report.pagination.totalPages > 1 ? (
-        <nav className="report-pagination" aria-label="Report entries pages">
+        <nav className="report-pagination" aria-label="Report block pages">
           {report.pagination.hasPrevious ? (
             <Link href={reportsHref(report.appliedFilters, { page: report.pagination.page - 1 })}>Previous</Link>
           ) : <span aria-disabled="true">Previous</span>}

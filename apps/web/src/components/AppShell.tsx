@@ -41,7 +41,7 @@ const shortcuts = [
   [SEARCH_SHORTCUT_LABEL, "Open search"],
   ["?", "Keyboard shortcuts"],
   ["G then T, C, R, P, L, S", "Go to Today, Calendar, Review, Reports, Library, Settings"],
-  ["Space", "Start or stop the timer"],
+  ["Space", "Start or stop recording"],
   ["N", "Type what you're working on"],
   ["1–6", "Start a pinned activity"],
   ["Alt+Left", "Previous day or week"],
@@ -273,7 +273,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
 
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {isTimeline ? (
-          <section className="swiss-timeline-surface" aria-label="Timeline workspace">
+          <section className="swiss-timeline-surface" aria-label="Calendar">
             <div className="swiss-persistent-timer-shell">
               {persistentTimer}
             </div>

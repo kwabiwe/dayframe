@@ -13,7 +13,7 @@ vi.mock("@/components/AppShellRuntime", () => ({
 
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
-describe("PersistentTimerBar task suggestions", () => {
+describe("PersistentTimerBar block suggestions", () => {
   beforeEach(() => {
     Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
       configurable: true,
@@ -38,7 +38,7 @@ describe("PersistentTimerBar task suggestions", () => {
     runtime = runtimeFixture({ isManualEntryOpen: true });
     render(<PersistentTimerBar />);
 
-    const description = await screen.findByLabelText("Manual time entry description") as HTMLInputElement;
+    const description = await screen.findByLabelText("Manual block description") as HTMLInputElement;
     expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
     expect(description.value).toBe("");
 
@@ -55,7 +55,7 @@ describe("PersistentTimerBar task suggestions", () => {
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
   });
 
-  it("shows suggestions for an empty Uncategorized running toolbar without starting another timer", async () => {
+  it("shows suggestions for an empty Uncategorized running toolbar without starting another block", async () => {
     const startTimer = vi.fn().mockResolvedValue({ ok: true });
     const setTimerDraft = vi.fn();
     runtime = runtimeFixture({

@@ -301,7 +301,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       timerStatePollInFlightRef.current = true;
       try {
         const response = await clientFetch("/api/timer-state", { cache: "no-store" });
-        if (!response.ok) throw new Error(`Unable to check timer state: ${response.status}`);
+        if (!response.ok) throw new Error(`Unable to check the recording state: ${response.status}`);
         const next = (await response.json()) as TimerStateFingerprint;
         const changed = timerStateChanged(timerStateRef.current, next);
         timerStateRef.current = next;
@@ -346,7 +346,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     options: { dedupeRunning?: boolean } = {}
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot) return { ok: false, error: "Timer data is still loading." };
+    if (!snapshot) return { ok: false, error: "Block data is still loading." };
     return runTimerStartMutation({
       dedupeRunning: options.dedupeRunning,
       gate: mutationGateRef.current,
@@ -373,7 +373,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to start timer: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
       },
       refresh: async () => {
         await refresh({ force: true });
@@ -389,7 +389,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const stopTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to stop." };
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to stop." };
     const activeEntry = snapshot.activeEntry;
     const draftSnapshot = draftRef.current;
     const draft = mergeTimerDraft(draftSnapshot, input);
@@ -413,7 +413,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             })
           });
           if (!updateResponse.ok) {
-            throw new Error(await responseError(updateResponse, `Unable to save timer details: ${updateResponse.status}`));
+            throw new Error(await responseError(updateResponse, `Unable to save the block details: ${updateResponse.status}`));
           }
         }
         const response = await clientFetch("/api/events", {
@@ -431,12 +431,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             }
           })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to stop timer: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to stop the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
         setTimerDraft(draftSnapshot);
-        const message = errorMessage(error, "Unable to stop the timer.");
+        const message = errorMessage(error, "Unable to stop the block.");
         setTimerError(message);
         return { ok: false, error: message } as const;
       } finally {
@@ -446,12 +446,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
   const deleteActiveTimer = useCallback(async (): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to delete." };
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to delete." };
     const draftSnapshot = draftRef.current;
     const result = await mutationGateRef.current.run(async () => {
       setIsTimerBusy(true);
@@ -463,12 +463,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
           method: "DELETE"
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to delete timer: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to delete the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
         commitData(snapshot, "optimistic");
         setTimerDraft(draftSnapshot);
-        const message = errorMessage(error, "Unable to delete the running timer.");
+        const message = errorMessage(error, "Unable to delete the running block.");
         setTimerError(message);
         return { ok: false, error: message } as const;
       } finally {
@@ -478,12 +478,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
   const updateActiveDetails = useCallback(async (draft: TimerDraft): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     const result = await mutationGateRef.current.run(async () => {
       setIsTimerBusy(true);
       setTimerError(null);
@@ -500,7 +500,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             tagNames: draft.tagNames
           })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to save timer details: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
         const result = (await response.json()) as { updatedAt?: string };
         if (result.updatedAt && dataRef.current) {
           commitData(
@@ -512,7 +512,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       } catch {
         commitData(snapshot, "optimistic");
         setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
-        const message = "Timer details were not saved. Your previous values were restored.";
+        const message = "Block details were not saved. Your previous values were restored.";
         setTimerError(message);
         return { ok: false, error: message } as const;
       } finally {
@@ -522,14 +522,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, refresh, setTimerDraft]);
 
   const updateActiveEntryFromCalendar = useCallback(async (
     input: ActiveEntryCompactMutationInput
   ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     const draftSnapshot = draftRef.current;
     refreshRequestRef.current += 1;
     return runActiveEntryCompactMutation({
@@ -548,7 +548,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify(payload)
         });
         if (!response.ok) {
-          throw new Error(await responseError(response, `Unable to save timer details: ${response.status}`));
+          throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
         }
         return (await response.json()) as { updatedAt?: string };
       },
@@ -561,7 +561,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const updateActiveStartTime = useCallback(async (startedAt: string): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running timer to edit." };
+    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     const draft = draftRef.current;
     const result = await mutationGateRef.current.run(async () => {
       setIsTimerBusy(true);
@@ -602,7 +602,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, refresh]);
 
   const createManualEntry = useCallback(async (input: ManualEntryInput): Promise<MutationOutcome> => {
@@ -614,10 +614,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode: "manual", ...input })
         });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to add entry: ${response.status}`));
+        if (!response.ok) throw new Error(await responseError(response, `Unable to add the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
-        return { ok: false, error: errorMessage(error, "Unable to add this time entry.") } as const;
+        return { ok: false, error: errorMessage(error, "Unable to add this block.") } as const;
       } finally {
         setIsTimerBusy(false);
       }
@@ -625,7 +625,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
-    return result.ran ? result.value : { ok: false, error: "A timer update is already in progress." };
+    return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [refresh]);
 
   const createCategory = useCallback(async (

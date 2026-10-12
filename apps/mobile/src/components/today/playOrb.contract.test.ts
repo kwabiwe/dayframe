@@ -17,7 +17,7 @@ function body(start: string) {
 describe("Play orb wiring (Blocks parity step 3)", () => {
   it("reserves the tab bar's trailing slot with a disabled search-role item whose press is the orb's tap", () => {
     const trigger = layout.slice(layout.indexOf("<NativeTabs.Trigger\n"), layout.indexOf("</NativeTabs>"));
-    expect(trigger).toContain('accessibilityLabel={timerRunning ? "Stop timer" : "Start a block"}');
+    expect(trigger).toContain('accessibilityLabel={timerRunning ? "Stop recording" : "Start a block"}');
     expect(trigger).toMatch(/\bdisabled\b/);
     // Fixed for the process: toggling it at runtime would re-key the tab view and remount every tab.
     expect(trigger).toContain("hidden={!PLAY_ORB_SLOT}");

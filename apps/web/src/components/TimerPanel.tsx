@@ -69,7 +69,7 @@ export function TimerPanel({
 
   async function refreshClientData() {
     const response = await clientFetch("/api/bootstrap", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Unable to refresh timer state: ${response.status}`);
+    if (!response.ok) throw new Error(`Unable to refresh the recording state: ${response.status}`);
     const data = (await response.json()) as BootstrapData;
     onSynced?.(data);
   }
@@ -89,7 +89,7 @@ export function TimerPanel({
             stoppedAt: activeEntry.stoppedAt
           })
         });
-        if (!updateResponse.ok) throw new Error(`Unable to save timer details: ${updateResponse.status}`);
+        if (!updateResponse.ok) throw new Error(`Unable to save the block details: ${updateResponse.status}`);
       }
 
       const response = await clientFetch("/api/time-entries", {
@@ -106,7 +106,7 @@ export function TimerPanel({
               }
         )
       });
-      if (!response.ok) throw new Error(`Timer action failed: ${response.status}`);
+      if (!response.ok) throw new Error(`Block action failed: ${response.status}`);
       if (mode === "start") updateDraft({ description: "" });
 
       if (onSynced) await refreshClientData();
@@ -126,7 +126,7 @@ export function TimerPanel({
         method: "DELETE"
       });
       if (!response.ok) {
-        let errorMessage = `Unable to delete timer: ${response.status}`;
+        let errorMessage = `Unable to delete the block: ${response.status}`;
         try {
           const payload = (await response.json()) as { error?: string };
           errorMessage = payload.error ?? errorMessage;
@@ -141,7 +141,7 @@ export function TimerPanel({
       if (onSynced) await refreshClientData();
       else startTransition(() => router.refresh());
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running timer.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete the running block.");
     } finally {
       setIsSubmitting(false);
     }
@@ -180,11 +180,11 @@ export function TimerPanel({
     >
       <div className="border-b border-[var(--line)] px-4 py-3">
         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-          <h2 className="text-base font-semibold">Time entry</h2>
+          <h2 className="text-base font-semibold">Block</h2>
           <p className="text-xs text-[var(--muted)]">
             {activeEntry
               ? `${timeEntryTitle(activeEntry)} since ${formatTime(activeEntry.startedAt)}`
-              : "No timer is running."}
+              : "No block is running."}
           </p>
         </div>
       </div>
@@ -254,8 +254,8 @@ export function TimerPanel({
                 className="industrial-button-danger focus-ring h-11 w-11 shrink-0 px-0 text-sm disabled:opacity-50"
                 type="button"
                 disabled={isBusy}
-                aria-label="Delete running timer"
-                title="Delete running timer"
+                aria-label="Delete running block"
+                title="Delete running block"
                 onClick={() => {
                   setDeleteError(null);
                   setDeleteDialogEntryId(activeEntry.id);
@@ -281,7 +281,7 @@ export function TimerPanel({
       <div className="border-t border-[var(--line)] p-4">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-semibold">Continue</h3>
-          <span className="text-xs text-[var(--muted)]">{recentEntries.slice(0, 4).length} entries</span>
+          <span className="text-xs text-[var(--muted)]">{recentEntries.slice(0, 4).length} blocks</span>
         </div>
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {recentEntries.slice(0, 4).map((entry) => (
@@ -306,13 +306,13 @@ export function TimerPanel({
       </div>
       {isDeleteDialogOpen ? (
         <DestructiveConfirmationDialog
-          body="This removes the entry instead of stopping it."
+          body="This removes the block instead of stopping it."
           dialogId="delete-running-timer"
           error={deleteError}
           isBusy={isBusy}
           onCancel={() => setDeleteDialogEntryId(null)}
           onConfirm={() => void deleteActiveEntry()}
-          title="Delete running timer?"
+          title="Delete running block?"
         />
       ) : null}
     </section>

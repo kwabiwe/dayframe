@@ -34,7 +34,7 @@ Recommended product states:
 - denied and needs Settings
 - reduced accuracy
 
-Request foreground location first. Explain background/Always access before requesting it. If `canAskAgain` is false, provide an Open Settings action.
+Request foreground location first. Explain background/Always access before requesting it. If `canAskAgain` is false, provide an Open Settings action (iPhone Settings › Location: `locationAccessNeedsIosSettings` reads it live; the Access pill and the suggestions switch open iOS Settings — UIA-111).
 
 ## Account consent and capture lifetime
 

@@ -317,7 +317,7 @@ export function EntriesTable({
 
   async function continueEntry(entry: TimeEntryRow, surface: "row" | "editor" = "row") {
     if (continuingEntryId || isTimerBusy) {
-      const outcome = { ok: false, error: "A timer update is already in progress." } as const;
+      const outcome = { ok: false, error: "A block update is already in progress." } as const;
       if (surface === "row") setActionError(outcome.error);
       return outcome;
     }
@@ -334,7 +334,7 @@ export function EntriesTable({
     } catch (error) {
       const outcome = {
         ok: false,
-        error: error instanceof Error ? error.message : "Unable to start this task."
+        error: error instanceof Error ? error.message : "Unable to start this block."
       } as const;
       if (surface === "row") setActionError(outcome.error);
       return outcome;
@@ -507,7 +507,7 @@ export function EntriesTable({
           });
         }
       });
-      setInlineStatus(`Updated ${current.target.entryIds.length} grouped entries.`);
+      setInlineStatus(`Updated ${current.target.entryIds.length} grouped blocks.`);
       await onChanged?.();
       if (nextGroupKey) focusGroupedDescription(nextGroupKey);
       startTransition(() => router.refresh());
@@ -580,11 +580,11 @@ export function EntriesTable({
         }}
       >
         <span aria-hidden="true" className="timeline-inline-description-measure timeline-task-title">
-          {value || "Untitled task"}
+          {value || "Untitled block"}
         </span>
         <input
           aria-label={isGroupedTarget
-            ? `${timeEntryTitle(entry)} shared description for ${editTarget.entryIds.length} grouped entries. Click to edit all occurrences.`
+            ? `${timeEntryTitle(entry)} shared description for ${editTarget.entryIds.length} grouped blocks. Click to edit all occurrences.`
             : `${timeEntryTitle(entry)} description. Click to edit inline. Double-click to open the full editor.`}
           className="timeline-task-title timeline-inline-description-input"
           data-inline-edit-scope={editTarget.kind}
@@ -600,7 +600,7 @@ export function EntriesTable({
           onKeyDown={(event) => {
             handleInlineKeyDown(event, entry, "description", undefined, editTarget);
           }}
-          placeholder="Untitled task"
+          placeholder="Untitled block"
           readOnly={!editor || editor.isSaving}
           title={isGroupedTarget ? `Click to edit all ${editTarget.entryIds.length} occurrences.` : "Click to edit. Double-click for the full editor."}
           value={value}
@@ -683,7 +683,7 @@ export function EntriesTable({
     const editor = inlineEditor?.entryId === entry.id ? inlineEditor : null;
     if (editor?.error) return <span className="timeline-inline-edit-error" role="alert">{editor.error}</span>;
     if (editor?.isSaving) {
-      return <span className="sr-only" role="status">{editor.target.kind === "group" ? "Saving grouped entries" : "Saving entry"}</span>;
+      return <span className="sr-only" role="status">{editor.target.kind === "group" ? "Saving grouped blocks" : "Saving block"}</span>;
     }
     return null;
   }
@@ -781,7 +781,7 @@ export function EntriesTable({
                       {isGrouped ? (
                         <button
                           aria-expanded={isExpanded}
-                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${group.entries.length} ${timeEntryTitle(entry)} entries`}
+                          aria-label={`${isExpanded ? "Collapse" : "Expand"} ${group.entries.length} ${timeEntryTitle(entry)} blocks`}
                           className="timeline-group-count"
                           onClick={() => setExpandedGroups((current) => {
                             const next = new Set(current);
@@ -806,10 +806,10 @@ export function EntriesTable({
                           <span
                             className="overlap-marker"
                             aria-label={isGrouped
-                              ? `${overlappingOccurrences.length} entries in this group overlap other entries`
+                              ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
                               : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
                             title={isGrouped
-                              ? `${overlappingOccurrences.length} entries in this group overlap other entries`
+                              ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
                               : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
                           >
                             {isGrouped
@@ -1006,7 +1006,7 @@ function overlapMarkerDescription(
       }`
     : "";
   return `Overlap: ${formatDuration(overlap.uniqueOverlapSeconds)} shared with ${overlap.overlapCount} other ${
-    overlap.overlapCount === 1 ? "entry" : "entries"
+    overlap.overlapCount === 1 ? "block" : "blocks"
   }${peerDetail}. ${timeEntryTitle(entry)} still counts in full towards Total logged.`;
 }
 

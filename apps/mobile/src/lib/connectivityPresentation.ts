@@ -105,7 +105,7 @@ export function syncAttentionPresentation(attentionCount: number) {
   if (count === 0) return null;
   return {
     accessibilityLabel: `Account and settings. ${count === 1 ? "A change" : `${count} changes`} couldn't be saved and ${count === 1 ? "needs" : "need"} your attention.`,
-    accessibilityHint: "Opens Sync help in Settings",
+    accessibilityHint: "Opens Settings › Sync help",
     count
   };
 }

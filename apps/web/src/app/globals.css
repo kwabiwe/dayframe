@@ -370,9 +370,12 @@ a {
   text-decoration: none;
 }
 
+/* Text selection is neutral, never coral (UIA-314): the secondary text colour behind surface-
+   coloured text — 4.6:1 to 6.4:1 against the canvas and cards, and the selected text 5.0:1 (Daylight)
+   and 5.6:1 (Midnight) on it, whatever colour it had (coral, on-block). */
 ::selection {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--text-secondary);
+  color: var(--surface);
 }
 
 .tabular {
@@ -3209,7 +3212,7 @@ kbd {
 .auth-card {
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border), var(--shadow-soft);
+  box-shadow: var(--shadow-soft);
 }
 
 .auth-card-head {
@@ -3485,7 +3488,6 @@ kbd {
   width: min(680px, 62%);
   height: min(560px, calc(100% - 56px));
   transform: translateY(-50%);
-  border: 1px solid var(--line);
   border-radius: 28px;
   background:
     linear-gradient(var(--line) 1px, transparent 1px),
@@ -3531,7 +3533,6 @@ kbd {
   right: 24px;
   display: grid;
   gap: 4px;
-  border: 1px solid var(--line-strong);
   border-radius: 16px;
   padding: 14px 16px;
   color: var(--block-text);
@@ -3592,7 +3593,6 @@ kbd {
 
 .landing-feature-strip article,
 .landing-assurance {
-  border: 1px solid var(--line);
   border-radius: 20px;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   box-shadow: 0 12px 32px color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -5490,7 +5490,7 @@ kbd {
 
 .place-search-option[aria-selected="true"],
 .place-search-option:hover {
-  background: var(--accent-soft);
+  background: var(--surface-muted);
 }
 
 .place-search-option-title,
@@ -9314,6 +9314,12 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--text-primary);
 }
 
+/* The current page's icon is coral (owner, 11 Oct; the iPhone's selected tab); the label and the
+   sliding thumb stay neutral. */
+.df-nav a[aria-current="page"] > svg {
+  color: var(--accent-text);
+}
+
 .df-nav-count,
 .df-tab-count {
   display: grid;
@@ -9582,6 +9588,10 @@ dialog.ui-dialog.manual-entry-dialog {
   .df-tabbar a[aria-current="page"] {
     background: var(--surface-muted);
     color: var(--text-primary);
+  }
+
+  .df-tabbar a[aria-current="page"] .df-tab-icon > svg {
+    color: var(--accent-text);
   }
 
   .df-tab-icon {
@@ -10166,12 +10176,13 @@ dialog.ui-dialog.df-palette {
   padding: 20px 32px 32px;
 }
 
+/* Panels are fill-led (prototype web.html .card): no outline. Only floating chrome — the command
+   bar, the phone tab bar, popovers and dialogs — keeps a faint edge. */
 .df-card {
   min-width: 0;
   border-radius: 22px;
   padding: 18px 20px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-today-hero,
@@ -10223,11 +10234,15 @@ dialog.ui-dialog.df-palette {
   font-variant-numeric: tabular-nums;
 }
 
+/* The prototype's eyebrow (blocks.css .eyebrow): small capitals over the hero, in the secondary
+   text colour (the prototype's text-3 measures 4.05:1 on a Midnight card, under 4.5:1). */
 .df-eyebrow {
   margin: 0 0 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .df-today-hero {
@@ -10254,10 +10269,14 @@ dialog.ui-dialog.df-palette {
   letter-spacing: -0.035em;
 }
 
+/* The prototype's hero-sub: 14 px in its --text-2, which sits between our secondary and primary
+   text (#A3ACC1 in Midnight, #586176 in Daylight), straight under the total. */
 .df-today-sub {
-  margin: 6px 0 0;
-  color: var(--text-secondary);
+  margin: 2px 0 0;
+  color: color-mix(in srgb, var(--text-primary) 28%, var(--text-secondary));
   font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .df-goal-cells {
@@ -10288,6 +10307,19 @@ dialog.ui-dialog.df-palette {
   box-shadow: inset -2px 0 0 var(--accent);
 }
 
+/* Activities inside an hour cell never touch (owner, Trello): each one after the first starts with
+   a 2 px strip in the cell's own colour, drawn inside its width so every slice keeps its exact
+   share of the hour and the live edge stays where the time is. */
+.df-goal-cell > span + span {
+  box-shadow: inset 2px 0 0 var(--surface-muted);
+}
+
+/* The coral recording edge is listed first so it paints on top: a live slice under 2 px wide
+   still shows coral, not the separator. */
+.df-goal-cell > span + span.is-live {
+  box-shadow: inset -2px 0 0 var(--accent), inset 2px 0 0 var(--surface-muted);
+}
+
 .df-ribbon {
   position: relative;
   padding-bottom: 22px;
@@ -10313,16 +10345,23 @@ dialog.ui-dialog.df-palette {
   background: var(--border-strong);
 }
 
+/* Ribbon blocks never touch: a 1 px gap (each block clipped half a pixel in on either side — a clip,
+   not a border, so it is never snapped to a whole device pixel and matches ribbonDrawnHitAt) and a
+   very faint inner edge, light on Midnight and dark on Daylight, so dark activity colours never get
+   a darker outline (owner, Trello; X2). */
 .df-ribbon-block {
   position: absolute;
   top: 4px;
   bottom: 4px;
   border-radius: 6px;
+  clip-path: inset(0 0.5px round 6px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent);
   transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .df-ribbon-block.is-none {
-  background: var(--uncategorized-color, var(--text-muted));
+  /* background-color, not the shorthand, so the padding-box clip (the 1 px gap) survives. */
+  background-color: var(--uncategorized-color, var(--text-muted));
 }
 
 .df-ribbon-block.is-pending {
@@ -12219,7 +12258,6 @@ dialog.ui-dialog.df-ce-dialog {
 .df-library .places-list-section {
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-library .places-list-section > header {

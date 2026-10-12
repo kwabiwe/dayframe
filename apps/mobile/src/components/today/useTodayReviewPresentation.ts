@@ -308,7 +308,7 @@ async function readCachedSnapshot(input: {
   return readReviewPresentationSnapshot({ owner: input.owner, response: { scope: input.scope } });
 }
 
-function reviewOwner(bootstrap: MobileBootstrap | null): ReviewPresentationOwner | null {
+export function reviewOwner(bootstrap: MobileBootstrap | null): ReviewPresentationOwner | null {
   if (!bootstrap || !DAYFRAME_BACKEND_ID) return null;
   const declaredBackend = bootstrap.serverBuild?.backendId;
   if (declaredBackend && declaredBackend !== DAYFRAME_BACKEND_ID) return null;
@@ -319,7 +319,7 @@ function reviewOwner(bootstrap: MobileBootstrap | null): ReviewPresentationOwner
   };
 }
 
-function windowScopeFor(dayKey: string, timeZone: string): ReviewPresentationSnapshot["scope"] {
+export function windowScopeFor(dayKey: string, timeZone: string): ReviewPresentationSnapshot["scope"] {
   const todayStart = localDateForKey(dayKey);
   const tomorrow = new Date(todayStart);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -340,12 +340,12 @@ function localDateForKey(dayKey: string) {
   return value;
 }
 
-function localDayKey(nowMs: number) {
+export function localDayKey(nowMs: number) {
   const date = new Date(nowMs);
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
 }
 
-function currentTimeZone() {
+export function currentTimeZone() {
   const value = Intl.DateTimeFormat().resolvedOptions().timeZone;
   return value && isIanaTimeZone(value) ? value : null;
 }

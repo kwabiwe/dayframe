@@ -22,7 +22,7 @@ const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 afterEach(() => cleanup());
 
-describe("AppShellRuntime latest timer intent", () => {
+describe("AppShellRuntime latest block intent", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("keeps PersistentTimerBar Start and Quick Action reachable while exact Stop A is in flight", async () => {
@@ -75,12 +75,12 @@ describe("AppShellRuntime latest timer intent", () => {
         <TimerIntentHarness initial={initial} />
       </AppShellRuntimeProvider>
     );
-    fireEvent.click(screen.getByRole("button", { name: "Hydrate timer A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate block A" }));
     await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("A"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop timer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop recording" }));
     await waitFor(() => expect(requests.some((request) => request.url === "/api/events")).toBe(true));
-    const start = screen.getByRole("button", { name: "Start timer" }) as HTMLButtonElement;
+    const start = screen.getByRole("button", { name: "Start a block" }) as HTMLButtonElement;
     const quickAction = screen.getByRole("button", { name: /Focus/ }) as HTMLButtonElement;
     expect(start.disabled).toBe(false);
     expect(start.getAttribute("aria-busy")).toBeNull();
@@ -141,10 +141,10 @@ describe("AppShellRuntime rejected Start", () => {
           <TimerIntentHarness initial={idle} />
         </AppShellRuntimeProvider>
       );
-      fireEvent.click(screen.getByRole("button", { name: "Hydrate timer A" }));
+      fireEvent.click(screen.getByRole("button", { name: "Hydrate block A" }));
       const description = await screen.findByLabelText("Description") as HTMLInputElement;
       fireEvent.change(description, { target: { value: "Plan @focus" } });
-      fireEvent.click(screen.getByRole("button", { name: "Start timer" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start a block" }));
       await waitFor(() => expect(rejectStart).toBeDefined());
       await waitFor(() => expect(screen.getByTestId("active-timer").textContent).toBe("Focus"));
       if (typeMeanwhile) fireEvent.change(description, { target: { value: "Updated plan" } });
@@ -161,7 +161,7 @@ describe("AppShellRuntime rejected Start", () => {
 function TimerIntentHarness({ initial }: { initial: BootstrapData }) {
   const { data, hydrate } = useAppShellRuntime();
   return <>
-    <button onClick={() => hydrate(initial)}>Hydrate timer A</button>
+    <button onClick={() => hydrate(initial)}>Hydrate block A</button>
     <output data-testid="active-timer">
       {data?.activeEntry
         ? data.activeEntry.categoryName ?? data.activeEntry.description ?? "running"

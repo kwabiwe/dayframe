@@ -9,7 +9,6 @@ import {
   hasReviewNeededActivityForRange,
   hasSuggestedTimeWindow,
   hideTombstonedReviewItems,
-  isCalendarPreviewReviewItem,
   isCurrentReviewEditPresentation,
   isOneOffLocationReviewItem,
   isOpenReviewItem,
@@ -64,12 +63,6 @@ describe("mobile review helpers", () => {
     expect(isOpenReviewItem({ status: "open" })).toBe(true);
     expect(isOpenReviewItem({ status: "accepted" })).toBe(false);
     expect(isOpenReviewItem({ status: "ignored" })).toBe(false);
-  });
-
-  it("limits calendar review previews to commute candidates", () => {
-    expect(isCalendarPreviewReviewItem({ eventType: "commute_detected" })).toBe(true);
-    expect(isCalendarPreviewReviewItem({ eventType: "learned_place_visit" })).toBe(false);
-    expect(isCalendarPreviewReviewItem({ eventType: "health_workout_import" })).toBe(false);
   });
 
   it("labels significant single stays as one-off location activity evidence", () => {
@@ -601,7 +594,7 @@ describe("mobile review helpers", () => {
 
     expect(copy).toEqual(expect.arrayContaining([
       "Needs review",
-      "Suggested time entry",
+      "Suggested block",
       "Detected visit",
       "Edit before logging",
       "Skip"

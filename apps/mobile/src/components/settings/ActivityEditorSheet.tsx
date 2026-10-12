@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
   saveText: { fontSize: 15, fontWeight: "700" },
   scroll: { flex: 1 },
   body: { gap: 14, paddingHorizontal: 4, paddingTop: 6 },
-  preview: { borderRadius: 22, gap: 10, justifyContent: "flex-end", minHeight: 120, padding: 18 },
+  preview: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 10, justifyContent: "flex-end", minHeight: 120, padding: 18 },
   previewName: { fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 24 },
   nameInput: { borderRadius: 14, fontSize: 16, minHeight: 48, paddingHorizontal: 14 },
   problem: { fontSize: 14, marginTop: -6 },

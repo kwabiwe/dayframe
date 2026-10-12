@@ -182,7 +182,7 @@ describe("TodayBlockRows", () => {
   it("says a group's count once to VoiceOver", () => {
     const { tree } = render([group(entry("a", at(8), at(9)), entry("b", at(10), at(11)))]);
     const label = tree.root.findByProps({ testID: "today-block-row-a" }).props.accessibilityLabel as string;
-    expect(label).toBe("Expand 2 Deep work entries. Deep work, 08:00 to 09:00, Focus, 2 hours");
+    expect(label).toBe("Expand 2 Deep work blocks. Deep work, 08:00 to 09:00, Focus, 2 hours");
   });
 
   it("commits nothing when the system cancels an armed swipe", () => {

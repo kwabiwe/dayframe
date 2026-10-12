@@ -35,7 +35,7 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(donutSegmentSource).toContain('role="link"');
     expect(donutSegmentSource).toContain("event.key !== \"Enter\"");
     expect(donutSegmentSource).toContain("router.push(href)");
-    expect(overviewSource).toContain("Entries can contain multiple tags, so tag totals may overlap.");
+    expect(overviewSource).toContain("Blocks can contain multiple tags, so tag totals may overlap.");
   });
 
   it("keeps dates explicit, inclusive and cancellable", () => {

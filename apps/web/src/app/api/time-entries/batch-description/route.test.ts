@@ -62,12 +62,12 @@ describe("PATCH /api/time-entries/batch-description", () => {
     expect(missing.status).toBe(404);
 
     mocks.updateTimeEntryDescriptions.mockRejectedValueOnce(
-      new mocks.TimeEntryValidationError("Grouped descriptions can only update completed entries.")
+      new mocks.TimeEntryValidationError("Grouped descriptions can only update completed blocks.")
     );
     const running = await PATCH(request({ ids: ids(), description: "Planning" }));
     expect(running.status).toBe(400);
     await expect(running.json()).resolves.toEqual({
-      error: "Grouped descriptions can only update completed entries."
+      error: "Grouped descriptions can only update completed blocks."
     });
   });
 

@@ -33,6 +33,7 @@
 		DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
 		DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */; };
+		DFB2000001BC49B8811A0005 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 		F8E5DEB5A642AF9128DE2E3F /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 47826C218DF2CD53638292FB /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -371,6 +372,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				DFB2000001BC49B8811A0005 /* BricolageGrotesque-Bold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

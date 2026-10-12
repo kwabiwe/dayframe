@@ -384,7 +384,6 @@ function ActivityCard({
         </span>
       </div>
       <button aria-label={`Edit ${activity.name}`} className="df-rbtn df-rbtn--sm" disabled={busy} onClick={onEdit} type="button">
-        <DayframeIcon glyph="pencil" size={15} />
         Edit
       </button>
     </article>

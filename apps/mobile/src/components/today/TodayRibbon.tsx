@@ -3,8 +3,8 @@ import { StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
-import Svg, { Circle, Defs, Line, Path, Pattern, Rect } from "react-native-svg";
-import { blockColorsFor } from "@dayframe/shared";
+import Svg, { Circle, Defs, G, Line, Path, Pattern, Rect } from "react-native-svg";
+import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
 import { playHaptic } from "../../lib/haptics";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -13,7 +13,9 @@ import { todayReviewNavigationTarget } from "../../lib/todayReviewNavigation";
 import {
   buildTodayRibbon,
   RIBBON_LABEL_HOURS,
+  RIBBON_BLOCK_GAP,
   RIBBON_MIN_BLOCK_WIDTH,
+  ribbonBlockFrame,
   RIBBON_TICK_HOURS,
   ribbonHitAt,
   ribbonHourFraction,
@@ -31,6 +33,9 @@ const TRACK_HEIGHT = 46;
 const BLEED = 8;
 const BLOCK_INSET = 4;
 const HOT_SCALE = 1.18;
+/** Blocks carry a faint inner edge at this opacity of the primary text (gap: ribbonBlockFrame). */
+const RIBBON_EDGE_ALPHA = 0.14;
+const PENDING_STROKE = 1.5;
 const CARD_PADDING = 14;
 /** Gap between the tooltip and the top of the track. */
 const TIP_GAP = 6;
@@ -62,7 +67,7 @@ export const TodayRibbon = memo(function TodayRibbon({
 
   const scrubTo = useCallback((x: number, scrubbing: boolean) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width, RIBBON_BLOCK_GAP / width);
     const key = next.kind === "block" ? next.block.key : "gap";
     if (key !== lastKey.current) {
       if (scrubbing && next.kind === "block") playHaptic("tick");
@@ -76,7 +81,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   }, []);
   const tapAt = useCallback((x: number) => {
     if (width <= 0) return;
-    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width);
+    const next = ribbonHitAt(modelRef.current, x / width, RIBBON_MIN_BLOCK_WIDTH / width, RIBBON_BLOCK_GAP / width);
     if (next.kind === "block") onOpenBlock(next.block);
   }, [onOpenBlock, width]);
 
@@ -116,7 +121,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   const pendingCount = model.blocks.length - loggedCount;
   const summary = model.blocks.length
     ? `${loggedCount} ${loggedCount === 1 ? "block" : "blocks"}${pendingCount ? `, ${pendingCount} waiting for review` : ""}. Swipe up or down to step through them.`
-    : "Nothing tracked yet today.";
+    : "Nothing framed yet today.";
   const ordered = useMemo(() => [...model.blocks].sort((a, b) => a.startMs - b.startMs), [model.blocks]);
 
   return (
@@ -177,22 +182,52 @@ export const TodayRibbon = memo(function TodayRibbon({
                 const hot = block.key === hotKey;
                 const height = (TRACK_HEIGHT - BLOCK_INSET * 2) * (hot ? HOT_SCALE : 1);
                 const y = BLEED + TRACK_HEIGHT / 2 - height / 2;
-                const x = block.left * width;
-                const w = Math.max(RIBBON_MIN_BLOCK_WIDTH, block.width * width);
+                // 1 pt between neighbours: each block gives up half a point on either side.
+                const { x, width: w } = ribbonBlockFrame(model, block, width);
+                // A block squeezed out by its neighbour's start (a minute just before another) is not drawn.
+                if (w <= 0) return null;
+                // Narrower than its stroke, a block is drawn as fill alone, so no stroke ever spills past
+                // its frame (onto a neighbour, or where a tap selects something else).
+                if (block.kind === "pending" && w < PENDING_STROKE * 2) {
+                  return <Rect fill={colorWithAlpha(color, 0.45)} height={height} key={block.key} width={w} x={x} y={y} />;
+                }
+                if (block.kind !== "pending" && w < 2) {
+                  return <Rect fill={color} height={height} key={block.key} width={w} x={x} y={y} />;
+                }
                 return block.kind === "pending" ? (
+                  // The hatch's stroke is centred on its path, so the path is inset by half the stroke
+                  // and the whole outline stays inside the block's drawn bounds.
                   <Rect
                     fill={`url(#${patternId(block)})`}
-                    height={height}
+                    height={Math.max(0, height - PENDING_STROKE)}
                     key={block.key}
-                    rx={6}
+                    rx={6 - PENDING_STROKE / 2}
                     stroke={colorWithAlpha(color, 0.7)}
-                    strokeWidth={1.5}
-                    width={w}
-                    x={x}
-                    y={y}
+                    strokeWidth={PENDING_STROKE}
+                    width={Math.max(0, w - PENDING_STROKE)}
+                    x={x + PENDING_STROKE / 2}
+                    y={y + PENDING_STROKE / 2}
                   />
                 ) : (
-                  <Rect fill={color} height={height} key={block.key} rx={6} width={w} x={x} y={y} />
+                  // The full activity fill, then the faint inner edge over it (light on Midnight, dark on
+                  // Daylight): a 1-pt stroke inset half a point, so all of it lies on the fill and
+                  // never darkens the track around a dark activity colour.
+                  // Explicit corner radii (fill: up to 6, edge: half a point less) so a narrow block's
+                  // edge follows the fill's own curve instead of SVG's independently clamped one.
+                  <G key={block.key}>
+                    <Rect fill={color} height={height} rx={Math.min(6, w / 2)} ry={Math.min(6, w / 2)} width={w} x={x} y={y} />
+                    <Rect
+                      fill="none"
+                      height={Math.max(0, height - 1)}
+                      rx={Math.max(0, Math.min(6, w / 2) - 0.5)}
+                      ry={Math.max(0, Math.min(6, w / 2) - 0.5)}
+                      stroke={colorWithAlpha(theme.textPrimary, RIBBON_EDGE_ALPHA)}
+                      strokeWidth={1}
+                      width={Math.max(0, w - 1)}
+                      x={x + 0.5}
+                      y={y + 0.5}
+                    />
+                  </G>
                 );
               })}
               {model.now !== null ? (
@@ -295,7 +330,7 @@ function patternId(block: RibbonBlock) {
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 22, paddingBottom: 10, paddingHorizontal: CARD_PADDING, paddingTop: 14 },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingBottom: 10, paddingHorizontal: CARD_PADDING, paddingTop: 14 },
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between", marginBottom: 12 - BLEED },
   heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
   caption: { fontSize: 13 },

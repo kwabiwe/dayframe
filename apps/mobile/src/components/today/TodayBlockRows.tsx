@@ -14,7 +14,7 @@ import Reanimated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
 import { BLOCKS_SPRING, POP_REQUEST_TTL_MS, type LandingRequest } from "../../lib/blocksMotion";
 import { rowFlightNode } from "../../lib/stopFlight";
@@ -330,11 +330,11 @@ export const TodayBlockRow = memo(function TodayBlockRow({
 
   const spoken = spokenDuration(durationSeconds);
   const label = count > 1
-    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} entries. ${spokenLabel}, ${spoken}`
+    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} blocks. ${spokenLabel}, ${spoken}`
     : `${spokenLabel}, ${spoken}`;
   const actions = [
     ...(replayable ? [{ name: "startAgain", label: activeTimerRunning ? `Switch to ${title}` : "Start again" }] : []),
-    ...(deletable ? [{ name: "delete", label: count > 1 ? `Delete ${count} ${title} entries` : `Delete ${title}` }] : []),
+    ...(deletable ? [{ name: "delete", label: count > 1 ? `Delete ${count} ${title} blocks` : `Delete ${title}` }] : []),
   ];
 
   return (
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between" },
   heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
   caption: { fontSize: 13 },
-  card: { borderRadius: 22, overflow: "hidden" },
+  card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, overflow: "hidden" },
   empty: { gap: 2, minHeight: 64, justifyContent: "center", paddingHorizontal: 16, paddingVertical: 10 },
   row: { overflow: "hidden" },
   under: { alignItems: "center", bottom: 0, flexDirection: "row", gap: 8, left: 0, paddingHorizontal: 22, position: "absolute", right: 0, top: 0 },

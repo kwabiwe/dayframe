@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { blockColorsFor } from "@dayframe/shared";
+import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { EarlierDay } from "../../lib/earlierThisWeek";
 import { shortDuration } from "../../lib/earlierThisWeek";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -33,7 +33,7 @@ export const EarlierThisWeek = memo(function EarlierThisWeek({
         {days.map((day) => (
           <Pressable
             accessibilityHint="Opens this day in Calendar"
-            accessibilityLabel={`${day.spokenDate}, ${day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing tracked"}`}
+            accessibilityLabel={`${day.spokenDate}, ${day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing framed"}`}
             accessibilityRole="button"
             key={day.dayKey}
             onPress={() => onOpenDay(day.dayKey)}
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between" },
   heading: { flexShrink: 1, fontSize: 17, fontWeight: "700", letterSpacing: -0.2 },
   caption: { fontSize: 13 },
-  list: { borderRadius: 22, gap: 2, overflow: "hidden", paddingVertical: 6 },
+  list: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, gap: 2, overflow: "hidden", paddingVertical: 6 },
   row: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 44, paddingHorizontal: 16, paddingVertical: 6 },
   pressed: { opacity: 0.82 },
   day: { minWidth: 52 },

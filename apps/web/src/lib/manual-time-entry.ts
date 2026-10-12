@@ -31,7 +31,7 @@ export function validateManualTimeEntryWindow({
     throw new ManualTimeEntryValidationError("Finish time must be after the start time.");
   }
   if (finish.getTime() - start.getTime() > 24 * 60 * 60 * 1_000) {
-    throw new ManualTimeEntryValidationError("Entries can be no longer than 24 hours.");
+    throw new ManualTimeEntryValidationError("A block can be no longer than 24 hours.");
   }
 
   return {

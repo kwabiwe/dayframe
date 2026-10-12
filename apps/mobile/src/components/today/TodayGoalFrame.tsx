@@ -62,8 +62,8 @@ export const TodayGoalFrame = memo(function TodayGoalFrame({
       </Text>
       <View
         accessibilityLabel={partial
-          ? `${spokenDuration(totalSeconds)} tracked, ${spokenDuration(counted)} toward your daily goal of ${spokenGoal(goalHours)}, ${percent} percent.`
-          : `${spokenDuration(totalSeconds)} tracked. Daily goal ${spokenGoal(goalHours)}, ${percent} percent.`}
+          ? `${spokenDuration(totalSeconds)} framed, ${spokenDuration(counted)} toward your daily goal of ${spokenGoal(goalHours)}, ${percent} percent.`
+          : `${spokenDuration(totalSeconds)} framed. Daily goal ${spokenGoal(goalHours)}, ${percent} percent.`}
         accessible
         style={styles.goal}
       >

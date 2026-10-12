@@ -59,7 +59,7 @@ export function TagMetadata({
           ) : null}
           {onPressTag ? (
             <Pressable
-              accessibilityHint="Removes this tag from the draft; save the entry to confirm"
+              accessibilityHint="Removes this tag from the draft; save the block to confirm"
               accessibilityLabel={`Remove tag ${tagName}`}
               accessibilityRole="button"
               onPress={() => onPressTag(tagName)}

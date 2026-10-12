@@ -283,7 +283,7 @@ describe("POST /api/time-entries", () => {
     [
       "longer than 24 hours",
       { startedAt: "2026-07-04T09:00:00.000Z", stoppedAt: "2026-07-05T09:00:01.000Z" },
-      "Entries can be no longer than 24 hours."
+      "A block can be no longer than 24 hours."
     ]
   ])("returns a specific 400 for %s", async (_label, interval, error) => {
     const response = await POST(jsonRequest({ mode: "manual", ...interval }));

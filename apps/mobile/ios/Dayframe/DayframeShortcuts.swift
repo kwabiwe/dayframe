@@ -4,7 +4,7 @@ import Foundation
 @available(iOS 16.4, *)
 struct StartTrackingIntent: AppIntent {
   static var title: LocalizedStringResource = "Start tracking"
-  static var description = IntentDescription("Start a Dayframe timer with an optional description, activity, and workspace.")
+  static var description = IntentDescription("Start a Dayframe block with an optional description, activity, and workspace.")
   static var openAppWhenRun: Bool = false
 
   @Parameter(title: "Description")
@@ -35,7 +35,7 @@ extension StartTrackingIntent: LiveActivityIntent {}
 @available(iOS 16.4, *)
 struct StopTrackingIntent: AppIntent {
   static var title: LocalizedStringResource = "Stop tracking"
-  static var description = IntentDescription("Stop the current Dayframe timer.")
+  static var description = IntentDescription("Stop the block Dayframe is recording.")
   static var openAppWhenRun: Bool = false
 
   func perform() async throws -> some IntentResult {
@@ -52,15 +52,15 @@ struct StopTrackingIntent: AppIntent {
 
 @available(iOS 17.0, *)
 struct DayframeLiveActivityStopIntent: LiveActivityIntent {
-  static var title: LocalizedStringResource = "Stop timer"
-  static var description = IntentDescription("Stop the current Dayframe timer from the Live Activity.")
+  static var title: LocalizedStringResource = "Stop recording"
+  static var description = IntentDescription("Stop the block Dayframe is recording, from the Live Activity.")
   static var openAppWhenRun: Bool = false
   static var isDiscoverable: Bool = false
 
   @Parameter(title: "Activity ID")
   var activityId: String?
 
-  @Parameter(title: "Timer entry ID")
+  @Parameter(title: "Block ID")
   var entryId: String?
 
   @Parameter(title: "API base")
@@ -111,7 +111,7 @@ struct DayframeShortcuts: AppShortcutsProvider {
       intent: StartTrackingIntent(),
       phrases: [
         "Start tracking in \(.applicationName)",
-        "Start a task in \(.applicationName)"
+        "Start a block in \(.applicationName)"
       ],
       shortTitle: "Start tracking",
       systemImageName: "timer"
@@ -120,7 +120,7 @@ struct DayframeShortcuts: AppShortcutsProvider {
       intent: StopTrackingIntent(),
       phrases: [
         "Stop tracking in \(.applicationName)",
-        "Stop the timer in \(.applicationName)"
+        "Stop recording in \(.applicationName)"
       ],
       shortTitle: "Stop tracking",
       systemImageName: "stop.circle"
@@ -167,6 +167,7 @@ private enum DayframeShortcutPerformer {
         title: event.description ?? category?.name ?? "No activity",
         categoryName: category?.name ?? dayframeCleanText(categoryName),
         categoryColor: category?.color,
+        categoryColorLight: category?.lightColor,
         startedAt: event.occurredAt
       )
     case .stopEntry(let entryId):
@@ -379,6 +380,8 @@ private struct DayframeShortcutWorkspace: Decodable {
 
 private struct DayframeShortcutCategory: Decodable {
   let color: String?
+  // Optional: catalogs written by older builds have the dark fill only.
+  let lightColor: String?
   let id: String
   let name: String
 }

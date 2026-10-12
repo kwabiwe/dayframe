@@ -210,9 +210,16 @@ export function layoutTimeIntervals(
   input: ReadonlyArray<Pick<TimeIntervalInput, "id" | "startedAt" | "stoppedAt">>,
   now: Date | string | number = new Date(),
   {
-    minimumOverlapMs = MINIMUM_MEANINGFUL_OVERLAP_MS
+    minimumOverlapMs = MINIMUM_MEANINGFUL_OVERLAP_MS,
+    insetOverlays = true
   }: {
     minimumOverlapMs?: number;
+    /**
+     * Draw a short block inside a longer one as an inset overlay (the default). False keeps every
+     * overlap in side-by-side lanes, for a narrow column where an inset would leave the longer
+     * block only a thin strip to tap.
+     */
+    insetOverlays?: boolean;
   } = {}
 ) {
   const nowMs = toTimestamp(now);
@@ -237,7 +244,7 @@ export function layoutTimeIntervals(
   const layouts = collisionComponents(
     intervals,
     Math.max(0, minimumOverlapMs)
-  ).flatMap(layoutCollisionGroup);
+  ).flatMap((group) => layoutCollisionGroup(group, insetOverlays));
 
   return layouts.sort((left, right) => left.id.localeCompare(right.id));
 }
@@ -366,13 +373,13 @@ function pairKey(leftId: string, rightId: string) {
     : `${rightId}\u0000${leftId}`;
 }
 
-function layoutCollisionGroup(group: NormalizedInterval[]): TimeIntervalLayout[] {
+function layoutCollisionGroup(group: NormalizedInterval[], insetOverlays: boolean): TimeIntervalLayout[] {
   const groupId = group.map((interval) => interval.id).sort().join(":");
   if (group.length === 1) {
     return [fullLayout(group[0]!, groupId)];
   }
 
-  if (group.length === 2) {
+  if (insetOverlays && group.length === 2) {
     const [first, second] = group;
     const contained =
       contains(first, second) ? { container: first, overlay: second }
