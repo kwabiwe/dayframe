@@ -1,5 +1,5 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { StatusBar, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -10,8 +10,14 @@ import { ConnectivityProvider } from "@/lib/connectivity";
 import { MobileThemeProvider, useMobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { createNavigationColors } from "@/lib/navigationTheme";
+import { primeSettingsLastKnown } from "@/lib/settingsLastKnown";
 
 export default function RootLayout() {
+  // A4: Settings' last-known display values are read from the device at launch, long before
+  // Settings opens, so its first open paints them on the first frame.
+  useEffect(() => {
+    void primeSettingsLastKnown();
+  }, []);
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

@@ -138,6 +138,13 @@ import {
 } from "@/lib/settingsRefresh";
 import { readTodayBootstrapForSettings } from "@/lib/settingsSeed";
 import { beginRememberedSettingsRead, useRememberedSettingsState } from "@/lib/settingsRemembered";
+import {
+  recordSettingsLastKnown,
+  settingsLocationDisplay,
+  shownSyncHelpCounts,
+  useSettingsLastKnown,
+  type SettingsLastKnownDisplay
+} from "@/lib/settingsLastKnown";
 import { useContentSizedSheetKeyboard } from "@/lib/contentSizedSheetKeyboard";
 import { clampSettingsScrollOffset, settingsScrollNeedsClamp } from "@/lib/settingsScroll";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
@@ -225,6 +232,14 @@ function healthAutomaticCategoryKinds(preferences: HealthImportPreferences) {
     kinds.push("health");
   }
   return kinds;
+}
+
+/** Display only: last-known Health types laid over their defaults (settingsLastKnown). */
+function shownHealthPreferencesFrom(lastKnown: SettingsLastKnownDisplay["healthImportPreferences"]): HealthImportPreferences | null {
+  if (!lastKnown) return null;
+  return Object.fromEntries(
+    HEALTH_IMPORT_PREFERENCE_OPTIONS.map((option) => [option.key, lastKnown[option.key] ?? option.defaultEnabled])
+  ) as HealthImportPreferences;
 }
 
 type SettingsSnapshot = {
@@ -390,6 +405,8 @@ export default function SettingsScreen() {
   const todaySeed = initialSeed && readTodayBootstrapForSettings(getActiveMobileAccountSnapshot()) === initialSeed ? initialSeed : null;
   const shownUser = (data ?? todaySeed)?.user;
   const [queue, setQueue] = useState<QueuedEvent[]>(cachedSnapshot?.queue ?? []);
+  // Whether this session has read the local queue (its counts then replace the last-known ones).
+  const [queueKnown, setQueueKnown] = useState(cachedSnapshot !== null);
   const [lastSyncResult, setLastSyncResult] = useState<SyncQueueResult | null>(cachedSnapshot?.lastSyncResult ?? null);
   const [syncingQueue, setSyncingQueue] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -438,6 +455,10 @@ export default function SettingsScreen() {
   // Settings › Apple Health: the last Sync now result (never cached).
   const [healthSyncNoteText, setHealthSyncNote] = useState<string | null>(null);
   const [healthAccessGranted, setHealthAccessGranted] = useRememberedSettingsState<boolean | null>("healthAccessGranted", null);
+  // A4: what this account last saw on this iPhone (persisted, bound to the account and session), so
+  // the first open after a launch paints at once. DISPLAY ONLY: it feeds the `shown…` values below,
+  // which only rows, labels and switch positions read; every action reads the live state instead.
+  const lastKnown = useSettingsLastKnown();
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
@@ -574,13 +595,17 @@ export default function SettingsScreen() {
   async function refreshQueueLatest() {
     const mine = ++queueReadSequence.current;
     try {
-      const owner = await readActiveMobileAccount();
+      const startedFor = await beginRememberedSettingsRead();
+      const owner = startedFor.owner;
       const queued = await readQueue();
       if (!queueMounted.current || mine !== queueReadSequence.current || !owner) return;
       const stillOwner = await readActiveMobileAccount();
       // Re-checked right before publishing: Settings may have closed during the owner read.
       if (!queueMounted.current || !stillOwner || !mobileAccountOwnersEqual(owner, stillOwner) || mine !== queueReadSequence.current) return;
       setQueueAndCache(queued);
+      setQueueKnown(true);
+      const counts = getQueueDiagnostics(queued);
+      recordSettingsLastKnown({ sync: { queuedCount: counts.queuedCount, permanentFailedCount: counts.permanentFailedCount } }, startedFor);
     } catch {
       // A failed local read leaves the last known queue in place.
     }
@@ -594,6 +619,7 @@ export default function SettingsScreen() {
     // bootstrap below succeeds, and never after Settings closed or the account changed.
     void refreshQueueLatest();
     try {
+      const startedFor = await beginRememberedSettingsRead();
       const loadOwner = await readActiveMobileAccount();
       await drainNativeShortcutQueue();
       const epochAtFetch = activityAnswerEpoch;
@@ -622,6 +648,15 @@ export default function SettingsScreen() {
       activityCategoriesRef.current = bootstrap.categories;
       activityFreshEpoch.current = epochAtFetch;
       setData(bootstrap);
+      // A4: the display-level summary of this read, for the next launch's first paint.
+      recordSettingsLastKnown({
+        location: settingsLocationDisplay(location),
+        activities: {
+          count: bootstrap.categories.length,
+          pinned: bootstrap.categories.filter((category) => category.isPinned).length
+        },
+        placesCount: bootstrap.places.length
+      }, startedFor);
       await configureLocationIntelligence(bootstrap);
       syncShortcutCatalog(bootstrap);
       setLocationDiagnostics(location);
@@ -752,7 +787,10 @@ export default function SettingsScreen() {
     return () => subscription.remove();
   }, [refreshReviewNudge, transitionReady]);
 
-  const reviewNudgeOn = Boolean(reviewNudge?.enabled) && nudgePermission === "granted";
+  // Display only (A4): the live reminder once read, otherwise the last-known one.
+  const shownReviewNudge = reviewNudge ? { enabled: reviewNudge.enabled, minutes: reviewNudge.minutes } : lastKnown?.reviewNudge ?? null;
+  const shownNudgePermission = nudgePermission ?? lastKnown?.nudgePermission ?? null;
+  const shownReviewNudgeOn = Boolean(shownReviewNudge?.enabled) && shownNudgePermission === "granted";
 
   async function changeReviewNudge(change: (owner: MobileAccountOwner) => Promise<ReviewNudgeState>) {
     if (nudgeBusy) return;
@@ -836,7 +874,12 @@ export default function SettingsScreen() {
       const startedFor = await beginRememberedSettingsRead();
       setHealthAccessGranted(await isHealthKitAutomaticSyncEnabled(), startedFor);
     })().catch(() => undefined);
-    getHealthImportPreferences().then(setHealthImportPreferencesAndCache).catch(() => undefined);
+    void (async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      const preferences = await getHealthImportPreferences();
+      setHealthImportPreferencesAndCache(preferences);
+      recordSettingsLastKnown({ healthImportPreferences: preferences }, startedFor);
+    })().catch(() => undefined);
     void healthMappingWriter.refresh();
   }, [
     setHealthAutoLogMappingsAndCache,
@@ -897,7 +940,7 @@ export default function SettingsScreen() {
   // live permission (canAskAgain) decides; it is read again whenever the diagnostics change and when
   // Dayframe returns to the foreground (coming back from iOS Settings), without waiting for the
   // network.
-  const [iosSettingsNeeded, setIosSettingsNeeded] = useRememberedSettingsState("iosSettingsNeeded", false);
+  const [iosSettingsNeeded, setIosSettingsNeeded] = useRememberedSettingsState<boolean | null>("iosSettingsNeeded", null);
   // Only the newest read publishes (an older answer arriving late never overwrites it), and none
   // after Settings closes.
   const [iosSettingsRead] = useState(createLatestRead);
@@ -920,26 +963,37 @@ export default function SettingsScreen() {
     });
     return () => subscription.remove();
   }, []);
-  const locationNeedsIosSettings = iosSettingsNeeded;
+  // Display only (A4): the Location rows show this visit's live read once it lands, otherwise what
+  // this account last saw. The actions (enableLocation, toggleLocationLearning) read live state.
+  const shownLocation = locationDiagnostics ? settingsLocationDisplay(locationDiagnostics) : lastKnown?.location ?? null;
+  const shownNeedsIosSettings = iosSettingsNeeded ?? lastKnown?.iosSettingsNeeded ?? false;
+  const shownMonitoringAllowed = shownLocation?.backgroundPermission === "granted";
+  const shownCaptureNeedsRetry = shownLocation?.learningEnabled === true && shownLocation.captureState === "inactive";
   // One action drives the pill's label and what VoiceOver says; Settings comes first, because a
-  // restart can't succeed until iOS allows location again.
-  const locationAction = locationAccessAction({
-    needsIosSettings: locationNeedsIosSettings,
-    captureNeedsRetry: locationCaptureNeedsRetry,
-    monitoringAllowed: locationMonitoringAllowed
+  // restart can't succeed until iOS allows location again. (Its press re-reads the live state.)
+  const shownLocationAction = locationAccessAction({
+    needsIosSettings: shownNeedsIosSettings,
+    captureNeedsRetry: shownCaptureNeedsRetry,
+    monitoringAllowed: shownMonitoringAllowed
   });
-  const { label: locationActionLabel, accessibilityLabel: locationActionAccessibilityLabel } = locationAccessLabels(locationAction);
-  const motionFitness = motionFitnessStatus
-    ? motionFitnessPresentation(motionFitnessStatus, locationDiagnostics?.locationLearningEnabled === true)
+  const { label: locationActionLabel, accessibilityLabel: locationActionAccessibilityLabel } = locationAccessLabels(shownLocationAction);
+  const shownMotionFitnessStatus = motionFitnessStatus ?? lastKnown?.motionFitnessStatus ?? null;
+  const shownMotionFitness = shownMotionFitnessStatus
+    ? motionFitnessPresentation(shownMotionFitnessStatus, shownLocation?.learningEnabled === true)
     : null;
   const settingsTitle = settingsSectionTitle(settingsSection);
   const backLabel = usePreviousScreenLabel() ?? settingsBackLabel(settingsSection, blocksNavOrigin(params.from));
   const workspaceLabel = (data ?? todaySeed)?.workspace?.name ?? "Default workspace";
   // The index's Activities summary draws from Today's copy until Settings' own data lands (display
   // only, like the account card; the Activities page itself still waits for `data`).
-  const shownCategories = (data ?? todaySeed)?.categories ?? [];
-  const categoryCount = shownCategories.length;
-  const pinnedCategoryCount = shownCategories.filter((category) => category.isPinned).length;
+  const shownBootstrap = data ?? todaySeed;
+  const shownCategories = shownBootstrap?.categories ?? [];
+  // Without either copy (Today has not loaded one yet), the counts this account last saw (A4).
+  const categoryCount = shownBootstrap ? shownCategories.length : lastKnown?.activities?.count ?? 0;
+  const pinnedCategoryCount = shownBootstrap
+    ? shownCategories.filter((category) => category.isPinned).length
+    : lastKnown?.activities?.pinned ?? 0;
+  const shownPlacesCount = shownBootstrap ? shownBootstrap.places.length : lastKnown?.placesCount ?? 0;
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
   // The account whose goals are on screen (Today is told only about the same account).
@@ -983,45 +1037,50 @@ export default function SettingsScreen() {
   };
   const dailyGoalHours = Math.round(goalMinutes.daily / 60);
   const weeklyGoalHours = Math.round(goalMinutes.weekly / 60);
-  const locationAccessSummary = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+  const locationAccessSummary = shownLocation?.captureState === "logout_cleanup"
     ? "Paused while signing out"
-    : locationMonitoringAllowed
+    : shownMonitoringAllowed
       ? "Always"
-      : locationDiagnostics?.foregroundPermission === "granted"
+      : shownLocation?.foregroundPermission === "granted"
         ? "Needs Always access"
-        : locationDiagnostics?.foregroundPermission === "denied"
+        : shownLocation?.foregroundPermission === "denied"
           ? "Off in iPhone Settings"
           : "Not set up";
-  const locationSuggestionsSummary = locationCaptureNeedsRetry
+  const locationSuggestionsSummary = shownCaptureNeedsRetry
     ? "Paused. Open Location to restart it."
-    : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
+    : shownLocation?.learningEnabled && !shownMonitoringAllowed
       ? "Needs Always location access"
       : "Anything uncertain waits in Review";
+  // Display only (A4): this visit's Health types once read, otherwise the last-known ones.
+  const shownHealthImportPreferences = healthImportPreferences ?? shownHealthPreferencesFrom(lastKnown?.healthImportPreferences);
   const healthWorkoutKeys = HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => option.key !== "sleep");
-  const healthWorkoutSummary = healthImportPreferences
-    ? `${healthWorkoutKeys.filter((option) => healthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
+  const healthWorkoutSummary = shownHealthImportPreferences
+    ? `${healthWorkoutKeys.filter((option) => shownHealthImportPreferences[option.key]).length} of ${healthWorkoutKeys.length}`
     : null;
   // Settings › Location: the consent switch's plain state, kept apart from the iOS permission.
-  const locationSuggestionsDetail = locationDiagnostics?.locationLearningCaptureState === "logout_cleanup"
+  const locationSuggestionsDetail = shownLocation?.captureState === "logout_cleanup"
     ? "Paused while signing out. Sign out again to finish."
-    : locationAction === "settings" && locationDiagnostics?.locationLearningEnabled
+    : shownLocationAction === "settings" && shownLocation?.learningEnabled
       ? "Paused. Allow location in iPhone Settings (Open Settings above)."
-      : locationCaptureNeedsRetry
+      : shownCaptureNeedsRetry
       ? "Paused. Tap Restart location above to start it again."
-      : locationDiagnostics?.locationLearningEnabled && !locationMonitoringAllowed
+      : shownLocation?.learningEnabled && !shownMonitoringAllowed
         ? "On, but needs Always location access"
-        : locationDiagnostics?.locationLearningActive
+        : shownLocation?.learningActive
           ? "On. Anything uncertain waits in Review."
           : "Off";
   // Settings › Apple Health: one plain access line (the notes behind it stay in the details).
   const healthConnected = healthAccessGranted === true || healthPermissionStatus?.status === "available";
-  // Known once this account has read its Apple Health access on any Settings page (remembered).
-  const healthAccessKnown = healthAccessGranted !== null || healthPermissionStatus !== undefined;
+  // Display only (A4): the live access once read this session, otherwise the last-known one.
+  const shownHealthAccessGranted = healthAccessGranted ?? lastKnown?.healthAccessGranted ?? null;
+  const shownHealthConnected = shownHealthAccessGranted === true || healthPermissionStatus?.status === "available";
+  // Known once this account has read its Apple Health access (this session, or last-known).
+  const shownHealthAccessKnown = shownHealthAccessGranted !== null || healthPermissionStatus !== undefined;
   const healthAccessSummary = healthAvailability?.status === "unavailable"
     ? "Apple Health isn't available on this iPhone"
-    : healthConnected
+    : shownHealthConnected
       ? "Connected"
-      : !healthAccessKnown
+      : !shownHealthAccessKnown
         ? "Checking…"
         : healthPermissionStatus
           ? "Allow Dayframe in the Health app"
@@ -1068,7 +1127,8 @@ export default function SettingsScreen() {
     setSyncHelpNote(null);
   }, [settingsSection, syncHelpIssueKey]);
   // Sync help and the Settings Help row: one plain status (settingsSyncDiagnostics.syncHelpStatus).
-  const syncStatus = syncHelpStatus({
+  // The Needs attention rows (and their actions) come only from the live lists.
+  const liveSyncStatus = syncHelpStatus({
     timerStopIssueCount: timerStopSyncIssues.length,
     timeEntryIssueCount: timeEntrySyncIssues.length,
     reviewIssueCount: reviewSyncIssues.length,
@@ -1081,6 +1141,21 @@ export default function SettingsScreen() {
     reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? 0,
     reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? 0
   });
+  // Display only (A4): each source's live count once read this session (its issue list arrives with
+  // its diagnostics), otherwise the last-known count.
+  const syncStatus = syncHelpStatus(shownSyncHelpCounts({
+    timerStopIssueCount: timerStopSyncDiagnostics ? timerStopSyncIssues.length : null,
+    timeEntryIssueCount: timeEntrySyncDiagnostics ? timeEntrySyncIssues.length : null,
+    reviewIssueCount: reviewSyncDiagnostics ? reviewSyncIssues.length : null,
+    permanentFailedCount: queueKnown ? queueDiagnostics.permanentFailedCount : null,
+    quarantinedCount: timeEntrySyncDiagnostics?.quarantinedCount ?? null,
+    deviceQuarantinedCount: timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? null,
+    queuedCount: queueKnown ? queueDiagnostics.queuedCount : null,
+    timerStopPendingCount: timerStopSyncDiagnostics?.pendingCount ?? null,
+    timeEntryPendingCount: timeEntrySyncDiagnostics?.pendingCount ?? null,
+    reviewWaitingCount: reviewSyncDiagnostics?.waitingCount ?? null,
+    reviewSignInCount: reviewSyncDiagnostics?.authenticationRequiredCount ?? null
+  }, lastKnown?.sync));
   const syncNeedsAttention = syncStatus.kind === "attention";
 
   function changeGoal(kind: "daily" | "weekly", direction: -1 | 1) {
@@ -1527,10 +1602,14 @@ export default function SettingsScreen() {
   }
 
   async function handleMotionFitnessAction() {
-    if (motionFitness?.action?.kind === "request") {
-      const startedFor = await beginRememberedSettingsRead();
+    // The live status decides (the pill may still show the last-known one, A4).
+    const startedFor = await beginRememberedSettingsRead();
+    const status = await readMotionFitnessStatus();
+    setMotionFitnessStatus(status, startedFor);
+    const action = motionFitnessPresentation(status, locationDiagnostics?.locationLearningEnabled === true).action;
+    if (action?.kind === "request") {
       setMotionFitnessStatus(await requestMotionFitness(), startedFor);
-    } else if (motionFitness?.action?.kind === "open_settings") {
+    } else if (action?.kind === "open_settings") {
       await Linking.openSettings();
     }
   }
@@ -1575,7 +1654,9 @@ export default function SettingsScreen() {
   };
 
   async function refreshLocationDiagnostics(fallbackStatus?: string) {
+    const startedFor = await beginRememberedSettingsRead();
     const diagnostics = await getLocationVisitDiagnostics();
+    recordSettingsLastKnown({ location: settingsLocationDisplay(diagnostics) }, startedFor);
     const nextLocationStatus = fallbackStatus ?? locationStatusText(diagnostics);
     updateSettingsSnapshot({
       locationDiagnostics: diagnostics,
@@ -1723,6 +1804,7 @@ export default function SettingsScreen() {
   }
 
   async function updateHealthImportPreference(type: HealthImportPreferenceKey, enabled: boolean) {
+    const startedFor = await beginRememberedSettingsRead();
     const current = healthImportPreferences ?? await getHealthImportPreferences();
     const optimistic = { ...current, [type]: enabled };
     setHealthImportPreferencesAndCache(optimistic);
@@ -1734,6 +1816,7 @@ export default function SettingsScreen() {
       }
       const saved = await setHealthImportPreference(type, enabled);
       setHealthImportPreferencesAndCache(saved);
+      recordSettingsLastKnown({ healthImportPreferences: saved }, startedFor);
       await reprocessExistingHealthReviewItems(saved, { force: true, mappings: healthAutoLogMappings });
       await load({ silent: true });
     } catch (error) {
@@ -2067,14 +2150,15 @@ export default function SettingsScreen() {
                   control={
                     <SettingsSwitch
                       accessibilityHint={locationSuggestionsSwitchHint({
-                        needsIosSettings: locationNeedsIosSettings,
-                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                        needsIosSettings: shownNeedsIosSettings,
+                        consentOn: shownLocation?.learningEnabled === true
                       })}
-                      disabled={locationDiagnostics === null}
+                      disabled={shownLocation === null}
                       label="Suggest visits and commutes"
-                      onValueChange={toggleLocationLearning}
+                      // Acts only on this visit's live read (a last-known position is display only).
+                      onValueChange={(enabled) => { if (locationDiagnostics) void toggleLocationLearning(enabled); }}
                       theme={theme}
-                      value={locationDiagnostics?.locationLearningEnabled ?? false}
+                      value={shownLocation?.learningEnabled ?? false}
                     />
                   }
                   subtitle={locationSuggestionsSummary}
@@ -2084,14 +2168,14 @@ export default function SettingsScreen() {
                 />
                 {/* UIA-086: Motion & Fitness is a status with its own action, not a page. */}
                 <SettingsBlockRow
-                  control={motionFitness?.action ? (
+                  control={shownMotionFitness?.action ? (
                     <SettingsPillButton
-                      label={motionFitness.action.label}
+                      label={shownMotionFitness.action.label}
                       onPress={() => void handleMotionFitnessAction()}
                       theme={theme}
                     />
                   ) : undefined}
-                  subtitle={motionFitness?.label ?? "Checking…"}
+                  subtitle={shownMotionFitness?.label ?? "Checking…"}
                   testID="settings-motion"
                   theme={theme}
                   title="Motion & Fitness"
@@ -2101,10 +2185,10 @@ export default function SettingsScreen() {
                   testID="settings-places"
                   theme={theme}
                   title="Saved places"
-                  value={String(data?.places.length ?? 0)}
+                  value={String(shownPlacesCount)}
                 />
                 <SettingsBlockRow
-                  control={nudgePermission === "denied" ? (
+                  control={shownNudgePermission === "denied" ? (
                     <SettingsPillButton
                       accessibilityLabel="Open iPhone Settings to allow notifications"
                       label="Open Settings"
@@ -2113,31 +2197,33 @@ export default function SettingsScreen() {
                     />
                   ) : (
                     <SettingsSwitch
-                      disabled={reviewNudge === null || nudgeBusy}
+                      disabled={shownReviewNudge === null || nudgeBusy}
                       label="Evening reminder"
+                      // Reads the live permission and saves the choice itself (never from the display).
                       onValueChange={(enabled) => void toggleReviewNudge(enabled)}
                       theme={theme}
-                      value={reviewNudgeOn}
+                      value={shownReviewNudgeOn}
                     />
                   )}
-                  subtitle={nudgePermission === "denied" ? "Notifications are off in iPhone Settings" : "When suggestions are waiting"}
+                  subtitle={shownNudgePermission === "denied" ? "Notifications are off in iPhone Settings" : "When suggestions are waiting"}
                   testID="settings-review-nudge"
                   theme={theme}
                   title="Evening reminder"
                 />
-                {reviewNudgeOn && reviewNudge ? (
+                {shownReviewNudgeOn && shownReviewNudge ? (
                   <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
                     <SettingsBlockRow
                       control={
                         <SettingsStepper
-                          canDecrease={!nudgeBusy && reviewNudge.minutes > REVIEW_NUDGE_MINUTES.min}
-                          canIncrease={!nudgeBusy && reviewNudge.minutes < REVIEW_NUDGE_MINUTES.max}
+                          canDecrease={!nudgeBusy && shownReviewNudge.minutes > REVIEW_NUDGE_MINUTES.min}
+                          canIncrease={!nudgeBusy && shownReviewNudge.minutes < REVIEW_NUDGE_MINUTES.max}
                           hint={`From ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.min)} to ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.max)}, in half hours`}
                           label="reminder time"
-                          onDecrease={() => void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes - REVIEW_NUDGE_MINUTES.step))}
-                          onIncrease={() => void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes + REVIEW_NUDGE_MINUTES.step))}
+                          // Steps from the live time only; before it is read a tap does nothing.
+                          onDecrease={() => { if (reviewNudge) void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes - REVIEW_NUDGE_MINUTES.step)); }}
+                          onIncrease={() => { if (reviewNudge) void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes + REVIEW_NUDGE_MINUTES.step)); }}
                           theme={theme}
-                          value={formatReviewNudgeTime(reviewNudge.minutes)}
+                          value={formatReviewNudgeTime(shownReviewNudge.minutes)}
                         />
                       }
                       testID="settings-review-nudge-time"
@@ -2152,17 +2238,18 @@ export default function SettingsScreen() {
                 <SettingsBlockRow
                   control={
                     <SettingsSwitch
-                      disabled={healthImportPreferences === null || healthAvailability?.status === "unavailable"}
+                      disabled={shownHealthImportPreferences === null || healthAvailability?.status === "unavailable"}
                       label="Sleep"
+                      // Saves from the live preferences (updateHealthImportPreference), never the display.
                       onValueChange={(enabled) => void setSleepImport(enabled)}
                       theme={theme}
-                      value={healthImportPreferences?.sleep ?? false}
+                      value={shownHealthImportPreferences?.sleep ?? false}
                     />
                   }
                   divider={false}
                   subtitle={healthAvailability?.status === "unavailable"
                     ? "Apple Health isn't available on this device"
-                    : healthImportPreferences?.sleep && healthPermissionStatus && healthPermissionStatus.status !== "available"
+                    : shownHealthImportPreferences?.sleep && healthPermissionStatus && healthPermissionStatus.status !== "available"
                       ? "Allow sleep in the Health app to import it"
                       : "Becomes a Sleep block you confirm"}
                   testID="settings-health-sleep"
@@ -2437,7 +2524,7 @@ export default function SettingsScreen() {
                 />
               </SettingsBlockGroup>
 
-              {syncStatus.issueCount > 0 ? (
+              {liveSyncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
                   foot="Try again resends it. Discard keeps your account as it is."
                   theme={theme}
@@ -2599,14 +2686,15 @@ export default function SettingsScreen() {
                     <SettingsSwitch
                       // Consent for this account, separate from the iOS permission above.
                       accessibilityHint={locationSuggestionsSwitchHint({
-                        needsIosSettings: locationNeedsIosSettings,
-                        consentOn: locationDiagnostics?.locationLearningEnabled === true
+                        needsIosSettings: shownNeedsIosSettings,
+                        consentOn: shownLocation?.learningEnabled === true
                       })}
-                      disabled={locationDiagnostics === null}
+                      disabled={shownLocation === null}
                       label="Suggest visits and commutes"
-                      onValueChange={toggleLocationLearning}
+                      // Acts only on this visit's live read (a last-known position is display only).
+                      onValueChange={(enabled) => { if (locationDiagnostics) void toggleLocationLearning(enabled); }}
                       theme={theme}
-                      value={locationDiagnostics?.locationLearningEnabled ?? false}
+                      value={shownLocation?.learningEnabled ?? false}
                     />
                   }
                   divider={false}
@@ -2616,14 +2704,14 @@ export default function SettingsScreen() {
                   title="Suggest visits and commutes"
                 />
                 <SettingsBlockRow
-                  control={motionFitness?.action ? (
+                  control={shownMotionFitness?.action ? (
                     <SettingsPillButton
-                      label={motionFitness.action.label}
+                      label={shownMotionFitness.action.label}
                       onPress={() => void handleMotionFitnessAction()}
                       theme={theme}
                     />
                   ) : undefined}
-                  subtitle={motionFitness ? `${motionFitness.label} · ${motionFitness.detail}` : "Checking…"}
+                  subtitle={shownMotionFitness ? `${shownMotionFitness.label} · ${shownMotionFitness.detail}` : "Checking…"}
                   testID="location-motion"
                   theme={theme}
                   title="Motion & Fitness"
@@ -2647,7 +2735,7 @@ export default function SettingsScreen() {
                   testID="location-saved-places"
                   theme={theme}
                   title="Saved places"
-                  value={String(data?.places.length ?? 0)}
+                  value={String(shownPlacesCount)}
                 />
               </SettingsBlockGroup>
 
@@ -2681,7 +2769,7 @@ export default function SettingsScreen() {
                     // The slot keeps its height either way, so the row never shifts when Connect
                     // goes; Connect shows only once access is known to be missing (owner, 12 Oct).
                     <View style={styles.settingsControlSlot}>
-                      {healthAccessKnown && !healthConnected ? (
+                      {shownHealthAccessKnown && !shownHealthConnected ? (
                         <SettingsPillButton
                           accessibilityLabel="Connect Apple Health"
                           disabled={healthAvailability?.status === "unavailable"}
@@ -2713,7 +2801,7 @@ export default function SettingsScreen() {
                 <Reanimated.View key={group.title} layout={localLayoutTransition(reduceMotion)}>
                 <SettingsBlockGroup theme={theme} title={group.title}>
                   {HEALTH_IMPORT_PREFERENCE_OPTIONS.filter((option) => group.keys.includes(option.key)).map((option, index) => {
-                    const enabled = healthImportPreferences?.[option.key] ?? option.defaultEnabled;
+                    const enabled = shownHealthImportPreferences?.[option.key] ?? option.defaultEnabled;
                     const mapping = healthAutoLogMappings[option.key] ?? {};
                     const mappedCategory = data?.categories.find((category) => category.id === mapping.categoryId) ?? null;
                     const label = option.key === "other" ? "Other workouts" : option.label;
@@ -2782,7 +2870,7 @@ export default function SettingsScreen() {
       {healthDetailKey ? (
         <HealthTypeSheet
           categories={data?.categories ?? []}
-          enabled={healthImportPreferences?.[healthDetailKey]
+          enabled={shownHealthImportPreferences?.[healthDetailKey]
             ?? HEALTH_IMPORT_PREFERENCE_OPTIONS.find((option) => option.key === healthDetailKey)?.defaultEnabled
             ?? false}
           healthKey={healthDetailKey}
