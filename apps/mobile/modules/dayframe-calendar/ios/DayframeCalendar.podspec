@@ -17,5 +17,7 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
   s.source_files = '**/*.swift'
+  # Registry glyphs rendered by scripts/generate-icons.mjs (npm run check:icons guards them).
+  s.resource_bundles = { 'DayframeCalendarGlyphs' => ['Glyphs/*.png'] }
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
 end

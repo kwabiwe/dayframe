@@ -124,7 +124,7 @@ describe("native Calendar production contract", () => {
 
     expect(records).toContain("var tagText: String?");
     expect(model).toContain("tagText = record.tagText");
-    expect(rootView).toContain("Image(systemName: \"tag.fill\")");
+    expect(rootView).toContain("DayframeCalendarGlyph(name: \"tag\"");
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });
@@ -249,7 +249,7 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain(".accessibilityHidden(true)");
     expect(previewView).not.toContain("presentation.entries");
     expect(previewView).not.toContain("entry.color");
-    expect(previewView).not.toContain('Image(systemName: "tag.fill")');
+    expect(previewView).not.toContain('DayframeCalendarGlyph(name: "tag"');
     expect(previewView).not.toContain("play.fill");
   });
 

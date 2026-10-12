@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Builds Dayframe's single icon geometry from lucide-react (ISC) plus Dayframe-drawn glyphs.
 //
-//   node scripts/generate-icons.mjs          write packages/shared/src/iconGlyphs.ts and the iOS tab-bar PNGs
+//   node scripts/generate-icons.mjs          write packages/shared/src/iconGlyphs.ts, the iOS tab-bar PNGs and the native Calendar glyph PNGs
 //   node scripts/generate-icons.mjs --check  fail if either is stale (no rendering needed)
 //
 // Add a glyph by listing it in GLYPHS (or CUSTOM_GLYPHS) and re-running the script.
@@ -25,7 +25,7 @@ const GLYPHS = [
   "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-user-round", "cloud-alert", "cloud-check",
   "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "footprints", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
-  "laptop", "library", "list-checks", "log-out", "mail", "map-pin", "message-circle", "moon", "mountain", "music", "palette",
+  "laptop", "library", "list-checks", "log-out", "mail", "map-pin", "message-circle", "minus", "moon", "mountain", "music", "palette",
   "party-popper", "paw-print", "pen-line", "pencil", "person-standing", "phone", "pill", "pin", "plane", "play",
   "plus", "presentation", "refresh-cw", "rotate-ccw", "route", "scissors", "search", "settings", "ship", "shirt", "shopping-bag",
   "shield", "shopping-cart", "sprout", "square", "stethoscope", "sun", "tag", "tent", "timer", "train-front", "trash-2", "tv",
@@ -46,6 +46,13 @@ const CUSTOM_GLYPHS = {
 // Native iOS tab bar icons, rendered as template images so UIKit tints them inside Liquid Glass.
 const TAB_ICONS = { today: "sun", calendar: "calendar-days", reports: "chart-column", orb: "play" };
 const TAB_POINTS = 26;
+
+// Native Calendar glyphs (SwiftUI module), template images at the registry's 24-point grid, bundled
+// with the DayframeCalendar pod and tinted by SwiftUI. Swift scales them to the text they sit beside.
+const calendarGlyphDir = join(root, "apps/mobile/modules/dayframe-calendar/ios/Glyphs");
+const calendarManifestPath = join(calendarGlyphDir, "manifest.json");
+const CALENDAR_ICONS = { place: "map-pin", tag: "tag", "zoom-in": "plus", "zoom-out": "minus" };
+const CALENDAR_POINTS = 24;
 
 async function lucideNodes(name) {
   const file = join(lucideDir, `${name}.mjs`);
@@ -112,30 +119,46 @@ function tabSvg(glyphs, glyph, size) {
   return glyphSvg(glyphs[glyph], { size, padding: (TAB_POINTS - 24) / 2 });
 }
 
+function calendarSvg(glyphs, glyph, size) {
+  return glyphSvg(glyphs[glyph], { size });
+}
+
+// One icon family of template PNGs: icons maps file stem -> glyph, svgFor(glyphs, glyph, pixels).
+const ICON_SETS = [
+  { label: "tab icon", dir: tabIconDir, manifestPath: tabManifestPath, icons: TAB_ICONS, points: TAB_POINTS, svgFor: tabSvg },
+  {
+    label: "Calendar glyph",
+    dir: calendarGlyphDir,
+    manifestPath: calendarManifestPath,
+    icons: CALENDAR_ICONS,
+    points: CALENDAR_POINTS,
+    svgFor: calendarSvg
+  }
+];
+
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 const TAB_SCALES = [["", 1], ["@2x", 2], ["@3x", 3]];
 
 // The manifest records the SVG each image comes from and the bytes of every PNG, so --check can
 // catch a glyph change that was not regenerated and images that were not committed.
-async function renderTabIcons(glyphs) {
+async function renderIconSet(glyphs, set) {
   let sharp;
   try {
     // sharp arrives with Next.js; it is only needed to write images, never for --check.
     sharp = require("sharp");
   } catch {
-    throw new Error("Rendering tab icons needs sharp. Run npm ci (with optional dependencies) and retry.");
+    throw new Error("Rendering icons needs sharp. Run npm ci (with optional dependencies) and retry.");
   }
   const manifest = {};
   const files = {};
-  for (const [tab, glyph] of Object.entries(TAB_ICONS)) {
+  for (const [name, glyph] of Object.entries(set.icons)) {
     const images = {};
     for (const [suffix, scale] of TAB_SCALES) {
-      const size = TAB_POINTS * scale;
-      const png = await sharp(Buffer.from(tabSvg(glyphs, glyph, size))).png().toBuffer();
-      files[`${tab}${suffix}.png`] = png;
-      images[`${tab}${suffix}.png`] = sha256(png);
+      const png = await sharp(Buffer.from(set.svgFor(glyphs, glyph, set.points * scale))).png().toBuffer();
+      files[`${name}${suffix}.png`] = png;
+      images[`${name}${suffix}.png`] = sha256(png);
     }
-    manifest[tab] = { glyph, points: TAB_POINTS, svgSha256: sha256(tabSvg(glyphs, glyph, TAB_POINTS)), images };
+    manifest[name] = { glyph, points: set.points, svgSha256: sha256(set.svgFor(glyphs, glyph, set.points)), images };
   }
   return { manifest, files };
 }
@@ -148,30 +171,34 @@ if (process.argv.includes("--check")) {
   if (!existsSync(registryPath) || readFileSync(registryPath, "utf8") !== registry) {
     problems.push("packages/shared/src/iconGlyphs.ts is stale");
   }
-  const manifest = existsSync(tabManifestPath) ? JSON.parse(readFileSync(tabManifestPath, "utf8")) : {};
-  for (const [tab, glyph] of Object.entries(TAB_ICONS)) {
-    const entry = manifest[tab];
-    if (!entry || entry.glyph !== glyph || entry.svgSha256 !== sha256(tabSvg(glyphs, glyph, TAB_POINTS))) {
-      problems.push(`tab icon "${tab}" does not match the ${glyph} glyph`);
-      continue;
-    }
-    for (const [suffix] of TAB_SCALES) {
-      const name = `${tab}${suffix}.png`;
-      const path = join(tabIconDir, name);
-      if (!existsSync(path)) problems.push(`missing tab icon ${name}`);
-      else if (sha256(readFileSync(path)) !== entry.images?.[name]) problems.push(`tab icon ${name} differs from the generated image`);
+  for (const set of ICON_SETS) {
+    const manifest = existsSync(set.manifestPath) ? JSON.parse(readFileSync(set.manifestPath, "utf8")) : {};
+    for (const [name, glyph] of Object.entries(set.icons)) {
+      const entry = manifest[name];
+      if (!entry || entry.glyph !== glyph || entry.svgSha256 !== sha256(set.svgFor(glyphs, glyph, set.points))) {
+        problems.push(`${set.label} "${name}" does not match the ${glyph} glyph`);
+        continue;
+      }
+      for (const [suffix] of TAB_SCALES) {
+        const file = `${name}${suffix}.png`;
+        const path = join(set.dir, file);
+        if (!existsSync(path)) problems.push(`missing ${set.label} ${file}`);
+        else if (sha256(readFileSync(path)) !== entry.images?.[file]) problems.push(`${set.label} ${file} differs from the generated image`);
+      }
     }
   }
   if (problems.length) {
     console.error(`${problems.join("\n")}\nRun: npm run generate:icons`);
     process.exit(1);
   }
-  console.log(`Icon registry and tab icons are current (${Object.keys(glyphs).length} glyphs).`);
+  console.log(`Icon registry, tab icons and Calendar glyphs are current (${Object.keys(glyphs).length} glyphs).`);
 } else {
   writeFileSync(registryPath, registry);
-  const { manifest, files } = await renderTabIcons(glyphs);
-  mkdirSync(tabIconDir, { recursive: true });
-  for (const [name, png] of Object.entries(files)) writeFileSync(join(tabIconDir, name), png);
-  writeFileSync(tabManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`Wrote ${Object.keys(glyphs).length} glyphs and ${Object.keys(TAB_ICONS).length} tab icons.`);
+  for (const set of ICON_SETS) {
+    const { manifest, files } = await renderIconSet(glyphs, set);
+    mkdirSync(set.dir, { recursive: true });
+    for (const [name, png] of Object.entries(files)) writeFileSync(join(set.dir, name), png);
+    writeFileSync(set.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+  console.log(`Wrote ${Object.keys(glyphs).length} glyphs, ${Object.keys(TAB_ICONS).length} tab icons and ${Object.keys(CALENDAR_ICONS).length} Calendar glyphs.`);
 }
