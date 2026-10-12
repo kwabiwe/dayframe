@@ -1555,6 +1555,8 @@ dialog.ui-dialog::backdrop {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* The dialog's own inner padding, like its header and actions (UIA-301). */
+  padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
 .ui-dialog .swiss-form-grid {
@@ -1593,6 +1595,8 @@ dialog.ui-popover-panel.bottom-left {
 
 .ui-popover-content {
   display: grid;
+  /* Popover rows lay out their own edges. */
+  padding: 0;
 }
 
 @media (max-width: 1180px) {
@@ -3186,7 +3190,6 @@ dialog.ui-popover-panel.bottom-left {
 .swiss-confirm-body {
   display: grid;
   gap: 16px;
-  padding: 16px;
 }
 
 .swiss-confirm-body p {
@@ -5386,7 +5389,6 @@ kbd {
 
 .place-dialog-copy {
   margin: 0;
-  padding: 18px;
   color: var(--muted);
   font-size: 14px;
   line-height: 1.55;
@@ -5395,7 +5397,6 @@ kbd {
 .place-role-dialog {
   display: grid;
   gap: 16px;
-  padding: 18px;
 }
 
 .place-role-note {
@@ -7442,6 +7443,8 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .manual-entry-dialog-content {
   overflow: visible;
+  /* The manual entry form lays out its own edges. */
+  padding: 0;
 }
 
 .manual-entry-dialog .manual-entry-form {
@@ -10082,6 +10085,8 @@ dialog.ui-dialog.df-palette {
   display: flex;
   min-height: 0;
   flex-direction: column;
+  /* The palette pads the dialog itself. */
+  padding: 0;
 }
 
 .df-palette-input {
@@ -12442,8 +12447,31 @@ dialog.ui-dialog.df-ce-dialog {
   margin: 0;
 }
 
+/* Settings dialogs (UIA-301): fields stacked full width; the action is in the dialog footer. */
 .df-set-dialog-form {
-  align-items: end;
+  display: grid;
+  gap: 12px;
+}
+
+.df-set-dialog-form .ui-control.is-compact {
+  width: 100%;
+}
+
+.ui-dialog .settings-workspace-actions.df-set-dialog-workspace {
+  min-width: 0;
+  justify-items: stretch;
+}
+
+.df-set-dialog-workspace .settings-workspace-toolbar {
+  justify-content: flex-start;
+}
+
+.df-set-dialog-workspace .settings-workspace-select {
+  flex: 1 1 200px;
+}
+
+.df-set-dialog-workspace .settings-workspace-detail-form {
+  justify-content: flex-start;
 }
 
 .df-settings {
