@@ -14193,6 +14193,8 @@ dialog.ui-dialog.df-rf-dialog {
   .df-pe-seg span {
     min-height: 44px;
   }
+}
+
 
 /*
  * W13: Calendar drag-to-create ghost and resize tip (prototype web.html .cal-ghost / .resize-tip).
