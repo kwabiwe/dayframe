@@ -284,6 +284,8 @@ describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", 
     // Now exactly on a step (10:35): a full step ending at now.
     expect(calendarDragCreateRange({ ...axis, anchorMinutes: 640, currentMinutes: 700, limitMinutes: 635 }))
       .toEqual({ startMinutes: 630, endMinutes: 635, heldAtLimit: true });
+    // Every limit minute of the day; failures are collected so the loop stays cheap on CI.
+    const failures: string[] = [];
     for (let limit = 1; limit < 24 * 60; limit += 1) {
       for (const [anchor, current] of [[limit - 3, limit + 40], [limit + 5, limit + 10], [limit - 1, limit - 1], [limit - 40, limit + 2]]) {
         const range = calendarDragCreateRange({
@@ -292,11 +294,16 @@ describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", 
           currentMinutes: Math.round(current / 5) * 5,
           limitMinutes: limit
         });
-        expect(range.startMinutes % 5).toBe(0);
-        expect(range.endMinutes).toBeLessThanOrEqual(limit);
-        expect(range.endMinutes - range.startMinutes).toBeGreaterThanOrEqual(1);
+        if (
+          range.startMinutes % 5 !== 0 ||
+          range.endMinutes > limit ||
+          range.endMinutes - range.startMinutes < 1
+        ) {
+          failures.push(`limit ${limit} anchor ${anchor} current ${current}: ${range.startMinutes}–${range.endMinutes}`);
+        }
       }
     }
+    expect(failures).toEqual([]);
   });
 
   it("never draws the ghost past the now line, growing a too-short ghost upward instead (Codex r1 on #369)", () => {
@@ -323,24 +330,34 @@ describe("Calendar create stops at now (owner decision 12 Oct 2026, option B)", 
     const ghost = calendarCreateGhostGeometry({ ...axis, endMinutes: 715, limitMinutes: 716, startMinutes: 710 });
     expect(ghost.top + ghost.height).toBeLessThanOrEqual(nowLineY - 2);
     expect(ghost.height).toBe(12);
-    // Sweep: every short range (5–15 minutes) ending up to 15 minutes before now, at every zoom.
-    for (const rowHeight of [48, 64, 92, 128, 192]) {
-      for (let limit = 30; limit <= 24 * 60; limit += 7) {
+    // Sweep (sampled, so it stays fast on CI): short ranges ending 0–15 minutes before now, at a
+    // few zooms and limits through the day, including just after midnight where the 12px minimum
+    // can't fit above the line and the ghost goes as far up as the day allows (top 0).
+    const failures: string[] = [];
+    for (const rowHeight of [48, 64, 192]) {
+      for (const limit of [1, 2, 5, 9, 14, 22, 29, 31, 301, 719, 720, 1103, 1439]) {
+        const lineY = (limit / 60) * rowHeight;
         for (let endGap = 0; endGap <= 15; endGap += 1) {
           for (const length of [1, 2, 4, 5, 10, 15]) {
             const endMinutes = limit - endGap;
             const startMinutes = endMinutes - length;
-            const geometry = calendarCreateGhostGeometry({ endMinutes, limitMinutes: limit, rowHeight, startHour: 0, startMinutes });
-            const lineY = (limit / 60) * rowHeight;
-            expect(geometry.top + geometry.height).toBeLessThanOrEqual(lineY - 2 + 1e-9);
-            expect(geometry.height).toBeGreaterThanOrEqual(12);
-            expect(geometry.top).toBeGreaterThanOrEqual(0);
-            // Never drawn lower than the range itself starts.
-            expect(geometry.top).toBeLessThanOrEqual((startMinutes / 60) * rowHeight + 1e-9);
+            if (startMinutes < 0) continue;
+            const { height, top } = calendarCreateGhostGeometry({ endMinutes, limitMinutes: limit, rowHeight, startHour: 0, startMinutes });
+            const bottom = top + height;
+            const fits = lineY - 2 >= 12;
+            if (
+              height < 12 ||
+              top < 0 ||
+              top > (startMinutes / 60) * rowHeight + 1e-9 ||
+              (fits ? bottom > lineY - 2 + 1e-9 : top !== 0)
+            ) {
+              failures.push(`${rowHeight}px/h now ${limit} ${startMinutes}–${endMinutes}: top ${top} height ${height}`);
+            }
           }
         }
       }
     }
+    expect(failures).toEqual([]);
   });
 
   it("creates a dragged range ending where the ghost stops, and nothing that starts at or after now", () => {
