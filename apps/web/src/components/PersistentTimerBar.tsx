@@ -32,7 +32,6 @@ import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
-import { isUnsavedEntryId } from "@/lib/today-view";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -162,11 +161,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
   // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
-  // picking an activity then removes it and the next autosave sends the cleaned text. A block
-  // still on its optimistic id (its Start's refresh not back yet) has nothing to PATCH: edits wait
-  // in the draft and are saved once its real block arrives.
+  // picking an activity then removes it and the next autosave sends the cleaned text. The runtime
+  // saves to the block's real id, including a just-started block still shown optimistically.
   useEffect(() => {
-    if (!active || isUnsavedEntryId(active.id)) return undefined;
+    if (!active) return undefined;
     const nextCategoryId = timerDraft.categoryId || null;
     const nextDescription = timerDraft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
@@ -346,11 +344,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     setCategoryMenuOpen(false);
     setSuggestionsOpen(false);
     const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
-    setTimerDraft(draft);
     // The Start decides when it runs (a queued Start can run after earlier ones settle): asking for
     // exactly the running block changes nothing and says so; a switch names the block it actually
-    // replaced, timed to the switch. A Start superseded by a later one announces nothing.
-    void startTimer(draft, { dedupeRunning: true }).then((outcome) => {
+    // replaced, timed to the switch. A Start superseded by a later one announces nothing. It is
+    // asked for before the bar shows its draft, so the runtime keeps the outgoing block's edits.
+    const started = startTimer(draft, { dedupeRunning: true });
+    setTimerDraft(draft);
+    void started.then((outcome) => {
       if (!outcome.ok || !outcome.own) return;
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);

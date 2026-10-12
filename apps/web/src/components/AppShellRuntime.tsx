@@ -24,6 +24,7 @@ import {
   reconcileTimerDraft,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
+  timerDraftDiffersFromEntry,
   timerDraftForEntry,
   timerDraftsEqual,
   timerDraftVersion,
@@ -116,9 +117,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // optimistic block to the real one keeps the token.
   const scopeCounterRef = useRef(0);
   const [timerDraftScope, setTimerDraftScope] = useState("idle#0");
-  // The optimistic block of a Start the server accepted; its real block is the same block. Kept
-  // until the server's own state (a real block, or none) arrives.
-  const acceptedStartIdRef = useRef<string | null>(null);
+  // Optimistic block id → the real block id its Start's POST returned (Codex r10). Recorded the
+  // moment the server accepts the Start, so saves and Stop target the real block straight away,
+  // and only that real block is this block's handoff: any other real block arriving supersedes
+  // it. Separate from the completion scope; cleared once a real block is running.
+  const startHandoffsRef = useRef(new Map<string, string>());
+  // The running block's draft at the moment a Start that replaces it was asked for, by block id:
+  // its pending edits, saved to its real id before the switch runs (Codex r10).
+  const outgoingDraftsRef = useRef(new Map<string, TimerDraft>());
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -187,17 +193,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const rollbackDraft = rollbackDraftRef.current;
     rollbackDraftRef.current = null;
     const rolledBack = activeEntryChanged && rollbackDraft?.entryId === activeEntryId;
-    // A Start the server accepted replaces its optimistic block with the real one: the same block,
-    // so edits made while the Start was pending are reconciled like any other, not reset (Codex
-    // r7). A rejected Start's rollback is a genuine change of block (Codex r8).
-    const startAccepted = activeEntryChanged && !rolledBack && previousEntryId !== null
-      && previousEntryId === acceptedStartIdRef.current
-      && activeEntryId !== null && !isOptimisticTimerId(activeEntryId);
-    // The acceptance record is separate from the completion scope: it outlives later optimistic
-    // blocks and rollbacks to its block (a second Start rejected before the first one's refresh
-    // lands; Codex r9) and is cleared only by the server's own truth, a real block or none,
-    // whether that is its handoff or a newer state superseding it.
-    if (activeEntryId === null || !isOptimisticTimerId(activeEntryId)) acceptedStartIdRef.current = null;
+    // The real block a Start's POST returned replaces its optimistic block: the same block, so
+    // edits made meanwhile are reconciled like any other, not reset (Codex r7). Only that exact
+    // block counts (Codex r10): another real block (another device, a newer state) supersedes it.
+    // A rejected Start's rollback is a genuine change of block (Codex r8). The record outlives
+    // later optimistic blocks and rollbacks to its block (Codex r9).
+    const handoffId = previousEntryId === null ? undefined : startHandoffsRef.current.get(previousEntryId);
+    const startAccepted = activeEntryChanged && !rolledBack && handoffId !== undefined && activeEntryId === handoffId;
+    if (activeEntryId !== null && !isOptimisticTimerId(activeEntryId)) startHandoffsRef.current.clear();
     const nextDraft = rolledBack
       ? rollbackDraft!.draft
       : reconcileTimerDraft(activeEntryChanged && !startAccepted, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
@@ -360,13 +363,96 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     commitData(nextData, "hydrate");
   }, [commitData, selectedDate]);
 
+  /** The server's id for a block: the real id behind an accepted Start's optimistic block. */
+  const serverEntryId = useCallback((entryId: string) => (
+    isOptimisticTimerId(entryId) ? startHandoffsRef.current.get(entryId) ?? null : entryId
+  ), []);
+
+  // Saves the running block's details; the caller holds the mutation gate.
+  const saveActiveDetails = useCallback(async (snapshot: BootstrapData, draft: TimerDraft): Promise<MutationOutcome> => {
+    const activeEntry = snapshot.activeEntry!;
+    const targetId = serverEntryId(activeEntry.id);
+    if (!targetId) return { ok: false, error: "The block is still starting." };
+    setIsTimerBusy(true);
+    setTimerError(null);
+    refreshRequestRef.current += 1;
+    const optimistic = applyOptimisticActiveEntryPatch(snapshot, draft);
+    commitData(optimistic, "optimistic");
+    // What is being saved is now the canonical draft, so an edit made while the save is pending
+    // (even one back to the previous text) is newer and survives its acknowledgement (Codex r7).
+    canonicalTimerDraftRef.current = timerDraftForEntry(optimistic.activeEntry);
+    try {
+      const response = await clientFetch(`/api/time-entries/${targetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          categoryId: draft.categoryId || null,
+          placeId: activeEntry.placeId,
+          description: draft.description.trim() || null,
+          tagNames: draft.tagNames
+        })
+      });
+      if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
+      const result = (await response.json()) as { updatedAt?: string };
+      if (result.updatedAt && dataRef.current) {
+        commitData(
+          applyAuthoritativeActiveEntryVersion(dataRef.current, activeEntry.id, result.updatedAt),
+          "canonical"
+        );
+      }
+      return { ok: true } as const;
+    } catch {
+      commitData(snapshot, "optimistic");
+      canonicalTimerDraftRef.current = timerDraftForEntry(snapshot.activeEntry);
+      setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
+      const message = "Block details were not saved. Your previous values were restored.";
+      setTimerError(message);
+      return { ok: false, error: message } as const;
+    } finally {
+      setIsTimerBusy(false);
+    }
+  }, [commitData, serverEntryId, setTimerDraft]);
+
+  // Leaving the shell: details the running block's real id would still get from autosave are sent
+  // now (keepalive, so the request outlives the page). A block whose Start's POST has not come
+  // back has no real id yet; those edits are lost, as on any page left mid-request.
+  useEffect(() => () => {
+    const entry = dataRef.current?.activeEntry;
+    const draft = draftRef.current;
+    const targetId = entry ? serverEntryId(entry.id) : null;
+    if (!entry || !targetId || !timerDraftDiffersFromEntry(draft, entry)) return;
+    void clientFetch(`/api/time-entries/${targetId}`, {
+      method: "PATCH",
+      keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        categoryId: draft.categoryId || null,
+        placeId: entry.placeId,
+        description: draft.description.trim() || null,
+        tagNames: draft.tagNames
+      })
+    }).catch(() => undefined);
+  }, [serverEntryId]);
+
   const startTimer = useCallback(async (
     input: TimerDraftInput = {},
     options: { dedupeRunning?: boolean } = {}
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
+    const outgoing = snapshot.activeEntry;
+    if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) outgoingDraftsRef.current.set(outgoing.id, draftRef.current);
     return runTimerStartMutation({
+      beforeStart: async () => {
+        // The block this Start replaces gets its pending edits first, at its real id.
+        const current = dataRef.current;
+        const entry = current?.activeEntry;
+        const pending = entry ? outgoingDraftsRef.current.get(entry.id) : undefined;
+        outgoingDraftsRef.current.clear();
+        if (current && entry && pending && serverEntryId(entry.id) && timerDraftDiffersFromEntry(pending, entry)) {
+          await saveActiveDetails(current, pending);
+        }
+      },
       dedupeRunning: options.dedupeRunning,
       gate: mutationGateRef.current,
       snapshot,
@@ -393,15 +479,27 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           body: JSON.stringify(payload)
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
-        // Accepted: the optimistic block on screen is handed over to the real one on refresh.
-        const running = dataRef.current?.activeEntry?.id ?? null;
-        acceptedStartIdRef.current = isOptimisticTimerId(running) ? running : null;
+        // Accepted: record which real block the optimistic one on screen is, from the POST itself.
+        const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
+        const snapshot = dataRef.current;
+        const optimisticId = snapshot?.activeEntry?.id ?? null;
+        if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || typeof result?.timeEntryId !== "string") return;
+        startHandoffsRef.current.set(optimisticId, result.timeEntryId);
+        // Edits made while the POST was in flight had no block to go to: save them to it now,
+        // before anything queued behind this Start (a switch, a Stop) runs. A switch asked for
+        // meanwhile has already put its own draft on screen, so its capture of this block's edits
+        // is what is saved.
+        const pending = outgoingDraftsRef.current.get(optimisticId) ?? draftRef.current;
+        outgoingDraftsRef.current.delete(optimisticId);
+        if (timerDraftDiffersFromEntry(pending, snapshot.activeEntry!)) {
+          await saveActiveDetails(snapshot, pending);
+        }
       },
       refresh: async () => {
         await refresh({ force: true });
       }
     });
-  }, [commitData, refresh, setTimerDraft]);
+  }, [commitData, refresh, saveActiveDetails, serverEntryId, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
     const decision = entryContinuationDecision(entry);
@@ -410,9 +508,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [startTimer]);
 
   const stopTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
-    const snapshot = dataRef.current;
-    if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to stop." };
-    const activeEntry = snapshot.activeEntry;
+    const requested = dataRef.current?.activeEntry;
+    if (!requested) return { ok: false, error: "There is no running block to stop." };
+    // A block whose Start is still in flight has no server id yet: Stop waits behind that Start
+    // in the mutation gate and then stops the real block (Codex r10). If the Start was rejected,
+    // the block it would have stopped is gone, so nothing is stopped.
+    if (!serverEntryId(requested.id)) {
+      await mutationGateRef.current.whenIdle();
+      if (dataRef.current?.activeEntry?.id !== requested.id) {
+        return { ok: false, error: "That block did not start, so there was nothing to stop." };
+      }
+    }
+    const snapshot = dataRef.current!;
+    const activeEntry = snapshot.activeEntry!;
+    const targetId = serverEntryId(activeEntry.id);
+    if (!targetId) return { ok: false, error: "The block is still starting." };
     const draftSnapshot = draftRef.current;
     const draft = mergeTimerDraft(draftSnapshot, input);
     const result = await mutationGateRef.current.run(async () => {
@@ -423,7 +533,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
       try {
         if (!timerDraftsEqual(draft, timerDraftForEntry(activeEntry))) {
-          const updateResponse = await clientFetch(`/api/time-entries/${activeEntry.id}`, {
+          const updateResponse = await clientFetch(`/api/time-entries/${targetId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -445,17 +555,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
             source: "manual_app",
             type: "timer_stop",
             occurredAt: new Date().toISOString(),
-            clientEventId: `web-timer-stop:${activeEntry.id}`,
+            clientEventId: `web-timer-stop:${targetId}`,
             rawPayload: {
               origin: "web_timer",
               stopScope: "entry",
-              targetEntryId: activeEntry.id
+              targetEntryId: targetId
             }
           })
         });
         if (!response.ok) throw new Error(await responseError(response, `Unable to stop the block: ${response.status}`));
         return { ok: true } as const;
       } catch (error) {
+        // The block comes back with the edits it had (the rollback draft), not its saved details.
+        rollbackDraftRef.current = { draft: draftSnapshot, entryId: activeEntry.id };
         commitData(snapshot, "optimistic");
         setTimerDraft(draftSnapshot);
         const message = errorMessage(error, "Unable to stop the block.");
@@ -469,7 +581,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [commitData, refresh, setTimerDraft]);
+  }, [commitData, refresh, serverEntryId, setTimerDraft]);
 
   const deleteActiveTimer = useCallback(async (): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
@@ -506,51 +618,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const updateActiveDetails = useCallback(async (draft: TimerDraft): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
-    const result = await mutationGateRef.current.run(async () => {
-      setIsTimerBusy(true);
-      setTimerError(null);
-      refreshRequestRef.current += 1;
-      const optimistic = applyOptimisticActiveEntryPatch(snapshot, draft);
-      commitData(optimistic, "optimistic");
-      // What is being saved is now the canonical draft, so an edit made while the save is pending
-      // (even one back to the previous text) is newer and survives its acknowledgement (Codex r7).
-      canonicalTimerDraftRef.current = timerDraftForEntry(optimistic.activeEntry);
-      try {
-        const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            categoryId: draft.categoryId || null,
-            placeId: snapshot.activeEntry!.placeId,
-            description: draft.description.trim() || null,
-            tagNames: draft.tagNames
-          })
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
-        const result = (await response.json()) as { updatedAt?: string };
-        if (result.updatedAt && dataRef.current) {
-          commitData(
-            applyAuthoritativeActiveEntryVersion(dataRef.current, snapshot.activeEntry!.id, result.updatedAt),
-            "canonical"
-          );
-        }
-        return { ok: true } as const;
-      } catch {
-        commitData(snapshot, "optimistic");
-        canonicalTimerDraftRef.current = timerDraftForEntry(snapshot.activeEntry);
-        setTimerDraft(timerDraftForEntry(snapshot.activeEntry));
-        const message = "Block details were not saved. Your previous values were restored.";
-        setTimerError(message);
-        return { ok: false, error: message } as const;
-      } finally {
-        setIsTimerBusy(false);
-      }
-    });
+    // A block whose Start is still in flight keeps its edits in the draft; the Start saves them to
+    // the real block as soon as the server accepts it.
+    if (!serverEntryId(snapshot.activeEntry.id)) return { ok: false, error: "The block is still starting." };
+    const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft));
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [commitData, refresh, setTimerDraft]);
+  }, [refresh, saveActiveDetails, serverEntryId]);
 
   const updateActiveEntryFromCalendar = useCallback(async (
     input: ActiveEntryCompactMutationInput

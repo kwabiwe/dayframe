@@ -21,6 +21,8 @@ const server = {
   patches: [] as Patch[],
   patchUrls: [] as string[],
   posts: [] as Record<string, unknown>[],
+  /** Stop events: the block each one targeted. */
+  stops: [] as string[],
   rejectPatches: false,
   rejectStart: false,
   /** The next PATCH or Start waits (the request is recorded) until `release()`. */
@@ -78,7 +80,17 @@ vi.mock("@/lib/client-auth-fetch", () => ({
         startedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-      return reply(true, {});
+      // As `POST /api/time-entries` does: the processed event, with the started block's id.
+      return reply(true, { timeEntryId: server.entry.id });
+    }
+    if (method === "POST" && url === "/api/events") {
+      const body = JSON.parse(String(init?.body)) as { type?: string; rawPayload?: { targetEntryId?: string } };
+      const target = body.rawPayload?.targetEntryId ?? "";
+      server.stops.push(target);
+      if (body.type !== "timer_stop" || !server.entry || target !== server.entry.id) return reply(false, { error: "Not running" });
+      server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
+      server.entry = null;
+      return reply(true, { timeEntryId: target });
     }
     return reply(false, {});
   })
@@ -96,6 +108,7 @@ beforeEach(() => {
   server.patches = [];
   server.patchUrls = [];
   server.posts = [];
+  server.stops = [];
   server.holdNext = null;
   server.release = null;
   server.rejectStart = false;
@@ -115,9 +128,11 @@ const activitiesOpen = () => screen.queryByRole("listbox", { name: "Activities" 
 async function renderShell(entry: TimeEntryRow | null) {
   server.entry = entry;
   let refresh: () => Promise<unknown> = async () => undefined;
+  let stop: () => Promise<unknown> = async () => undefined;
   function Loader() {
     const runtime = useAppShellRuntime();
     refresh = () => runtime.refresh({ force: true });
+    stop = () => runtime.stopTimer();
     const { hydrate: load } = runtime;
     useEffect(() => load(bootstrap(server.entry)), [load]);
     return runtime.shellData ? <PersistentTimerBar /> : null;
@@ -125,7 +140,7 @@ async function renderShell(entry: TimeEntryRow | null) {
   const { unmount } = render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
   const input = await screen.findByLabelText("Description") as HTMLInputElement;
   // A server copy arriving later (another device started a block, a poll noticed it).
-  return { input, unmount, refresh: () => act(async () => { await refresh(); }) };
+  return { input, unmount, refresh: () => act(async () => { await refresh(); }), stop: () => stop() };
 }
 
 function descriptions() {
@@ -568,6 +583,139 @@ describe("Codex r9: a rejected second Start keeps the first Start's handoff", ()
     await handOff();
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
     expect(server.patches[0]).toMatchObject({ categoryId: "focus", description: "Plan", tagNames: ["urgent"] });
+  });
+});
+
+describe("Codex r10: an accepted Start's real id is known from its POST", () => {
+  const activityLabel = () => screen.getByRole("button", { name: /^Activity:/ }).getAttribute("aria-label");
+
+  /** Focus / "Plan" started; `hold` keeps either its POST or (once accepted) its refresh waiting. */
+  async function startPlan(hold: "start" | "bootstrap") {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan @foc{Tab}");
+    server.holdNext = hold;
+    await user.click(shell.input);
+    await user.keyboard("{End}{Enter}");
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    await waitFor(() => expect(server.release).not.toBeNull());
+    const release = server.release!;
+    server.release = null;
+    return { ...shell, user, release: () => act(async () => { release(); }) };
+  }
+
+  describe("POST accepted, its refresh held", () => {
+    it("autosave saves edits to the real block while it still shows optimistically", async () => {
+      const { user } = await startPlan("bootstrap");
+      await user.keyboard(" more");
+      await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]), { timeout: 2_000 });
+      expect(server.patches[0]).toMatchObject({ categoryId: "focus", description: "Plan more" });
+    });
+
+    it("another device's block arriving supersedes it: no list, no edits written to that block", async () => {
+      const { input, user, release, refresh } = await startPlan("bootstrap");
+      await user.keyboard(" more @wri");
+      expect(screen.queryByRole("listbox", { name: "Activities" })).not.toBeNull();
+      server.entry = entry({ id: "device-b", description: "Other", updatedAt: "2026-08-17T06:00:00.000Z" });
+      await release();
+      await refresh();
+      await waitFor(() => expect(input.value).toBe("Other"));
+      expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+      await user.keyboard("{Enter}");
+      await wait(1_000);
+      expect(server.patchUrls.filter((url) => url.endsWith("/device-b"))).toEqual([]);
+      expect(server.entry).toMatchObject({ id: "device-b", categoryId: "focus", description: "Other" });
+    });
+
+    it("Stop after the debounce stops the real block with its edits", async () => {
+      const { user, stop } = await startPlan("bootstrap");
+      await user.keyboard(" more");
+      await wait(1_000);
+      await act(async () => { await stop(); });
+      expect(server.stops).toEqual(["started-1"]);
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+    });
+
+    it("Stop within the debounce saves the edits to the real block, then stops it", async () => {
+      const { user, stop } = await startPlan("bootstrap");
+      await user.keyboard(" more");
+      await act(async () => { await stop(); });
+      expect(server.patchUrls).toContain("/api/time-entries/started-1");
+      expect(server.stops).toEqual(["started-1"]);
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+    });
+
+    it("a quick-start switch completes the real block with its saved edits", async () => {
+      const { user } = await startPlan("bootstrap");
+      await user.keyboard(" more");
+      await wait(1_000);
+      await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+      await waitFor(() => expect(server.posts).toHaveLength(2));
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+      await waitFor(() => expect(activityLabel()).toBe("Activity: Writing"));
+    });
+
+    it("a quick start inside the debounce saves the outgoing edits to the real block first", async () => {
+      const { user } = await startPlan("bootstrap");
+      await user.keyboard(" more");
+      await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+      await waitFor(() => expect(server.posts).toHaveLength(2));
+      expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]);
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+    });
+
+    it("leaving the shell sends edits still inside the debounce to the real block", async () => {
+      const { user, unmount } = await startPlan("bootstrap");
+      await user.keyboard(" final");
+      unmount();
+      await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]));
+      expect(server.patches[0]).toMatchObject({ description: "Plan final" });
+    });
+  });
+
+  describe("POST still in flight", () => {
+    it("edits wait, then are saved to the real block as soon as the POST returns", async () => {
+      const { input, user, release } = await startPlan("start");
+      await user.keyboard(" more");
+      await wait(1_000);
+      expect(server.patches).toEqual([]);
+      await release();
+      await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]));
+      expect(server.patches[0]).toMatchObject({ description: "Plan more" });
+      expect(input.value).toBe("Plan more");
+    });
+
+    it("Stop waits behind the Start, then stops the real block with the edits", async () => {
+      const { user, release, stop } = await startPlan("start");
+      await user.keyboard(" more");
+      let stopped: Promise<unknown> = Promise.resolve();
+      act(() => { stopped = stop(); });
+      await release();
+      await act(async () => { await stopped; });
+      expect(server.stops).toEqual(["started-1"]);
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+    });
+
+    it("a quick start queues behind the Start; the outgoing real block keeps the edits", async () => {
+      const { user, release } = await startPlan("start");
+      await user.keyboard(" more");
+      await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+      await release();
+      await waitFor(() => expect(server.posts).toHaveLength(2));
+      expect(server.completed).toMatchObject({ id: "started-1", description: "Plan more" });
+      await waitFor(() => expect(activityLabel()).toBe("Activity: Writing"));
+    });
+
+    it("leaving the shell before the POST returns cannot target a block (documented loss)", async () => {
+      const { user, unmount, release } = await startPlan("start");
+      await user.keyboard(" more");
+      unmount();
+      await release();
+      await wait(300);
+      // Nothing was sent to an optimistic id; anything sent went to the real block.
+      for (const url of server.patchUrls) expect(url).toBe("/api/time-entries/started-1");
+    });
   });
 });
 
