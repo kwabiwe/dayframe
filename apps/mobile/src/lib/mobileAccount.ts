@@ -8,6 +8,9 @@ export type MobileAccountOwner = {
 };
 
 let cachedOwner: MobileAccountOwner | null | undefined;
+// Advances on every account activation or removal: one value per account lifetime, so a read
+// captured for A before A→B→A is never mistaken for the returning A (Codex r1 on #365).
+let accountEpoch = 0;
 let mutationTail: Promise<void> = Promise.resolve();
 const listeners = new Set<() => void>();
 
@@ -38,6 +41,7 @@ export async function activateMobileAccount(owner: MobileAccountOwner) {
     if (mobileAccountOwnersEqual(cachedOwner, next)) return next;
     await AsyncStorage.setItem(ACTIVE_MOBILE_ACCOUNT_KEY, JSON.stringify(next));
     cachedOwner = next;
+    accountEpoch += 1;
     emitChange();
     return next;
   });
@@ -53,9 +57,15 @@ export async function deactivateMobileAccount(owner?: MobileAccountOwner) {
     }
     await AsyncStorage.removeItem(ACTIVE_MOBILE_ACCOUNT_KEY);
     cachedOwner = null;
+    accountEpoch += 1;
     emitChange();
     return true;
   });
+}
+
+/** The current account lifetime: changes whenever an account is activated or removed. */
+export function currentMobileAccountEpoch() {
+  return accountEpoch;
 }
 
 export function getActiveMobileAccountSnapshot() {
