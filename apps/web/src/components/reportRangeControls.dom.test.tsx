@@ -19,7 +19,11 @@ let reduce = false;
 let root: Root;
 let container: HTMLDivElement;
 
+// Frozen clock: the fixture's week (5–11 Oct 2026) must match what the presets compute as "now".
+const NOW = new Date(2026, 9, 7, 12);
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: NOW });
   reduce = false;
   window.matchMedia = ((query: string) => ({ matches: query.includes("reduce") ? reduce : false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
   if (!HTMLDialogElement.prototype.showModal) {
@@ -30,7 +34,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   push.mockReset();
-  render({ ...defaultReportFilters(new Date(2026, 9, 7)), range: "this-week" });
+  render({ ...defaultReportFilters(NOW), range: "this-week" });
 });
 
 /** Renders as the page does: the range is in the key, so a new range remounts the controls. */
@@ -72,7 +76,7 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
   });
 
   it("keeps the menu mounted while it fades out, and reopening mid-exit cancels the unmount", () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: NOW });
     act(() => trigger().click());
     act(() => trigger().click());
     expect(menu()?.dataset.state).toBe("closing");
@@ -108,7 +112,7 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     await user.click(Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Apply")!);
     expect(push).toHaveBeenCalledTimes(1);
     const href = new URL(push.mock.calls[0][0], "http://x").searchParams;
-    render({ ...defaultReportFilters(new Date(2026, 9, 7)), range: "custom", from: href.get("from")!, to: href.get("to")! });
+    render({ ...defaultReportFilters(NOW), range: "custom", from: href.get("from")!, to: href.get("to")! });
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     expect(document.activeElement).toBe(trigger());
   });

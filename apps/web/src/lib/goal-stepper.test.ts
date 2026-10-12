@@ -8,7 +8,11 @@ describe("goal steppers (UIA-309)", () => {
     expect(nextGoalMinutes(480, 1, DAILY_GOAL_HOURS)).toBe(540);
     expect(nextGoalMinutes(480, -1, DAILY_GOAL_HOURS)).toBe(420);
     expect(nextGoalMinutes(60, -1, DAILY_GOAL_HOURS)).toBe(60);
-    expect(nextGoalMinutes(14 * 60, 1, DAILY_GOAL_HOURS)).toBe(14 * 60);
+    expect(nextGoalMinutes(24 * 60, 1, DAILY_GOAL_HOURS)).toBe(24 * 60);
+    expect(nextGoalMinutes(14 * 60, 1, DAILY_GOAL_HOURS)).toBe(15 * 60);
+    // Weekly tops out at a whole week; down from it lands back on the 5 h grid.
+    expect(nextGoalMinutes(165 * 60, 1, WEEKLY_GOAL_HOURS)).toBe(168 * 60);
+    expect(nextGoalMinutes(168 * 60, -1, WEEKLY_GOAL_HOURS)).toBe(165 * 60);
     expect(canStepGoal(60, -1, DAILY_GOAL_HOURS)).toBe(false);
     expect(nextGoalMinutes(2400, 1, WEEKLY_GOAL_HOURS)).toBe(2700);
   });
@@ -19,7 +23,7 @@ describe("goal steppers (UIA-309)", () => {
     expect(nextGoalMinutes(450, 1, DAILY_GOAL_HOURS)).toBe(480);
     expect(nextGoalMinutes(450, -1, DAILY_GOAL_HOURS)).toBe(420);
     // Outside the limits (set before them): back inside.
-    expect(nextGoalMinutes(20 * 60, -1, DAILY_GOAL_HOURS)).toBe(14 * 60);
+    expect(nextGoalMinutes(200 * 60, -1, WEEKLY_GOAL_HOURS)).toBe(168 * 60);
   });
 
   const stubTimers = { setTimer: () => 1, clearTimer: () => undefined };
@@ -114,7 +118,8 @@ describe("goals outside the stepper limits (Codex r11)", () => {
   it("never steps further out or across to the other side", () => {
     expect(nextGoalMinutes(24 * 60, 1, DAILY_GOAL_HOURS)).toBe(24 * 60);
     expect(canStepGoal(24 * 60, 1, DAILY_GOAL_HOURS)).toBe(false);
-    expect(nextGoalMinutes(24 * 60, -1, DAILY_GOAL_HOURS)).toBe(14 * 60);
+    expect(nextGoalMinutes(25 * 60, -1, DAILY_GOAL_HOURS)).toBe(24 * 60);
+    expect(nextGoalMinutes(24 * 60, -1, DAILY_GOAL_HOURS)).toBe(23 * 60);
     expect(nextGoalMinutes(168 * 60, 1, WEEKLY_GOAL_HOURS)).toBe(168 * 60);
     expect(nextGoalMinutes(30, -1, DAILY_GOAL_HOURS)).toBe(30);
     expect(canStepGoal(30, -1, DAILY_GOAL_HOURS)).toBe(false);
