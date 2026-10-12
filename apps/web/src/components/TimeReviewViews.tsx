@@ -164,6 +164,9 @@ type CalendarCreateEditorTarget = {
 
 type CalendarEditorTarget = CalendarEntryEditorTarget | CalendarCreateEditorTarget;
 
+
+/** Room the resize tip needs to the pointer's right before it flips to the left (W13). */
+const RESIZE_TIP_ROOM = 150;
 export function TimeReviewViews({
   initialData,
   initialPreference,
@@ -628,7 +631,7 @@ export function CalendarReview({
   const [resizeDraft, setResizeDraft] = useState<CalendarResizeDraft | null>(null);
   const [resizingId, setResizingId] = useState<string | null>(null);
   const [resizeError, setResizeError] = useState<string | null>(null);
-  const [resizeTip, setResizeTip] = useState<{ label: string; x: number; y: number } | null>(null);
+  const [resizeTip, setResizeTip] = useState<{ flip: boolean; label: string; x: number; y: number } | null>(null);
   // Drag on empty time: the day body owns the pointer (capture) from press to release.
   const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
   // Decided once at pointerdown against the layout at that moment: whether the press may become a
@@ -938,7 +941,9 @@ export function CalendarReview({
       );
       setResizeTip({
         label: `${formatCalendarAxisMinutes(edgeMinutes)} · ${formatDuration(durationSeconds)}`,
-        x: lastClientX + 14,
+        // Near the right edge (a phone, a narrow window) the tip flips to the pointer's left.
+        flip: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth,
+        x: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth ? lastClientX - 14 : lastClientX + 14,
         y: clientY + 10
       });
     };
@@ -1658,7 +1663,7 @@ export function CalendarReview({
           aria-hidden="true"
           className="calendar-resize-tip tabular"
           data-calendar-resize-tip
-          style={{ left: resizeTip.x, top: resizeTip.y }}
+          style={{ left: resizeTip.x, top: resizeTip.y, transform: resizeTip.flip ? "translateX(-100%)" : undefined }}
         >
           {resizeTip.label}
         </div>
