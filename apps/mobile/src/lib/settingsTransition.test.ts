@@ -63,3 +63,42 @@ describe("afterSettingsTransition (I1)", () => {
     expect(work).not.toHaveBeenCalled();
   });
 });
+
+describe("createFocusedTransitionReady (I1 r2)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("mount → blur before ready: the fallback must not fire; refocus → ready after its own transition", async () => {
+    const { createFocusedTransitionReady } = await import("./settingsTransition");
+    const nav = fakeNavigation();
+    const onReady = vi.fn();
+    const gateReady = createFocusedTransitionReady(() => ({ subscribeTransitionEnd: nav.subscribeTransitionEnd, fallbackMs: 300 }), onReady);
+    gateReady.focus();
+    gateReady.blur();
+    vi.advanceTimersByTime(1000);
+    expect(onReady).not.toHaveBeenCalled();
+    expect(nav.listenerCount()).toBe(0);
+    gateReady.focus();
+    vi.advanceTimersByTime(100);
+    expect(onReady).not.toHaveBeenCalled();
+    nav.end();
+    expect(onReady).toHaveBeenCalledTimes(1);
+    // Once ready it stays ready: later focus/blur never schedules again.
+    gateReady.blur();
+    gateReady.focus();
+    vi.advanceTimersByTime(1000);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("refocus falls back to the timer when no transition event arrives", async () => {
+    const { createFocusedTransitionReady } = await import("./settingsTransition");
+    const nav = fakeNavigation();
+    const onReady = vi.fn();
+    const gateReady = createFocusedTransitionReady(() => ({ subscribeTransitionEnd: nav.subscribeTransitionEnd, fallbackMs: 300 }), onReady);
+    gateReady.focus();
+    gateReady.blur();
+    gateReady.focus();
+    vi.advanceTimersByTime(300);
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
+});

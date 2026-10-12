@@ -2,7 +2,7 @@ import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCu
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
 import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, type MobileAccountOwner } from "@/lib/mobileAccount";
-import { afterSettingsTransition, type TransitionGate } from "@/lib/settingsTransition";
+import { afterSettingsTransition, createFocusedTransitionReady, type TransitionGate } from "@/lib/settingsTransition";
 import {
   REVIEW_NUDGE_MINUTES,
   formatReviewNudgeTime,
@@ -315,10 +315,19 @@ function useSettingsTransitionGate() {
   }, [navigation]);
 }
 
-/** True once the screen's opening transition has ended (never set after unmount). */
+/**
+ * True once the screen, while focused, has finished its own opening transition. Cancelled on blur
+ * and unmount, rescheduled on refocus (createFocusedTransitionReady).
+ */
 function useSettingsTransitionReady(gate: () => TransitionGate) {
   const [ready, setReady] = useState(false);
-  useEffect(() => afterSettingsTransition(gate(), () => setReady(true)), [gate]);
+  const [focusGate] = useState(() => createFocusedTransitionReady(() => gateRef.current(), () => setReady(true)));
+  const gateRef = useRef(gate);
+  gateRef.current = gate;
+  useFocusEffect(useCallback(() => {
+    focusGate.focus();
+    return () => focusGate.blur();
+  }, [focusGate]));
   return ready;
 }
 

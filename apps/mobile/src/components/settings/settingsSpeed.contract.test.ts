@@ -23,7 +23,7 @@ describe("Settings opens instantly (I1)", () => {
 
   it("defers every mount-time read until the transition settles", () => {
     // Behaviour of the gate itself: src/lib/settingsTransition.test.ts.
-    expect(settings).toContain("useEffect(() => afterSettingsTransition(gate(), () => setReady(true)), [gate]);");
+    expect(settings).toMatch(/useFocusEffect\(useCallback\(\(\) => \{\s*focusGate\.focus\(\);\s*return \(\) => focusGate\.blur\(\);/);
     expect(settings).toContain('navigation.addListener("transitionEnd"');
     expect(settings).not.toContain("InteractionManager");
     for (const marker of [

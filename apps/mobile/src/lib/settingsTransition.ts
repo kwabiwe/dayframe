@@ -40,3 +40,26 @@ export function afterSettingsTransition(gate: TransitionGate, work: () => void):
   if (done) unsubscribe();
   return finish;
 }
+
+/**
+ * The opening-reads gate tied to focus: scheduled on each focus until it has fired once, cancelled
+ * on blur (a sub-page pushed before Settings settled never lets the covered screen start its reads).
+ */
+export function createFocusedTransitionReady(gate: () => TransitionGate, onReady: () => void) {
+  let ready = false;
+  let cancel: (() => void) | null = null;
+  return {
+    focus() {
+      if (ready || cancel) return;
+      cancel = afterSettingsTransition(gate(), () => {
+        cancel = null;
+        ready = true;
+        onReady();
+      });
+    },
+    blur() {
+      cancel?.();
+      cancel = null;
+    }
+  };
+}
