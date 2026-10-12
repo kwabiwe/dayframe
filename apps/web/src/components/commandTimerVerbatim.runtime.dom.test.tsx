@@ -24,11 +24,13 @@ const server = {
   rejectPatches: false,
   rejectStart: false,
   /** The next PATCH or Start waits (the request is recorded) until `release()`. */
-  holdNext: null as "patch" | "start" | null,
+  holdNext: null as "patch" | "start" | "bootstrap" | null,
+  /** Tags the workspace knows besides the running block's. */
+  tags: [] as string[],
   release: null as (() => void) | null
 };
 
-async function maybeHold(kind: "patch" | "start") {
+async function maybeHold(kind: "patch" | "start" | "bootstrap") {
   if (server.holdNext !== kind) return;
   server.holdNext = null;
   await new Promise<void>((resolve) => { server.release = resolve; });
@@ -45,11 +47,16 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (url === "/api/timer-state") {
       return reply(true, { activeEntryId: server.entry?.id ?? null, updatedAt: server.entry?.updatedAt ?? null });
     }
-    if (url.startsWith("/api/bootstrap")) return reply(true, bootstrap(server.entry));
+    if (url.startsWith("/api/bootstrap")) {
+      await maybeHold("bootstrap");
+      return reply(true, bootstrap(server.entry));
+    }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
       const body = JSON.parse(String(init?.body)) as Patch;
       server.patches.push(body);
       server.patchUrls.push(url);
+      // Only the running block can be patched (an optimistic id is unknown to the server).
+      if (url !== `/api/time-entries/${server.entry?.id}`) return reply(false, { error: "Not found" });
       await maybeHold("patch");
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
       const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
@@ -92,6 +99,7 @@ beforeEach(() => {
   server.holdNext = null;
   server.release = null;
   server.rejectStart = false;
+  server.tags = [];
   server.rejectPatches = false;
 });
 
@@ -496,6 +504,73 @@ describe("Codex r8: a genuine change of block starts completion clean", () => {
   });
 });
 
+describe("Codex r9: a rejected second Start keeps the first Start's handoff", () => {
+  const activityLabel = () => screen.getByRole("button", { name: /^Activity:/ }).getAttribute("aria-label");
+
+  /** Focus / "Plan" started and accepted, its refresh held; a Writing quick start rejected. */
+  async function acceptedThenRejected() {
+    server.tags = ["urgent"];
+    const { input, refresh } = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("Plan @foc{Tab}");
+    expect(input.value).toBe("Plan");
+    server.holdNext = "bootstrap";
+    await user.click(input);
+    await user.keyboard("{End}{Enter}");
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    await waitFor(() => expect(server.release).not.toBeNull());
+    const releaseRefresh = server.release!;
+    server.release = null;
+    server.rejectStart = true;
+    await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+    await waitFor(() => expect(server.posts).toHaveLength(2));
+    await waitFor(() => expect(activityLabel()).toBe("Activity: Focus"));
+    expect(input.value).toBe("Plan");
+    await user.click(input);
+    await user.keyboard("{End}");
+    // The held refresh lands (the quick start made it stale, so it is dropped), then the next
+    // canonical read (the timer-state poll or the periodic reconcile) brings the real block.
+    const handOff = async () => {
+      await act(async () => { releaseRefresh(); });
+      await refresh();
+    };
+    return { input, user, handOff };
+  }
+
+  it("plain text typed on the restored block survives the first Start's handoff", async () => {
+    const { input, user, handOff } = await acceptedThenRejected();
+    await user.keyboard(" more");
+    await handOff();
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
+    expect(server.patchUrls[0]).toBe("/api/time-entries/started-1");
+    expect(server.patches[0]).toMatchObject({ categoryId: "focus", description: "Plan more" });
+    expect(input.value).toBe("Plan more");
+  });
+
+  it("an activity pick on the restored block survives the first Start's handoff", async () => {
+    const { input, user, handOff } = await acceptedThenRejected();
+    await user.keyboard(" @wri{Enter}");
+    expect(activityLabel()).toBe("Activity: Writing");
+    await handOff();
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
+    expect(server.patches[0]).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(activityLabel()).toBe("Activity: Writing");
+    expect(input.value).toBe("Plan");
+  });
+
+  it("a tag pick on the restored block survives the first Start's handoff", async () => {
+    const { input, user, handOff } = await acceptedThenRejected();
+    await user.keyboard(" #urg");
+    expect(screen.queryByRole("listbox", { name: "Tags" })).not.toBeNull();
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Plan");
+    await handOff();
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 3_000 });
+    expect(server.patches[0]).toMatchObject({ categoryId: "focus", description: "Plan", tagNames: ["urgent"] });
+  });
+});
+
 function optionNames() {
   return within(screen.getByRole("listbox", { name: "Activities" })).queryAllByRole("option").map((option) => option.textContent);
 }
@@ -509,12 +584,12 @@ function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
       { id: "write", name: "Writing", color: "blue", isPinned: true }
     ],
     categoryUsage: [],
-    tags: (activeEntry as (TimeEntryRow & { knownTags?: string[] }) | null)?.knownTags?.map((name) => ({
+    tags: [...new Set([...server.tags, ...((activeEntry as (TimeEntryRow & { knownTags?: string[] }) | null)?.knownTags ?? [])])].map((name) => ({
       id: name,
       name,
       normalizedName: name,
       usageCount: 1
-    })) ?? [],
+    })),
     taskSuggestions: [],
     entries,
     historyEntries: entries,

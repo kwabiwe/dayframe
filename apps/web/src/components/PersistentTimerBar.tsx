@@ -32,6 +32,7 @@ import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
+import { isUnsavedEntryId } from "@/lib/today-view";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -161,9 +162,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
   // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
-  // picking an activity then removes it and the next autosave sends the cleaned text.
+  // picking an activity then removes it and the next autosave sends the cleaned text. A block
+  // still on its optimistic id (its Start's refresh not back yet) has nothing to PATCH: edits wait
+  // in the draft and are saved once its real block arrives.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || isUnsavedEntryId(active.id)) return undefined;
     const nextCategoryId = timerDraft.categoryId || null;
     const nextDescription = timerDraft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();

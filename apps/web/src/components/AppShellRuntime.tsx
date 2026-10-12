@@ -116,7 +116,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // optimistic block to the real one keeps the token.
   const scopeCounterRef = useRef(0);
   const [timerDraftScope, setTimerDraftScope] = useState("idle#0");
-  // The optimistic block of a Start the server accepted; its real block is the same block.
+  // The optimistic block of a Start the server accepted; its real block is the same block. Kept
+  // until the server's own state (a real block, or none) arrives.
   const acceptedStartIdRef = useRef<string | null>(null);
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
@@ -192,7 +193,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const startAccepted = activeEntryChanged && !rolledBack && previousEntryId !== null
       && previousEntryId === acceptedStartIdRef.current
       && activeEntryId !== null && !isOptimisticTimerId(activeEntryId);
-    if (activeEntryChanged && previousEntryId === acceptedStartIdRef.current) acceptedStartIdRef.current = null;
+    // The acceptance record is separate from the completion scope: it outlives later optimistic
+    // blocks and rollbacks to its block (a second Start rejected before the first one's refresh
+    // lands; Codex r9) and is cleared only by the server's own truth, a real block or none,
+    // whether that is its handoff or a newer state superseding it.
+    if (activeEntryId === null || !isOptimisticTimerId(activeEntryId)) acceptedStartIdRef.current = null;
     const nextDraft = rolledBack
       ? rollbackDraft!.draft
       : reconcileTimerDraft(activeEntryChanged && !startAccepted, draftRef.current, canonicalTimerDraftRef.current, canonicalDraft);
