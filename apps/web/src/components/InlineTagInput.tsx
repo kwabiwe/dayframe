@@ -42,6 +42,7 @@ export function InlineTagInput({
   ariaLabel,
   className = "",
   closeSignal = 0,
+  completionScope = "",
   disabled = false,
   inputClassName = "",
   inputId,
@@ -54,7 +55,6 @@ export function InlineTagInput({
   onEnter,
   onFocus,
   onHashtagPanelChange,
-  onQueryListChange,
   onInputKeyDown,
   onSelectedTagNamesChange,
   placeholder,
@@ -68,6 +68,12 @@ export function InlineTagInput({
   ariaLabel: string;
   className?: string;
   closeSignal?: number;
+  /**
+   * What the text belongs to (the command timer passes the running block's id, or "idle"). When
+   * it changes, an open `#` or `@` list closes even if the text reads the same, and a pick is
+   * reported with the scope its list was opened in so the owner can drop a stale one.
+   */
+  completionScope?: string;
   disabled?: boolean;
   inputClassName?: string;
   inputId?: string;
@@ -77,7 +83,7 @@ export function InlineTagInput({
    * An activity chosen from the `@` list, with the description as it reads once the `@query`
    * has left it. The owner sets both (the input does not call `onChange` for it).
    */
-  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger) => void;
+  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger, scope: string) => void;
   /** The description field lost focus. */
   onBlur?: () => void;
   onChange: (value: string) => void;
@@ -85,11 +91,6 @@ export function InlineTagInput({
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onFocus?: () => void;
   onHashtagPanelChange?: (open: boolean) => void;
-  /**
-   * Whether a `#` Tags or `@` Activities list is open for a query being typed (the tag picker
-   * does not count). The command timer holds its autosave while one is.
-   */
-  onQueryListChange?: (open: boolean) => void;
   onInputKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
   onSelectedTagNamesChange: (tagNames: string[]) => void;
   placeholder?: string;
@@ -149,13 +150,23 @@ export function InlineTagInput({
     ],
     [createName, matches]
   );
-  const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen;
   // The `@` Activities list opens only for an `@word` being typed (it was the token at the caret
-  // when the text last changed in this field). Escape, Close, leaving the field, moving the caret
-  // out of it or any other change of the text closes it and leaves the `@word` as written; placing
-  // the caret on existing text never opens it.
-  const [typedMention, setTypedMention] = useState<{ start: number; value: string } | null>(null);
-  const caretMention = activities && !disabled && focused && !pickerOpen && typedMention?.value === value
+  // when the text last changed in this field, in this `completionScope`). Escape, Close, leaving
+  // the field, moving the caret out of it, any other change of the text or a new scope closes it
+  // and leaves the `@word` as written; placing the caret on existing text never opens it.
+  const [typedMention, setTypedMention] = useState<{ start: number; value: string; scope: string } | null>(null);
+  // A new scope (another block, or idle) closes both lists, even when the text reads the same:
+  // the `@` anchor is cleared and the `#` token at the caret is dismissed.
+  const [seenScope, setSeenScope] = useState(completionScope);
+  if (seenScope !== completionScope) {
+    setSeenScope(completionScope);
+    setTypedMention(null);
+    setDismissedTagStart(active?.start ?? null);
+  }
+  const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen
+    && seenScope === completionScope;
+  const caretMention = activities && !disabled && focused && !pickerOpen
+    && typedMention?.value === value && typedMention.scope === completionScope
     ? findActiveMention(value, caret)
     : null;
   const mention = caretMention && caretMention.start === typedMention?.start ? caretMention : null;
@@ -224,10 +235,6 @@ export function InlineTagInput({
   useEffect(() => {
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
-
-  useEffect(() => {
-    onQueryListChange?.(shouldOpen || activityOpen);
-  }, [activityOpen, onQueryListChange, shouldOpen]);
 
   // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
   useEffect(() => {
@@ -377,7 +384,7 @@ export function InlineTagInput({
     if (disabled || !mention) return;
     setTypedMention(null);
     const replacement = consumeActiveHashtag(value, mention);
-    onActivityChoose?.(activity.id, replacement.text, trigger);
+    onActivityChoose?.(activity.id, replacement.text, trigger, typedMention?.scope ?? completionScope);
     placeCaret(replacement.caret);
   }
 
@@ -480,7 +487,7 @@ export function InlineTagInput({
             const nextCaret = event.target.selectionStart ?? event.target.value.length;
             onChange(event.target.value);
             const typed = activities ? findActiveMention(event.target.value, nextCaret) : null;
-            setTypedMention(typed ? { start: typed.start, value: event.target.value } : null);
+            setTypedMention(typed ? { start: typed.start, value: event.target.value, scope: completionScope } : null);
             setCaret(nextCaret);
             setHighlightedIndex(0);
             setActivityIndex(0);

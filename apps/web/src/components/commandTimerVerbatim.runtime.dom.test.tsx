@@ -12,11 +12,14 @@ import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 // autosave PATCH and its rollback) against a fake server, so no hidden state can drop a saved
 // "@writing".
 
-type Patch = { categoryId: string | null; description: string | null; tagNames: string[] };
+type Patch = { categoryId: string | null; description: string | null; tagNames: string[]; url?: string };
 
 const server = {
   entry: null as TimeEntryRow | null,
+  /** The block a Start replaced, as the server last had it. */
+  completed: null as TimeEntryRow | null,
   patches: [] as Patch[],
+  patchUrls: [] as string[],
   posts: [] as Record<string, unknown>[],
   rejectPatches: false
 };
@@ -36,13 +39,25 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
       const body = JSON.parse(String(init?.body)) as Patch;
       server.patches.push(body);
+      server.patchUrls.push(url);
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
       const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
       server.entry = { ...server.entry!, description: body.description, categoryId: body.categoryId, tagNames: body.tagNames, updatedAt };
       return reply(true, { updatedAt });
     }
     if (method === "POST" && url === "/api/time-entries") {
-      server.posts.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      server.posts.push(body);
+      if (server.entry) server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
+      server.entry = {
+        ...(server.entry ?? entry()),
+        id: `started-${server.posts.length}`,
+        categoryId: (body.categoryId as string | undefined) ?? null,
+        description: (body.description as string | undefined) ?? null,
+        tagNames: (body.tagNames as string[] | undefined) ?? [],
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
       return reply(true, {});
     }
     return reply(false, {});
@@ -54,7 +69,9 @@ const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 beforeEach(() => {
   server.entry = null;
+  server.completed = null;
   server.patches = [];
+  server.patchUrls = [];
   server.posts = [];
   server.rejectPatches = false;
 });
@@ -78,10 +95,10 @@ async function renderShell(entry: TimeEntryRow | null) {
     useEffect(() => load(bootstrap(server.entry)), [load]);
     return runtime.shellData ? <PersistentTimerBar /> : null;
   }
-  render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
+  const { unmount } = render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
   const input = await screen.findByLabelText("Description") as HTMLInputElement;
   // A server copy arriving later (another device started a block, a poll noticed it).
-  return { input, refresh: () => act(async () => { await refresh(); }) };
+  return { input, unmount, refresh: () => act(async () => { await refresh(); }) };
 }
 
 function descriptions() {
@@ -206,14 +223,12 @@ describe("earlier rounds' repros with the real runtime", () => {
 });
 
 describe("autosave and Enter while recording", () => {
-  it("Escape closes the list and autosave then sends the text verbatim; nothing is saved while it is open", async () => {
+  it("Escape closes the list and autosave then sends the text verbatim", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
     await user.click(input);
     await user.keyboard("{End} @wri");
     expect(activitiesOpen()).toBe(true);
-    await wait(1_000);
-    expect(server.patches).toEqual([]);
     await user.keyboard("{Escape}");
     expect(activitiesOpen()).toBe(false);
     expect(input.value).toBe("Fix bug @wri");
@@ -235,6 +250,63 @@ describe("autosave and Enter while recording", () => {
     // The same block: no Start, no Stop.
     expect(server.posts).toEqual([]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull());
+  });
+});
+
+describe("Codex r6: no autosave hold; lists belong to their block", () => {
+  it("autosave runs while the list is open (verbatim), and after a pick sends the cleaned text", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} @wri");
+    await waitFor(() => expect(descriptions()).toEqual(["Fix bug @wri"]), { timeout: 2_000 });
+    expect(activitiesOpen()).toBe(true);
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Fix bug");
+    await waitFor(() => expect(server.patches).toHaveLength(2), { timeout: 2_000 });
+    expect(server.patches[1]).toMatchObject({ categoryId: "write", description: "Fix bug" });
+    expect(server.posts).toEqual([]);
+  });
+
+  it("a quick-start switch keeps the outgoing block's edit, even with a list open", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} new @wri");
+    await wait(1_000);
+    await user.click(screen.getByRole("button", { name: "Start Writing (2)" }));
+    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 2_000 });
+    expect(server.completed?.description).toBe("Fix bug new @wri");
+  });
+
+  it("unmounting after the debounce has already saved the edit", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} final @wri");
+    await wait(1_000);
+    unmount();
+    expect(descriptions()).toContain("Fix bug final @wri");
+    expect(server.entry?.description).toBe("Fix bug final @wri");
+  });
+
+  it("a replacement block with the same text never inherits the open list or its pick", async () => {
+    const { input, refresh } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} @wri");
+    expect(activitiesOpen()).toBe(true);
+    server.entry = entry({ id: "next", description: "Fix bug @wri", updatedAt: "2026-08-17T06:00:00.000Z" });
+    await refresh();
+    expect(input.value).toBe("Fix bug @wri");
+    expect(activitiesOpen()).toBe(false);
+    await user.keyboard("{Enter}");
+    await wait(1_000);
+    expect(server.patchUrls.filter((url) => url.endsWith("/next"))).toEqual([]);
+    expect(server.entry).toMatchObject({ id: "next", categoryId: "focus", description: "Fix bug @wri" });
+    // Typing again in the new block opens its own list.
+    await user.keyboard("{Backspace}");
+    expect(optionNames()).toEqual(["Writing"]);
   });
 });
 

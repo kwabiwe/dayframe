@@ -67,8 +67,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
-  // A `#` Tags or `@` Activities list is open for a query being typed: autosave waits for it.
-  const [queryListOpen, setQueryListOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -112,6 +110,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .slice(0, TASK_SUGGESTION_LIMIT);
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
+  // The block the description's `#`/`@` lists belong to: a different running block (or going
+  // idle) closes them, even when the text reads the same.
+  const completionScope = active?.id ?? "idle";
   const parsedCommand = useMemo(
     () => active ? null : parseCommand(timerDraft.description),
     [active, timerDraft.description]
@@ -156,12 +157,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     return () => window.clearInterval(interval);
   }, [active]);
 
-  // Autosave sends the description exactly as shown: nothing is parsed or stripped. While a `#`
-  // or `@` list is open for a query being typed it waits, so a half-typed `@wri` is not saved,
-  // and saves as usual once the list closes. A new block resets the draft (which closes the
-  // list), so nothing is held over.
+  // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
+  // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
+  // picking an activity then removes it and the next autosave sends the cleaned text.
   useEffect(() => {
-    if (!active || queryListOpen) return undefined;
+    if (!active) return undefined;
     const nextCategoryId = timerDraft.categoryId || null;
     const nextDescription = timerDraft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
@@ -177,7 +177,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       void updateActiveDetails(timerDraft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, queryListOpen, timerDraft, updateActiveDetails]);
+  }, [active, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
@@ -322,7 +322,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // Recording: the running block's activity changes in place through the usual debounced
   // autosave, never a Stop or new block. Idle: Enter also starts the block; Tab, a click or a tap
   // only picks the activity.
-  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
+  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger, scope: string) {
+    // A pick only ever changes the block the list was opened for.
+    if (scope !== completionScope) return;
     setCommandNotice(null);
     setSuggestionsOpen(false);
     if (trigger === "enter" && !active) {
@@ -468,6 +470,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             inputRef={descriptionInputRef}
             name="timer-description"
             onActivityChoose={chooseActivity}
+            completionScope={completionScope}
             onChange={(description) => {
               setCommandNotice(null);
               setTimerDraft((current) => ({ ...current, description }));
@@ -487,7 +490,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               setHashtagSuggestionsOpen(open);
               if (open) setSuggestionsOpen(false);
             }}
-            onQueryListChange={setQueryListOpen}
             onInputKeyDown={(event) => {
               if (!suggestionsOpen || hashtagSuggestionsOpen || !visibleTaskSuggestions.length) return;
               if (event.key === "Escape") {

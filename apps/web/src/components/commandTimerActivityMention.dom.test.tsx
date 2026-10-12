@@ -399,13 +399,10 @@ function expectRunningBlockKept(calls: Spies) {
 }
 
 describe("the description is saved as written (Codex r5)", () => {
-  const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 
-  it("nothing is saved while the Activities list is open; after Escape the text is saved verbatim", async () => {
+  it("after Escape the text is saved verbatim", async () => {
     const { calls, input } = renderBar({ activeEntry: running() });
     const user = await typeInto(input, " @wri");
-    await wait(900);
-    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
     await user.keyboard("{Escape}");
     expect(input.value).toBe("Fix bug @wri");
     await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
@@ -443,20 +440,6 @@ describe("the description is saved as written (Codex r5)", () => {
     expect(calls.stopTimer).toHaveBeenCalledTimes(1);
     // No override: the runtime stops with the draft as it is.
     expect(calls.stopTimer).toHaveBeenCalledWith();
-  });
-
-  it("nothing is saved while the Tags list is open for a #query", async () => {
-    const { calls, input } = renderBar({ activeEntry: running() });
-    const user = await typeInto(input, " #dee");
-    expect(screen.getByRole("listbox", { name: "Tags" })).not.toBeNull();
-    await wait(900);
-    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
-      categoryId: "focus",
-      description: "Fix bug",
-      tagNames: ["Deep work"]
-    }), { timeout: 2_000 });
   });
 
   it("keeps an @word the running block already had", async () => {
