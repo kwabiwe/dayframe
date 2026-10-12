@@ -12987,6 +12987,16 @@ dialog.ui-dialog.df-rf-dialog {
   font-size: 14px;
 }
 
+.df-day-pick-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.df-report-blocks:focus {
+  outline: none;
+}
+
 .df-day-pick-close {
   display: grid;
   width: 44px;
@@ -13048,6 +13058,31 @@ dialog.ui-dialog.df-rf-dialog {
 .df-day-pick-row.is-hot,
 .df-day-pick-row[aria-pressed="true"] {
   background: var(--surface-muted);
+}
+
+/*
+ * Touch targets for picking a day (review r3): under 640 px a day column is at least 40 px plus
+ * its 4 px gap share (a 44 px target; 42 + 4 for a week at 375 px), and a range of more than seven
+ * days scrolls sideways inside the card with 44 px columns instead of squeezing. Month cells are
+ * at least 41 px plus their 3 px gap (43 + 3 at 375 px). The page itself never scrolls sideways.
+ */
+@media (max-width: 640px) {
+  .df-wblocks {
+    grid-auto-columns: minmax(40px, 1fr);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .df-wblocks.is-long {
+    grid-auto-columns: minmax(44px, 1fr);
+    padding-bottom: 6px;
+  }
+
+  .df-month {
+    grid-template-columns: repeat(7, minmax(41px, 1fr));
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

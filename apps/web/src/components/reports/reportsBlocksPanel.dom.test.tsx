@@ -18,10 +18,10 @@ const { ReportsBlocksPanel, traceBlockAt, traceDayAt } = await import("./Reports
 const at = (date: number, hour = 0) => new Date(2026, 9, date, hour).toISOString();
 const day = (date: number) => ({ key: `d${date}`, label: `Day ${date}`, start: at(date), end: at(date + 1) });
 
-function report(preset = "this-week", secondDay = false): ReportResult {
-  const days = [5, 6, 7, 8, 9, 10, 11].map(day);
+function report(preset = "this-week", secondDay = false, dayCount = 7): ReportResult {
+  const days = Array.from({ length: dayCount }, (_, index) => day(5 + index));
   return {
-    range: { preset, dayCount: 7 },
+    range: { preset, dayCount },
     capturedNow: at(6, 12),
     byCategory: [
       { id: "work", name: "Work", color: "blue", seconds: 9 * 3600, entryCount: 3 },
@@ -255,14 +255,14 @@ describe("Reports blocks and Where it went", () => {
     expect(view.centre()).toBe("1hNo activity");
     // Another day switches the panel and keeps the pin.
     await tap(20, 100);
-    expect(panel.querySelector("b")?.textContent).toBe("Day 5");
+    expect(panel.querySelector("h3")?.textContent).toBe("Day 5");
     expect(view.centre()).toBe("1hNo activity");
     // The picked day again, or an empty day, closes the panel and ends the pin.
     await tap(20, 100);
     expect(panel.classList.contains("is-open")).toBe(false);
     expect(view.centre()).toBe("10hlogged this week");
     // The collapsing panel keeps the last day's rows (no blank mid-exit), inert.
-    expect(panel.querySelector("b")?.textContent).toBe("Day 5");
+    expect(panel.querySelector("h3")?.textContent).toBe("Day 5");
     await tap(20, 100);
     await tap(70, 100);
     expect(panel.classList.contains("is-open")).toBe(false);
@@ -287,6 +287,81 @@ describe("Reports blocks and Where it went", () => {
     await pointer(list, "pointerup", 20, 100, "touch");
     expect(panel.classList.contains("is-open")).toBe(false);
     await act(async () => view.root.unmount());
+  });
+
+  it("titles the day panel with a heading under the card's heading (review r3)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    await pointer(list, "pointerdown", 20, 100, "touch");
+    await pointer(list, "pointerup", 20, 100, "touch");
+    const heading = view.container.querySelector(".df-day-pick h3");
+    expect(heading?.textContent).toBe("Day 5");
+    expect(view.container.querySelector(".df-report-blocks h2")?.textContent).toBe("The days in blocks");
+    await act(async () => view.root.unmount());
+  });
+
+  it("returns focus from the closing panel to the day's first block, or the card when it has none (review r3)", async () => {
+    const view = await mount(week());
+    const { container } = view;
+    const list = container.querySelector(".df-wblocks")!;
+    const open = async (x: number) => {
+      await pointer(list, "pointerdown", x, 100, "touch");
+      await pointer(list, "pointerup", x, 100, "touch");
+    };
+    const firstOfDay7 = () => container.querySelector<HTMLButtonElement>('button[aria-label="No activity, 30m, Day 7"]');
+    // Close.
+    await open(120);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-close")!.focus());
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-close")!.click());
+    expect(document.activeElement).toBe(firstOfDay7());
+    expect(container.querySelector(".df-day-pick")?.contains(document.activeElement)).toBe(false);
+    await act(async () => firstOfDay7()!.blur());
+    // Escape from a focused row.
+    await open(120);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    });
+    expect(container.querySelector(".df-day-pick")?.classList.contains("is-open")).toBe(false);
+    expect(document.activeElement).toBe(firstOfDay7());
+    await act(async () => firstOfDay7()!.blur());
+    // A pointer down outside lets focus go where the pointer lands (nothing stays in the panel).
+    await open(120);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
+    await pointer(document.body, "pointerdown", 600, 600, "touch");
+    expect(container.querySelector(".df-day-pick")?.contains(document.activeElement)).toBe(false);
+    expect(container.querySelector(".df-wblocks")?.classList.contains("has-hot")).toBe(false);
+    // New data that leaves the day without blocks: focus goes to the blocks card.
+    await open(120);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-day-pick-row")!.focus());
+    await view.rerender(week(false));
+    expect(document.activeElement).toBe(container.querySelector(".df-report-blocks"));
+    await act(async () => view.root.unmount());
+  });
+
+  it("keeps the closing panel's rows when new data drops the day (review r3)", async () => {
+    const view = await mount(week());
+    const list = view.container.querySelector(".df-wblocks")!;
+    await pointer(list, "pointerdown", 120, 100, "touch");
+    await pointer(list, "pointerup", 120, 100, "touch");
+    const panel = view.container.querySelector(".df-day-pick")!;
+    expect(panel.querySelector("h3")?.textContent).toBe("Day 7");
+    // Day 7 loses its time in the new report: the panel closes with the day it showed.
+    await view.rerender(week(false));
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(panel.querySelector("h3")?.textContent).toBe("Day 7");
+    expect([...panel.querySelectorAll(".df-day-pick-row")].map((row) => row.textContent)).toEqual(["No activity30m", "Work2h"]);
+    await act(async () => view.root.unmount());
+  });
+
+  it("lets more than seven days scroll sideways inside the card on phones instead of squeezing (review r3)", async () => {
+    const long = renderToStaticMarkup(
+      <ReportsBlocksPanel blocks={reportBlocksModel(report("custom", false, 14), formatDuration)} land={land} slices={slices} totalLabel="logged in this range" totalSeconds={10 * 3600} />
+    );
+    expect((long.match(/class="df-wb[ "]/g) ?? []).length).toBe(14);
+    expect(long).toContain('class="df-wblocks is-long"');
+    const short = renderToStaticMarkup(week());
+    expect(short).toContain('class="df-wblocks"');
   });
 
   it("ends a pin made without focus, and the day panel, on Escape anywhere (review 2)", async () => {

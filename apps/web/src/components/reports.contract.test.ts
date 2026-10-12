@@ -119,6 +119,11 @@ describe("Reports staging feedback I1–I3", () => {
     expect(rule(".df-day-pick-close")).toContain("height: 44px");
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-day-pick \{\s*transition: none;/);
     expect(panelSource).toContain("inert={!pickedDay}");
+    // Day targets on phones (review r3): at least 40 px + 4 px gap per week day, 44 px columns
+    // scrolling inside the card past seven days, 41 px + 3 px month cells; the page never scrolls.
+    expect(styles).toMatch(/@media \(max-width: 640px\) \{\s*\.df-wblocks \{\s*grid-auto-columns: minmax\(40px, 1fr\);\s*overflow-x: auto;/);
+    expect(styles).toMatch(/\.df-wblocks\.is-long \{\s*grid-auto-columns: minmax\(44px, 1fr\);/);
+    expect(styles).toMatch(/\.df-month \{\s*grid-template-columns: repeat\(7, minmax\(41px, 1fr\)\);\s*overflow-x: auto;/);
     expect(rule(".df-tblock:focus-visible")).toContain("outline: 2px solid var(--focus)");
     expect(rule(".df-tblock:focus-visible")).toContain("outline-offset: -2px");
     expect(rule(".df-wblocks.has-hot .df-tblock,\n.df-month.has-hot .df-tblock")).toContain("opacity: 0.22");

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ReportDonutSegment } from "@/components/ReportDonutSegment";
 import { AccessibleBreakdownTable } from "@/components/ReportsOverview";
@@ -116,7 +116,9 @@ export function ReportsBlocksPanel({
   // The touch day panel (review 3): the day a touch picked, and the day it last showed, kept while
   // the panel collapses so its rows never blank mid-exit.
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  const [shownKey, setShownKey] = useState<string | null>(null);
+  // A snapshot of the day the panel shows (review r3): a report that drops that day must not blank
+  // the rows while the panel collapses.
+  const [shownDay, setShownDay] = useState<ReportBlocksDay | null>(null);
   // New report data (a filter, range or refresh navigation) invalidates every trace: the element
   // that started it may be gone without a blur or leave (I1 review). The focus ring follows the
   // slice element, which survives while its slice does.
@@ -142,8 +144,27 @@ export function ReportsBlocksPanel({
   const blocksRef = useRef<HTMLElement | null>(null);
   const cardRef = useRef<HTMLElement | null>(null);
   const pickedDay = blocks?.days.find((day) => day.key === pickedKey) ?? null;
-  const shownDay = blocks?.days.find((day) => day.key === shownKey) ?? null;
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Closing makes the panel inert; focus inside it (a row or Close) returns to the picked day's
+  // first block, or to the blocks card when that day is gone (review r3), whatever closed it.
+  // Close and Escape move it before the panel turns inert; the layout effect covers the closes
+  // that come with new report data.
+  const restoreFocus = () => {
+    const panel = panelRef.current;
+    if (!panel || !(document.activeElement instanceof Node) || !panel.contains(document.activeElement)) return;
+    const dayKey = panel.dataset.dayKey;
+    const day = [...(blocksRef.current?.querySelectorAll<HTMLElement>("[data-trace-day]") ?? [])].find((element) => element.dataset.traceDay === dayKey);
+    const target = day?.querySelector<HTMLElement>("[data-block-key]") ?? cardRef.current;
+    target?.focus();
+  };
+  const restoreFocusRef = useRef(restoreFocus);
+  const panelOpen = pickedDay !== null;
+  useLayoutEffect(() => {
+    restoreFocusRef.current = restoreFocus;
+    if (!panelOpen) restoreFocus();
+  });
   const closeDay = () => {
+    restoreFocus();
     setPickedKey(null);
     setSource("tap", null);
   };
@@ -157,10 +178,17 @@ export function ReportsBlocksPanel({
       setTrace((current) => (current.tap === null ? current : { ...current, tap: null }));
     };
     const onPointerDown = (event: Event) => {
-      if (!(event.target instanceof Node && cardRef.current?.contains(event.target))) end();
+      if (event.target instanceof Node && cardRef.current?.contains(event.target)) return;
+      // Focus goes where the pointer lands, never back into the blocks (a focused block would
+      // keep tracing after the dismissal).
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && panelRef.current?.contains(active)) active.blur();
+      end();
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") end();
+      if (event.key !== "Escape") return;
+      restoreFocusRef.current();
+      end();
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
@@ -198,7 +226,7 @@ export function ReportsBlocksPanel({
       if (!day || day.activities.length === 0 || day.key === pickedKey) closeDay();
       else {
         setPickedKey(day.key);
-        setShownKey(day.key);
+        setShownDay(day);
       }
     }
   };
@@ -272,6 +300,7 @@ export function ReportsBlocksPanel({
           ref={(node) => {
             cardRef.current = node;
           }}
+          tabIndex={-1}
         >
           <div className="df-card-head">
             <h2 id="df-report-blocks-title">{blocks.layout === "month" ? "The month in blocks" : "The days in blocks"}</h2>
@@ -285,7 +314,7 @@ export function ReportsBlocksPanel({
           </div>
           {blocks.layout === "week" ? (
             <ol
-              className={`df-wblocks${hotIds ? " has-hot" : ""}`}
+              className={`df-wblocks${blocks.days.length > 7 ? " is-long" : ""}${hotIds ? " has-hot" : ""}`}
               ref={(node) => {
                 blocksRef.current = node;
               }}
@@ -331,12 +360,12 @@ export function ReportsBlocksPanel({
               ))}
             </div>
           )}
-          <div className={`df-day-pick${pickedDay ? " is-open" : ""}`} inert={!pickedDay}>
+          <div className={`df-day-pick${pickedDay ? " is-open" : ""}`} data-day-key={shownDay?.key} inert={!pickedDay} ref={panelRef}>
             <div className="df-day-pick-body">
               {shownDay ? (
                 <>
                   <div className="df-day-pick-head">
-                    <b>{shownDay.label}</b>
+                    <h3>{shownDay.label}</h3>
                     <button aria-label={`Close ${shownDay.label}`} className="df-day-pick-close" onClick={closeDay} type="button">
                       <X aria-hidden="true" size={18} />
                     </button>
