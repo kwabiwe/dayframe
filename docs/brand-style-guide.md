@@ -301,7 +301,7 @@ For compact embedded web forms, use these fixed semantic roles rather than nearb
 | Input, option and body | 14 px | 400–500 | 1.45 |
 | Button and menu action | 14 px | 650 | 1.35 |
 
-Use sentence case for headings and actions. Preserve hierarchy through role, weight and colour; do not invent a one-off font size inside one host of a shared component.
+Use sentence case for headings and actions. Preserve hierarchy through role, weight and colour; do not invent a one-off font size inside one host of a shared component. Floating lists under a field (the command timer's Suggestions, Tags and Activities) share one anatomy and head: a 12 px sentence-case heading naming the list with its plural noun, never an all-caps eyebrow, and 44 px rows with one neutral highlight.
 
 Compound web fields reserve one 2 px perimeter and 12 px of content inset. A leading icon or colour action keeps at least a 44 × 44 px target while its visual mark remains independently sized. For the contextual category-create field, the visible swatch is 20 px: centred in the 44 px leading target, its edge is 14 px and its centre is 24 px from the field's outer edge. Category markers in closed fields and option rows remain compact, borderless and shadowless rounded-square blocks (the X3 activity marker rule), never circles.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand } from "./command-parse";
+import { activitiesForMention, findActiveMention, parseActivityMention, parseCommand } from "./command-parse";
 
 const activities = [
   { id: "deep", name: "Deep work" },
@@ -40,5 +40,34 @@ describe("parseCommand", () => {
     expect(parseCommand("Stretch 0.5m", activities).durationSeconds).toBeNull();
     expect(parseCommand("Trip 30h", activities)).toMatchObject({ description: "Trip 30h", durationSeconds: null });
     expect(parseCommand("Room 101m2", activities).durationSeconds).toBeNull();
+  });
+});
+
+describe("the @ Activities list", () => {
+  it("finds the @word at the caret, from the start of the text or after a space", () => {
+    expect(findActiveMention("@", 1)).toEqual({ start: 0, end: 1, query: "" });
+    expect(findActiveMention("Plan @dee", 9)).toEqual({ start: 5, end: 9, query: "dee" });
+    // The caret inside the word still owns the whole word.
+    expect(findActiveMention("Plan @deep later", 8)).toEqual({ start: 5, end: 10, query: "deep" });
+    expect(findActiveMention("Plan @café", 10)?.query).toBe("café");
+  });
+
+  it("ignores an @ inside a word (an email address) or one the caret has left", () => {
+    expect(findActiveMention("mail me@example", 15)).toBeNull();
+    expect(findActiveMention("Plan @deep later", 16)).toBeNull();
+    expect(findActiveMention("Plan", 4)).toBeNull();
+  });
+
+  it("offers names that start with the query first, then names that contain it", () => {
+    expect(activitiesForMention("adm", activities).map((activity) => activity.id)).toEqual(["admin", "adm2"]);
+    expect(activitiesForMention("work", activities).map((activity) => activity.id)).toEqual(["deep"]);
+    expect(activitiesForMention("pwo", activities).map((activity) => activity.id)).toEqual(["deep"]);
+    expect(activitiesForMention("", activities)).toHaveLength(activities.length);
+    expect(activitiesForMention("zzz", activities)).toEqual([]);
+  });
+
+  it("parses only the @activity while recording, leaving a duration as text", () => {
+    expect(parseActivityMention("Fix bug @admin 45m", activities)).toEqual({ categoryId: "admin", description: "Fix bug 45m" });
+    expect(parseActivityMention("Fix bug @nothing", activities)).toEqual({ categoryId: null, description: "Fix bug @nothing" });
   });
 });

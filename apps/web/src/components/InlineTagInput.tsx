@@ -4,7 +4,8 @@ import {
   consumeActiveHashtag,
   findActiveHashtag,
   normalizeNewTagName,
-  normalizeTagName
+  normalizeTagName,
+  resolveActivityIcon
 } from "@dayframe/shared";
 import { Check, X } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -20,10 +21,24 @@ import {
   type RefObject
 } from "react";
 import type { TagRow } from "@/lib/queries";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { FloatingList } from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
+import { blockStyle } from "@/lib/block-style";
+import { activitiesForMention, findActiveMention } from "@/lib/command-parse";
 import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
+/** An activity the description's `@` list can offer (the command timer passes its activities). */
+export type MentionActivity = { id: string; name: string; color: string; icon?: string | null };
+
+/**
+ * How an activity was chosen from the `@` list: Enter (the command timer may also start the
+ * block), or Tab, a click or a tap (only the activity changes).
+ */
+export type ActivityChoiceTrigger = "enter" | "select";
+
 export function InlineTagInput({
+  activities,
   ariaLabel,
   className = "",
   closeSignal = 0,
@@ -32,6 +47,8 @@ export function InlineTagInput({
   inputId,
   inputRef: externalInputRef,
   name = "description",
+  onActivityChoose,
+  onActivityListChange,
   onChange,
   onClick,
   onEnter,
@@ -45,6 +62,8 @@ export function InlineTagInput({
   tags,
   value
 }: {
+  /** Turns on the `@` Activities list; without it `@` is plain text. */
+  activities?: readonly MentionActivity[];
   ariaLabel: string;
   className?: string;
   closeSignal?: number;
@@ -53,6 +72,12 @@ export function InlineTagInput({
   inputId?: string;
   inputRef?: RefObject<HTMLInputElement | null>;
   name?: string;
+  /**
+   * An activity chosen from the `@` list, with the description as it reads once the `@query`
+   * has left it. The owner sets both (the input does not call `onChange` for it).
+   */
+  onActivityChoose?: (activityId: string, description: string, trigger: ActivityChoiceTrigger) => void;
+  onActivityListChange?: (open: boolean) => void;
   onChange: (value: string) => void;
   onClick?: () => void;
   onEnter?: (event: KeyboardEvent<HTMLInputElement>) => void;
@@ -76,6 +101,10 @@ export function InlineTagInput({
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const [activityIndex, setActivityIndex] = useState(0);
+  // Escape closes the Activities list for the `@` it was open for, until that mention is gone.
+  const [dismissedMentionStart, setDismissedMentionStart] = useState<number | null>(null);
+  const activityPanelRef = useRef<HTMLDivElement | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const [anchorWidth, setAnchorWidth] = useState(0);
@@ -113,6 +142,12 @@ export function InlineTagInput({
     [createName, matches]
   );
   const shouldOpen = !disabled && focused && Boolean(active) && !pickerOpen;
+  const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret) : null;
+  const activityOpen = Boolean(mention) && mention?.start !== dismissedMentionStart;
+  const activityMatches = mention && activities ? activitiesForMention(mention.query, activities) : [];
+  const activeActivityIndex = Math.min(activityIndex, Math.max(0, activityMatches.length - 1));
+  const tagListId = `${name}-tag-suggestions`;
+  const activityListId = `${name}-activity-suggestions`;
   const effectivePickerOpen = !disabled && pickerOpen;
   const normalizedPickerQuery = pickerQuery.trim().toLowerCase();
   const pickerOptions = useMemo(() => {
@@ -169,9 +204,20 @@ export function InlineTagInput({
     return () => observer?.disconnect();
   }, [selectedTagNames]);
 
+  // Any of the input's own panels (Tags, the tag picker, Activities) hides the owner's Suggestions.
   useEffect(() => {
-    onHashtagPanelChange?.(shouldOpen || effectivePickerOpen);
-  }, [effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
+    onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
+  }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
+
+  useEffect(() => {
+    onActivityListChange?.(activityOpen);
+  }, [activityOpen, onActivityListChange]);
+
+  // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
+  useEffect(() => {
+    if (!activityOpen) return;
+    document.getElementById(`${name}-activity-option-${activeActivityIndex}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeActivityIndex, activityOpen, name]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -220,7 +266,7 @@ export function InlineTagInput({
   }, [effectivePickerOpen]);
 
   useLayoutEffect(() => {
-    if (!portal || (!shouldOpen && !effectivePickerOpen)) return undefined;
+    if (!portal || (!shouldOpen && !effectivePickerOpen && !activityOpen)) return undefined;
     function updatePosition() {
       const anchor = anchorRef.current;
       if (!anchor) return;
@@ -249,6 +295,7 @@ export function InlineTagInput({
         return { left, top, width } satisfies CSSProperties;
       };
       if (shouldOpen) setSuggestionsPosition(place(suggestionsPanelRef.current, suggestionsWidth, false));
+      else if (activityOpen) setSuggestionsPosition(place(activityPanelRef.current, suggestionsWidth, false));
       if (effectivePickerOpen) setPickerPosition(place(pickerPanelRef.current, pickerWidth, true));
     }
     updatePosition();
@@ -262,7 +309,7 @@ export function InlineTagInput({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [effectivePickerOpen, portal, shouldOpen]);
+  }, [activityOpen, effectivePickerOpen, portal, shouldOpen]);
 
   function updateCaret() {
     const input = localInputRef.current;
@@ -304,8 +351,46 @@ export function InlineTagInput({
     });
   }
 
+  function chooseActivity(activity: MentionActivity, trigger: ActivityChoiceTrigger) {
+    if (disabled || !mention) return;
+    const replacement = consumeActiveHashtag(value, mention);
+    onActivityChoose?.(activity.id, replacement.text, trigger);
+    setCaret(replacement.caret);
+    window.requestAnimationFrame(() => {
+      const input = localInputRef.current;
+      input?.focus();
+      input?.setSelectionRange(replacement.caret, replacement.caret);
+    });
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (disabled) return;
+    // The Activities list owns ↑/↓/Enter/Tab/Escape while it is open. Enter with nothing to
+    // choose falls through to the owner (the command timer's Start).
+    if (activityOpen && !event.nativeEvent.isComposing) {
+      const count = activityMatches.length;
+      if (event.key === "ArrowDown" && count) {
+        event.preventDefault();
+        setActivityIndex((activeActivityIndex + 1) % count);
+        return;
+      }
+      if (event.key === "ArrowUp" && count) {
+        event.preventDefault();
+        setActivityIndex((activeActivityIndex - 1 + count) % count);
+        return;
+      }
+      if ((event.key === "Enter" || (event.key === "Tab" && !event.shiftKey)) && count) {
+        event.preventDefault();
+        chooseActivity(activityMatches[activeActivityIndex], event.key === "Enter" ? "enter" : "select");
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setDismissedMentionStart(mention?.start ?? null);
+        return;
+      }
+    }
     if (!shouldOpen) {
       onInputKeyDown?.(event);
       if (event.defaultPrevented) return;
@@ -336,11 +421,16 @@ export function InlineTagInput({
     <div className={`inline-tag-editor ${className}`} ref={editorRef}>
       <div className="ui-compound-control inline-tag-input-anchor" ref={anchorRef}>
         <input
+          aria-activedescendant={activityOpen && activityMatches.length
+            ? `${name}-activity-option-${activeActivityIndex}`
+            : shouldOpen && actions.length
+              ? `${name}-tag-option-${Math.min(highlightedIndex, actions.length - 1)}`
+              : undefined}
           aria-describedby={`${name}-tag-help`}
           aria-label={ariaLabel}
           aria-autocomplete="list"
-          aria-controls={`${name}-tag-suggestions`}
-          aria-expanded={shouldOpen}
+          aria-controls={activityOpen ? activityListId : tagListId}
+          aria-expanded={shouldOpen || activityOpen}
           autoComplete="off"
           className={`${inputClassName} inline-tag-description-input`.trim()}
           disabled={disabled}
@@ -348,9 +438,14 @@ export function InlineTagInput({
           name={name}
           onBlur={() => setFocused(false)}
           onChange={(event) => {
+            const nextCaret = event.target.selectionStart ?? event.target.value.length;
             onChange(event.target.value);
-            setCaret(event.target.selectionStart ?? event.target.value.length);
+            setCaret(nextCaret);
             setHighlightedIndex(0);
+            setActivityIndex(0);
+            if (dismissedMentionStart !== null && findActiveMention(event.target.value, nextCaret)?.start !== dismissedMentionStart) {
+              setDismissedMentionStart(null);
+            }
           }}
           onClick={() => {
             updateCaret();
@@ -428,37 +523,66 @@ export function InlineTagInput({
         >
           <TagIcon size={15} />
         </button>
-        {maybePortal(<div
-          aria-hidden={!shouldOpen}
-          className={`ui-floating-surface inline-tag-suggestions${shouldOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-          id={`${name}-tag-suggestions`}
-          inert={!shouldOpen}
-          ref={suggestionsPanelRef}
-          role="listbox"
+        {maybePortal(<FloatingList
+          className={`inline-tag-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+          heading="Tags"
+          id={tagListId}
+          isOpen={shouldOpen}
+          panelRef={suggestionsPanelRef}
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
-          <span className="inline-tag-suggestions-title">TAGS</span>
-          <div>
-            {actions.map((action, index) => (
-              <button
-                aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
-                aria-selected={highlightedIndex === index}
-                className={`${highlightedIndex === index ? "is-highlighted" : ""}${action.create ? " is-create" : ""}`}
-                disabled={disabled}
-                key={action.id}
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => selectAction(action)}
-                role="option"
-                tabIndex={shouldOpen ? 0 : -1}
-                type="button"
-              >
-                {action.create ? "+ " : ""}{action.create ? `Create “${action.label}”` : action.label}
-              </button>
-            ))}
-            {actions.length === 0 ? <span className="inline-tag-empty">Type a name to search or create</span> : null}
-          </div>
-        </div>)}
+          {actions.map((action, index) => (
+            <button
+              aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
+              aria-selected={highlightedIndex === index}
+              className={`df-flist-row${highlightedIndex === index ? " is-highlighted" : ""}${action.create ? " is-create" : ""}`}
+              disabled={disabled}
+              id={`${name}-tag-option-${index}`}
+              key={action.id}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setHighlightedIndex(index)}
+              onClick={() => selectAction(action)}
+              role="option"
+              tabIndex={shouldOpen ? 0 : -1}
+              type="button"
+            >
+              {action.create ? "+ " : ""}{action.create ? `Create “${action.label}”` : action.label}
+            </button>
+          ))}
+          {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
+        </FloatingList>)}
+        {activities ? maybePortal(<FloatingList
+          className={`inline-activity-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+          heading="Activities"
+          id={activityListId}
+          isOpen={activityOpen}
+          panelRef={activityPanelRef}
+          style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
+        >
+          {activityMatches.map((activity, index) => (
+            <button
+              aria-selected={activeActivityIndex === index}
+              className={`df-flist-row df-flist-row--activity${activeActivityIndex === index ? " is-highlighted" : ""}`}
+              disabled={disabled}
+              id={`${name}-activity-option-${index}`}
+              key={activity.id}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActivityIndex(index)}
+              onClick={() => chooseActivity(activity, "select")}
+              role="option"
+              tabIndex={-1}
+              type="button"
+            >
+              <span aria-hidden="true" className="df-flist-block df-block" style={blockStyle(activity.color, activity.name)}>
+                <DayframeIcon glyph={resolveActivityIcon(activity).glyph} size={13} />
+              </span>
+              <span>{activity.name}</span>
+            </button>
+          ))}
+          {activityMatches.length === 0 ? (
+            <span className="df-flist-empty">No activity called “{mention?.query}”</span>
+          ) : null}
+        </FloatingList>) : null}
         {maybePortal(<section
           aria-hidden={!effectivePickerOpen}
           aria-label="Add or filter tags"

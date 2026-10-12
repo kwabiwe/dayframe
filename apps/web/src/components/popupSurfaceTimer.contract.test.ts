@@ -10,6 +10,10 @@ const taskSuggestionsSource = readFileSync(
   fileURLToPath(new URL("./TaskSuggestionsPanel.tsx", import.meta.url)),
   "utf8"
 );
+const floatingListSource = readFileSync(
+  fileURLToPath(new URL("./FloatingList.tsx", import.meta.url)),
+  "utf8"
+);
 const tagSource = readFileSync(
   fileURLToPath(new URL("./InlineTagInput.tsx", import.meta.url)),
   "utf8"
@@ -29,9 +33,10 @@ describe("persistent timer floating surfaces", () => {
     const commandRules = styles.match(/\.df-cmd(?:-wrap)?\s*\{[^}]*\}/g) ?? [];
     expect(commandRules.length).toBeGreaterThan(0);
     for (const rule of commandRules) expect(rule).not.toMatch(/overflow:\s*(hidden|clip|auto)/);
-    expect(taskSuggestionsSource).toContain(
-      "ui-floating-surface swiss-task-suggestions"
-    );
+    // Suggestions (and the description's Tags and Activities) are the one FloatingList surface.
+    expect(taskSuggestionsSource).toContain("<FloatingList");
+    expect(taskSuggestionsSource).toContain("className={`swiss-task-suggestions");
+    expect(floatingListSource).toContain("ui-floating-surface df-flist");
     expect(categorySource).toContain(
       "ui-floating-surface swiss-category-menu"
     );

@@ -16,7 +16,7 @@ import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
-import { InlineTagInput } from "@/components/InlineTagInput";
+import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
@@ -30,7 +30,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import { parseCommand } from "@/lib/command-parse";
+import { parseActivityMention, parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -66,6 +66,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
+  // The `@` Activities list is open: a half-typed `@wri` is not saved to the running block.
+  const [activityListOpen, setActivityListOpen] = useState(false);
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -152,7 +154,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }, [active]);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || activityListOpen) return undefined;
     const nextCategoryId = timerDraft.categoryId || null;
     const nextDescription = timerDraft.description.trim() || null;
     const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
@@ -168,7 +170,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       void updateActiveDetails(timerDraft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, timerDraft, updateActiveDetails]);
+  }, [active, activityListOpen, timerDraft, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;
@@ -263,6 +265,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
+    // While recording, Enter on a typed `@activity` switches the running block's activity in
+    // place (the same debounced update as the activity block) and the `@activity` leaves the text.
+    if (active) {
+      const mention = parseActivityMention(timerDraft.description, data!.categories);
+      if (mention.categoryId) chooseActivity(mention.categoryId, mention.description, "select");
+      return;
+    }
     if (!shouldStartTimerFromEntrySubmit({
       hasActiveTimer: Boolean(active),
       isBusy: isTimerBusy && Boolean(active)
@@ -273,8 +282,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
   // ending now (through the manual-entry path) instead of starting the timer.
-  async function runCommand() {
-    const submitted = timerDraft;
+  async function runCommand(submitted = timerDraft) {
     const command = parseCommand(submitted.description, data!.categories);
     const categoryId = command.categoryId ?? submitted.categoryId;
     // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
@@ -304,6 +312,22 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     }
     // A rejected Start keeps the started details (or anything typed meanwhile) in the bar.
     await startTimer({ categoryId, description: command.description, tagNames: submitted.tagNames });
+  }
+
+  // An activity chosen from the description's `@` list (or a typed `@activity` + Enter while
+  // recording). Recording: the running block's activity changes in place, never a new block.
+  // Idle: Enter also starts the block, as `@activity` + Enter always has; Tab, a click or a tap
+  // only picks the activity.
+  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
+    setCommandNotice(null);
+    setSuggestionsOpen(false);
+    if (trigger === "enter" && !active) {
+      const draft = { ...timerDraft, categoryId, description };
+      setTimerDraft(draft);
+      void runCommand(draft);
+      return;
+    }
+    setTimerDraft((current) => ({ ...current, categoryId, description }));
   }
 
   function startQuickAction(action: QuickAction) {
@@ -429,11 +453,14 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
         <div className="df-cmd-field swiss-timer-description-control" ref={suggestionsRef}>
           <InlineTagInput
+            activities={data.categories}
             ariaLabel="Description"
             className="df-cmd-tags"
             inputId="persistent-timer-description"
             inputRef={descriptionInputRef}
             name="timer-description"
+            onActivityChoose={chooseActivity}
+            onActivityListChange={setActivityListOpen}
             onChange={(description) => {
               setCommandNotice(null);
               setTimerDraft((current) => ({ ...current, description }));
