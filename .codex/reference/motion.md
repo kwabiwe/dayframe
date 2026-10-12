@@ -469,3 +469,12 @@ Block pull-to-refresh:
 - **Surrounding layout:** none moves; the toast floats above the page.
 - **Interruption:** a replacing or undone toast exits from wherever its entrance has got to (the exit sets no start values while the entrance runs), and its exit animations replace the entrance springs, so nothing jumps or keeps running. Once the entrance has finished Reanimated forgets the toast's values, so the exit then starts from rest (opacity 1, no offset, full size); a Reduce Motion entrance animates opacity only, so an exit interrupting it (also after the setting changed) carries the live opacity and starts the transform at rest. The toast owns a shared entrance phase (`entering`, `fading`, `settled`) that the entrance sets and its completion settles.
 - **Reduce Motion:** opacity only: web 140 ms in and 80 ms out (the existing `prefers-reduced-motion` rules on `.df-toast`), iPhone 90 ms in and 70 ms out, with the transform settled at once.
+
+## Web Reports Filter dialog "More filters" (audit W8b, UIA-307)
+
+- Trigger: the "More filters" disclosure button (`aria-expanded`, `aria-controls`) in the Reports Filter dialog. Its open state belongs to `ReportFilterDialog` (`moreOpen`): it starts open when a place, source or description filter is applied, then changes only when the user toggles it. Draft edits (clearing the last place, source or description) never fold it away.
+- Single owner: CSS on `.df-rf-more-panel`, with `grid-template-rows` going 0fr → 1fr over 200ms (ease-out spring curve) and opacity going 0 → 1 over 160ms; the chevron turns 180° in 160ms. Nothing else animates the panel.
+- Entrance/update/exit: expanding grows the dialog body smoothly, and the dialog's internal scroll takes any overflow; collapsing reverses it. Collapsed content is `inert` from the moment the collapse starts, so it leaves the tab order and the accessibility tree.
+- Interruption: toggling again mid-transition retargets the CSS transition from where it is; there are no timers or stale states.
+- Reduce Motion: the panel and chevron transitions are `none`, so expand and collapse are immediate.
+- Evidence: `reportFilters.dom.test.tsx` (stays open after the only source or description is cleared, inert after a user collapse, rapid toggles) and `reports.contract.test.ts` (one transition owner, Reduce Motion CSS).

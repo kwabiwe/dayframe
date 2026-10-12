@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useId, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, X } from "lucide-react";
@@ -160,6 +160,12 @@ function ReportFilterDialog({
   const fullDraft: Draft = { ...draft, categories: categoriesForDraft };
   const noneChosen = chosen.length === 0;
   const count = noneChosen ? 0 : draftBlockCount(fullDraft, filters, counts);
+  // The disclosure owns its open state: opened from the applied filters, then only by the user,
+  // so clearing the last place, source or description never folds the controls away mid-edit.
+  const [moreOpen, setMoreOpen] = useState(
+    filters.places.length + filters.sources.length > 0 || filters.description.trim() !== ""
+  );
+  const moreId = useId();
   const moreCount = draft.places.length + draft.sources.length + (draft.description.trim() ? 1 : 0);
   // Sources with time in the range, plus any already chosen so a chosen one can be removed.
   const sources = sourcesInRange
@@ -246,12 +252,22 @@ function ReportFilterDialog({
           options={options.tags.map((tag) => ({ id: tag.id, name: `#${tag.name}` }))}
           selected={draft.tags}
         />
-        <details className="df-rf-more" open={moreCount > 0 || undefined}>
-          <summary>
+        <div className={`df-rf-more${moreOpen ? " is-open" : ""}`}>
+          <button
+            aria-controls={moreId}
+            aria-expanded={moreOpen}
+            className="df-rf-more-toggle"
+            onClick={() => setMoreOpen((open) => !open)}
+            type="button"
+          >
             <span>More filters</span>
             {moreCount ? <small className="df-faint">{moreCount} selected</small> : <small className="df-faint">Places, sources, description</small>}
             <ChevronDown aria-hidden="true" className="df-rf-more-chevron" size={16} />
-          </summary>
+          </button>
+          {/* One transition owner: the wrapper's grid rows (0fr ↔ 1fr) with opacity. Collapsed
+              content is inert at once, so it leaves the tab order and the accessibility tree as
+              the collapse starts; reversing mid-transition simply retargets the CSS transition. */}
+          <div className="df-rf-more-panel" id={moreId} inert={!moreOpen}>
           <div className="df-rf-more-body">
             <ChipGroup
               label="Places"
@@ -280,7 +296,8 @@ function ReportFilterDialog({
               />
             </label>
           </div>
-        </details>
+          </div>
+        </div>
       </form>
     </ModalDialog>
   );

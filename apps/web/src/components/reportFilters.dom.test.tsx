@@ -47,7 +47,7 @@ describe("Reports filters", () => {
     await user.click(within(dialog).getByRole("button", { name: "None" }));
     await user.click(within(dialog).getByRole("button", { name: "Work" }));
     await user.click(within(dialog).getByRole("button", { name: "#acme" }));
-    await user.click(within(dialog).getByText("More filters"));
+    await user.click(within(dialog).getByRole("button", { name: /More filters/ }));
     await user.click(within(dialog).getByRole("button", { name: "Apple Health sleep" }));
     await user.type(within(dialog).getByLabelText("Description contains"), "  launch ");
     expect(push).not.toHaveBeenCalled();
@@ -108,8 +108,10 @@ describe("Reports filters", () => {
     render(<ReportFiltersPanel filters={filters()} options={options} rangeLabel="This week" sourcesInRange={[]} />);
     await user.click(screen.getByRole("button", { name: "Filter" }));
     const dialog = screen.getByRole("dialog");
-    const more = dialog.querySelector("details.df-rf-more") as HTMLDetailsElement;
-    expect(more.open).toBe(false);
+    const toggle = within(dialog).getByRole("button", { name: /More filters/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    expect(panel.hasAttribute("inert")).toBe(true);
     expect(within(dialog).queryByRole("button", { name: "Apple Health sleep" })).toBeNull();
     expect(within(dialog).getByText("No sources have time in this range.")).toBeTruthy();
     // A tag change makes the count unknown, so Apply says Apply.
@@ -122,7 +124,45 @@ describe("Reports filters", () => {
     render(<ReportFiltersPanel filters={filters({ sources: ["health_sleep"] })} options={options} rangeLabel="This week" sourcesInRange={[]} />);
     await user.click(screen.getByRole("button", { name: "Filter · 1" }));
     const dialog = screen.getByRole("dialog");
-    expect((dialog.querySelector("details.df-rf-more") as HTMLDetailsElement).open).toBe(true);
+    expect(within(dialog).getByRole("button", { name: /More filters/ }).getAttribute("aria-expanded")).toBe("true");
     expect(within(dialog).getByRole("button", { name: "Apple Health sleep" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("keeps More filters open when its only source is deselected", async () => {
+    const user = userEvent.setup();
+    render(<ReportFiltersPanel filters={filters({ sources: ["health_sleep"] })} options={options} rangeLabel="This week" />);
+    await user.click(screen.getByRole("button", { name: "Filter · 1" }));
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Apple Health sleep" }));
+    const toggle = within(dialog).getByRole("button", { name: /More filters/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(toggle.getAttribute("aria-controls")!)!.hasAttribute("inert")).toBe(false);
+  });
+
+  it("keeps More filters open when its only description is cleared", async () => {
+    const user = userEvent.setup();
+    render(<ReportFiltersPanel filters={filters({ description: "launch" })} options={options} rangeLabel="This week" />);
+    await user.click(screen.getByRole("button", { name: "Filter · 1" }));
+    const dialog = screen.getByRole("dialog");
+    await user.clear(within(dialog).getByLabelText("Description contains"));
+    expect(within(dialog).getByRole("button", { name: /More filters/ }).getAttribute("aria-expanded")).toBe("true");
+    expect(within(dialog).getByLabelText("Description contains")).toBeTruthy();
+  });
+
+  it("collapses More filters only on the user's toggle, leaving its controls inert", async () => {
+    const user = userEvent.setup();
+    render(<ReportFiltersPanel filters={filters()} options={options} rangeLabel="This week" />);
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = screen.getByRole("dialog");
+    const toggle = within(dialog).getByRole("button", { name: /More filters/ });
+    const panel = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    await user.click(toggle);
+    expect(panel.hasAttribute("inert")).toBe(false);
+    await user.click(toggle);
+    await user.click(toggle);
+    await user.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(panel.hasAttribute("inert")).toBe(true);
+    expect(panel.closest(".df-rf-more")!.classList.contains("is-open")).toBe(false);
   });
 });

@@ -69,10 +69,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
           ))}
         </ul>
       ) : (
-        <div className="report-empty-details">
-          <strong>No matching blocks</strong>
-          <p>Remove a filter or choose another date range to see tracked time.</p>
-        </div>
+        <p className="df-muted">No matching blocks. Remove a filter or choose another date range to see tracked time.</p>
       )}
 
       {report.pagination.totalPages > 1 ? (

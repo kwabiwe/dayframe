@@ -67,10 +67,10 @@ describe("Reports accessibility and responsive contracts", () => {
 
 describe("Reports in Blocks audit fixes (W8)", () => {
   it("never paints data, disclosures or pagination coral (UIA-302)", () => {
-    for (const selector of [".report-entry-duration", ".report-ranked-track i", ".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
+    for (const selector of [".report-ranked-track i", ".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
       expect(rule(selector)).not.toMatch(/--accent/);
     }
-    expect(rule(".report-entry-duration")).toContain("var(--text-primary)");
+    expect(rule(".df-erow-dur")).not.toMatch(/--accent/);
     expect(rule(".overlap-marker")).toContain("--warning");
   });
 
@@ -124,13 +124,21 @@ describe("Reports rows and Filter dialog in Blocks (W8b)", () => {
 
   it("matches the prototype Filter dialog and keeps every filter (UIA-307)", () => {
     expect(filtersSource).toContain(">None</button>");
-    expect(filtersSource).toContain('className="df-rf-more"');
+    expect(filtersSource).toContain("df-rf-more${moreOpen");
+    expect(filtersSource).toContain("inert={!moreOpen}");
+    expect(filtersSource).not.toContain("<details");
     expect(filtersSource).toContain("More filters");
     expect(filtersSource).toContain("sourcesInRange.includes(source.id) || draft.sources.includes(source.id)");
     expect(filtersSource).toContain("Show ${count}");
     expect(filtersSource).not.toContain("df-rbtn\" onClick={onClose}");
-    expect(rule(".df-rf-more > summary")).toContain("min-height: 44px");
-    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-rf-more-chevron \{\s*transition: none;/);
+    expect(rule(".df-rf-more-toggle")).toContain("min-height: 44px");
+    // One transition owner for expand/collapse: the panel's grid rows with opacity.
+    expect(rule(".df-rf-more-panel")).toMatch(/grid-template-rows: 0fr;[\s\S]*transition: grid-template-rows/);
+    expect(rule(".df-rf-more.is-open .df-rf-more-panel")).toContain("grid-template-rows: 1fr");
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-rf-more-chevron,\s*\.df-rf-more-panel \{\s*transition: none;/);
+    // The old matching table's styles are gone; the shared exact-data table stays.
+    expect(styles).not.toMatch(/\.report-(detail-table|entry-|running-pill|sort-control|allocation)/);
+    expect(styles).toContain(".report-data-table table {");
     expect(pageSource).toContain("sourcesInRange={report.sourcesInRange}");
   });
 });
