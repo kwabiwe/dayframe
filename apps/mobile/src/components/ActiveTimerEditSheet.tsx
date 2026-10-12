@@ -2884,7 +2884,8 @@ export function ActiveTimerEditSheet({
                     ) : null}
                     {isAddMode && onSave ? (
                       // The add sheet's single primary action (UIA-052): saves the new block, the same
-                      // commit as Done in the head; it closes optimistically with no spinner.
+                      // commit as Done in the head; it closes once the block is created (no spinner,
+                      // and a double tap saves once).
                       <Pressable
                         accessibilityHint="Saves this time as a new block"
                         accessibilityLabel="Add block"
