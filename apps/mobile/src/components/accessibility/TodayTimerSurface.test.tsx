@@ -9,6 +9,7 @@ vi.mock("react", async () => {
 });
 vi.mock("react-native", () => ({
   Animated: { View: "AnimatedView" },
+  AppState: { currentState: "active" },
   Pressable: "Pressable",
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
