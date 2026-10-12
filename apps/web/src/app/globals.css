@@ -10531,6 +10531,11 @@ dialog.ui-dialog.df-palette {
   color: var(--accent-text);
 }
 
+/* Reports never paints data coral (UIA-302): a running block's duration stays neutral there. */
+.df-report-row.df-erow.is-live .df-erow-dur {
+  color: var(--text-primary);
+}
+
 .df-erow-acts {
   display: flex;
   justify-content: flex-end;

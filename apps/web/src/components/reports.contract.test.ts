@@ -71,6 +71,8 @@ describe("Reports in Blocks audit fixes (W8)", () => {
       expect(rule(selector)).not.toMatch(/--accent/);
     }
     expect(rule(".df-erow-dur")).not.toMatch(/--accent/);
+    // A running row in Reports overrides Today's coral live duration (Codex r2).
+    expect(rule(".df-report-row.df-erow.is-live .df-erow-dur")).toContain("var(--text-primary)");
     expect(rule(".overlap-marker")).toContain("--warning");
   });
 
