@@ -45,8 +45,11 @@ export function GoalSettings({
   const router = useRouter();
   const { refresh } = useAppShellRuntime();
   const drafts = useSyncExternalStore(goalDrafts.subscribe, () => goalDrafts.get(userId), () => goalDrafts.get(userId));
-  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string } | null>(null);
+  const [status, setStatus] = useState<{ kind: "saved" | "error"; text: string; revision?: number } | null>(null);
   const page: ServerGoals = { dailyGoalMinutes, weeklyGoalMinutes, goalsRevision };
+  // "Saved" stays only while this tab's save is still the newest goal the server has handed it.
+  const newestRevision = Math.max(drafts.known?.goalsRevision ?? 0, goalsRevision);
+  const shownStatus = status?.kind === "saved" && (status.revision ?? 0) < newestRevision ? null : status;
   const goals: TimeGoalMinutes = {
     dailyGoalMinutes: shownGoal(drafts, "dailyGoalMinutes", page),
     weeklyGoalMinutes: shownGoal(drafts, "weeklyGoalMinutes", page)
@@ -58,8 +61,8 @@ export function GoalSettings({
   }, [dailyGoalMinutes, goalsRevision, userId, weeklyGoalMinutes]);
   // Read by the saver after a save lands (also after Settings closed: Today and Reports still
   // pick up the new goal at once).
-  const latest = useRef({ mounted: false, refresh, router, lastSaveIsNewest: true });
-  const saverRef = useRef<ReturnType<typeof createGoalSaver<SaveContext, ServerGoals | undefined>> | null>(null);
+  const latest = useRef({ mounted: false, refresh, router, lastSavedRevision: 0 });
+  const saverRef = useRef<ReturnType<typeof createGoalSaver<SaveContext, ServerGoals>> | null>(null);
 
   useEffect(() => {
     latest.current.refresh = refresh;
@@ -69,7 +72,7 @@ export function GoalSettings({
   useEffect(() => {
     const state = latest.current;
     state.mounted = true;
-    const saver = createGoalSaver<SaveContext, ServerGoals | undefined>({
+    const saver = createGoalSaver<SaveContext, ServerGoals>({
       save: async (changes) => {
         const response = await clientFetch("/api/profile", {
           method: "PATCH",
@@ -79,27 +82,32 @@ export function GoalSettings({
           keepalive: true
         });
         if (!response.ok) throw new Error("not saved");
-        const body = (await response.json().catch(() => null)) as { goals?: ServerGoals } | null;
-        return body?.goals;
+        // Only a reply naming the stored goals and their revision settles the tap; anything else is
+        // an unconfirmed outcome (handled like a failure, then reconciled by the reload).
+        const body = (await response.json().catch(() => null)) as { goals?: Partial<ServerGoals> } | null;
+        const stored = body?.goals;
+        if (!stored || !Number.isInteger(stored.dailyGoalMinutes) || !Number.isInteger(stored.weeklyGoalMinutes) || !Number.isInteger(stored.goalsRevision)) {
+          throw new UnconfirmedGoalSave();
+        }
+        return stored as ServerGoals;
       },
       mergeContext: (earlier, later) => ({ revisions: { ...earlier.revisions, ...later.revisions } }),
       // The tab's drafts outlive this visit: a save that lands after Settings closed still counts.
       onAccepted: ({ changes, context }, stored) => {
         goalDrafts.accept(userId, changes, context.revisions, stored);
-        // "Saved" only when this save is still the newest goal: a change made elsewhere after it
-        // is what the page shows instead.
-        const known = goalDrafts.get(userId).known;
-        state.lastSaveIsNewest = !stored || !known || known.goalsRevision <= stored.goalsRevision;
+        state.lastSavedRevision = stored.goalsRevision;
       },
-      onFailed: ({ changes, context }) => {
+      onFailed: ({ changes, context }, error) => {
         // Only the goals this save carried, and only if no newer tap changed them since: each
         // falls back to the value the account last accepted from this tab, or the page's.
         goalDrafts.fail(userId, changes, context.revisions);
-        if (state.mounted) setStatus({ kind: "error", text: "Your goal was not saved. Check your connection and try again." });
+        if (state.mounted) setStatus(error instanceof UnconfirmedGoalSave
+          ? { kind: "error", text: "Dayframe couldn't confirm your goal. Showing your account's latest." }
+          : { kind: "error", text: "Your goal was not saved. Check your connection and try again." });
       },
       onBusyChange: (busy, lastAccepted) => {
         if (busy) return;
-        if (state.mounted && lastAccepted && state.lastSaveIsNewest) setStatus({ kind: "saved", text: "Saved" });
+        if (state.mounted && lastAccepted) setStatus({ kind: "saved", text: "Saved", revision: state.lastSavedRevision });
         // Everything is saved (or failed): reload once, so every accepted write reaches the app.
         void state.refresh({ force: true }).then(() => state.router.refresh()).catch(() => undefined);
       }
@@ -161,10 +169,10 @@ export function GoalSettings({
         )}
       />
       <p
-        className={`settings-section-feedback df-goal-status${status?.kind === "error" ? " is-error" : ""}`}
-        role={status?.kind === "error" ? "alert" : "status"}
+        className={`settings-section-feedback df-goal-status${shownStatus?.kind === "error" ? " is-error" : ""}`}
+        role={shownStatus?.kind === "error" ? "alert" : "status"}
       >
-        {status?.text ?? ""}
+        {shownStatus?.text ?? ""}
       </p>
     </>
   );
@@ -218,3 +226,10 @@ function goalLabel(minutes: number) {
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+/** A save whose reply did not name the stored goals: its outcome is unknown until the reload. */
+class UnconfirmedGoalSave extends Error {
+  constructor() {
+    super("goal save not confirmed");
+    this.name = "UnconfirmedGoalSave";
+  }
+}

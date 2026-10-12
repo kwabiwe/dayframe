@@ -27,7 +27,7 @@ vi.mock("@/components/AppShellRuntime", () => ({ useAppShellRuntime: () => ({ re
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.fetch }));
 
 const { GoalSettings } = await import("./GoalSettings");
-const { __resetGoalDraftsForTests, __resetGoalSaveQueueForTests } = await import("@/lib/goal-stepper");
+const { __resetGoalDraftsForTests, __resetGoalSaveQueueForTests, goalDrafts } = await import("@/lib/goal-stepper");
 
 /** The page's data: goals with the server revision they were read at. */
 const page = (daily: number, weekly: number, revision: number) => (
@@ -265,6 +265,42 @@ describe("Settings › Your day steppers (UIA-309)", () => {
     expect(view.getByRole("group", { name: "Daily goal: 9h" })).toBeTruthy();
     fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
     expect(view.getByRole("group", { name: "Daily goal: 10h" })).toBeTruthy();
+  });
+
+  it("remembers a newer goal seen while Settings was closed (Codex r10)", async () => {
+    vi.useFakeTimers();
+    const first = render(page(480, 2400, 1));
+    fireEvent.click(first.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); }); // 9h at revision 2
+    first.unmount();
+    // Away from Settings, the app's runtime commits a refresh with 12h (revision 3).
+    goalDrafts.observe("user-1", { dailyGoalMinutes: 720, weeklyGoalMinutes: 2400, goalsRevision: 3 });
+    // Back on Settings with stale server-rendered data.
+    const second = render(page(480, 2400, 1));
+    expect(second.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
+  });
+
+  it("an unreadable reply is not a save: the tap goes and no Saved shows (Codex r10)", async () => {
+    vi.useFakeTimers();
+    mocks.fetch.mockImplementationOnce(async () => new Response("not json", { status: 200 }));
+    const view = render(page(480, 2400, 1));
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(view.getByRole("alert").textContent).toContain("couldn't confirm");
+    expect(view.queryByText("Saved")).toBeNull();
+    expect(view.getByRole("group", { name: "Daily goal: 8h" })).toBeTruthy();
+    expect(mocks.refresh).toHaveBeenCalledWith({ force: true });
+  });
+
+  it("Saved goes away once a newer revision arrives (Codex r10)", async () => {
+    vi.useFakeTimers();
+    const view = render(page(480, 2400, 1));
+    fireEvent.click(view.getByRole("button", { name: "Increase daily goal" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    expect(view.getByText("Saved")).toBeTruthy();
+    view.rerender(page(720, 2400, 3));
+    expect(view.queryByText("Saved")).toBeNull();
+    expect(view.getByRole("group", { name: "Daily goal: 12h" })).toBeTruthy();
   });
 
   it("leaving the page saves a pending change at once", async () => {

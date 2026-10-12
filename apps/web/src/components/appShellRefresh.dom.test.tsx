@@ -48,6 +48,21 @@ describe("AppShellRuntime refresh", () => {
     // The older body arrived last: it is dropped.
     expect(screen.getByTestId("goal").textContent).toBe("600");
   });
+
+  it("records every server copy of the goals in the tab's goal record, Settings open or not (Codex r10)", async () => {
+    const { goalDrafts, __resetGoalDraftsForTests } = await import("@/lib/goal-stepper");
+    __resetGoalDraftsForTests();
+    render(<AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(answers).toHaveLength(1));
+    await act(async () => answers[0]?.(bootstrap(720, 3)));
+    await waitFor(() => expect(screen.getByTestId("goal").textContent).toBe("720"));
+    await waitFor(() => expect(goalDrafts.get("user-1").known).toEqual({ dailyGoalMinutes: 720, weeklyGoalMinutes: 2400, goalsRevision: 3 }));
+    // Older server-rendered data afterwards never replaces it.
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate" }));
+    expect(goalDrafts.get("user-1").known?.goalsRevision).toBe(3);
+  });
 });
 
 function Harness() {
@@ -59,7 +74,7 @@ function Harness() {
   </>;
 }
 
-function bootstrap(dailyGoalMinutes: number): BootstrapData {
+function bootstrap(dailyGoalMinutes: number, goalsRevision = 1): BootstrapData {
   return {
     activeEntry: null,
     categories: [],
@@ -69,7 +84,7 @@ function bootstrap(dailyGoalMinutes: number): BootstrapData {
     dayEntries: [],
     weekEntries: [],
     dateRange: { selectedDate: "2026-08-17", dayStart: "2026-08-17T00:00:00.000Z", dayEnd: "2026-08-18T00:00:00.000Z", weekStart: "2026-08-17T00:00:00.000Z", weekEnd: "2026-08-24T00:00:00.000Z" },
-    user: { id: "user-1", dailyGoalMinutes, weeklyGoalMinutes: 2400 },
+    user: { id: "user-1", dailyGoalMinutes, weeklyGoalMinutes: 2400, goalsRevision },
     workspace: { id: "workspace-1", name: "Mine" }
   } as unknown as BootstrapData;
 }
