@@ -847,62 +847,6 @@ textarea.ui-control {
   color: var(--on-accent);
 }
 
-.settings-goal-control {
-  display: grid;
-  min-width: min(100%, 440px);
-  grid-template-columns: repeat(2, minmax(172px, 1fr));
-  gap: 10px 14px;
-}
-
-.settings-duration-control {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  margin: 0;
-  border: 0;
-  padding: 0;
-}
-
-.settings-duration-control legend {
-  grid-column: 1 / -1;
-  margin-bottom: 2px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.settings-duration-control label {
-  display: grid;
-  grid-template-columns: 58px auto;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.settings-duration-control .ui-control {
-  width: 58px;
-  padding: 0 8px;
-  text-align: center;
-}
-
-.settings-save-row {
-  display: flex;
-  grid-column: 1 / -1;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-}
-
-.settings-save-row-goals {
-  justify-content: flex-end;
-}
-
-.settings-save-row-goals .ui-button {
-  min-width: 104px;
-}
-
 .settings-inline-form > .ui-button {
   min-width: 104px;
 }
@@ -1296,7 +1240,6 @@ textarea.ui-control {
 }
 
 .settings-workspace-toolbar,
-.settings-export-actions,
 .settings-troubleshooting-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1378,10 +1321,6 @@ textarea.ui-control {
   max-width: none;
 }
 
-.settings-export-actions .ui-button {
-  min-width: 0;
-}
-
 .settings-confirm-copy,
 .settings-troubleshooting-copy {
   display: grid;
@@ -1443,15 +1382,6 @@ textarea.ui-control {
     justify-self: stretch;
   }
 
-  .settings-goal-control {
-    min-width: 0;
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-save-row {
-    grid-column: 1;
-  }
-
   .settings-inline-form,
   .settings-security-form {
     display: grid;
@@ -1473,8 +1403,7 @@ textarea.ui-control {
     justify-items: stretch;
   }
 
-  .settings-workspace-toolbar,
-  .settings-export-actions {
+  .settings-workspace-toolbar {
     justify-content: flex-start;
   }
 
@@ -1483,10 +1412,6 @@ textarea.ui-control {
   .settings-workspace-select,
   .settings-workspace-select .ui-control {
     width: 100%;
-  }
-
-  .settings-export-actions .ui-button {
-    flex: 1 1 140px;
   }
 }
 
@@ -12570,6 +12495,116 @@ dialog.ui-dialog.df-ce-dialog {
   gap: 16px;
 }
 
+/* Settings › Export data (UIA-312): one Export, with a small menu for the other files. */
+.df-export {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-export-more[open] {
+  flex-basis: 100%;
+  display: grid;
+  justify-items: end;
+}
+
+.df-export-more > summary {
+  list-style: none;
+}
+
+.df-export-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* The other formats open in the row's own flow (no floating layer), so they fit any width. */
+.df-export {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.df-export .df-rbtn {
+  min-height: 44px;
+}
+
+.df-export-menu {
+  display: grid;
+  width: 100%;
+  margin-top: 6px;
+  border-radius: 14px;
+  padding: 4px;
+  background: var(--surface-muted);
+}
+
+.df-export-menu a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.df-export-menu a:hover {
+  background: var(--surface-muted);
+}
+
+/* No keyboard shortcuts on touch-only devices (UIA-313): the Help row and the sidebar entry hide. */
+@media (hover: none) and (pointer: coarse) {
+  .df-shortcuts-row,
+  .df-set-card .ui-settings-row.df-shortcuts-row,
+  .df-side-shortcuts {
+    display: none;
+  }
+}
+
+/* Settings › Your day (UIA-309): the iPhone's goal steppers — 36 px circles, 44 px targets on touch. */
+.df-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.df-stepper-btn {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.df-stepper-btn:disabled {
+  color: var(--text-muted);
+  cursor: default;
+  opacity: 0.55;
+}
+
+.df-stepper-value {
+  min-width: 56px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.df-goal-status:empty {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .df-stepper-btn {
+    /* The circle stays 36 px; the touch target is 44 px. */
+    width: 44px;
+    height: 44px;
+    background: radial-gradient(circle, var(--surface-muted) 17.5px, transparent 18px);
+  }
+}
+
 .df-set-card {
   display: grid;
   gap: 6px;
@@ -12615,18 +12650,6 @@ dialog.ui-dialog.df-ce-dialog {
 
 .df-set-card .ui-settings-row-action {
   margin-left: auto;
-}
-
-/* Goals take the full card width under their label and stack when the card is narrow. */
-.df-set-card .settings-goals-row .ui-settings-row-action {
-  flex: 1 1 100%;
-  margin-left: 0;
-}
-
-.df-set-card .settings-goal-control {
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(172px, 1fr));
 }
 
 /* Selection is neutral in Blocks: coral stays for recording and the one primary action. */

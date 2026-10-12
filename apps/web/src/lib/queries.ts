@@ -215,7 +215,7 @@ export type DashboardSeriesPoint = {
 
 export type BootstrapData = {
   authMode?: RequestSession["authMode"];
-  user: { id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number };
+  user: { id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: number };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
   dateRange: DashboardDateRange;
@@ -424,20 +424,33 @@ export async function getNormalizationContext(
 }
 
 export async function getUser(session: RequestSession) {
-  const result = await query<{ id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number }>(
-    `select id, email, name,
-            daily_goal_minutes as "dailyGoalMinutes",
-            weekly_goal_minutes as "weeklyGoalMinutes"
-     from users
-     where id = $1`,
-    [session.userId]
-  );
-  return result.rows[0] ?? {
+  let result;
+  try {
+    result = await query<{ id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: string | number }>(
+      `select id, email, name,
+              daily_goal_minutes as "dailyGoalMinutes",
+              weekly_goal_minutes as "weeklyGoalMinutes",
+              goals_revision as "goalsRevision"
+       from users
+       where id = $1`,
+      [session.userId]
+    );
+  } catch (error) {
+    if (isUndefinedColumnError(error, "goals_revision")) {
+      throw missingRequiredColumnError("users", "goals_revision", "supabase/migrations/202610120002_user_goals_revision.sql", error);
+    }
+    throw error;
+  }
+  const row = result.rows[0];
+  // bigint arrives as a string from pg; goal revisions stay far below 2^53.
+  if (row) return { ...row, goalsRevision: Number(row.goalsRevision) };
+  return {
     id: session.userId,
     email: "local@dayframe",
     name: "Dayframe user",
     dailyGoalMinutes: 480,
-    weeklyGoalMinutes: 2400
+    weeklyGoalMinutes: 2400,
+    goalsRevision: 0
   };
 }
 

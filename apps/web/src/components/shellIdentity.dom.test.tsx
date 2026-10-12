@@ -64,7 +64,7 @@ describe("Theme toggle on first paint", () => {
 
     expect(iconClasses(container)).toEqual(serverIcons);
     expect(serverIcons).toEqual(expect.arrayContaining([expect.stringContaining("lucide-moon"), expect.stringContaining("lucide-sun")]));
-    expect(container.querySelector("button")?.getAttribute("aria-label")).toBe("Switch to light mode");
+    expect(container.querySelector("button")?.getAttribute("aria-label")).toBe("Switch to Daylight");
     await act(async () => root?.unmount());
   });
 });
