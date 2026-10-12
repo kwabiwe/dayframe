@@ -72,13 +72,17 @@ import type {
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateGhostGeometry,
+  calendarCreateLimitMinutes,
+  calendarCreateMinuteIsFuture,
   calendarCreatePointerSequenceAccepted,
   calendarDragCreateRange,
+  calendarDragCreateSeconds,
   calendarDragCreateSlot,
   calendarDragMinutesAt,
-  calendarDragRangeSeconds,
   calendarPointHitsSemanticBlock,
   calendarPointerMatchesConsumed,
+  calendarPointerMinutesAt,
   isEligibleCalendarCreatePointer,
   type CalendarConsumedPointer,
   type CalendarCreatePointerSequence,
@@ -91,6 +95,10 @@ type CalendarHoursMode = "fullDay";
 
 /** Half the now pill's height (11 px text + 2 px padding each side), for clamping it inside the axis. */
 const NOW_PILL_HALF_HEIGHT = 10;
+// Owner decision 12 Oct 2026 (option B): Calendar creates past time only, and says so.
+const CALENDAR_FUTURE_CREATE_NOTICE = "Blocks can't start in the future";
+const CALENDAR_CREATE_NOTICE_MS = 3_000;
+const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <DayframeIcon glyph="calendar-days" size={16}/> },
@@ -534,6 +542,7 @@ export function TimeReviewViews({
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
             todayKeyHint={initialTodayKey}
+            undoToastVisible={Boolean(pendingNotice)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
           />
         ) : null}
@@ -592,6 +601,7 @@ export function CalendarReview({
   scrollContainerRef,
   tags,
   todayKeyHint = null,
+  undoToastVisible = false,
   visibleDays
 }: {
   calendarHoursMode: CalendarHoursMode;
@@ -610,6 +620,8 @@ export function CalendarReview({
   tags: BootstrapData["tags"];
   /** Before hydration, today's date key as the server saw it in the viewer's zone (null: none). */
   todayKeyHint?: string | null;
+  /** The Timeline's Delete Undo toast is up: it keeps the toast place, so Calendar notices are only announced. */
+  undoToastVisible?: boolean;
   visibleDays: Date[];
 }) {
   const router = useRouter();
@@ -656,14 +668,61 @@ export function CalendarReview({
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [resizeTip, setResizeTip] = useState<{ flip: boolean; label: string; x: number; y: number } | null>(null);
   // Drag on empty time: the day body owns the pointer (capture) from press to release.
-  const [createGhost, setCreateGhost] = useState<{ dayKey: string; endMinutes: number; startMinutes: number } | null>(null);
+  // `nowMs`: the displayed now the range was clamped against; `heldAtLimit`: it ends at that now.
+  const [createGhost, setCreateGhost] = useState<{
+    dayKey: string;
+    endMinutes: number;
+    heldAtLimit: boolean;
+    nowMs: number;
+    startMinutes: number;
+  } | null>(null);
   // Decided once at pointerdown against the layout at that moment: whether the press may become a
   // drag (it is outside every block's semantic time) and the 5-minute anchor it pressed on.
-  const createPressRef = useRef<{ anchorMinutes: number; dragAllowed: boolean; pointerId: number } | null>(null);
+  // `future`: the press is at or after now, where no block can start — no ghost, a not-allowed
+  // cursor, and a notice on release.
+  const createPressRef = useRef<{
+    anchorMinutes: number;
+    dragAllowed: boolean;
+    future: boolean;
+    pointerId: number;
+  } | null>(null);
+  const [futurePressDayKey, setFuturePressDayKey] = useState<string | null>(null);
+  // "Blocks can't start in the future": one notice at a time, keyed by a rising token so a
+  // replacing notice re-mounts and a stale timer never hides a newer one. While the Timeline's
+  // Delete Undo toast is up it keeps the place and this notice is only announced.
+  const [createNotice, setCreateNotice] = useState<{ announcedOnly: boolean; exiting: boolean; token: number } | null>(null);
+  const createNoticeSequenceRef = useRef(0);
+  useEffect(() => {
+    if (!createNotice || createNotice.exiting) return;
+    const token = createNotice.token;
+    const timer = window.setTimeout(() => {
+      setCreateNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));
+    }, CALENDAR_CREATE_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [createNotice]);
+  useEffect(() => {
+    if (!createNotice?.exiting) return;
+    const token = createNotice.token;
+    const timer = window.setTimeout(() => {
+      setCreateNotice((current) => (current?.token === token ? null : current));
+    }, CALENDAR_CREATE_NOTICE_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [createNotice]);
+  // A delete's Undo toast replaces a visible notice (one toast at a time), so the notice never
+  // pops back in when the Undo toast leaves. Adjusted during render, as React recommends.
+  const [undoToastSeen, setUndoToastSeen] = useState(undoToastVisible);
+  if (undoToastSeen !== undoToastVisible) {
+    setUndoToastSeen(undoToastVisible);
+    if (undoToastVisible && createNotice && !createNotice.announcedOnly) setCreateNotice(null);
+  }
+  function showFutureCreateNotice() {
+    setCreateNotice({ announcedOnly: undoToastVisible, exiting: false, token: ++createNoticeSequenceRef.current });
+  }
   const createDragRef = useRef<{
     anchorMinutes: number;
     dayKey: string;
     endMinutes: number;
+    nowMs: number;
     pointerId: number;
     startMinutes: number;
   } | null>(null);
@@ -1061,7 +1120,9 @@ export function CalendarReview({
       pointerType: event.pointerType,
       resizeActive: Boolean(resizingId),
       targetKind
-    })) {
+    }) || !localTimeReady) {
+      // Until hydration the grid draws no blocks, now line or future zone (#367), so there is
+      // nothing a press could be judged against.
       createPointerSequenceRef.current = null;
       return;
     }
@@ -1075,17 +1136,25 @@ export function CalendarReview({
       scrollLeft: calendarScroller?.scrollLeft ?? 0,
       scrollTop: calendarScroller?.scrollTop ?? 0
     };
+    const axis = {
+      clientY: event.clientY,
+      dayBodyTop: dayBody.getBoundingClientRect().top,
+      endHour: calendarHours.endHour,
+      rowHeight,
+      startHour: calendarHours.startHour
+    };
+    const dragAllowed = !dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY);
+    // Decided against the now the Calendar shows (`capturedNow`: the now line and the
+    // not-allowed zone), never a fresher clock, so what the user sees and what release does agree.
+    // `capturedNow` never runs ahead of the real clock, so anything allowed here is in the past.
+    const future = calendarCreateMinuteIsFuture({ day, minutes: calendarPointerMinutesAt(axis), now: capturedNow });
     createPressRef.current = {
-      anchorMinutes: calendarDragMinutesAt({
-        clientY: event.clientY,
-        dayBodyTop: dayBody.getBoundingClientRect().top,
-        endHour: calendarHours.endHour,
-        rowHeight,
-        startHour: calendarHours.startHour
-      }),
-      dragAllowed: !dayBodyPointHitsSemanticBlock(dayBody, event.clientX, event.clientY),
+      anchorMinutes: calendarDragMinutesAt(axis),
+      dragAllowed,
+      future,
       pointerId: event.pointerId
     };
+    if (future && dragAllowed) setFuturePressDayKey(formatCalendarDateKey(day));
     dayBody.setPointerCapture(event.pointerId);
   }
 
@@ -1094,8 +1163,9 @@ export function CalendarReview({
     if (!sequence || sequence.pointerId !== event.pointerId) return;
     const dayBodyTop = event.currentTarget.getBoundingClientRect().top;
     const press = createPressRef.current;
-    // A press inside a block's semantic time (including its visual gap) never becomes a drag.
-    if (!press || press.pointerId !== event.pointerId || !press.dragAllowed) return;
+    // A press inside a block's semantic time (including its visual gap) never becomes a drag, and
+    // a press in the future never draws a ghost.
+    if (!press || press.pointerId !== event.pointerId || !press.dragAllowed || press.future) return;
     const axis = { endHour: calendarHours.endHour, rowHeight, startHour: calendarHours.startHour };
     let drag = createDragRef.current;
     if (!drag) {
@@ -1105,20 +1175,26 @@ export function CalendarReview({
         anchorMinutes,
         dayKey: sequence.dayKey,
         endMinutes: anchorMinutes,
+        nowMs: capturedNow.getTime(),
         pointerId: event.pointerId,
         startMinutes: anchorMinutes
       };
       createDragRef.current = drag;
     }
+    // Held at the displayed now: the ghost stops at the now line, exactly where release will
+    // finish the block.
     const range = calendarDragCreateRange({
       ...axis,
       anchorMinutes: drag.anchorMinutes,
-      currentMinutes: calendarDragMinutesAt({ ...axis, clientY: event.clientY, dayBodyTop })
+      currentMinutes: calendarDragMinutesAt({ ...axis, clientY: event.clientY, dayBodyTop }),
+      limitMinutes: calendarCreateLimitMinutes(day, capturedNow)
     });
+    // Same range means the same now minute when held, so the ghost and the block still agree.
+    drag.nowMs = capturedNow.getTime();
     if (range.startMinutes === drag.startMinutes && range.endMinutes === drag.endMinutes && createGhost) return;
     drag.startMinutes = range.startMinutes;
     drag.endMinutes = range.endMinutes;
-    setCreateGhost({ dayKey: formatCalendarDateKey(day), ...range });
+    setCreateGhost({ dayKey: formatCalendarDateKey(day), nowMs: drag.nowMs, ...range });
   }
 
   function abortCalendarCreateDrag() {
@@ -1126,10 +1202,12 @@ export function CalendarReview({
     createDragRef.current = null;
     createPointerSequenceRef.current = null;
     setCreateGhost(null);
+    setFuturePressDayKey(null);
   }
 
+  const createGestureActive = Boolean(createGhost) || futurePressDayKey !== null;
   useEffect(() => {
-    if (!createGhost) return;
+    if (!createGestureActive) return;
     const escape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -1138,7 +1216,7 @@ export function CalendarReview({
     };
     window.addEventListener("keydown", escape, true);
     return () => window.removeEventListener("keydown", escape, true);
-  }, [createGhost]);
+  }, [createGestureActive]);
 
   function finishCalendarCreatePointer(
     day: Date,
@@ -1150,7 +1228,21 @@ export function CalendarReview({
     if (dayBody.hasPointerCapture(event.pointerId)) {
       dayBody.releasePointerCapture(event.pointerId);
     }
+    const press = createPressRef.current;
     createPressRef.current = null;
+    if (press?.future && press.pointerId === event.pointerId) {
+      setFuturePressDayKey(null);
+      // Released anywhere, after a click or a drag: say why nothing opened — unless the press was
+      // an open editor's dismissal, which only dismisses.
+      if (
+        press.dragAllowed &&
+        sequence &&
+        !calendarPointerMatchesConsumed(consumedPointerRef.current, sequence)
+      ) {
+        showFutureCreateNotice();
+      }
+      return;
+    }
     const drag = createDragRef.current;
     if (drag && drag.pointerId === event.pointerId) {
       createDragRef.current = null;
@@ -1159,7 +1251,7 @@ export function CalendarReview({
       const slot = calendarDragCreateSlot({
         day,
         endMinutes: drag.endMinutes,
-        now: new Date(),
+        now: new Date(drag.nowMs),
         startMinutes: drag.startMinutes
       });
       if (slot) createCalendarDraft(day, slot);
@@ -1192,7 +1284,7 @@ export function CalendarReview({
       day,
       dayBodyRect,
       endHour: calendarHours.endHour,
-      now: new Date(),
+      now: capturedNow,
       rowHeight,
       startHour: calendarHours.startHour
     });
@@ -1202,6 +1294,10 @@ export function CalendarReview({
   function cancelCalendarCreatePointer(event: ReactPointerEvent<HTMLDivElement>) {
     if (createPointerSequenceRef.current?.pointerId === event.pointerId) {
       createPointerSequenceRef.current = null;
+    }
+    if (createPressRef.current?.future && createPressRef.current.pointerId === event.pointerId) {
+      createPressRef.current = null;
+      setFuturePressDayKey(null);
     }
     if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
@@ -1308,12 +1404,29 @@ export function CalendarReview({
               </div>
             ))}
           </div>
-          {visibleDays.map((day) => (
+          {visibleDays.map((day) => {
+            const dayKey = formatCalendarDateKey(day);
+            // Where a block can't start: a whole later day, or today below the now line. CSS gives
+            // both the not-allowed cursor, so hovering costs no render. Local-time dependent, so it
+            // follows the same post-hydration now as the now line, blocks and "today" (#367), and
+            // the server render and the hydration pass draw none of it.
+            const createLimitMinutes = localTimeReady
+              ? calendarCreateLimitMinutes(day, capturedNow)
+              : 24 * 60;
+            const dayIsFuture = createLimitMinutes <= calendarHours.startHour * 60;
+            const futureZoneTop = createLimitMinutes < calendarHours.endHour * 60 && !dayIsFuture
+              ? Math.round(((createLimitMinutes - calendarHours.startHour * 60) / 60) * rowHeight)
+              : null;
+            return (
             <div
               key={`${day.toISOString()}-body`}
               data-calendar-day-body
-              data-calendar-day-key={formatCalendarDateKey(day)}
-              className="calendar-day-body"
+              data-calendar-day-key={dayKey}
+              className={[
+                "calendar-day-body",
+                dayIsFuture ? "is-future" : "",
+                futurePressDayKey === dayKey ? "is-future-press" : ""
+              ].filter(Boolean).join(" ")}
               onLostPointerCapture={cancelCalendarCreatePointer}
               onPointerCancel={cancelCalendarCreatePointer}
               onPointerDown={(event) => startCalendarCreatePointer(day, event)}
@@ -1324,6 +1437,14 @@ export function CalendarReview({
                 backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${Math.max(0, gridLineSpacing - 1)}px, var(--line) ${gridLineSpacing}px)`
               }}
             >
+              {futureZoneTop !== null ? (
+                <span
+                  aria-hidden="true"
+                  className="calendar-future-zone"
+                  data-calendar-future-zone
+                  style={{ top: futureZoneTop }}
+                />
+              ) : null}
               {localTimeReady && isToday(day) ? (
                 <span
                   aria-hidden="true"
@@ -1378,19 +1499,34 @@ export function CalendarReview({
                   </Link>
                 );
               })}
-              {createGhost?.dayKey === formatCalendarDateKey(day) ? (
-                <div
-                  aria-hidden="true"
-                  className="calendar-create-ghost tabular"
-                  data-calendar-create-ghost
-                  style={{
-                    height: Math.max(12, ((createGhost.endMinutes - createGhost.startMinutes) / 60) * rowHeight - 2),
-                    top: ((createGhost.startMinutes - calendarHours.startHour * 60) / 60) * rowHeight
-                  }}
-                >
-                  {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(calendarDragRangeSeconds(day, createGhost.startMinutes, createGhost.endMinutes) ?? 0)}`}
-                </div>
-              ) : null}
+              {createGhost?.dayKey === formatCalendarDateKey(day) ? (() => {
+                const ghostLimitMinutes = calendarCreateLimitMinutes(day, new Date(createGhost.nowMs));
+                const geometry = calendarCreateGhostGeometry({
+                  endMinutes: createGhost.endMinutes,
+                  limitMinutes: ghostLimitMinutes < 24 * 60 ? ghostLimitMinutes : undefined,
+                  rowHeight,
+                  startHour: calendarHours.startHour,
+                  startMinutes: createGhost.startMinutes
+                });
+                // The label's duration is the block release creates (DST-safe, ending at the
+                // displayed now when held there).
+                const seconds = calendarDragCreateSeconds({
+                  day,
+                  endMinutes: createGhost.endMinutes,
+                  now: new Date(createGhost.nowMs),
+                  startMinutes: createGhost.startMinutes
+                });
+                return (
+                  <div
+                    aria-hidden="true"
+                    className="calendar-create-ghost tabular"
+                    data-calendar-create-ghost
+                    style={geometry}
+                  >
+                    {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(seconds)}`}
+                  </div>
+                );
+              })() : null}
               {visibleSelectedTarget?.kind === "create" && visibleSelectedTarget.dayKey === formatCalendarDateKey(day) ? (() => {
                 const geometry = calculateCalendarDraftAnchorGeometry({
                   day,
@@ -1626,7 +1762,8 @@ export function CalendarReview({
                 });
               })()}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
       {visibleSelectedTarget?.kind === "entry" && selectedEntry ? (
@@ -1708,6 +1845,18 @@ export function CalendarReview({
         <p className="timeline-delete-error" role="alert" aria-atomic="true" aria-live="assertive">
           {actionError}
         </p>
+      ) : null}
+      {/* Announces a notice the Delete Undo toast kept off screen; empty otherwise, so a visible
+          toast (its own polite status) is never read twice. */}
+      <p aria-atomic="true" aria-live="polite" className="sr-only" role="status">
+        {createNotice?.announcedOnly ? CALENDAR_FUTURE_CREATE_NOTICE : ""}
+      </p>
+      {createNotice && !createNotice.announcedOnly ? (
+        <BlocksToast
+          exiting={createNotice.exiting}
+          key={createNotice.token}
+          message={CALENDAR_FUTURE_CREATE_NOTICE}
+        />
       ) : null}
     </section>
   );
@@ -1976,5 +2125,8 @@ function calendarCreateTargetKind(
   if (target.closest(".swiss-resize-handle")) return "resize";
   if (target.closest("[data-calendar-block-key]")) return "entry";
   if (target.closest("button, a, input, select, textarea, [role='button']")) return "action";
-  return target === dayBody ? "day-body" : "other";
+  // The future zone is empty day-body time that only carries the not-allowed cursor.
+  return target === dayBody || (target.parentElement === dayBody && target.hasAttribute("data-calendar-future-zone"))
+    ? "day-body"
+    : "other";
 }

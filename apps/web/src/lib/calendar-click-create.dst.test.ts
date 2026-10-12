@@ -2,6 +2,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   calculateCalendarClickCreateSlot,
   calculateCalendarDraftAnchorGeometry,
+  calendarCreateLimitMinutes,
+  calendarDragCreateRange,
+  calendarDragCreateSeconds,
+  calendarDragCreateSlot,
   calendarDragRangeSeconds
 } from "./calendar-click-create";
 import {
@@ -136,7 +140,31 @@ describe.each([
     expect(editedFinish.durationSeconds).toBeGreaterThan(0);
   });
 
-  it("preserves ordinary and midnight wall-clock output while rejecting future Finish", () => {
+  it("ends a drag held at now on the exact instant at both 01:30s of the fall-back hour (Codex r1 on #369)", () => {
+    process.env.TZ = timezone;
+    const day = new Date(fallDate[0], fallDate[1], fallDate[2], 12);
+    // fallEditedStartIso is the first 01:30, fallEditedStopIso the second, an hour later.
+    for (const [nowIso, expectedSeconds] of [[fallEditedStartIso, 90 * 60], [fallEditedStopIso, 150 * 60]] as const) {
+      const now = new Date(nowIso);
+      const limitMinutes = calendarCreateLimitMinutes(day, now);
+      expect(limitMinutes).toBe(90);
+      const range = calendarDragCreateRange({
+        anchorMinutes: 0,
+        currentMinutes: 4 * 60,
+        endHour: 24,
+        limitMinutes,
+        startHour: 0
+      });
+      expect(range).toEqual({ startMinutes: 0, endMinutes: 90, heldAtLimit: true });
+      const slot = calendarDragCreateSlot({ day, endMinutes: range.endMinutes, now, startMinutes: range.startMinutes });
+      expect(slot?.stoppedAt).toBe(nowIso);
+      expect(durationSeconds(slot)).toBe(expectedSeconds);
+      // The ghost's label says the same duration.
+      expect(calendarDragCreateSeconds({ day, endMinutes: 90, now, startMinutes: 0 })).toBe(expectedSeconds);
+    }
+  });
+
+  it("preserves ordinary and midnight wall-clock output while holding a future Finish at now", () => {
     process.env.TZ = timezone;
     const ordinaryDay = new Date(2026, 1, 10, 12);
     const ordinary = slotAt(ordinaryDay, 10 * 60 + 7, new Date(2026, 1, 10, 18));
@@ -157,8 +185,16 @@ describe.each([
     });
 
     const futureDay = new Date(2026, 1, 10, 12);
-    expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 20))).toBeNull();
+    // Owner decision 12 Oct 2026 (option B): a slot running past now finishes at now (floored to
+    // the minute) instead of silently creating nothing; a slot that can't start before now is null.
+    const heldAtNow = slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 20, 40));
+    expect(dateTimeLocal(heldAtNow?.startedAt).slice(11)).toBe("10:00");
+    expect(dateTimeLocal(heldAtNow?.stoppedAt).slice(11)).toBe("10:20");
+    expect(durationSeconds(heldAtNow)).toBe(1_200);
+    expect(heldAtNow?.height).toBeCloseTo((20 / 60) * 64);
     expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 31))).not.toBeNull();
+    expect(slotAt(futureDay, 10 * 60, new Date(2026, 1, 10, 10, 0, 50))).toBeNull();
+    expect(slotAt(futureDay, 10 * 60 + 20, new Date(2026, 1, 10, 10, 0))).toBeNull();
   });
 });
 

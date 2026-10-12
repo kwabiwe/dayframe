@@ -137,6 +137,14 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(container.querySelector(`[data-calendar-day-key="2026-10-11"] [data-entry-id="${LATE_CALL.id}"]`)).toBeNull();
     expect(container.querySelector(`[data-calendar-day-key="2026-10-14"] [data-entry-id="${WEDNESDAY.id}"] .calendar-entry-primary`)?.getAttribute("aria-label")).toContain("14:00");
     expect(monday.querySelector(".calendar-now-line")).not.toBeNull();
+    // Future time (#369) follows the same post-hydration now: none of it in the server frame, then
+    // the not-allowed zone starts exactly at the now line and later days are marked.
+    expect(html).not.toContain("calendar-future-zone");
+    expect(html).not.toContain("is-future");
+    expect(monday.querySelector<HTMLElement>("[data-calendar-future-zone]")?.style.top)
+      .toBe(monday.querySelector<HTMLElement>(".calendar-now-line")?.style.top);
+    expect(container.querySelector('[data-calendar-day-key="2026-10-13"]')?.classList.contains("is-future")).toBe(true);
+    expect(monday.classList.contains("is-future")).toBe(false);
     expect(container.querySelector(".calendar-day-heading.is-today")?.querySelector("[aria-label]")?.getAttribute("aria-label")).toContain("12 Oct");
     expect(container.querySelector(".calendar-grid-scroller")?.hasAttribute("aria-busy")).toBe(false);
     // 45 minutes on Monday (London) and an hour on Wednesday.
