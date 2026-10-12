@@ -1,6 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { FloatingList } from "@/components/FloatingList";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
@@ -10,6 +11,7 @@ export function TaskSuggestionsPanel({
   anchorRef,
   isBusy,
   isOpen,
+  onClose,
   onSelect,
   panelRef,
   portal = false,
@@ -18,6 +20,8 @@ export function TaskSuggestionsPanel({
   anchorRef?: RefObject<HTMLElement | null>;
   isBusy: boolean;
   isOpen: boolean;
+  /** Closes Suggestions (the phone sheet's Close control). */
+  onClose: () => void;
   onSelect: (suggestion: RecentActivitySuggestion) => void;
   panelRef?: RefObject<HTMLDivElement | null>;
   portal?: boolean;
@@ -88,11 +92,13 @@ export function TaskSuggestionsPanel({
   }, [anchorRef, isOpen, portal, resolvedPanelRef]);
 
   const panel = (
-    <div
-      aria-hidden={!isOpen}
-      aria-label="Suggestions"
-      className={`ui-floating-surface swiss-task-suggestions${isOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-      inert={!isOpen}
+    <FloatingList
+      anchorRef={anchorRef}
+      className={`swiss-task-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+      headClassName="swiss-task-suggestions-header"
+      heading="Suggestions"
+      isOpen={isOpen}
+      onClose={onClose}
       onKeyDown={(event) => {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)')];
@@ -108,34 +114,32 @@ export function TaskSuggestionsPanel({
               : (currentIndex + 1) % options.length;
         options[nextIndex]?.focus();
       }}
-      ref={resolvedPanelRef}
-      role="listbox"
+      panelRef={resolvedPanelRef}
+      rowsClassName="swiss-task-suggestions-list"
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
     >
-      <div className="swiss-task-suggestions-header"><span>Suggestions</span></div>
-      <div className="swiss-task-suggestions-list">
-        {suggestions.map((suggestion) => (
-          <button
-            key={suggestion.key}
-            type="button"
-            role="option"
-            aria-selected={false}
-            disabled={isBusy}
-            onClick={() => onSelect(suggestion)}
-          >
-            <span>
-              <b>{suggestion.description}</b>
-              <small>
-                <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }} />
-                {suggestion.categoryName ?? "No activity"}
-                {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
-              </small>
-            </span>
-            <DayframeIcon glyph="play" size={14} fill="currentColor" strokeWidth={0}/>
-          </button>
-        ))}
-      </div>
-    </div>
+      {suggestions.map((suggestion) => (
+        <button
+          aria-selected={false}
+          className="df-flist-row"
+          disabled={isBusy}
+          key={suggestion.key}
+          onClick={() => onSelect(suggestion)}
+          role="option"
+          type="button"
+        >
+          <span>
+            <b>{suggestion.description}</b>
+            <small>
+              <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }} />
+              {suggestion.categoryName ?? "No activity"}
+              {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
+            </small>
+          </span>
+          <DayframeIcon glyph="play" size={14} fill="currentColor" strokeWidth={0}/>
+        </button>
+      ))}
+    </FloatingList>
   );
 
   return portal && typeof document !== "undefined" ? createPortal(panel, document.body) : panel;

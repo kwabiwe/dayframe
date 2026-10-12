@@ -15,7 +15,7 @@ import {
 import { createPortal } from "react-dom";
 import { Check, CheckCircle2, ChevronDown, Plus, X } from "lucide-react";
 import {
-  DAYFRAME_APP_ICONS,
+  DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH,
   DAYFRAME_PALETTE_PICKER,
   DEFAULT_PALETTE_KEY,
   resolveActivityIcon,
@@ -574,7 +574,7 @@ export function CategoryPicker({
           aria-controls={menuId}
           aria-expanded={open}
           aria-haspopup={isCreating ? "dialog" : "listbox"}
-          aria-label={selectedCategory ? `Activity: ${selectedCategory.name}` : "Choose activity"}
+          aria-label={`Activity: ${selectedCategory?.name ?? "No activity"}`}
           className={`df-cmd-activity${selectedCategory ? " df-block" : ""}`}
           disabled={disabled}
           id={triggerId}
@@ -588,11 +588,13 @@ export function CategoryPicker({
           onKeyDown={handleTriggerKeyDown}
           ref={assignTrigger}
           style={selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined}
-          title={selectedCategory?.name ?? "Choose activity"}
+          title={`Activity: ${selectedCategory?.name ?? "No activity"}`}
           type="button"
         >
+          {/* No activity is the neutral activity dot, as on Today's rows; never the tag glyph,
+              which means "add tags" (the description's own control). */}
           <DayframeIcon
-            glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_APP_ICONS.tag}
+            glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH}
             size={20}
           />
         </button>

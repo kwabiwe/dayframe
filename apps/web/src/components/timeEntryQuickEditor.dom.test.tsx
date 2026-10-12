@@ -52,7 +52,8 @@ describe("TimeEntryQuickEditorModal", () => {
       const suggestions = await screen.findByRole("listbox", { name: "Suggestions" });
 
       expect(description.value).toBe("");
-      expect(suggestions.parentElement).toBe(document.body);
+      // The listbox sits inside the FloatingList surface, which is portalled to the body.
+      expect(suggestions.closest(".df-flist")?.parentElement).toBe(document.body);
       expect(suggestions.textContent).toContain("Deep planning");
       fireEvent.keyDown(description, { key: "ArrowDown" });
       expect(document.activeElement?.textContent).toContain("Deep planning");
