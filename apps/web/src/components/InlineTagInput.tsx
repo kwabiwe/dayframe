@@ -103,6 +103,9 @@ export function InlineTagInput({
   const [caret, setCaret] = useState(value.length);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [activityIndex, setActivityIndex] = useState(0);
+  // Escape or Close dismisses the Tags list for the `#…` it was open for; the next `#` (or the
+  // same one once deleted) opens it again. Focus, and the phone keyboard, stay in the field.
+  const [dismissedTagStart, setDismissedTagStart] = useState<number | null>(null);
   const activityPanelRef = useRef<HTMLDivElement | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -140,7 +143,7 @@ export function InlineTagInput({
     ],
     [createName, matches]
   );
-  const shouldOpen = !disabled && focused && Boolean(active) && !pickerOpen;
+  const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen;
   const mention = activities && !disabled && focused && !pickerOpen ? findActiveMention(value, caret) : null;
   const activityOpen = Boolean(mention);
   const activityMatches = mention && activities ? activitiesForMention(mention.query, activities) : [];
@@ -416,8 +419,12 @@ export function InlineTagInput({
       if (action) selectAction(action);
     } else if (event.key === "Escape") {
       event.preventDefault();
-      setFocused(false);
+      dismissTagList();
     }
+  }
+
+  function dismissTagList() {
+    setDismissedTagStart(active?.start ?? null);
   }
 
   function maybePortal(panel: ReactNode) {
@@ -453,6 +460,9 @@ export function InlineTagInput({
             setCaret(nextCaret);
             setHighlightedIndex(0);
             setActivityIndex(0);
+            if (dismissedTagStart !== null && findActiveHashtag(event.target.value, nextCaret)?.start !== dismissedTagStart) {
+              setDismissedTagStart(null);
+            }
           }}
           onClick={() => {
             updateCaret();
@@ -536,7 +546,7 @@ export function InlineTagInput({
           heading="Tags"
           id={tagListId}
           isOpen={shouldOpen}
-          onClose={() => setFocused(false)}
+          onClose={dismissTagList}
           panelRef={suggestionsPanelRef}
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >

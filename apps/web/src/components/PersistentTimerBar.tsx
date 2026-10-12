@@ -31,7 +31,7 @@ import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
-import { parseActivityMention, parseCommand, withoutPendingMentions } from "@/lib/command-parse";
+import { keepsMentions, parseCommand, pendingMentionActivity, withoutPendingMentions } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
 const TASK_SUGGESTION_LIMIT = 5;
@@ -67,6 +67,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [narrowCommand, setNarrowCommand] = useState(false);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [hashtagSuggestionsOpen, setHashtagSuggestionsOpen] = useState(false);
+  // Idle: the text left when an activity was picked from the `@` list. Its `@words` are literal
+  // (the picked activity wins); a newly typed `@activity` still parses. Dropped once the text no
+  // longer holds them.
+  const [literalMentions, setLiteralMentions] = useState("");
   const [startEditorOpen, setStartEditorOpen] = useState(false);
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
@@ -111,8 +115,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }, [taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
   const parsedCommand = useMemo(
-    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? []),
-    [active, data?.categories, timerDraft.description]
+    () => active ? null : parseCommand(timerDraft.description, data?.categories ?? [], literalMentions),
+    [active, data?.categories, literalMentions, timerDraft.description]
   );
   const activeAccent = active
     ? timeEntryAccentColor({
@@ -272,10 +276,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   function startFromEnter(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    // While recording, Enter on a typed `@activity` switches the running block's activity in
-    // place (the same debounced update as the activity block) and the `@activity` leaves the text.
+    // While recording, Enter on a newly typed `@activity` switches the running block's activity
+    // in place (the same debounced update as the activity block) and the new `@…` leave the text;
+    // `@words` the saved description already had are literal text.
     if (active) {
-      const mention = parseActivityMention(timerDraft.description, data!.categories);
+      const mention = pendingMentionActivity(timerDraft.description, active.description ?? "", data!.categories);
       if (mention.categoryId) chooseActivity(mention.categoryId, mention.description, "select");
       return;
     }
@@ -289,8 +294,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // Idle Start: `@activity` picks the activity and a trailing duration logs a finished block
   // ending now (through the manual-entry path) instead of starting the timer.
-  async function runCommand(submitted = timerDraft) {
-    const command = parseCommand(submitted.description, data!.categories);
+  async function runCommand(submitted = timerDraft, literal = literalMentions) {
+    const command = parseCommand(submitted.description, data!.categories, literal);
     const categoryId = command.categoryId ?? submitted.categoryId;
     // Only the command that was sent is cleared or restored: text typed while it was in flight wins.
     const isUntouched = (current: typeof submitted) => current.description === submitted.description
@@ -325,16 +330,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // recording). Recording: the running block's activity changes in place, never a new block.
   // Idle: Enter also starts the block, as `@activity` + Enter always has; Tab, a click or a tap
   // only picks the activity.
-  function chooseActivity(categoryId: string, text: string, trigger: ActivityChoiceTrigger) {
+  // Only the chosen `@query` leaves the text: other `@words` stay as written. Idle, they become
+  // literal so the chosen activity wins (a trailing duration still parses); recording, ones the
+  // saved description had stay and new ones are never saved (`withoutPendingMentions`).
+  function chooseActivity(categoryId: string, description: string, trigger: ActivityChoiceTrigger) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
-    // The chosen activity wins: any other `@activity` still in the text leaves it too, so
-    // nothing re-parses it (a trailing duration is still parsed when the block starts).
-    const description = parseActivityMention(text, data!.categories).description;
+    if (!active) setLiteralMentions(description);
     if (trigger === "enter" && !active) {
       const draft = { ...timerDraft, categoryId, description };
       setTimerDraft(draft);
-      void runCommand(draft);
+      void runCommand(draft, description);
       return;
     }
     setTimerDraft((current) => ({ ...current, categoryId, description }));
@@ -485,6 +491,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             }}
             onChange={(description) => {
               setCommandNotice(null);
+              setLiteralMentions((literal) => (literal && !keepsMentions(description, literal) ? "" : literal));
               setTimerDraft((current) => ({ ...current, description }));
               setSuggestionsOpen(true);
             }}

@@ -245,9 +245,29 @@ describe("@activity + Enter", () => {
     expect(calls.createManualEntry).not.toHaveBeenCalled();
   });
 
-  it("idle: the activity picked from the list wins over an earlier @activity", async () => {
+  it("idle: the activity picked from the list wins; an earlier @word stays as literal text", async () => {
     const { calls, input } = renderBar();
     const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Enter}");
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan @foc", tagNames: [] });
+  });
+
+  it("idle: after Tab picks an activity, Start still uses it, not an earlier @word", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @foc @wri");
+    await user.keyboard("{Tab}");
+    expect(input.value).toBe("Plan @foc");
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    await act(async () => { await user.click(screen.getByRole("button", { name: "Start a block" })); });
+    expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan @foc", tagNames: [] });
+  });
+
+  it("idle: a substring the list offers also parses on Enter after a space (one resolver)", async () => {
+    const { calls, input } = renderBar();
+    const user = await typeInto(input, "Plan @rit");
+    expect(optionNames(activities())).toEqual(["Writing"]);
+    await user.keyboard(" ");
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
     await user.keyboard("{Enter}");
     expect(calls.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "Plan", tagNames: [] });
   });
@@ -258,7 +278,7 @@ describe("@activity + Enter", () => {
     await act(async () => { await user.keyboard("{Enter}"); });
     expect(calls.createManualEntry).toHaveBeenCalledTimes(1);
     const entry = calls.createManualEntry.mock.calls[0][0];
-    expect(entry).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(entry).toMatchObject({ categoryId: "write", description: "Plan @foc" });
     expect(Date.parse(entry.stoppedAt) - Date.parse(entry.startedAt)).toBe(45 * 60 * 1000);
     expect(calls.startTimer).not.toHaveBeenCalled();
   });
@@ -309,6 +329,41 @@ describe("@activity + Enter", () => {
     expectRunningBlockKept(calls);
   });
 
+  it("recording: choosing an activity keeps @words the saved description already had", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @focus wording" }) });
+    const user = await typeInto(input, " @wri");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Discuss @focus wording");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith({
+      categoryId: "write",
+      description: "Discuss @focus wording",
+      tagNames: []
+    }), { timeout: 2_000 });
+    expectRunningBlockKept(calls, ["Discuss @focus wording"]);
+  });
+
+  it("recording: Enter on a saved @word alone does not switch or remove it", async () => {
+    const { calls, input } = renderBar({ activeEntry: running({ description: "Discuss @writing" }) });
+    const user = userEvent.setup();
+    await user.click(input);
+    // The caret is not on the word, so its list is closed.
+    await user.keyboard("{Home}{Enter}");
+    expect(input.value).toBe("Discuss @writing");
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+    expect(calls.updateActiveDetails).not.toHaveBeenCalled();
+  });
+
+  it("recording: a substring @word switches on Enter after a space, as the list offers it", async () => {
+    const { calls, input } = renderBar({ activeEntry: running() });
+    const user = await typeInto(input, " @rit ");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Fix bug");
+    await waitFor(() => expect(calls.updateActiveDetails).toHaveBeenCalledWith(
+      expect.objectContaining({ categoryId: "write", description: "Fix bug" })
+    ), { timeout: 2_000 });
+    expectRunningBlockKept(calls);
+  });
+
   it("recording: choosing from the list switches too", async () => {
     const { calls, input } = renderBar({ activeEntry: running() });
     const user = await typeInto(input, " @");
@@ -320,12 +375,15 @@ describe("@activity + Enter", () => {
   });
 });
 
-function expectRunningBlockKept(calls: Spies) {
+function expectRunningBlockKept(calls: Spies, literal: string[] = []) {
   expect(calls.startTimer).not.toHaveBeenCalled();
   expect(calls.stopTimer).not.toHaveBeenCalled();
   expect(calls.createManualEntry).not.toHaveBeenCalled();
-  // A half-typed "@wri" is never saved to the running block.
-  for (const [draft] of calls.updateActiveDetails.mock.calls) expect((draft as TimerDraft).description).not.toContain("@");
+  // A half-typed "@wri" is never saved to the running block (only text it already had).
+  for (const [draft] of calls.updateActiveDetails.mock.calls) {
+    const description = (draft as TimerDraft).description;
+    if (!literal.includes(description)) expect(description).not.toContain("@");
+  }
 }
 
 describe("an unfinished @ is never saved to the running block", () => {
@@ -378,6 +436,16 @@ describe("an unfinished @ is never saved to the running block", () => {
 });
 
 describe("# Tags stay as they were", () => {
+  it("Escape closes the Tags list for that #… only; the next # opens it again", async () => {
+    const { input } = renderBar();
+    const user = await typeInto(input, "Plan #de");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    expect(input.value).toBe("Plan #de");
+    await user.type(input, " #dee", { skipClick: true });
+    expect(screen.getByRole("listbox", { name: "Tags" })).not.toBeNull();
+  });
+
   it("opens the Tags list on #, and Enter adds the tag and removes the #query", async () => {
     const { input } = renderBar();
     const user = await typeInto(input, "Plan #dee");
@@ -469,6 +537,44 @@ describe("on phones the lists are sheets", () => {
     expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
     expect(document.activeElement).toBe(input);
     expect(calls.startTimer).not.toHaveBeenCalled();
+  });
+
+  it("Close dismisses only the current token: the next # or @ opens its list again with focus kept", async () => {
+    phone();
+    const { input } = renderBar();
+    const user = await typeInto(input, "Plan #de");
+    const tags = () => screen.getByRole("listbox", { name: "Tags" }).closest<HTMLElement>(".df-flist")!;
+    await user.click(within(tags()).getByRole("button", { name: "Close tags" }));
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    expect(document.activeElement).toBe(input);
+    // Typing on in the dismissed token keeps it closed; the next token reopens it.
+    await user.type(input, "e", { skipClick: true });
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await user.type(input, " #dee", { skipClick: true });
+    expect(within(tags()).getByRole("option", { name: "Existing tag, Deep work" })).not.toBeNull();
+
+    await user.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}@wr");
+    const list = activities().closest<HTMLElement>(".df-flist")!;
+    await user.click(within(list).getByRole("button", { name: "Close activities" }));
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    // The caret is restored on the next frame, before the next keystroke.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await user.type(input, " @wr", { skipClick: true });
+    expect(input.value).toBe("Plan #dee @wr");
+    expect(optionNames(activities())).toEqual(["Writing"]);
+  });
+
+  it("Suggestions reopen after Close once you type again", async () => {
+    phone();
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    await user.click(input);
+    const suggestions = screen.getByRole("listbox", { name: "Suggestions" }).closest<HTMLElement>(".df-flist")!;
+    await user.click(within(suggestions).getByRole("button", { name: "Close suggestions" }));
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    expect(document.activeElement).toBe(input);
+    await user.type(input, "Wr", { skipClick: true });
+    expect(screen.getByRole("listbox", { name: "Suggestions" })).not.toBeNull();
   });
 
   it("gives Suggestions and Tags the same sheet and Close", async () => {

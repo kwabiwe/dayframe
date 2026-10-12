@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitiesForMention, findActiveMention, parseActivityMention, parseCommand, withoutPendingMentions } from "./command-parse";
+import { activitiesForMention, findActiveMention, keepsMentions, parseCommand, pendingMentionActivity, withoutPendingMentions } from "./command-parse";
 
 const activities = [
   { id: "deep", name: "Deep work" },
@@ -88,8 +88,27 @@ describe("the @ Activities list", () => {
     expect(withoutPendingMentions("mail me@example.com", "")).toBe("mail me@example.com");
   });
 
-  it("parses only the @activity while recording, leaving a duration as text", () => {
-    expect(parseActivityMention("Fix bug @admin 45m", activities)).toEqual({ categoryId: "admin", description: "Fix bug 45m" });
-    expect(parseActivityMention("Fix bug @nothing", activities)).toEqual({ categoryId: null, description: "Fix bug @nothing" });
+  it("recording: Enter resolves only newly typed @words, leaving a duration and saved @words as text", () => {
+    expect(pendingMentionActivity("Fix bug @admin 45m", "Fix bug", activities)).toEqual({ categoryId: "admin", description: "Fix bug 45m" });
+    // Unresolved new @words still never reach the saved text.
+    expect(pendingMentionActivity("Fix bug @nothing", "Fix bug", activities)).toEqual({ categoryId: null, description: "Fix bug" });
+    // A saved "@admin" is literal: it neither switches nor leaves the text.
+    expect(pendingMentionActivity("Email @admin team", "Email @admin team", activities)).toEqual({ categoryId: null, description: "Email @admin team" });
+    expect(pendingMentionActivity("Email @admin team @deep", "Email @admin team", activities)).toEqual({ categoryId: "deep", description: "Email @admin team" });
+  });
+
+  it("uses the list's resolver everywhere: exact, then prefix, then substring", () => {
+    const writing = [{ id: "write", name: "Writing" }, { id: "wr", name: "Wrap-up" }];
+    expect(parseCommand("Plan @rit", writing)).toMatchObject({ categoryId: "write", description: "Plan" });
+    expect(parseCommand("Plan @rit", writing).categoryId).toBe(activitiesForMention("rit", writing)[0].id);
+    expect(pendingMentionActivity("Fix @rit", "Fix", writing).categoryId).toBe("write");
+  });
+
+  it("leaves literal @words alone after an activity was picked from the list", () => {
+    expect(parseCommand("Plan @admin 45m", activities, "Plan @admin")).toEqual({ description: "Plan @admin", categoryId: null, durationSeconds: 2700 });
+    // A newly typed one still parses.
+    expect(parseCommand("Plan @admin @deep", activities, "Plan @admin").categoryId).toBe("deep");
+    expect(keepsMentions("Plan @admin more", "Plan @admin")).toBe(true);
+    expect(keepsMentions("Plan more", "Plan @admin")).toBe(false);
   });
 });
