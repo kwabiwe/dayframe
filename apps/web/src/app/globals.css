@@ -1380,7 +1380,6 @@ textarea.ui-control {
 .settings-troubleshooting-copy {
   display: grid;
   gap: 10px;
-  padding: 16px;
 }
 
 .settings-confirm-copy p,
@@ -5428,7 +5427,6 @@ kbd {
   display: grid;
   gap: 1px;
   margin: 0;
-  padding: 16px;
 }
 
 .place-learned-details > div {

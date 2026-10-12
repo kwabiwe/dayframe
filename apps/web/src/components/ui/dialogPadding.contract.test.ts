@@ -19,7 +19,7 @@ describe("dialog padding (UIA-301)", () => {
   });
 
   it("drops per-dialog workarounds, and only edge-to-edge surfaces opt out", () => {
-    for (const selector of [".place-dialog-copy", ".place-role-dialog", ".swiss-confirm-body"]) {
+    for (const selector of [".place-dialog-copy", ".place-role-dialog", ".swiss-confirm-body", ".settings-troubleshooting-copy", ".place-learned-details"]) {
       expect(rule(selector)).not.toMatch(/\bpadding:/);
     }
     for (const selector of [".ui-popover-content", ".df-palette .ui-dialog-content", ".manual-entry-dialog-content"]) {
