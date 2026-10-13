@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const dashboard = readFileSync("src/components/DayframeDashboard.tsx", "utf8");
+const clock = readFileSync("src/lib/dashboardClock.ts", "utf8");
 const reports = readFileSync("src/components/reports/ReportsTab.tsx", "utf8");
 const orb = readFileSync("src/components/today/PlayOrb.tsx", "utf8");
 const motion = readFileSync("src/lib/blocksMotion.ts", "utf8");
@@ -18,8 +19,9 @@ const hotPaths = [
 describe("idle and background clock work", () => {
   it("ticks whole seconds only for live time, never in the background", () => {
     expect(dashboard).not.toMatch(/useEffect\(\(\) => \{\s*const interval = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);\s*return \(\) => clearInterval\(interval\);\s*\}, \[\]\);/);
-    expect(dashboard).toMatch(/if \(!appIsForeground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\)/);
-    expect(dashboard).toContain("}, [appIsForeground, needsSecondClock]);");
+    expect(clock).toMatch(/if \(!foreground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\)/);
+    expect(clock).toContain("}, [foreground, needsSecondClock, setNow]);");
+    expect(dashboard).toContain("useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, setNow });");
     expect(orb).toMatch(/if \(!foreground\) return undefined;[\s\S]*?setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
   });
   it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
