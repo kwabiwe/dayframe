@@ -454,17 +454,17 @@ describe("Review real SQLite transactions", () => {
     });
     expect(count("review_mutation_outbox")).toBe(1);
   });
-  it("restores only canonically open sources after a permanent conflict", async () => {
+  it("settles a conflict quietly and brings back only the canonically open source", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
     mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict", canonicalReviewStatuses: { [input.item.id]: "accepted", [input.mutation.adjacentReviewItemId]: "open" } }) });
     await store.synchroniseReviewMutations();
     const ids = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map(x => x.id);
     expect(ids).not.toContain(input.item.id); expect(ids).toContain(input.mutation.adjacentReviewItemId);
-    expect(count("review_mutation_outbox")).toBe(1);
-    await store.discardReviewSyncIssue(input.clientMutationId);
-    const afterDiscard = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map(x => x.id);
-    expect(afterDiscard).not.toContain(input.item.id);
-    expect(afterDiscard).toContain(input.mutation.adjacentReviewItemId);
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(await store.listReviewSyncIssues()).toEqual([]);
+    const diagnostics = await store.getReviewSyncDiagnostics();
+    expect(diagnostics.needsAttentionCount).toBe(0);
+    expect(diagnostics.settledElsewhereCount).toBe(1);
   });
   it("does not use absence from a capped bootstrap as merge handover proof", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
@@ -727,6 +727,7 @@ describe("Review real SQLite transactions", () => {
       canonicalStatus: "open"
     }) });
     await store.synchroniseReviewMutations();
+    // A changed proposal on a still-open moment is a real rejection: the saved action is kept.
     expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).toContain(item.id);
   });
@@ -765,7 +766,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -773,9 +774,18 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
+  });
+  it("upgrades a v7 database to v8 open observations without touching queued work", async () => {
+    await store.enqueueReviewMutation(mergeInput());
+    db.exec("drop table review_source_open_observation; pragma user_version=7;");
+    await reopen();
+    await store.loadCachedReviewBootstrap();
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(count("review_source_open_observation")).toBe(0);
+    expect(count("review_mutation_outbox")).toBe(1);
   });
   it("rejects cross-account effects and clears sensitive intent on account replacement", async () => {
     await store.enqueueReviewMutation(mergeInput());
@@ -783,6 +793,299 @@ describe("Review real SQLite transactions", () => {
     await store.activateReviewAccount({ workspaceId: data.workspace.id, workspaceName: "Other synthetic", userId: syntheticId(9) });
     expect(count("review_mutation_effects")).toBe(0); expect(count("review_mutation_outbox")).toBe(0);
     await expect(store.enqueueReviewMutation(mergeInput())).rejects.toThrow("not configured");
+  });
+});
+
+describe("Review actions for moments decided elsewhere (12 Oct 2026 superseded Commutes)", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const reconcileReply = (state: string, reason?: string) => async (url: string, init: { body: string }) => {
+    const { mutations } = JSON.parse(init.body);
+    return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId,
+      reviewItemId: mutations[0].reviewItemId, state, ...(reason ? { reason } : {}), checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+  };
+  async function parkAsOlderBuildDid(clientMutationId: string, lastError: string, resolutionStatus: string, status: number) {
+    db.prepare(`update review_mutation_outbox set state='needs_attention', last_error=?, resolution_status=?, last_http_status=?
+      where client_mutation_id=?`).run(lastError, resolutionStatus, status, clientMutationId);
+  }
+
+  it("settles a confirm on a superseded item without an issue, and the card stays gone", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(501), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ ok: false, code: "resolution_conflict", canonicalStatus: "ignored", reviewItemId: item.id }) });
+    const result = await store.synchroniseReviewMutations();
+    expect(result.needsAttentionCount).toBe(0);
+    expect(result.outcome).toBe("complete");
+    expect(await store.listReviewSyncIssues()).toEqual([]);
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(db.prepare("select count(*) as n from review_item_cache where review_item_id=?").get(item.id)!.n).toBe(0);
+    expect(await visibleIds()).not.toContain(item.id);
+    // A later bootstrap that still carries a stale open copy cannot bring it back either.
+    expect((await store.processReviewBootstrap(data)).reviewItems.map((candidate) => candidate.id)).not.toContain(item.id);
+    const diagnostics = await store.getReviewSyncDiagnostics();
+    expect(diagnostics.settledElsewhereCount).toBe(1);
+    expect(diagnostics.lastSettledElsewhereAt).toEqual(expect.any(String));
+    expect(diagnostics.lastSuccessfulSyncAt).toEqual(expect.any(String));
+  });
+
+  it("brings a settled item back when a later read lists it open again (replay reopened it)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(502), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: { get: () => "Mon, 12 Oct 2026 18:46:00 GMT" }, json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" };
+    await store.cacheReviewPresentation({ owner, response: { ...openPresentation(data, item.id, "b".repeat(64)), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner, response: { ...openPresentation(data, item.id, "b".repeat(64)), capturedAt: "2026-10-12T18:47:00.000Z" } });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("settles a 404 for a missing single-source item", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(503), mutation: { action: "ignore_once" } });
+    mocks.fetch.mockResolvedValue({ status: 404, json: async () => ({ code: "review_item_not_found" }) });
+    await store.synchroniseReviewMutations();
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(0);
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("re-checks a resolution conflict an older build parked and settles it on an ordinary pass", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(504), mutation: { action: "accept" } });
+    await parkAsOlderBuildDid(syntheticId(504), "HTTP 409 · resolution_conflict", "HTTP 409 · resolution_conflict", 409);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+    mocks.fetch.mockImplementation(reconcileReply("conflict", "different_final_decision"));
+    await store.synchroniseReviewMutations();
+    expect(String(mocks.fetch.mock.calls[0][0])).toContain("/api/review/mutations/reconcile");
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(0);
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("re-checks a reconcile conflict an older build parked as resolution_conflict, and a missing source", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(505), mutation: { action: "accept" } });
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[1], clientMutationId: syntheticId(506), mutation: { action: "accept" } });
+    await parkAsOlderBuildDid(syntheticId(505), "resolution_conflict", "resolution_conflict", 200);
+    await parkAsOlderBuildDid(syntheticId(506), "canonical_missing", "canonical_missing", 200);
+    mocks.fetch.mockImplementation(async (url: string, init: { body: string }) => {
+      const { mutations } = JSON.parse(init.body);
+      return reconcileReply(mutations[0].clientMutationId === syntheticId(505) ? "conflict" : "missing",
+        mutations[0].clientMutationId === syntheticId(505) ? "different_final_decision" : undefined)(url, init);
+    });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.getReviewSyncDiagnostics()).settledElsewhereCount).toBe(2);
+  });
+
+  it("keeps a mutation-ID conflict as a real rejection and does not re-check it again", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(507), mutation: { action: "accept" } });
+    await parkAsOlderBuildDid(syntheticId(507), "resolution_conflict", "resolution_conflict", 200);
+    mocks.fetch.mockImplementation(reconcileReply("conflict", "mutation_id_conflict"));
+    await store.synchroniseReviewMutations();
+    expect(await store.listReviewSyncIssues()).toEqual([expect.objectContaining({ resolutionStatus: "mutation_id_conflict" })]);
+    mocks.fetch.mockClear();
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("still parks validation rejections for the person", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(508), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 422, json: async () => ({ code: "invalid_action" }) });
+    await store.synchroniseReviewMutations();
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+    expect((await store.getReviewSyncDiagnostics()).settledElsewhereCount).toBe(0);
+  });
+});
+
+describe("Settling decided-elsewhere moments: Codex r1 on #370", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const owner = () => { const data = bootstrap(); return { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" }; };
+  const headers = (date: string) => ({ get: (name: string) => name.toLowerCase() === "date" ? date : null });
+
+  it("keeps a resolution conflict on a still-open moment as a real rejection with its saved action", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(701), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+  });
+
+  it("removes a settled moment from Today's cached snapshot and its counts", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const response = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:00:00.000Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response });
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(702), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+    expect(snapshot.response.outstanding.globalCount).toBe(0);
+    expect(JSON.stringify(snapshot.response.records)).not.toContain(item.id);
+  });
+
+  it("keeps a merge parked when reconcile cannot say which source was decided", async () => {
+    const input = mergeInput(); await store.enqueueReviewMutation(input);
+    db.prepare("update review_mutation_outbox set state='needs_attention', resolution_status='resolution_conflict', last_error='resolution_conflict' where client_mutation_id=?").run(input.clientMutationId);
+    mocks.fetch.mockImplementation(async (_url: string, init: { body: string }) => {
+      const { mutations } = JSON.parse(init.body);
+      return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "conflict", reason: "different_final_decision", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+    });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(count("review_mutation_effects")).toBe(2);
+  });
+
+  it("uses the server's per-source statuses for a 404", async () => {
+    const input = mergeInput(); await store.enqueueReviewMutation(input);
+    mocks.fetch.mockResolvedValue({ status: 404, json: async () => ({ code: "review_item_not_found", canonicalReviewStatuses: { [input.item.id]: "missing", [input.mutation.adjacentReviewItemId]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(0);
+    const ids = await visibleIds();
+    expect(ids).not.toContain(input.item.id); expect(ids).toContain(input.mutation.adjacentReviewItemId);
+
+    const data = bootstrap(); const single = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item: single, clientMutationId: syntheticId(703), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 404, json: async () => ({ code: "review_item_not_found", canonicalReviewStatuses: { [single.id]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+  });
+
+  it("rounds a whole-second Date up, so an open snapshot from earlier that second cannot clear the settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(704), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:46:00.500Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("never lowers terminal evidence with a delayed older lookup", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(705), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    expect(db.prepare("select captured_at from review_presentation_terminal_source where review_item_id=?").get(item.id)!.captured_at).toBe("2026-10-12T18:46:00.999Z");
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("re-checks an older build's parked conflict only once when it is still a real rejection", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(707), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', last_error='HTTP 409 · resolution_conflict', resolution_status='HTTP 409 · resolution_conflict', last_http_status=409 where client_mutation_id=?").run(syntheticId(707));
+    mocks.fetch.mockImplementation(async (url: string, init: { body: string }) => {
+      if (String(url).includes("/reconcile")) {
+        const { mutations } = JSON.parse(init.body);
+        return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "open", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+      }
+      return { status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) };
+    });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+    mocks.fetch.mockClear();
+    await store.synchroniseReviewMutations();
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("lets a newer cached open read win over a delayed settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(706), mutation: { action: "accept" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_presentation_terminal_source")).toBe(0);
+    expect(await visibleIds()).toContain(item.id);
+  });
+});
+
+describe("Terminal evidence against newer open reads: Codex r2 on #370", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const owner = (backendId = "dayframe-staging") => { const data = bootstrap(); return { workspaceId: data.workspace.id, userId: data.user.id, backendId }; };
+  const headers = (date: string) => ({ get: (name: string) => name.toLowerCase() === "date" ? date : null });
+  const settleAt = async (id: number, item: import("./api").MobileReviewItem, date = "Mon, 12 Oct 2026 18:46:00 GMT") => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(id), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers(date), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+  };
+
+  it("drops a source from a Today snapshot captured at the same time as its terminal evidence", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const response = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:46:00.999Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response });
+    db.prepare("delete from review_source_open_observation").run();
+    await settleAt(801, item);
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+  });
+
+  it("keeps a reopened source open after its display context was pruned, when an older settlement arrives late", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    db.prepare("delete from review_presentation_context").run();
+    await settleAt(802, item);
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("ignores another backend's open read when recording this backend's settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:00:00.000Z" } });
+    db.prepare("insert into review_source_open_observation (account_key, review_item_id, backend_id, observed_at) select account_key, ?, 'other-backend', '2026-10-12T19:00:00.000Z' from review_account_context").run(item.id);
+    await settleAt(803, item);
+    expect(db.prepare("select count(*) as n from review_presentation_terminal_source where review_item_id=?").get(item.id)!.n).toBe(1);
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("keeps a reopened source open when a delayed older terminal lookup arrives after it", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), snapshotToken: "late", capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("keeps a reopened source cached when a delayed older handover lookup retires its acknowledged intent (Codex r3 on #370)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(805), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: syntheticId(99) }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id], syntheticId(99)), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("drops open observations that newer terminal evidence makes irrelevant", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    expect(count("review_source_open_observation")).toBe(1);
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(count("review_source_open_observation")).toBe(0);
+  });
+
+  it("consumes the one-time re-check on a forced pass too", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(804), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', last_error='HTTP 409 · resolution_conflict', resolution_status='HTTP 409 · resolution_conflict', last_http_status=409 where client_mutation_id=?").run(syntheticId(804));
+    mocks.fetch.mockImplementation(async (url: string, init: { body: string }) => {
+      if (String(url).includes("/reconcile")) {
+        const { mutations } = JSON.parse(init.body);
+        return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "open", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+      }
+      return { status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) };
+    });
+    await store.synchroniseReviewMutations({ force: true });
+    mocks.fetch.mockClear();
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });
 

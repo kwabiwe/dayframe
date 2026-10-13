@@ -1,7 +1,7 @@
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
-import { REVIEW_EFFECTS_V5_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
+import { REVIEW_EFFECTS_V5_SQL, REVIEW_OBSERVATION_V8_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
   REVIEW_PRESENTATION_MAX_IDS,
@@ -37,10 +37,12 @@ import { createSerialMutationQueue } from "./location/mutationQueue";
 import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 7;
+const DATABASE_VERSION = 8;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
+const SETTLED_ELSEWHERE_COUNT_KEY = "settled_elsewhere_count";
+const LAST_SETTLED_ELSEWHERE_AT_KEY = "last_settled_elsewhere_at";
 const PRESENTATION_REVISION_KEY = "presentation_revision";
 const REVIEW_PRESENTATION_CONTEXT_LIMIT = 3;
 const REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES = 4 * 1024 * 1024;
@@ -66,6 +68,57 @@ export type ReviewMutationState = typeof SYNC_STATES[number];
 function unknownOutcomeSql(alias = "") {
   return `(${alias}state = 'needs_attention' and coalesce(${alias}resolution_status,'') in ('resolution_unknown','reconciling'))`;
 }
+/**
+ * A rejection an older build parked for the person although the server had only decided the
+ * moment elsewhere (another device, or location replay superseding it). Re-checked once on an
+ * ordinary pass so it settles quietly; nothing written today matches it.
+ */
+function legacyResolvedElsewhereSql(alias = "") {
+  return `(${alias}state = 'needs_attention' and (coalesce(${alias}resolution_status,'') in ('resolution_conflict','canonical_missing')
+    or coalesce(${alias}last_error,'') in ('HTTP 409 · resolution_conflict','HTTP 404 · review_item_not_found')))`;
+}
+const LEGACY_RECHECKED_KEY = "legacy_resolved_elsewhere_rechecked";
+
+/**
+ * SQL: terminal evidence row `alias` is in force, i.e. no presentation read of the same backend
+ * listed the source open strictly after it. Equal times keep the source closed.
+ */
+function terminalInForceSql(alias: string) {
+  return `not exists (select 1 from review_source_open_observation o
+    where o.account_key = ${alias}.account_key and o.review_item_id = ${alias}.review_item_id
+      and o.backend_id = ${alias}.backend_id and o.observed_at > ${alias}.captured_at)`;
+}
+
+/** Terminal evidence at `at` makes an open observation at or before it irrelevant: drop it. */
+async function compactOpenObservation(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  backendId: string,
+  at: string
+) {
+  await transaction.runAsync(
+    `delete from review_source_open_observation
+     where account_key = ? and review_item_id = ? and backend_id = ? and observed_at <= ?`,
+    accountKeyValue, reviewItemId, backendId, at
+  );
+}
+
+async function recordOpenObservation(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  backendId: string,
+  observedAt: string
+) {
+  await transaction.runAsync(
+    `insert into review_source_open_observation (account_key, review_item_id, backend_id, observed_at)
+     values (?, ?, ?, ?)
+     on conflict(account_key, review_item_id, backend_id) do update set observed_at = excluded.observed_at
+     where excluded.observed_at > review_source_open_observation.observed_at`,
+    accountKeyValue, reviewItemId, backendId, observedAt
+  );
+}
 export type ReviewItemSyncState = {
   action: string;
   state: ReviewMutationState;
@@ -80,6 +133,9 @@ export type ReviewSyncDiagnostics = {
   needsAttentionCount: number;
   /** Unknown outcomes Dayframe re-checks on its own (I1). */
   checkingCount?: number;
+  /** Actions for moments already decided elsewhere, settled quietly (never a rejection). */
+  settledElsewhereCount?: number;
+  lastSettledElsewhereAt?: string | null;
   acknowledgedCount: number;
   waitingCount: number;
   oldestQueuedAt: string | null;
@@ -462,6 +518,7 @@ async function database() {
         await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
         if ((version?.user_version ?? 0) < 7) await transaction.execAsync(REVIEW_PRESENTATION_V7_SQL);
+        await transaction.execAsync(REVIEW_OBSERVATION_V8_SQL);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -1289,7 +1346,7 @@ export async function cacheReviewPresentation(input: {
     );
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
-    await materialiseAcknowledgedReviewHandover(transaction, key, response);
+    await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
@@ -1421,13 +1478,58 @@ export async function readReviewPresentationSnapshot(input: {
   }
   const activeAfterRead = await activeAccount(db);
   if (activeAfterRead?.account_key !== key) return null;
-  const effects = await readPresentationEffects(db, key);
+  const terminal = await db.getAllAsync<{ review_item_id: string; captured_at: string }>(
+    `select t.review_item_id, t.captured_at from review_presentation_terminal_source t
+     where t.account_key = ? and t.backend_id = ? and t.captured_at >= ? and ${terminalInForceSql("t")}`,
+    key, input.owner.backendId, response.capturedAt
+  );
+  response = withNewerTerminalEvidence(response, new Set(terminal.map((source) => source.review_item_id)));
+  // A card restored by a rejection is drawn from its effect; once its source is closed it is gone.
+  const closed = await terminalReviewItemIds(key, input.owner.backendId);
+  const effects = (await readPresentationEffects(db, key))
+    .filter((effect) => !(effect.localEffect === "restore" && closed.has(effect.reviewItemId)));
   const revision = Number(await metadata(accountMetadataKey(PRESENTATION_REVISION_KEY, key), db) ?? "0");
   return {
     response,
     cachedAt: row.cached_at,
     localRevision: Number.isFinite(revision) ? revision : 0,
     effects
+  };
+}
+
+/**
+ * A cached snapshot shows what was open when it was captured. Sources with terminal evidence newer
+ * than that (settled elsewhere, a later lookup) are no longer open: they leave its records and its
+ * open set, and its counts drop by the ones it counted, so Today never shows them again.
+ */
+export function withNewerTerminalEvidence(
+  response: ReviewPresentationSnapshot,
+  closed: ReadonlySet<string>
+): ReviewPresentationSnapshot {
+  if (closed.size === 0) return response;
+  const wasOpen = new Set(response.outstanding.openReviewItemIds);
+  const removedOpen = [...closed].filter((id) => wasOpen.has(id));
+  const today = response.scope.today;
+  const todayStart = today ? Date.parse(today.start) : NaN;
+  const todayEnd = today ? Date.parse(today.end) : NaN;
+  const removedToday = response.records.filter((record) => {
+    if (record.kind !== "review" || record.status !== "open" || !closed.has(record.reviewItemId)) return false;
+    const start = Date.parse(record.interval.start ?? "");
+    const end = Date.parse(record.interval.end ?? "");
+    return Number.isFinite(start) && Number.isFinite(end)
+      ? start < todayEnd && end > todayStart
+      : Date.parse(record.createdAt) >= todayStart && Date.parse(record.createdAt) < todayEnd;
+  }).length;
+  return {
+    ...response,
+    records: response.records.filter((record) => !(record.kind === "review" && record.status === "open" && closed.has(record.reviewItemId))),
+    links: response.links.filter((link) => !(link.status === "open" && closed.has(link.reviewItemId))),
+    outstanding: {
+      ...response.outstanding,
+      globalCount: Math.max(0, response.outstanding.globalCount - removedOpen.length),
+      todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
+      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id))
+    }
   };
 }
 
@@ -1548,6 +1650,7 @@ async function recordTerminalPresentationSources(
     // a source after a delayed response arrives, and another backend stays
     // isolated.
     if (record.kind !== "review" || record.status !== "open") continue;
+    await recordOpenObservation(transaction, accountKeyValue, record.reviewItemId, backendId, response.capturedAt);
     await transaction.runAsync(
       `delete from review_presentation_terminal_source
        where account_key = ? and review_item_id = ? and backend_id = ?
@@ -1559,6 +1662,7 @@ async function recordTerminalPresentationSources(
     );
   }
   for (const [reviewItemId, status] of terminalStatusesFromPresentation(response)) {
+    await compactOpenObservation(transaction, accountKeyValue, reviewItemId, backendId, response.capturedAt);
     await transaction.runAsync(
       `insert into review_presentation_terminal_source (
          account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
@@ -1568,7 +1672,10 @@ async function recordTerminalPresentationSources(
          backend_id = excluded.backend_id,
          snapshot_token = excluded.snapshot_token,
          status = excluded.status,
-         captured_at = excluded.captured_at`,
+         captured_at = excluded.captured_at
+       -- Terminal evidence only moves forward in time; a delayed older read cannot lower it.
+       where excluded.captured_at >= review_presentation_terminal_source.captured_at
+         or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
       accountKeyValue,
       reviewItemId,
       scopeKey,
@@ -1613,7 +1720,8 @@ async function pruneReviewPresentationContexts(
 async function materialiseAcknowledgedReviewHandover(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
-  response: ReviewPresentationSnapshot
+  response: ReviewPresentationSnapshot,
+  backendId: string
 ) {
   const rows = await transaction.getAllAsync<{
     client_mutation_id: string;
@@ -1668,6 +1776,14 @@ async function materialiseAcknowledgedReviewHandover(
     });
     if (!materialised) continue;
     for (const effect of effects) {
+      // A newer read already lists this source open again (replay reopened it): it is a live card
+      // now, so the handover retires the acknowledged intent but keeps the cached source.
+      const reopened = await transaction.getFirstAsync(
+        `select 1 as found from review_source_open_observation
+         where account_key = ? and review_item_id = ? and backend_id = ? and observed_at > ?`,
+        accountKeyValue, effect.review_item_id, backendId, response.capturedAt
+      );
+      if (reopened) continue;
       await transaction.runAsync(
         `delete from review_item_cache where account_key = ? and review_item_id = ?`,
         accountKeyValue,
@@ -1991,6 +2107,22 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
      order by created_at,client_mutation_id limit 25`,
     account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,
     new Date(Date.now()-REVIEW_UNKNOWN_RECHECK_MS).toISOString(),options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
+  // Rows an older build parked although the moment was only decided elsewhere are re-checked once
+  // each (an ordinary pass, no force); a row that is still a real rejection afterwards stays parked.
+  const recheckedKey = accountMetadataKey(LEGACY_RECHECKED_KEY, account.account_key);
+  const rechecked = new Set(parseStringArray(await metadata(recheckedKey, db) ?? "[]"));
+  const legacyCandidates = (await db.getAllAsync<MutationRow>(
+    `select * from review_mutation_outbox where account_key=? and (? is null or client_mutation_id=?) and ${legacyResolvedElsewhereSql()}
+     order by created_at,client_mutation_id`,
+    account.account_key,options.clientMutationId??null,options.clientMutationId??null
+  )).filter(row => !rechecked.has(row.client_mutation_id));
+  // Marked when processed, however the pass selected it (an ordinary pass or a forced one).
+  const legacyIds = new Set(legacyCandidates.map(row => row.client_mutation_id));
+  const selected = new Set(rows.map(row => row.client_mutation_id));
+  rows.push(...legacyCandidates.filter(row => !selected.has(row.client_mutation_id)));
+  rows.sort((left,right) => left.created_at < right.created_at ? -1 : left.created_at > right.created_at ? 1
+    : left.client_mutation_id < right.client_mutation_id ? -1 : left.client_mutation_id > right.client_mutation_id ? 1 : 0);
+  rows.splice(25);
   let acknowledgedCount=0;
   let outcome: SyncLaneOutcome="complete";
   let stopped=false;
@@ -2002,6 +2134,12 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
     const effectRows=await db.getAllAsync<{review_item_id:string}>("select review_item_id from review_mutation_effects where account_key=? and client_mutation_id=?",account.account_key,row.client_mutation_id);
     if(effectRows.some(effect=>affected.has(effect.review_item_id))) continue;
     effectRows.forEach(effect=>affected.add(effect.review_item_id));
+    if (legacyIds.has(row.client_mutation_id)) {
+      rechecked.add(row.client_mutation_id);
+      const live = new Set((await db.getAllAsync<{client_mutation_id:string}>(
+        "select client_mutation_id from review_mutation_outbox where account_key=?",account.account_key)).map(item=>item.client_mutation_id));
+      await serialiseReviewMutation(()=>setMetadata(recheckedKey,JSON.stringify([...rechecked].filter(id=>live.has(id)))));
+    }
     const reconcile = row.state === "needs_attention" || row.state === "in_flight" || row.resolution_status === "delivery_interrupted" ||
       row.contention_count >= REVIEW_CONTENTION_LIMIT || Date.now()-Date.parse(row.created_at) >= REVIEW_RECONCILE_AGE_MS;
     const request = (path: string, body: string) => mobileJsonRequest(`${DAYFRAME_API_BASE}${path}`, {
@@ -2028,7 +2166,13 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         if ((proof.state==="applied"||proof.state==="equivalent_applied") && validReviewAcknowledgement(proof.result,envelope,row.review_item_id)) {
           await acknowledgeReviewMutation(row,proof.result!,response.status,isCurrent);acknowledgedCount++;continue;
         }
-        if(proof.state==="conflict"||proof.state==="missing") {await attention(proof.state==="missing"?"canonical_missing":"resolution_conflict",response.status);continue;}
+        // Gone, or decided differently elsewhere: the moment is settled, not a rejection.
+        // Only a single-source proof says which source was decided; a merge keeps its parked row.
+        if(effectRows.length<=1&&(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision"))) {
+          const status=proof.state==="missing"?"missing":envelope.mutation.action.startsWith("ignore")?"accepted":"ignored";
+          await settleResolvedElsewhere(row,[{reviewItemId:row.review_item_id,status}],proof.checkedAt,isCurrent);continue;
+        }
+        if(proof.state==="conflict") {await attention(proof.reason==="mutation_id_conflict"?"mutation_id_conflict":"resolution_conflict",response.status);continue;}
         if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
       }
       if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
@@ -2050,6 +2194,8 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
         continue;
       }
+      const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id));
+      if(settlement) {await settleResolvedElsewhere(row,settlement.retired,reviewResponseServerTime(response),isCurrent);continue;}
       await attention(safeFailureSummary(response.status,responseBody),response.status,canonicalOpenEffectIds(responseBody,row.review_item_id));
     } catch(error) {
       if(!await isCurrent() || error instanceof StaleMobileSessionResponseError || (error instanceof Error&&error.name==="AbortError")) {outcome="cancelled";stopped=true;break;}
@@ -2081,6 +2227,120 @@ async function acknowledgeReviewMutation(row: MutationRow, body: Record<string,u
   // Today is subscribed to the same durable owner. Publish at the committed
   // acknowledgement boundary rather than waiting for the rest of a 25-item
   // delivery drain to settle.
+  emitChange();
+}
+
+type RetiredReviewSource = { reviewItemId: string; status: "accepted" | "ignored" | "missing" };
+const TERMINAL_REVIEW_STATUSES = new Set(["accepted", "ignored", "missing"]);
+
+/**
+ * The server answered that the moment is no longer open: decided on another device, superseded by
+ * location replay, or gone. That is the moment settling, not a rejection the person can act on
+ * (as on web). It applies only when the server proves the primary source accepted, ignored or
+ * missing and reports every source's status; sources it reports open are not retired, so only those
+ * cards come back. An open or unreported primary (an existing entry that differs, a changed
+ * proposal) is a real rejection and keeps its saved action. Returns null for those.
+ */
+export function reviewResolvedElsewhere(
+  status: number,
+  body: Record<string, unknown> | null,
+  primaryId: string,
+  sourceIds: string[]
+): { retired: RetiredReviewSource[] } | null {
+  const code = typeof body?.code === "string" ? body.code : null;
+  const notFound = status === 404 && code === "review_item_not_found";
+  if (!notFound && !(status === 409 && code === "resolution_conflict")) return null;
+  const sources = sourceIds.length ? sourceIds : [primaryId];
+  const listed = body?.canonicalReviewStatuses;
+  const statuses: Record<string, unknown> = listed && typeof listed === "object" && !Array.isArray(listed)
+    ? listed as Record<string, unknown>
+    : notFound
+      ? (sources.length === 1 ? { [primaryId]: "missing" } : {})
+      : { [primaryId]: body?.canonicalStatus };
+  if (!TERMINAL_REVIEW_STATUSES.has(String(statuses[primaryId]))) return null;
+  if (sources.some((id) => statuses[id] !== "open" && !TERMINAL_REVIEW_STATUSES.has(String(statuses[id])))) return null;
+  return {
+    retired: sources.flatMap((reviewItemId): RetiredReviewSource[] => {
+      const canonical = statuses[reviewItemId];
+      return canonical === "accepted" || canonical === "ignored" || canonical === "missing"
+        ? [{ reviewItemId, status: canonical }]
+        : [];
+    })
+  };
+}
+
+/**
+ * The server's time for a direct response. HTTP `Date` has whole seconds while snapshot
+ * `capturedAt` has milliseconds, so it is rounded up to the end of its second: an open snapshot
+ * captured earlier in that second can never clear the settlement.
+ */
+export function reviewResponseServerTime(response: { headers?: { get(name: string): string | null } }) {
+  const parsed = Date.parse(response.headers?.get("date") ?? "");
+  return Number.isFinite(parsed) ? new Date(parsed + 999).toISOString() : new Date().toISOString();
+}
+
+/** A presentation read of this backend listed the source open after `checkedAt` (replay reopened it). */
+async function newerOpenEvidence(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  checkedAt: string
+) {
+  if (!DAYFRAME_BACKEND_ID) return false;
+  return Boolean(await transaction.getFirstAsync(
+    `select 1 as found from review_source_open_observation
+     where account_key = ? and review_item_id = ? and backend_id = ? and observed_at > ?`,
+    accountKeyValue, reviewItemId, DAYFRAME_BACKEND_ID, checkedAt
+  ));
+}
+
+async function settleResolvedElsewhere(
+  row: MutationRow,
+  retired: RetiredReviewSource[],
+  checkedAt: string,
+  isCurrent: () => Promise<boolean>
+) {
+  const db = await database();
+  const now = new Date().toISOString();
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    if (!await isCurrent()) throw new StaleMobileSessionResponseError();
+    for (const source of retired) {
+      // A newer read already shows it open again: that read wins, whatever order they arrived in.
+      if (await newerOpenEvidence(transaction, row.account_key, source.reviewItemId, checkedAt)) continue;
+      await transaction.runAsync(
+        "delete from review_item_cache where account_key = ? and review_item_id = ?",
+        row.account_key, source.reviewItemId
+      );
+      if (!DAYFRAME_BACKEND_ID) continue;
+      await compactOpenObservation(transaction, row.account_key, source.reviewItemId, DAYFRAME_BACKEND_ID, checkedAt);
+      await transaction.runAsync(
+        `insert into review_presentation_terminal_source (
+           account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
+         ) values (?, ?, 'settled_elsewhere', ?, ?, ?, ?)
+         on conflict(account_key, review_item_id) do update set
+           scope_key = excluded.scope_key, backend_id = excluded.backend_id,
+           snapshot_token = excluded.snapshot_token, status = excluded.status,
+           captured_at = excluded.captured_at
+         where excluded.captured_at >= review_presentation_terminal_source.captured_at
+           or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
+        row.account_key, source.reviewItemId, DAYFRAME_BACKEND_ID, `settled:${row.client_mutation_id}`,
+        source.status, checkedAt
+      );
+    }
+    await transaction.runAsync(
+      "delete from review_mutation_effects where client_mutation_id = ? and account_key = ?",
+      row.client_mutation_id, row.account_key
+    );
+    await transaction.runAsync(
+      "delete from review_mutation_outbox where client_mutation_id = ? and account_key = ?",
+      row.client_mutation_id, row.account_key
+    );
+    const countKey = accountMetadataKey(SETTLED_ELSEWHERE_COUNT_KEY, row.account_key);
+    const settled = (Number(await metadata(countKey, transaction)) || 0) + 1;
+    await setMetadata(countKey, String(settled), transaction);
+    await setMetadata(accountMetadataKey(LAST_SETTLED_ELSEWHERE_AT_KEY, row.account_key), now, transaction);
+    await setMetadata(accountMetadataKey(LAST_SUCCESSFUL_SYNC_AT_KEY, row.account_key), now, transaction);
+  }));
   emitChange();
 }
 
@@ -2228,6 +2488,8 @@ async function reviewSyncDiagnosticsForAccount(
     needsAttentionCount: Number(diagnostics.needs_attention_count) || 0,
     acknowledgedCount: Number(diagnostics.acknowledged_count) || 0,
     checkingCount,
+    settledElsewhereCount: Number(await metadata(accountMetadataKey(SETTLED_ELSEWHERE_COUNT_KEY, account.account_key), db)) || 0,
+    lastSettledElsewhereAt: await metadata(accountMetadataKey(LAST_SETTLED_ELSEWHERE_AT_KEY, account.account_key), db),
     waitingCount: pendingCount + retryWaitCount + authenticationRequiredCount + checkingCount,
     oldestQueuedAt: diagnostics.oldest_queued_at,
     lastSuccessfulSyncAt: await metadata(
@@ -2560,9 +2822,9 @@ async function terminalReviewItemIds(accountKeyValue: string, backendId: string 
   if (!backendId) return new Set<string>();
   const db = await database();
   const rows = await db.getAllAsync<{ review_item_id: string }>(
-    `select review_item_id
-     from review_presentation_terminal_source
-     where account_key = ? and backend_id = ?`,
+    `select t.review_item_id
+     from review_presentation_terminal_source t
+     where t.account_key = ? and t.backend_id = ? and ${terminalInForceSql("t")}`,
     accountKeyValue,
     backendId
   );
@@ -2579,7 +2841,8 @@ async function latestPresentationBackendId(accountKeyValue: string) {
      limit 1`,
     accountKeyValue
   );
-  return row?.backend_id ?? null;
+  // No presentation read cached yet: this build's own backend (where settled sources are recorded).
+  return row?.backend_id ?? DAYFRAME_BACKEND_ID ?? null;
 }
 
 async function presentationBackendIdForBootstrap(
