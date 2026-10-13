@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // Reanimated's builders, recorded so the toast's motion can be read without a native runtime.
+vi.mock("./appForeground", () => ({ useAppForeground: () => true }));
 vi.mock("react-native-reanimated", () => ({
   Easing: { in: (curve: unknown) => ({ in: curve }), quad: "quad" },
   ReduceMotion: { Never: "never" },

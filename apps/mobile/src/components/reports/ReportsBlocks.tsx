@@ -1,3 +1,4 @@
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 import { memo, useEffect, useState, type Ref } from "react";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
@@ -216,7 +217,7 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
         const focused = focusedKey === day.key;
         const dimmed = focusedKey !== null && !focused;
         const heights = reportStackHeights(day.segments.map((s) => s.seconds), busiest, WEEK_COLUMN_HEIGHT, 3, 3);
-        const name = day.start.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+        const name = formatLocaleDate(day.start, { weekday: "long", day: "numeric", month: "long" });
         return (
           <Pressable
             key={day.key}
@@ -248,7 +249,7 @@ export const ReportWeekColumns = memo(function ReportWeekColumns({
                 { color: focused ? theme.textPrimary : day.key === todayKey ? theme.accentText : theme.textMuted },
               ]}
             >
-              {day.start.toLocaleDateString(undefined, { weekday: "narrow" })}
+              {formatLocaleDate(day.start, { weekday: "narrow" })}
             </Text>
           </Pressable>
         );
@@ -272,11 +273,11 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
   const busiest = Math.max(0, ...days.map((day) => day.seconds));
   const blanks = monthGridLeadingBlanks(first);
   const weekdays = Array.from({ length: 7 }, (_, index) =>
-    new Date(2026, 0, 5 + index).toLocaleDateString(undefined, { weekday: "narrow" }),
+    formatLocaleDate(new Date(2026, 0, 5 + index), { weekday: "narrow" }),
   );
   return (
     <View
-      accessibilityLabel={`${first.toLocaleDateString(undefined, { month: "long" })} in blocks`}
+      accessibilityLabel={`${formatLocaleDate(first, { month: "long" })} in blocks`}
       style={[styles.monthCard, { backgroundColor: theme.surface }]}
       testID="reports-month-grid"
     >
@@ -302,7 +303,7 @@ export const ReportMonthGrid = memo(function ReportMonthGrid({
             <View key={day.key} style={styles.monthCellSlot}>
               <View
                 accessible
-                accessibilityLabel={`${day.start.toLocaleDateString(undefined, { day: "numeric", month: "long" })}, ${day.seconds >= 60 ? spokenDuration(day.seconds) : "nothing framed"}`}
+                accessibilityLabel={`${formatLocaleDate(day.start, { day: "numeric", month: "long" })}, ${day.seconds >= 60 ? spokenDuration(day.seconds) : "nothing framed"}`}
                 style={[
                   styles.monthCell,
                   { backgroundColor: theme.surfaceMuted },

@@ -1,3 +1,4 @@
+import { formatLocaleDate } from "./localeDateFormat";
 import type { ReportSummaryRequest } from "@dayframe/shared";
 
 export type ReportPreset = "today" | "week" | "month" | "year";
@@ -121,7 +122,7 @@ export function buildReportRange(
   if (choice === "month") {
     start = new Date(today.getFullYear(), today.getMonth(), 1);
     end = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-    title = start.toLocaleDateString(undefined, { month: "long" });
+    title = formatLocaleDate(start, { month: "long" });
   }
   if (choice === "year") {
     start = new Date(today.getFullYear(), 0, 1);
@@ -166,15 +167,15 @@ export function buildReportRange(
     const stop = new Date(Math.min(next.getTime(), end.getTime()));
     const label =
       bucketUnit === "month"
-          ? cursor.toLocaleDateString(undefined, { month: "short" })
+          ? formatLocaleDate(cursor, { month: "short" })
           : choice === "week"
-            ? cursor.toLocaleDateString(undefined, { weekday: "short" })
+            ? formatLocaleDate(cursor, { weekday: "short" })
             : String(cursor.getDate());
     const fullLabel =
       bucketUnit === "week"
           ? `${shortDate(cursor)} – ${shortDate(addLocalDays(stop, -1))}`
           : bucketUnit === "month" && axisLayout === "year"
-            ? cursor.toLocaleDateString(undefined, {
+            ? formatLocaleDate(cursor, {
                 month: "long",
                 year: "numeric",
               })
@@ -209,14 +210,14 @@ export function buildReportRange(
   };
 }
 function shortDate(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
 }
 function fullDay(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     weekday: "long",
     day: "numeric",
     month: "long",

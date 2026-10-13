@@ -11,6 +11,7 @@ import {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { useAppForeground } from "./appForeground";
 import { MOBILE_MOTION } from "./motion";
 
 // Dayframe Blocks springs (.codex/reference/motion.md). Starting values from the prototype; tune on a physical iPhone.
@@ -206,6 +207,9 @@ function landingIsDue(request: LandingRequest | null, entryId: string | undefine
 /** Opacity-only breathing for the single live block; static under Reduce Motion or when not live. */
 export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduceMotion: boolean }) {
   const opacity = useSharedValue<number>(BREATHING_RING.reducedOpacity);
+  // The loop breathes only while it can be seen; in the background it holds still (it otherwise
+  // kept the display link running for as long as location kept the app alive).
+  const foreground = useAppForeground();
 
   useEffect(() => {
     cancelAnimation(opacity);
@@ -213,7 +217,7 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
       opacity.value = withTiming(0, { duration: MOBILE_MOTION.control, reduceMotion: ReduceMotion.Never });
       return undefined;
     }
-    if (reduceMotion) {
+    if (reduceMotion || !foreground) {
       opacity.value = BREATHING_RING.reducedOpacity;
       return undefined;
     }
@@ -231,7 +235,7 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
       ReduceMotion.Never
     );
     return () => cancelAnimation(opacity);
-  }, [live, opacity, reduceMotion]);
+  }, [foreground, live, opacity, reduceMotion]);
 
   return useAnimatedStyle(() => ({ opacity: opacity.value }));
 }

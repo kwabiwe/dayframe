@@ -1,3 +1,4 @@
+import { formatLocaleDate } from "./localeDateFormat";
 import {
   analyzeTimeIntervals,
   blockColorsFor,
@@ -902,22 +903,20 @@ function addDays(date: Date, days: number) {
 
 function formatSelectedDayTitle(date: Date, todayKey: string) {
   if (formatDateKey(date) === todayKey) return "Today";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", weekday: "long" });
+  return formatLocaleDate(date, { day: "numeric", month: "short", weekday: "long" });
 }
 
 function formatWeekday(date: Date) {
-  return date.toLocaleDateString(undefined, { weekday: "narrow" });
+  return formatLocaleDate(date, { weekday: "narrow" });
 }
 
 function formatMonthTitle(date: Date, today: Date) {
-  return date.toLocaleDateString(
-    undefined,
-    date.getFullYear() === today.getFullYear() ? { month: "long" } : { month: "long", year: "numeric" }
+  return formatLocaleDate(date, date.getFullYear() === today.getFullYear() ? { month: "long" } : { month: "long", year: "numeric" }
   );
 }
 
 function formatFramedLabel(seconds: number, date: Date) {
-  const weekday = date.toLocaleDateString(undefined, { weekday: "long" });
+  const weekday = formatLocaleDate(date, { weekday: "long" });
   return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed on ${weekday}` : `Nothing framed on ${weekday}`;
 }
 

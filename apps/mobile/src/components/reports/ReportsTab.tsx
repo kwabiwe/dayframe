@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -79,7 +80,7 @@ type DatePresentation = {
   initial: ReportRangeChoice;
 };
 
-export function ReportsTab({
+function ReportsTabView({
   data,
   initialChoice = "week",
   isFocused,
@@ -87,6 +88,7 @@ export function ReportsTab({
   nowMs,
   styles,
   theme,
+  timeZoneId,
 }: {
   data: MobileBootstrap;
   /** Week, as in the prototype; tests start other ranges directly. */
@@ -97,6 +99,8 @@ export function ReportsTab({
   nowMs: number;
   styles: MobileStyles;
   theme: MobileTheme;
+  /** The device zone: a change rebuilds the range and its labels, keeping selections and caches. */
+  timeZoneId?: string;
 }) {
   const [choice, setChoice] = useState<ReportRangeChoice>(initialChoice);
   const sheetPortal = useContext(ReportsSheetPortalContext);
@@ -148,7 +152,8 @@ export function ReportsTab({
   activeDatePresentation.current = datePresentation;
   reportsOwnerActive.current = isFocused && foreground;
   const day = formatLocalDateKey(new Date(nowMs));
-  const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day, timeZoneId]);
   const requestKey = JSON.stringify(range.request);
   // The same stretch of the previous period, for the hero's change pill (none for custom ranges).
   const previous = useMemo(
@@ -895,3 +900,7 @@ const s = StyleSheet.create({
   number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
   unavailable: { paddingVertical: 24, gap: 12 },
 });
+
+// Memoised: the Dashboard re-renders every second while a block runs, and Reports formats every
+// day it shows, so it renders only when its own props change (investigation 2026-10-12).
+export const ReportsTab = memo(ReportsTabView);
