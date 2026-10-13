@@ -1,5 +1,6 @@
 import { clearLocaleDateFormats, currentTimeZoneId } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
+import { useDashboardClockTicks } from "@/lib/dashboardClock";
 import {
   createContext,
   useCallback,
@@ -1474,10 +1475,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     ]
   };
   const retainedActiveEntryForSheet = activeEntryForDisplay ?? presentedActiveEntry;
-  // The Dashboard's clock (investigation 2026-10-12, Instruments): only a running block, its open
-  // sheet or a Calendar entry being edited needs whole seconds; otherwise Today, Calendar and Reports
-  // change on the minute. In the background nothing ticks (location can keep the app alive for hours,
-  // and every tick re-rendered all three tabs); returning to the foreground reads the time at once.
+  // The Dashboard's clock (`useDashboardClockTicks`): whole seconds only while a block runs (or its
+  // sheet or a running Calendar entry is open), otherwise on the minute; nothing in the background.
   const minuteFloorNow = Math.floor(now / 60_000) * 60_000;
   // Reports memoises its range and day labels: a new time zone rebuilds them (selections and cached
   // totals stay).
@@ -1485,23 +1484,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const needsSecondClock = Boolean(
     retainedActiveEntryForSheet || (calendarEditEntry && !calendarEditEntry.stoppedAt)
   );
-  useEffect(() => {
-    if (!appIsForeground) return undefined;
-    setNow(Date.now());
-    if (needsSecondClock) {
-      const interval = setInterval(() => setNow(Date.now()), 1000);
-      return () => clearInterval(interval);
-    }
-    let timeout: ReturnType<typeof setTimeout>;
-    const scheduleMinute = () => {
-      timeout = setTimeout(() => {
-        setNow(Date.now());
-        scheduleMinute();
-      }, 60_000 - (Date.now() % 60_000) + 20);
-    };
-    scheduleMinute();
-    return () => clearTimeout(timeout);
-  }, [appIsForeground, needsSecondClock]);
+  useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, setNow });
   // New data (a block finished elsewhere, a refresh) is shown against the time it arrived, not the
   // last minute tick, so nothing it holds is clipped away until the next minute.
   useEffect(() => {

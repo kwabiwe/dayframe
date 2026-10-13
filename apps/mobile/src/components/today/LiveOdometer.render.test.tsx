@@ -7,12 +7,30 @@ vi.mock("react", async () => {
 });
 
 let fontScale = 1;
+const appState = vi.hoisted(() => ({
+  currentState: "active",
+  listeners: new Set<(state: string) => void>(),
+}));
 vi.mock("react-native", () => ({
+  AppState: {
+    get currentState() {
+      return appState.currentState;
+    },
+    addEventListener: (_type: string, listener: (state: string) => void) => {
+      appState.listeners.add(listener);
+      return { remove: () => appState.listeners.delete(listener) };
+    },
+  },
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
   View: "View",
   useWindowDimensions: () => ({ fontScale, height: 874, scale: 3, width: 402 }),
 }));
+
+function setAppState(state: string) {
+  appState.currentState = state;
+  for (const listener of [...appState.listeners]) listener(state);
+}
 
 type Shared = { value: unknown };
 const shared: Shared[] = [];
@@ -36,17 +54,20 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize } from "./LiveOdometer";
+import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize, odometerTickRolls } from "./LiveOdometer";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 
-function mount(label: string, reduceMotion = false) {
+function mount(label: string, reduceMotion = false, seconds?: number) {
   shared.length = 0;
   let tree!: ReturnType<typeof create>;
   act(() => {
-    tree = create(<LiveOdometer color="#fff" label={label} reduceMotion={reduceMotion} />);
+    tree = create(<LiveOdometer color="#fff" label={label} reduceMotion={reduceMotion} seconds={seconds} />);
   });
   return tree;
 }
+
+const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
+const spring = (to: number) => ({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to });
 
 describe("odometer cells", () => {
   it("keys cells from the right so seconds stay seconds when the hours gain a digit", () => {
@@ -101,6 +122,45 @@ describe("LiveOdometer", () => {
     const cell = Math.round(size * ODOMETER_EM.height * 10) / 10;
     expect(size).toBeLessThan(58);
     expect(strips[4].value).toBe(-9 * cell);
+    act(() => tree.unmount());
+  });
+});
+
+describe("odometer ticks and jumps (investigation 2026-10-13, TestFlight 117)", () => {
+  it("rolls only for an ordinary tick of one or two seconds", () => {
+    expect(odometerTickRolls(undefined, 10)).toBe(true);
+    expect(odometerTickRolls(9, 10)).toBe(true);
+    expect(odometerTickRolls(9, 11)).toBe(true);
+    expect(odometerTickRolls(9, 9)).toBe(false);
+    expect(odometerTickRolls(28, 818)).toBe(false);
+    expect(odometerTickRolls(818, 28)).toBe(false);
+  });
+
+  it("sets every changed digit at rest when the clock jumps, then rolls the next tick again", () => {
+    const tree = mount("0:00:28", false, 28);
+    const strips = [...shared];
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:38" reduceMotion={false} seconds={818} />));
+    // Minutes 0 → 1 and 0 → 3, tens of seconds 2 → 3: placed, never rolled through 13 minutes.
+    expect(strips.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, -3 * CELL, -8 * CELL]);
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:39" reduceMotion={false} seconds={819} />));
+    expect(strips[4].value).toEqual(spring(-9 * CELL));
+    expect(strips[2].value).toBe(-3 * CELL);
+    act(() => tree.unmount());
+  });
+
+  it("remounts the digits at rest from the current time when the app returns", () => {
+    setAppState("active");
+    const tree = mount("0:00:28", false, 28);
+    const before = [...shared];
+    act(() => setAppState("background"));
+    shared.length = 0;
+    act(() => setAppState("active"));
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:01" reduceMotion={false} seconds={781} />));
+    const after = [...shared];
+    // Fresh strips (a remount), created at rest for 0:13:01 — no strip is left from before the break.
+    expect(after).toHaveLength(5);
+    expect(after.every((strip) => !before.includes(strip))).toBe(true);
+    expect(after.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, 0, -1 * CELL]);
     act(() => tree.unmount());
   });
 });

@@ -11,6 +11,9 @@ export function useAppForeground() {
   const [foreground, setForeground] = useState(() => AppState.currentState === "active");
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => setForeground(state === "active"));
+    // The state can change between the first render and this subscription (a launch that becomes
+    // active, or a return to the app while the screen mounts); read it again so no change is missed.
+    setForeground(AppState.currentState === "active");
     return () => subscription.remove();
   }, []);
   return foreground;
