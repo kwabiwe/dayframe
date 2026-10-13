@@ -14,7 +14,12 @@ const appState = vi.hoisted(() => ({
   /** Simulates a change that lands before the listener is attached: no event is ever delivered. */
   changeWhileSubscribing: null as string | null,
 }));
-vi.mock("react-native", () => ({
+vi.mock("react-native", async () => {
+  const { createFakeAnimated, fakeNativeEasing } = await import("../../test/fakeNativeAnimated");
+  return {
+  // The odometer's strips are React Native Animated values on the native driver (13 Oct).
+  Animated: createFakeAnimated((value) => shared.push(value)),
+  Easing: fakeNativeEasing,
   AppState: {
     get currentState() {
       return appState.currentState;
@@ -32,7 +37,8 @@ vi.mock("react-native", () => ({
   Text: "Text",
   View: "View",
   useWindowDimensions: () => ({ fontScale: 1, height: 874, scale: 3, width: 402 }),
-}));
+  };
+});
 
 type Shared = { value: unknown };
 const shared: Shared[] = [];
@@ -141,7 +147,7 @@ describe("live timer: background → foreground with a running block (TestFlight
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(back[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: -3 * CELL });
+    expect(back[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, toValue: -3 * CELL, useNativeDriver: true }, kind: "spring", to: -3 * CELL });
     act(() => {
       vi.advanceTimersByTime(1000);
     });
@@ -234,7 +240,7 @@ describe("live timer behind Settings (iPhone 17, 13 Oct)", () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(strips[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: -6 * CELL });
+    expect(strips[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, toValue: -6 * CELL, useNativeDriver: true }, kind: "spring", to: -6 * CELL });
     act(() => tree.unmount());
   });
 });
@@ -395,6 +401,49 @@ describe("Today in front moves the Dashboard on the minute (iPhone 17, 13 Oct: 2
       });
     }
     expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 9]);
+    act(() => tree.unmount());
+  });
+
+  it("holds a stopped block at the time it read at Stop while it leaves (Codex r2 on #390)", () => {
+    vi.setSystemTime(new Date("2026-10-13T13:50:34.300Z"));
+    // The Dashboard's value is from its last minute tick (0:01:50); the block's own clock is fresher.
+    const running: LiveBlockClockInput = {
+      durationSeconds: 0,
+      elapsedLabel: "0:01:50",
+      elapsedSeconds: 110,
+      hasLiveActiveTimer: true,
+      startedAt: STARTED_AT,
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<LiveBlockTime active={running} reduceMotion={false} />);
+    });
+    act(() => tree.update(<LiveBlockTime active={{ ...running, hasLiveActiveTimer: false }} reduceMotion={false} />));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    // Three minute boundaries later it has not moved on.
+    for (let step = 0; step < 3; step += 1) {
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+    }
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    // Nor after ten minutes in the background and a return to the app (Codex r1 on #392), nor when the
+    // Dashboard, which keeps counting the stopped entry it retains, offers a larger value.
+    act(() => setAppState("background"));
+    act(() => {
+      vi.advanceTimersByTime(600_000);
+    });
+    act(() => setAppState("active"));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    act(() =>
+      tree.update(
+        <LiveBlockTime
+          active={{ ...running, elapsedLabel: "0:15:23", elapsedSeconds: 923, hasLiveActiveTimer: false }}
+          reduceMotion={false}
+        />
+      )
+    );
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
     act(() => tree.unmount());
   });
 

@@ -1,6 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import Reanimated, { ReduceMotion, cancelAnimation, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { Animated, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { MOBILE_DISPLAY_FONT, MOBILE_TEXT_CAP } from "../../lib/mobileTypography";
@@ -148,7 +147,9 @@ const OdometerDigit = memo(function OdometerDigit({
   reduceMotion: boolean;
   size: number;
 }) {
-  const offset = useSharedValue(stripOffset(digit, cellHeight));
+  // React Native's native driver moves the strip on the UI thread, with no per-frame JS and no view-tree
+  // commit (Reanimated committed the whole tree on every frame of a roll: iPhone 17, 13 Oct).
+  const [offset] = useState(() => new Animated.Value(stripOffset(digit, cellHeight)));
   const placed = useRef({ cellHeight, digit, reduceMotion });
 
   useEffect(() => {
@@ -159,24 +160,26 @@ const OdometerDigit = memo(function OdometerDigit({
     // Reduce Motion (or a covered Today) sets the strip at rest, a roll still running from the tick
     // before included; a new cell size (Dynamic Type, a narrower card) re-places it. Neither rolls.
     if (reduceMotion || previous.cellHeight !== cellHeight) {
-      cancelAnimation(offset);
-      offset.value = target;
+      offset.stopAnimation();
+      offset.setValue(target);
       return;
     }
     // Motion coming back alone leaves the strip where it rests.
     if (previous.digit === digit) return;
-    offset.value = withSpring(target, { ...BLOCKS_SPRING.roll, reduceMotion: ReduceMotion.Never });
+    // The same stiffness, damping and mass as Reanimated's withSpring. React Native settles at 0.001 of
+    // displacement and speed (Reanimated uses a relative energy threshold), and a retarget starts from
+    // the strip's position without the earlier roll's speed (Codex r1 on #392).
+    Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();
   }, [cellHeight, digit, offset, reduceMotion]);
 
-  useEffect(() => () => cancelAnimation(offset), [offset]);
+  useEffect(() => () => offset.stopAnimation(), [offset]);
 
-  const stripStyle = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
   const lineHeight = size * FONT_LINE_EM;
   const textStyle = [styles.digit, { color, fontSize: size, height: lineHeight, lineHeight, top: (cellHeight - lineHeight) / 2 }];
 
   return (
     <View style={[styles.digitCell, { height: cellHeight, width: size * ODOMETER_EM.digitWidth }]}>
-      <Reanimated.View style={[styles.strip, stripStyle]}>
+      <Animated.View style={[styles.strip, { transform: [{ translateY: offset }] }]}>
         {DIGITS.map((value) => (
           <View key={value} style={{ height: cellHeight }}>
             <Text allowFontScaling={false} style={textStyle}>
@@ -184,7 +187,7 @@ const OdometerDigit = memo(function OdometerDigit({
             </Text>
           </View>
         ))}
-      </Reanimated.View>
+      </Animated.View>
     </View>
   );
 });

@@ -90,7 +90,7 @@ export function TodayLiveBlock({
     return blockColorsFor(active.categoryColor, theme.mode, active.categoryLabel ?? "");
   }, [active.categoryColor, active.categoryLabel, theme.mode, theme.surfaceRaised, theme.textPrimary]);
   const landingStyle = useBlockLanding({ distance: LIVE_LANDING_DISTANCE, reduceMotion, request: landing });
-  const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion });
+  const ringOpacity = useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion });
   const elapsed = useLiveBlockElapsed(active);
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
@@ -118,9 +118,9 @@ export function TodayLiveBlock({
       style={[styles.card, { backgroundColor: colors.fill }, swipe.cardStyle]}
       testID={ghost ? "today-live-ghost" : "today-live-block"}
     >
-      <Reanimated.View
+      <Animated.View
         pointerEvents="none"
-        style={[styles.ring, { borderColor: colors.text }, ringStyle]}
+        style={[styles.ring, { borderColor: colors.text, opacity: ringOpacity }]}
         testID="today-live-ring"
       />
       <Pressable

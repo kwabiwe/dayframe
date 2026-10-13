@@ -46,8 +46,15 @@ describe("idle and background clock work", () => {
     // Coming back reads the time in that same render.
     expect(clock).toMatch(/if \(inFront !== wasInFront\) \{\s*setWasInFront\(inFront\);\s*if \(inFront\) setNow\(Date\.now\(\)\);/);
   });
+  it("runs the live block's ring and digits on React Native's native driver (iPhone 17, 13 Oct: Reanimated committed the whole tree every frame)", () => {
+    const odometer = readFileSync("src/components/today/LiveOdometer.tsx", "utf8");
+    expect(odometer).not.toContain("react-native-reanimated");
+    expect(odometer).toContain("Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();");
+    expect(motion).toMatch(/export function useBreathingRing[\s\S]*?useNativeDriver: true[\s\S]*?resetBeforeIteration: false/);
+    expect(liveBlock).toContain("style={[styles.ring, { borderColor: colors.text, opacity: ringOpacity }]}");
+  });
   it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
-    expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground \|\| paused\) \{\s*opacity\.value = BREATHING_RING\.reducedOpacity;/);
+    expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground \|\| paused\) \{\s*opacity\.setValue\(BREATHING_RING\.reducedOpacity\);/);
     expect(motion).toContain("}, [foreground, live, opacity, paused, reduceMotion]);");
   });
   it("gives Reports and Today's presentation minute time unless a live block needs seconds", () => {

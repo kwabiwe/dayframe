@@ -16,6 +16,8 @@ vi.mock("react-native-reanimated", () => ({
 }));
 
 vi.mock("./motion", () => ({ MOBILE_MOTION: { control: 160, layout: 220 } }));
+// blocksMotion's breathing ring uses React Native's Animated; the toast does not.
+vi.mock("react-native", () => ({ Animated: {}, Easing: {} }));
 vi.mock("react", () => ({ useEffect: () => undefined, useRef: (value: unknown) => ({ current: value }) }));
 
 const { BLOCKS_SPRING, TOAST_MOTION, blocksToastEntering, blocksToastExiting } = await import("./blocksMotion");
