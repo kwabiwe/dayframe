@@ -1,6 +1,7 @@
 import { clearLocaleDateFormats, currentTimeZoneId } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
-import { useDashboardClockTicks } from "@/lib/dashboardClock";
+import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
+import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
 import {
   createContext,
   useCallback,
@@ -29,7 +30,7 @@ import {
 } from "react-native";
 import Reanimated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
 import Svg, { Circle, Path } from "react-native-svg";
-import { router, useFocusEffect, useIsFocused } from "expo-router";
+import { router, useFocusEffect, useIsFocused, usePathname } from "expo-router";
 import { takeDashboardRefresh } from "@/lib/todayRefreshRequest";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
@@ -298,6 +299,8 @@ function DashboardBrandLockup({
   );
 }
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** The tabs that show a running block's live seconds: Today's live block and Reports' running totals. */
+const LIVE_TIME_PATHNAMES = new Set([DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route].map((route) => `/${route}`));
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -338,6 +341,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const appIsForeground = useAppForeground();
+  // Settings, Review and Calendar cover the live time; coming back to it reads the time in that render.
+  const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntryPresentation, setManualEntryPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
@@ -1477,14 +1482,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const retainedActiveEntryForSheet = activeEntryForDisplay ?? presentedActiveEntry;
   // The Dashboard's clock (`useDashboardClockTicks`): whole seconds only while a block runs (or its
   // sheet or a running Calendar entry is open), otherwise on the minute; nothing in the background.
+  // Whole seconds re-render the Dashboard only while they are on screen: a running block with Today
+  // or Reports in front, or a running entry's sheet. Behind Settings every tick re-rendered all three
+  // tabs (about 150 ms of JS a second on the iPhone 17, 13 Oct).
   const minuteFloorNow = Math.floor(now / 60_000) * 60_000;
   // Reports memoises its range and day labels: a new time zone rebuilds them (selections and cached
   // totals stay).
   const timeZoneId = currentTimeZoneId(minuteFloorNow);
-  const needsSecondClock = Boolean(
-    retainedActiveEntryForSheet || (calendarEditEntry && !calendarEditEntry.stoppedAt)
-  );
-  useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, setNow });
+  const runningCalendarEdit = Boolean(calendarEditEntry && !calendarEditEntry.stoppedAt);
+  const needsSecondClock = Boolean(retainedActiveEntryForSheet) || runningCalendarEdit;
+  const secondsShown = Boolean(retainedActiveEntryForSheet && liveTimeInFront) ||
+    Boolean(activeEditPresentation) || runningCalendarEdit;
+  useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, secondsShown, setNow });
   // New data (a block finished elsewhere, a refresh) is shown against the time it arrived, not the
   // last minute tick, so nothing it holds is clipped away until the next minute.
   useEffect(() => {
