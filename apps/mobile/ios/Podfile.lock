@@ -2432,7 +2432,7 @@ DEPENDENCIES:
   - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSecureStore (from `../../../node_modules/expo-secure-store/ios`)
   - ExpoSQLite (from `../../../node_modules/expo-sqlite/ios`)
-  - ExpoSymbols (from `../node_modules/expo-router/node_modules/expo-symbols/ios`)
+  - ExpoSymbols (from `../../../node_modules/expo-symbols/ios`)
   - ExpoSystemUI (from `../../../node_modules/expo-system-ui/ios`)
   - ExpoTaskManager (from `../../../node_modules/expo-task-manager/ios`)
   - "ExpoUI (from `../node_modules/expo-router/node_modules/@expo/ui/ios`)"
@@ -2587,7 +2587,7 @@ EXTERNAL SOURCES:
   ExpoSQLite:
     :path: "../../../node_modules/expo-sqlite/ios"
   ExpoSymbols:
-    :path: "../node_modules/expo-router/node_modules/expo-symbols/ios"
+    :path: "../../../node_modules/expo-symbols/ios"
   ExpoSystemUI:
     :path: "../../../node_modules/expo-system-ui/ios"
   ExpoTaskManager:
