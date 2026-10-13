@@ -16,6 +16,7 @@ import { PersistentTimerBar } from "@/components/PersistentTimerBar";
 import { SignOutControl } from "@/components/SignOutControl";
 import { ShellProfileIdentity, ShellProfileInitials, initials } from "@/components/ShellProfileIdentity";
 import { ThemeToggleButton } from "@/components/ThemeToggleButton";
+import { useBandScrolled } from "@/components/useBandScrolled";
 import { ModalDialog, PopoverPanel } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { beforeSessionChange } from "@/lib/session-change";
@@ -149,6 +150,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, []);
 
   const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
+  // The sticky timer band draws its hairline only once page content has scrolled under it (C1).
+  const timerBandRef = useRef<HTMLDivElement | null>(null);
+  const pageMainRef = useRef<HTMLElement | null>(null);
+  const contentUnderBand = useBandScrolled(timerBandRef, pageMainRef, pathname);
   const navigatePeriod = useCallback(async (direction: "previous" | "next") => {
     if (pathname !== "/timeline") return;
     const nextState = shiftTimelineState(timelineState, direction);
@@ -296,10 +301,14 @@ function AppShellContent({ children }: { children: ReactNode }) {
           </section>
         ) : (
           <>
-            <div className="swiss-persistent-timer-shell">
+            <div
+              className="swiss-persistent-timer-shell"
+              data-scrolled={contentUnderBand ? "true" : undefined}
+              ref={timerBandRef}
+            >
               {persistentTimer}
             </div>
-            <main>
+            <main ref={pageMainRef}>
               {children}
             </main>
           </>

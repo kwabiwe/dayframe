@@ -7,7 +7,7 @@ import {
   normalizeTagName,
   resolveActivityIcon
 } from "@dayframe/shared";
-import { Check, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   useEffect,
@@ -22,14 +22,14 @@ import {
 } from "react";
 import type { TagRow } from "@/lib/queries";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { FloatingList } from "@/components/FloatingList";
+import { FLOATING_LIST_HINTS, FloatingList } from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
 import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention, findActiveMention } from "@/lib/command-parse";
 import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
 /** An activity the description's `@` list can offer (the command timer passes its activities). */
-export type MentionActivity = { id: string; name: string; color: string; icon?: string | null };
+export type MentionActivity = { id: string; name: string; color: string; icon?: string | null; isPinned?: boolean };
 
 /**
  * How an activity was chosen from the `@` list: Enter (the command timer may also start the
@@ -145,8 +145,8 @@ export function InlineTagInput({
   }, [active, exactMatch]);
   const actions = useMemo(
     () => [
-      ...matches.map((tag) => ({ id: tag.id, label: tag.name, create: false })),
-      ...(createName ? [{ id: "create", label: createName, create: true }] : [])
+      ...matches.map((tag) => ({ id: tag.id, label: tag.name, create: false, count: tag.usageCount as number | null })),
+      ...(createName ? [{ id: "create", label: createName, create: true, count: null }] : [])
     ],
     [createName, matches]
   );
@@ -584,6 +584,7 @@ export function InlineTagInput({
           anchorRef={anchorRef}
           className={`inline-tag-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Tags"
+          hints={FLOATING_LIST_HINTS.tags}
           id={tagListId}
           isOpen={shouldOpen}
           onClose={dismissTagList}
@@ -594,7 +595,7 @@ export function InlineTagInput({
             <button
               aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
               aria-selected={highlightedIndex === index}
-              className={`df-flist-row${highlightedIndex === index ? " is-highlighted" : ""}${action.create ? " is-create" : ""}`}
+              className={`df-flist-row df-flist-row--tag${highlightedIndex === index ? " is-highlighted" : ""}${action.create ? " is-create" : ""}`}
               disabled={disabled}
               id={`${name}-tag-option-${index}`}
               key={action.id}
@@ -605,7 +606,11 @@ export function InlineTagInput({
               tabIndex={shouldOpen ? 0 : -1}
               type="button"
             >
-              {action.create ? "+ " : ""}{action.create ? `Create “${action.label}”` : action.label}
+              <span aria-hidden="true" className="df-flist-lead">
+                {action.create ? <Plus size={14} strokeWidth={2.2} /> : <DayframeIcon glyph="tag" size={14} />}
+              </span>
+              <span className="df-flist-label">{action.create ? `Create “#${action.label}”` : `#${action.label}`}</span>
+              {action.count !== null ? <span aria-hidden="true" className="df-flist-meta">{action.count}</span> : null}
             </button>
           ))}
           {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
@@ -614,6 +619,7 @@ export function InlineTagInput({
           anchorRef={anchorRef}
           className={`inline-activity-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Activities"
+          hints={FLOATING_LIST_HINTS.activities}
           id={activityListId}
           isOpen={activityOpen}
           onClose={dismissMention}
@@ -637,7 +643,10 @@ export function InlineTagInput({
               <span aria-hidden="true" className="df-flist-block df-block" style={blockStyle(activity.color, activity.name)}>
                 <DayframeIcon glyph={resolveActivityIcon(activity).glyph} size={13} />
               </span>
-              <span>{activity.name}</span>
+              <span className="df-flist-label">{activity.name}</span>
+              {/* A pinned activity is one of the quick starts; the marker is visual only, so the
+                  option's accessible name stays the activity's name. */}
+              {activity.isPinned ? <span aria-hidden="true" className="df-flist-meta">Pinned</span> : null}
             </button>
           ))}
           {activityMatches.length === 0 ? (
@@ -675,7 +684,7 @@ export function InlineTagInput({
                 autoComplete="off"
                 disabled={disabled}
                 onChange={(event) => setPickerQuery(event.target.value)}
-                placeholder="Add/filter tags"
+                placeholder="Search tags"
                 ref={pickerInputRef}
                 value={pickerQuery}
               />
@@ -713,7 +722,8 @@ export function InlineTagInput({
                 }}
                 type="button"
               >
-                + Create “{pickerCreateName}”
+                <span aria-hidden="true" className="df-flist-lead"><Plus size={14} strokeWidth={2.2} /></span>
+                <span className="df-flist-label">Create “#{pickerCreateName}”</span>
               </button>
             ) : null}
         </section>)}

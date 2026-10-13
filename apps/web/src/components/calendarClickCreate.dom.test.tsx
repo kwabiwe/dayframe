@@ -169,7 +169,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     const picker = await screen.findByRole("dialog", { name: "Add or filter tags" });
     const search = within(picker).getByRole("textbox", { name: "Add or filter tags" });
     await userEvent.type(search, "New tag");
-    await userEvent.click(within(picker).getByRole("button", { name: /Create “New tag”/ }));
+    await userEvent.click(within(picker).getByRole("button", { name: /Create “#New tag”/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add block" }));
 
     await waitFor(() => expect(runtime.createManualEntry).toHaveBeenCalledOnce());

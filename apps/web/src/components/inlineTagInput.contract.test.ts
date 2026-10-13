@@ -20,7 +20,7 @@ describe("web tag editor interaction contract", () => {
 
   it("opens an icon-triggered search/select/create picker with mobile-safe semantics", () => {
     expect(source).toContain('aria-label="Add or filter tags"');
-    expect(source).toContain('placeholder="Add/filter tags"');
+    expect(source).toContain('placeholder="Search tags"');
     expect(source).toContain("pickerMatches.map");
     expect(source).toContain("pickerCreateName");
     expect(source).toContain("aria-pressed={selected}");

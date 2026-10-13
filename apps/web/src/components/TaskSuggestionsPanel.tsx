@@ -1,7 +1,6 @@
 "use client";
 
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { FloatingList } from "@/components/FloatingList";
+import { FLOATING_LIST_HINTS, FloatingList, type FloatingListHint } from "@/components/FloatingList";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { RecentActivitySuggestion } from "@dayframe/shared";
@@ -9,6 +8,7 @@ import { paletteCssColorFor } from "@dayframe/shared";
 
 export function TaskSuggestionsPanel({
   anchorRef,
+  hints = FLOATING_LIST_HINTS.suggestionsEditor,
   isBusy,
   isOpen,
   onClose,
@@ -18,6 +18,8 @@ export function TaskSuggestionsPanel({
   suggestions
 }: {
   anchorRef?: RefObject<HTMLElement | null>;
+  /** The footer's keyboard hints (the command timer passes its own; editors use the default). */
+  hints?: readonly FloatingListHint[];
   isBusy: boolean;
   isOpen: boolean;
   /** Closes Suggestions (the phone sheet's Close control). */
@@ -97,6 +99,7 @@ export function TaskSuggestionsPanel({
       className={`swiss-task-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
       headClassName="swiss-task-suggestions-header"
       heading="Suggestions"
+      hints={hints}
       isOpen={isOpen}
       onClose={onClose}
       onKeyDown={(event) => {
@@ -119,24 +122,26 @@ export function TaskSuggestionsPanel({
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
     >
       {suggestions.map((suggestion) => (
+        // One 36 px line: the activity marker, the description with its #tags, and the activity
+        // name right-aligned as muted metadata.
         <button
           aria-selected={false}
-          className="df-flist-row"
+          className="df-flist-row df-flist-row--suggestion"
           disabled={isBusy}
           key={suggestion.key}
           onClick={() => onSelect(suggestion)}
           role="option"
           type="button"
         >
-          <span>
+          <i
+            aria-hidden="true"
+            style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }}
+          />
+          <span className="df-flist-label">
             <b>{suggestion.description}</b>
-            <small>
-              <i style={{ backgroundColor: paletteCssColorFor(suggestion.categoryColor ?? "steel", suggestion.categoryName ?? "Activity") }} />
-              {suggestion.categoryName ?? "No activity"}
-              {suggestion.tagNames.length ? ` · ${suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}` : ""}
-            </small>
+            {suggestion.tagNames.length ? <small>{suggestion.tagNames.map((tag) => `#${tag}`).join(" ")}</small> : null}
           </span>
-          <DayframeIcon glyph="play" size={14} fill="currentColor" strokeWidth={0}/>
+          <span className="df-flist-meta">{suggestion.categoryName ?? "No activity"}</span>
         </button>
       ))}
     </FloatingList>

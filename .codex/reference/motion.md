@@ -303,6 +303,17 @@ Block pull-to-refresh:
 - Interruption: a digit that changes again mid-roll retargets from where it is.
 - Accessibility: Reduce Motion removes the roll and the press scale (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
 
+## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
+
+- Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.
+- Owner: each `FloatingList` surface owns its own opacity (120 ms ease-out in; out over 120 ms with visibility held until the fade ends); no transform, so the panel never slides or scales. The band's `::after` hairline owns its opacity (160 ms ease-out), driven only by `data-scrolled` from `useBandScrolled` (rAF-throttled; it re-renders only when the answer changes).
+- Entrance/update/exit: a panel fades in at its final position and size; filtering changes rows in place (no row animation; the highlight moves at once); switching between Suggestions and Tags/Activities fades one out and the other in at the same place. The hairline fades in once content is under the band and out when it is back at the top; the band itself never moves or resizes.
+- Surrounding layout: panels are out of flow (absolute, portalled or the phone sheet), so the bar, the quick starts and the page never move; the footer and header stay fixed while rows scroll inside. The band's 8 px bottom padding is static.
+- Interruption: opening and closing in quick succession retargets the opacity transition from its current value; a scroll that crosses the threshold back and forth retargets the hairline's fade.
+- Async outcome: none; panels and the hairline reflect local state only.
+- Hydration and refresh: the hairline starts hidden and is measured after mount, so nothing lands on load or refresh at the top; a page restored mid-scroll shows it without a fade-in from a scroll. Panels are closed on load.
+- Accessibility: Reduce Motion removes both transitions (panels and hairline change at once). Focus stays in the Description (combobox with `aria-activedescendant`); the footer hints sit outside the listbox with their glyphs hidden and a spoken sentence each.
+
 ## Web Calendar (Blocks parity step 12b)
 
 - Trigger: entries change, the running block, the clock, hover and selection.
