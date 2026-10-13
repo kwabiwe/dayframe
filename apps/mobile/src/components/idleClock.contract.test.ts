@@ -31,6 +31,8 @@ describe("idle and background clock work", () => {
     // Codex r1 on #374: new data is shown against the time it arrived; zone changes reset formatters.
     expect(dashboard).toMatch(/useEffect\(\(\) => \{\s*if \(appIsForeground\) setNow\(Date\.now\(\)\);\s*\}, \[appIsForeground, data\]\);/);
     expect(dashboard).toMatch(/if \(appIsForeground\) clearLocaleDateFormats\(\);/);
+    // Codex r2 on #374: a zone change remounts Reports so its memoised day labels are rebuilt.
+    expect(dashboard).toContain(":${data.user.id}:${timeZoneId}`}");
     expect(dashboard).toMatch(/TodayReviewPresentationProvider[\s\S]*?nowMs=\{minuteFloorNow\}/);
     expect(reports).toContain("export const ReportsTab = memo(ReportsTabView);");
   });

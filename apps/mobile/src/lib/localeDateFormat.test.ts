@@ -22,6 +22,22 @@ describe("formatLocaleDate", () => {
     expect(created).toBe(1);
     spy.mockRestore();
   });
+  it("never reuses a formatter between zones that share an offset (Codex r2 on #374)", () => {
+    const original = process.env.TZ;
+    try {
+      // London and Lagos are both UTC+1 in summer; January differs (London is UTC+0).
+      process.env.TZ = "Europe/London";
+      clearLocaleDateFormats();
+      formatLocaleDate(new Date(2026, 6, 1), { month: "short" });
+      process.env.TZ = "Africa/Lagos";
+      clearLocaleDateFormats();
+      const january = new Date(2026, 0, 1, 0, 30);
+      expect(formatLocaleDate(january, { month: "short" })).toBe(january.toLocaleDateString(undefined, { month: "short" }));
+    } finally {
+      process.env.TZ = original;
+      clearLocaleDateFormats();
+    }
+  });
   it("never reuses a formatter across a time-zone change (Codex r1 on #374)", () => {
     const original = process.env.TZ;
     try {
@@ -29,6 +45,8 @@ describe("formatLocaleDate", () => {
       clearLocaleDateFormats();
       formatLocaleDate(new Date(2026, 9, 12, 12), { weekday: "long" });
       process.env.TZ = "Asia/Tokyo";
+      // The zone changed while the app was away; returning to the foreground clears the cache.
+      clearLocaleDateFormats();
       const tuesdayMidnight = new Date(2026, 9, 13, 0, 0);
       expect(formatLocaleDate(tuesdayMidnight, { weekday: "long" })).toBe(tuesdayMidnight.toLocaleDateString(undefined, { weekday: "long" }));
     } finally {

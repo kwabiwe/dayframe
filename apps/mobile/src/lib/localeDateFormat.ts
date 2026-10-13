@@ -3,11 +3,26 @@
 // models format every day they show, so per-call formatting dominated idle re-renders
 // (investigation 2026-10-12, Instruments run 2). Same output as toLocaleDateString(undefined, options).
 const formatters = new Map<string, Intl.DateTimeFormat>();
+const ZONE_RECHECK_MS = 30_000;
+let zone: string | null = null;
+let zoneCheckedAt = 0;
+
+/**
+ * The device's time zone identity, re-read at most every 30 s (reading it builds a formatter) and
+ * at once after clearLocaleDateFormats. A formatter keeps the zone it was made in, so the zone is
+ * part of every cache key: a zone change never reuses a formatter, even between zones that share an
+ * offset but not daylight-saving rules.
+ */
+export function currentTimeZoneId(now = Date.now()): string {
+  if (zone === null || now - zoneCheckedAt > ZONE_RECHECK_MS) {
+    zone = new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local";
+    zoneCheckedAt = now;
+  }
+  return zone;
+}
 
 export function formatLocaleDate(date: Date, options: Intl.DateTimeFormatOptions): string {
-  // A formatter keeps the zone it was made in: the date's UTC offset is part of the key, and the
-  // cache is cleared when the app returns to the foreground (a zone change while away).
-  const key = `${date.getTimezoneOffset()}|${JSON.stringify(options)}`;
+  const key = `${currentTimeZoneId()}|${JSON.stringify(options)}`;
   let formatter = formatters.get(key);
   if (!formatter) {
     formatter = new Intl.DateTimeFormat(undefined, options);
@@ -19,4 +34,5 @@ export function formatLocaleDate(date: Date, options: Intl.DateTimeFormatOptions
 /** Called when the app returns to the foreground: the device time zone or language may have changed. */
 export function clearLocaleDateFormats() {
   formatters.clear();
+  zone = null;
 }
