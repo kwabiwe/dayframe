@@ -204,8 +204,19 @@ function landingIsDue(request: LandingRequest | null, entryId: string | undefine
   return Date.now() - request.requestedAt <= LANDING_REQUEST_TTL_MS;
 }
 
-/** Opacity-only breathing for the single live block; static under Reduce Motion or when not live. */
-export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduceMotion: boolean }) {
+/**
+ * Opacity-only breathing for the single live block; static under Reduce Motion, when not live, in the
+ * background and while Today is covered (`paused`): every frame of the loop commits the view tree.
+ */
+export function useBreathingRing({
+  live,
+  paused = false,
+  reduceMotion,
+}: {
+  live: boolean;
+  paused?: boolean;
+  reduceMotion: boolean;
+}) {
   const opacity = useSharedValue<number>(BREATHING_RING.reducedOpacity);
   // The loop breathes only while it can be seen; in the background it holds still (it otherwise
   // kept the display link running for as long as location kept the app alive).
@@ -217,7 +228,7 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
       opacity.value = withTiming(0, { duration: MOBILE_MOTION.control, reduceMotion: ReduceMotion.Never });
       return undefined;
     }
-    if (reduceMotion || !foreground) {
+    if (reduceMotion || !foreground || paused) {
       opacity.value = BREATHING_RING.reducedOpacity;
       return undefined;
     }
@@ -235,7 +246,7 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
       ReduceMotion.Never
     );
     return () => cancelAnimation(opacity);
-  }, [foreground, live, opacity, reduceMotion]);
+  }, [foreground, live, opacity, paused, reduceMotion]);
 
   return useAnimatedStyle(() => ({ opacity: opacity.value }));
 }

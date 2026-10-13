@@ -26,6 +26,7 @@ export function TodayTimerSurface({
   diagnostic,
   liveHidden = false,
   liveLanding,
+  motionPaused = false,
   onAddTime,
   onOpenActiveTimer,
   onStartActivity,
@@ -44,6 +45,8 @@ export function TodayTimerSurface({
   /** The Stop flight's ghost has taken the live block's place: it is hidden at once, not faded. */
   liveHidden?: boolean;
   liveLanding: LandingRequest | null;
+  /** Today is covered (another tab or a pushed screen): the live block's looping motion holds still. */
+  motionPaused?: boolean;
   onAddTime: () => void;
   onOpenActiveTimer: () => void;
   onStartActivity: (activityId: string) => void;
@@ -86,6 +89,7 @@ export function TodayTimerSurface({
               detailsStyle={activeTimerDetailsStyle}
               diagnostic={diagnostic}
               landing={liveLanding}
+              motionPaused={motionPaused}
               onAddTime={onAddTime}
               onOpen={onOpenActiveTimer}
               onStop={onStop}

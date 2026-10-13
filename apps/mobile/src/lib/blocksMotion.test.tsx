@@ -161,6 +161,18 @@ describe("useBreathingRing", () => {
     act(() => tree.unmount());
   });
 
+  it("holds still while Today is covered and breathes again once it is uncovered (13 Oct, main thread)", () => {
+    // This file's mock creates a shared value per render: read the latest one.
+    const latest = () => assigned[assigned.length - 1];
+    const { tree } = mountRing({ live: true, paused: true, reduceMotion: false });
+    expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
+    act(() => tree.update(<Ring live paused={false} reduceMotion={false} />));
+    expect((latest().value as { kind: string }).kind).toBe("repeat");
+    act(() => tree.update(<Ring live paused reduceMotion={false} />));
+    expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
+    act(() => tree.unmount());
+  });
+
   it("stays still under Reduce Motion and fades out when the block is no longer live", () => {
     const reduced = mountRing({ live: true, reduceMotion: true });
     expect(reduced.opacity.value).toBe(BREATHING_RING.reducedOpacity);
