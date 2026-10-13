@@ -727,9 +727,8 @@ describe("Review real SQLite transactions", () => {
       canonicalStatus: "open"
     }) });
     await store.synchroniseReviewMutations();
-    // The proposal changed, so the card returns to be decided again; that is not a sync error.
-    expect(count("review_mutation_outbox")).toBe(0);
-    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(0);
+    // A changed proposal on a still-open moment is a real rejection: the saved action is kept.
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
     expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((candidate) => candidate.id)).toContain(item.id);
   });
   it("repairs a server-rejected split that an older client queued for a commute", async () => {
@@ -888,6 +887,112 @@ describe("Review actions for moments decided elsewhere (12 Oct 2026 superseded C
     await store.synchroniseReviewMutations();
     expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
     expect((await store.getReviewSyncDiagnostics()).settledElsewhereCount).toBe(0);
+  });
+});
+
+describe("Settling decided-elsewhere moments: Codex r1 on #370", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const owner = () => { const data = bootstrap(); return { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" }; };
+  const headers = (date: string) => ({ get: (name: string) => name.toLowerCase() === "date" ? date : null });
+
+  it("keeps a resolution conflict on a still-open moment as a real rejection with its saved action", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(701), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+  });
+
+  it("removes a settled moment from Today's cached snapshot and its counts", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const response = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:00:00.000Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response });
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(702), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+    expect(snapshot.response.outstanding.globalCount).toBe(0);
+    expect(JSON.stringify(snapshot.response.records)).not.toContain(item.id);
+  });
+
+  it("keeps a merge parked when reconcile cannot say which source was decided", async () => {
+    const input = mergeInput(); await store.enqueueReviewMutation(input);
+    db.prepare("update review_mutation_outbox set state='needs_attention', resolution_status='resolution_conflict', last_error='resolution_conflict' where client_mutation_id=?").run(input.clientMutationId);
+    mocks.fetch.mockImplementation(async (_url: string, init: { body: string }) => {
+      const { mutations } = JSON.parse(init.body);
+      return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "conflict", reason: "different_final_decision", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+    });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(count("review_mutation_effects")).toBe(2);
+  });
+
+  it("uses the server's per-source statuses for a 404", async () => {
+    const input = mergeInput(); await store.enqueueReviewMutation(input);
+    mocks.fetch.mockResolvedValue({ status: 404, json: async () => ({ code: "review_item_not_found", canonicalReviewStatuses: { [input.item.id]: "missing", [input.mutation.adjacentReviewItemId]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(0);
+    const ids = await visibleIds();
+    expect(ids).not.toContain(input.item.id); expect(ids).toContain(input.mutation.adjacentReviewItemId);
+
+    const data = bootstrap(); const single = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item: single, clientMutationId: syntheticId(703), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 404, json: async () => ({ code: "review_item_not_found", canonicalReviewStatuses: { [single.id]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+  });
+
+  it("rounds a whole-second Date up, so an open snapshot from earlier that second cannot clear the settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(704), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:46:00.500Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("never lowers terminal evidence with a delayed older lookup", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(705), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    expect(db.prepare("select captured_at from review_presentation_terminal_source where review_item_id=?").get(item.id)!.captured_at).toBe("2026-10-12T18:46:00.999Z");
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("re-checks an older build's parked conflict only once when it is still a real rejection", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(707), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', last_error='HTTP 409 · resolution_conflict', resolution_status='HTTP 409 · resolution_conflict', last_http_status=409 where client_mutation_id=?").run(syntheticId(707));
+    mocks.fetch.mockImplementation(async (url: string, init: { body: string }) => {
+      if (String(url).includes("/reconcile")) {
+        const { mutations } = JSON.parse(init.body);
+        return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "open", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+      }
+      return { status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) };
+    });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(1);
+    mocks.fetch.mockClear();
+    await store.synchroniseReviewMutations();
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+
+  it("lets a newer cached open read win over a delayed settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(706), mutation: { action: "accept" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers("Mon, 12 Oct 2026 18:46:00 GMT"), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(count("review_presentation_terminal_source")).toBe(0);
+    expect(await visibleIds()).toContain(item.id);
   });
 });
 

@@ -75,8 +75,9 @@ function unknownOutcomeSql(alias = "") {
  */
 function legacyResolvedElsewhereSql(alias = "") {
   return `(${alias}state = 'needs_attention' and (coalesce(${alias}resolution_status,'') in ('resolution_conflict','canonical_missing')
-    or coalesce(${alias}last_error,'') in ('HTTP 409 · resolution_conflict','HTTP 409 · proposal_changed','HTTP 404 · review_item_not_found')))`;
+    or coalesce(${alias}last_error,'') in ('HTTP 409 · resolution_conflict','HTTP 404 · review_item_not_found')))`;
 }
+const LEGACY_RECHECKED_KEY = "legacy_resolved_elsewhere_rechecked";
 export type ReviewItemSyncState = {
   action: string;
   state: ReviewMutationState;
@@ -1435,6 +1436,12 @@ export async function readReviewPresentationSnapshot(input: {
   }
   const activeAfterRead = await activeAccount(db);
   if (activeAfterRead?.account_key !== key) return null;
+  const terminal = await db.getAllAsync<{ review_item_id: string; captured_at: string }>(
+    `select review_item_id, captured_at from review_presentation_terminal_source
+     where account_key = ? and backend_id = ? and captured_at > ?`,
+    key, input.owner.backendId, response.capturedAt
+  );
+  response = withNewerTerminalEvidence(response, new Set(terminal.map((source) => source.review_item_id)));
   const effects = await readPresentationEffects(db, key);
   const revision = Number(await metadata(accountMetadataKey(PRESENTATION_REVISION_KEY, key), db) ?? "0");
   return {
@@ -1442,6 +1449,42 @@ export async function readReviewPresentationSnapshot(input: {
     cachedAt: row.cached_at,
     localRevision: Number.isFinite(revision) ? revision : 0,
     effects
+  };
+}
+
+/**
+ * A cached snapshot shows what was open when it was captured. Sources with terminal evidence newer
+ * than that (settled elsewhere, a later lookup) are no longer open: they leave its records and its
+ * open set, and its counts drop by the ones it counted, so Today never shows them again.
+ */
+export function withNewerTerminalEvidence(
+  response: ReviewPresentationSnapshot,
+  closed: ReadonlySet<string>
+): ReviewPresentationSnapshot {
+  if (closed.size === 0) return response;
+  const wasOpen = new Set(response.outstanding.openReviewItemIds);
+  const removedOpen = [...closed].filter((id) => wasOpen.has(id));
+  const today = response.scope.today;
+  const todayStart = today ? Date.parse(today.start) : NaN;
+  const todayEnd = today ? Date.parse(today.end) : NaN;
+  const removedToday = response.records.filter((record) => {
+    if (record.kind !== "review" || record.status !== "open" || !closed.has(record.reviewItemId)) return false;
+    const start = Date.parse(record.interval.start ?? "");
+    const end = Date.parse(record.interval.end ?? "");
+    return Number.isFinite(start) && Number.isFinite(end)
+      ? start < todayEnd && end > todayStart
+      : Date.parse(record.createdAt) >= todayStart && Date.parse(record.createdAt) < todayEnd;
+  }).length;
+  return {
+    ...response,
+    records: response.records.filter((record) => !(record.kind === "review" && record.status === "open" && closed.has(record.reviewItemId))),
+    links: response.links.filter((link) => !(link.status === "open" && closed.has(link.reviewItemId))),
+    outstanding: {
+      ...response.outstanding,
+      globalCount: Math.max(0, response.outstanding.globalCount - removedOpen.length),
+      todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
+      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id))
+    }
   };
 }
 
@@ -1582,7 +1625,10 @@ async function recordTerminalPresentationSources(
          backend_id = excluded.backend_id,
          snapshot_token = excluded.snapshot_token,
          status = excluded.status,
-         captured_at = excluded.captured_at`,
+         captured_at = excluded.captured_at
+       -- Terminal evidence only moves forward in time; a delayed older read cannot lower it.
+       where excluded.captured_at >= review_presentation_terminal_source.captured_at
+         or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
       accountKeyValue,
       reviewItemId,
       scopeKey,
@@ -1998,13 +2044,25 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
   const rows = await db.getAllAsync<MutationRow>(
     `select * from review_mutation_outbox where account_key=?
        and (? is null or client_mutation_id=?)
-       and (state in ('pending','in_flight') or (state='needs_attention' and ?=1) or ${legacyResolvedElsewhereSql()}
+       and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
          or (${unknownOutcomeSql()} and updated_at<=?)
          or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
            or (reconciliation_attempt_count=0 and (contention_count>=3 or created_at<=?)))))
      order by created_at,client_mutation_id limit 25`,
     account.account_key,options.clientMutationId??null,options.clientMutationId??null,options.force?1:0,
     new Date(Date.now()-REVIEW_UNKNOWN_RECHECK_MS).toISOString(),options.force?1:0,new Date().toISOString(),new Date(Date.now()-REVIEW_RECONCILE_AGE_MS).toISOString());
+  // Rows an older build parked although the moment was only decided elsewhere are re-checked once
+  // each (an ordinary pass, no force); a row that is still a real rejection afterwards stays parked.
+  const recheckedKey = accountMetadataKey(LEGACY_RECHECKED_KEY, account.account_key);
+  const rechecked = new Set(parseStringArray(await metadata(recheckedKey, db) ?? "[]"));
+  const selected = new Set(rows.map(row => row.client_mutation_id));
+  const legacyRows = (await db.getAllAsync<MutationRow>(
+    `select * from review_mutation_outbox where account_key=? and (? is null or client_mutation_id=?) and ${legacyResolvedElsewhereSql()}
+     order by created_at,client_mutation_id`,
+    account.account_key,options.clientMutationId??null,options.clientMutationId??null
+  )).filter(row => !rechecked.has(row.client_mutation_id) && !selected.has(row.client_mutation_id)).slice(0, 25);
+  const legacyIds = new Set(legacyRows.map(row => row.client_mutation_id));
+  rows.push(...legacyRows);
   let acknowledgedCount=0;
   let outcome: SyncLaneOutcome="complete";
   let stopped=false;
@@ -2016,6 +2074,12 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
     const effectRows=await db.getAllAsync<{review_item_id:string}>("select review_item_id from review_mutation_effects where account_key=? and client_mutation_id=?",account.account_key,row.client_mutation_id);
     if(effectRows.some(effect=>affected.has(effect.review_item_id))) continue;
     effectRows.forEach(effect=>affected.add(effect.review_item_id));
+    if (legacyIds.has(row.client_mutation_id)) {
+      rechecked.add(row.client_mutation_id);
+      const live = new Set((await db.getAllAsync<{client_mutation_id:string}>(
+        "select client_mutation_id from review_mutation_outbox where account_key=?",account.account_key)).map(item=>item.client_mutation_id));
+      await serialiseReviewMutation(()=>setMetadata(recheckedKey,JSON.stringify([...rechecked].filter(id=>live.has(id)))));
+    }
     const reconcile = row.state === "needs_attention" || row.state === "in_flight" || row.resolution_status === "delivery_interrupted" ||
       row.contention_count >= REVIEW_CONTENTION_LIMIT || Date.now()-Date.parse(row.created_at) >= REVIEW_RECONCILE_AGE_MS;
     const request = (path: string, body: string) => mobileJsonRequest(`${DAYFRAME_API_BASE}${path}`, {
@@ -2043,9 +2107,10 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
           await acknowledgeReviewMutation(row,proof.result!,response.status,isCurrent);acknowledgedCount++;continue;
         }
         // Gone, or decided differently elsewhere: the moment is settled, not a rejection.
-        if(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision")) {
-          const primaryStatus=proof.state==="missing"?"missing":"decided";
-          await settleResolvedElsewhere(row,proof.state==="missing"||effectRows.length<=1?[{reviewItemId:row.review_item_id,status:primaryStatus}]:[],proof.checkedAt,isCurrent);continue;
+        // Only a single-source proof says which source was decided; a merge keeps its parked row.
+        if(effectRows.length<=1&&(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision"))) {
+          const status=proof.state==="missing"?"missing":envelope.mutation.action.startsWith("ignore")?"accepted":"ignored";
+          await settleResolvedElsewhere(row,[{reviewItemId:row.review_item_id,status}],proof.checkedAt,isCurrent);continue;
         }
         if(proof.state==="conflict") {await attention(proof.reason==="mutation_id_conflict"?"mutation_id_conflict":"resolution_conflict",response.status);continue;}
         if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
@@ -2070,7 +2135,7 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         continue;
       }
       const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id));
-      if(settlement) {await settleResolvedElsewhere(row,settlement.retired,serverTime(response),isCurrent);continue;}
+      if(settlement) {await settleResolvedElsewhere(row,settlement.retired,reviewResponseServerTime(response),isCurrent);continue;}
       await attention(safeFailureSummary(response.status,responseBody),response.status,canonicalOpenEffectIds(responseBody,row.review_item_id));
     } catch(error) {
       if(!await isCurrent() || error instanceof StaleMobileSessionResponseError || (error instanceof Error&&error.name==="AbortError")) {outcome="cancelled";stopped=true;break;}
@@ -2105,13 +2170,16 @@ async function acknowledgeReviewMutation(row: MutationRow, body: Record<string,u
   emitChange();
 }
 
-type RetiredReviewSource = { reviewItemId: string; status: "accepted" | "ignored" | "missing" | "decided" };
+type RetiredReviewSource = { reviewItemId: string; status: "accepted" | "ignored" | "missing" };
+const TERMINAL_REVIEW_STATUSES = new Set(["accepted", "ignored", "missing"]);
 
 /**
  * The server answered that the moment is no longer open: decided on another device, superseded by
  * location replay, or gone. That is the moment settling, not a rejection the person can act on
- * (as on web). Sources the server proves still open are not retired, so only those cards return
- * (as they now are, from the cache); everything else stays gone. Returns null for real rejections.
+ * (as on web). It applies only when the server proves the primary source accepted, ignored or
+ * missing and reports every source's status; sources it reports open are not retired, so only those
+ * cards come back. An open or unreported primary (an existing entry that differs, a changed
+ * proposal) is a real rejection and keeps its saved action. Returns null for those.
  */
 export function reviewResolvedElsewhere(
   status: number,
@@ -2120,35 +2188,59 @@ export function reviewResolvedElsewhere(
   sourceIds: string[]
 ): { retired: RetiredReviewSource[] } | null {
   const code = typeof body?.code === "string" ? body.code : null;
+  const notFound = status === 404 && code === "review_item_not_found";
+  if (!notFound && !(status === 409 && code === "resolution_conflict")) return null;
   const sources = sourceIds.length ? sourceIds : [primaryId];
-  if (status === 404 && code === "review_item_not_found") {
-    // Which source was missing is only certain for a single-source action.
-    return { retired: sources.length === 1 ? [{ reviewItemId: primaryId, status: "missing" }] : [] };
-  }
-  if (status !== 409 || (code !== "resolution_conflict" && code !== "proposal_changed")) return null;
   const listed = body?.canonicalReviewStatuses;
   const statuses: Record<string, unknown> = listed && typeof listed === "object" && !Array.isArray(listed)
     ? listed as Record<string, unknown>
-    : { [primaryId]: body?.canonicalStatus };
+    : notFound
+      ? (sources.length === 1 ? { [primaryId]: "missing" } : {})
+      : { [primaryId]: body?.canonicalStatus };
+  if (!TERMINAL_REVIEW_STATUSES.has(String(statuses[primaryId]))) return null;
+  if (sources.some((id) => statuses[id] !== "open" && !TERMINAL_REVIEW_STATUSES.has(String(statuses[id])))) return null;
   return {
     retired: sources.flatMap((reviewItemId): RetiredReviewSource[] => {
       const canonical = statuses[reviewItemId];
-      return canonical === "accepted" || canonical === "ignored" ? [{ reviewItemId, status: canonical }] : [];
+      return canonical === "accepted" || canonical === "ignored" || canonical === "missing"
+        ? [{ reviewItemId, status: canonical }]
+        : [];
     })
   };
 }
 
-function serverTime(response: { headers?: { get(name: string): string | null } }) {
+/**
+ * The server's time for a direct response. HTTP `Date` has whole seconds while snapshot
+ * `capturedAt` has milliseconds, so it is rounded up to the end of its second: an open snapshot
+ * captured earlier in that second can never clear the settlement.
+ */
+export function reviewResponseServerTime(response: { headers?: { get(name: string): string | null } }) {
   const parsed = Date.parse(response.headers?.get("date") ?? "");
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
+  return Number.isFinite(parsed) ? new Date(parsed + 999).toISOString() : new Date().toISOString();
 }
 
-/**
- * Settles an action whose moment the server already decided: the action and its local effects
- * leave the outbox, retired sources leave the cache and are recorded as terminal at the server's
- * time (so an older cached Today snapshot cannot show them again, while a later read that lists
- * one open, e.g. replay reopening it, still brings it back). Counted, never shown as an issue.
- */
+/** A cached read captured after `checkedAt` still lists this source open (replay reopened it). */
+async function newerOpenEvidence(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  checkedAt: string
+) {
+  const contexts = await transaction.getAllAsync<{ context_json: string }>(
+    "select context_json from review_presentation_context where account_key = ? and captured_at > ?",
+    accountKeyValue, checkedAt
+  );
+  return contexts.some(({ context_json: contextJson }) => {
+    try {
+      const response = ReviewPresentationSnapshotSchema.parse(JSON.parse(contextJson));
+      return [...response.records, ...response.lookup.reviewItems].some((record) =>
+        record.kind === "review" && record.reviewItemId === reviewItemId && record.status === "open");
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function settleResolvedElsewhere(
   row: MutationRow,
   retired: RetiredReviewSource[],
@@ -2160,6 +2252,8 @@ async function settleResolvedElsewhere(
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     if (!await isCurrent()) throw new StaleMobileSessionResponseError();
     for (const source of retired) {
+      // A newer read already shows it open again: that read wins, whatever order they arrived in.
+      if (await newerOpenEvidence(transaction, row.account_key, source.reviewItemId, checkedAt)) continue;
       await transaction.runAsync(
         "delete from review_item_cache where account_key = ? and review_item_id = ?",
         row.account_key, source.reviewItemId
@@ -2172,10 +2266,11 @@ async function settleResolvedElsewhere(
          on conflict(account_key, review_item_id) do update set
            scope_key = excluded.scope_key, backend_id = excluded.backend_id,
            snapshot_token = excluded.snapshot_token, status = excluded.status,
-           captured_at = max(review_presentation_terminal_source.captured_at, excluded.captured_at)`,
+           captured_at = excluded.captured_at
+         where excluded.captured_at >= review_presentation_terminal_source.captured_at
+           or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
         row.account_key, source.reviewItemId, DAYFRAME_BACKEND_ID, `settled:${row.client_mutation_id}`,
-        source.status === "decided" ? (row.action_kind.startsWith("ignore") ? "accepted" : "ignored") : source.status,
-        checkedAt
+        source.status, checkedAt
       );
     }
     await transaction.runAsync(
