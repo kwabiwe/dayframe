@@ -61,7 +61,7 @@ import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { useDashboardClockTicks, useLiveTimeInFront } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
 import { LiveOdometer, ODOMETER_EM } from "./LiveOdometer";
-import { useLiveBlockElapsed, type LiveBlockClockInput } from "./liveBlockClock";
+import { livePresentationAt, useLiveBlockElapsed, type LiveBlockClockInput } from "./liveBlockClock";
 import { formatLiveClock } from "./todayBlocksLayout";
 
 const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
@@ -306,5 +306,88 @@ describe("the live block keeps its own time while Today is covered (Codex r1 on 
     act(() => tree.update(<CoveredDashboard inFront />));
     expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
     act(() => tree.unmount());
+  });
+});
+
+/**
+ * Today in front with the Dashboard on the minute (it shows no seconds itself any more). Like the real
+ * provider, it keeps a just-stopped entry for the block's exit, so its clock does not change at Stop.
+ */
+function TodayDashboard({ running }: { running: boolean }) {
+  const foreground = useAppForeground();
+  const [now, setNow] = useState(() => Date.now());
+  useDashboardClockTicks({ foreground, needsSecondClock: true, secondsShown: false, setNow });
+  const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  useLayoutEffect(() => {
+    providerCommits += 1;
+  });
+  return (
+    <LiveBlockTime
+      active={{
+        durationSeconds: 0,
+        elapsedLabel: formatLiveClock(seconds),
+        elapsedSeconds: seconds,
+        hasLiveActiveTimer: running,
+        startedAt: STARTED_AT,
+      }}
+      reduceMotion={false}
+    />
+  );
+}
+
+describe("Today in front moves the Dashboard on the minute (iPhone 17, 13 Oct: 28 % of a core)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    appState.currentState = "active";
+    appState.listeners.clear();
+    appState.changeWhileSubscribing = null;
+    shared.length = 0;
+    commits.length = 0;
+    providerCommits = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("ticks the live block every second while the Dashboard re-renders only at minute boundaries, and shows the stop time as it leaves", () => {
+    vi.setSystemTime(new Date("2026-10-13T13:48:38.800Z"));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TodayDashboard running />);
+    });
+    const providerAtStart = providerCommits;
+    for (let second = 0; second < 85; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+    // 13:50:03.8: the block shows 0:01:53; the Dashboard rendered only at 13:49:00.8 and 13:50:00.8.
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
+    expect(providerCommits - providerAtStart).toBe(2);
+    // Stopped 30.5 s later: the leaving block reads the time once more and shows 0:02:23, not the
+    // Dashboard's 0:01:50 from its last minute tick.
+    act(() => {
+      vi.advanceTimersByTime(30_500);
+    });
+    act(() => tree.update(<TodayDashboard running={false} />));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    act(() => tree.unmount());
+  });
+
+  it("gives the Stop flight's ghost the time the block stopped at", () => {
+    const presentation = {
+      durationSeconds: 0,
+      elapsedLabel: "0:01:50",
+      elapsedSeconds: 110,
+      hasLiveActiveTimer: true,
+      startedAt: STARTED_AT,
+      title: "Lunch",
+    };
+    const stopped = livePresentationAt(presentation, Date.parse("2026-10-13T13:50:34.300Z"));
+    expect(stopped).toMatchObject({ elapsedLabel: "0:02:23", elapsedSeconds: 143, title: "Lunch" });
+    // Never behind the Dashboard's own value, and untouched without a start.
+    expect(livePresentationAt(presentation, Date.parse("2026-10-13T13:49:00.000Z"))).toBe(presentation);
+    const unclocked = { ...presentation, startedAt: undefined };
+    expect(livePresentationAt(unclocked, Date.parse("2026-10-13T14:00:00.000Z"))).toBe(unclocked);
   });
 });

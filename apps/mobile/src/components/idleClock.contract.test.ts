@@ -30,7 +30,11 @@ describe("idle and background clock work", () => {
     expect(clock).toMatch(/if \(!secondsShownRef\.current && minute === shownMinute\) return;/);
     expect(dashboard).toContain("const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);");
     expect(dashboard).toMatch(/const secondsShown = Boolean\(retainedActiveEntryForSheet && liveTimeInFront\) \|\|\s*Boolean\(activeEditPresentation\) \|\| runningCalendarEdit;/);
-    expect(dashboard).toContain("[DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route]");
+    // Only Reports reads the Dashboard's seconds; Today's live block has its own clock (13 Oct, 28 % → see LiveTimerResume).
+    expect(dashboard).toContain("const LIVE_TIME_PATHNAMES = new Set([`/${DAYFRAME_NATIVE_TABS.reports.route}`]);");
+    expect(dashboard).not.toContain("DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route");
+    // The Stop flight's ghost shows the time the block stopped at, not the Dashboard's minute tick.
+    expect(dashboard).toContain("const presentation = todayLivePresentation && livePresentationAt(todayLivePresentation, Date.now());");
     // The live block keeps its own second clock, so a swipe back reveals the true time (Codex r1 on #384).
     expect(liveBlock).toContain("const elapsed = useLiveBlockElapsed(active);");
     expect(liveBlock).toContain("seconds={elapsed.seconds}");
