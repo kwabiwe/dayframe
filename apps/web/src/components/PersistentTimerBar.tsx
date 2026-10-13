@@ -9,7 +9,7 @@ import type {
   RefObject
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { normalizeTagName, resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
+import { resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
 import { Clock3, Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -56,6 +56,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     startTimer,
     stopTimer,
     timerDraft,
+    timerDraftEdited,
     timerDraftScope,
     timerError,
     updateActiveDetails,
@@ -163,24 +164,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
   // picking an activity then removes it and the next autosave sends the cleaned text. The runtime
   // saves to the block's real id, including a just-started block still shown optimistically.
+  // It runs only for an edit made in this tab (`timerDraftEdited`: the draft against the server
+  // copy the edit was based on), never because a newer server copy differs from the bar, and the
+  // runtime sends only the edited fields, so a second tab never writes stale details back.
+  // (A newer copy of the block re-arms the debounce, so an edit a busy save turned away is retried.)
   useEffect(() => {
-    if (!active) return undefined;
-    const nextCategoryId = timerDraft.categoryId || null;
-    const nextDescription = timerDraft.description.trim() || null;
-    const draftTags = timerDraft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
-    const activeTags = (active.tags?.map((tag) => tag.normalizedName)
-      ?? active.tagNames.map((name) => normalizeTagName(name).normalizedName)).sort();
-    if (
-      nextCategoryId === active.categoryId &&
-      nextDescription === (active.description ?? null) &&
-      JSON.stringify(draftTags) === JSON.stringify(activeTags)
-    ) return undefined;
-
+    if (!active || !timerDraftEdited) return undefined;
     const handle = window.setTimeout(() => {
       void updateActiveDetails(timerDraft);
     }, 650);
     return () => window.clearTimeout(handle);
-  }, [active, timerDraft, updateActiveDetails]);
+  }, [active, timerDraft, timerDraftEdited, updateActiveDetails]);
 
   useEffect(() => {
     if (!suggestionsOpen) return undefined;

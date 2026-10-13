@@ -10,7 +10,15 @@ export type BootstrapCommitSource = "cache" | "canonical" | "hydrate" | "optimis
 export function reconcileTimerBootstrap(
   current: BootstrapData | null,
   incoming: BootstrapData,
-  source: BootstrapCommitSource
+  source: BootstrapCommitSource,
+  options: {
+    /**
+     * While this tab is saving the running block, its shown copy is optimistic and still carries
+     * the pre-save `updatedAt`: a server copy with the same version is the pre-save one (requested
+     * before the PATCH, answered while it is pending) and must not replace it.
+     */
+    keepCurrentActiveOnTie?: boolean;
+  } = {}
 ): BootstrapData {
   if (!current || source === "optimistic" || current.workspace.id !== incoming.workspace.id) {
     return incoming;
@@ -20,7 +28,9 @@ export function reconcileTimerBootstrap(
   const incomingActive = incoming.activeEntry;
 
   if (currentActive && incomingActive?.id === currentActive.id) {
-    return isNewer(currentActive, incomingActive)
+    const keepCurrent = isNewer(currentActive, incomingActive) ||
+      (options.keepCurrentActiveOnTie === true && !isNewer(incomingActive, currentActive));
+    return keepCurrent
       ? withEntry(incoming, currentActive, true)
       : incoming;
   }

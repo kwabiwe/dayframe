@@ -27,7 +27,7 @@ describe("web Settings and running-timer follow-up", () => {
     expect(editor).toContain("event.stopPropagation()");
     expect(editor).toContain("void saveStartTime()");
     expect(editor).toContain('type="button" variant="primary"');
-    expect(runtime).toContain("applyOptimisticActiveEntryPatch(snapshot, draft, startedAt)");
+    expect(runtime).toContain("applyOptimisticActiveEntryPatch(snapshot, sending, startedAt)");
     expect(runtime).toContain("await refresh({ force: true })");
   });
 
