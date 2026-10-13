@@ -13,6 +13,12 @@ const recoveryOwnerSource = source("../../components/ConnectivityRecoveryOwner.t
 const geofenceSource = source("../geofence.ts");
 
 describe("location finalisation replay contracts", () => {
+  it("does not let a pass's own location evidence queue another pass (13 Oct, TestFlight 117)", () => {
+    expect(recoveryOwnerSource).toContain("durableWorkArrived(");
+    expect(recoveryOwnerSource).toContain("currentCoordinator.snapshot().inFlight");
+    expect(recoveryOwnerSource).toContain("previousLocationCount.current = durableWork.locationCount");
+    expect(recoveryOwnerSource).not.toContain("durableWork.pendingCount > previousPendingCount.current");
+  });
   it("reprocesses local evidence and forces one replay on foreground", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
     expect(runtimeSource).toContain("await processPendingLocationEvidence()");
