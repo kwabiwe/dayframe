@@ -10,6 +10,12 @@ vi.mock("react", async () => {
 
 type Animation = { kind: string; to: unknown; config?: Record<string, unknown>; delay?: number };
 const assigned: Array<{ value: unknown; writes: unknown[] }> = [];
+// The breathing ring's opacity: a React Native Animated value on the native driver (13 Oct).
+const nativeValues: Array<{ value: unknown; writes: unknown[] }> = [];
+vi.mock("react-native", async () => {
+  const { createFakeAnimated, fakeNativeEasing } = await import("../test/fakeNativeAnimated");
+  return { Animated: createFakeAnimated((value) => nativeValues.push(value)), Easing: fakeNativeEasing };
+});
 const initialValues: unknown[] = [];
 
 vi.mock("react-native-reanimated", () => ({
@@ -155,19 +161,25 @@ describe("useBlockLanding", () => {
 
 describe("useBreathingRing", () => {
   function mountRing(props: Parameters<typeof useBreathingRing>[0]) {
-    assigned.length = 0;
+    nativeValues.length = 0;
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(<Ring {...props} />);
     });
-    return { opacity: assigned[0], tree };
+    return { opacity: nativeValues[0], tree };
   }
 
   function breathing(value: unknown) {
-    const sequence = value as { kind: string; to: [Animation, { kind: string; to: { to: Animation[] } }] };
+    const sequence = value as {
+      kind: string;
+      to: [Animation, { config?: Record<string, unknown>; kind: string; to: { kind: string; to: Animation[] } }];
+    };
     expect(sequence.kind).toBe("sequence");
     const [rise, loop] = sequence.to;
-    expect(loop.kind).toBe("repeat");
+    expect(loop.kind).toBe("loop");
+    // React Native's loop would reset the value to where it began before each cycle; it must not.
+    expect(loop.config).toEqual({ iterations: -1, resetBeforeIteration: false });
+    expect(loop.to.kind).toBe("sequence");
     return { halves: loop.to.to, rise };
   }
 
@@ -177,6 +189,8 @@ describe("useBreathingRing", () => {
     // One rise from where the ring held, then a cycle that starts and ends at the maximum, so each
     // repeat (which restarts from the cycle's start) is seamless (Codex r2 on #380).
     expect(rise).toMatchObject({ kind: "timing", to: BREATHING_RING.maxOpacity });
+    expect(rise.config).toMatchObject({ useNativeDriver: true });
+    expect(halves.every((half) => half.config?.useNativeDriver === true)).toBe(true);
     expect(halves.map((half) => half.to)).toEqual([BREATHING_RING.minOpacity, BREATHING_RING.maxOpacity]);
     expect(halves.at(-1)?.to).toBe(rise.to);
     expect(halves.reduce((sum, half) => sum + Number(half.config?.duration), 0)).toBe(BREATHING_RING.cycleMs);
@@ -185,14 +199,15 @@ describe("useBreathingRing", () => {
   });
 
   it("holds still while Today is covered and breathes again once it is uncovered (13 Oct, main thread)", () => {
-    // This file's mock creates a shared value per render: read the latest one.
-    const latest = () => assigned[assigned.length - 1];
+    // The ring keeps one native value for its lifetime.
+    const latest = () => nativeValues[nativeValues.length - 1];
     const { tree } = mountRing({ live: true, paused: true, reduceMotion: false });
     expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
     act(() => tree.update(<Ring live paused={false} reduceMotion={false} />));
     breathing(latest().value);
     // The loop starts from the held opacity: nothing sets the ring to its minimum first (Codex r1 on #380).
-    expect(assigned.flatMap((shared) => shared.writes)).not.toContain(BREATHING_RING.minOpacity);
+    expect(nativeValues.flatMap((value) => value.writes)).not.toContain(BREATHING_RING.minOpacity);
+    expect(nativeValues).toHaveLength(1);
     act(() => tree.update(<Ring live paused reduceMotion={false} />));
     expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
     act(() => tree.unmount());

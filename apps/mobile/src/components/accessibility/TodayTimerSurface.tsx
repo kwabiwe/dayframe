@@ -14,8 +14,10 @@ export type TodayActiveTimerPresentation = TodayLiveBlockPresentation;
 
 /**
  * Today's Blocks timer area: the live block (or the idle card) and the quick-start mosaic below it.
- * Reanimated is the only animation owner here (LayoutAnimation does nothing in this app; see
- * .codex/reference/motion.md): the card slot and the mosaic animate their own layout changes, and
+ * Each moving property has one owner (LayoutAnimation does nothing in this app; see
+ * .codex/reference/motion.md): Reanimated moves the card slot, the mosaic and the landing; React
+ * Native's native driver runs the live block's breathing ring and rolling digits. The card slot and
+ * the mosaic animate their own layout changes, and
  * idle and live cards crossfade at the same geometry. With Reduce Motion the cards swap in place and
  * the live block's content fade is the single opacity change.
  */

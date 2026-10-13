@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing as NativeEasing } from "react-native";
 import {
   Easing,
   ReduceMotion,
@@ -217,44 +218,44 @@ export function useBreathingRing({
   paused?: boolean;
   reduceMotion: boolean;
 }) {
-  const opacity = useSharedValue<number>(BREATHING_RING.reducedOpacity);
+  // React Native's native driver runs the loop on the UI thread, with no per-frame JS and no view-tree
+  // commit (Reanimated committed the whole tree on every frame of this loop: iPhone 17, 13 Oct). The
+  // result is the opacity for a React Native Animated.View.
+  const [opacity] = useState(() => new Animated.Value(BREATHING_RING.reducedOpacity));
   // The loop breathes only while it can be seen; in the background it holds still (it otherwise
   // kept the display link running for as long as location kept the app alive).
   const foreground = useAppForeground();
 
   useEffect(() => {
-    cancelAnimation(opacity);
+    opacity.stopAnimation();
     if (!live) {
-      opacity.value = withTiming(0, { duration: MOBILE_MOTION.control, reduceMotion: ReduceMotion.Never });
-      return undefined;
+      const fade = Animated.timing(opacity, { duration: MOBILE_MOTION.control, toValue: 0, useNativeDriver: true });
+      fade.start();
+      return () => fade.stop();
     }
     if (reduceMotion || !foreground || paused) {
-      opacity.value = BREATHING_RING.reducedOpacity;
+      opacity.setValue(BREATHING_RING.reducedOpacity);
       return undefined;
     }
     const half = BREATHING_RING.cycleMs / 2;
-    const ease = Easing.inOut(Easing.sin);
-    const toMax = () => withTiming(BREATHING_RING.maxOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never });
+    const easing = NativeEasing.inOut(NativeEasing.sin);
+    const to = (toValue: number) => Animated.timing(opacity, { duration: half, easing, toValue, useNativeDriver: true });
     // The first rise starts from wherever the ring held (its reduced opacity, or part-way through a
     // fade), so breathing resumes without a step down. The cycle after it starts and ends at the
-    // maximum: a repeat restarts each cycle from the value it started at.
-    opacity.value = withSequence(
-      toMax(),
-      withRepeat(
-        withSequence(
-          withTiming(BREATHING_RING.minOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never }),
-          toMax()
-        ),
-        -1,
-        false,
-        undefined,
-        ReduceMotion.Never
-      )
-    );
-    return () => cancelAnimation(opacity);
+    // maximum, and the loop does not reset the value between cycles (by default it would snap it back
+    // to where the value began).
+    const breathing = Animated.sequence([
+      to(BREATHING_RING.maxOpacity),
+      Animated.loop(Animated.sequence([to(BREATHING_RING.minOpacity), to(BREATHING_RING.maxOpacity)]), {
+        iterations: -1,
+        resetBeforeIteration: false,
+      }),
+    ]);
+    breathing.start();
+    return () => breathing.stop();
   }, [foreground, live, opacity, paused, reduceMotion]);
 
-  return useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return opacity;
 }
 
 /** How long a pop request stays valid; like a landing, it is never replayed by a later mount. */

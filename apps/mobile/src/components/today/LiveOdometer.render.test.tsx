@@ -12,7 +12,12 @@ const appState = vi.hoisted(() => ({
   currentState: "active",
   listeners: new Set<(state: string) => void>(),
 }));
-vi.mock("react-native", () => ({
+vi.mock("react-native", async () => {
+  const { createFakeAnimated, fakeNativeEasing } = await import("../../test/fakeNativeAnimated");
+  return {
+  // The digits' strips are React Native Animated values on the native driver (13 Oct).
+  Animated: createFakeAnimated((value) => shared.push(value)),
+  Easing: fakeNativeEasing,
   AppState: {
     get currentState() {
       return appState.currentState;
@@ -26,14 +31,15 @@ vi.mock("react-native", () => ({
   Text: "Text",
   View: "View",
   useWindowDimensions: () => ({ fontScale, height: 874, scale: 3, width: 402 }),
-}));
+  };
+});
 
 function setAppState(state: string) {
   appState.currentState = state;
   for (const listener of [...appState.listeners]) listener(state);
 }
 
-type Shared = { value: unknown };
+type Shared = { value: unknown; stops: number };
 const shared: Shared[] = [];
 vi.mock("react-native-reanimated", async () => {
   const React = await import("react");
@@ -46,7 +52,7 @@ vi.mock("react-native-reanimated", async () => {
   useSharedValue: (initial: unknown) => {
     const ref = React.useRef<Shared | null>(null);
     if (!ref.current) {
-      ref.current = { value: initial };
+      ref.current = { stops: 0, value: initial };
       shared.push(ref.current);
     }
     return ref.current;
@@ -55,7 +61,6 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-import { cancelAnimation } from "react-native-reanimated";
 import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize, odometerTickRolls } from "./LiveOdometer";
 import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
@@ -70,7 +75,7 @@ function mount(label: string, reduceMotion = false, seconds?: number) {
 }
 
 const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
-const spring = (to: number) => ({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to });
+const spring = (to: number) => ({ config: { ...BLOCKS_SPRING.roll, toValue: to, useNativeDriver: true }, kind: "spring", to });
 
 describe("odometer cells", () => {
   it("keys cells from the right so seconds stay seconds when the hours gain a digit", () => {
@@ -100,8 +105,8 @@ describe("LiveOdometer", () => {
     const cell = Math.round(58 * ODOMETER_EM.height * 10) / 10;
     expect(strips.map((value) => value.value)).toEqual([0, 0, 0, 0, -9 * cell]);
     act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} />));
-    expect(strips[3].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: -cell });
-    expect(strips[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: 0 });
+    expect(strips[3].value).toEqual(spring(-cell));
+    expect(strips[4].value).toEqual(spring(0));
     expect(strips[0].value).toBe(0);
     act(() => tree.unmount());
   });
@@ -122,11 +127,11 @@ describe("LiveOdometer", () => {
     act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
     expect(strips[3].value).toEqual(spring(-CELL));
     expect(strips[4].value).toEqual(spring(0));
-    vi.mocked(cancelAnimation).mockClear();
+    const stopsBefore = strips.map((strip) => strip.stops);
     // Covered in the same second: the digits did not change, but the two rolls stop where they land.
     act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion seconds={10} />));
     expect(strips.map((strip) => strip.value)).toEqual([0, 0, 0, -CELL, 0]);
-    expect(vi.mocked(cancelAnimation).mock.calls.map(([value]) => strips.indexOf(value as Shared))).toEqual([0, 1, 2, 3, 4]);
+    expect(strips.map((strip, index) => strip.stops - stopsBefore[index])).toEqual([1, 1, 1, 1, 1]);
     // Back on Today: nothing rolls until a digit changes, and the next tick rolls again.
     act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
     expect(strips.map((strip) => strip.value)).toEqual([0, 0, 0, -CELL, 0]);

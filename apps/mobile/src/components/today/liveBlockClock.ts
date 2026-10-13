@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppForeground } from "../../lib/appForeground";
 import { useDashboardClockTicks } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
@@ -28,7 +28,13 @@ export function useLiveBlockElapsed(active: LiveBlockClockInput) {
   const [now, setNow] = useState(() => Date.now());
   const { durationSeconds, startedAt } = active;
   const clocked = startedAt !== undefined && durationSeconds !== undefined;
-  useDashboardClockTicks({ foreground, needsSecondClock: clocked && active.hasLiveActiveTimer, setNow });
+  const live = clocked && active.hasLiveActiveTimer;
+  useDashboardClockTicks({ foreground: foreground && live, needsSecondClock: true, setNow });
+  // A stopping block reads the time once more, then holds it while it leaves (Codex r2 on #390: a
+  // minute tick could otherwise move it on during the exit).
+  useEffect(() => {
+    if (clocked && !live) setNow(Date.now());
+  }, [clocked, live]);
   if (!clocked) return { label: active.elapsedLabel, seconds: active.elapsedSeconds };
   const seconds = Math.max(active.elapsedSeconds, activeTimerElapsedSeconds({ durationSeconds, startedAt }, now));
   return { label: seconds === active.elapsedSeconds ? active.elapsedLabel : formatLiveClock(seconds), seconds };

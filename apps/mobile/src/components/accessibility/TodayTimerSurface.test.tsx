@@ -7,15 +7,20 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-vi.mock("react-native", () => ({
-  Animated: { View: "AnimatedView" },
-  AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
-  Pressable: "Pressable",
-  StyleSheet: { create: (styles: unknown) => styles },
-  Text: "Text",
-  View: "View",
-  useWindowDimensions: () => ({ fontScale: 1, height: 874, scale: 3, width: 402 }),
-}));
+vi.mock("react-native", async () => {
+  const { createFakeAnimated, fakeNativeEasing } = await import("../../test/fakeNativeAnimated");
+  return {
+    // The live block's ring and odometer run on React Native's native driver (13 Oct).
+    Animated: createFakeAnimated(),
+    AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
+    Easing: fakeNativeEasing,
+    Pressable: "Pressable",
+    StyleSheet: { create: (styles: unknown) => styles },
+    Text: "Text",
+    View: "View",
+    useWindowDimensions: () => ({ fontScale: 1, height: 874, scale: 3, width: 402 }),
+  };
+});
 vi.mock("react-native-svg", () => ({
   Circle: "Circle",
   Ellipse: "Ellipse",
