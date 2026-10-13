@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { formatLocaleDate } from "./localeDateFormat";
+import { clearLocaleDateFormats, formatLocaleDate } from "./localeDateFormat";
 
 describe("formatLocaleDate", () => {
   const date = new Date(2026, 9, 12, 18, 45);
@@ -21,5 +21,19 @@ describe("formatLocaleDate", () => {
     for (let day = 1; day <= 30; day += 1) formatLocaleDate(new Date(2026, 8, day), { weekday: "short", day: "2-digit" });
     expect(created).toBe(1);
     spy.mockRestore();
+  });
+  it("never reuses a formatter across a time-zone change (Codex r1 on #374)", () => {
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      clearLocaleDateFormats();
+      formatLocaleDate(new Date(2026, 9, 12, 12), { weekday: "long" });
+      process.env.TZ = "Asia/Tokyo";
+      const tuesdayMidnight = new Date(2026, 9, 13, 0, 0);
+      expect(formatLocaleDate(tuesdayMidnight, { weekday: "long" })).toBe(tuesdayMidnight.toLocaleDateString(undefined, { weekday: "long" }));
+    } finally {
+      process.env.TZ = original;
+      clearLocaleDateFormats();
+    }
   });
 });

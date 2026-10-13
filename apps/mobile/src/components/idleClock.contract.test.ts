@@ -27,7 +27,10 @@ describe("idle and background clock work", () => {
     expect(motion).toContain("}, [foreground, live, opacity, reduceMotion]);");
   });
   it("gives Reports and Today's presentation minute time unless a live block needs seconds", () => {
-    expect(dashboard).toContain("nowMs={isFocused && needsSecondClock ? now : minuteFloorNow}");
+    expect(dashboard).toContain("nowMs={isFocused ? now : minuteFloorNow}");
+    // Codex r1 on #374: new data is shown against the time it arrived; zone changes reset formatters.
+    expect(dashboard).toMatch(/useEffect\(\(\) => \{\s*if \(appIsForeground\) setNow\(Date\.now\(\)\);\s*\}, \[appIsForeground, data\]\);/);
+    expect(dashboard).toMatch(/if \(appIsForeground\) clearLocaleDateFormats\(\);/);
     expect(dashboard).toMatch(/TodayReviewPresentationProvider[\s\S]*?nowMs=\{minuteFloorNow\}/);
     expect(reports).toContain("export const ReportsTab = memo(ReportsTabView);");
   });

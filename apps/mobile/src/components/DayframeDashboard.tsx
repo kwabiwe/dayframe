@@ -1,3 +1,4 @@
+import { clearLocaleDateFormats } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
 import {
   createContext,
@@ -1498,6 +1499,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     scheduleMinute();
     return () => clearTimeout(timeout);
   }, [appIsForeground, needsSecondClock]);
+  // New data (a block finished elsewhere, a refresh) is shown against the time it arrived, not the
+  // last minute tick, so nothing it holds is clipped away until the next minute.
+  useEffect(() => {
+    if (appIsForeground) setNow(Date.now());
+  }, [appIsForeground, data]);
+  useEffect(() => {
+    if (appIsForeground) clearLocaleDateFormats();
+  }, [appIsForeground]);
   const pendingDeletionEntryIds = new Set(pendingDeletion?.entryIds ?? []);
   const displayedActiveEntry = dashboardActiveTimerEntry({
     activeEntry: activeEntryForDisplay,
@@ -3179,9 +3188,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               key={`${DAYFRAME_BACKEND_ID ?? data.serverBuild?.backendId ?? "unknown-backend"}:${data.workspace.id}:${data.user.id}`}
               data={data}
               isFocused={isFocused}
-              // Whole seconds only while Reports is on screen with a block running (it keeps its own
-              // frozen clock otherwise), so the memoised tab skips the Dashboard's other ticks.
-              nowMs={isFocused && needsSecondClock ? now : minuteFloorNow}
+              // The exact time while Reports is on screen (it floors to the minute itself unless a block
+              // or its just-stopped contribution is live); minute time behind it, so the memoised tab
+              // skips the Dashboard's other ticks.
+              nowMs={isFocused ? now : minuteFloorNow}
               onScrubbingChange={setReportsScrubbing}
               styles={styles}
               theme={theme}
