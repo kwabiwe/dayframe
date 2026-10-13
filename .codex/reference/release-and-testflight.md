@@ -38,15 +38,15 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (117)` (2026-10-13)
+- Last repository-recorded verified build: `0.1.0 (118)` (2026-10-13)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `618d663c-8272-42e1-88dd-09c2e53244c0`
-- Archived commit: `6f31627`
+- Delivery/build ID: `11789f60-be0a-4cee-8367-ddc6c93267ee`
+- Archived commit: `8435b49`
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 117 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 118 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
