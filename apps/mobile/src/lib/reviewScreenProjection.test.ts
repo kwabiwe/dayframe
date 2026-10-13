@@ -34,6 +34,16 @@ describe("projectReviewScreenData (one Review data owner)", () => {
     expect(next.reviewItems[0].confidence).toBe("low");
   });
 
+  it("keeps a store-only time-away subtype under the live copy (Codex r2 on #372)", () => {
+    const server = syntheticReviewBootstrap(2);
+    const cached = { ...cachedCopy(server), reviewItems: server.reviewItems.map((item, index) => index === 0
+      ? { ...item, rawPayload: { qualificationReason: "same_place_outing", stopCount: 1 } } : { ...item, rawPayload: null }) };
+    const next = projectReviewScreenData({ base: server, projection: cached, live: liveReviewItems(server), current: null });
+    expect(next.reviewItems[0].rawPayload).toEqual(expect.objectContaining({ qualificationReason: "same_place_outing", stopCount: 1, durationSeconds: 1800 }));
+    const again = projectReviewScreenData({ base: next, projection: cached, live: liveReviewItems(server), current: next });
+    expect(again).toBe(next);
+  });
+
   it("returns what is on screen when nothing changed (no re-render), and reuses unchanged cards", () => {
     const server = syntheticReviewBootstrap(3);
     const live = liveReviewItems(server);

@@ -49,7 +49,13 @@ export function projectReviewScreenData(input: {
     : new Map<string, MobileReviewItem>();
   const reviewItems = projection.reviewItems.map((cached) => {
     const liveItem = live.get(cached.id);
-    const chosen = liveItem && sameReviewProposal(liveItem, cached) ? liveItem : cached;
+    // The live copy adds what is never cached (visit titles); fields only the store holds (a time-away
+    // subtype from a presentation read) stay underneath, so the card keeps its kind.
+    const chosen = liveItem && sameReviewProposal(liveItem, cached)
+      ? cached.rawPayload && Object.keys(cached.rawPayload).some((key) => !(key in (liveItem.rawPayload ?? {})))
+        ? { ...liveItem, rawPayload: { ...cached.rawPayload, ...(liveItem.rawPayload ?? {}) } }
+        : liveItem
+      : cached;
     const shown = previous.get(chosen.id);
     return shown && sameJson(shown, chosen) ? shown : chosen;
   });
