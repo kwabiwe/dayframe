@@ -1051,6 +1051,26 @@ describe("Terminal evidence against newer open reads: Codex r2 on #370", () => {
     expect(await visibleIds()).toContain(item.id);
   });
 
+  it("keeps a reopened source cached when a delayed older handover lookup retires its acknowledged intent (Codex r3 on #370)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(805), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "accept", status: "accepted", entryId: syntheticId(99) }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id], syntheticId(99)), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("drops open observations that newer terminal evidence makes irrelevant", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    expect(count("review_source_open_observation")).toBe(1);
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(count("review_source_open_observation")).toBe(0);
+  });
+
   it("consumes the one-time re-check on a forced pass too", async () => {
     const data = bootstrap(); const item = data.reviewItems[0];
     await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(804), mutation: { action: "accept" } });

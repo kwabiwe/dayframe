@@ -89,6 +89,21 @@ function terminalInForceSql(alias: string) {
       and o.backend_id = ${alias}.backend_id and o.observed_at > ${alias}.captured_at)`;
 }
 
+/** Terminal evidence at `at` makes an open observation at or before it irrelevant: drop it. */
+async function compactOpenObservation(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  backendId: string,
+  at: string
+) {
+  await transaction.runAsync(
+    `delete from review_source_open_observation
+     where account_key = ? and review_item_id = ? and backend_id = ? and observed_at <= ?`,
+    accountKeyValue, reviewItemId, backendId, at
+  );
+}
+
 async function recordOpenObservation(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
@@ -1331,7 +1346,7 @@ export async function cacheReviewPresentation(input: {
     );
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
-    await materialiseAcknowledgedReviewHandover(transaction, key, response);
+    await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
@@ -1647,6 +1662,7 @@ async function recordTerminalPresentationSources(
     );
   }
   for (const [reviewItemId, status] of terminalStatusesFromPresentation(response)) {
+    await compactOpenObservation(transaction, accountKeyValue, reviewItemId, backendId, response.capturedAt);
     await transaction.runAsync(
       `insert into review_presentation_terminal_source (
          account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
@@ -1704,7 +1720,8 @@ async function pruneReviewPresentationContexts(
 async function materialiseAcknowledgedReviewHandover(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
-  response: ReviewPresentationSnapshot
+  response: ReviewPresentationSnapshot,
+  backendId: string
 ) {
   const rows = await transaction.getAllAsync<{
     client_mutation_id: string;
@@ -1759,6 +1776,14 @@ async function materialiseAcknowledgedReviewHandover(
     });
     if (!materialised) continue;
     for (const effect of effects) {
+      // A newer read already lists this source open again (replay reopened it): it is a live card
+      // now, so the handover retires the acknowledged intent but keeps the cached source.
+      const reopened = await transaction.getFirstAsync(
+        `select 1 as found from review_source_open_observation
+         where account_key = ? and review_item_id = ? and backend_id = ? and observed_at > ?`,
+        accountKeyValue, effect.review_item_id, backendId, response.capturedAt
+      );
+      if (reopened) continue;
       await transaction.runAsync(
         `delete from review_item_cache where account_key = ? and review_item_id = ?`,
         accountKeyValue,
@@ -2287,6 +2312,7 @@ async function settleResolvedElsewhere(
         row.account_key, source.reviewItemId
       );
       if (!DAYFRAME_BACKEND_ID) continue;
+      await compactOpenObservation(transaction, row.account_key, source.reviewItemId, DAYFRAME_BACKEND_ID, checkedAt);
       await transaction.runAsync(
         `insert into review_presentation_terminal_source (
            account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
