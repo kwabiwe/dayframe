@@ -9,7 +9,7 @@ import {
   Text,
   View
 } from "react-native";
-import Reanimated from "react-native-reanimated";
+import Reanimated, { LayoutAnimationConfig } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -203,6 +203,7 @@ export default function ReviewScreen() {
   // in the deck toast's place (a held decision's Undo toast always wins that place).
   const confirmSheet = useBlocksConfirm();
   const deckNotice = useBlocksNotice();
+  const shownDeckToastKeysRef = useRef(new Set<string>());
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [reviewBacklog, setReviewBacklog] = useState<ReviewBacklogState | null>(null);
   const [reviewBacklogLoading, setReviewBacklogLoading] = useState(false);
@@ -221,6 +222,13 @@ export default function ReviewScreen() {
   const deferGenerations = useRef(new Map<string, number>());
   // Blocks parity step 5b: a thrown card is held for Undo before its decision is saved.
   const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeld | null>(null);
+  // A toast key goes into this set once it has been on screen (after commit), so the same toast
+  // handed to another slot when the deck changes branch starts settled instead of rising again.
+  const activeDeckToastKey = heldDeckDecision ? String(heldDeckDecision.token) : deckNotice.notice ? `notice-${deckNotice.notice.token}` : null;
+  useEffect(() => {
+    // Only the toast on screen now can be handed to another slot; older keys are dropped.
+    shownDeckToastKeysRef.current = new Set(activeDeckToastKey ? [activeDeckToastKey] : []);
+  }, [activeDeckToastKey]);
   // A single thrown card (most of the deck's flight and Undo logic is about this one).
   const heldDeckCard = heldDeckDecision?.kind === "single" ? heldDeckDecision : null;
   // Step 5f: a bulk skip is being counted (older backlog pages load before the confirmation).
@@ -2089,6 +2097,21 @@ export default function ReviewScreen() {
   // feedback C1: it used to sit above them, over the bottom of the card), or under Back to Today
   // once all is framed / under the waiting copy, always out of flow, so it never covers the card or
   // the controls whatever the phone height or text size, and its exit moves nothing.
+  // Each place the toast can hang (under the round actions, under Back to Today, under the waiting
+  // copy) is a slot that is always mounted with its branch. When the deck changes branch while a
+  // toast is up (the last card thrown, "All framed" appearing) the slot that went away takes its
+  // copy with it instead of leaving a fading ghost (skipExiting), and the same toast continues in
+  // the new slot at rest (BlocksToast appearSettled, for a key already shown). A toast first raised
+  // in the same commit as a branch change (Skip all) still rises in; one that times out inside a
+  // mounted slot still leaves with its own exit.
+  function deckToastSlot(placement: "actions" | "under") {
+    return (
+      <LayoutAnimationConfig skipExiting>
+        {renderDeckToast(placement)}
+      </LayoutAnimationConfig>
+    );
+  }
+
   function renderDeckToast(placement: "actions" | "under") {
     const held = heldDeckDecision;
     const placementStyle = placement === "under" ? styles.reviewDeckToastUnderButton : styles.reviewDeckToast;
@@ -2096,6 +2119,7 @@ export default function ReviewScreen() {
       const notice = deckNotice.notice;
       return notice ? (
         <BlocksToast
+          appearSettled={shownDeckToastKeysRef.current.has(`notice-${notice.token}`)}
           key={`notice-${notice.token}`}
           message={notice.message}
           reduceMotion={reduceMotion}
@@ -2117,6 +2141,7 @@ export default function ReviewScreen() {
     // hold (reviewDeckHold.ts, 4.8 s) still owns its lifetime; the token re-mounts a newer toast.
     return (
       <BlocksToast
+        appearSettled={shownDeckToastKeysRef.current.has(String(held.token))}
         key={held.token}
         actionAccessibilityLabel={undoLabel}
         actionLabel="Undo"
@@ -2194,7 +2219,7 @@ export default function ReviewScreen() {
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
             celebrate={celebrateDeckFinish.current}
-            footer={renderDeckToast("under")}
+            footer={deckToastSlot("under")}
             onBack={() => router.back()}
             reduceMotion={reduceMotion}
             theme={theme}
@@ -2256,7 +2281,7 @@ export default function ReviewScreen() {
               theme={theme}
             />
               {/* After the actions: below them on screen and after them for VoiceOver. */}
-              {renderDeckToast("actions")}
+              {deckToastSlot("actions")}
             </View>
           </>
         ) : (
@@ -2276,7 +2301,7 @@ export default function ReviewScreen() {
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Show more</Text>
               </Pressable>
             ) : null}
-            {renderDeckToast("under")}
+            {deckToastSlot("under")}
             </View>
           </View>
         )}

@@ -290,7 +290,7 @@ describe("Today rows swipe-to-delete contract", () => {
     expect(dashboardSource).toContain("itemLayoutAnimation={localLayoutTransition(reduceMotion)}");
     // The Undo toast's presence is BlocksToast's own Reanimated entering/exiting.
     expect(dashboardSource).toContain("<BlocksToast");
-    expect(blocksToastSource).toContain("entering={blocksToastEntering(reduceMotion, phase)}");
+    expect(blocksToastSource).toContain("entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}");
     expect(blocksToastSource).toContain("exiting={blocksToastExiting(reduceMotion, phase)}");
   });
 

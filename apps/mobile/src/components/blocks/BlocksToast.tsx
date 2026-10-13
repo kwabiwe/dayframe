@@ -25,6 +25,11 @@ export type BlocksToastProps = {
   swatchColor?: string | null;
   testID?: string;
   theme: MobileTheme;
+  /**
+   * The toast is already on screen and only moved to another slot (the Review deck changing
+   * branch): it appears at rest with no entrance, settled, so its later exit starts from rest.
+   */
+  appearSettled?: boolean;
 };
 
 /**
@@ -35,6 +40,7 @@ export type BlocksToastProps = {
  * Reanimated owns the presence: rise + fade in, fade out; Reduce Motion fades only.
  */
 export function BlocksToast({
+  appearSettled = false,
   actionAccessibilityLabel,
   actionLabel,
   actionTestID,
@@ -47,11 +53,11 @@ export function BlocksToast({
   theme
 }: BlocksToastProps) {
   // Where the entrance is, so the exit knows where to start (blocksToastExiting).
-  const phase = useSharedValue<ToastPhase["value"]>("entering");
+  const phase = useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering");
   return (
     <Reanimated.View
       accessibilityLiveRegion="polite"
-      entering={blocksToastEntering(reduceMotion, phase)}
+      entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
       exiting={blocksToastExiting(reduceMotion, phase)}
       style={[toastStyles.toast, { backgroundColor: theme.textPrimary, shadowColor: theme.shadow }, style]}
       testID={testID}

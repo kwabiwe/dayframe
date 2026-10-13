@@ -85,7 +85,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(toast).toContain("marginTop: 12");
     expect(toast).not.toContain("bottom:");
     // Rendered after the actions inside their anchor (below them for VoiceOver too).
-    expect(screen).toMatch(/<View style=\{styles\.reviewDeckActionsAnchor\}>\s*<ReviewDeckActions[\s\S]*?\/>\s*\{\/\*[^*]*\*\/\}\s*\{renderDeckToast\("actions"\)\}\s*<\/View>/);
+    expect(screen).toMatch(/<View style=\{styles\.reviewDeckActionsAnchor\}>\s*<ReviewDeckActions[\s\S]*?\/>\s*\{\/\*[^*]*\*\/\}\s*\{deckToastSlot\("actions"\)\}\s*<\/View>/);
     expect(screen).toContain('placement === "under" ? styles.reviewDeckToastUnderButton : styles.reviewDeckToast');
     expect(styleBlock("reviewDeckWaitingContent")).toContain(`paddingBottom: ${reserve}`);
   });
@@ -101,8 +101,10 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("keeps Undo in every deck state and never decides a cancelled gesture (r3 1, 2)", () => {
-    expect(screen.match(/renderDeckToast\("under"\)/g)?.length).toBe(2);
-    expect(screen).toContain('renderDeckToast("actions")');
+    expect(screen.match(/deckToastSlot\("under"\)/g)?.length).toBe(2);
+    expect(screen).toContain('deckToastSlot("actions")');
+    // Investigation 2026-10-12: a branch change must hand the same toast over, never ghost it.
+    expect(screen).toMatch(/function deckToastSlot[\s\S]*?<LayoutAnimationConfig skipExiting>\s*\{renderDeckToast\(placement\)\}/);
     expect(deck).toContain(".onEnd((_event, success) => {");
     expect(deck).toContain("if (direction !== 0 && success && allowed) {");
   });
@@ -229,4 +231,23 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(screen).toContain("await inFlight.done;");
   });
 
+
+  it("gives the Log-as row one geometry on the top card and beneath it (investigation 2026-10-12)", () => {
+    // The top card's 44-point field and activity button; every other card the same 44-point slots.
+    expect(deck).toMatch(/deckStyles\.logAsName, deckStyles\.logAsStaticName/);
+    expect(deck).toMatch(/deckStyles\.activityChip, deckStyles\.activityChipButton, \{ backgroundColor: card\.color \}\]\}>/);
+    expect(deck).toMatch(/logAsStaticName: \{\s*justifyContent: "center",\s*minHeight: 44/);
+  });
+
+  it("starts a handed-over toast settled, so its later exit starts from rest (Codex r1 on #373)", () => {
+    const toast = source("../blocks/BlocksToast.tsx");
+    expect(toast).toContain('useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering")');
+    expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(String(held.token))}");
+    expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(`notice-${notice.token}`)}");
+    expect(screen).toContain("shownDeckToastKeysRef.current = new Set(activeDeckToastKey ? [activeDeckToastKey] : []);");
+    // Only a handoff skips the entrance; a toast first raised with a branch change still rises in.
+    expect(toast).toContain("entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}");
+    expect(screen).not.toContain("skipEntering");
+  });
 });
+
