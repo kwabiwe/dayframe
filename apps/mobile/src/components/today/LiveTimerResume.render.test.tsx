@@ -374,6 +374,30 @@ describe("Today in front moves the Dashboard on the minute (iPhone 17, 13 Oct: 2
     act(() => tree.unmount());
   });
 
+  it("keeps the Stop flight's ghost still at the captured time, across second and minute boundaries (Codex r1 on #390)", () => {
+    vi.setSystemTime(new Date("2026-10-13T13:50:09.900Z"));
+    // The ghost's presentation, as StopFlightOverlay passes it: captured at Stop, no clock of its own.
+    const ghost: LiveBlockClockInput = {
+      durationSeconds: undefined,
+      elapsedLabel: "0:01:59",
+      elapsedSeconds: 119,
+      hasLiveActiveTimer: false,
+      startedAt: STARTED_AT,
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<LiveBlockTime active={ghost} reduceMotion />);
+    });
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 9]);
+    for (let step = 0; step < 3; step += 1) {
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+    }
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 9]);
+    act(() => tree.unmount());
+  });
+
   it("gives the Stop flight's ghost the time the block stopped at", () => {
     const presentation = {
       durationSeconds: 0,

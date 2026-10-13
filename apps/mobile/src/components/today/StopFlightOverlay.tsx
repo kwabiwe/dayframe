@@ -149,7 +149,9 @@ function FlightGhost({
       testID="stop-flight-ghost"
     >
       <TodayLiveBlock
-        active={{ ...flight.presentation, hasLiveActiveTimer: false }}
+        // A still snapshot of the time at Stop: without durationSeconds the live block keeps no clock of
+        // its own (useLiveBlockElapsed), so the ghost never ticks on while it flies (Codex r1 on #390).
+        active={{ ...flight.presentation, durationSeconds: undefined, hasLiveActiveTimer: false }}
         ghostContentStyle={contentStyle}
         landing={null}
         onAddTime={noop}

@@ -35,6 +35,10 @@ describe("idle and background clock work", () => {
     expect(dashboard).not.toContain("DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route");
     // The Stop flight's ghost shows the time the block stopped at, not the Dashboard's minute tick.
     expect(dashboard).toContain("const presentation = todayLivePresentation && livePresentationAt(todayLivePresentation, Date.now());");
+    // ...and the ghost keeps that time still while it flies (Codex r1 on #390).
+    expect(readFileSync("src/components/today/StopFlightOverlay.tsx", "utf8")).toContain(
+      "active={{ ...flight.presentation, durationSeconds: undefined, hasLiveActiveTimer: false }}"
+    );
     // The live block keeps its own second clock, so a swipe back reveals the true time (Codex r1 on #384).
     expect(liveBlock).toContain("const elapsed = useLiveBlockElapsed(active);");
     expect(liveBlock).toContain("seconds={elapsed.seconds}");
