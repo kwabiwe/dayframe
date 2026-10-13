@@ -55,6 +55,7 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
+import { cancelAnimation } from "react-native-reanimated";
 import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize, odometerTickRolls } from "./LiveOdometer";
 import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
@@ -112,6 +113,26 @@ describe("LiveOdometer", () => {
     const cell = Math.round(58 * ODOMETER_EM.height * 10) / 10;
     expect(strips[3].value).toBe(-cell);
     expect(strips[4].value).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it("settles a roll still running when Today is covered, and leaves it at rest when Today is back (Codex r1 on #380)", () => {
+    const tree = mount("0:00:09", false, 9);
+    const strips = [...shared];
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
+    expect(strips[3].value).toEqual(spring(-CELL));
+    expect(strips[4].value).toEqual(spring(0));
+    vi.mocked(cancelAnimation).mockClear();
+    // Covered in the same second: the digits did not change, but the two rolls stop where they land.
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion seconds={10} />));
+    expect(strips.map((strip) => strip.value)).toEqual([0, 0, 0, -CELL, 0]);
+    expect(vi.mocked(cancelAnimation).mock.calls.map(([value]) => strips.indexOf(value as Shared))).toEqual([0, 1, 2, 3, 4]);
+    // Back on Today: nothing rolls until a digit changes, and the next tick rolls again.
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
+    expect(strips.map((strip) => strip.value)).toEqual([0, 0, 0, -CELL, 0]);
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:11" reduceMotion={false} seconds={11} />));
+    expect(strips[4].value).toEqual(spring(-CELL));
+    expect(strips[3].value).toBe(-CELL);
     act(() => tree.unmount());
   });
 

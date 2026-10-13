@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 });
 
 type Animation = { kind: string; to: unknown; config?: Record<string, unknown>; delay?: number };
-const assigned: Array<{ value: unknown }> = [];
+const assigned: Array<{ value: unknown; writes: unknown[] }> = [];
 const initialValues: unknown[] = [];
 
 vi.mock("react-native-reanimated", () => ({
@@ -19,7 +19,19 @@ vi.mock("react-native-reanimated", () => ({
   useAnimatedStyle: (factory: () => unknown) => factory(),
   useSharedValue: (initial: unknown) => {
     initialValues.push(initial);
-    const shared = { value: initial };
+    // Records every write, so a value overwritten in the same effect still shows.
+    let value = initial;
+    const writes: unknown[] = [];
+    const shared = {
+      get value() {
+        return value;
+      },
+      set value(next: unknown) {
+        writes.push(next);
+        value = next;
+      },
+      writes,
+    };
     assigned.push(shared);
     return shared;
   },
@@ -168,6 +180,8 @@ describe("useBreathingRing", () => {
     expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
     act(() => tree.update(<Ring live paused={false} reduceMotion={false} />));
     expect((latest().value as { kind: string }).kind).toBe("repeat");
+    // The loop starts from the held opacity: nothing sets the ring to its minimum first (Codex r1 on #380).
+    expect(assigned.flatMap((shared) => shared.writes)).not.toContain(BREATHING_RING.minOpacity);
     act(() => tree.update(<Ring live paused reduceMotion={false} />));
     expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
     act(() => tree.unmount());
