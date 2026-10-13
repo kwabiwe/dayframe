@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -7,12 +8,30 @@ vi.mock("react", async () => {
 });
 
 let fontScale = 1;
+const appState = vi.hoisted(() => ({
+  currentState: "active",
+  listeners: new Set<(state: string) => void>(),
+}));
 vi.mock("react-native", () => ({
+  AppState: {
+    get currentState() {
+      return appState.currentState;
+    },
+    addEventListener: (_type: string, listener: (state: string) => void) => {
+      appState.listeners.add(listener);
+      return { remove: () => appState.listeners.delete(listener) };
+    },
+  },
   StyleSheet: { create: (styles: unknown) => styles },
   Text: "Text",
   View: "View",
   useWindowDimensions: () => ({ fontScale, height: 874, scale: 3, width: 402 }),
 }));
+
+function setAppState(state: string) {
+  appState.currentState = state;
+  for (const listener of [...appState.listeners]) listener(state);
+}
 
 type Shared = { value: unknown };
 const shared: Shared[] = [];
@@ -36,17 +55,21 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize } from "./LiveOdometer";
+import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize, odometerTickRolls } from "./LiveOdometer";
+import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 
-function mount(label: string, reduceMotion = false) {
+function mount(label: string, reduceMotion = false, seconds?: number) {
   shared.length = 0;
   let tree!: ReturnType<typeof create>;
   act(() => {
-    tree = create(<LiveOdometer color="#fff" label={label} reduceMotion={reduceMotion} />);
+    tree = create(<LiveOdometer color="#fff" label={label} reduceMotion={reduceMotion} seconds={seconds} />);
   });
   return tree;
 }
+
+const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
+const spring = (to: number) => ({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to });
 
 describe("odometer cells", () => {
   it("keys cells from the right so seconds stay seconds when the hours gain a digit", () => {
@@ -101,6 +124,79 @@ describe("LiveOdometer", () => {
     const cell = Math.round(size * ODOMETER_EM.height * 10) / 10;
     expect(size).toBeLessThan(58);
     expect(strips[4].value).toBe(-9 * cell);
+    act(() => tree.unmount());
+  });
+});
+
+describe("odometer ticks and jumps (investigation 2026-10-13, TestFlight 117)", () => {
+  it("rolls only for an ordinary tick of one or two seconds", () => {
+    expect(odometerTickRolls(undefined, 10)).toBe(true);
+    expect(odometerTickRolls(9, 10)).toBe(true);
+    expect(odometerTickRolls(9, 11)).toBe(true);
+    expect(odometerTickRolls(9, 9)).toBe(false);
+    expect(odometerTickRolls(28, 818)).toBe(false);
+    expect(odometerTickRolls(818, 28)).toBe(false);
+  });
+
+  it("remounts every digit at rest on a jump, then rolls the next ordinary tick", () => {
+    const tree = mount("0:00:28", false, 28);
+    const before = [...shared];
+    shared.length = 0;
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:38" reduceMotion={false} seconds={818} />));
+    const after = [...shared];
+    // Fresh strips at rest for 0:13:38; nothing rolled through the 13 minutes.
+    expect(after.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, -3 * CELL, -8 * CELL]);
+    expect(before.map((strip) => strip.value)).toEqual([0, 0, 0, -2 * CELL, -8 * CELL]);
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:39" reduceMotion={false} seconds={819} />));
+    expect(after[4].value).toEqual(spring(-9 * CELL));
+    expect(after[2].value).toBe(-3 * CELL);
+    act(() => tree.unmount());
+  });
+
+  it("a jump right after an ordinary roll leaves no roll running (Codex r1 on #377)", () => {
+    const tree = mount("0:00:09", false, 9);
+    const first = [...shared];
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
+    expect(first[3].value).toEqual(spring(-CELL));
+    expect(first[4].value).toEqual(spring(0));
+    shared.length = 0;
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:01:10" reduceMotion={false} seconds={70} />));
+    // Every strip is new and at rest: the seconds strips that were rolling are gone with their springs.
+    expect(shared).toHaveLength(5);
+    expect(shared.map((strip) => strip.value)).toEqual([0, 0, -1 * CELL, -1 * CELL, 0]);
+    act(() => tree.unmount());
+  });
+
+  it("remounts the digits at rest in the same commit as the return to the app", () => {
+    setAppState("active");
+    const commits: number[] = [];
+    function Probe() {
+      // Renders in the same batch as the odometer (it listens to the same AppState event) and runs
+      // after that commit, before passive effects: what the first frame back would show.
+      useAppForegroundState();
+      useLayoutEffect(() => {
+        commits.push(shared.length);
+      });
+      return null;
+    }
+    shared.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <>
+          <LiveOdometer color="#fff" label="0:00:28" reduceMotion={false} seconds={28} />
+          <Probe />
+        </>
+      );
+    });
+    const before = [...shared];
+    act(() => setAppState("background"));
+    const commitsBeforeReturn = commits.length;
+    act(() => setAppState("active"));
+    // The commit caused by the return already holds fresh strips (no frame with the old ones).
+    expect(commits[commitsBeforeReturn]).toBe(10);
+    expect(shared.slice(5).every((strip) => !before.includes(strip))).toBe(true);
+    expect(shared.slice(5).map((strip) => strip.value)).toEqual([0, 0, 0, -2 * CELL, -8 * CELL]);
     act(() => tree.unmount());
   });
 });

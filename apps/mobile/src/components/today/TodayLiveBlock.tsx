@@ -158,7 +158,13 @@ export function TodayLiveBlock({
             onLayout={(event) => recordMobileLayout(diagnostic, "today.timer.elapsed.frame", event)}
             style={[styles.time, detailsStyle]}
           >
-            <LiveOdometer color={colors.text} key={active.startedAt ?? "live"} label={active.elapsedLabel} reduceMotion={reduceMotion} />
+            <LiveOdometer
+              color={colors.text}
+              key={active.startedAt ?? "live"}
+              label={active.elapsedLabel}
+              reduceMotion={reduceMotion}
+              seconds={active.elapsedSeconds}
+            />
           </Animated.View>
           {/* The start time wraps instead of clipping: when it is too wide to sit beside the
               actions, the reserved action space moves to its own line and the card grows. */}

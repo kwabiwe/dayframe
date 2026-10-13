@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Reanimated, { ReduceMotion, cancelAnimation, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { MOBILE_DISPLAY_FONT, MOBILE_TEXT_CAP } from "../../lib/mobileTypography";
 
@@ -14,6 +15,17 @@ const FONT_LINE_EM = 1.2;
 const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] as const;
 
 export type OdometerCell = { key: string; kind: "digit" | "separator"; value: string };
+
+/**
+ * The clock rolls only for an ordinary tick: one or two seconds on (a tick can land late). Any other
+ * change sets every digit at rest instead, so the clock never rolls through time it was not showing:
+ * the return to the app after time away, a refresh that corrects the start, a tick after a long stall.
+ */
+export function odometerTickRolls(previousSeconds: number | undefined, seconds: number | undefined) {
+  if (previousSeconds === undefined || seconds === undefined) return true;
+  const step = seconds - previousSeconds;
+  return step >= 1 && step <= 2;
+}
 
 /**
  * Splits a clock label into fixed cells keyed from the right, so seconds stay seconds when the
@@ -57,22 +69,39 @@ export function odometerFontSize({
  * The live timer's rolling digits (Blocks `roll` spring). Each digit is a fixed cell holding a
  * 0–9 strip; only digits whose value changed move, on the UI thread, so the clock never jitters.
  * Reduce Motion sets each digit in place. VoiceOver reads the card's spoken duration instead.
+ *
+ * A jump (anything but an ordinary tick, `odometerTickRolls`) and every return to the app remount the
+ * digits at rest from the time they show, in the same commit (investigation 2026-10-13, TestFlight
+ * 117: digits that changed around a return kept their old positions), so no roll survives a jump and
+ * the first frame back comes from React's own props, whatever state a roll was left in.
  */
 export function LiveOdometer({
   baseSize = 58,
   color,
   label,
   reduceMotion,
+  seconds,
 }: {
   baseSize?: number;
   color: string;
   label: string;
   reduceMotion: boolean;
+  /** The elapsed seconds the label shows; a change other than an ordinary tick sets the digits at rest. */
+  seconds?: number;
 }) {
   const { fontScale } = useWindowDimensions();
   const [width, setWidth] = useState<number | null>(null);
   const size = odometerFontSize({ baseSize, fontScale, label, width });
   const cellHeight = Math.round(size * ODOMETER_EM.height * 10) / 10;
+  // Counted from the previous render's seconds (React's "information from previous renders" pattern:
+  // state set during render, so a render React discards never counts).
+  const [clock, setClock] = useState({ jumps: 0, seconds });
+  let jumps = clock.jumps;
+  if (seconds !== clock.seconds) {
+    if (!odometerTickRolls(clock.seconds, seconds)) jumps += 1;
+    setClock({ jumps, seconds });
+  }
+  const { returns } = useAppForegroundState();
 
   return (
     <View
@@ -82,7 +111,7 @@ export function LiveOdometer({
       style={styles.track}
       testID="today-live-odometer"
     >
-      <View style={[styles.row, { height: cellHeight }]}>
+      <View key={`${returns}:${jumps}`} style={[styles.row, { height: cellHeight }]}>
         {odometerCells(label).map((cell) =>
           cell.kind === "digit" ? (
             <OdometerDigit
