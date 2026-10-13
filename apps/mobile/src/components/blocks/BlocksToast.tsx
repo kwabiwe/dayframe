@@ -26,8 +26,8 @@ export type BlocksToastProps = {
   testID?: string;
   theme: MobileTheme;
   /**
-   * The toast is already on screen and only moved to another slot whose mount skips entering (the
-   * Review deck changing branch): it starts settled, so its later exit starts from rest.
+   * The toast is already on screen and only moved to another slot (the Review deck changing
+   * branch): it appears at rest with no entrance, settled, so its later exit starts from rest.
    */
   appearSettled?: boolean;
 };
@@ -57,7 +57,7 @@ export function BlocksToast({
   return (
     <Reanimated.View
       accessibilityLiveRegion="polite"
-      entering={blocksToastEntering(reduceMotion, phase)}
+      entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
       exiting={blocksToastExiting(reduceMotion, phase)}
       style={[toastStyles.toast, { backgroundColor: theme.textPrimary, shadowColor: theme.shadow }, style]}
       testID={testID}

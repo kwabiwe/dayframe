@@ -226,7 +226,8 @@ export default function ReviewScreen() {
   // handed to another slot when the deck changes branch starts settled instead of rising again.
   const activeDeckToastKey = heldDeckDecision ? String(heldDeckDecision.token) : deckNotice.notice ? `notice-${deckNotice.notice.token}` : null;
   useEffect(() => {
-    if (activeDeckToastKey) shownDeckToastKeysRef.current.add(activeDeckToastKey);
+    // Only the toast on screen now can be handed to another slot; older keys are dropped.
+    shownDeckToastKeysRef.current = new Set(activeDeckToastKey ? [activeDeckToastKey] : []);
   }, [activeDeckToastKey]);
   // A single thrown card (most of the deck's flight and Undo logic is about this one).
   const heldDeckCard = heldDeckDecision?.kind === "single" ? heldDeckDecision : null;
@@ -2098,13 +2099,14 @@ export default function ReviewScreen() {
   // the controls whatever the phone height or text size, and its exit moves nothing.
   // Each place the toast can hang (under the round actions, under Back to Today, under the waiting
   // copy) is a slot that is always mounted with its branch. When the deck changes branch while a
-  // toast is up (the last card thrown, "All framed" appearing) the same toast continues in the new
-  // slot: it does not rise in again there, and the slot that went away takes its copy with it
-  // instead of leaving a fading ghost. A toast that times out inside a mounted slot still leaves
-  // with its own exit, and one raised later still rises in.
+  // toast is up (the last card thrown, "All framed" appearing) the slot that went away takes its
+  // copy with it instead of leaving a fading ghost (skipExiting), and the same toast continues in
+  // the new slot at rest (BlocksToast appearSettled, for a key already shown). A toast first raised
+  // in the same commit as a branch change (Skip all) still rises in; one that times out inside a
+  // mounted slot still leaves with its own exit.
   function deckToastSlot(placement: "actions" | "under") {
     return (
-      <LayoutAnimationConfig skipEntering skipExiting>
+      <LayoutAnimationConfig skipExiting>
         {renderDeckToast(placement)}
       </LayoutAnimationConfig>
     );

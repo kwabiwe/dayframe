@@ -104,7 +104,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen.match(/deckToastSlot\("under"\)/g)?.length).toBe(2);
     expect(screen).toContain('deckToastSlot("actions")');
     // Investigation 2026-10-12: a branch change must hand the same toast over, never ghost it.
-    expect(screen).toMatch(/function deckToastSlot[\s\S]*?<LayoutAnimationConfig skipEntering skipExiting>\s*\{renderDeckToast\(placement\)\}/);
+    expect(screen).toMatch(/function deckToastSlot[\s\S]*?<LayoutAnimationConfig skipExiting>\s*\{renderDeckToast\(placement\)\}/);
     expect(deck).toContain(".onEnd((_event, success) => {");
     expect(deck).toContain("if (direction !== 0 && success && allowed) {");
   });
@@ -244,7 +244,10 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(toast).toContain('useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering")');
     expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(String(held.token))}");
     expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(`notice-${notice.token}`)}");
-    expect(screen).toMatch(/useEffect\(\(\) => \{\s*if \(activeDeckToastKey\) shownDeckToastKeysRef\.current\.add\(activeDeckToastKey\);/);
+    expect(screen).toContain("shownDeckToastKeysRef.current = new Set(activeDeckToastKey ? [activeDeckToastKey] : []);");
+    // Only a handoff skips the entrance; a toast first raised with a branch change still rises in.
+    expect(toast).toContain("entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}");
+    expect(screen).not.toContain("skipEntering");
   });
 });
 
