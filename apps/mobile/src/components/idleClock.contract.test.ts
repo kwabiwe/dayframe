@@ -20,10 +20,23 @@ const hotPaths = [
 describe("idle and background clock work", () => {
   it("ticks whole seconds only for live time, never in the background", () => {
     expect(dashboard).not.toMatch(/useEffect\(\(\) => \{\s*const interval = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);\s*return \(\) => clearInterval\(interval\);\s*\}, \[\]\);/);
-    expect(clock).toMatch(/if \(!foreground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\)/);
+    expect(clock).toMatch(/if \(!foreground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?const interval = setInterval\(\(\) => \{/);
     expect(clock).toContain("}, [foreground, needsSecondClock, setNow]);");
-    expect(dashboard).toContain("useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, setNow });");
+    expect(dashboard).toContain("useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, secondsShown, setNow });");
     expect(orb).toMatch(/if \(!foreground\) return undefined;[\s\S]*?setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
+  });
+  it("re-renders whole seconds only while they are on screen (iPhone 17, 13 Oct: about 150 ms of JS a second behind Settings)", () => {
+    // Behind Settings, Review or Calendar a second tick that is not a new minute re-renders nothing.
+    expect(clock).toMatch(/if \(!secondsShownRef\.current && minute === shownMinute\) return;/);
+    expect(dashboard).toContain("const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);");
+    expect(dashboard).toMatch(/const secondsShown = Boolean\(retainedActiveEntryForSheet && liveTimeInFront\) \|\|\s*Boolean\(activeEditPresentation\) \|\| runningCalendarEdit;/);
+    expect(dashboard).toContain("[DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route]");
+    // The live block keeps its own second clock, so a swipe back reveals the true time (Codex r1 on #384).
+    expect(liveBlock).toContain("const elapsed = useLiveBlockElapsed(active);");
+    expect(liveBlock).toContain("seconds={elapsed.seconds}");
+    expect(dashboard).toContain("durationSeconds: displayedActiveEntry.durationSeconds,");
+    // Coming back reads the time in that same render.
+    expect(clock).toMatch(/if \(inFront !== wasInFront\) \{\s*setWasInFront\(inFront\);\s*if \(inFront\) setNow\(Date\.now\(\)\);/);
   });
   it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
     expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground \|\| paused\) \{\s*opacity\.value = BREATHING_RING\.reducedOpacity;/);
