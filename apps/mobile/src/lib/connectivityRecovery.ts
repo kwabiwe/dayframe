@@ -65,6 +65,27 @@ export function connectivityRecoveryRequest(input: {
   return null;
 }
 
+export type DurableWorkArrivalCounts = { pendingCount: number; locationCount: number };
+
+/**
+ * Whether durable work counted since the last snapshot should queue a recovery pass. While a pass runs,
+ * a rise in the location count alone queues nothing: it is that pass's own location step storing its
+ * native drain, its Motion & Fitness capture and its upload batch, which the same step uploads. Any other
+ * work queues a pass as before, and location evidence still pending after a pass gets the completed-pass
+ * retry. On 13 Oct (TestFlight 117) each pass's own evidence queued the next one: nine bootstraps, six
+ * uploads and seven server replays in the 45 s after the owner came back to the app (investigation
+ * 2026-10-12).
+ */
+export function durableWorkArrived(
+  previous: DurableWorkArrivalCounts,
+  next: DurableWorkArrivalCounts,
+  passInFlight: boolean
+) {
+  if (next.pendingCount <= previous.pendingCount) return false;
+  if (!passInFlight) return true;
+  return next.pendingCount - next.locationCount > previous.pendingCount - previous.locationCount;
+}
+
 export function foregroundRecoveryRequest(input: {
   accountKey: string | null;
   isOnline: boolean;

@@ -13,6 +13,7 @@ import {
   connectivityAllowsRecovery,
   createConnectivityRecoveryCoordinator,
   connectivityRecoveryRequest,
+  durableWorkArrived,
   foregroundRecoveryRequest,
   locationConnectivityRecoveryStepResult,
   reviewConnectivityRecoveryStepResult,
@@ -73,6 +74,7 @@ export function ConnectivityRecoveryOwner() {
   const durableWorkRef = useRef(durableWork);
   const appActiveRef = useRef(AppState.currentState === "active");
   const previousPendingCount = useRef(0);
+  const previousLocationCount = useRef(0);
   const previousAccountKey = useRef<string | null>(null);
   connectivityRef.current = connectivity;
   durableWorkRef.current = durableWork;
@@ -187,13 +189,18 @@ export function ConnectivityRecoveryOwner() {
     const currentCoordinator = coordinator.current;
     if (!currentCoordinator) return;
     const accountChanged = previousAccountKey.current !== durableWork.accountKey;
-    const workArrived = durableWork.pendingCount > previousPendingCount.current;
+    const workArrived = durableWorkArrived(
+      { pendingCount: previousPendingCount.current, locationCount: previousLocationCount.current },
+      durableWork,
+      currentCoordinator.snapshot().inFlight
+    );
     if (accountChanged && previousAccountKey.current !== null) {
       currentCoordinator.ignore(connectivity.reconnectEpoch);
       void endAllTimerBackgroundExecution("account_changed");
     }
     previousAccountKey.current = durableWork.accountKey;
     previousPendingCount.current = durableWork.pendingCount;
+    previousLocationCount.current = durableWork.locationCount;
     if (
       durableWork.accountKey &&
       (accountChanged || workArrived) &&

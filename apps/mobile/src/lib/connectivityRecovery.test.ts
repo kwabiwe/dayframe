@@ -4,6 +4,7 @@ import {
   connectivityRecoveryRequest,
   createConnectivityRecoveryCoordinator,
   createSharedInFlightOperation,
+  durableWorkArrived,
   foregroundRecoveryRequest,
   locationConnectivityRecoveryStepResult,
   reviewConnectivityRecoveryStepResult,
@@ -620,6 +621,62 @@ describe("connectivity recovery", () => {
     });
     expect(vi.getTimerCount()).toBe(1);
   });
+
+  it("queues a pass for new work, but not for a location rise alone while a pass runs (13 Oct)", () => {
+    const before = { pendingCount: 2, locationCount: 1 };
+    expect(durableWorkArrived(before, { pendingCount: 2, locationCount: 1 }, false)).toBe(false);
+    expect(durableWorkArrived(before, { pendingCount: 1, locationCount: 0 }, true)).toBe(false);
+    // No pass running: any rise queues one, location included.
+    expect(durableWorkArrived(before, { pendingCount: 3, locationCount: 2 }, false)).toBe(true);
+    expect(durableWorkArrived(before, { pendingCount: 3, locationCount: 1 }, false)).toBe(true);
+    // A pass running: its own location evidence queues nothing; other work still does.
+    expect(durableWorkArrived(before, { pendingCount: 3, locationCount: 2 }, true)).toBe(false);
+    expect(durableWorkArrived(before, { pendingCount: 4, locationCount: 4 }, true)).toBe(false);
+    expect(durableWorkArrived(before, { pendingCount: 3, locationCount: 1 }, true)).toBe(true);
+    expect(durableWorkArrived(before, { pendingCount: 4, locationCount: 2 }, true)).toBe(true);
+  });
+
+  it.each([
+    ["the pending total alone (before 13 Oct): four passes", "total", 4],
+    ["durableWorkArrived: one pass", "lanes", 1]
+  ] as const)(
+    "passes that each store their own location evidence, judged by %s",
+    async (_label, rule, expectedPasses) => {
+      // Durable work as the recovery owner sees it. For three passes in a row the location step stores
+      // fresh evidence (a Motion & Fitness capture and its upload batch) and uploads it, as on the
+      // owner's phone after a return on 13 Oct.
+      let previous = { pendingCount: 0, locationCount: 0 };
+      let freshEvidence = 3;
+      let passes = 0;
+      const coordinator = createConnectivityRecoveryCoordinator({
+        canStart: () => true,
+        runPass: async () => {
+          passes += 1;
+          // The location step runs after the pass's earlier steps have awaited.
+          await Promise.resolve();
+          if (freshEvidence > 0) {
+            freshEvidence -= 1;
+            publish({ pendingCount: 2, locationCount: 2 });
+            await Promise.resolve();
+            publish({ pendingCount: 0, locationCount: 0 });
+          }
+          return "completed" as const;
+        },
+        shouldRetry: () => previous.pendingCount > 0
+      });
+      // The owner's durable-work effect.
+      function publish(next: { pendingCount: number; locationCount: number }) {
+        const arrived = rule === "total"
+          ? next.pendingCount > previous.pendingCount
+          : durableWorkArrived(previous, next, coordinator.snapshot().inFlight);
+        previous = next;
+        if (arrived) void coordinator.request(0, { queuedWorkArrived: true });
+      }
+      await coordinator.request(1);
+      expect(passes).toBe(expectedPasses);
+      expect(coordinator.snapshot()).toMatchObject({ inFlight: false, retryAt: null });
+    }
+  );
 
   it("schedules a bounded follow-up when fresh durable work survives a completed pass", async () => {
     vi.useFakeTimers();
