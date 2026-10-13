@@ -15,7 +15,12 @@ export function sameReviewProposal(left: MobileReviewItem, right: MobileReviewIt
     left.suggestedStartedAt === right.suggestedStartedAt &&
     left.suggestedStoppedAt === right.suggestedStoppedAt &&
     left.suggestedCategoryId === right.suggestedCategoryId &&
-    left.suggestedPlaceId === right.suggestedPlaceId;
+    left.suggestedPlaceId === right.suggestedPlaceId &&
+    left.confidence === right.confidence &&
+    left.eventSource === right.eventSource &&
+    left.categoryName === right.categoryName &&
+    (left.categoryColor ?? null) === (right.categoryColor ?? null) &&
+    (left.placeName ?? null) === (right.placeName ?? null);
 }
 
 function sameOwner(left: MobileBootstrap, right: MobileBootstrap) {

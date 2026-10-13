@@ -27,6 +27,13 @@ describe("projectReviewScreenData (one Review data owner)", () => {
     expect(changed.reviewItems[0].rawPayload).toBeNull();
   });
 
+  it("shows the store's copy when only the confidence changed (Codex r1 on #372)", () => {
+    const server = syntheticReviewBootstrap(2);
+    const lowered = { ...cachedCopy(server), reviewItems: cachedCopy(server).reviewItems.map((item, index) => index === 0 ? { ...item, confidence: "low" } : item) };
+    const next = projectReviewScreenData({ base: server, projection: lowered, live: liveReviewItems(server), current: null });
+    expect(next.reviewItems[0].confidence).toBe("low");
+  });
+
   it("returns what is on screen when nothing changed (no re-render), and reuses unchanged cards", () => {
     const server = syntheticReviewBootstrap(3);
     const live = liveReviewItems(server);

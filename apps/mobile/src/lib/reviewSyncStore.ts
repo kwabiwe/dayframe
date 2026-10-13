@@ -1321,8 +1321,9 @@ export async function cacheReviewPresentation(input: {
         key, presented.id
       );
       const earlier = existing ? parseReviewSnapshot(existing.snapshot_json) : null;
-      const item = earlier && !presented.rawPayload && sameCachedProposal(earlier, presented)
-        ? { ...presented, rawPayload: earlier.rawPayload }
+      // Presented fields (a time-away subtype) win; earlier reason fields fill in underneath.
+      const item = earlier?.rawPayload && sameCachedProposal(earlier, presented)
+        ? { ...presented, rawPayload: { ...earlier.rawPayload, ...(presented.rawPayload ?? {}) } }
         : presented;
       await transaction.runAsync(
         `insert into review_item_cache (
@@ -1666,7 +1667,8 @@ export function reviewPresentationScopeKey(
 function sameCachedProposal(left: MobileReviewItem, right: MobileReviewItem) {
   return left.id === right.id && left.title === right.title && left.eventType === right.eventType &&
     left.suggestedStartedAt === right.suggestedStartedAt && left.suggestedStoppedAt === right.suggestedStoppedAt &&
-    left.suggestedCategoryId === right.suggestedCategoryId && left.suggestedPlaceId === right.suggestedPlaceId;
+    left.suggestedCategoryId === right.suggestedCategoryId && left.suggestedPlaceId === right.suggestedPlaceId &&
+    left.confidence === right.confidence && left.eventSource === right.eventSource;
 }
 
 function presentationReviewItems(response: ReviewPresentationSnapshot) {
