@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({ gestures: [] as any[], haptic: vi.fn(), reduce
 vi.mock("expo-blur", () => ({ BlurView: "BlurView" }));
 vi.mock("../../lib/motion", () => ({ useReduceTransparencyPreference: () => mocks.reduceTransparency }));
 vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
   Pressable: "Pressable",
   StyleSheet: { absoluteFill: { position: "absolute" }, create: <T,>(styles: T) => styles },
   Text: "Text",

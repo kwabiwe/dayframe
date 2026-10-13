@@ -1,3 +1,4 @@
+import { formatLocaleDate } from "./localeDateFormat";
 import type { ReportAxisLayout, ReportBucket } from "./reportsRanges";
 
 export function reportBucketAtX(x: number, width: number, count: number) {
@@ -31,7 +32,7 @@ const dayMonth = (date: Date) =>
   `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}`;
 
 const weekdayInitial = (date: Date) =>
-  date.toLocaleDateString(undefined, { weekday: "narrow" });
+  formatLocaleDate(date, { weekday: "narrow" });
 
 const inclusiveEnd = (bucket: ReportBucket) => {
   const result = new Date(bucket.end);
@@ -67,7 +68,7 @@ export function reportAxisLabels(
       .filter((index) => index < buckets.length)
       .map((index) => ({
         index,
-        primary: buckets[index].start.toLocaleDateString(undefined, {
+        primary: formatLocaleDate(buckets[index].start, {
           month: "short",
         }),
         anchor: "center" as const,

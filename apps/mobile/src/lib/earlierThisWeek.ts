@@ -1,3 +1,4 @@
+import { formatLocaleDate } from "./localeDateFormat";
 import { formatDuration } from "@dayframe/shared";
 import type { HistoryDaySection } from "./historyPresentation";
 
@@ -61,9 +62,9 @@ export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], now
     return {
       dayKey,
       date,
-      weekday: date.toLocaleDateString(undefined, { weekday: "short" }),
-      dateLabel: date.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
-      spokenDate: date.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }),
+      weekday: formatLocaleDate(date, { weekday: "short" }),
+      dateLabel: formatLocaleDate(date, { day: "numeric", month: "short" }),
+      spokenDate: formatLocaleDate(date, { weekday: "long", day: "numeric", month: "long" }),
       totalSeconds: section?.totalSeconds ?? 0,
       segments,
     };

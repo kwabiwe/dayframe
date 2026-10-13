@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   FadeIn,
@@ -224,10 +224,19 @@ function PlayOrbView({
 /** The running orb's coral ring, filling with the current minute's seconds; it owns its own 1 s clock. */
 function OrbSecondsRing({ color }: { color: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // The ring is a clock only while it can be seen: in the background it stops, and it reads the
+  // time again the moment the app returns (investigation 2026-10-12, background CPU).
+  const [foreground, setForeground] = useState(() => AppState.currentState === "active");
   useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => setForeground(state === "active"));
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (!foreground) return undefined;
+    setNowMs(Date.now());
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [foreground]);
   const seconds = new Date(nowMs).getSeconds() + (nowMs % 1000) / 1000;
   const ringRadius = PLAY_ORB.size / 2 + RING.inset - RING.stroke / 2;
   const circumference = 2 * Math.PI * ringRadius;

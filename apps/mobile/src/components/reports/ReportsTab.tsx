@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -79,7 +80,7 @@ type DatePresentation = {
   initial: ReportRangeChoice;
 };
 
-export function ReportsTab({
+function ReportsTabView({
   data,
   initialChoice = "week",
   isFocused,
@@ -895,3 +896,7 @@ const s = StyleSheet.create({
   number: { textAlign: "right", fontVariant: ["tabular-nums"], flexShrink: 0 },
   unavailable: { paddingVertical: 24, gap: 12 },
 });
+
+// Memoised: the Dashboard re-renders every second while a block runs, and Reports formats every
+// day it shows, so it renders only when its own props change (investigation 2026-10-12).
+export const ReportsTab = memo(ReportsTabView);
