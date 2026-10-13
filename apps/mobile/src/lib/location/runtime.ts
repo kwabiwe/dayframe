@@ -22,7 +22,7 @@ import {
   isLocationCaptureAdmissionSuspended,
   locationCaptureRevision,
   persistLocationEvidence,
-  processPendingLocationEvidence,
+  refreshLocalJournalReplayIfDue,
   readLocationCaptureBinding,
   readOwnedLocationAccountContext,
   recordLocationCaptureDiscard,
@@ -267,7 +267,7 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
       return;
     }
     await drainNativeLocationSignalsInBatchesUnsafe();
-    await processPendingLocationEvidence();
+    await refreshLocalJournalReplayIfDue();
   });
   if (ownerIsCurrent(owner, revision)) void syncLocationEvidence().catch(recordLocationStoreError);
 }
@@ -275,7 +275,7 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
 export async function syncLocationIntelligenceOnForeground(options: LocationSyncOptions = {}) {
   if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
   await drainNativeLocationSignalsInBatches();
-  await processPendingLocationEvidence();
+  await refreshLocalJournalReplayIfDue();
   return syncLocationEvidence({ forceReplay: true, ...options });
 }
 

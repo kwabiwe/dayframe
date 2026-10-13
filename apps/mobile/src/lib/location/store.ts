@@ -131,6 +131,11 @@ export type LocationStoreDiagnostics = {
   oldestUnsynchronisedAt: string | null;
   lastAcceptedEvidenceAt: string | null;
   lastEngineState: string | null;
+  /** When the local journal replay (a diagnostic projection) last ran, how long it took and over how many rows. */
+  lastLocalReplayAt?: string | null;
+  /** Reading the journal and running the engine; the snapshot rewrite after it is not included. */
+  lastLocalReplayComputeMs?: number | null;
+  lastLocalReplayInputCount?: number | null;
   activeProvisionalSegmentKind: string | null;
   lastGapDurationSeconds: number | null;
   rejectedEvidenceCounts: Record<string, number>;
@@ -295,7 +300,8 @@ async function updateOwnedDiagnostics(key: string, patch: Partial<LocationStoreD
       const previousAttempt = compatible ? parseLocationSyncAttempt(prior, endpoint) : null;
       return next ? parseLocationSyncAttempt({...next, lastSuccessAt: next.outcome === "success" ? next.completedAt : previousAttempt?.lastSuccessAt}, endpoint) : previousAttempt;
     };
-    await setMetadata(metadataKey, JSON.stringify({...previous,
+    // Fields bound to another backend or account are dropped, not re-stamped as this account's.
+    await setMetadata(metadataKey, JSON.stringify({...(compatible ? previous : {}),
       ...patch,
       uploadAttempt: mergeAttempt("evidence", patch.uploadAttempt, previous.uploadAttempt),
       replayAttempt: mergeAttempt("replay", patch.replayAttempt, previous.replayAttempt),
@@ -677,18 +683,41 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
     await recordCaptureRejections({ stale_epoch: items.length }, db);
   }
   await applyLocationRetentionUnsafe();
-  if (insertedCount && isLocationCaptureSnapshotCurrent(snapshot)) await processPendingLocationEvidenceUnsafe();
+  // No local journal replay here (investigation 2026-10-12, 13 Oct): it re-ran the shared engine over the
+  // whole seven-day journal (up to 5,000 location and 10,000 motion rows) after every stored sample, in
+  // the background too, for diagnostics alone. See `refreshLocalJournalReplayIfDue`.
   return { insertedCount, duplicateCount: items.length - insertedCount - rejectedCount, rejectedCount };
 }
 
+/**
+ * The local journal replay is a diagnostic projection (Settings › Sync help › Share location details reads
+ * it); the server's replay is what logs and suggests time. Foreground and account configuration refresh it
+ * at most this often; the export shares the last run's numbers with their time.
+ */
+export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS = 10 * 60_000;
+
+/** Re-runs the local journal at once (tests). */
 export async function processPendingLocationEvidence(processingAt = new Date().toISOString()) {
   return serialiseLocationMutation(() => processPendingLocationEvidenceUnsafe(processingAt));
+}
+
+/** Re-runs the local journal unless this account's last run is under ten minutes old. */
+export async function refreshLocalJournalReplayIfDue(now = Date.now()) {
+  return serialiseLocationMutation(async () => {
+    const current = await currentContext();
+    if (!current) return [];
+    const owned = parseOwnedDiagnosticMetadata(await metadata(`sync_diagnostics:${current.key}`));
+    const lastRun = diagnosticsBelongTo(owned, current.key) ? Date.parse(owned.lastLocalReplayAt ?? "") : Number.NaN;
+    if (Number.isFinite(lastRun) && now >= lastRun && now - lastRun < LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS) return [];
+    return processPendingLocationEvidenceUnsafe(new Date(now).toISOString());
+  });
 }
 
 async function processPendingLocationEvidenceUnsafe(processingAt = new Date().toISOString()) {
   const current = await currentContext();
   if (!current) return [];
   const db = await database();
+  const startedAt = Date.now();
   const rows = await db.getAllAsync<EvidenceRow>(
     "select evidence_json from location_evidence_journal where account_key = ? order by occurred_at, client_evidence_id",
     current.key
@@ -714,6 +743,7 @@ async function processPendingLocationEvidenceUnsafe(processingAt = new Date().to
     config: LOCATION_ENGINE_V2_CONFIG,
     processingAt
   });
+  const replayComputeMs = Date.now() - startedAt;
   await db.withExclusiveTransactionAsync(async (transaction) => {
     await transaction.runAsync(
       `insert into location_engine_state (account_key, state_json, updated_at) values (?, ?, ?)
@@ -757,6 +787,7 @@ async function processPendingLocationEvidenceUnsafe(processingAt = new Date().to
     await setMetadata("rejected_evidence_counts", JSON.stringify(rejectedCounts), transaction);
     await setMetadata("last_accepted_evidence_at", acceptedTimes.at(-1) ?? "", transaction);
     await updateOwnedDiagnostics(current.key, {lastEngineState:output.nextState.mode,
+      lastLocalReplayAt:processingAt,lastLocalReplayComputeMs:replayComputeMs,lastLocalReplayInputCount:rows.length,
       activeProvisionalSegmentKind:output.nextState.mode === "moving" ? "commute" : output.nextState.mode === "idle" ? null : "stay",
       lastGapDurationSeconds:gaps.length ? Math.max(...gaps) : null,rejectedEvidenceCounts:rejectedCounts},transaction);
   });
@@ -1506,6 +1537,9 @@ export async function getLocationStoreDiagnostics(owner?: MobileAccountOwner): P
     oldestUnsynchronisedAt: counts?.oldestUnsynchronised ?? null,
     lastAcceptedEvidenceAt: counts?.lastAccepted ?? null,
     lastEngineState: owned.lastEngineState ?? null,
+    lastLocalReplayAt: owned.lastLocalReplayAt ?? null,
+    lastLocalReplayComputeMs: owned.lastLocalReplayComputeMs ?? null,
+    lastLocalReplayInputCount: owned.lastLocalReplayInputCount ?? null,
     activeProvisionalSegmentKind: owned.activeProvisionalSegmentKind ?? null,
     lastGapDurationSeconds: owned.lastGapDurationSeconds ?? null,
     rejectedEvidenceCounts: owned.rejectedEvidenceCounts ?? {},

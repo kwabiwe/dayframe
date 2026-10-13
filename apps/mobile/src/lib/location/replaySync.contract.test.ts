@@ -13,9 +13,14 @@ const recoveryOwnerSource = source("../../components/ConnectivityRecoveryOwner.t
 const geofenceSource = source("../geofence.ts");
 
 describe("location finalisation replay contracts", () => {
-  it("reprocesses local evidence and forces one replay on foreground", () => {
+  it("refreshes the local journal replay when due and forces one server replay on foreground", () => {
     expect(runtimeSource).toContain("syncLocationIntelligenceOnForeground");
-    expect(runtimeSource).toContain("await processPendingLocationEvidence()");
+    // 13 Oct (investigation 2026-10-12): the local replay is a diagnostic projection over the whole
+    // seven-day journal, so it is throttled and never runs after each stored sample.
+    expect(runtimeSource).toContain("await refreshLocalJournalReplayIfDue()");
+    expect(runtimeSource).not.toContain("await processPendingLocationEvidence()");
+    const persistPath = storeSource.slice(storeSource.indexOf("async function persistLocationEvidenceUnsafe"), storeSource.indexOf("export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS"));
+    expect(persistPath).not.toContain("processPendingLocationEvidenceUnsafe()");
     expect(runtimeSource).toMatch(/syncLocationEvidence\(\{ forceReplay: true,\s*\.\.\.options \}\)/);
     expect(recoveryOwnerSource).toContain("await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly})");
     expect(dashboardSource).not.toContain("syncLocationIntelligenceOnForeground");

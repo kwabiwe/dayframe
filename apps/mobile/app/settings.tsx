@@ -1722,6 +1722,8 @@ export default function SettingsScreen() {
     if (!owner) return;
     const session = await readOwnedAuthenticatedSessionSnapshot(owner);
     if (session.status !== "authenticated") return;
+    // The local journal replay's numbers are from its last run (`lastLocalReplayAt`): foreground refreshes
+    // them at most every ten minutes. The export never waits for a replay of the whole journal.
     const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
     await Share.share({
@@ -1740,6 +1742,9 @@ export default function SettingsScreen() {
         oldestUnsynchronisedAt: local.oldestUnsynchronisedAt,
         lastAcceptedEvidenceAt: local.lastAcceptedEvidenceAt,
         lastEngineState: local.lastEngineState,
+        lastLocalReplayAt: local.lastLocalReplayAt,
+        lastLocalReplayComputeMs: local.lastLocalReplayComputeMs,
+        lastLocalReplayInputCount: local.lastLocalReplayInputCount,
         activeProvisionalSegmentKind: local.activeProvisionalSegmentKind,
         lastGapDurationSeconds: local.lastGapDurationSeconds,
         rejectedEvidenceCounts: local.rejectedEvidenceCounts,
