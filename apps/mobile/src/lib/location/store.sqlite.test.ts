@@ -46,6 +46,8 @@ describe("Location real SQLite drain results",()=>{
  });
  it.each(["pending", "acknowledged"])("journal expiry does not expire %s upload bodies or retained context (P3/P3b)",async state=>{
   await seed();
+  // Storing evidence no longer replays the local journal (13 Oct); replay once so engine state exists.
+  await store.processPendingLocationEvidence();
   if(state==="acknowledged")await store.syncLocationEvidence();
   const body=db.prepare("select body_json from location_upload_outbox limit 1").get()!.body_json;
   expect(String(body)).toContain('"latitude":51.5');
@@ -235,6 +237,33 @@ describe("complete saved-place snapshot replay", () => {
   await store.processPendingLocationEvidence(fixture.processingAt);
   expect(db.prepare("select count(*) n from location_segment_snapshot where account_key=?").get(key)!.n).toBe(0);
   expect(db.prepare("select count(*) n from location_segment_snapshot where account_key='other-account'").get()!.n).toBe(1);
+ });
+ it("replays the local journal on demand and at most every ten minutes, never after each stored sample (13 Oct)", async () => {
+  vi.useFakeTimers({toFake:["Date"]});
+  const start=Date.parse("2026-10-13T12:00:00Z");vi.setSystemTime(start);
+  const sample=(id:string,at:number)=>({clientEvidenceId:id,deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+   kind:"significant_change" as const,occurredAt:new Date(at).toISOString(),receivedAt:new Date(at).toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}});
+  await persistEvidence([sample("journal-1",start-60_000)]);
+  // Storing a sample did not re-run the engine over the journal.
+  expect(db.prepare("select count(*) n from location_engine_state").get()!.n).toBe(0);
+  expect((await store.getLocationStoreDiagnostics()).lastLocalReplayAt).toBeNull();
+  await store.refreshLocalJournalReplayIfDue(start);
+  let diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start).toISOString(),lastLocalReplayInputCount:1});
+  expect(diagnostics.lastLocalReplayDurationMs).toBeGreaterThanOrEqual(0);
+  // Five minutes on, with a new sample: not due, so nothing re-runs.
+  vi.setSystemTime(start+5*60_000);
+  await persistEvidence([sample("journal-2",start+4*60_000)]);
+  await store.refreshLocalJournalReplayIfDue(start+5*60_000);
+  diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start).toISOString(),lastLocalReplayInputCount:1});
+  // Ten minutes after the last run it is due again and reads both rows.
+  await store.refreshLocalJournalReplayIfDue(start+10*60_000);
+  diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start+10*60_000).toISOString(),lastLocalReplayInputCount:2});
+  // An explicit replay (the location diagnostics export) always runs.
+  await store.processPendingLocationEvidence(new Date(start+11*60_000).toISOString());
+  expect((await store.getLocationStoreDiagnostics()).lastLocalReplayAt).toBe(new Date(start+11*60_000).toISOString());
  });
  it("rolls back pruning and state when replacement fails", async () => {
   await seed();

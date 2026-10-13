@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   drainSignals: vi.fn<(limit: number) => Promise<DayframeLocationNativeSignal[]>>(async () => []),
   clearAllSignals: vi.fn(async () => 0),
   stopMonitoring: vi.fn(async () => ({ enabled: false })),
-  processPendingLocationEvidence: vi.fn(async () => []),
+  refreshLocalJournalReplayIfDue: vi.fn(async () => []),
   recordLocationStoreError: vi.fn(async () => undefined),
   recordLocationCaptureCleanupFailure: vi.fn(async () => undefined),
   syncLocationEvidence: vi.fn(async () => ({ synced: true, acknowledgedCount: 0 })),
@@ -54,7 +54,7 @@ vi.mock("./store", () => ({
   isLocationCaptureAdmissionSuspended: () => false,
   getLocationRolloutMode: async () => state.mode,
   persistLocationEvidence: mocks.persistLocationEvidence,
-  processPendingLocationEvidence: mocks.processPendingLocationEvidence,
+  refreshLocalJournalReplayIfDue: mocks.refreshLocalJournalReplayIfDue,
   recordLocationStoreError: mocks.recordLocationStoreError,
   recordLocationCaptureCleanupFailure: mocks.recordLocationCaptureCleanupFailure,
   recordLocationCaptureDiscard: async () => undefined,
@@ -103,7 +103,8 @@ describe("location runtime binding and drain", () => {
     await configureLocationIntelligence(bootstrap());
     expect(mocks.clearAllSignals).not.toHaveBeenCalled();
     expect(state.binding).toBe(binding);
-    expect(mocks.processPendingLocationEvidence).toHaveBeenCalledTimes(2);
+    // The local journal replay is asked for each time; the store throttles it (refreshLocalJournalReplayIfDue).
+    expect(mocks.refreshLocalJournalReplayIfDue).toHaveBeenCalledTimes(2);
   });
   it("clears native evidence before binding a different account", async () => {
     await configureLocationIntelligence(bootstrap());
@@ -201,10 +202,10 @@ describe("location runtime binding and drain", () => {
     expect(mocks.recordMotionCaptureFailure).toHaveBeenCalledOnce();
   });
 
-  it("reprocesses current time and forces replay on foreground without new signals", async () => {
+  it("refreshes the local journal replay when due and forces the server replay on foreground without new signals", async () => {
     await configureLocationIntelligence(bootstrap()); vi.clearAllMocks();
     await syncLocationIntelligenceOnForeground();
-    expect(mocks.processPendingLocationEvidence).toHaveBeenCalledOnce();
+    expect(mocks.refreshLocalJournalReplayIfDue).toHaveBeenCalledOnce();
     expect(mocks.syncLocationEvidence).toHaveBeenCalledWith({ forceReplay: true });
   });
 });
