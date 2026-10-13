@@ -2,6 +2,7 @@ import { useLayoutEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
+vi.mock("./appForeground", () => ({ useAppForeground: () => true }));
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../node_modules/react/index.js");

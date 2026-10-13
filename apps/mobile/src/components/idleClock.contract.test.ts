@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const dashboard = readFileSync("src/components/DayframeDashboard.tsx", "utf8");
 const reports = readFileSync("src/components/reports/ReportsTab.tsx", "utf8");
 const orb = readFileSync("src/components/today/PlayOrb.tsx", "utf8");
+const motion = readFileSync("src/lib/blocksMotion.ts", "utf8");
 const hotPaths = [
   "src/components/reports/ReportsBlocks.tsx",
   "src/lib/reportsRanges.ts",
@@ -20,6 +21,10 @@ describe("idle and background clock work", () => {
     expect(dashboard).toMatch(/if \(!appIsForeground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\)/);
     expect(dashboard).toContain("}, [appIsForeground, needsSecondClock]);");
     expect(orb).toMatch(/if \(!foreground\) return undefined;[\s\S]*?setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
+  });
+  it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
+    expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground\) \{\s*opacity\.value = BREATHING_RING\.reducedOpacity;/);
+    expect(motion).toContain("}, [foreground, live, opacity, reduceMotion]);");
   });
   it("gives Reports and Today's presentation minute time unless a live block needs seconds", () => {
     expect(dashboard).toContain("nowMs={isFocused && needsSecondClock ? now : minuteFloorNow}");

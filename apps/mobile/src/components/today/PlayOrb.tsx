@@ -1,5 +1,6 @@
+import { useAppForeground } from "../../lib/appForeground";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   FadeIn,
@@ -226,11 +227,7 @@ function OrbSecondsRing({ color }: { color: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   // The ring is a clock only while it can be seen: in the background it stops, and it reads the
   // time again the moment the app returns (investigation 2026-10-12, background CPU).
-  const [foreground, setForeground] = useState(() => AppState.currentState === "active");
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => setForeground(state === "active"));
-    return () => subscription.remove();
-  }, []);
+  const foreground = useAppForeground();
   useEffect(() => {
     if (!foreground) return undefined;
     setNowMs(Date.now());

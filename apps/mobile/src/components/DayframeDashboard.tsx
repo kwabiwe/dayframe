@@ -1,3 +1,4 @@
+import { useAppForeground } from "@/lib/appForeground";
 import {
   createContext,
   useCallback,
@@ -334,11 +335,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authError, setAuthError] = useState<string | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [appIsForeground, setAppIsForeground] = useState(() => AppState.currentState === "active");
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => setAppIsForeground(state === "active"));
-    return () => subscription.remove();
-  }, []);
+  const appIsForeground = useAppForeground();
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntryPresentation, setManualEntryPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [manualEntrySaving, setManualEntrySaving] = useState(false);
