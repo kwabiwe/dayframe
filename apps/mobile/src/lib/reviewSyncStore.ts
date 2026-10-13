@@ -1354,7 +1354,7 @@ export async function cacheReviewPresentation(input: {
       contextJson
     );
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
-    if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt);
+    if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt, scopeKey, input.owner.backendId);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
     await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
@@ -1371,15 +1371,19 @@ export async function cacheReviewPresentation(input: {
  * Every presentation read carries the complete set of open Review items (up to 5,000) from one
  * snapshot taken after the request arrived. A cached item written before the request and missing
  * from that set is no longer open (decided elsewhere, superseded by location replay, deleted), so
- * it leaves the cache; a card restored by a rejection leaves too. This is eviction, not terminal
- * evidence: a later read that lists the item open again (replay reopening it) caches it again.
- * Items cached after the request started, and hidden local decisions, are left alone.
+ * it leaves the cache. That is eviction, not terminal evidence: a later read that lists the item
+ * open again (replay reopening it) caches it again. A card restored by a rejection is shown from
+ * its effect, not the cache, so it gets terminal evidence at the read's own capturedAt instead,
+ * which a later open read clears in the usual way. Items cached after the request started and
+ * hidden local decisions are left alone.
  */
 async function evictItemsNoLongerOpen(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
   response: ReviewPresentationSnapshot,
-  requestedAt: string
+  requestedAt: string,
+  scopeKey: string,
+  backendId: string
 ) {
   if (!response.completeness.outstandingCounts) return 0;
   const open = new Set(response.outstanding.openReviewItemIds);
@@ -1387,29 +1391,36 @@ async function evictItemsNoLongerOpen(
     "select review_item_id from review_item_cache where account_key = ? and cached_at < ?",
     accountKeyValue, requestedAt
   );
-  let evicted = 0;
-  for (const { review_item_id: reviewItemId } of cached) {
-    if (open.has(reviewItemId)) continue;
+  const stale = cached.map((row) => row.review_item_id).filter((id) => !open.has(id));
+  for (let offset = 0; offset < stale.length; offset += 200) {
+    const chunk = stale.slice(offset, offset + 200);
     await transaction.runAsync(
-      "delete from review_item_cache where account_key = ? and review_item_id = ?",
-      accountKeyValue, reviewItemId
+      `delete from review_item_cache where account_key = ? and review_item_id in (${chunk.map(() => "?").join(",")})`,
+      accountKeyValue, ...chunk
     );
-    evicted += 1;
   }
-  const restored = await transaction.getAllAsync<{ client_mutation_id: string; review_item_id: string }>(
-    `select e.client_mutation_id, e.review_item_id from review_mutation_effects e
+  const restored = await transaction.getAllAsync<{ review_item_id: string }>(
+    `select e.review_item_id from review_mutation_effects e
      join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
      where e.account_key = ? and e.local_effect = 'restore' and o.updated_at < ?`,
     accountKeyValue, requestedAt
   );
-  for (const effect of restored) {
-    if (open.has(effect.review_item_id)) continue;
+  for (const { review_item_id: reviewItemId } of restored) {
+    if (open.has(reviewItemId)) continue;
     await transaction.runAsync(
-      "update review_mutation_effects set local_effect = 'hidden' where client_mutation_id = ? and review_item_id = ? and account_key = ?",
-      effect.client_mutation_id, effect.review_item_id, accountKeyValue
+      `insert into review_presentation_terminal_source (
+         account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
+       ) values (?, ?, ?, ?, ?, 'ignored', ?)
+       on conflict(account_key, review_item_id) do update set
+         scope_key = excluded.scope_key, backend_id = excluded.backend_id,
+         snapshot_token = excluded.snapshot_token, status = excluded.status,
+         captured_at = excluded.captured_at
+       where excluded.captured_at >= review_presentation_terminal_source.captured_at
+         or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
+      accountKeyValue, reviewItemId, scopeKey, backendId, `not-open:${response.snapshotToken}`, response.capturedAt
     );
   }
-  return evicted;
+  return stale.length;
 }
 
 /**

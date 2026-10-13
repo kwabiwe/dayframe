@@ -1002,6 +1002,8 @@ describe("Settling decided-elsewhere moments: Codex r1 on #370", () => {
     expect(count("review_mutation_outbox")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
     expect(await visibleIds()).toContain(item.id);
+  });
+});
 
 describe("Review cache eviction on complete reads (12 Oct 2026 stale superseded cards)", () => {
   const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
@@ -1056,6 +1058,17 @@ describe("Review cache eviction on complete reads (12 Oct 2026 stale superseded 
     expect(await visibleIds()).not.toContain(item.id);
     await store.cacheReviewPresentation({ owner: owner(), response: backlog([item.id], "2026-10-12T18:50:00.000Z"), requestedAt: later() });
     expect(await visibleIds()).toEqual([item.id]);
+  });
+
+  it("brings a restored card back when a later read lists it open again (Codex r1 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(611), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(611));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(611));
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([item.id], "2026-10-12T18:50:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).toContain(item.id);
   });
 
   it("leaves a hidden local decision alone and hides a restored card that is no longer open", async () => {
