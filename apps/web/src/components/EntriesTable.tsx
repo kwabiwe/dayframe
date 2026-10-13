@@ -993,6 +993,7 @@ export function EntriesTable({
           onStartAgain={editingEntry.stoppedAt ? () => continueEntry(editingEntry, "editor") : undefined}
           peerEntries={entries}
           taskSuggestions={shellData?.taskSuggestions ?? []}
+          taskSuggestionCandidates={shellData?.taskSuggestionCandidates}
           tags={tags}
         />
       ) : null}

@@ -369,6 +369,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           onStartAgain={editingEntry.stoppedAt ? () => startAgain(editingEntry) : undefined}
           peerEntries={entries}
           taskSuggestions={shellData?.taskSuggestions ?? []}
+          taskSuggestionCandidates={shellData?.taskSuggestionCandidates}
           tags={data.tags}
         />
       ) : null}

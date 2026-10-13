@@ -1786,6 +1786,7 @@ export function CalendarReview({
           positionKey={`${zoomLevel}:${rowHeight}:${selectedEntry.startedAt}:${selectedEntry.stoppedAt ?? "running"}`}
           scrollContainer={calendarScroller}
           taskSuggestions={shellData?.taskSuggestions ?? []}
+          taskSuggestionCandidates={shellData?.taskSuggestionCandidates}
           tags={tags}
         />
       ) : null}
@@ -1811,6 +1812,7 @@ export function CalendarReview({
             stoppedAt: visibleSelectedTarget.stoppedAt
           }}
           taskSuggestions={shellData?.taskSuggestions ?? []}
+          taskSuggestionCandidates={shellData?.taskSuggestionCandidates}
           tags={tags}
         />
       ) : null}
