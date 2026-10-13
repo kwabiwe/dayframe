@@ -767,7 +767,7 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
  * Recent description suggestions learn from location visits only when this is true (E1).
  * Uses $1 (workspace) and $2 (user) of the surrounding statement.
  */
-export const confirmedInReviewSql = `coalesce(
+export const confirmedInReviewExpressionSql = `coalesce(
               te.created_from_event_id in (
                 select accepted_review.event_id
                 from review_items accepted_review
@@ -788,7 +788,8 @@ export const confirmedInReviewSql = `coalesce(
                 )
               ),
               false
-            ) as "confirmedInReview"`;
+            )`;
+export const confirmedInReviewSql = `${confirmedInReviewExpressionSql} as "confirmedInReview"`;
 
 /**
  * Whether the owner typed the block's description while making the Review decision that created
@@ -798,14 +799,15 @@ export const confirmedInReviewSql = `coalesce(
  * back to it, a place's default description, legacy geofence acceptance, auto-logged visits and
  * rows from before the signal existed all read false. A primary-key lookup per block.
  */
-export const ownerAuthoredInReviewSql = `coalesce((
+export const ownerAuthoredInReviewExpressionSql = `coalesce((
               select (owner_event.raw_payload -> '${REVIEW_DECISION_PAYLOAD_KEY}' ->> 'ownerAuthoredDescription') = 'true'
               from activity_events owner_event
               where owner_event.id = te.created_from_event_id
                 and owner_event.workspace_id = te.workspace_id
                 and owner_event.user_id = te.user_id
                 and owner_event.source = 'location_learning'
-            ), false) as "ownerAuthoredInReview"`;
+            ), false)`;
+export const ownerAuthoredInReviewSql = `${ownerAuthoredInReviewExpressionSql} as "ownerAuthoredInReview"`;
 
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
@@ -980,6 +982,13 @@ export async function getTaskSuggestionSets(session: RequestSession, now: Date =
                and accepted_review.user_id = te.user_id
                and accepted_review.status = 'accepted'
            )
+         )
+         -- #363 tier 2 (Codex r1 on #386): a Review split/merge part has no Review item of its
+         -- own, so it qualifies only when confirmed in Review AND titled by the owner. The
+         -- contextual list ignores these rows (no accepted item on the block's own event).
+         or (
+           ${confirmedInReviewExpressionSql}
+           and ${ownerAuthoredInReviewExpressionSql}
          )
        )
        and nullif(btrim(coalesce(te.description, '')), '') is not null
