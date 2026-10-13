@@ -20,6 +20,7 @@ import {
   mergeReviewPresentationPages
 } from "./reviewPresentationClient";
 import type { ReviewPresentationResponse } from "@dayframe/shared";
+import { rememberReviewPresentationRequestedAt, reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 import { mobileJsonRequest } from "./mobile-network";
 import {
   isAuthenticatedSessionSnapshotCurrent,
@@ -46,6 +47,13 @@ describe("mergeReviewPresentationPages", () => {
     expect(merged.records).toHaveLength(2);
     expect(merged.nextCursor).toBeNull();
     expect(merged.completeness.records).toBe(true);
+  });
+
+  it("carries the earliest page's request time to the merged snapshot (stale-cache eviction bound)", () => {
+    const first = rememberReviewPresentationRequestedAt(page([], "cursor"), "2026-10-12T18:00:00.000Z");
+    const second = rememberReviewPresentationRequestedAt(page([], null), "2026-10-12T18:00:02.000Z");
+    expect(reviewPresentationRequestedAt(mergeReviewPresentationPages([first, second]))).toBe("2026-10-12T18:00:00.000Z");
+    expect(reviewPresentationRequestedAt(mergeReviewPresentationPages([page([], null)]))).toBeUndefined();
   });
 
   it("does not combine pages across a changed snapshot or scope", () => {

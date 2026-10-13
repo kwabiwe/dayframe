@@ -18,6 +18,7 @@ import {
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
+import { reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 import {
   MobileRequestTimeoutError,
   mobileJsonRequest,
@@ -144,6 +145,8 @@ export type ReviewSyncDiagnostics = {
   lastError: string | null;
   lastCachedAt: string | null;
   reviewCacheHitCount: number;
+  /** Cached Review items removed because a complete read no longer listed them open (this process). */
+  reviewCacheEvictedCount?: number;
   reviewCacheMissCount: number;
   lastReviewCacheAgeMs: number | null;
   evidenceCacheItemCount: number;
@@ -351,6 +354,7 @@ export type LocationReviewEvidenceCacheDiagnostics = {
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let reviewCacheHitCount = 0;
+let reviewCacheEvictedCount = 0;
 let reviewCacheMissCount = 0;
 let lastReviewCacheAgeMs: number | null = null;
 let evidenceCacheHitCount = 0;
@@ -370,6 +374,7 @@ let processDiagnosticsEpoch = 0;
  */
 function resetProcessReviewDiagnostics() {
   reviewCacheHitCount = 0;
+  reviewCacheEvictedCount = 0;
   reviewCacheMissCount = 0;
   lastReviewCacheAgeMs = null;
   evidenceCacheHitCount = 0;
@@ -1272,7 +1277,10 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
 export async function cacheReviewPresentation(input: {
   owner: ReviewPresentationOwner;
   response: ReviewPresentationSnapshot;
+  /** When the request was sent (client clock); defaults to what the presentation client recorded. */
+  requestedAt?: string;
 }) {
+  const requestedAt = input.requestedAt ?? reviewPresentationRequestedAt(input.response);
   const response = ReviewPresentationSnapshotSchema.parse(input.response);
   const db = await database();
   const key = accountKey(input.owner);
@@ -1283,6 +1291,7 @@ export async function cacheReviewPresentation(input: {
   }
   const now = new Date().toISOString();
   let wrote = false;
+  let evicted = 0;
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (
@@ -1345,13 +1354,62 @@ export async function cacheReviewPresentation(input: {
       contextJson
     );
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
+    if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
     await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
-  if (wrote) emitChange();
+  if (wrote) {
+    reviewCacheEvictedCount += evicted;
+    emitChange();
+  }
   return wrote;
+}
+
+/**
+ * Every presentation read carries the complete set of open Review items (up to 5,000) from one
+ * snapshot taken after the request arrived. A cached item written before the request and missing
+ * from that set is no longer open (decided elsewhere, superseded by location replay, deleted), so
+ * it leaves the cache; a card restored by a rejection leaves too. This is eviction, not terminal
+ * evidence: a later read that lists the item open again (replay reopening it) caches it again.
+ * Items cached after the request started, and hidden local decisions, are left alone.
+ */
+async function evictItemsNoLongerOpen(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  response: ReviewPresentationSnapshot,
+  requestedAt: string
+) {
+  if (!response.completeness.outstandingCounts) return 0;
+  const open = new Set(response.outstanding.openReviewItemIds);
+  const cached = await transaction.getAllAsync<{ review_item_id: string }>(
+    "select review_item_id from review_item_cache where account_key = ? and cached_at < ?",
+    accountKeyValue, requestedAt
+  );
+  let evicted = 0;
+  for (const { review_item_id: reviewItemId } of cached) {
+    if (open.has(reviewItemId)) continue;
+    await transaction.runAsync(
+      "delete from review_item_cache where account_key = ? and review_item_id = ?",
+      accountKeyValue, reviewItemId
+    );
+    evicted += 1;
+  }
+  const restored = await transaction.getAllAsync<{ client_mutation_id: string; review_item_id: string }>(
+    `select e.client_mutation_id, e.review_item_id from review_mutation_effects e
+     join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
+     where e.account_key = ? and e.local_effect = 'restore' and o.updated_at < ?`,
+    accountKeyValue, requestedAt
+  );
+  for (const effect of restored) {
+    if (open.has(effect.review_item_id)) continue;
+    await transaction.runAsync(
+      "update review_mutation_effects set local_effect = 'hidden' where client_mutation_id = ? and review_item_id = ? and account_key = ?",
+      effect.client_mutation_id, effect.review_item_id, accountKeyValue
+    );
+  }
+  return evicted;
 }
 
 /**
@@ -2508,6 +2566,7 @@ async function reviewSyncDiagnosticsForAccount(
     evidenceCacheItemCount: evidenceCache.itemCount,
     evidenceCacheBytes: evidenceCache.totalBytes,
     reviewCacheHitCount,
+    reviewCacheEvictedCount,
     reviewCacheMissCount,
     lastReviewCacheAgeMs,
     evidenceCacheHitCount,
