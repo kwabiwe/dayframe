@@ -766,7 +766,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -774,9 +774,18 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(7);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
+  });
+  it("upgrades a v7 database to v8 open observations without touching queued work", async () => {
+    await store.enqueueReviewMutation(mergeInput());
+    db.exec("drop table review_source_open_observation; pragma user_version=7;");
+    await reopen();
+    await store.loadCachedReviewBootstrap();
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(count("review_source_open_observation")).toBe(0);
+    expect(count("review_mutation_outbox")).toBe(1);
   });
   it("rejects cross-account effects and clears sensitive intent on account replacement", async () => {
     await store.enqueueReviewMutation(mergeInput());
@@ -993,6 +1002,70 @@ describe("Settling decided-elsewhere moments: Codex r1 on #370", () => {
     expect(count("review_mutation_outbox")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
     expect(await visibleIds()).toContain(item.id);
+  });
+});
+
+describe("Terminal evidence against newer open reads: Codex r2 on #370", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const owner = (backendId = "dayframe-staging") => { const data = bootstrap(); return { workspaceId: data.workspace.id, userId: data.user.id, backendId }; };
+  const headers = (date: string) => ({ get: (name: string) => name.toLowerCase() === "date" ? date : null });
+  const settleAt = async (id: number, item: import("./api").MobileReviewItem, date = "Mon, 12 Oct 2026 18:46:00 GMT") => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(id), mutation: { action: "accept" } });
+    mocks.fetch.mockResolvedValue({ status: 409, headers: headers(date), json: async () => ({ code: "resolution_conflict", canonicalStatus: "ignored" }) });
+    await store.synchroniseReviewMutations();
+  };
+
+  it("drops a source from a Today snapshot captured at the same time as its terminal evidence", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const response = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:46:00.999Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response });
+    db.prepare("delete from review_source_open_observation").run();
+    await settleAt(801, item);
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+  });
+
+  it("keeps a reopened source open after its display context was pruned, when an older settlement arrives late", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    db.prepare("delete from review_presentation_context").run();
+    await settleAt(802, item);
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("ignores another backend's open read when recording this backend's settlement", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:00:00.000Z" } });
+    db.prepare("insert into review_source_open_observation (account_key, review_item_id, backend_id, observed_at) select account_key, ?, 'other-backend', '2026-10-12T19:00:00.000Z' from review_account_context").run(item.id);
+    await settleAt(803, item);
+    expect(db.prepare("select count(*) as n from review_presentation_terminal_source where review_item_id=?").get(item.id)!.n).toBe(1);
+    expect(await visibleIds()).not.toContain(item.id);
+  });
+
+  it("keeps a reopened source open when a delayed older terminal lookup arrives after it", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), capturedAt: "2026-10-12T18:40:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...terminalPresentation(data, [item.id]), snapshotToken: "late", capturedAt: "2026-10-12T18:45:00.000Z" } });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("consumes the one-time re-check on a forced pass too", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(804), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', last_error='HTTP 409 · resolution_conflict', resolution_status='HTTP 409 · resolution_conflict', last_http_status=409 where client_mutation_id=?").run(syntheticId(804));
+    mocks.fetch.mockImplementation(async (url: string, init: { body: string }) => {
+      if (String(url).includes("/reconcile")) {
+        const { mutations } = JSON.parse(init.body);
+        return { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: mutations[0].clientMutationId, reviewItemId: mutations[0].reviewItemId, state: "open", checkedAt: "2026-10-12T18:46:00.000Z" }] }) };
+      }
+      return { status: 409, json: async () => ({ code: "resolution_conflict", canonicalStatus: "open" }) };
+    });
+    await store.synchroniseReviewMutations({ force: true });
+    mocks.fetch.mockClear();
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
 });
 

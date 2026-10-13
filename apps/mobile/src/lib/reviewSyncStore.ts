@@ -1,7 +1,7 @@
 import { createOwnerSyncCoalescer } from "./ownerSyncCoalescer";
 import type { SyncLaneOutcome } from "./syncLane";
 import * as SQLite from "expo-sqlite";
-import { REVIEW_EFFECTS_V5_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
+import { REVIEW_EFFECTS_V5_SQL, REVIEW_OBSERVATION_V8_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
   REVIEW_PRESENTATION_MAX_IDS,
@@ -37,7 +37,7 @@ import { createSerialMutationQueue } from "./location/mutationQueue";
 import { isLocationReviewItem } from "./review";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
-const DATABASE_VERSION = 7;
+const DATABASE_VERSION = 8;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
@@ -78,6 +78,32 @@ function legacyResolvedElsewhereSql(alias = "") {
     or coalesce(${alias}last_error,'') in ('HTTP 409 · resolution_conflict','HTTP 404 · review_item_not_found')))`;
 }
 const LEGACY_RECHECKED_KEY = "legacy_resolved_elsewhere_rechecked";
+
+/**
+ * SQL: terminal evidence row `alias` is in force, i.e. no presentation read of the same backend
+ * listed the source open strictly after it. Equal times keep the source closed.
+ */
+function terminalInForceSql(alias: string) {
+  return `not exists (select 1 from review_source_open_observation o
+    where o.account_key = ${alias}.account_key and o.review_item_id = ${alias}.review_item_id
+      and o.backend_id = ${alias}.backend_id and o.observed_at > ${alias}.captured_at)`;
+}
+
+async function recordOpenObservation(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  reviewItemId: string,
+  backendId: string,
+  observedAt: string
+) {
+  await transaction.runAsync(
+    `insert into review_source_open_observation (account_key, review_item_id, backend_id, observed_at)
+     values (?, ?, ?, ?)
+     on conflict(account_key, review_item_id, backend_id) do update set observed_at = excluded.observed_at
+     where excluded.observed_at > review_source_open_observation.observed_at`,
+    accountKeyValue, reviewItemId, backendId, observedAt
+  );
+}
 export type ReviewItemSyncState = {
   action: string;
   state: ReviewMutationState;
@@ -477,6 +503,7 @@ async function database() {
         await transaction.execAsync(REVIEW_EFFECTS_V5_SQL);
         if ((version?.user_version ?? 0) < 6) await transaction.execAsync(REVIEW_RECOVERY_V6_SQL);
         if ((version?.user_version ?? 0) < 7) await transaction.execAsync(REVIEW_PRESENTATION_V7_SQL);
+        await transaction.execAsync(REVIEW_OBSERVATION_V8_SQL);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
     }
@@ -1437,12 +1464,15 @@ export async function readReviewPresentationSnapshot(input: {
   const activeAfterRead = await activeAccount(db);
   if (activeAfterRead?.account_key !== key) return null;
   const terminal = await db.getAllAsync<{ review_item_id: string; captured_at: string }>(
-    `select review_item_id, captured_at from review_presentation_terminal_source
-     where account_key = ? and backend_id = ? and captured_at > ?`,
+    `select t.review_item_id, t.captured_at from review_presentation_terminal_source t
+     where t.account_key = ? and t.backend_id = ? and t.captured_at >= ? and ${terminalInForceSql("t")}`,
     key, input.owner.backendId, response.capturedAt
   );
   response = withNewerTerminalEvidence(response, new Set(terminal.map((source) => source.review_item_id)));
-  const effects = await readPresentationEffects(db, key);
+  // A card restored by a rejection is drawn from its effect; once its source is closed it is gone.
+  const closed = await terminalReviewItemIds(key, input.owner.backendId);
+  const effects = (await readPresentationEffects(db, key))
+    .filter((effect) => !(effect.localEffect === "restore" && closed.has(effect.reviewItemId)));
   const revision = Number(await metadata(accountMetadataKey(PRESENTATION_REVISION_KEY, key), db) ?? "0");
   return {
     response,
@@ -1605,6 +1635,7 @@ async function recordTerminalPresentationSources(
     // a source after a delayed response arrives, and another backend stays
     // isolated.
     if (record.kind !== "review" || record.status !== "open") continue;
+    await recordOpenObservation(transaction, accountKeyValue, record.reviewItemId, backendId, response.capturedAt);
     await transaction.runAsync(
       `delete from review_presentation_terminal_source
        where account_key = ? and review_item_id = ? and backend_id = ?
@@ -2055,14 +2086,18 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
   // each (an ordinary pass, no force); a row that is still a real rejection afterwards stays parked.
   const recheckedKey = accountMetadataKey(LEGACY_RECHECKED_KEY, account.account_key);
   const rechecked = new Set(parseStringArray(await metadata(recheckedKey, db) ?? "[]"));
-  const selected = new Set(rows.map(row => row.client_mutation_id));
-  const legacyRows = (await db.getAllAsync<MutationRow>(
+  const legacyCandidates = (await db.getAllAsync<MutationRow>(
     `select * from review_mutation_outbox where account_key=? and (? is null or client_mutation_id=?) and ${legacyResolvedElsewhereSql()}
      order by created_at,client_mutation_id`,
     account.account_key,options.clientMutationId??null,options.clientMutationId??null
-  )).filter(row => !rechecked.has(row.client_mutation_id) && !selected.has(row.client_mutation_id)).slice(0, 25);
-  const legacyIds = new Set(legacyRows.map(row => row.client_mutation_id));
-  rows.push(...legacyRows);
+  )).filter(row => !rechecked.has(row.client_mutation_id));
+  // Marked when processed, however the pass selected it (an ordinary pass or a forced one).
+  const legacyIds = new Set(legacyCandidates.map(row => row.client_mutation_id));
+  const selected = new Set(rows.map(row => row.client_mutation_id));
+  rows.push(...legacyCandidates.filter(row => !selected.has(row.client_mutation_id)));
+  rows.sort((left,right) => left.created_at < right.created_at ? -1 : left.created_at > right.created_at ? 1
+    : left.client_mutation_id < right.client_mutation_id ? -1 : left.client_mutation_id > right.client_mutation_id ? 1 : 0);
+  rows.splice(25);
   let acknowledgedCount=0;
   let outcome: SyncLaneOutcome="complete";
   let stopped=false;
@@ -2219,26 +2254,19 @@ export function reviewResponseServerTime(response: { headers?: { get(name: strin
   return Number.isFinite(parsed) ? new Date(parsed + 999).toISOString() : new Date().toISOString();
 }
 
-/** A cached read captured after `checkedAt` still lists this source open (replay reopened it). */
+/** A presentation read of this backend listed the source open after `checkedAt` (replay reopened it). */
 async function newerOpenEvidence(
   transaction: SQLite.SQLiteDatabase,
   accountKeyValue: string,
   reviewItemId: string,
   checkedAt: string
 ) {
-  const contexts = await transaction.getAllAsync<{ context_json: string }>(
-    "select context_json from review_presentation_context where account_key = ? and captured_at > ?",
-    accountKeyValue, checkedAt
-  );
-  return contexts.some(({ context_json: contextJson }) => {
-    try {
-      const response = ReviewPresentationSnapshotSchema.parse(JSON.parse(contextJson));
-      return [...response.records, ...response.lookup.reviewItems].some((record) =>
-        record.kind === "review" && record.reviewItemId === reviewItemId && record.status === "open");
-    } catch {
-      return false;
-    }
-  });
+  if (!DAYFRAME_BACKEND_ID) return false;
+  return Boolean(await transaction.getFirstAsync(
+    `select 1 as found from review_source_open_observation
+     where account_key = ? and review_item_id = ? and backend_id = ? and observed_at > ?`,
+    accountKeyValue, reviewItemId, DAYFRAME_BACKEND_ID, checkedAt
+  ));
 }
 
 async function settleResolvedElsewhere(
@@ -2768,9 +2796,9 @@ async function terminalReviewItemIds(accountKeyValue: string, backendId: string 
   if (!backendId) return new Set<string>();
   const db = await database();
   const rows = await db.getAllAsync<{ review_item_id: string }>(
-    `select review_item_id
-     from review_presentation_terminal_source
-     where account_key = ? and backend_id = ?`,
+    `select t.review_item_id
+     from review_presentation_terminal_source t
+     where t.account_key = ? and t.backend_id = ? and ${terminalInForceSql("t")}`,
     accountKeyValue,
     backendId
   );

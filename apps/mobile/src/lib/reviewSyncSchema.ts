@@ -70,3 +70,19 @@ export const REVIEW_PRESENTATION_V7_SQL = `
     check(status in ('accepted', 'ignored', 'missing'))
   );
 `;
+
+// Additive v7→v8 open observations (investigation 2026-10-12). The latest server time at which a
+// presentation read listed a Review source open, per account, source and backend. Terminal
+// evidence is in force only while no strictly newer open observation exists, so the order in
+// which delayed reads, settlements and reopenings arrive, and the pruning of display contexts,
+// can no longer hide a reopened source or show a decided one.
+export const REVIEW_OBSERVATION_V8_SQL = `
+  create table if not exists review_source_open_observation (
+    account_key text not null,
+    review_item_id text not null,
+    backend_id text not null,
+    observed_at text not null,
+    primary key(account_key, review_item_id, backend_id),
+    foreign key(account_key) references review_account_context(account_key) on delete cascade
+  );
+`;
