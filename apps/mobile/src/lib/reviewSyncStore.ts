@@ -1370,11 +1370,11 @@ export async function cacheReviewPresentation(input: {
 /**
  * Every presentation read carries the complete set of open Review items (up to 5,000) from one
  * snapshot taken after the request arrived. A cached item written before the request and missing
- * from that set is no longer open (decided elsewhere, superseded by location replay, deleted), so
- * it leaves the cache. That is eviction, not terminal evidence: a later read that lists the item
- * open again (replay reopening it) caches it again. A card restored by a rejection is shown from
- * its effect, not the cache, so it gets terminal evidence at the read's own capturedAt instead,
- * which a later open read clears in the usual way. Items cached after the request started and
+ * from that set is no longer open (decided elsewhere, superseded by location replay, deleted): it
+ * leaves the cache and gets terminal evidence at the read's capturedAt, and so does a card restored
+ * by a rejection. That evidence is in force only until a strictly newer read lists the source open
+ * (replay reopening it), so a delayed older open response or an older Today snapshot cannot bring
+ * the card back, while a real reopening still does. Items cached after the request started and
  * hidden local decisions are left alone.
  */
 async function evictItemsNoLongerOpen(
@@ -1405,8 +1405,9 @@ async function evictItemsNoLongerOpen(
      where e.account_key = ? and e.local_effect = 'restore' and o.updated_at < ?`,
     accountKeyValue, requestedAt
   );
-  for (const { review_item_id: reviewItemId } of restored) {
-    if (open.has(reviewItemId)) continue;
+  const closed = new Set([...stale, ...restored.map((row) => row.review_item_id).filter((id) => !open.has(id))]);
+  for (const reviewItemId of closed) {
+    await compactOpenObservation(transaction, accountKeyValue, reviewItemId, backendId, response.capturedAt);
     await transaction.runAsync(
       `insert into review_presentation_terminal_source (
          account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at

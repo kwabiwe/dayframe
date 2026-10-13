@@ -1093,6 +1093,24 @@ describe("Review cache eviction on complete reads (12 Oct 2026 stale superseded 
     expect(count("review_mutation_outbox")).toBe(1);
   });
 
+  it("removes an evicted card from an older cached Today snapshot (Codex r3 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const today = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:40:00.000Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response: today });
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response: today }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+  });
+
+  it("does not let a delayed older open response bring back an evicted card, while a newer one does (Codex r3 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:44:00.000Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:48:00.000Z" } });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
   it("leaves a hidden local decision alone and hides a restored card that is no longer open", async () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(601), mutation: { action: "accept" } });
