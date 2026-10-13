@@ -1071,6 +1071,28 @@ describe("Review cache eviction on complete reads (12 Oct 2026 stale superseded 
     expect(await visibleIds()).toContain(item.id);
   });
 
+  it("keeps a restored card when a newer open read arrived before a delayed absence (Codex r2 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(621), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(621));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(621));
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("removes an evicted restored card from Today's snapshot effects (Codex r2 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(622), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(622));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(622));
+    const response = backlog([], "2026-10-12T18:46:00.000Z");
+    await store.cacheReviewPresentation({ owner: owner(), response, requestedAt: later() });
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.effects.map((effect) => effect.reviewItemId)).not.toContain(item.id);
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+
   it("leaves a hidden local decision alone and hides a restored card that is no longer open", async () => {
     const data = bootstrap();
     await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(601), mutation: { action: "accept" } });
