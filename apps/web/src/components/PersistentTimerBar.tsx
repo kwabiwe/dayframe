@@ -27,6 +27,7 @@ import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
+import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
@@ -103,14 +104,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     ? Math.max(active.durationSeconds, Math.floor((now - activeStartedAtMs) / 1000))
     : 0;
   const taskSuggestions = useMemo(() => data?.taskSuggestions ?? [], [data?.taskSuggestions]);
+  const taskSuggestionCandidates = data?.taskSuggestionCandidates;
   const visibleTaskSuggestions = useMemo(() => {
-    const query = timerDraft.description.trim().toLocaleLowerCase();
+    const query = timerDraft.description.trim();
     if (!query) return taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
-    return taskSuggestions
-      .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
-        .some((value) => value.toLocaleLowerCase().includes(query)))
-      .slice(0, TASK_SUGGESTION_LIMIT);
-  }, [taskSuggestions, timerDraft.description]);
+    // A typed query searches the whole recent pool, not only the contextual top 6.
+    return searchTaskSuggestions(taskSuggestionCandidates, taskSuggestions, query, TASK_SUGGESTION_LIMIT);
+  }, [taskSuggestionCandidates, taskSuggestions, timerDraft.description]);
   const quickActions = useMemo(() => data ? buildLearnedQuickActions(data) : [], [data]);
   // The block the description's `#`/`@` lists belong to (the runtime's draft scope: the running
   // block, or idle, kept across an accepted Start's optimistic-to-real handoff). A different block
@@ -638,14 +638,21 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           ) : null}
         </div>
 
+        {/* Always type="button": Stop re-renders this same button as Start before the browser's
+            default click action runs, so a submit type would start a new block straight after
+            every Stop (production since 1 Sep, fixed 13 Oct). Start submits the form explicitly. */}
         <button
           className={`df-cmd-go${active ? " is-stop" : ""}`}
-          type={active ? "button" : "submit"}
+          type="button"
           disabled={Boolean(active) && isTimerBusy}
           aria-busy={(Boolean(active) && isTimerBusy) || undefined}
           aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
-          onClick={() => {
-            if (active) void stopTimer();
+          onClick={(event) => {
+            if (active) {
+              void stopTimer();
+              return;
+            }
+            event.currentTarget.form?.requestSubmit();
           }}
         >
           {active ? (
@@ -826,13 +833,10 @@ function ManualEntryDialog({
     stoppedAtDraft.slice(0, 10)
   ), [startedAtDraft, stoppedAtDraft]);
   const visibleTaskSuggestions = useMemo(() => {
-    const query = description.trim().toLocaleLowerCase();
+    const query = description.trim();
     if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
-    return data.taskSuggestions
-      .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
-        .some((value) => value.toLocaleLowerCase().includes(query)))
-      .slice(0, TASK_SUGGESTION_LIMIT);
-  }, [data.taskSuggestions, description]);
+    return searchTaskSuggestions(data.taskSuggestionCandidates, data.taskSuggestions, query, TASK_SUGGESTION_LIMIT);
+  }, [data.taskSuggestionCandidates, data.taskSuggestions, description]);
   const formId = "persistent-manual-entry-form";
 
   useEffect(() => {

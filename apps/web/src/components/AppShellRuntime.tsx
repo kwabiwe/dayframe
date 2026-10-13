@@ -1002,7 +1002,8 @@ function withCurrentSharedBootstrap(
     reviewItems: current.reviewItems,
     activityEvents: current.activityEvents,
     categoryUsage: current.categoryUsage,
-    taskSuggestions: current.taskSuggestions
+    taskSuggestions: current.taskSuggestions,
+    taskSuggestionCandidates: current.taskSuggestionCandidates
   };
 }
 

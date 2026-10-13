@@ -58,9 +58,10 @@ vi.mock("react-native-reanimated", async () => {
 import { useLayoutEffect, useState } from "react";
 import { useAppForeground } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
-import { useDashboardClockTicks } from "../../lib/dashboardClock";
+import { useDashboardClockTicks, useLiveTimeInFront } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
 import { LiveOdometer, ODOMETER_EM } from "./LiveOdometer";
+import { useLiveBlockElapsed, type LiveBlockClockInput } from "./liveBlockClock";
 import { formatLiveClock } from "./todayBlocksLayout";
 
 const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
@@ -165,6 +166,145 @@ describe("live timer: background → foreground with a running block (TestFlight
     });
     // The clock runs: 28 s + 2 s.
     expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 0, 3, 0]);
+    act(() => tree.unmount());
+  });
+});
+
+/** The Dashboard's live path with the route: Today in front, or covered by a pushed page such as Settings. */
+function RoutedLiveTimer({ inFront }: { inFront: boolean }) {
+  const foreground = useAppForeground();
+  const [now, setNow] = useState(() => Date.now());
+  const liveTimeInFront = useLiveTimeInFront(inFront, setNow);
+  useDashboardClockTicks({ foreground, needsSecondClock: true, secondsShown: liveTimeInFront, setNow });
+  const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  useLayoutEffect(() => {
+    commits.push(shownDigits(shared.slice(-5)));
+  });
+  return (
+    <LiveOdometer color="#000" label={formatLiveClock(seconds)} reduceMotion={!liveTimeInFront} seconds={seconds} />
+  );
+}
+
+describe("live timer behind Settings (iPhone 17, 13 Oct)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    appState.currentState = "active";
+    appState.listeners.clear();
+    appState.changeWhileSubscribing = null;
+    shared.length = 0;
+    commits.length = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-renders only for a new minute while Today is covered, and shows the true time in the first frame back", () => {
+    // 28 s into the block, Today in front: the clock ticks every second.
+    vi.setSystemTime(new Date("2026-10-13T13:48:38.800Z"));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<RoutedLiveTimer inFront />);
+    });
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 0, 3, 0]);
+
+    // Settings pushed over Today at 13:48:40.8. Each second used to re-render the whole Dashboard;
+    // now only the two minute boundaries (13:49 and 13:50) do, over 85 s.
+    act(() => tree.update(<RoutedLiveTimer inFront={false} />));
+    const covered = commits.length;
+    // One act per second, so every re-render commits on its own.
+    for (let second = 0; second < 85; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+    expect(commits.length - covered).toBe(2);
+
+    // Back on Today at 13:50:05.8, 1 min 55 s in: the first commit already shows it, at rest.
+    shared.length = 0;
+    const back = commits.length;
+    act(() => tree.update(<RoutedLiveTimer inFront />));
+    expect(commits[back]).toEqual([0, 0, 1, 5, 5]);
+    expect(shared.every((strip) => typeof strip.value === "number")).toBe(true);
+
+    // And it ticks every second again: the seconds roll to 0:01:56.
+    const strips = [...shared];
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(strips[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: -6 * CELL });
+    act(() => tree.unmount());
+  });
+});
+
+let providerCommits = 0;
+/** The live block with its own clock (useLiveBlockElapsed), as TodayLiveBlock renders it. */
+function LiveBlockTime({ active, reduceMotion }: { active: LiveBlockClockInput; reduceMotion: boolean }) {
+  const elapsed = useLiveBlockElapsed(active);
+  useLayoutEffect(() => {
+    commits.push(shownDigits(shared.slice(-5)));
+  });
+  return <LiveOdometer color="#000" label={elapsed.label} reduceMotion={reduceMotion} seconds={elapsed.seconds} />;
+}
+/** The Dashboard's side: behind Settings it moves on the minute; the route has not changed yet. */
+function CoveredDashboard({ inFront }: { inFront: boolean }) {
+  const foreground = useAppForeground();
+  const [now, setNow] = useState(() => Date.now());
+  const liveTimeInFront = useLiveTimeInFront(inFront, setNow);
+  useDashboardClockTicks({ foreground, needsSecondClock: true, secondsShown: liveTimeInFront, setNow });
+  const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  useLayoutEffect(() => {
+    providerCommits += 1;
+  });
+  return (
+    <LiveBlockTime
+      active={{
+        durationSeconds: 0,
+        elapsedLabel: formatLiveClock(seconds),
+        elapsedSeconds: seconds,
+        hasLiveActiveTimer: true,
+        startedAt: STARTED_AT,
+      }}
+      reduceMotion={!liveTimeInFront}
+    />
+  );
+}
+
+describe("the live block keeps its own time while Today is covered (Codex r1 on #384)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    appState.currentState = "active";
+    appState.listeners.clear();
+    appState.changeWhileSubscribing = null;
+    shared.length = 0;
+    commits.length = 0;
+    providerCommits = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the true time every second behind Settings, so a swipe back reveals it before the route changes", () => {
+    vi.setSystemTime(new Date("2026-10-13T13:48:38.800Z"));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CoveredDashboard inFront={false} />);
+    });
+    const providerAtStart = providerCommits;
+    // 85 s behind Settings, one act per second: the block's digits follow real time each second...
+    for (let second = 0; second < 85; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+    // ...0:01:53 at 13:50:03.8, while the Dashboard re-rendered only at the two minute boundaries.
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
+    expect(providerCommits - providerAtStart).toBe(2);
+    // The route flips to Today when the swipe completes: the time shown stays right (no jump back).
+    act(() => tree.update(<CoveredDashboard inFront />));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
     act(() => tree.unmount());
   });
 });

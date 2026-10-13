@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildRecentActivitySuggestions } from "@dayframe/shared";
 import { placeDisplayNameSql } from "./place-display";
 import {
   buildTimeEntriesQuery,
@@ -8,7 +9,10 @@ import {
   getCategoryUsageRanks,
   getNormalizationContext,
   getTaskSuggestions,
-  getUser
+  getTaskSuggestionSets,
+  getUser,
+  TASK_SUGGESTION_CANDIDATE_LIMIT,
+  TASK_SUGGESTION_CANDIDATE_WINDOW_DAYS
 } from "./queries";
 import type { RequestSession } from "./session";
 
@@ -207,6 +211,86 @@ describe("task suggestions query", () => {
       expect.objectContaining({ categoryId: "category-1", description: "Architecture review" }),
       expect.objectContaining({ categoryId: "family", description: "School pickup" })
     ]));
+  });
+
+  it("ships a bounded, session-scoped candidate pool beside the unchanged contextual top 6", async () => {
+    const now = new Date("2026-10-12T07:30:00.000Z");
+    const day = 86_400_000;
+    // pg returns timestamptz columns as Date objects.
+    const row = (id: string, description: string, stoppedAtMs: number, overrides: Record<string, unknown> = {}) => ({
+      id,
+      categoryId: "work",
+      categoryName: "Work",
+      categoryColor: "blue",
+      description,
+      durationSeconds: 1800,
+      eventType: "timer_start",
+      reviewStatus: "confirmed",
+      source: "manual_app",
+      startedAt: new Date(stoppedAtMs - 1_800_000),
+      stoppedAt: new Date(stoppedAtMs),
+      userConfirmed: false,
+      confirmedInReview: false,
+      ownerAuthoredInReview: false,
+      tagNames: [],
+      ...overrides
+    });
+    const rows = [
+      row("app-testing", "App testing", now.getTime() - 15 * 3_600_000),
+      ...Array.from({ length: 200 }, (_, index) =>
+        row(`bau-${index}`, "BAU", now.getTime() - (1 + index * 0.5) * day)),
+      ...Array.from({ length: 180 }, (_, index) =>
+        row(`task-${index}`, `Task ${index}`, now.getTime() - (2 + index * 0.25) * day)),
+      row("too-old", "Ancient project", now.getTime() - (TASK_SUGGESTION_CANDIDATE_WINDOW_DAYS + 1) * day),
+      row("short", "Blip", now.getTime() - 3_600_000, { durationSeconds: 30 }),
+      row("visit-suggested-title", "Visit Example Clinic", now.getTime() - day, {
+        source: "location_learning",
+        eventType: "learned_place_visit",
+        userConfirmed: true,
+        confirmedInReview: true
+      })
+    ];
+    const seen: unknown[][] = [];
+    mocks.query.mockImplementation(async (statement: string, values: unknown[]) => {
+      expect(statement).toContain("where te.workspace_id = $1");
+      expect(statement).toContain("and te.user_id = $2");
+      expect(statement).toContain("te.review_status = 'confirmed'");
+      expect(statement).toContain(confirmedInReviewSql);
+      expect(statement).toContain(ownerAuthoredInReviewSql);
+      seen.push(values);
+      return { rows };
+    });
+
+    const sets = await getTaskSuggestionSets(session, now);
+    const other: RequestSession = { ...session, workspaceId: "workspace-2", userId: "user-2" };
+    await getTaskSuggestionSets(other, now);
+    expect(seen).toEqual([
+      [session.workspaceId, session.userId],
+      [other.workspaceId, other.userId]
+    ]);
+
+    // The contextual list keeps its size and meaning (older clients read it).
+    expect(sets.taskSuggestions).toHaveLength(6);
+    expect(sets.taskSuggestions).toEqual(buildRecentActivitySuggestions(rows as never, {
+      contextDate: now,
+      limit: 6,
+      minDurationSeconds: 60
+    }));
+
+    const descriptions = sets.taskSuggestionCandidates.map((candidate) => candidate.description);
+    expect(sets.taskSuggestionCandidates).toHaveLength(TASK_SUGGESTION_CANDIDATE_LIMIT);
+    expect(new Set(descriptions).size).toBe(descriptions.length);
+    expect(descriptions[0]).toBe("App testing");
+    expect(descriptions).toContain("BAU");
+    expect(descriptions).not.toContain("Ancient project");
+    expect(descriptions).not.toContain("Blip");
+    // #363: a visit confirmed under Dayframe's suggested title never feeds typed search.
+    expect(descriptions).not.toContain("Visit Example Clinic");
+    expect(sets.taskSuggestionCandidates.find((candidate) => candidate.description === "BAU"))
+      .toEqual(expect.objectContaining({ useCount: 200, learningTier: 1 }));
+    expect(sets.taskSuggestionCandidates[0]?.lastSeenAt).toBe(new Date(now.getTime() - 15 * 3_600_000).toISOString());
+    // Payload stays small: one compact object per distinct variant, no per-block rows.
+    expect(JSON.stringify(sets.taskSuggestionCandidates).length).toBeLessThan(TASK_SUGGESTION_CANDIDATE_LIMIT * 400);
   });
 
   it("builds category usage ranks from manual category history", async () => {

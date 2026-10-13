@@ -3,7 +3,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { RecentActivitySuggestion } from "@dayframe/shared";
+import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -12,6 +12,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
+import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import {
   buildCalendarEntryCompactCreatePlan,
   buildCalendarEntryCompactSavePlan,
@@ -51,6 +52,8 @@ type TimeEntryQuickEditorBaseProps = {
   onDismiss: (options: { restoreFocus: boolean }) => void;
   peerEntries: OverlapPeerEntry[];
   taskSuggestions?: RecentActivitySuggestion[];
+  /** The bootstrap's recent pool a typed Description searches (see `searchTaskSuggestions`). */
+  taskSuggestionCandidates?: RecentActivitySuggestionCandidate[];
   tags: TagRow[];
 };
 
@@ -116,14 +119,12 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const previousStoppedAtRef = useRef(entry?.stoppedAt ?? null);
   const selectedCategory = props.categories.find((category) => category.id === draft.categoryId) ?? null;
   const taskSuggestions = useMemo(() => props.taskSuggestions ?? [], [props.taskSuggestions]);
+  const taskSuggestionCandidates = props.taskSuggestionCandidates;
   const visibleTaskSuggestions = useMemo(() => {
-    const query = draft.description.trim().toLocaleLowerCase();
+    const query = draft.description.trim();
     if (!query) return taskSuggestions.slice(0, 5);
-    return taskSuggestions
-      .filter((suggestion) => [suggestion.description, suggestion.categoryName ?? ""]
-        .some((value) => value.toLocaleLowerCase().includes(query)))
-      .slice(0, 5);
-  }, [draft.description, taskSuggestions]);
+    return searchTaskSuggestions(taskSuggestionCandidates, taskSuggestions, query, 5);
+  }, [draft.description, taskSuggestionCandidates, taskSuggestions]);
   const preview = useMemo(() => {
     try {
       return {

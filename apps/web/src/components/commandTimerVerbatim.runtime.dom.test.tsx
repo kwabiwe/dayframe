@@ -752,6 +752,34 @@ function optionNames() {
   return within(screen.getByRole("listbox", { name: "Activities" })).queryAllByRole("option").map((option) => option.textContent);
 }
 
+describe("Stop never starts a new block (production incident, 13 Oct 2026)", () => {
+  // The Go/Stop button used to switch from type="button" to type="submit" when Stop re-rendered
+  // it as Start, before the browser's default click action ran: every timer-bar Stop since 1 Sep
+  // was followed ~100 ms later by a Start of a junk block. jsdom runs that default action before
+  // React re-renders, so the guard here is the invariant itself: never a submit button.
+  it("the Go/Stop button is a plain button while recording and while idle", async () => {
+    await renderShell(entry());
+    const stop = screen.getByRole("button", { name: "Stop recording" }) as HTMLButtonElement;
+    expect(stop.type).toBe("button");
+    await userEvent.click(stop);
+    await waitFor(() => expect(server.stops).toEqual(["active"]));
+    const start = await screen.findByRole("button", { name: "Start a block" }) as HTMLButtonElement;
+    expect(start.type).toBe("button");
+    expect(start.form?.querySelector('button[type="submit"], input[type="submit"]')).toBeNull();
+    await wait(800);
+    expect(server.posts).toEqual([]);
+  });
+
+  it("Start from the button still starts one block with the typed description", async () => {
+    const { input } = await renderShell(null);
+    await userEvent.type(input, "Plan sprint");
+    await userEvent.click(screen.getByRole("button", { name: "Start a block" }));
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    expect(server.posts[0]?.description).toBe("Plan sprint");
+    expect(server.stops).toEqual([]);
+  });
+});
+
 function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
   const entries = activeEntry ? [activeEntry] : [];
   return {
