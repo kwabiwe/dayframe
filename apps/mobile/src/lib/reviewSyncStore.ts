@@ -1313,7 +1313,17 @@ export async function cacheReviewPresentation(input: {
     if (existing && existing.backend_id !== input.owner.backendId) return;
 
     const cachedReviewItems = presentationReviewItems(response);
-    for (const [position, item] of cachedReviewItems.entries()) {
+    for (const [position, presented] of cachedReviewItems.entries()) {
+      // A presentation record carries no reason fields; keep those an earlier bootstrap cached for
+      // the same proposal, so the card's reason does not change with whichever read wrote last.
+      const existing = await transaction.getFirstAsync<{ snapshot_json: string }>(
+        "select snapshot_json from review_item_cache where account_key = ? and review_item_id = ?",
+        key, presented.id
+      );
+      const earlier = existing ? parseReviewSnapshot(existing.snapshot_json) : null;
+      const item = earlier && !presented.rawPayload && sameCachedProposal(earlier, presented)
+        ? { ...presented, rawPayload: earlier.rawPayload }
+        : presented;
       await transaction.runAsync(
         `insert into review_item_cache (
            account_key, review_item_id, snapshot_json, server_status, position, cached_at
@@ -1651,6 +1661,12 @@ export function reviewPresentationScopeKey(
     reviewItemIds: scope.reviewItemIds ? [...scope.reviewItemIds].sort() : null,
     entryIds: scope.entryIds ? [...scope.entryIds].sort() : null
   });
+}
+
+function sameCachedProposal(left: MobileReviewItem, right: MobileReviewItem) {
+  return left.id === right.id && left.title === right.title && left.eventType === right.eventType &&
+    left.suggestedStartedAt === right.suggestedStartedAt && left.suggestedStoppedAt === right.suggestedStoppedAt &&
+    left.suggestedCategoryId === right.suggestedCategoryId && left.suggestedPlaceId === right.suggestedPlaceId;
 }
 
 function presentationReviewItems(response: ReviewPresentationSnapshot) {
@@ -2839,7 +2855,9 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "activityType",
     "durationSeconds",
     "qualificationReason",
-    "stopCount"
+    "stopCount",
+    // Display-only commute mode ("car", "walk"): shown on the card's time line.
+    "travelMode"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>
