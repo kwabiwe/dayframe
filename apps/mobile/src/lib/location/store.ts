@@ -133,7 +133,8 @@ export type LocationStoreDiagnostics = {
   lastEngineState: string | null;
   /** When the local journal replay (a diagnostic projection) last ran, how long it took and over how many rows. */
   lastLocalReplayAt?: string | null;
-  lastLocalReplayDurationMs?: number | null;
+  /** Reading the journal and running the engine; the snapshot rewrite after it is not included. */
+  lastLocalReplayComputeMs?: number | null;
   lastLocalReplayInputCount?: number | null;
   activeProvisionalSegmentKind: string | null;
   lastGapDurationSeconds: number | null;
@@ -299,7 +300,8 @@ async function updateOwnedDiagnostics(key: string, patch: Partial<LocationStoreD
       const previousAttempt = compatible ? parseLocationSyncAttempt(prior, endpoint) : null;
       return next ? parseLocationSyncAttempt({...next, lastSuccessAt: next.outcome === "success" ? next.completedAt : previousAttempt?.lastSuccessAt}, endpoint) : previousAttempt;
     };
-    await setMetadata(metadataKey, JSON.stringify({...previous,
+    // Fields bound to another backend or account are dropped, not re-stamped as this account's.
+    await setMetadata(metadataKey, JSON.stringify({...(compatible ? previous : {}),
       ...patch,
       uploadAttempt: mergeAttempt("evidence", patch.uploadAttempt, previous.uploadAttempt),
       replayAttempt: mergeAttempt("replay", patch.replayAttempt, previous.replayAttempt),
@@ -690,11 +692,11 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
 /**
  * The local journal replay is a diagnostic projection (Settings › Sync help › Share location details reads
  * it); the server's replay is what logs and suggests time. Foreground and account configuration refresh it
- * at most this often; reading the diagnostics always refreshes it.
+ * at most this often; the export shares the last run's numbers with their time.
  */
 export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS = 10 * 60_000;
 
-/** Re-runs the local journal at once (diagnostics export, tests). */
+/** Re-runs the local journal at once (tests). */
 export async function processPendingLocationEvidence(processingAt = new Date().toISOString()) {
   return serialiseLocationMutation(() => processPendingLocationEvidenceUnsafe(processingAt));
 }
@@ -741,7 +743,7 @@ async function processPendingLocationEvidenceUnsafe(processingAt = new Date().to
     config: LOCATION_ENGINE_V2_CONFIG,
     processingAt
   });
-  const replayDurationMs = Date.now() - startedAt;
+  const replayComputeMs = Date.now() - startedAt;
   await db.withExclusiveTransactionAsync(async (transaction) => {
     await transaction.runAsync(
       `insert into location_engine_state (account_key, state_json, updated_at) values (?, ?, ?)
@@ -785,7 +787,7 @@ async function processPendingLocationEvidenceUnsafe(processingAt = new Date().to
     await setMetadata("rejected_evidence_counts", JSON.stringify(rejectedCounts), transaction);
     await setMetadata("last_accepted_evidence_at", acceptedTimes.at(-1) ?? "", transaction);
     await updateOwnedDiagnostics(current.key, {lastEngineState:output.nextState.mode,
-      lastLocalReplayAt:processingAt,lastLocalReplayDurationMs:replayDurationMs,lastLocalReplayInputCount:rows.length,
+      lastLocalReplayAt:processingAt,lastLocalReplayComputeMs:replayComputeMs,lastLocalReplayInputCount:rows.length,
       activeProvisionalSegmentKind:output.nextState.mode === "moving" ? "commute" : output.nextState.mode === "idle" ? null : "stay",
       lastGapDurationSeconds:gaps.length ? Math.max(...gaps) : null,rejectedEvidenceCounts:rejectedCounts},transaction);
   });
@@ -1536,7 +1538,7 @@ export async function getLocationStoreDiagnostics(owner?: MobileAccountOwner): P
     lastAcceptedEvidenceAt: counts?.lastAccepted ?? null,
     lastEngineState: owned.lastEngineState ?? null,
     lastLocalReplayAt: owned.lastLocalReplayAt ?? null,
-    lastLocalReplayDurationMs: owned.lastLocalReplayDurationMs ?? null,
+    lastLocalReplayComputeMs: owned.lastLocalReplayComputeMs ?? null,
     lastLocalReplayInputCount: owned.lastLocalReplayInputCount ?? null,
     activeProvisionalSegmentKind: owned.activeProvisionalSegmentKind ?? null,
     lastGapDurationSeconds: owned.lastGapDurationSeconds ?? null,

@@ -250,7 +250,7 @@ describe("complete saved-place snapshot replay", () => {
   await store.refreshLocalJournalReplayIfDue(start);
   let diagnostics=await store.getLocationStoreDiagnostics();
   expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start).toISOString(),lastLocalReplayInputCount:1});
-  expect(diagnostics.lastLocalReplayDurationMs).toBeGreaterThanOrEqual(0);
+  expect(diagnostics.lastLocalReplayComputeMs).toBeGreaterThanOrEqual(0);
   // Five minutes on, with a new sample: not due, so nothing re-runs.
   vi.setSystemTime(start+5*60_000);
   await persistEvidence([sample("journal-2",start+4*60_000)]);
@@ -261,9 +261,26 @@ describe("complete saved-place snapshot replay", () => {
   await store.refreshLocalJournalReplayIfDue(start+10*60_000);
   diagnostics=await store.getLocationStoreDiagnostics();
   expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start+10*60_000).toISOString(),lastLocalReplayInputCount:2});
-  // An explicit replay (the location diagnostics export) always runs.
+  // An explicit replay always runs.
   await store.processPendingLocationEvidence(new Date(start+11*60_000).toISOString());
   expect((await store.getLocationStoreDiagnostics()).lastLocalReplayAt).toBe(new Date(start+11*60_000).toISOString());
+ });
+ it("never takes another backend's replay time as this account's (Codex r1 on #381)", async () => {
+  vi.useFakeTimers({toFake:["Date"]});
+  const start=Date.parse("2026-10-13T12:00:00Z");vi.setSystemTime(start);
+  const key=`sync_diagnostics:${owner.workspaceId}:${owner.userId}`;
+  db.prepare("insert into location_store_metadata(key,value,updated_at) values(?,?,?)").run(key,JSON.stringify({
+   lastLocalReplayAt:new Date(start-60_000).toISOString(),lastLocalReplayInputCount:99,
+   diagnosticBinding:{version:1,backend:"https://another.invalid",account:`${owner.workspaceId}:${owner.userId}`}}),new Date(start).toISOString());
+  // A diagnostics write for this backend drops the other backend's fields instead of stamping them as its own.
+  await store.syncLocationEvidence({forceReplay:true});
+  const stored=JSON.parse(db.prepare("select value from location_store_metadata where key=?").get(key)!.value as string);
+  expect(stored.diagnosticBinding.backend).toBe("https://fixture.invalid");
+  expect(stored).not.toHaveProperty("lastLocalReplayAt");
+  expect(stored).not.toHaveProperty("lastLocalReplayInputCount");
+  // So a minute-old replay on another backend does not hold back this account's refresh.
+  await store.refreshLocalJournalReplayIfDue(start);
+  expect((await store.getLocationStoreDiagnostics()).lastLocalReplayAt).toBe(new Date(start).toISOString());
  });
  it("rolls back pruning and state when replacement fails", async () => {
   await seed();

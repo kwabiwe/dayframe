@@ -177,7 +177,6 @@ import {
 } from "@/lib/location/runtime";
 import {
   getLocationStoreDiagnostics,
-  processPendingLocationEvidence,
   recordLocationStoreError
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
@@ -1723,9 +1722,8 @@ export default function SettingsScreen() {
     if (!owner) return;
     const session = await readOwnedAuthenticatedSessionSnapshot(owner);
     if (session.status !== "authenticated") return;
-    // The local journal replay is a diagnostic projection that no longer runs after every stored sample:
-    // refresh it for this export (a failure keeps the last run's numbers).
-    await processPendingLocationEvidence().catch(() => undefined);
+    // The local journal replay's numbers are from its last run (`lastLocalReplayAt`): foreground refreshes
+    // them at most every ten minutes. The export never waits for a replay of the whole journal.
     const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
     await Share.share({
@@ -1745,7 +1743,7 @@ export default function SettingsScreen() {
         lastAcceptedEvidenceAt: local.lastAcceptedEvidenceAt,
         lastEngineState: local.lastEngineState,
         lastLocalReplayAt: local.lastLocalReplayAt,
-        lastLocalReplayDurationMs: local.lastLocalReplayDurationMs,
+        lastLocalReplayComputeMs: local.lastLocalReplayComputeMs,
         lastLocalReplayInputCount: local.lastLocalReplayInputCount,
         activeProvisionalSegmentKind: local.activeProvisionalSegmentKind,
         lastGapDurationSeconds: local.lastGapDurationSeconds,
