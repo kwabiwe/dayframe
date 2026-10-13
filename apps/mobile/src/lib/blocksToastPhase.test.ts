@@ -16,7 +16,7 @@ import { toastExitStart } from "./blocksMotion";
 // start its exit from rest, never from an uninitialised entrance.
 describe("toastExitStart", () => {
   it("starts a settled toast's exit from rest", () => {
-    const start = toastExitStart({ value: "settled" }) as { opacity: number; transform: Array<Record<string, number>> };
+    const start = toastExitStart({ value: "settled" }) as unknown as { opacity: number; transform: Array<Record<string, number>> };
     expect(start.opacity).toBe(1);
     expect(start.transform).toEqual([{ translateY: 0 }, { scale: 1 }]);
   });
