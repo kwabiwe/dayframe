@@ -22,10 +22,47 @@ const SHEET_MIN_BELOW = 160;
 export type FloatingListHeading = "Suggestions" | "Tags" | "Activities";
 
 /**
+ * One keyboard hint in a list's footer: the glyph and its short label are drawn (and hidden from
+ * assistive technology); `spoken` is the sentence a screen reader gets instead.
+ */
+export type FloatingListHint = { glyph: string; label: string; spoken: string };
+
+/** The footer hints (owner design, 13 Oct 2026): `@ activity · # tag · ↵ start` and friends. */
+export const FLOATING_LIST_HINTS = {
+  /** Command timer Suggestions while idle: Enter starts the block. */
+  suggestionsStart: [
+    { glyph: "@", label: "activity", spoken: "Type @ to choose an activity." },
+    { glyph: "#", label: "tag", spoken: "Type # to add a tag." },
+    { glyph: "↵", label: "start", spoken: "Enter starts the block." }
+  ],
+  /** Command timer Suggestions while recording: a suggestion fills the running block. */
+  suggestionsUse: [
+    { glyph: "@", label: "activity", spoken: "Type @ to choose an activity." },
+    { glyph: "#", label: "tag", spoken: "Type # to add a tag." },
+    { glyph: "↵", label: "use", spoken: "Enter on a suggestion uses it." }
+  ],
+  /** Suggestions in the block editors (no `@` list there): a suggestion fills the draft. */
+  suggestionsEditor: [
+    { glyph: "#", label: "tag", spoken: "Type # to add a tag." },
+    { glyph: "↵", label: "use", spoken: "Enter on a suggestion uses it." }
+  ],
+  activities: [
+    { glyph: "↑↓", label: "choose", spoken: "Up and down arrows choose an activity." },
+    { glyph: "↵", label: "pick", spoken: "Enter picks it." }
+  ],
+  tags: [
+    { glyph: "↵", label: "add", spoken: "Enter adds the tag." },
+    { glyph: "⌫", label: "remove", spoken: "Backspace removes the typed tag." }
+  ]
+} as const satisfies Record<string, readonly FloatingListHint[]>;
+
+/**
  * The one floating list under a text field (Suggestions, Tags, Activities in the command timer
- * and the block editors): the same raised surface, a sentence-case heading that names the
- * listbox, the same 44 px rows and the same neutral highlight (`df-flist*` in globals.css). Rows
- * are the caller's `role="option"` buttons with the `df-flist-row` class; their content differs.
+ * and the block editors): the same raised surface, a small uppercase muted header (the DOM text
+ * stays sentence case and names the listbox), the same 36 px rows (44 px on phones and touch)
+ * with an inset rounded highlight, right-aligned muted metadata (`df-flist-meta`) and one footer
+ * row of keyboard hints (`df-flist*` in globals.css). Rows are the caller's `role="option"`
+ * buttons with the `df-flist-row` class; their content differs.
  *
  * On phones (560 px and below) with an `anchorRef` it is a full-width sheet: fixed 12 px from the
  * screen edges, just below the field (above it when the keyboard leaves no room), its height
@@ -40,6 +77,7 @@ export function FloatingList({
   className = "",
   heading,
   headClassName = "",
+  hints,
   id,
   isOpen,
   onClose,
@@ -53,6 +91,8 @@ export function FloatingList({
   className?: string;
   heading: FloatingListHeading;
   headClassName?: string;
+  /** The footer's keyboard hints (outside the listbox, so they are never options). */
+  hints?: readonly FloatingListHint[];
   /** The listbox's id (what the field's `aria-controls` names). */
   id?: string;
   isOpen: boolean;
@@ -100,6 +140,18 @@ export function FloatingList({
       <div aria-label={heading} className={`df-flist-rows ${rowsClassName}`.trim()} id={id} role="listbox">
         {children}
       </div>
+      {hints?.length ? (
+        <p className="df-flist-foot">
+          {hints.map((hint, index) => (
+            <span className="df-flist-hint" key={hint.glyph}>
+              {index ? <span aria-hidden="true" className="df-flist-hint-sep">·</span> : null}
+              <kbd aria-hidden="true">{hint.glyph}</kbd>
+              <span aria-hidden="true">{hint.label}</span>
+              <span className="sr-only">{hint.spoken}</span>
+            </span>
+          ))}
+        </p>
+      ) : null}
     </div>
   );
 }

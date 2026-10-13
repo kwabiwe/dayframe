@@ -16,6 +16,7 @@ import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
+import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -40,6 +41,14 @@ const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 
 type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; token: number };
+
+/**
+ * The idle description's placeholder is the example the old "Try …" line under the field gave
+ * (owner design B1, 13 Oct 2026); the `@`/`#` keys are explained in the Suggestions footer (B2).
+ * Phones get a shorter one so it is not cut off beside the activity block and Start.
+ */
+export const COMMAND_PLACEHOLDER = "Try “Write report @work #client”";
+export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
   const {
@@ -76,7 +85,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  const [commandFocused, setCommandFocused] = useState(false);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
@@ -426,9 +434,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     >
       <form
         className={`df-cmd${active ? " is-live" : ""}`}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCommandFocused(false);
-        }}
         onSubmit={submitTimer}
         style={liveCategory ? blockStyle(liveCategory.color, liveCategory.name) : undefined}
       >
@@ -478,7 +483,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             onClick={() => setSuggestionsOpen(true)}
             onEnter={startFromEnter}
             onFocus={() => {
-              setCommandFocused(true);
               if (suppressSuggestionFocusRef.current) {
                 suppressSuggestionFocusRef.current = false;
                 return;
@@ -500,7 +504,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}
-            placeholder={active ? "Add a description" : narrowCommand ? "What's this block?" : "What are you working on?"}
+            placeholder={active ? "Add a description" : narrowCommand ? COMMAND_PLACEHOLDER_NARROW : COMMAND_PLACEHOLDER}
             selectedTagNames={timerDraft.tagNames}
             tags={data.tags}
             value={timerDraft.description}
@@ -508,6 +512,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           {visibleTaskSuggestions.length ? (
             <TaskSuggestionsPanel
               anchorRef={suggestionsRef}
+              hints={active ? FLOATING_LIST_HINTS.suggestionsUse : FLOATING_LIST_HINTS.suggestionsStart}
               isBusy={isTimerBusy}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
               onClose={() => setSuggestionsOpen(false)}
@@ -731,12 +736,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             ) : (
               <span className="df-cmd-hint">Enter starts a block</span>
             )}
-          </>
-        ) : !active && commandFocused && !timerDraft.description ? (
-          <>
-            <span className="df-cmd-hint">Try</span>
-            <span className="df-cmd-chip">Write proposal 45m</span>
-            <span className="df-cmd-hint">@ opens your activities, # adds tags, a trailing duration logs time you already spent.</span>
           </>
         ) : null}
       </div>

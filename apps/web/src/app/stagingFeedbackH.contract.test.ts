@@ -32,7 +32,7 @@ describe("command timer placement (H2)", () => {
     expect(rule(".swiss-app-shell")).toMatch(/--df-cmd-inset-top: 12px;[\s\S]*--df-cmd-inset-x: 24px;/);
     expect(css).toMatch(/@media \(max-width: 860px\) \{\s*\.swiss-app-shell \{\s*--df-cmd-inset-x: 12px;/);
     expect(css).toMatch(/@media \(max-width: 760px\) \{\s*\.swiss-app-shell \{\s*--df-cmd-inset-top: 10px;/);
-    expect(rule(".swiss-persistent-timer-shell")).toContain("padding: var(--df-cmd-inset-top) var(--df-cmd-inset-x) 0;");
+    expect(rule(".swiss-persistent-timer-shell")).toContain("padding: var(--df-cmd-inset-top) var(--df-cmd-inset-x) 8px;");
     // Calendar: the shell adds only the top inset, the frame only the side inset.
     expect(rule(".swiss-timeline-surface .swiss-persistent-timer-shell")).toContain("padding: var(--df-cmd-inset-top) 0 0;");
     const frame = [...css.matchAll(/\n\.swiss-main-frame\.is-timeline \{([^}]*)\}/g)].at(-1)?.[1] ?? "";

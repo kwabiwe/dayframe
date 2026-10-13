@@ -749,7 +749,9 @@ describe("Codex r10: an accepted Start's real id is known from its POST", () => 
 });
 
 function optionNames() {
-  return within(screen.getByRole("listbox", { name: "Activities" })).queryAllByRole("option").map((option) => option.textContent);
+  // The activity's name (a row may also show a muted "Pinned" marker beside it).
+  return within(screen.getByRole("listbox", { name: "Activities" })).queryAllByRole("option")
+    .map((option) => option.querySelector(".df-flist-label")?.textContent);
 }
 
 describe("Stop never starts a new block (production incident, 13 Oct 2026)", () => {

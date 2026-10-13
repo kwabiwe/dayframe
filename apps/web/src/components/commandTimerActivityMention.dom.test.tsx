@@ -17,7 +17,7 @@ vi.mock("@/components/AppShellRuntime", () => ({
   useAppShellRuntime: () => runtime
 }));
 
-const { PersistentTimerBar } = await import("./PersistentTimerBar");
+const { COMMAND_PLACEHOLDER, PersistentTimerBar } = await import("./PersistentTimerBar");
 
 afterEach(() => {
   cleanup();
@@ -133,7 +133,8 @@ function activities() {
 }
 
 function optionNames(list: HTMLElement) {
-  return within(list).queryAllByRole("option").map((option) => option.textContent);
+  // The activity's name (a row may also show a muted "Pinned" marker beside it).
+  return within(list).queryAllByRole("option").map((option) => option.querySelector(".df-flist-label")?.textContent);
 }
 
 async function typeInto(input: HTMLInputElement, text: string) {
@@ -468,7 +469,7 @@ describe("# Tags stay as they were", () => {
     const { input } = renderBar();
     const user = await typeInto(input, "Plan #dee");
     const tags = screen.getByRole("listbox", { name: "Tags" });
-    const option = within(tags).getByRole("option", { name: "Existing tag, Deep work" });
+    const option = within(tags).getByRole("option", { name: "#Deep work" });
     expect(input.getAttribute("aria-controls")).toBe(tags.id);
     expect(input.getAttribute("aria-activedescendant")).toBe(option.id);
     await user.keyboard("{Enter}");
@@ -498,15 +499,87 @@ describe("one floating list style", () => {
     await user.click(input);
     const suggestions = screen.getByRole("listbox", { name: "Suggestions" });
     expectOneStyle(suggestions, "Suggestions");
-    // Rows keep their own content: the suggestion's play arrow, the activity's block and icon.
-    expect(suggestions.querySelector('svg[data-glyph="play"]')).not.toBeNull();
+    // Rows keep their own content: the suggestion's activity marker and description, with the
+    // activity name right-aligned as muted metadata (no play arrow any more: the footer says ↵ start).
+    const suggestion = within(suggestions).getAllByRole("option")[0];
+    expect(suggestion.querySelector("i")).not.toBeNull();
+    expect(suggestion.querySelector(".df-flist-label")).not.toBeNull();
+    expect(suggestion.querySelector(".df-flist-meta")?.textContent).toBeTruthy();
+    expect(suggestions.querySelector('svg[data-glyph="play"]')).toBeNull();
 
     await user.type(input, "#", { skipClick: true });
-    expectOneStyle(screen.getByRole("listbox", { name: "Tags" }), "Tags");
+    const tags = screen.getByRole("listbox", { name: "Tags" });
+    expectOneStyle(tags, "Tags");
+    // An existing tag is named by its visible text and shows its use count as metadata, kept out
+    // of that name (WCAG 2.5.3 label in name).
+    const tag = within(tags).getByRole("option", { name: "#Deep work" });
+    expect(tag.querySelector(".df-flist-label")?.textContent).toBe("#Deep work");
+    expect(tag.querySelector(".df-flist-meta")?.getAttribute("aria-hidden")).toBe("true");
+    expect(tag.querySelector(".df-flist-meta")?.textContent).toMatch(/^\d+$/);
 
     await user.keyboard("{Backspace}@");
     expectOneStyle(activities(), "Activities");
     expect(activities().querySelector(".df-flist-block.df-block svg")).not.toBeNull();
+    // A pinned activity (a quick start) is marked "Pinned": its accessible description, while its
+    // name stays the activity's.
+    const writing = within(activities()).getByRole("option", { name: "Writing" });
+    expect(writing.querySelector(".df-flist-meta")?.textContent).toBe("Pinned");
+    const describedBy = writing.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe("Pinned");
+  });
+
+  it("gives each list one footer of keyboard hints, outside the listbox, glyphs hidden and spoken text for screen readers", async () => {
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    const footer = (listbox: HTMLElement) => {
+      const foot = listbox.closest<HTMLElement>(".df-flist")!.querySelector<HTMLElement>(".df-flist-foot")!;
+      expect(foot).not.toBeNull();
+      expect(listbox.contains(foot)).toBe(false);
+      for (const kbd of foot.querySelectorAll("kbd")) expect(kbd.getAttribute("aria-hidden")).toBe("true");
+      const visual = [...foot.querySelectorAll(".df-flist-hint")]
+        .map((hint) => [...hint.querySelectorAll('[aria-hidden="true"]')].map((part) => part.textContent).join(" "))
+        .join(" ");
+      const spoken = [...foot.querySelectorAll(".sr-only")].map((part) => part.textContent);
+      return { spoken, visual };
+    };
+
+    await user.click(input);
+    expect(footer(screen.getByRole("listbox", { name: "Suggestions" }))).toEqual({
+      spoken: ["Type @ to choose an activity.", "Type # to add a tag.", "Enter starts the block."],
+      visual: "@ activity · # tag · ↵ start"
+    });
+
+    await user.type(input, "@", { skipClick: true });
+    expect(footer(activities())).toEqual({
+      spoken: ["Up and down arrows choose an activity.", "Enter picks it."],
+      visual: "↑↓ choose · ↵ pick"
+    });
+
+    await user.keyboard("{Backspace}#");
+    expect(footer(screen.getByRole("listbox", { name: "Tags" }))).toEqual({
+      spoken: ["Enter adds the tag.", "Backspace removes the typed tag."],
+      visual: "↵ add · ⌫ remove"
+    });
+  });
+
+  it("offers Create “#name” as a real option that creates the typed tag", async () => {
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    await user.type(input, "Plan #launch");
+    const tags = screen.getByRole("listbox", { name: "Tags" });
+    // Its accessible name is the visible phrase (WCAG 2.5.3 label in name).
+    const create = within(tags).getByRole("option", { name: "Create “#launch”" });
+    expect(create.hasAttribute("aria-label")).toBe(false);
+    expect(create.querySelector(".df-flist-label")?.textContent).toBe("Create “#launch”");
+    expect(create.className).toContain("df-flist-row");
+    expect(input.getAttribute("aria-activedescendant")).toBe(create.id);
+    // The old picker wording is not on this list.
+    expect(tags.closest(".df-flist")!.textContent).not.toMatch(/Add ?\/ ?filter tags/);
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Remove tag launch" })).not.toBeNull();
+    expect(input.value).toBe("Plan");
   });
 });
 
@@ -569,7 +642,7 @@ describe("on phones the lists are sheets", () => {
     await user.type(input, "e", { skipClick: true });
     expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
     await user.type(input, " #dee", { skipClick: true });
-    expect(within(tags()).getByRole("option", { name: "Existing tag, Deep work" })).not.toBeNull();
+    expect(within(tags()).getByRole("option", { name: "#Deep work" })).not.toBeNull();
 
     await user.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}@wr");
     const list = activities().closest<HTMLElement>(".df-flist")!;
@@ -623,5 +696,25 @@ describe("on phones the lists are sheets", () => {
     expect(tags.className).toContain("is-sheet");
     await user.click(within(tags).getByRole("button", { name: "Close tags" }));
     expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+  });
+});
+
+describe("the idle example and the old hint line (owner design B1/B2, 13 Oct 2026)", () => {
+  it("shows the example in the empty field's placeholder and keeps a plain prompt while recording", () => {
+    const { input } = renderBar();
+    expect(COMMAND_PLACEHOLDER).toBe("Try “Write report @work #client”");
+    expect(input.getAttribute("placeholder")).toBe(COMMAND_PLACEHOLDER);
+  });
+
+  it("no longer draws the Try … hint line under the field; the @/# keys live in the Suggestions footer", async () => {
+    const { input } = renderBar();
+    const user = userEvent.setup();
+    await user.click(input);
+    const bar = screen.getByTestId("persistent-timer");
+    expect(bar.querySelector(".df-cmd-parse")?.textContent).toBe("");
+    expect(bar.textContent).not.toContain("@ opens your activities");
+    expect(bar.querySelector(".df-cmd-parse .df-cmd-chip")).toBeNull();
+    const foot = screen.getByRole("listbox", { name: "Suggestions" }).closest(".df-flist")!.querySelector(".df-flist-foot");
+    expect(foot?.textContent).toContain("Type @ to choose an activity.");
   });
 });

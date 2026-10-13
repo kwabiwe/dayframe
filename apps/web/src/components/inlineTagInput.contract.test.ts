@@ -20,7 +20,10 @@ describe("web tag editor interaction contract", () => {
 
   it("opens an icon-triggered search/select/create picker with mobile-safe semantics", () => {
     expect(source).toContain('aria-label="Add or filter tags"');
-    expect(source).toContain('placeholder="Add/filter tags"');
+    expect(source).toContain('placeholder="Search tags"');
+    // WCAG 2.5.3 label in name: the search field's accessible name is its visible wording.
+    expect(source).toMatch(/aria-label="Search tags"\s+autoComplete="off"[\s\S]{0,200}placeholder="Search tags"/);
+    expect(source).not.toMatch(/aria-label="Add or filter tags"\s+autoComplete="off"/);
     expect(source).toContain("pickerMatches.map");
     expect(source).toContain("pickerCreateName");
     expect(source).toContain("aria-pressed={selected}");
