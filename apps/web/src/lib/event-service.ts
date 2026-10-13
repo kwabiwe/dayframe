@@ -1978,7 +1978,17 @@ export async function updateTimeEntry(
   try {
     await client.query("begin");
     if (input.expectedDetails) {
-      // Locked, so a concurrent save cannot slip in between this check and the update.
+      // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
+      // snapshot, so the read below (after any concurrent save has committed and released the
+      // lock) sees that save's description, category and tags. Reading tags in the locking
+      // statement would pair the updated row with its pre-change tags (Codex r1 on #387).
+      const locked = await client.query(
+        `select id from time_entries
+         where id = $1 and workspace_id = $2 and user_id = $3
+         for update`,
+        [id, session.workspaceId, session.userId]
+      );
+      if (!locked.rows[0]) throw new TimeEntryNotFoundError();
       const stored = await client.query<{
         categoryId: string | null;
         description: string | null;
@@ -1993,8 +2003,7 @@ export async function updateTimeEntry(
                   where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
                 ), array[]::text[]) as "tagNormalizedNames"
          from time_entries te
-         where te.id = $1 and te.workspace_id = $2 and te.user_id = $3
-         for update of te`,
+         where te.id = $1 and te.workspace_id = $2 and te.user_id = $3`,
         [id, session.workspaceId, session.userId]
       );
       const current = stored.rows[0];

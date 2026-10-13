@@ -515,7 +515,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         const pending = entry ? outgoingDraftsRef.current.get(entry.id) : undefined;
         outgoingDraftsRef.current.clear();
         if (current && entry && pending && serverEntryId(entry.id)) {
-          await saveActiveDetails(current, pending.draft, pending.base);
+          const outcome = await saveActiveDetails(current, pending.draft, pending.base);
+          // Refused because the block changed elsewhere: the switch goes ahead, and the notice
+          // that the edit was not kept stays on screen (Codex r1 on #387).
+          if (!outcome.ok && outcome.error === DETAILS_CONFLICT_MESSAGE) return { notice: DETAILS_CONFLICT_SWITCH_MESSAGE };
         }
       },
       dedupeRunning: options.dedupeRunning,
@@ -722,22 +725,40 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
       },
       send: async (entryId, payload) => {
-        const response = await clientFetch(`/api/time-entries/${entryId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
+        // A same-tab editor save owns the base like the bar's own saves: the fields it writes
+        // become the base the moment it is sent, so typing in the bar while it is pending is a
+        // newer edit based on the editor's values, never a false conflict (Codex r1 on #387).
+        const previousBase = baseFor(snapshot.activeEntry!);
+        const resolved = input.plan.resolved;
+        setTimerDraftBase({
+          categoryId: "categoryId" in payload ? resolved.categoryId ?? "" : previousBase.categoryId,
+          description: "description" in payload ? resolved.description ?? "" : previousBase.description,
+          tagNames: "tagNames" in payload ? [...resolved.tagNames] : previousBase.tagNames
+        }, entryId);
+        detailsSavesInFlightRef.current += 1;
+        try {
+          const response = await clientFetch(`/api/time-entries/${entryId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) {
+            throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
+          }
+          return (await response.json()) as { updatedAt?: string };
+        } catch (error) {
+          setTimerDraftBase(previousBase, entryId);
+          throw error;
+        } finally {
+          detailsSavesInFlightRef.current -= 1;
         }
-        return (await response.json()) as { updatedAt?: string };
       },
       setBusy: setIsTimerBusy,
       setDraft: setTimerDraft,
       setError: setTimerError,
       snapshot
     });
-  }, [commitData, refresh, setTimerDraft]);
+  }, [baseFor, commitData, refresh, setTimerDraft, setTimerDraftBase]);
 
   const updateActiveStartTime = useCallback(async (startedAt: string): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
@@ -929,6 +950,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
 const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-timer:";
 const DETAILS_CONFLICT_MESSAGE = "This block was changed in another window or device, so its latest details are shown.";
+const DETAILS_CONFLICT_SWITCH_MESSAGE = "Switched. The block you left was changed in another window or device, so your edit to it was not saved.";
 const DETAILS_CONFLICT_STOP_MESSAGE = "Stopped. This block was changed in another window or device, so it kept those details.";
 
 function isOptimisticTimerId(id: string | null) {

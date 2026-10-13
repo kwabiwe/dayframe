@@ -298,6 +298,55 @@ describe("one tab: a stale copy answered after its own save never writes back", 
   });
 });
 
+describe("Codex r1 on #387", () => {
+  it("an editor save (quick/inline editor) owns the base: typing while it is pending is saved, never a false 409", async () => {
+    server.entry = entry({ description: "BAU" });
+    const tab = await openTab();
+    server.holdNext = "patch";
+    const plan = {
+      durationSeconds: 2_100,
+      payload: { description: "from quick editor" },
+      resolved: {
+        categoryId: "work",
+        description: "from quick editor",
+        tagNames: [] as string[],
+        startedAt: server.entry.startedAt,
+        stoppedAt: null
+      }
+    } as unknown as Parameters<Runtime["updateActiveEntryFromCalendar"]>[0]["plan"];
+    let saved: Promise<unknown> = Promise.resolve();
+    act(() => { saved = tab.runtime().updateActiveEntryFromCalendar({ plan }); });
+    await waitFor(() => expect(server.patches).toHaveLength(1));
+    await waitFor(() => expect(tab.input.value).toBe("from quick editor"));
+    // Newer typing in the bar while the editor's PATCH is pending.
+    await tab.clearAndType("newer toolbar edit");
+    await act(async () => { server.release?.(); await saved; });
+    await waitFor(() => expect(server.entry?.description).toBe("newer toolbar edit"), { timeout: 3_000 });
+    expect(server.conflicts).toBe(0);
+    expect(bodies()[1]).toEqual({ description: "newer toolbar edit", expectedDetails: { description: "from quick editor" } });
+    await wait(900);
+    expect(tab.input.value).toBe("newer toolbar edit");
+  });
+
+  it("a switch whose outgoing edit is refused (409) keeps the notice on screen", async () => {
+    server.entry = entry({ description: "BAU" });
+    const tab = await openTab();
+    // Another window changes the description; this tab has not refreshed.
+    server.entry = { ...server.entry, description: "app testing", updatedAt: "2026-10-13T07:31:02.905Z" };
+    await tab.type("{End} more");
+    const quickStart = Array.from(tab.container.querySelectorAll("button"))
+      .find((button) => /^Start Coding/.test(button.getAttribute("aria-label") ?? button.textContent ?? ""));
+    expect(quickStart).toBeDefined();
+    await userEvent.setup().click(quickStart!);
+    await waitFor(() => expect(server.posts).toHaveLength(1), { timeout: 3_000 });
+    expect(server.conflicts).toBe(1);
+    await waitFor(() => expect(tab.activity()).toBe("Activity: Coding"));
+    await wait(300);
+    const alert = tab.container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("your edit to it was not saved");
+  });
+});
+
 describe("Discard deletes the real block, never the optimistic id", () => {
   async function startPlan(hold: "start" | "bootstrap") {
     const tab = await openTab();

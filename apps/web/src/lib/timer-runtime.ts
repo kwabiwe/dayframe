@@ -382,8 +382,12 @@ export async function runTimerStartMutation({
   setError: (error: string | null) => void;
   send: (payload: TimerStartRequestPayload) => Promise<void>;
   refresh: () => Promise<void>;
-  /** Runs first inside the gate: saves the outgoing block's pending edits before it is replaced. */
-  beforeStart?: () => Promise<void>;
+  /**
+   * Runs first inside the gate: saves the outgoing block's pending edits before it is replaced. A
+   * returned notice (its edits were refused, 409) stays shown through the switch instead of being
+   * cleared with the Start's error.
+   */
+  beforeStart?: () => Promise<{ notice?: string } | void>;
   /**
    * A quick start for exactly the block that is running when this Start runs (not when it was
    * asked for) changes nothing instead of stopping and restarting it.
@@ -391,7 +395,8 @@ export async function runTimerStartMutation({
   dedupeRunning?: boolean;
 }): Promise<TimerStartOutcome> {
   const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
-    if (beforeStart) await beforeStart();
+    const carried = beforeStart ? await beforeStart() : undefined;
+    const notice = carried ? carried.notice ?? null : null;
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
@@ -401,7 +406,7 @@ export async function runTimerStartMutation({
     }
     onAccepted?.();
     setBusy(true);
-    setError(null);
+    setError(notice);
     commit(applyOptimisticTimerStart(acceptedSnapshot, draft, startedAt, createOptimisticId(startedAt)));
     setDraft(draft);
 
