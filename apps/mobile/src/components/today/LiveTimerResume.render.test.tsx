@@ -55,7 +55,7 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { useAppForeground } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { useDashboardClockTicks } from "../../lib/dashboardClock";
@@ -71,12 +71,18 @@ function setAppState(state: string) {
   for (const listener of [...appState.listeners]) listener(state);
 }
 
+/** What each commit would draw: the digits of the strips mounted at that commit, before passive effects. */
+const commits: number[][] = [];
+
 /** The Dashboard's live path: foreground → clock → elapsed seconds → the live block's odometer. */
 function LiveTimer() {
   const foreground = useAppForeground();
   const [now, setNow] = useState(() => Date.now());
   useDashboardClockTicks({ foreground, needsSecondClock: true, setNow });
   const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  useLayoutEffect(() => {
+    commits.push(shownDigits(shared.slice(-5)));
+  });
   return <LiveOdometer color="#000" label={formatLiveClock(seconds)} reduceMotion={false} seconds={seconds} />;
 }
 
@@ -95,6 +101,7 @@ describe("live timer: background → foreground with a running block (TestFlight
     appState.listeners.clear();
     appState.changeWhileSubscribing = null;
     shared.length = 0;
+    commits.length = 0;
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -118,9 +125,12 @@ describe("live timer: background → foreground with a running block (TestFlight
     });
     expect(shownDigits(shared.slice(0, 5))).toEqual([0, 0, 0, 2, 8]);
 
-    // Back in the app at 15:01:12.8: 13 min 2 s, shown at rest straight away, with no roll.
+    // Back in the app at 15:01:12.8: 13 min 2 s, shown at rest straight away, with no roll — already
+    // in the first commit after the return (Codex r1 on #377), not one commit later.
     shared.length = 0;
+    const commitsBeforeReturn = commits.length;
     act(() => setAppState("active"));
+    expect(commits[commitsBeforeReturn]).toEqual([0, 1, 3, 0, 2]);
     const back = [...shared];
     expect(back).toHaveLength(5);
     expect(back.every((strip) => typeof strip.value === "number")).toBe(true);

@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -55,6 +56,7 @@ vi.mock("react-native-reanimated", async () => {
 });
 
 import { LiveOdometer, ODOMETER_EM, odometerCells, odometerFontSize, odometerTickRolls } from "./LiveOdometer";
+import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 
 function mount(label: string, reduceMotion = false, seconds?: number) {
@@ -136,31 +138,65 @@ describe("odometer ticks and jumps (investigation 2026-10-13, TestFlight 117)", 
     expect(odometerTickRolls(818, 28)).toBe(false);
   });
 
-  it("sets every changed digit at rest when the clock jumps, then rolls the next tick again", () => {
+  it("remounts every digit at rest on a jump, then rolls the next ordinary tick", () => {
     const tree = mount("0:00:28", false, 28);
-    const strips = [...shared];
+    const before = [...shared];
+    shared.length = 0;
     act(() => tree.update(<LiveOdometer color="#fff" label="0:13:38" reduceMotion={false} seconds={818} />));
-    // Minutes 0 → 1 and 0 → 3, tens of seconds 2 → 3: placed, never rolled through 13 minutes.
-    expect(strips.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, -3 * CELL, -8 * CELL]);
+    const after = [...shared];
+    // Fresh strips at rest for 0:13:38; nothing rolled through the 13 minutes.
+    expect(after.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, -3 * CELL, -8 * CELL]);
+    expect(before.map((strip) => strip.value)).toEqual([0, 0, 0, -2 * CELL, -8 * CELL]);
     act(() => tree.update(<LiveOdometer color="#fff" label="0:13:39" reduceMotion={false} seconds={819} />));
-    expect(strips[4].value).toEqual(spring(-9 * CELL));
-    expect(strips[2].value).toBe(-3 * CELL);
+    expect(after[4].value).toEqual(spring(-9 * CELL));
+    expect(after[2].value).toBe(-3 * CELL);
     act(() => tree.unmount());
   });
 
-  it("remounts the digits at rest from the current time when the app returns", () => {
+  it("a jump right after an ordinary roll leaves no roll running (Codex r1 on #377)", () => {
+    const tree = mount("0:00:09", false, 9);
+    const first = [...shared];
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:00:10" reduceMotion={false} seconds={10} />));
+    expect(first[3].value).toEqual(spring(-CELL));
+    expect(first[4].value).toEqual(spring(0));
+    shared.length = 0;
+    act(() => tree.update(<LiveOdometer color="#fff" label="0:01:10" reduceMotion={false} seconds={70} />));
+    // Every strip is new and at rest: the seconds strips that were rolling are gone with their springs.
+    expect(shared).toHaveLength(5);
+    expect(shared.map((strip) => strip.value)).toEqual([0, 0, -1 * CELL, -1 * CELL, 0]);
+    act(() => tree.unmount());
+  });
+
+  it("remounts the digits at rest in the same commit as the return to the app", () => {
     setAppState("active");
-    const tree = mount("0:00:28", false, 28);
+    const commits: number[] = [];
+    function Probe() {
+      // Renders in the same batch as the odometer (it listens to the same AppState event) and runs
+      // after that commit, before passive effects: what the first frame back would show.
+      useAppForegroundState();
+      useLayoutEffect(() => {
+        commits.push(shared.length);
+      });
+      return null;
+    }
+    shared.length = 0;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <>
+          <LiveOdometer color="#fff" label="0:00:28" reduceMotion={false} seconds={28} />
+          <Probe />
+        </>
+      );
+    });
     const before = [...shared];
     act(() => setAppState("background"));
-    shared.length = 0;
+    const commitsBeforeReturn = commits.length;
     act(() => setAppState("active"));
-    act(() => tree.update(<LiveOdometer color="#fff" label="0:13:01" reduceMotion={false} seconds={781} />));
-    const after = [...shared];
-    // Fresh strips (a remount), created at rest for 0:13:01 — no strip is left from before the break.
-    expect(after).toHaveLength(5);
-    expect(after.every((strip) => !before.includes(strip))).toBe(true);
-    expect(after.map((strip) => strip.value)).toEqual([0, -1 * CELL, -3 * CELL, 0, -1 * CELL]);
+    // The commit caused by the return already holds fresh strips (no frame with the old ones).
+    expect(commits[commitsBeforeReturn]).toBe(10);
+    expect(shared.slice(5).every((strip) => !before.includes(strip))).toBe(true);
+    expect(shared.slice(5).map((strip) => strip.value)).toEqual([0, 0, 0, -2 * CELL, -8 * CELL]);
     act(() => tree.unmount());
   });
 });

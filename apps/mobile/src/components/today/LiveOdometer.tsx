@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import Reanimated, { ReduceMotion, cancelAnimation, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
-import { useAppForeground } from "../../lib/appForeground";
+import { useAppForegroundState } from "../../lib/appForeground";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { MOBILE_DISPLAY_FONT, MOBILE_TEXT_CAP } from "../../lib/mobileTypography";
 
@@ -70,9 +70,10 @@ export function odometerFontSize({
  * 0–9 strip; only digits whose value changed move, on the UI thread, so the clock never jitters.
  * Reduce Motion sets each digit in place. VoiceOver reads the card's spoken duration instead.
  *
- * Returning to the app (investigation 2026-10-13, TestFlight 117) remounts the digits at rest from
- * the current time, so the first frame back is right whatever state a roll was left in while the
- * app was away, and a jump of more than two seconds never rolls (`odometerTickRolls`).
+ * A jump (anything but an ordinary tick, `odometerTickRolls`) and every return to the app remount the
+ * digits at rest from the time they show, in the same commit (investigation 2026-10-13, TestFlight
+ * 117: digits that changed around a return kept their old positions), so no roll survives a jump and
+ * the first frame back comes from React's own props, whatever state a roll was left in.
  */
 export function LiveOdometer({
   baseSize = 58,
@@ -92,19 +93,15 @@ export function LiveOdometer({
   const [width, setWidth] = useState<number | null>(null);
   const size = odometerFontSize({ baseSize, fontScale, label, width });
   const cellHeight = Math.round(size * ODOMETER_EM.height * 10) / 10;
-  // The seconds of the last committed render (set after commit, so a discarded render never counts).
-  const shownSeconds = useRef(seconds);
-  const roll = odometerTickRolls(shownSeconds.current, seconds);
-  useEffect(() => {
-    shownSeconds.current = seconds;
-  });
-  const foreground = useAppForeground();
-  const [restGeneration, setRestGeneration] = useState(0);
-  const wasForeground = useRef(foreground);
-  useEffect(() => {
-    if (foreground && !wasForeground.current) setRestGeneration((generation) => generation + 1);
-    wasForeground.current = foreground;
-  }, [foreground]);
+  // Counted from the previous render's seconds (React's "information from previous renders" pattern:
+  // state set during render, so a render React discards never counts).
+  const [clock, setClock] = useState({ jumps: 0, seconds });
+  let jumps = clock.jumps;
+  if (seconds !== clock.seconds) {
+    if (!odometerTickRolls(clock.seconds, seconds)) jumps += 1;
+    setClock({ jumps, seconds });
+  }
+  const { returns } = useAppForegroundState();
 
   return (
     <View
@@ -114,7 +111,7 @@ export function LiveOdometer({
       style={styles.track}
       testID="today-live-odometer"
     >
-      <View key={restGeneration} style={[styles.row, { height: cellHeight }]}>
+      <View key={`${returns}:${jumps}`} style={[styles.row, { height: cellHeight }]}>
         {odometerCells(label).map((cell) =>
           cell.kind === "digit" ? (
             <OdometerDigit
@@ -123,7 +120,6 @@ export function LiveOdometer({
               digit={Number(cell.value)}
               key={cell.key}
               reduceMotion={reduceMotion}
-              roll={roll}
               size={size}
             />
           ) : (
@@ -144,15 +140,12 @@ const OdometerDigit = memo(function OdometerDigit({
   color,
   digit,
   reduceMotion,
-  roll,
   size,
 }: {
   cellHeight: number;
   color: string;
   digit: number;
   reduceMotion: boolean;
-  /** False when the clock jumped rather than ticked: the digit is set at rest instead of rolling. */
-  roll: boolean;
   size: number;
 }) {
   const offset = useSharedValue(stripOffset(digit, cellHeight));
@@ -163,15 +156,13 @@ const OdometerDigit = memo(function OdometerDigit({
     if (previous.digit === digit && previous.cellHeight === cellHeight) return;
     placed.current = { cellHeight, digit };
     const target = stripOffset(digit, cellHeight);
-    // A new cell size (Dynamic Type, a narrower card) or a jump re-places the strip; it never rolls.
-    if (reduceMotion || !roll || previous.cellHeight !== cellHeight) {
+    // A new cell size (Dynamic Type, a narrower card) re-places the strip; it never rolls.
+    if (reduceMotion || previous.cellHeight !== cellHeight) {
       cancelAnimation(offset);
       offset.value = target;
       return;
     }
     offset.value = withSpring(target, { ...BLOCKS_SPRING.roll, reduceMotion: ReduceMotion.Never });
-    // `roll` only qualifies a change of digit; it is read with it, not watched on its own.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cellHeight, digit, offset, reduceMotion]);
 
   useEffect(() => () => cancelAnimation(offset), [offset]);
