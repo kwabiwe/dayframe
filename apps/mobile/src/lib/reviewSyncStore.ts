@@ -41,6 +41,8 @@ const DATABASE_VERSION = 7;
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const LAST_CACHE_AT_KEY = "last_cache_at";
 const LAST_SUCCESSFUL_SYNC_AT_KEY = "last_successful_sync_at";
+const SETTLED_ELSEWHERE_COUNT_KEY = "settled_elsewhere_count";
+const LAST_SETTLED_ELSEWHERE_AT_KEY = "last_settled_elsewhere_at";
 const PRESENTATION_REVISION_KEY = "presentation_revision";
 const REVIEW_PRESENTATION_CONTEXT_LIMIT = 3;
 const REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES = 4 * 1024 * 1024;
@@ -66,6 +68,15 @@ export type ReviewMutationState = typeof SYNC_STATES[number];
 function unknownOutcomeSql(alias = "") {
   return `(${alias}state = 'needs_attention' and coalesce(${alias}resolution_status,'') in ('resolution_unknown','reconciling'))`;
 }
+/**
+ * A rejection an older build parked for the person although the server had only decided the
+ * moment elsewhere (another device, or location replay superseding it). Re-checked once on an
+ * ordinary pass so it settles quietly; nothing written today matches it.
+ */
+function legacyResolvedElsewhereSql(alias = "") {
+  return `(${alias}state = 'needs_attention' and (coalesce(${alias}resolution_status,'') in ('resolution_conflict','canonical_missing')
+    or coalesce(${alias}last_error,'') in ('HTTP 409 · resolution_conflict','HTTP 409 · proposal_changed','HTTP 404 · review_item_not_found')))`;
+}
 export type ReviewItemSyncState = {
   action: string;
   state: ReviewMutationState;
@@ -80,6 +91,9 @@ export type ReviewSyncDiagnostics = {
   needsAttentionCount: number;
   /** Unknown outcomes Dayframe re-checks on its own (I1). */
   checkingCount?: number;
+  /** Actions for moments already decided elsewhere, settled quietly (never a rejection). */
+  settledElsewhereCount?: number;
+  lastSettledElsewhereAt?: string | null;
   acknowledgedCount: number;
   waitingCount: number;
   oldestQueuedAt: string | null;
@@ -1984,7 +1998,7 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
   const rows = await db.getAllAsync<MutationRow>(
     `select * from review_mutation_outbox where account_key=?
        and (? is null or client_mutation_id=?)
-       and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
+       and (state in ('pending','in_flight') or (state='needs_attention' and ?=1) or ${legacyResolvedElsewhereSql()}
          or (${unknownOutcomeSql()} and updated_at<=?)
          or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
            or (reconciliation_attempt_count=0 and (contention_count>=3 or created_at<=?)))))
@@ -2028,7 +2042,12 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         if ((proof.state==="applied"||proof.state==="equivalent_applied") && validReviewAcknowledgement(proof.result,envelope,row.review_item_id)) {
           await acknowledgeReviewMutation(row,proof.result!,response.status,isCurrent);acknowledgedCount++;continue;
         }
-        if(proof.state==="conflict"||proof.state==="missing") {await attention(proof.state==="missing"?"canonical_missing":"resolution_conflict",response.status);continue;}
+        // Gone, or decided differently elsewhere: the moment is settled, not a rejection.
+        if(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision")) {
+          const primaryStatus=proof.state==="missing"?"missing":"decided";
+          await settleResolvedElsewhere(row,proof.state==="missing"||effectRows.length<=1?[{reviewItemId:row.review_item_id,status:primaryStatus}]:[],proof.checkedAt,isCurrent);continue;
+        }
+        if(proof.state==="conflict") {await attention(proof.reason==="mutation_id_conflict"?"mutation_id_conflict":"resolution_conflict",response.status);continue;}
         if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
       }
       if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
@@ -2050,6 +2069,8 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
         continue;
       }
+      const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id));
+      if(settlement) {await settleResolvedElsewhere(row,settlement.retired,serverTime(response),isCurrent);continue;}
       await attention(safeFailureSummary(response.status,responseBody),response.status,canonicalOpenEffectIds(responseBody,row.review_item_id));
     } catch(error) {
       if(!await isCurrent() || error instanceof StaleMobileSessionResponseError || (error instanceof Error&&error.name==="AbortError")) {outcome="cancelled";stopped=true;break;}
@@ -2081,6 +2102,96 @@ async function acknowledgeReviewMutation(row: MutationRow, body: Record<string,u
   // Today is subscribed to the same durable owner. Publish at the committed
   // acknowledgement boundary rather than waiting for the rest of a 25-item
   // delivery drain to settle.
+  emitChange();
+}
+
+type RetiredReviewSource = { reviewItemId: string; status: "accepted" | "ignored" | "missing" | "decided" };
+
+/**
+ * The server answered that the moment is no longer open: decided on another device, superseded by
+ * location replay, or gone. That is the moment settling, not a rejection the person can act on
+ * (as on web). Sources the server proves still open are not retired, so only those cards return
+ * (as they now are, from the cache); everything else stays gone. Returns null for real rejections.
+ */
+export function reviewResolvedElsewhere(
+  status: number,
+  body: Record<string, unknown> | null,
+  primaryId: string,
+  sourceIds: string[]
+): { retired: RetiredReviewSource[] } | null {
+  const code = typeof body?.code === "string" ? body.code : null;
+  const sources = sourceIds.length ? sourceIds : [primaryId];
+  if (status === 404 && code === "review_item_not_found") {
+    // Which source was missing is only certain for a single-source action.
+    return { retired: sources.length === 1 ? [{ reviewItemId: primaryId, status: "missing" }] : [] };
+  }
+  if (status !== 409 || (code !== "resolution_conflict" && code !== "proposal_changed")) return null;
+  const listed = body?.canonicalReviewStatuses;
+  const statuses: Record<string, unknown> = listed && typeof listed === "object" && !Array.isArray(listed)
+    ? listed as Record<string, unknown>
+    : { [primaryId]: body?.canonicalStatus };
+  return {
+    retired: sources.flatMap((reviewItemId): RetiredReviewSource[] => {
+      const canonical = statuses[reviewItemId];
+      return canonical === "accepted" || canonical === "ignored" ? [{ reviewItemId, status: canonical }] : [];
+    })
+  };
+}
+
+function serverTime(response: { headers?: { get(name: string): string | null } }) {
+  const parsed = Date.parse(response.headers?.get("date") ?? "");
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
+}
+
+/**
+ * Settles an action whose moment the server already decided: the action and its local effects
+ * leave the outbox, retired sources leave the cache and are recorded as terminal at the server's
+ * time (so an older cached Today snapshot cannot show them again, while a later read that lists
+ * one open, e.g. replay reopening it, still brings it back). Counted, never shown as an issue.
+ */
+async function settleResolvedElsewhere(
+  row: MutationRow,
+  retired: RetiredReviewSource[],
+  checkedAt: string,
+  isCurrent: () => Promise<boolean>
+) {
+  const db = await database();
+  const now = new Date().toISOString();
+  await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
+    if (!await isCurrent()) throw new StaleMobileSessionResponseError();
+    for (const source of retired) {
+      await transaction.runAsync(
+        "delete from review_item_cache where account_key = ? and review_item_id = ?",
+        row.account_key, source.reviewItemId
+      );
+      if (!DAYFRAME_BACKEND_ID) continue;
+      await transaction.runAsync(
+        `insert into review_presentation_terminal_source (
+           account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
+         ) values (?, ?, 'settled_elsewhere', ?, ?, ?, ?)
+         on conflict(account_key, review_item_id) do update set
+           scope_key = excluded.scope_key, backend_id = excluded.backend_id,
+           snapshot_token = excluded.snapshot_token, status = excluded.status,
+           captured_at = max(review_presentation_terminal_source.captured_at, excluded.captured_at)`,
+        row.account_key, source.reviewItemId, DAYFRAME_BACKEND_ID, `settled:${row.client_mutation_id}`,
+        source.status === "decided" ? (row.action_kind.startsWith("ignore") ? "accepted" : "ignored") : source.status,
+        checkedAt
+      );
+    }
+    await transaction.runAsync(
+      "delete from review_mutation_effects where client_mutation_id = ? and account_key = ?",
+      row.client_mutation_id, row.account_key
+    );
+    await transaction.runAsync(
+      "delete from review_mutation_outbox where client_mutation_id = ? and account_key = ?",
+      row.client_mutation_id, row.account_key
+    );
+    const countKey = accountMetadataKey(SETTLED_ELSEWHERE_COUNT_KEY, row.account_key);
+    const settled = (Number(await metadata(countKey, transaction)) || 0) + 1;
+    await setMetadata(countKey, String(settled), transaction);
+    await setMetadata(accountMetadataKey(LAST_SETTLED_ELSEWHERE_AT_KEY, row.account_key), now, transaction);
+    await setMetadata(accountMetadataKey(LAST_SUCCESSFUL_SYNC_AT_KEY, row.account_key), now, transaction);
+  }));
   emitChange();
 }
 
@@ -2228,6 +2339,8 @@ async function reviewSyncDiagnosticsForAccount(
     needsAttentionCount: Number(diagnostics.needs_attention_count) || 0,
     acknowledgedCount: Number(diagnostics.acknowledged_count) || 0,
     checkingCount,
+    settledElsewhereCount: Number(await metadata(accountMetadataKey(SETTLED_ELSEWHERE_COUNT_KEY, account.account_key), db)) || 0,
+    lastSettledElsewhereAt: await metadata(accountMetadataKey(LAST_SETTLED_ELSEWHERE_AT_KEY, account.account_key), db),
     waitingCount: pendingCount + retryWaitCount + authenticationRequiredCount + checkingCount,
     oldestQueuedAt: diagnostics.oldest_queued_at,
     lastSuccessfulSyncAt: await metadata(
@@ -2579,7 +2692,8 @@ async function latestPresentationBackendId(accountKeyValue: string) {
      limit 1`,
     accountKeyValue
   );
-  return row?.backend_id ?? null;
+  // No presentation read cached yet: this build's own backend (where settled sources are recorded).
+  return row?.backend_id ?? DAYFRAME_BACKEND_ID ?? null;
 }
 
 async function presentationBackendIdForBootstrap(
