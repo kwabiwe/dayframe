@@ -24,16 +24,19 @@ describe("formatLocaleDate", () => {
   });
   it("never reuses a formatter between zones that share an offset (Codex r2 on #374)", () => {
     const original = process.env.TZ;
+    vi.useFakeTimers();
     try {
       // London and Lagos are both UTC+1 in summer; January differs (London is UTC+0).
       process.env.TZ = "Europe/London";
       clearLocaleDateFormats();
       formatLocaleDate(new Date(2026, 6, 1), { month: "short" });
       process.env.TZ = "Africa/Lagos";
-      clearLocaleDateFormats();
+      // No clear: only the throttled zone re-read (30 s) separates the two zones' formatters.
+      vi.setSystemTime(Date.now() + 31_000);
       const january = new Date(2026, 0, 1, 0, 30);
       expect(formatLocaleDate(january, { month: "short" })).toBe(january.toLocaleDateString(undefined, { month: "short" }));
     } finally {
+      vi.useRealTimers();
       process.env.TZ = original;
       clearLocaleDateFormats();
     }

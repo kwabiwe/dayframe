@@ -88,6 +88,7 @@ function ReportsTabView({
   nowMs,
   styles,
   theme,
+  timeZoneId,
 }: {
   data: MobileBootstrap;
   /** Week, as in the prototype; tests start other ranges directly. */
@@ -98,6 +99,8 @@ function ReportsTabView({
   nowMs: number;
   styles: MobileStyles;
   theme: MobileTheme;
+  /** The device zone: a change rebuilds the range and its labels, keeping selections and caches. */
+  timeZoneId?: string;
 }) {
   const [choice, setChoice] = useState<ReportRangeChoice>(initialChoice);
   const sheetPortal = useContext(ReportsSheetPortalContext);
@@ -149,7 +152,8 @@ function ReportsTabView({
   activeDatePresentation.current = datePresentation;
   reportsOwnerActive.current = isFocused && foreground;
   const day = formatLocalDateKey(new Date(nowMs));
-  const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const range = useMemo(() => buildReportRange(choice, nowMs), [choice, day, timeZoneId]);
   const requestKey = JSON.stringify(range.request);
   // The same stretch of the previous period, for the hero's change pill (none for custom ranges).
   const previous = useMemo(

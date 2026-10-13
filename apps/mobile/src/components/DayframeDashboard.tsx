@@ -1479,7 +1479,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // change on the minute. In the background nothing ticks (location can keep the app alive for hours,
   // and every tick re-rendered all three tabs); returning to the foreground reads the time at once.
   const minuteFloorNow = Math.floor(now / 60_000) * 60_000;
-  // Reports memoises its day labels: a new time zone remounts it so they are built again.
+  // Reports memoises its range and day labels: a new time zone rebuilds them (selections and cached
+  // totals stay).
   const timeZoneId = currentTimeZoneId(minuteFloorNow);
   const needsSecondClock = Boolean(
     retainedActiveEntryForSheet || (calendarEditEntry && !calendarEditEntry.stoppedAt)
@@ -3187,7 +3188,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
           {data ? (
             <ReportsTab
-              key={`${DAYFRAME_BACKEND_ID ?? data.serverBuild?.backendId ?? "unknown-backend"}:${data.workspace.id}:${data.user.id}:${timeZoneId}`}
+              key={`${DAYFRAME_BACKEND_ID ?? data.serverBuild?.backendId ?? "unknown-backend"}:${data.workspace.id}:${data.user.id}`}
               data={data}
               isFocused={isFocused}
               // The exact time while Reports is on screen (it floors to the minute itself unless a block
@@ -3195,6 +3196,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               // skips the Dashboard's other ticks.
               nowMs={isFocused ? now : minuteFloorNow}
               onScrubbingChange={setReportsScrubbing}
+              timeZoneId={timeZoneId}
               styles={styles}
               theme={theme}
             />
