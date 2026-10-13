@@ -1630,6 +1630,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     categoryLabel: displayedActiveEntry.categoryName ? activeCategoryLabel : null,
     elapsedLabel: formatLiveClock(displayedActiveDurationSeconds),
     elapsedSeconds: displayedActiveDurationSeconds,
+    durationSeconds: displayedActiveEntry.durationSeconds,
     hasLiveActiveTimer,
     startedAt: displayedActiveEntry.startedAt,
     startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,

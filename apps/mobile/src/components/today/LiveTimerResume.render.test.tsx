@@ -61,6 +61,7 @@ import { BLOCKS_SPRING } from "../../lib/blocksMotion";
 import { useDashboardClockTicks, useLiveTimeInFront } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
 import { LiveOdometer, ODOMETER_EM } from "./LiveOdometer";
+import { useLiveBlockElapsed, type LiveBlockClockInput } from "./liveBlockClock";
 import { formatLiveClock } from "./todayBlocksLayout";
 
 const CELL = Math.round(58 * ODOMETER_EM.height * 10) / 10;
@@ -234,6 +235,76 @@ describe("live timer behind Settings (iPhone 17, 13 Oct)", () => {
       vi.advanceTimersByTime(1000);
     });
     expect(strips[4].value).toEqual({ config: { ...BLOCKS_SPRING.roll, reduceMotion: "never" }, kind: "spring", to: -6 * CELL });
+    act(() => tree.unmount());
+  });
+});
+
+let providerCommits = 0;
+/** The live block with its own clock (useLiveBlockElapsed), as TodayLiveBlock renders it. */
+function LiveBlockTime({ active, reduceMotion }: { active: LiveBlockClockInput; reduceMotion: boolean }) {
+  const elapsed = useLiveBlockElapsed(active);
+  useLayoutEffect(() => {
+    commits.push(shownDigits(shared.slice(-5)));
+  });
+  return <LiveOdometer color="#000" label={elapsed.label} reduceMotion={reduceMotion} seconds={elapsed.seconds} />;
+}
+/** The Dashboard's side: behind Settings it moves on the minute; the route has not changed yet. */
+function CoveredDashboard({ inFront }: { inFront: boolean }) {
+  const foreground = useAppForeground();
+  const [now, setNow] = useState(() => Date.now());
+  const liveTimeInFront = useLiveTimeInFront(inFront, setNow);
+  useDashboardClockTicks({ foreground, needsSecondClock: true, secondsShown: liveTimeInFront, setNow });
+  const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  useLayoutEffect(() => {
+    providerCommits += 1;
+  });
+  return (
+    <LiveBlockTime
+      active={{
+        durationSeconds: 0,
+        elapsedLabel: formatLiveClock(seconds),
+        elapsedSeconds: seconds,
+        hasLiveActiveTimer: true,
+        startedAt: STARTED_AT,
+      }}
+      reduceMotion={!liveTimeInFront}
+    />
+  );
+}
+
+describe("the live block keeps its own time while Today is covered (Codex r1 on #384)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    appState.currentState = "active";
+    appState.listeners.clear();
+    appState.changeWhileSubscribing = null;
+    shared.length = 0;
+    commits.length = 0;
+    providerCommits = 0;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the true time every second behind Settings, so a swipe back reveals it before the route changes", () => {
+    vi.setSystemTime(new Date("2026-10-13T13:48:38.800Z"));
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<CoveredDashboard inFront={false} />);
+    });
+    const providerAtStart = providerCommits;
+    // 85 s behind Settings, one act per second: the block's digits follow real time each second...
+    for (let second = 0; second < 85; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+    }
+    // ...0:01:53 at 13:50:03.8, while the Dashboard re-rendered only at the two minute boundaries.
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
+    expect(providerCommits - providerAtStart).toBe(2);
+    // The route flips to Today when the swipe completes: the time shown stays right (no jump back).
+    act(() => tree.update(<CoveredDashboard inFront />));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 1, 5, 3]);
     act(() => tree.unmount());
   });
 });

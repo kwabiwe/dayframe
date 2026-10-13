@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 
 /**
@@ -24,8 +24,11 @@ export function useDashboardClockTicks({
   secondsShown?: boolean;
   setNow: (now: number) => void;
 }) {
+  // Published from the committed render only (Codex r1 on #384: a discarded render must not change it).
   const secondsShownRef = useRef(secondsShown);
-  secondsShownRef.current = secondsShown;
+  useLayoutEffect(() => {
+    secondsShownRef.current = secondsShown;
+  }, [secondsShown]);
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") setNow(Date.now());

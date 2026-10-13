@@ -21,6 +21,7 @@ import { playHaptic } from "../../lib/haptics";
 import { LIVE_FLIGHT_NODE, flightNodeRef } from "../../lib/stopFlight";
 import { LIVE_SWIPE_COMMIT, liveSwipeOffset, liveSwipeRawFor } from "../../lib/todaySwitch";
 import { LiveOdometer } from "./LiveOdometer";
+import { useLiveBlockElapsed } from "./liveBlockClock";
 import { TODAY_CARD, TODAY_CARD_ACTIONS_WIDTH, colorWithAlpha, spokenDuration } from "./todayBlocksLayout";
 
 export type TodayLiveBlockPresentation = {
@@ -35,6 +36,8 @@ export type TodayLiveBlockPresentation = {
    * to it; the queued Start's optimistic id being swapped for the server's keeps the same start.
    */
   startedAt?: string;
+  /** The running entry's stored duration: with `startedAt`, the live block's own second clock. */
+  durationSeconds?: number;
   hasLiveActiveTimer: boolean;
   startedLabel: string | null;
   title: string;
@@ -88,6 +91,7 @@ export function TodayLiveBlock({
   }, [active.categoryColor, active.categoryLabel, theme.mode, theme.surfaceRaised, theme.textPrimary]);
   const landingStyle = useBlockLanding({ distance: LIVE_LANDING_DISTANCE, reduceMotion, request: landing });
   const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion });
+  const elapsed = useLiveBlockElapsed(active);
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
   const ghost = ghostContentStyle !== undefined;
@@ -126,7 +130,7 @@ export function TodayLiveBlock({
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "switch" && active.hasLiveActiveTimer) onSwitch();
         }}
-        accessibilityValue={{ text: `${activityName}. ${active.title}. ${spokenDuration(active.elapsedSeconds)} so far.` }}
+        accessibilityValue={{ text: `${activityName}. ${active.title}. ${spokenDuration(elapsed.seconds)} so far.` }}
         disabled={!active.hasLiveActiveTimer}
         onPress={onOpen}
         style={({ pressed }) => [styles.main, pressed && active.hasLiveActiveTimer ? styles.pressed : null]}
@@ -164,9 +168,9 @@ export function TodayLiveBlock({
             <LiveOdometer
               color={colors.text}
               key={active.startedAt ?? "live"}
-              label={active.elapsedLabel}
+              label={elapsed.label}
               reduceMotion={reduceMotion || motionPaused}
-              seconds={active.elapsedSeconds}
+              seconds={elapsed.seconds}
             />
           </Animated.View>
           {/* The start time wraps instead of clipping: when it is too wide to sit beside the

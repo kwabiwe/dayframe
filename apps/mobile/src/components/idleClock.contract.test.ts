@@ -31,6 +31,10 @@ describe("idle and background clock work", () => {
     expect(dashboard).toContain("const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);");
     expect(dashboard).toMatch(/const secondsShown = Boolean\(retainedActiveEntryForSheet && liveTimeInFront\) \|\|\s*Boolean\(activeEditPresentation\) \|\| runningCalendarEdit;/);
     expect(dashboard).toContain("[DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route]");
+    // The live block keeps its own second clock, so a swipe back reveals the true time (Codex r1 on #384).
+    expect(liveBlock).toContain("const elapsed = useLiveBlockElapsed(active);");
+    expect(liveBlock).toContain("seconds={elapsed.seconds}");
+    expect(dashboard).toContain("durationSeconds: displayedActiveEntry.durationSeconds,");
     // Coming back reads the time in that same render.
     expect(clock).toMatch(/if \(inFront !== wasInFront\) \{\s*setWasInFront\(inFront\);\s*if \(inFront\) setNow\(Date\.now\(\)\);/);
   });
