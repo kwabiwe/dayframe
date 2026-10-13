@@ -238,4 +238,13 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(deck).toMatch(/deckStyles\.activityChip, deckStyles\.activityChipButton, \{ backgroundColor: card\.color \}\]\}>/);
     expect(deck).toMatch(/logAsStaticName: \{\s*justifyContent: "center",\s*minHeight: 44/);
   });
+
+  it("starts a handed-over toast settled, so its later exit starts from rest (Codex r1 on #373)", () => {
+    const toast = source("../blocks/BlocksToast.tsx");
+    expect(toast).toContain('useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering")');
+    expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(String(held.token))}");
+    expect(screen).toContain("appearSettled={shownDeckToastKeysRef.current.has(`notice-${notice.token}`)}");
+    expect(screen).toMatch(/useEffect\(\(\) => \{\s*if \(activeDeckToastKey\) shownDeckToastKeysRef\.current\.add\(activeDeckToastKey\);/);
+  });
 });
+

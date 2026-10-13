@@ -203,6 +203,7 @@ export default function ReviewScreen() {
   // in the deck toast's place (a held decision's Undo toast always wins that place).
   const confirmSheet = useBlocksConfirm();
   const deckNotice = useBlocksNotice();
+  const shownDeckToastKeysRef = useRef(new Set<string>());
   const [data, setData] = useState<MobileBootstrap | null>(null);
   const [reviewBacklog, setReviewBacklog] = useState<ReviewBacklogState | null>(null);
   const [reviewBacklogLoading, setReviewBacklogLoading] = useState(false);
@@ -221,6 +222,12 @@ export default function ReviewScreen() {
   const deferGenerations = useRef(new Map<string, number>());
   // Blocks parity step 5b: a thrown card is held for Undo before its decision is saved.
   const [heldDeckDecision, setHeldDeckDecision] = useState<ReviewDeckHeld | null>(null);
+  // A toast key goes into this set once it has been on screen (after commit), so the same toast
+  // handed to another slot when the deck changes branch starts settled instead of rising again.
+  const activeDeckToastKey = heldDeckDecision ? String(heldDeckDecision.token) : deckNotice.notice ? `notice-${deckNotice.notice.token}` : null;
+  useEffect(() => {
+    if (activeDeckToastKey) shownDeckToastKeysRef.current.add(activeDeckToastKey);
+  }, [activeDeckToastKey]);
   // A single thrown card (most of the deck's flight and Undo logic is about this one).
   const heldDeckCard = heldDeckDecision?.kind === "single" ? heldDeckDecision : null;
   // Step 5f: a bulk skip is being counted (older backlog pages load before the confirmation).
@@ -2110,6 +2117,7 @@ export default function ReviewScreen() {
       const notice = deckNotice.notice;
       return notice ? (
         <BlocksToast
+          appearSettled={shownDeckToastKeysRef.current.has(`notice-${notice.token}`)}
           key={`notice-${notice.token}`}
           message={notice.message}
           reduceMotion={reduceMotion}
@@ -2131,6 +2139,7 @@ export default function ReviewScreen() {
     // hold (reviewDeckHold.ts, 4.8 s) still owns its lifetime; the token re-mounts a newer toast.
     return (
       <BlocksToast
+        appearSettled={shownDeckToastKeysRef.current.has(String(held.token))}
         key={held.token}
         actionAccessibilityLabel={undoLabel}
         actionLabel="Undo"
