@@ -234,17 +234,22 @@ export function useBreathingRing({
     }
     const half = BREATHING_RING.cycleMs / 2;
     const ease = Easing.inOut(Easing.sin);
+    const toMax = () => withTiming(BREATHING_RING.maxOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never });
     // The first rise starts from wherever the ring held (its reduced opacity, or part-way through a
-    // fade), so breathing resumes without a step down.
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(BREATHING_RING.maxOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never }),
-        withTiming(BREATHING_RING.minOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never })
-      ),
-      -1,
-      false,
-      undefined,
-      ReduceMotion.Never
+    // fade), so breathing resumes without a step down. The cycle after it starts and ends at the
+    // maximum: a repeat restarts each cycle from the value it started at.
+    opacity.value = withSequence(
+      toMax(),
+      withRepeat(
+        withSequence(
+          withTiming(BREATHING_RING.minOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never }),
+          toMax()
+        ),
+        -1,
+        false,
+        undefined,
+        ReduceMotion.Never
+      )
     );
     return () => cancelAnimation(opacity);
   }, [foreground, live, opacity, paused, reduceMotion]);
