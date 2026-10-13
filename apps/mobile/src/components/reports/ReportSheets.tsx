@@ -258,6 +258,8 @@ export function ReportDateSheet({
   initial: ReportRangeChoice;
   nowMs: number;
   theme: MobileTheme;
+  /** The device zone its "today" and labels are read in: a change re-renders the open picker. */
+  timeZoneId?: string;
   reduceMotion: boolean;
   onApply: (range: ReportRangeChoice) => boolean | void;
   onDismissed: (presentationId: number) => void;

@@ -466,6 +466,7 @@ function ReportsTabView({
           initial={datePresentation.initial}
           nowMs={nowMs}
           theme={theme}
+          timeZoneId={timeZoneId}
           reduceMotion={reduceMotion}
           onApply={(value) => {
             if (activeDatePresentation.current?.id !== datePresentation.id)
@@ -484,6 +485,9 @@ function ReportsTabView({
       reduceMotion,
       releaseDatePresentation,
       theme,
+      // An open picker's "today" and day labels follow the device zone, also when only the zone
+      // changed (Codex Nice-to-have on #374).
+      timeZoneId,
     ],
   );
   const presentedSheet = filterSheet ?? dateSheet;

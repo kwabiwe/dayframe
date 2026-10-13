@@ -730,6 +730,35 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     act(() => tree.unmount());
   });
 
+  it("re-renders an open date picker when only the device zone changes (Codex Nice-to-have on #374)", async () => {
+    let tree!: ReturnType<typeof create>;
+    // Every other prop keeps its identity, so only the zone can invalidate the picker's memo.
+    const styles = {} as never;
+    const theme = { mode: "dark" } as never;
+    const reports = (timeZoneId: string) => (
+      <ReportsTab
+        data={data}
+        initialChoice="week"
+        isFocused
+        nowMs={nowMs}
+        styles={styles}
+        theme={theme}
+        timeZoneId={timeZoneId}
+      />
+    );
+    await act(async () => {
+      tree = create(reports("Europe/London"));
+    });
+    await act(async () =>
+      tree.root.findByType("ReportRangeSwitch" as never).props.onMore(),
+    );
+    expect(tree.root.findByType("ReportDateSheet" as never).props.timeZoneId).toBe("Europe/London");
+    // Same instant, new zone: the picker's "today" and labels must follow at once.
+    await act(async () => tree.update(reports("Africa/Lagos")));
+    expect(tree.root.findByType("ReportDateSheet" as never).props.timeZoneId).toBe("Africa/Lagos");
+    act(() => tree.unmount());
+  });
+
   it("announces the hero once after a user change, not on refreshes", async () => {
     mocks.announce.mockReset();
     const tree = await week();
