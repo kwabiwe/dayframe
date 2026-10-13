@@ -1209,6 +1209,33 @@ describe("Terminal evidence against newer open reads: Codex r2 on #370", () => {
   });
 });
 
+describe("Review cache keeps one shape per proposal (12 Oct 2026 footnote flicker)", () => {
+  it("keeps earlier reason fields under a time-away subtype the presentation supplies", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
+      ? { ...candidate, rawPayload: { semanticReason: "time_away_review_only" } } : candidate) });
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" };
+    const response = openPresentation(data, item.id, "a".repeat(64));
+    response.lookup.reviewItems[0] = { ...response.lookup.reviewItems[0], timeAway: { stopCount: 1 } } as never;
+    await store.cacheReviewPresentation({ owner, response });
+    const cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
+    expect(cached.rawPayload).toEqual(expect.objectContaining({ semanticReason: "time_away_review_only", qualificationReason: "same_place_outing", stopCount: 1 }));
+  });
+  it("keeps the bootstrap's reason fields when a presentation read rewrites the same proposal, and drops them for a changed one", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
+      ? { ...candidate, rawPayload: { ...candidate.rawPayload, semanticReason: "review_mode", travelMode: "car" } } : candidate) });
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" };
+    await store.cacheReviewPresentation({ owner, response: openPresentation(data, item.id, "a".repeat(64)) });
+    let cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
+    expect(cached.rawPayload).toEqual(expect.objectContaining({ semanticReason: "review_mode", travelMode: "car" }));
+    const moved = { ...item, suggestedStartedAt: "2026-08-28T09:00:00.000Z" };
+    await store.cacheReviewPresentation({ owner, response: { ...openPresentation({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id ? moved : candidate) }, item.id, "b".repeat(64)), capturedAt: "2026-08-28T18:05:00.000Z" } });
+    cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
+    expect(cached.rawPayload).toBeNull();
+  });
+});
+
 function terminalPresentation(
   data: ReturnType<typeof bootstrap>,
   reviewIds: string[],

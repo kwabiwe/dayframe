@@ -85,6 +85,7 @@ import {
 } from "@/lib/reviewDeck";
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
 import { createReviewKnownItems, reviewDataOwnerKey } from "@/lib/reviewKnownItems";
+import { liveReviewItems, projectReviewScreenData } from "@/lib/reviewScreenProjection";
 import {
   REVIEW_COPY,
   isTimeAwayReviewItem,
@@ -272,6 +273,10 @@ export default function ReviewScreen() {
     Map<string, ReviewItemSyncState>
   >(new Map());
   const dataRef = useRef<MobileBootstrap | null>(null);
+  // The latest bootstrap's open items, shown in place of their cached copies while unchanged.
+  const liveReviewItemsRef = useRef<ReadonlyMap<string, MobileReviewItem>>(new Map());
+  // One projection re-read at a time; a burst of store changes runs it once more at most.
+  const projectionReadRef = useRef({ running: false, again: false });
   const editTargetRef = useRef<ReviewEditTarget | null>(null);
   const editPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
   const editPresentationSequence = useRef(0);
@@ -354,6 +359,7 @@ export default function ReviewScreen() {
       reviewBacklogRef.current = null;
       // Cards the deck remembers (for Undo or a failed save) belong to the previous account.
       knownDeckItems.clear();
+      liveReviewItemsRef.current = new Map();
       setReviewBacklog(null);
       setReviewBacklogLoading(false);
     }
@@ -402,7 +408,10 @@ export default function ReviewScreen() {
       return false;
     }
     const current = dataRef.current;
-    commitData(current ? mergeReviewBootstrapProjection(current, cached.bootstrap) : cached.bootstrap);
+    const next = current
+      ? projectReviewScreenData({ base: current, projection: cached.bootstrap, live: liveReviewItemsRef.current, current })
+      : cached.bootstrap;
+    if (next !== current) commitData(next);
     return true;
   }, [commitData]);
 
@@ -535,8 +544,10 @@ export default function ReviewScreen() {
         ) {
           return;
         }
-        const nextBootstrap = mergeReviewBootstrapProjection(current, cached.bootstrap);
-        commitData(nextBootstrap);
+        const nextBootstrap = projectReviewScreenData({
+          base: current, projection: cached.bootstrap, live: liveReviewItemsRef.current, current
+        });
+        if (nextBootstrap !== current) commitData(nextBootstrap);
         commitReviewBacklog(nextBacklog);
         startEvidencePrefetch(nextBootstrap);
         setReviewAvailabilityMessage(null);
@@ -606,7 +617,22 @@ export default function ReviewScreen() {
       ) {
         return;
       }
-      commitBootstrap(bootstrap);
+      // The bootstrap's Review list is capped and carries no local decisions: the screen shows the
+      // store's projection of it (written by fetchBootstrap), never the raw list, so a reload can
+      // not briefly drop or re-add cards.
+      const live = liveReviewItems(bootstrap);
+      const projection = await loadCachedReviewBootstrap().catch(() => null);
+      if (
+        generation !== screenOwnerGeneration.current ||
+        !screenFocusedRef.current
+      ) {
+        return;
+      }
+      commitBootstrap(projection
+        ? projectReviewScreenData({ base: bootstrap, projection: projection.bootstrap, live, current: dataRef.current })
+        : bootstrap);
+      // After the commit, which forgets a previous account's live items.
+      liveReviewItemsRef.current = live;
       setReviewAvailabilityMessage(null);
       await refreshReviewSyncDiagnostics();
       startEvidencePrefetch(bootstrap);
@@ -635,7 +661,7 @@ export default function ReviewScreen() {
           const current = dataRef.current;
           const nextBootstrap =
             current
-              ? mergeReviewBootstrapProjection(current, cached.bootstrap)
+              ? projectReviewScreenData({ base: current, projection: cached.bootstrap, live: liveReviewItemsRef.current, current })
               : cached.bootstrap;
           commitBootstrap(nextBootstrap);
           startEvidencePrefetch(nextBootstrap);
@@ -748,8 +774,24 @@ export default function ReviewScreen() {
     void refreshReviewSyncDiagnostics();
     return subscribeReviewSync(() => {
       if (!screenFocusedRef.current) return;
-      void reconcileLocalReviewProjection();
-      void refreshReviewSyncDiagnostics();
+      const read = projectionReadRef.current;
+      if (read.running) {
+        read.again = true;
+        return;
+      }
+      read.running = true;
+      void (async () => {
+        try {
+          do {
+            read.again = false;
+            await reconcileLocalReviewProjection().catch(() => false);
+            await refreshReviewSyncDiagnostics().catch(() => undefined);
+          } while (read.again && screenFocusedRef.current);
+        } finally {
+          read.running = false;
+          read.again = false;
+        }
+      })();
     });
   }, [reconcileLocalReviewProjection, refreshReviewSyncDiagnostics]);
 
@@ -2499,30 +2541,6 @@ function collectReviewNeededEntries(
   return Array.from(byId.values()).sort(
     (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
   );
-}
-
-export function mergeReviewBootstrapProjection(
-  current: MobileBootstrap,
-  projection: MobileBootstrap
-) {
-  if (
-    current.workspace.id !== projection.workspace.id ||
-    current.user.id !== projection.user.id
-  ) {
-    return projection;
-  }
-  return {
-    ...current,
-    workspace: projection.workspace,
-    categories: projection.categories,
-    reviewItems: projection.reviewItems,
-    stats: current.stats
-      ? {
-          ...current.stats,
-          reviewCount: projection.stats?.reviewCount ?? projection.reviewItems.length
-        }
-      : projection.stats
-  };
 }
 
 function mergeFocusedReviewItem(current: MobileBootstrap, target: MobileReviewItem): MobileBootstrap {
