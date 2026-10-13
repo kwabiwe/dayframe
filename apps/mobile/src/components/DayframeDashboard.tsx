@@ -2,6 +2,7 @@ import { clearLocaleDateFormats, currentTimeZoneId } from "@/lib/localeDateForma
 import { useAppForeground } from "@/lib/appForeground";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
 import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
+import { livePresentationAt } from "@/components/today/liveBlockClock";
 import {
   createContext,
   useCallback,
@@ -299,8 +300,11 @@ function DashboardBrandLockup({
   );
 }
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
-/** The tabs that show a running block's live seconds: Today's live block and Reports' running totals. */
-const LIVE_TIME_PATHNAMES = new Set([DAYFRAME_NATIVE_TABS.today.route, DAYFRAME_NATIVE_TABS.reports.route].map((route) => `/${route}`));
+/**
+ * The tab that shows a running block's live seconds from the Dashboard's clock: Reports' running totals.
+ * Today's live block keeps its own clock (`useLiveBlockElapsed`), so Today in front needs none.
+ */
+const LIVE_TIME_PATHNAMES = new Set([`/${DAYFRAME_NATIVE_TABS.reports.route}`]);
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
@@ -341,7 +345,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [authNotice, setAuthNotice] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const appIsForeground = useAppForeground();
-  // Settings, Review and Calendar cover the live time; coming back to it reads the time in that render.
+  // Reports' running totals read the Dashboard's seconds; coming back to Reports reads the time in that render.
   const liveTimeInFront = useLiveTimeInFront(LIVE_TIME_PATHNAMES.has(usePathname()), setNow);
   const [manualDraftEntry, setManualDraftEntry] = useState<TimeEntry | null>(null);
   const [manualEntryPresentation, setManualEntryPresentation] = useState<TimeEntrySheetPresentation | null>(null);
@@ -1482,9 +1486,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const retainedActiveEntryForSheet = activeEntryForDisplay ?? presentedActiveEntry;
   // The Dashboard's clock (`useDashboardClockTicks`): whole seconds only while a block runs (or its
   // sheet or a running Calendar entry is open), otherwise on the minute; nothing in the background.
-  // Whole seconds re-render the Dashboard only while they are on screen: a running block with Today
-  // or Reports in front, or a running entry's sheet. Behind Settings every tick re-rendered all three
-  // tabs (about 150 ms of JS a second on the iPhone 17, 13 Oct).
+  // Whole seconds re-render the Dashboard only while it shows them: a running block with Reports in
+  // front, or a running entry's sheet. Today's live block has its own clock (`useLiveBlockElapsed`).
+  // Each tick re-rendered all three tabs: about 150 ms of JS a second on the iPhone 17 (13 Oct).
   const minuteFloorNow = Math.floor(now / 60_000) * 60_000;
   // Reports memoises its range and day labels: a new time zone rebuilds them (selections and cached
   // totals stay).
@@ -1844,7 +1848,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function stopFromToday() {
     const entryId = latestData.current?.activeEntry?.id;
-    const presentation = todayLivePresentation;
+    // The ghost shows the time the block stopped at (the Dashboard itself moves on the minute).
+    const presentation = todayLivePresentation && livePresentationAt(todayLivePresentation, Date.now());
     // No flight under Reduce Motion, or before the overlay that draws the ghost has measured itself.
     if (reduceMotion || !entryId || !presentation || !stopFlightOverlayReady()) {
       runStopFromToday(entryId, null);
