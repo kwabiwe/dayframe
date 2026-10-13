@@ -9,7 +9,7 @@ import {
   Text,
   View
 } from "react-native";
-import Reanimated from "react-native-reanimated";
+import Reanimated, { LayoutAnimationConfig } from "react-native-reanimated";
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from "expo-router";
 import type { NativeStackNavigationProp } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -2089,6 +2089,20 @@ export default function ReviewScreen() {
   // feedback C1: it used to sit above them, over the bottom of the card), or under Back to Today
   // once all is framed / under the waiting copy, always out of flow, so it never covers the card or
   // the controls whatever the phone height or text size, and its exit moves nothing.
+  // Each place the toast can hang (under the round actions, under Back to Today, under the waiting
+  // copy) is a slot that is always mounted with its branch. When the deck changes branch while a
+  // toast is up (the last card thrown, "All framed" appearing) the same toast continues in the new
+  // slot: it does not rise in again there, and the slot that went away takes its copy with it
+  // instead of leaving a fading ghost. A toast that times out inside a mounted slot still leaves
+  // with its own exit, and one raised later still rises in.
+  function deckToastSlot(placement: "actions" | "under") {
+    return (
+      <LayoutAnimationConfig skipEntering skipExiting>
+        {renderDeckToast(placement)}
+      </LayoutAnimationConfig>
+    );
+  }
+
   function renderDeckToast(placement: "actions" | "under") {
     const held = heldDeckDecision;
     const placementStyle = placement === "under" ? styles.reviewDeckToastUnderButton : styles.reviewDeckToast;
@@ -2194,7 +2208,7 @@ export default function ReviewScreen() {
             blocks={deckVisit.logged.map((block) => block.color)}
             copy={deckFinishedCopy(deckVisit.logged, deckVisit.decided)}
             celebrate={celebrateDeckFinish.current}
-            footer={renderDeckToast("under")}
+            footer={deckToastSlot("under")}
             onBack={() => router.back()}
             reduceMotion={reduceMotion}
             theme={theme}
@@ -2256,7 +2270,7 @@ export default function ReviewScreen() {
               theme={theme}
             />
               {/* After the actions: below them on screen and after them for VoiceOver. */}
-              {renderDeckToast("actions")}
+              {deckToastSlot("actions")}
             </View>
           </>
         ) : (
@@ -2276,7 +2290,7 @@ export default function ReviewScreen() {
                 <Text {...mobileTextProps("control")} style={styles.secondaryButtonText}>Show more</Text>
               </Pressable>
             ) : null}
-            {renderDeckToast("under")}
+            {deckToastSlot("under")}
             </View>
           </View>
         )}

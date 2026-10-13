@@ -562,14 +562,18 @@ function ReviewDeckCardView({
               ]}
               testID={top ? "review-deck-log-as" : undefined}
             >
-              <Text
-                {...mobileTextProps("control")}
-                numberOfLines={1}
-                style={[deckStyles.logAsName, { color: theme.textPrimary }]}
-              >
-                {card.logAsName}
-              </Text>
-              <View style={[deckStyles.activityChip, { backgroundColor: card.color }]}>
+              {/* Same 44-point geometry as the top card's field and activity button, so a card
+                  promoted to the top (or whose sync state changes) swaps content without moving. */}
+              <View style={[deckStyles.logAsName, deckStyles.logAsStaticName]}>
+                <Text
+                  {...mobileTextProps("control")}
+                  numberOfLines={1}
+                  style={[deckStyles.logAsNameText, { color: theme.textPrimary }]}
+                >
+                  {card.logAsName}
+                </Text>
+              </View>
+              <View style={[deckStyles.activityChip, deckStyles.activityChipButton, { backgroundColor: card.color }]}>
                 <Text {...mobileTextProps("counter")} numberOfLines={1} style={[deckStyles.activityChipText, { color: card.onColor }]}>
                   {card.activityName}
                 </Text>
@@ -1018,6 +1022,14 @@ const deckStyles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     minWidth: 0
+  },
+  logAsNameText: {
+    fontSize: 16,
+    fontWeight: "600"
+  },
+  logAsStaticName: {
+    justifyContent: "center",
+    minHeight: 44
   },
   more: {
     alignItems: "center",
