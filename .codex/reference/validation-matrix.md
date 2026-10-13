@@ -108,6 +108,12 @@ Required when changing text roles, row composition, settings presentation, Revie
 
 ## Health And Review
 
+Required checks when changing Reanimated or worklets static feature flags (`apps/mobile/package.json`):
+
+- `pod install` with Xcode 26.6 and `LANG=en_US.UTF-8`; commit only the changed pod's checksum (environment-generated `hermes-engine`, `React-Core-prebuilt` and `ReactNativeDependencies` checksums stay as they are).
+- A native Staging build on a physical iPhone, then every Reanimated surface: Today (Start landing, live-block swipe to Switch, Stop flight, pull-to-refresh blocks, the breathing ring and rolling digits, row swipes), the Review deck (throw, Undo, stamps, deferral), the Play orb bloom, sheets (open, drag to dismiss, keyboard), onboarding steps and Settings switches, in normal motion and with Reduce Motion.
+- Time Profiler (all processes) with a block running on Today, to compare the main thread with the previous build.
+
 Required checks when touching Health import, Review, Confirm/Dismiss, or reprocess:
 
 - Mobile Health unit tests.
