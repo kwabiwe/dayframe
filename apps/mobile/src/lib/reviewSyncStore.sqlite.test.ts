@@ -1005,6 +1005,126 @@ describe("Settling decided-elsewhere moments: Codex r1 on #370", () => {
   });
 });
 
+describe("Review cache eviction on complete reads (12 Oct 2026 stale superseded cards)", () => {
+  const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
+  const owner = () => { const data = bootstrap(); return { backendId: "dayframe-staging", workspaceId: data.workspace.id, userId: data.user.id }; };
+  function backlog(openIds: string[], capturedAt = "2026-10-12T18:46:00.000Z", complete = true) {
+    const data = bootstrap();
+    return {
+      version: 1 as const,
+      scope: { mode: "backlog" as const, timeZone: "Europe/London" },
+      snapshotToken: `backlog-${openIds.length}-${capturedAt}`,
+      capturedAt,
+      nextCursor: null,
+      completeness: { records: complete, outstandingCounts: complete, completedToday: false, partialReason: complete ? null : "bounded_collection" as const },
+      outstanding: { globalCount: openIds.length, todayCount: 0, openReviewItemIds: complete ? openIds : [] },
+      records: openIds.map((id) => ({ ...presentationReview(data.reviewItems.find((item) => item.id === id)!), status: "open" as const, proposalHash: "a".repeat(64) })),
+      links: openIds.map((reviewItemId) => ({ reviewItemId, entryIds: [], status: "open" as const })),
+      lookup: { reviewItems: [], entries: [] }
+    };
+  }
+  const later = () => new Date(Date.now() + 60_000).toISOString();
+
+  it("evicts a cached item the complete open set no longer lists, and the bootstrap/cached projections agree", async () => {
+    const data = bootstrap(); const zombie = data.reviewItems[0]; const open = data.reviewItems.slice(1).map((item) => item.id);
+    expect(await visibleIds()).toContain(zombie.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog(open), requestedAt: later() });
+    expect(await visibleIds()).toEqual(open);
+    expect((await store.getReviewSyncDiagnostics()).reviewCacheEvictedCount).toBe(1);
+  });
+
+  it("evicts every stale item when nothing is open (the owner's 0-open, 34-card deck)", async () => {
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([]), requestedAt: later() });
+    expect(await visibleIds()).toEqual([]);
+    expect(count("review_item_cache")).toBe(0);
+  });
+
+  it("keeps an item cached after the request started, and evicts nothing from an incomplete open set", async () => {
+    const data = bootstrap();
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([]), requestedAt: "2000-01-01T00:00:00.000Z" });
+    expect(count("review_item_cache")).toBe(4);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], undefined, false), requestedAt: later() });
+    expect(await visibleIds()).toEqual(expect.arrayContaining(data.reviewItems.map((item) => item.id)));
+  });
+
+  it("does not evict without a recorded request time", async () => {
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([]) });
+    expect(count("review_item_cache")).toBe(4);
+  });
+
+  it("caches an evicted item again when a later read lists it open (replay reopened it)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([]), requestedAt: later() });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([item.id], "2026-10-12T18:50:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).toEqual([item.id]);
+  });
+
+  it("brings a restored card back when a later read lists it open again (Codex r1 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(611), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(611));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(611));
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([item.id], "2026-10-12T18:50:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("keeps a restored card when a newer open read arrived before a delayed absence (Codex r2 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(621), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(621));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(621));
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:50:00.000Z" } });
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("removes an evicted restored card from Today's snapshot effects (Codex r2 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(622), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(622));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(622));
+    const response = backlog([], "2026-10-12T18:46:00.000Z");
+    await store.cacheReviewPresentation({ owner: owner(), response, requestedAt: later() });
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response }))!;
+    expect(snapshot.effects.map((effect) => effect.reviewItemId)).not.toContain(item.id);
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+
+  it("removes an evicted card from an older cached Today snapshot (Codex r3 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    const today = { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:40:00.000Z" };
+    await store.cacheReviewPresentation({ owner: owner(), response: today });
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    const snapshot = (await store.readReviewPresentationSnapshot({ owner: owner(), response: today }))!;
+    expect(snapshot.response.outstanding.openReviewItemIds).not.toContain(item.id);
+  });
+
+  it("does not let a delayed older open response bring back an evicted card, while a newer one does (Codex r3 on #371)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[0];
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([], "2026-10-12T18:46:00.000Z"), requestedAt: later() });
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:44:00.000Z" } });
+    expect(await visibleIds()).not.toContain(item.id);
+    await store.cacheReviewPresentation({ owner: owner(), response: { ...openPresentation(data, item.id, "a".repeat(64)), capturedAt: "2026-10-12T18:48:00.000Z" } });
+    expect(await visibleIds()).toContain(item.id);
+  });
+
+  it("leaves a hidden local decision alone and hides a restored card that is no longer open", async () => {
+    const data = bootstrap();
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[0], clientMutationId: syntheticId(601), mutation: { action: "accept" } });
+    await store.enqueueReviewMutation({ bootstrap: data, item: data.reviewItems[1], clientMutationId: syntheticId(602), mutation: { action: "accept" } });
+    db.prepare("update review_mutation_outbox set state='needs_attention', updated_at='2026-01-01T00:00:00.000Z' where client_mutation_id=?").run(syntheticId(602));
+    db.prepare("update review_mutation_effects set local_effect='restore' where client_mutation_id=?").run(syntheticId(602));
+    expect(await visibleIds()).toContain(data.reviewItems[1].id);
+    await store.cacheReviewPresentation({ owner: owner(), response: backlog([data.reviewItems[0].id]), requestedAt: later() });
+    expect(await visibleIds()).not.toContain(data.reviewItems[1].id);
+    expect(count("review_mutation_outbox")).toBe(2);
+    expect(db.prepare("select local_effect from review_mutation_effects where client_mutation_id=?").get(syntheticId(601))!.local_effect).toBe("hidden");
+  });
+});
+
 describe("Terminal evidence against newer open reads: Codex r2 on #370", () => {
   const visibleIds = async () => (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map((item) => item.id);
   const owner = (backendId = "dayframe-staging") => { const data = bootstrap(); return { workspaceId: data.workspace.id, userId: data.user.id, backendId }; };

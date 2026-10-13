@@ -18,6 +18,7 @@ import {
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
+import { reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 import {
   MobileRequestTimeoutError,
   mobileJsonRequest,
@@ -144,6 +145,8 @@ export type ReviewSyncDiagnostics = {
   lastError: string | null;
   lastCachedAt: string | null;
   reviewCacheHitCount: number;
+  /** Cached Review items removed because a complete read no longer listed them open (this process). */
+  reviewCacheEvictedCount?: number;
   reviewCacheMissCount: number;
   lastReviewCacheAgeMs: number | null;
   evidenceCacheItemCount: number;
@@ -351,6 +354,7 @@ export type LocationReviewEvidenceCacheDiagnostics = {
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 let reviewCacheHitCount = 0;
+let reviewCacheEvictedCount = 0;
 let reviewCacheMissCount = 0;
 let lastReviewCacheAgeMs: number | null = null;
 let evidenceCacheHitCount = 0;
@@ -370,6 +374,7 @@ let processDiagnosticsEpoch = 0;
  */
 function resetProcessReviewDiagnostics() {
   reviewCacheHitCount = 0;
+  reviewCacheEvictedCount = 0;
   reviewCacheMissCount = 0;
   lastReviewCacheAgeMs = null;
   evidenceCacheHitCount = 0;
@@ -1272,7 +1277,10 @@ export async function cacheDashboardBootstrap(bootstrap: MobileBootstrap) {
 export async function cacheReviewPresentation(input: {
   owner: ReviewPresentationOwner;
   response: ReviewPresentationSnapshot;
+  /** When the request was sent (client clock); defaults to what the presentation client recorded. */
+  requestedAt?: string;
 }) {
+  const requestedAt = input.requestedAt ?? reviewPresentationRequestedAt(input.response);
   const response = ReviewPresentationSnapshotSchema.parse(input.response);
   const db = await database();
   const key = accountKey(input.owner);
@@ -1283,6 +1291,7 @@ export async function cacheReviewPresentation(input: {
   }
   const now = new Date().toISOString();
   let wrote = false;
+  let evicted = 0;
   await serialiseReviewMutation(() => db.withExclusiveTransactionAsync(async (transaction) => {
     const account = await activeAccount(transaction);
     if (
@@ -1345,13 +1354,74 @@ export async function cacheReviewPresentation(input: {
       contextJson
     );
     await recordTerminalPresentationSources(transaction, key, scopeKey, input.owner.backendId, response);
+    if (requestedAt) evicted = await evictItemsNoLongerOpen(transaction, key, response, requestedAt, scopeKey, input.owner.backendId);
     await pruneReviewPresentationContexts(transaction, key, scopeKey);
     await materialiseAcknowledgedReviewHandover(transaction, key, response, input.owner.backendId);
     await bumpPresentationRevision(key, transaction);
     wrote = true;
   }));
-  if (wrote) emitChange();
+  if (wrote) {
+    reviewCacheEvictedCount += evicted;
+    emitChange();
+  }
   return wrote;
+}
+
+/**
+ * Every presentation read carries the complete set of open Review items (up to 5,000) from one
+ * snapshot taken after the request arrived. A cached item written before the request and missing
+ * from that set is no longer open (decided elsewhere, superseded by location replay, deleted): it
+ * leaves the cache and gets terminal evidence at the read's capturedAt, and so does a card restored
+ * by a rejection. That evidence is in force only until a strictly newer read lists the source open
+ * (replay reopening it), so a delayed older open response or an older Today snapshot cannot bring
+ * the card back, while a real reopening still does. Items cached after the request started and
+ * hidden local decisions are left alone.
+ */
+async function evictItemsNoLongerOpen(
+  transaction: SQLite.SQLiteDatabase,
+  accountKeyValue: string,
+  response: ReviewPresentationSnapshot,
+  requestedAt: string,
+  scopeKey: string,
+  backendId: string
+) {
+  if (!response.completeness.outstandingCounts) return 0;
+  const open = new Set(response.outstanding.openReviewItemIds);
+  const cached = await transaction.getAllAsync<{ review_item_id: string }>(
+    "select review_item_id from review_item_cache where account_key = ? and cached_at < ?",
+    accountKeyValue, requestedAt
+  );
+  const stale = cached.map((row) => row.review_item_id).filter((id) => !open.has(id));
+  for (let offset = 0; offset < stale.length; offset += 200) {
+    const chunk = stale.slice(offset, offset + 200);
+    await transaction.runAsync(
+      `delete from review_item_cache where account_key = ? and review_item_id in (${chunk.map(() => "?").join(",")})`,
+      accountKeyValue, ...chunk
+    );
+  }
+  const restored = await transaction.getAllAsync<{ review_item_id: string }>(
+    `select e.review_item_id from review_mutation_effects e
+     join review_mutation_outbox o on o.client_mutation_id = e.client_mutation_id and o.account_key = e.account_key
+     where e.account_key = ? and e.local_effect = 'restore' and o.updated_at < ?`,
+    accountKeyValue, requestedAt
+  );
+  const closed = new Set([...stale, ...restored.map((row) => row.review_item_id).filter((id) => !open.has(id))]);
+  for (const reviewItemId of closed) {
+    await compactOpenObservation(transaction, accountKeyValue, reviewItemId, backendId, response.capturedAt);
+    await transaction.runAsync(
+      `insert into review_presentation_terminal_source (
+         account_key, review_item_id, scope_key, backend_id, snapshot_token, status, captured_at
+       ) values (?, ?, ?, ?, ?, 'ignored', ?)
+       on conflict(account_key, review_item_id) do update set
+         scope_key = excluded.scope_key, backend_id = excluded.backend_id,
+         snapshot_token = excluded.snapshot_token, status = excluded.status,
+         captured_at = excluded.captured_at
+       where excluded.captured_at >= review_presentation_terminal_source.captured_at
+         or excluded.backend_id <> review_presentation_terminal_source.backend_id`,
+      accountKeyValue, reviewItemId, scopeKey, backendId, `not-open:${response.snapshotToken}`, response.capturedAt
+    );
+  }
+  return stale.length;
 }
 
 /**
@@ -2508,6 +2578,7 @@ async function reviewSyncDiagnosticsForAccount(
     evidenceCacheItemCount: evidenceCache.itemCount,
     evidenceCacheBytes: evidenceCache.totalBytes,
     reviewCacheHitCount,
+    reviewCacheEvictedCount,
     reviewCacheMissCount,
     lastReviewCacheAgeMs,
     evidenceCacheHitCount,

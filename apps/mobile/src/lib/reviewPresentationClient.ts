@@ -20,6 +20,7 @@ import {
   readOwnedAuthenticatedSessionSnapshot
 } from "./secure-session";
 import type { ReviewPresentationOwner } from "./reviewSyncStore";
+import { rememberReviewPresentationRequestedAt, reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 
 const PRESENTATION_TIMEOUT_MS = 8_000;
 const MAX_SNAPSHOT_RESTARTS = 1;
@@ -56,6 +57,7 @@ export async function fetchReviewPresentationPage(input: {
   if (session.status === "signed_out") throw new AuthRequiredError();
   if (session.status !== "authenticated") throw new StaleMobileSessionResponseError();
 
+  const requestedAt = new Date().toISOString();
   const { response, body } = await mobileJsonRequest<ReviewPresentationResponse | { code?: unknown } | null>(
     `${DAYFRAME_API_BASE}/api/review/presentation`,
     {
@@ -97,7 +99,7 @@ export async function fetchReviewPresentationPage(input: {
   }
   const parsed = ReviewPresentationResponseSchema.safeParse(body);
   if (!parsed.success) throw new ReviewPresentationValidationError();
-  return parsed.data;
+  return rememberReviewPresentationRequestedAt(parsed.data, requestedAt);
 }
 
 /** Fetch every bounded page from one immutable server snapshot. */
@@ -169,7 +171,9 @@ export function mergeReviewPresentationPages(
   }
 
   const last = pages.at(-1)!;
-  return ReviewPresentationSnapshotSchema.parse({
+  // The earliest page's request bounds the whole snapshot (fewer cached rows are older than it).
+  const requestedAt = pages.map((page) => reviewPresentationRequestedAt(page)).find(Boolean);
+  const merged = ReviewPresentationSnapshotSchema.parse({
     ...first,
     capturedAt: last.capturedAt,
     nextCursor: null,
@@ -185,6 +189,7 @@ export function mergeReviewPresentationPages(
       entries: [...lookupEntryById.values()]
     }
   });
+  return requestedAt ? rememberReviewPresentationRequestedAt(merged, requestedAt) : merged;
 }
 
 function presentationRecordKey(record: ReviewPresentationResponse["records"][number]) {
