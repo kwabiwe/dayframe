@@ -12,7 +12,14 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   updateTimeEntry: vi.fn(),
   deleteTimeEntry: vi.fn(),
+  getTimeEntryById: vi.fn(),
   scheduleLiveActivityNotification: vi.fn(),
+  TimeEntryConflictError: class TimeEntryConflictError extends Error {
+    constructor() {
+      super("This block was changed in another window or device.");
+      this.name = "TimeEntryConflictError";
+    }
+  },
   TimeEntryNotFoundError: class TimeEntryNotFoundError extends Error {
     constructor() {
       super("Block not found.");
@@ -34,8 +41,13 @@ vi.mock("@/lib/ingest-auth", () => ({
 vi.mock("@/lib/event-service", () => ({
   updateTimeEntry: mocks.updateTimeEntry,
   deleteTimeEntry: mocks.deleteTimeEntry,
+  TimeEntryConflictError: mocks.TimeEntryConflictError,
   TimeEntryNotFoundError: mocks.TimeEntryNotFoundError,
   TimeEntryValidationError: mocks.TimeEntryValidationError
+}));
+
+vi.mock("@/lib/queries", () => ({
+  getTimeEntryById: mocks.getTimeEntryById
 }));
 
 vi.mock("@/lib/live-activity-post-response", () => ({
@@ -150,6 +162,57 @@ describe("PATCH /api/time-entries/[id]", () => {
       { description: "Plan #planning", tagNames: ["Planning"] },
       session
     );
+  });
+
+  it("passes the details an edit was based on through for the conflict check", async () => {
+    const response = await PATCH(
+      jsonRequest({ description: "app testing", expectedDetails: { description: "BAU" } }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
+      "entry-1",
+      { description: "app testing", expectedDetails: { description: "BAU" } },
+      session
+    );
+  });
+
+  it("refuses a save based on details changed elsewhere with 409 and the current block", async () => {
+    const current = { id: "entry-1", description: "app testing", categoryId: "coding", tagNames: [], stoppedAt: null };
+    mocks.updateTimeEntry.mockRejectedValueOnce(new mocks.TimeEntryConflictError());
+    mocks.getTimeEntryById.mockResolvedValueOnce(current);
+
+    const response = await PATCH(
+      jsonRequest({ description: "BAU", expectedDetails: { description: "BAU " } }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This block was changed in another window or device.",
+      code: "time_entry_details_conflict",
+      entry: current
+    });
+    expect(mocks.getTimeEntryById).toHaveBeenCalledWith(session, "entry-1");
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
+  });
+
+  it("keeps a PATCH without expected details exactly as before (mobile, older web)", async () => {
+    const response = await PATCH(jsonRequest({ description: "BAU", categoryId: null }), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", { description: "BAU", categoryId: null }, session);
+  });
+
+  it("rejects malformed expected details", async () => {
+    const response = await PATCH(
+      jsonRequest({ description: "BAU", expectedDetails: { description: 4 } }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
   });
 
   it("rejects a start time after a completed entry finish time", async () => {

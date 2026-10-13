@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
-import type { TimerDraft } from "@/lib/timer-runtime";
+import { timerDraftEditedFields, timerDraftForEntry, type TimerDraft } from "@/lib/timer-runtime";
 
 // The command timer's "@" Activities list (owner feedback, 12 Oct 2026): "@" + letters offers
 // the activities like "#" offers tags; choosing one sets the block's activity and the "@query"
@@ -89,6 +89,8 @@ function renderBar({ activeEntry = null, categories = ACTIVITIES, description = 
       startTimer: calls.startTimer,
       stopTimer: calls.stopTimer,
       timerDraft,
+      // The running block's details as loaded are this harness's base.
+      timerDraftEdited: activeEntry ? timerDraftEditedFields(timerDraft, timerDraftForEntry(activeEntry)).length > 0 : false,
       timerError: null,
       updateActiveDetails: calls.updateActiveDetails,
       updateActiveStartTime: vi.fn().mockResolvedValue({ ok: true })

@@ -800,6 +800,8 @@ export const ownerAuthoredInReviewSql = `coalesce((
 
 export type TimeEntryQueryOptions = {
   capturedNow?: string;
+  /** Only this block. */
+  entryId?: string;
   overlappingFrom?: string;
   startedFrom?: string;
   startedBefore?: string;
@@ -814,6 +816,10 @@ export function buildTimeEntriesQuery(
   const capturedNow = options.capturedNow ?? new Date().toISOString();
   const values: Array<string | number> = [session.workspaceId, session.userId, capturedNow];
   const capturedNowParam = "$3";
+  if (options.entryId) {
+    values.push(options.entryId);
+    where.push(`te.id = $${values.length}::uuid`);
+  }
   if (options.overlappingFrom) {
     values.push(options.overlappingFrom);
     where.push(`coalesce(te.stopped_at, ${capturedNowParam}::timestamptz) > $${values.length}::timestamptz`);
@@ -897,6 +903,12 @@ async function getTimeEntries(
   const statement = buildTimeEntriesQuery(session, options);
   const result = await query<TimeEntryRow>(statement.text, statement.values);
   return result.rows;
+}
+
+/** One block, as the bootstrap lists show it (null when it is not this user's). */
+export async function getTimeEntryById(session: RequestSession, entryId: string) {
+  const rows = await getTimeEntries(session, { entryId, limit: 1 });
+  return rows[0] ?? null;
 }
 
 export async function getTaskSuggestions(session: RequestSession) {

@@ -198,20 +198,105 @@ export function timerDraftForEntry(entry: TimeEntryRow | null | undefined): Time
   };
 }
 
-/** Whether saving `draft` would change `entry` (the autosave's own comparison). */
-export function timerDraftDiffersFromEntry(draft: TimerDraft, entry: TimeEntryRow) {
-  const draftTags = draft.tagNames.map((name) => normalizeTagName(name).normalizedName).sort();
-  const entryTags = (entry.tags?.map((tag) => tag.normalizedName)
-    ?? entry.tagNames.map((name) => normalizeTagName(name).normalizedName)).sort();
-  return (draft.categoryId || null) !== entry.categoryId
-    || (draft.description.trim() || null) !== (entry.description ?? null)
-    || JSON.stringify(draftTags) !== JSON.stringify(entryTags);
-}
-
 export function timerDraftsEqual(left: TimerDraft, right: TimerDraft) {
   return left.categoryId === right.categoryId &&
     left.description === right.description &&
     timerTagNamesEqual(left.tagNames, right.tagNames);
+}
+
+export type TimerDetailField = "categoryId" | "description" | "tagNames";
+export const TIMER_DETAIL_FIELDS: readonly TimerDetailField[] = ["categoryId", "description", "tagNames"];
+
+/**
+ * Whether two drafts hold the same value for one field, as the server would store it: the
+ * description trimmed (empty is none), no activity as none, tags by normalized name in any order.
+ */
+export function timerDetailEquivalent(field: TimerDetailField, left: TimerDraft, right: TimerDraft) {
+  if (field === "categoryId") return (left.categoryId || null) === (right.categoryId || null);
+  if (field === "description") return (left.description.trim() || null) === (right.description.trim() || null);
+  return timerTagSetsEqual(left.tagNames, right.tagNames);
+}
+
+/**
+ * The fields this tab's user changed: the draft compared with the server copy each field's edit
+ * was based on (the base), never with whatever server copy is newest.
+ */
+export function timerDraftEditedFields(draft: TimerDraft, base: TimerDraft): TimerDetailField[] {
+  return TIMER_DETAIL_FIELDS.filter((field) => !timerDetailEquivalent(field, draft, base));
+}
+
+/** The wire value of one field (as the PATCH sends it and the server stores it). */
+export function timerDetailWireValue(field: TimerDetailField, draft: TimerDraft) {
+  if (field === "categoryId") return draft.categoryId || null;
+  if (field === "description") return draft.description.trim() || null;
+  return [...draft.tagNames];
+}
+
+/**
+ * A running block's details PATCH: only the fields the user edited, each with the value its edit
+ * was based on (`expectedDetails`), so the server can refuse to overwrite a newer change made
+ * elsewhere (409). Returns null when nothing was edited.
+ */
+export function timerDetailsPatch(draft: TimerDraft, base: TimerDraft) {
+  const fields = timerDraftEditedFields(draft, base);
+  if (!fields.length) return null;
+  const body: Record<string, unknown> = {};
+  const expectedDetails: Record<string, unknown> = {};
+  for (const field of fields) {
+    body[field] = timerDetailWireValue(field, draft);
+    expectedDetails[field] = timerDetailWireValue(field, base);
+  }
+  return { fields, body: { ...body, expectedDetails } };
+}
+
+/** The base once `fields` of `draft` are saved: those fields as the server stores them. */
+export function timerDraftBaseAfterSave(base: TimerDraft, draft: TimerDraft, fields: TimerDetailField[]): TimerDraft {
+  return {
+    categoryId: fields.includes("categoryId") ? draft.categoryId : base.categoryId,
+    description: fields.includes("description") ? draft.description.trim() : base.description,
+    tagNames: fields.includes("tagNames") ? [...draft.tagNames] : base.tagNames
+  };
+}
+
+/** `draft` with only `fields` taken from it and every other field from `fallback`. */
+export function pickTimerDraftFields(draft: TimerDraft, fallback: TimerDraft, fields: TimerDetailField[]): TimerDraft {
+  return {
+    categoryId: fields.includes("categoryId") ? draft.categoryId : fallback.categoryId,
+    description: fields.includes("description") ? draft.description : fallback.description,
+    tagNames: fields.includes("tagNames") ? draft.tagNames : fallback.tagNames
+  };
+}
+
+/**
+ * A newer server copy of the same block meets this tab's draft, field by field:
+ * - a field the user has not edited (same as its base) shows the server's value when the server
+ *   changed it, and is left exactly as typed otherwise (a trailing space survives a refresh);
+ * - a field the user has edited keeps the edit. Its base moves to the server's copy only when the
+ *   server did not change that field (or now holds the same value): an edit based on a value the
+ *   server has since replaced keeps its old base, so saving it is refused (409) instead of
+ *   overwriting the other change.
+ * A different block replaces both.
+ */
+export function reconcileTimerDraftWithBase(
+  activeEntryChanged: boolean,
+  currentDraft: TimerDraft,
+  base: TimerDraft,
+  nextCanonicalDraft: TimerDraft
+): { draft: TimerDraft; base: TimerDraft } {
+  if (activeEntryChanged) return { draft: nextCanonicalDraft, base: nextCanonicalDraft };
+  const draft = { ...currentDraft };
+  const nextBase = { ...base };
+  for (const field of TIMER_DETAIL_FIELDS) {
+    const edited = !timerDetailEquivalent(field, currentDraft, base);
+    const serverChanged = !timerDetailEquivalent(field, nextCanonicalDraft, base);
+    if (!edited) {
+      if (serverChanged) assignTimerField(draft, field, nextCanonicalDraft);
+      assignTimerField(nextBase, field, nextCanonicalDraft);
+    } else if (!serverChanged || timerDetailEquivalent(field, currentDraft, nextCanonicalDraft)) {
+      assignTimerField(nextBase, field, nextCanonicalDraft);
+    }
+  }
+  return { draft, base: nextBase };
 }
 
 export function reconcileTimerDraft(
@@ -220,18 +305,20 @@ export function reconcileTimerDraft(
   lastCanonicalDraft: TimerDraft,
   nextCanonicalDraft: TimerDraft
 ) {
-  if (activeEntryChanged) return nextCanonicalDraft;
-  return {
-    categoryId: currentDraft.categoryId === lastCanonicalDraft.categoryId
-      ? nextCanonicalDraft.categoryId
-      : currentDraft.categoryId,
-    description: currentDraft.description === lastCanonicalDraft.description
-      ? nextCanonicalDraft.description
-      : currentDraft.description,
-    tagNames: timerTagNamesEqual(currentDraft.tagNames, lastCanonicalDraft.tagNames)
-      ? nextCanonicalDraft.tagNames
-      : currentDraft.tagNames
-  };
+  return reconcileTimerDraftWithBase(activeEntryChanged, currentDraft, lastCanonicalDraft, nextCanonicalDraft).draft;
+}
+
+function assignTimerField(target: TimerDraft, field: TimerDetailField, source: TimerDraft) {
+  if (field === "categoryId") target.categoryId = source.categoryId;
+  else if (field === "description") target.description = source.description;
+  else target.tagNames = source.tagNames;
+}
+
+function timerTagSetsEqual(left: string[], right: string[]) {
+  const normalizedLeft = [...new Set(left.map((name) => normalizeTagName(name).normalizedName))].sort();
+  const normalizedRight = [...new Set(right.map((name) => normalizeTagName(name).normalizedName))].sort();
+  return normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((name, index) => name === normalizedRight[index]);
 }
 
 function timerTagNamesEqual(left: string[], right: string[]) {
@@ -578,6 +665,19 @@ export async function runActiveEntryCompactMutation({
 export function timerCompactEditErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
   return "Block details were not saved. Your previous values were restored.";
+}
+
+/** The server's current copy of the running block (a refused save's answer) replaces the shown one. */
+export function applyServerActiveEntry(data: BootstrapData, shownId: string, entry: TimeEntryRow) {
+  if (data.activeEntry?.id !== shownId || entry.stoppedAt) return data;
+  const withoutShown = shownId === entry.id ? data : {
+    ...data,
+    entries: data.entries.filter((item) => item.id !== shownId),
+    historyEntries: data.historyEntries.filter((item) => item.id !== shownId),
+    dayEntries: data.dayEntries.filter((item) => item.id !== shownId),
+    weekEntries: data.weekEntries.filter((item) => item.id !== shownId)
+  };
+  return replaceEntryCollections({ ...withoutShown, activeEntry: entry }, entry);
 }
 
 export function applyAuthoritativeActiveEntryVersion(

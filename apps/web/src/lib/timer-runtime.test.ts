@@ -10,8 +10,11 @@ import {
   entryContinuationDecision,
   quickActionTimerDraft,
   reconcileTimerDraft,
+  reconcileTimerDraftWithBase,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
+  timerDetailsPatch,
+  timerDraftEditedFields,
   timerDraftForEntry,
   timerDraftsEqual,
   timerDraftVersion,
@@ -776,6 +779,66 @@ describe("shell timer runtime", () => {
     )).toBe(true);
   });
 });
+
+describe("running-block details: edits are relative to their base (13 Oct stale-tab report)", () => {
+  const base = { categoryId: "work", description: "BAU", tagNames: ["Cubic"] };
+  const server = { categoryId: "coding", description: "app testing", tagNames: [] as string[] };
+
+  it("counts only real edits: whitespace, empty activity and tag case/order are not edits", () => {
+    expect(timerDraftEditedFields({ ...base, description: "BAU " }, base)).toEqual([]);
+    expect(timerDraftEditedFields({ ...base, tagNames: ["cubic"] }, base)).toEqual([]);
+    expect(timerDraftEditedFields({ categoryId: "", description: "", tagNames: [] }, { categoryId: "", description: "  ", tagNames: [] })).toEqual([]);
+    expect(timerDraftEditedFields({ ...base, description: "BAU more" }, base)).toEqual(["description"]);
+  });
+
+  it("an untouched draft adopts every newer server field, even with a stray trailing space", () => {
+    // The production revert: a tab's "BAU " (trailing space typed earlier, saved as "BAU").
+    const result = reconcileTimerDraftWithBase(false, { ...base, description: "BAU " }, base, server);
+    expect(result).toEqual({ draft: server, base: server });
+    expect(timerDraftEditedFields(result.draft, result.base)).toEqual([]);
+  });
+
+  it("an untouched field the server did not change is left exactly as typed", () => {
+    const next = { ...base, categoryId: "coding" };
+    expect(reconcileTimerDraftWithBase(false, { ...base, description: "BAU " }, base, next).draft)
+      .toEqual({ ...next, description: "BAU " });
+  });
+
+  it("an edit keeps its base when the server changed that field, so saving it is refused", () => {
+    const draft = { ...base, description: "BAU more" };
+    const result = reconcileTimerDraftWithBase(false, draft, base, server);
+    expect(result.draft).toEqual({ ...server, description: "BAU more" });
+    expect(result.base).toEqual({ ...server, description: "BAU" });
+    expect(timerDetailsPatch(result.draft, result.base)?.body).toEqual({
+      description: "BAU more",
+      expectedDetails: { description: "BAU" }
+    });
+  });
+
+  it("an edit whose field the server left alone moves its base forward", () => {
+    const draft = { ...base, description: "BAU more" };
+    const next = { ...base, categoryId: "coding" };
+    expect(reconcileTimerDraftWithBase(false, draft, base, next)).toEqual({
+      draft: { ...next, description: "BAU more" },
+      base: next
+    });
+  });
+
+  it("a different block replaces draft and base", () => {
+    expect(reconcileTimerDraftWithBase(true, { ...base, description: "x" }, base, server)).toEqual({ draft: server, base: server });
+  });
+
+  it("the PATCH carries only edited fields with their base values, and nothing when unedited", () => {
+    expect(timerDetailsPatch({ ...base, description: "BAU " }, base)).toBeNull();
+    expect(timerDetailsPatch({ categoryId: "", description: " app testing ", tagNames: [] }, base)?.body).toEqual({
+      categoryId: null,
+      description: "app testing",
+      tagNames: [],
+      expectedDetails: { categoryId: "work", description: "BAU", tagNames: ["Cubic"] }
+    });
+  });
+});
+
 
 function bootstrapData(activeEntry: TimeEntryRow | null) {
   const entries = activeEntry ? [activeEntry] : [];

@@ -34,9 +34,8 @@ describe("web task suggestion interaction", () => {
   });
 
   it("syncs tag-only changes and restores clean description plus persisted tag state after failure", () => {
-    expect(timerSource).toContain(
-      "JSON.stringify(draftTags) === JSON.stringify(activeTags)"
-    );
+    // Tags count as edited by normalized name (timerDetailEquivalent), and only an edit autosaves.
+    expect(timerSource).toContain("if (!active || !timerDraftEdited) return undefined;");
     expect(runtimeSource).toContain(
       "setTimerDraft(timerDraftForEntry(snapshot.activeEntry))"
     );

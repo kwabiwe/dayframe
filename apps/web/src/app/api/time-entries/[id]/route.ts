@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z, ZodError } from "zod";
 import {
   deleteTimeEntry,
+  TimeEntryConflictError,
   TimeEntryNotFoundError,
   TimeEntryValidationError,
   updateTimeEntry
@@ -10,11 +11,15 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { TagNameSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
+import { getTimeEntryById } from "@/lib/queries";
+import { ExpectedDetailsSchema } from "@/lib/time-entry-details-precondition";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  let session: Awaited<ReturnType<typeof resolveRequestSession>> | null = null;
+  let id = "";
   try {
-    const session = await resolveRequestSession(request);
-    const { id } = await context.params;
+    session = await resolveRequestSession(request);
+    ({ id } = await context.params);
     const body = await request.json();
     const update: Parameters<typeof updateTimeEntry>[1] = {};
     if (Object.prototype.hasOwnProperty.call(body, "projectId")) update.projectId = optionalStringOrNull(body.projectId);
@@ -25,6 +30,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (Object.prototype.hasOwnProperty.call(body, "stoppedAt")) update.stoppedAt = optionalStringOrNull(body.stoppedAt);
     if (Object.prototype.hasOwnProperty.call(body, "tagNames")) {
       update.tagNames = z.array(TagNameSchema).max(24).parse(body.tagNames);
+    }
+    // Optional optimistic concurrency (web timer autosave): refused with 409 and the current block
+    // if a detail this edit was based on has changed since. Absent: as before (mobile, older web).
+    if (Object.prototype.hasOwnProperty.call(body, "expectedDetails") && body.expectedDetails != null) {
+      update.expectedDetails = ExpectedDetailsSchema.parse(body.expectedDetails);
     }
     validateTimeWindow(update);
     const result = await updateTimeEntry(id, update, session);
@@ -38,6 +48,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (error instanceof TimeEntryNotFoundError) {
       return NextResponse.json({ error: error.message }, { status: 404 });
+    }
+    if (error instanceof TimeEntryConflictError && session) {
+      const entry = await getTimeEntryById(session, id);
+      return NextResponse.json(
+        { error: error.message, code: "time_entry_details_conflict", entry },
+        { status: 409 }
+      );
     }
     throw error;
   }

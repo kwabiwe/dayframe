@@ -19,7 +19,10 @@ const server = {
   /** The block a Start replaced, as the server last had it. */
   completed: null as TimeEntryRow | null,
   patches: [] as Patch[],
+  /** Each PATCH body exactly as sent. */
+  sent: [] as Record<string, unknown>[],
   patchUrls: [] as string[],
+  patchInits: [] as RequestInit[],
   posts: [] as Record<string, unknown>[],
   /** Stop events: the block each one targeted. */
   stops: [] as string[],
@@ -31,6 +34,14 @@ const server = {
   tags: [] as string[],
   release: null as (() => void) | null
 };
+
+/** Whether a field the PATCH's edit was based on (`expectedDetails`) has changed since. */
+function detailsChanged(current: TimeEntryRow, expected: Partial<Patch>) {
+  const tags = (names: string[]) => [...names].map((name) => name.toLowerCase()).sort().join(",");
+  return ("categoryId" in expected && (expected.categoryId ?? null) !== (current.categoryId ?? null))
+    || ("description" in expected && (expected.description ?? null) !== (current.description ?? null))
+    || ("tagNames" in expected && tags(expected.tagNames ?? []) !== tags(current.tagNames ?? []));
+}
 
 async function maybeHold(kind: "patch" | "start" | "bootstrap") {
   if (server.holdNext !== kind) return;
@@ -54,15 +65,27 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(true, bootstrap(server.entry));
     }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
-      const body = JSON.parse(String(init?.body)) as Patch;
-      server.patches.push(body);
+      const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch> };
+      const { expectedDetails, ...sent } = body;
+      // Recorded as the details the PATCH asks the block to have: only the fields it sends change
+      // (as on the server); the raw request is kept in `sent`.
+      const before = server.entry;
+      server.patches.push({
+        ...(before ? { categoryId: before.categoryId, description: before.description, tagNames: before.tagNames } : {}),
+        ...sent
+      } as Patch);
+      server.sent.push(body);
       server.patchUrls.push(url);
+      server.patchInits.push(init ?? {});
       // Only the running block can be patched (an optimistic id is unknown to the server).
       if (url !== `/api/time-entries/${server.entry?.id}`) return reply(false, { error: "Not found" });
       await maybeHold("patch");
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
+      if (expectedDetails && detailsChanged(server.entry!, expectedDetails)) {
+        return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: server.entry }) };
+      }
       const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
-      server.entry = { ...server.entry!, description: body.description, categoryId: body.categoryId, tagNames: body.tagNames, updatedAt };
+      server.entry = { ...server.entry!, ...sent, updatedAt } as TimeEntryRow;
       return reply(true, { updatedAt });
     }
     if (method === "POST" && url === "/api/time-entries") {
@@ -106,7 +129,9 @@ beforeEach(() => {
   server.entry = null;
   server.completed = null;
   server.patches = [];
+  server.sent = [];
   server.patchUrls = [];
+  server.patchInits = [];
   server.posts = [];
   server.stops = [];
   server.holdNext = null;
@@ -274,8 +299,9 @@ describe("autosave and Enter while recording", () => {
     await user.keyboard("{Escape}");
     expect(activitiesOpen()).toBe(false);
     expect(input.value).toBe("Fix bug @wri");
-    await waitFor(() => expect(server.patches).toEqual([
-      { categoryId: "focus", description: "Fix bug @wri", placeId: null, tagNames: [] }
+    // Only the edited field is sent, with the value the edit was based on.
+    await waitFor(() => expect(server.sent).toEqual([
+      { description: "Fix bug @wri", expectedDetails: { description: "Fix bug" } }
     ]), { timeout: 2_000 });
   });
 
@@ -671,6 +697,9 @@ describe("Codex r10: an accepted Start's real id is known from its POST", () => 
       unmount();
       await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]));
       expect(server.patches[0]).toMatchObject({ description: "Plan final" });
+      // The request outlives the page.
+      expect(server.patchInits[0]).toMatchObject({ method: "PATCH", keepalive: true });
+      expect(server.sent[0]).toEqual({ description: "Plan final", expectedDetails: { description: "Plan" } });
     });
   });
 

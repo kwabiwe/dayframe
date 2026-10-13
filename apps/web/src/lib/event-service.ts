@@ -52,6 +52,7 @@ import {
   query
 } from "./db";
 import { getNormalizationContext } from "./queries";
+import { detailsChangedSince, type ExpectedDetails } from "./time-entry-details-precondition";
 import { getDevSession, type RequestSession } from "./session";
 import { createTag, syncTimeEntryTags } from "./tag-service";
 import type pg from "pg";
@@ -1960,6 +1961,8 @@ export async function updateTimeEntry(
     startedAt?: string;
     stoppedAt?: string | null;
     tagNames?: string[];
+    /** The details this edit was based on: refused (409) if any has changed since. */
+    expectedDetails?: ExpectedDetails;
   },
   session: RequestSession = getDevSession()
 ) {
@@ -1974,6 +1977,30 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    if (input.expectedDetails) {
+      // Locked, so a concurrent save cannot slip in between this check and the update.
+      const stored = await client.query<{
+        categoryId: string | null;
+        description: string | null;
+        tagNormalizedNames: string[];
+      }>(
+        `select te.category_id as "categoryId",
+                te.description,
+                coalesce((
+                  select array_agg(t.normalized_name)
+                  from time_entry_tags tet
+                  join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+                  where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+                ), array[]::text[]) as "tagNormalizedNames"
+         from time_entries te
+         where te.id = $1 and te.workspace_id = $2 and te.user_id = $3
+         for update of te`,
+        [id, session.workspaceId, session.userId]
+      );
+      const current = stored.rows[0];
+      if (!current) throw new TimeEntryNotFoundError();
+      if (detailsChangedSince(current, input.expectedDetails)) throw new TimeEntryConflictError();
+    }
     if (hasStartedAt || hasStoppedAt) {
       const existing = await client.query<{
         startedAt: string | Date;
@@ -2041,6 +2068,14 @@ export class TimeEntryNotFoundError extends Error {
   constructor() {
     super("Block not found.");
     this.name = "TimeEntryNotFoundError";
+  }
+}
+
+/** The details a PATCH was based on have changed since (another window or device saved first). */
+export class TimeEntryConflictError extends Error {
+  constructor() {
+    super("This block was changed in another window or device.");
+    this.name = "TimeEntryConflictError";
   }
 }
 

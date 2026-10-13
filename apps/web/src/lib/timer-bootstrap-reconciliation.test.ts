@@ -12,6 +12,18 @@ describe("timer bootstrap reconciliation", () => {
     expect(result.entries[0]?.description).toBe("New draft");
   });
 
+  it("keeps the shown copy over a same-version server copy while this tab is saving", () => {
+    // Requested before the PATCH, answered while it is pending: the pre-save details.
+    const current = bootstrap(entry({ description: "app testing", updatedAt: "2026-07-31T10:04:00.000Z" }));
+    const incoming = bootstrap(entry({ description: "BAU", updatedAt: "2026-07-31T10:04:00.000Z" }));
+    expect(reconcileTimerBootstrap(current, incoming, "canonical", { keepCurrentActiveOnTie: true }).activeEntry?.description)
+      .toBe("app testing");
+    expect(reconcileTimerBootstrap(current, incoming, "canonical").activeEntry?.description).toBe("BAU");
+    const newer = bootstrap(entry({ description: "Elsewhere", updatedAt: "2026-07-31T10:05:00.000Z" }));
+    expect(reconcileTimerBootstrap(current, newer, "canonical", { keepCurrentActiveOnTie: true }).activeEntry?.description)
+      .toBe("Elsewhere");
+  });
+
   it("accepts a newer canonical version of the same active entry", () => {
     const current = bootstrap(entry({ updatedAt: "2026-07-31T10:04:00.000Z" }));
     const incoming = bootstrap(entry({ description: "External edit", updatedAt: "2026-07-31T10:05:00.000Z" }));
