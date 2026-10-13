@@ -150,7 +150,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   }, []);
 
   const persistentTimer = <PersistentTimerBar workspaceMode={isTimeline} />;
-  // The sticky timer band draws its hairline only once page content has scrolled under it (C1).
+  // The timer band draws its hairline only once page content has scrolled under it (C1), on every
+  // page: Calendar's band is the same opaque canvas and its grid scrolls inside its own panel.
   const timerBandRef = useRef<HTMLDivElement | null>(null);
   const pageMainRef = useRef<HTMLElement | null>(null);
   const contentUnderBand = useBandScrolled(timerBandRef, pageMainRef, pathname);
@@ -294,10 +295,16 @@ function AppShellContent({ children }: { children: ReactNode }) {
       <div className={`swiss-main-frame${isTimeline ? " is-timeline" : ""}`}>
         {isTimeline ? (
           <section className="swiss-timeline-surface" aria-label="Calendar">
-            <div className="swiss-persistent-timer-shell">
+            <div
+              className="swiss-persistent-timer-shell"
+              data-scrolled={contentUnderBand ? "true" : undefined}
+              ref={timerBandRef}
+            >
               {persistentTimer}
             </div>
-            <main className="swiss-timeline-main">{children}</main>
+            {/* The Calendar grid scrolls inside this panel, which never moves under the band, so
+                its own scrolling never shows the hairline. */}
+            <main className="swiss-timeline-main" ref={pageMainRef}>{children}</main>
           </section>
         ) : (
           <>

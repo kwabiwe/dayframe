@@ -469,7 +469,7 @@ describe("# Tags stay as they were", () => {
     const { input } = renderBar();
     const user = await typeInto(input, "Plan #dee");
     const tags = screen.getByRole("listbox", { name: "Tags" });
-    const option = within(tags).getByRole("option", { name: "Existing tag, Deep work" });
+    const option = within(tags).getByRole("option", { name: "#Deep work" });
     expect(input.getAttribute("aria-controls")).toBe(tags.id);
     expect(input.getAttribute("aria-activedescendant")).toBe(option.id);
     await user.keyboard("{Enter}");
@@ -510,8 +510,9 @@ describe("one floating list style", () => {
     await user.type(input, "#", { skipClick: true });
     const tags = screen.getByRole("listbox", { name: "Tags" });
     expectOneStyle(tags, "Tags");
-    // An existing tag shows its use count as metadata, kept out of its accessible name.
-    const tag = within(tags).getByRole("option", { name: "Existing tag, Deep work" });
+    // An existing tag is named by its visible text and shows its use count as metadata, kept out
+    // of that name (WCAG 2.5.3 label in name).
+    const tag = within(tags).getByRole("option", { name: "#Deep work" });
     expect(tag.querySelector(".df-flist-label")?.textContent).toBe("#Deep work");
     expect(tag.querySelector(".df-flist-meta")?.getAttribute("aria-hidden")).toBe("true");
     expect(tag.querySelector(".df-flist-meta")?.textContent).toMatch(/^\d+$/);
@@ -519,9 +520,13 @@ describe("one floating list style", () => {
     await user.keyboard("{Backspace}@");
     expectOneStyle(activities(), "Activities");
     expect(activities().querySelector(".df-flist-block.df-block svg")).not.toBeNull();
-    // A pinned activity (a quick start) is marked, visually only: its name stays the activity's.
+    // A pinned activity (a quick start) is marked "Pinned": its accessible description, while its
+    // name stays the activity's.
     const writing = within(activities()).getByRole("option", { name: "Writing" });
     expect(writing.querySelector(".df-flist-meta")?.textContent).toBe("Pinned");
+    const describedBy = writing.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe("Pinned");
   });
 
   it("gives each list one footer of keyboard hints, outside the listbox, glyphs hidden and spoken text for screen readers", async () => {
@@ -563,7 +568,9 @@ describe("one floating list style", () => {
     const user = userEvent.setup();
     await user.type(input, "Plan #launch");
     const tags = screen.getByRole("listbox", { name: "Tags" });
-    const create = within(tags).getByRole("option", { name: "Create new tag, launch" });
+    // Its accessible name is the visible phrase (WCAG 2.5.3 label in name).
+    const create = within(tags).getByRole("option", { name: "Create “#launch”" });
+    expect(create.hasAttribute("aria-label")).toBe(false);
     expect(create.querySelector(".df-flist-label")?.textContent).toBe("Create “#launch”");
     expect(create.className).toContain("df-flist-row");
     expect(input.getAttribute("aria-activedescendant")).toBe(create.id);
@@ -635,7 +642,7 @@ describe("on phones the lists are sheets", () => {
     await user.type(input, "e", { skipClick: true });
     expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
     await user.type(input, " #dee", { skipClick: true });
-    expect(within(tags()).getByRole("option", { name: "Existing tag, Deep work" })).not.toBeNull();
+    expect(within(tags()).getByRole("option", { name: "#Deep work" })).not.toBeNull();
 
     await user.keyboard("{Backspace}{Backspace}{Backspace}{Backspace}@wr");
     const list = activities().closest<HTMLElement>(".df-flist")!;

@@ -71,7 +71,8 @@ describe("one floating list (FloatingList)", () => {
     // Metadata is real data: the activity name, the tag's use count, a pinned (quick start) marker.
     expect(suggestions).toMatch(/df-flist-meta">\{suggestion\.categoryName/);
     expect(tagInput).toContain("count: tag.usageCount");
-    expect(tagInput).toContain('activity.isPinned ? <span aria-hidden="true" className="df-flist-meta">Pinned</span>');
+    expect(tagInput).toContain('<span aria-hidden="true" className="df-flist-meta" id={`${name}-activity-pinned-${index}`}>Pinned</span>');
+    expect(tagInput).toContain("aria-describedby={activity.isPinned ? `${name}-activity-pinned-${index}` : undefined}");
     // No stray rules: the footer, the head and the rows draw no border.
     for (const selector of [".df-flist-foot", ".df-flist-head", ".df-flist .df-flist-row", ".df-flist-meta"]) {
       expect(rule(selector), selector).not.toMatch(/border(?:-top|-bottom)?:\s*1px/);
@@ -102,10 +103,21 @@ describe("one floating list (FloatingList)", () => {
     expect(tagInput).not.toContain('placeholder="Add/filter tags"');
     // The picker's Create row has no divider above it.
     expect(rule(".inline-tag-picker-create")).not.toContain("border-top");
+    // Create rows are neutral like the others: coral stays for recording and the primary action.
+    expect(rule(".inline-tag-suggestions .df-flist-row.is-create")).toMatch(/color: var\(--foreground\);/);
+    expect(rule(".inline-tag-picker-create")).toMatch(/color: var\(--foreground\);/);
+    expect(rule(".inline-tag-picker-create .df-flist-lead")).toMatch(/color: var\(--muted\);/);
+    expect(css).not.toMatch(/\.is-create[^{]*\{[^}]*accent/);
+    expect(css).not.toMatch(/\.inline-tag-picker-create[^{]*\{[^}]*accent/);
+    // The Create row's name is its visible phrase (WCAG 2.5.3); the old "Create new tag, …" is gone.
+    expect(tagInput).not.toContain("Create new tag, ");
+    expect(tagInput).not.toContain("Existing tag, ");
   });
 
   it("draws no divider across the activity chip grid", () => {
     expect(rule(".df-rchip.category-picker-create-option::before")).toMatch(/content: none;/);
+    // The chip grid's Create chip is neutral, never coral.
+    expect(rule(".df-rchip.category-picker-create-option")).toMatch(/color: var\(--text-secondary\);/);
   });
 
   it("appears with opacity only, and at once under Reduce Motion", () => {

@@ -6540,6 +6540,8 @@ kbd {
    flow: no divider drawn across the middle of the chips and no extra gap above it. */
 .df-rchip.category-picker-create-option {
   margin-top: 0;
+  /* Neutral like the chips around it, never coral (the base create option's accent text). */
+  color: var(--text-secondary);
 }
 
 .df-rchip.category-picker-create-option::before {
@@ -7304,9 +7306,10 @@ kbd {
   color: var(--background);
 }
 
-/* The picker's Create row reads like the # Tags list's: Create "#name", no divider above it. */
+/* The picker's Create row reads like the # Tags list's: Create "#name" in primary text with a
+   neutral "+", no divider above it. */
 .inline-tag-picker-create {
-  color: var(--accent-text);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -7319,6 +7322,7 @@ kbd {
   width: 20px;
   flex: 0 0 auto;
   place-items: center;
+  color: var(--muted);
 }
 
 /* The # Tags and @ Activities lists sit under the description (FloatingList draws them), at the
@@ -7334,9 +7338,10 @@ kbd {
   overflow: hidden;
 }
 
-.inline-tag-suggestions .df-flist-row.is-create,
-.inline-tag-suggestions .df-flist-row.is-create .df-flist-lead {
-  color: var(--accent-text);
+/* Create "#name" reads like the other rows (primary text, a neutral "+"): coral stays for
+   recording and the one primary action. */
+.inline-tag-suggestions .df-flist-row.is-create {
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -8862,7 +8867,9 @@ dialog.ui-dialog.manual-entry-dialog {
   z-index: 50;
   display: block;
   border: 0;
-  background: transparent;
+  /* The same opaque canvas band as every page (C1); Calendar's grid scrolls inside its own panel,
+     so content never passes under it and no hairline shows. */
+  background: var(--background);
   /* The Calendar frame supplies the side inset (--df-cmd-inset-x); the shell adds only the top. */
   padding: var(--df-cmd-inset-top) 0 0;
 }

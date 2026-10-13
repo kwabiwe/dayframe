@@ -99,3 +99,111 @@ describe("useBandScrolled", () => {
     expect(remove).toHaveBeenCalledWith("scroll", expect.any(Function), { capture: true });
   });
 });
+
+describe("useBandScrolled frame scheduling (non-synchronous rAF)", () => {
+  let frames: Map<number, FrameRequestCallback>;
+  let nextId: number;
+  let contentTop: number;
+  const cancelled: number[] = [];
+
+  beforeEach(() => {
+    frames = new Map();
+    nextId = 0;
+    contentTop = 130;
+    cancelled.length = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextId += 1;
+      frames.set(nextId, callback);
+      return nextId;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      cancelled.push(id);
+      frames.delete(id);
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function flushFrames() {
+    const pending = [...frames.entries()];
+    frames.clear();
+    act(() => {
+      for (const [, callback] of pending) callback(0);
+    });
+  }
+
+  function Band({ calendar = false }: { calendar?: boolean }) {
+    const band = useRef<HTMLDivElement | null>(null);
+    const content = useRef<HTMLElement | null>(null);
+    const scrolled = useBandScrolled(band, content);
+    return (
+      <>
+        <div
+          data-scrolled={scrolled ? "true" : undefined}
+          data-testid="band"
+          ref={(node) => {
+            band.current = node;
+            if (node) node.getBoundingClientRect = () => ({ bottom: 130, top: 0 }) as DOMRect;
+          }}
+        />
+        <main
+          ref={(node) => {
+            content.current = node;
+            if (node) node.getBoundingClientRect = () => ({ top: contentTop, bottom: contentTop + 900 }) as DOMRect;
+          }}
+        >
+          {calendar ? <div data-testid="grid" style={{ overflow: "auto" }} /> : null}
+        </main>
+      </>
+    );
+  }
+
+  it("batches a burst of scrolls into one frame and measures only when it runs", () => {
+    const { getByTestId } = render(<Band />);
+    contentTop = -100;
+    act(() => {
+      for (let i = 0; i < 5; i += 1) window.dispatchEvent(new Event("scroll"));
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(frames.size).toBe(1);
+    // Nothing is measured until the frame runs.
+    expect(getByTestId("band").dataset.scrolled).toBeUndefined();
+    flushFrames();
+    expect(getByTestId("band").dataset.scrolled).toBe("true");
+    // After the frame a new scroll schedules a new one.
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(frames.size).toBe(1);
+  });
+
+  it("cancels a pending frame on unmount, so it never measures a removed band", () => {
+    const { unmount } = render(<Band />);
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    const [pendingId] = [...frames.keys()];
+    unmount();
+    expect(cancelled).toEqual([pendingId]);
+    expect(frames.size).toBe(0);
+  });
+
+  it("does not cancel anything on unmount when no frame is pending", () => {
+    const { unmount } = render(<Band />);
+    unmount();
+    expect(cancelled).toEqual([]);
+  });
+
+  it("ignores an inner scroller (Calendar's grid) while nothing moves under the band", () => {
+    const { getByTestId } = render(<Band calendar />);
+    act(() => {
+      getByTestId("grid").dispatchEvent(new Event("scroll"));
+    });
+    flushFrames();
+    expect(getByTestId("band").dataset.scrolled).toBeUndefined();
+  });
+});
+

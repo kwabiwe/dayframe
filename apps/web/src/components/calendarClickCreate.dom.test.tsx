@@ -167,7 +167,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     await openCreateAt(8 * 60);
     await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));
     const picker = await screen.findByRole("dialog", { name: "Add or filter tags" });
-    const search = within(picker).getByRole("textbox", { name: "Add or filter tags" });
+    const search = within(picker).getByRole("textbox", { name: "Search tags" });
     await userEvent.type(search, "New tag");
     await userEvent.click(within(picker).getByRole("button", { name: /Create “#New tag”/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add block" }));

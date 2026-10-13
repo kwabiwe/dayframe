@@ -592,8 +592,9 @@ export function InlineTagInput({
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
           {actions.map((action, index) => (
+            // The option's name is its visible text ("#Deep work", "Create “#launch”"; WCAG 2.5.3
+            // label in name): the lead glyph and the use count are hidden from it.
             <button
-              aria-label={action.create ? `Create new tag, ${action.label}` : `Existing tag, ${action.label}`}
               aria-selected={highlightedIndex === index}
               className={`df-flist-row df-flist-row--tag${highlightedIndex === index ? " is-highlighted" : ""}${action.create ? " is-create" : ""}`}
               disabled={disabled}
@@ -628,6 +629,7 @@ export function InlineTagInput({
         >
           {activityMatches.map((activity, index) => (
             <button
+              aria-describedby={activity.isPinned ? `${name}-activity-pinned-${index}` : undefined}
               aria-selected={activeActivityIndex === index}
               className={`df-flist-row df-flist-row--activity${activeActivityIndex === index ? " is-highlighted" : ""}`}
               disabled={disabled}
@@ -644,9 +646,11 @@ export function InlineTagInput({
                 <DayframeIcon glyph={resolveActivityIcon(activity).glyph} size={13} />
               </span>
               <span className="df-flist-label">{activity.name}</span>
-              {/* A pinned activity is one of the quick starts; the marker is visual only, so the
-                  option's accessible name stays the activity's name. */}
-              {activity.isPinned ? <span aria-hidden="true" className="df-flist-meta">Pinned</span> : null}
+              {/* A pinned activity is one of the quick starts: "Pinned" is the option's accessible
+                  description, kept out of its name, which stays the activity's name. */}
+              {activity.isPinned ? (
+                <span aria-hidden="true" className="df-flist-meta" id={`${name}-activity-pinned-${index}`}>Pinned</span>
+              ) : null}
             </button>
           ))}
           {activityMatches.length === 0 ? (
@@ -680,7 +684,7 @@ export function InlineTagInput({
             <div className="ui-compound-control inline-tag-picker-search">
               <TagIcon size={15} />
               <input
-                aria-label="Add or filter tags"
+                aria-label="Search tags"
                 autoComplete="off"
                 disabled={disabled}
                 onChange={(event) => setPickerQuery(event.target.value)}

@@ -25,10 +25,27 @@ describe("the band's styles and wiring", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.swiss-persistent-timer-shell::after \{\s*transition: none;/);
   });
 
+  it("keeps the opaque canvas in every rule that styles the band, Calendar included (Codex r1)", () => {
+    // Every rule whose selector targets the band itself (not its ::after or descendants): any
+    // background it sets is the canvas, so no later override (Calendar's used to be transparent)
+    // can make the band see-through.
+    const bodies = [...css.matchAll(/\n\s*([^{}\n]*\.swiss-persistent-timer-shell)\s*\{([^}]*)\}/g)];
+    expect(bodies.length).toBeGreaterThan(2);
+    const backgrounds = bodies
+      .map(([, selector, body]) => [selector.trim(), /(?:^|[;\s])background(?:-color)?\s*:\s*([^;]+);/.exec(body)?.[1]?.trim()])
+      .filter(([, value]) => value !== undefined);
+    expect(backgrounds.map(([selector]) => selector)).toContain(".swiss-timeline-surface .swiss-persistent-timer-shell");
+    for (const [selector, value] of backgrounds) expect(value, selector).toBe("var(--background)");
+    expect(css).not.toMatch(/\.swiss-persistent-timer-shell\s*\{[^}]*background:\s*transparent/);
+  });
+
   it("is driven by AppShell from the page's own main element", () => {
     const shell = readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8");
     expect(shell).toContain("useBandScrolled(timerBandRef, pageMainRef, pathname)");
     expect(shell).toContain('data-scrolled={contentUnderBand ? "true" : undefined}');
     expect(shell).toContain("<main ref={pageMainRef}>");
+    // Calendar measures against its own panel, which its grid scrolls inside.
+    expect(shell).toContain('<main className="swiss-timeline-main" ref={pageMainRef}>');
+    expect(shell.match(/data-scrolled=\{contentUnderBand \? "true" : undefined\}/g)).toHaveLength(2);
   });
 });
