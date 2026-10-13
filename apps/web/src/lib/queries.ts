@@ -6,12 +6,14 @@ import type {
   PlaceRole,
   PlaceSummary,
   ProjectSummary,
-  RecentActivitySuggestion
+  RecentActivitySuggestion,
+  RecentActivitySuggestionCandidate
 } from "@dayframe/shared";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
+  buildHistoricalSuggestionCandidates,
   buildRecentActivitySuggestions
 } from "@dayframe/shared";
 import {
@@ -245,6 +247,12 @@ export type BootstrapData = {
   activityEvents: ActivityRow[];
   categoryUsage: CategoryUsageRank[];
   taskSuggestions: RecentActivitySuggestion[];
+  /**
+   * Web-only: the bounded pool a typed Description searches (most recent distinct variants from
+   * the last 26 weeks). `taskSuggestions` stays the compact contextual top 6 for the empty field
+   * and for older clients; optional so a cached bootstrap from before the field still reads.
+   */
+  taskSuggestionCandidates?: RecentActivitySuggestionCandidate[];
   stats: DashboardStats;
   todaySeries: DashboardSeriesPoint[];
   weekSeries: DashboardSeriesPoint[];
@@ -276,7 +284,7 @@ export async function getBootstrapData(
     reviewItems,
     activityEvents,
     categoryUsage,
-    taskSuggestions,
+    { taskSuggestions, taskSuggestionCandidates },
     stats
   ] = await Promise.all([
     getUser(session),
@@ -312,7 +320,7 @@ export async function getBootstrapData(
     getReviewItems(session),
     getActivityEvents(session),
     getCategoryUsageRanks(session),
-    getTaskSuggestions(session),
+    getTaskSuggestionSets(session),
     getDashboardStats(session, dateRange, capturedNow)
   ]);
 
@@ -363,6 +371,7 @@ export async function getBootstrapData(
     activityEvents,
     categoryUsage,
     taskSuggestions,
+    taskSuggestionCandidates,
     stats: {
       ...stats,
       todayCoveredSeconds: todayCoverage.coveredSeconds,
@@ -899,7 +908,20 @@ async function getTimeEntries(
   return result.rows;
 }
 
+/** Recent typed-search pool bounds: distinct variants and how far back they reach. */
+export const TASK_SUGGESTION_CANDIDATE_LIMIT = 150;
+export const TASK_SUGGESTION_CANDIDATE_WINDOW_DAYS = 182;
+
 export async function getTaskSuggestions(session: RequestSession) {
+  return (await getTaskSuggestionSets(session)).taskSuggestions;
+}
+
+/**
+ * One read of the owner's eligible completed blocks feeds both the compact contextual list
+ * (`taskSuggestions`, unchanged: top 6, also read by older clients) and the bounded pool a typed
+ * Description searches (`taskSuggestionCandidates`, #363 learning tiers, last 26 weeks).
+ */
+export async function getTaskSuggestionSets(session: RequestSession, now: Date = new Date()) {
   const result = await query<{
     id: string;
     categoryId: string | null;
@@ -913,6 +935,8 @@ export async function getTaskSuggestions(session: RequestSession) {
     startedAt: string;
     stoppedAt: string | null;
     userConfirmed: boolean;
+    confirmedInReview: boolean;
+    ownerAuthoredInReview: boolean;
     tagNames: string[];
   }>(
     `select te.id,
@@ -934,7 +958,9 @@ export async function getTaskSuggestions(session: RequestSession) {
                 and accepted_review.workspace_id = te.workspace_id
                 and accepted_review.user_id = te.user_id
                 and accepted_review.status = 'accepted'
-            ) and coalesce(ae.event_type, '') not in ('health_sleep_import', 'health_workout_import') as "userConfirmed"
+            ) and coalesce(ae.event_type, '') not in ('health_sleep_import', 'health_workout_import') as "userConfirmed",
+            ${confirmedInReviewSql},
+            ${ownerAuthoredInReviewSql}
      from time_entries te
      left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id and cat.is_archived = false
@@ -962,11 +988,33 @@ export async function getTaskSuggestions(session: RequestSession) {
     [session.workspaceId, session.userId]
   );
 
-  return buildRecentActivitySuggestions(result.rows, {
-    contextDate: new Date(),
+  const taskSuggestions = buildRecentActivitySuggestions(result.rows, {
+    contextDate: now,
     limit: 6,
     minDurationSeconds: 60
   });
+  const windowStartMs = now.getTime() - TASK_SUGGESTION_CANDIDATE_WINDOW_DAYS * 86_400_000;
+  const candidateRows = result.rows.flatMap((row) => {
+    // pg returns timestamptz as Date; the shared builder reads ISO strings.
+    const startedAt = timestampIso(row.startedAt);
+    const stoppedAt = timestampIso(row.stoppedAt);
+    if (!startedAt || !stoppedAt || Date.parse(stoppedAt) < windowStartMs) return [];
+    return [{ ...row, startedAt, stoppedAt }];
+  });
+  const taskSuggestionCandidates = buildHistoricalSuggestionCandidates(
+    candidateRows,
+    {
+      contextDate: now,
+      limit: TASK_SUGGESTION_CANDIDATE_LIMIT,
+      minDurationSeconds: 60
+    }
+  );
+  return { taskSuggestions, taskSuggestionCandidates };
+}
+
+function timestampIso(value: unknown) {
+  const ms = value instanceof Date ? value.getTime() : typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
 export async function getCategoryUsageRanks(session: RequestSession) {

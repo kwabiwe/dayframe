@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { RecentActivitySuggestion } from "@dayframe/shared";
+import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import type { CreateCategoryOutcome } from "@/components/CategoryPicker";
 import {
   TimeEntryQuickEditorPanel,
@@ -35,6 +35,7 @@ type CalendarEntryCompactEditorSharedProps = {
   positionKey: string;
   scrollContainer: HTMLElement | null;
   taskSuggestions?: RecentActivitySuggestion[];
+  taskSuggestionCandidates?: RecentActivitySuggestionCandidate[];
   tags?: TagRow[];
 };
 

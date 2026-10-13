@@ -909,8 +909,112 @@ export function buildHistoricalEntrySuggestions(
   options: HistoricalSuggestionSearchOptions = { query: "" }
 ): RecentActivitySuggestion[] {
   const limit = historicalSuggestionLimit(options.limit);
-  if (limit === 0 || !Array.isArray(entries)) return [];
+  if (limit === 0) return [];
+  return rankHistoricalSuggestionCandidates(
+    aggregateHistoricalSuggestionCandidates(entries, options),
+    options.query,
+    limit
+  ).map(stripHistoricalLearningTier);
+}
 
+/**
+ * One Recent suggestion variant with the learning tier it ranks in. The web bootstrap ships a
+ * bounded pool of these (`taskSuggestionCandidates`) so a typed Description searches the owner's
+ * whole recent history, not only the compact contextual list.
+ */
+export type RecentActivitySuggestionCandidate = RecentActivitySuggestion & {
+  learningTier: HistoricalSuggestionLearningTier;
+};
+
+export const DEFAULT_SUGGESTION_CANDIDATE_LIMIT = 150;
+const MAX_SUGGESTION_CANDIDATE_LIMIT = 500;
+
+/**
+ * The bounded candidate pool for typed Description search: the same eligibility, learning tiers
+ * and variant aggregation as `buildHistoricalEntrySuggestions`, keeping the `limit` most recently
+ * used variants (ties: more uses first). Blocks shorter than `minDurationSeconds` never count.
+ */
+export function buildHistoricalSuggestionCandidates(
+  entries: RecentActivityEntry[],
+  options: { contextDate?: Date | string; limit?: number; minDurationSeconds?: number } = {}
+): RecentActivitySuggestionCandidate[] {
+  const limit = options.limit === undefined || !Number.isFinite(options.limit)
+    ? DEFAULT_SUGGESTION_CANDIDATE_LIMIT
+    : Math.min(MAX_SUGGESTION_CANDIDATE_LIMIT, Math.max(0, Math.floor(options.limit)));
+  if (limit === 0 || !Array.isArray(entries)) return [];
+  const minDurationSeconds = options.minDurationSeconds ?? 0;
+  const eligible = minDurationSeconds > 0
+    ? entries.filter((entry) => {
+        if (!entry || typeof entry !== "object") return false;
+        const seconds = typeof entry.durationSeconds === "number" && Number.isFinite(entry.durationSeconds)
+          ? entry.durationSeconds
+          : durationSecondsBetween(entry.startedAt, entry.stoppedAt) ?? 0;
+        return seconds >= minDurationSeconds;
+      })
+    : entries;
+  return aggregateHistoricalSuggestionCandidates(eligible, { contextDate: options.contextDate })
+    .sort((left, right) =>
+      Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt) ||
+      right.useCount - left.useCount ||
+      stableTextCompare(left.key, right.key)
+    )
+    .slice(0, limit);
+}
+
+/**
+ * Ranks a candidate pool against what the owner typed, with the Recent match tiers: exact, then
+ * prefix, then word start, then substring (case-insensitive, whitespace-normalised). Within a
+ * tier: owner-typed before confirmed visits, then score, uses, recency, total time. An empty
+ * query matches nothing; callers show their contextual list instead.
+ */
+export function searchHistoricalSuggestionCandidates(
+  candidates: RecentActivitySuggestionCandidate[],
+  query: string,
+  options: { limit?: number } = {}
+): RecentActivitySuggestion[] {
+  const limit = historicalSuggestionLimit(options.limit);
+  if (limit === 0 || !Array.isArray(candidates) || !normalizeHistoricalSearchText(query)) return [];
+  return rankHistoricalSuggestionCandidates(candidates, query, limit).map(stripHistoricalLearningTier);
+}
+
+function stripHistoricalLearningTier(candidate: RecentActivitySuggestionCandidate): RecentActivitySuggestion {
+  const { learningTier: _learningTier, ...suggestion } = candidate;
+  return suggestion;
+}
+
+function rankHistoricalSuggestionCandidates(
+  candidates: RecentActivitySuggestionCandidate[],
+  rawQuery: string,
+  limit: number
+): RecentActivitySuggestionCandidate[] {
+  const query = normalizeHistoricalSearchText(rawQuery);
+  return candidates
+    .map((candidate) => ({
+      candidate,
+      tier: historicalSuggestionMatchTier(
+        normalizeHistoricalSearchText(candidate.description),
+        query
+      )
+    }))
+    .filter((result) => query.length === 0 || result.tier !== null)
+    .sort((left, right) =>
+      (left.tier ?? 0) - (right.tier ?? 0) ||
+      left.candidate.learningTier - right.candidate.learningTier ||
+      right.candidate.score - left.candidate.score ||
+      right.candidate.useCount - left.candidate.useCount ||
+      Date.parse(right.candidate.lastSeenAt) - Date.parse(left.candidate.lastSeenAt) ||
+      right.candidate.totalSeconds - left.candidate.totalSeconds ||
+      stableTextCompare(left.candidate.key, right.candidate.key)
+    )
+    .slice(0, limit)
+    .map(({ candidate }) => candidate);
+}
+
+function aggregateHistoricalSuggestionCandidates(
+  entries: RecentActivityEntry[],
+  options: { contextDate?: Date | string; currentEntryId?: string | null }
+): RecentActivitySuggestionCandidate[] {
+  if (!Array.isArray(entries)) return [];
   const currentEntryId = typeof options.currentEntryId === "string"
     ? options.currentEntryId
     : null;
@@ -991,32 +1095,10 @@ export function buildHistoricalEntrySuggestions(
     }
   }
 
-  const query = normalizeHistoricalSearchText(options.query);
-  return [...aggregates.values()]
-    .map((aggregate) => ({
-      learningTier: aggregate.learningTier,
-      suggestion: scoreRecentActivitySuggestion(aggregate, contextMs)
-    }))
-    .map(({ learningTier, suggestion }) => ({
-      learningTier,
-      suggestion,
-      tier: historicalSuggestionMatchTier(
-        normalizeHistoricalSearchText(suggestion.description),
-        query
-      )
-    }))
-    .filter((result) => query.length === 0 || result.tier !== null)
-    .sort((left, right) =>
-      (left.tier ?? 0) - (right.tier ?? 0) ||
-      left.learningTier - right.learningTier ||
-      right.suggestion.score - left.suggestion.score ||
-      right.suggestion.useCount - left.suggestion.useCount ||
-      Date.parse(right.suggestion.lastSeenAt) - Date.parse(left.suggestion.lastSeenAt) ||
-      right.suggestion.totalSeconds - left.suggestion.totalSeconds ||
-      stableTextCompare(left.suggestion.key, right.suggestion.key)
-    )
-    .slice(0, limit)
-    .map(({ suggestion }) => suggestion);
+  return [...aggregates.values()].map((aggregate) => ({
+    ...scoreRecentActivitySuggestion(aggregate, contextMs),
+    learningTier: aggregate.learningTier
+  }));
 }
 
 /** Creates the complete and intentionally narrow mutation for a selection. */

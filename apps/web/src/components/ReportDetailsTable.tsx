@@ -101,6 +101,7 @@ export function ReportDetailsTable({ report }: { report: ReportResult }) {
           }}
           peerEntries={report.overlapCandidates}
           taskSuggestions={shellData?.taskSuggestions ?? []}
+          taskSuggestionCandidates={shellData?.taskSuggestionCandidates}
           tags={report.filterOptions.tags}
         />
       ) : null}
