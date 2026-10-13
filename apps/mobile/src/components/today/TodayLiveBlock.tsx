@@ -57,6 +57,7 @@ export function TodayLiveBlock({
   diagnostic,
   ghostContentStyle,
   landing,
+  motionPaused = false,
   onAddTime,
   onOpen,
   onStop,
@@ -71,6 +72,8 @@ export function TodayLiveBlock({
   /** Set only on the Stop flight's ghost: the content fades with it; the ghost is never measured or swiped. */
   ghostContentStyle?: ComponentProps<typeof Reanimated.View>["style"];
   landing: LandingRequest | null;
+  /** Today is covered: the ring holds still and the clock sets its digits instead of rolling them. */
+  motionPaused?: boolean;
   onAddTime: () => void;
   onOpen: () => void;
   onStop: () => void;
@@ -84,7 +87,7 @@ export function TodayLiveBlock({
     return blockColorsFor(active.categoryColor, theme.mode, active.categoryLabel ?? "");
   }, [active.categoryColor, active.categoryLabel, theme.mode, theme.surfaceRaised, theme.textPrimary]);
   const landingStyle = useBlockLanding({ distance: LIVE_LANDING_DISTANCE, reduceMotion, request: landing });
-  const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, reduceMotion });
+  const ringStyle = useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion });
   const activityName = active.categoryLabel ?? "No activity";
   const titleStyle = [styles.title, { color: colors.text }, active.titleIsPlaceholder ? styles.placeholder : null];
   const ghost = ghostContentStyle !== undefined;
@@ -162,7 +165,7 @@ export function TodayLiveBlock({
               color={colors.text}
               key={active.startedAt ?? "live"}
               label={active.elapsedLabel}
-              reduceMotion={reduceMotion}
+              reduceMotion={reduceMotion || motionPaused}
               seconds={active.elapsedSeconds}
             />
           </Animated.View>
@@ -330,6 +333,9 @@ const styles = StyleSheet.create({
   ring: {
     borderRadius: TODAY_CARD.radius,
     borderWidth: 2,
+    // Clipping (the ring has no children) lets Core Animation draw the border; a bordered view that
+    // does not clip is drawn as an image on the CPU, and every frame of the breathing redrew it.
+    overflow: "hidden",
     bottom: 0,
     left: 0,
     position: "absolute",

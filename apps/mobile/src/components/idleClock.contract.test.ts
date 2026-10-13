@@ -5,6 +5,7 @@ const dashboard = readFileSync("src/components/DayframeDashboard.tsx", "utf8");
 const clock = readFileSync("src/lib/dashboardClock.ts", "utf8");
 const reports = readFileSync("src/components/reports/ReportsTab.tsx", "utf8");
 const orb = readFileSync("src/components/today/PlayOrb.tsx", "utf8");
+const liveBlock = readFileSync("src/components/today/TodayLiveBlock.tsx", "utf8");
 const motion = readFileSync("src/lib/blocksMotion.ts", "utf8");
 const hotPaths = [
   "src/components/reports/ReportsBlocks.tsx",
@@ -25,8 +26,8 @@ describe("idle and background clock work", () => {
     expect(orb).toMatch(/if \(!foreground\) return undefined;[\s\S]*?setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
   });
   it("holds the breathing ring still in the background (the display link otherwise kept running)", () => {
-    expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground\) \{\s*opacity\.value = BREATHING_RING\.reducedOpacity;/);
-    expect(motion).toContain("}, [foreground, live, opacity, reduceMotion]);");
+    expect(motion).toMatch(/const foreground = useAppForeground\(\);[\s\S]*?if \(reduceMotion \|\| !foreground \|\| paused\) \{\s*opacity\.value = BREATHING_RING\.reducedOpacity;/);
+    expect(motion).toContain("}, [foreground, live, opacity, paused, reduceMotion]);");
   });
   it("gives Reports and Today's presentation minute time unless a live block needs seconds", () => {
     expect(dashboard).toContain("nowMs={isFocused ? now : minuteFloorNow}");
@@ -42,5 +43,17 @@ describe("idle and background clock work", () => {
   });
   it("formats day labels with cached formatters in the per-day paths", () => {
     for (const [path, source] of hotPaths) expect(source, path).not.toContain("toLocaleDateString");
+  });
+
+  // Time Profiler on the iPhone 17 (13 Oct): with a block running, every frame of the breathing ring
+  // and each second's roll committed the whole view tree (Today stays mounted under Settings and the
+  // other tabs), and the ring's border was redrawn on the CPU on every opacity change.
+  it("holds the live block's looping motion still while Today is covered", () => {
+    expect(dashboard).toContain("motionPaused={!isFocused}");
+    expect(liveBlock).toContain("useBreathingRing({ live: active.hasLiveActiveTimer, paused: motionPaused, reduceMotion })");
+    expect(liveBlock).toContain("reduceMotion={reduceMotion || motionPaused}");
+  });
+  it("lets Core Animation draw the ring's border (a bordered view that does not clip is drawn on the CPU)", () => {
+    expect(liveBlock).toMatch(/ {2}ring: \{[^}]*overflow: "hidden"/);
   });
 });

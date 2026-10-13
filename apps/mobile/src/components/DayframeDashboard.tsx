@@ -3008,6 +3008,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 // commits the idle card comes in at once instead of waiting for the retained exit.
                 active={stopFlightOwnsLiveBlock && !hasLiveActiveTimer ? null : todayLivePresentation}
                 liveHidden={stopFlightOwnsLiveBlock}
+                motionPaused={!isFocused}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}
                 liveLanding={liveLanding}

@@ -204,8 +204,19 @@ function landingIsDue(request: LandingRequest | null, entryId: string | undefine
   return Date.now() - request.requestedAt <= LANDING_REQUEST_TTL_MS;
 }
 
-/** Opacity-only breathing for the single live block; static under Reduce Motion or when not live. */
-export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduceMotion: boolean }) {
+/**
+ * Opacity-only breathing for the single live block; static under Reduce Motion, when not live, in the
+ * background and while Today is covered (`paused`): every frame of the loop commits the view tree.
+ */
+export function useBreathingRing({
+  live,
+  paused = false,
+  reduceMotion,
+}: {
+  live: boolean;
+  paused?: boolean;
+  reduceMotion: boolean;
+}) {
   const opacity = useSharedValue<number>(BREATHING_RING.reducedOpacity);
   // The loop breathes only while it can be seen; in the background it holds still (it otherwise
   // kept the display link running for as long as location kept the app alive).
@@ -217,25 +228,31 @@ export function useBreathingRing({ live, reduceMotion }: { live: boolean; reduce
       opacity.value = withTiming(0, { duration: MOBILE_MOTION.control, reduceMotion: ReduceMotion.Never });
       return undefined;
     }
-    if (reduceMotion || !foreground) {
+    if (reduceMotion || !foreground || paused) {
       opacity.value = BREATHING_RING.reducedOpacity;
       return undefined;
     }
     const half = BREATHING_RING.cycleMs / 2;
     const ease = Easing.inOut(Easing.sin);
-    opacity.value = BREATHING_RING.minOpacity;
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(BREATHING_RING.maxOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never }),
-        withTiming(BREATHING_RING.minOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never })
-      ),
-      -1,
-      false,
-      undefined,
-      ReduceMotion.Never
+    const toMax = () => withTiming(BREATHING_RING.maxOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never });
+    // The first rise starts from wherever the ring held (its reduced opacity, or part-way through a
+    // fade), so breathing resumes without a step down. The cycle after it starts and ends at the
+    // maximum: a repeat restarts each cycle from the value it started at.
+    opacity.value = withSequence(
+      toMax(),
+      withRepeat(
+        withSequence(
+          withTiming(BREATHING_RING.minOpacity, { duration: half, easing: ease, reduceMotion: ReduceMotion.Never }),
+          toMax()
+        ),
+        -1,
+        false,
+        undefined,
+        ReduceMotion.Never
+      )
     );
     return () => cancelAnimation(opacity);
-  }, [foreground, live, opacity, reduceMotion]);
+  }, [foreground, live, opacity, paused, reduceMotion]);
 
   return useAnimatedStyle(() => ({ opacity: opacity.value }));
 }

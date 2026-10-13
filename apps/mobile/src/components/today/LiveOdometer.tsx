@@ -149,19 +149,22 @@ const OdometerDigit = memo(function OdometerDigit({
   size: number;
 }) {
   const offset = useSharedValue(stripOffset(digit, cellHeight));
-  const placed = useRef({ cellHeight, digit });
+  const placed = useRef({ cellHeight, digit, reduceMotion });
 
   useEffect(() => {
     const previous = placed.current;
-    if (previous.digit === digit && previous.cellHeight === cellHeight) return;
-    placed.current = { cellHeight, digit };
+    if (previous.digit === digit && previous.cellHeight === cellHeight && previous.reduceMotion === reduceMotion) return;
+    placed.current = { cellHeight, digit, reduceMotion };
     const target = stripOffset(digit, cellHeight);
-    // A new cell size (Dynamic Type, a narrower card) re-places the strip; it never rolls.
+    // Reduce Motion (or a covered Today) sets the strip at rest, a roll still running from the tick
+    // before included; a new cell size (Dynamic Type, a narrower card) re-places it. Neither rolls.
     if (reduceMotion || previous.cellHeight !== cellHeight) {
       cancelAnimation(offset);
       offset.value = target;
       return;
     }
+    // Motion coming back alone leaves the strip where it rests.
+    if (previous.digit === digit) return;
     offset.value = withSpring(target, { ...BLOCKS_SPRING.roll, reduceMotion: ReduceMotion.Never });
   }, [cellHeight, digit, offset, reduceMotion]);
 

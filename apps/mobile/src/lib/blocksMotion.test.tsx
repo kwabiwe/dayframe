@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 });
 
 type Animation = { kind: string; to: unknown; config?: Record<string, unknown>; delay?: number };
-const assigned: Array<{ value: unknown }> = [];
+const assigned: Array<{ value: unknown; writes: unknown[] }> = [];
 const initialValues: unknown[] = [];
 
 vi.mock("react-native-reanimated", () => ({
@@ -19,7 +19,19 @@ vi.mock("react-native-reanimated", () => ({
   useAnimatedStyle: (factory: () => unknown) => factory(),
   useSharedValue: (initial: unknown) => {
     initialValues.push(initial);
-    const shared = { value: initial };
+    // Records every write, so a value overwritten in the same effect still shows.
+    let value = initial;
+    const writes: unknown[] = [];
+    const shared = {
+      get value() {
+        return value;
+      },
+      set value(next: unknown) {
+        writes.push(next);
+        value = next;
+      },
+      writes,
+    };
     assigned.push(shared);
     return shared;
   },
@@ -151,13 +163,38 @@ describe("useBreathingRing", () => {
     return { opacity: assigned[0], tree };
   }
 
+  function breathing(value: unknown) {
+    const sequence = value as { kind: string; to: [Animation, { kind: string; to: { to: Animation[] } }] };
+    expect(sequence.kind).toBe("sequence");
+    const [rise, loop] = sequence.to;
+    expect(loop.kind).toBe("repeat");
+    return { halves: loop.to.to, rise };
+  }
+
   it("breathes on opacity alone in a 2.4 s cycle while live", () => {
     const { opacity, tree } = mountRing({ live: true, reduceMotion: false });
-    const loop = opacity.value as { kind: string; to: { to: Animation[] } };
-    expect(loop.kind).toBe("repeat");
-    const halves = loop.to.to;
-    expect(halves.map((half) => half.to)).toEqual([BREATHING_RING.maxOpacity, BREATHING_RING.minOpacity]);
+    const { halves, rise } = breathing(opacity.value);
+    // One rise from where the ring held, then a cycle that starts and ends at the maximum, so each
+    // repeat (which restarts from the cycle's start) is seamless (Codex r2 on #380).
+    expect(rise).toMatchObject({ kind: "timing", to: BREATHING_RING.maxOpacity });
+    expect(halves.map((half) => half.to)).toEqual([BREATHING_RING.minOpacity, BREATHING_RING.maxOpacity]);
+    expect(halves.at(-1)?.to).toBe(rise.to);
     expect(halves.reduce((sum, half) => sum + Number(half.config?.duration), 0)).toBe(BREATHING_RING.cycleMs);
+    expect(rise.config?.duration).toBe(BREATHING_RING.cycleMs / 2);
+    act(() => tree.unmount());
+  });
+
+  it("holds still while Today is covered and breathes again once it is uncovered (13 Oct, main thread)", () => {
+    // This file's mock creates a shared value per render: read the latest one.
+    const latest = () => assigned[assigned.length - 1];
+    const { tree } = mountRing({ live: true, paused: true, reduceMotion: false });
+    expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
+    act(() => tree.update(<Ring live paused={false} reduceMotion={false} />));
+    breathing(latest().value);
+    // The loop starts from the held opacity: nothing sets the ring to its minimum first (Codex r1 on #380).
+    expect(assigned.flatMap((shared) => shared.writes)).not.toContain(BREATHING_RING.minOpacity);
+    act(() => tree.update(<Ring live paused reduceMotion={false} />));
+    expect(latest().value).toBe(BREATHING_RING.reducedOpacity);
     act(() => tree.unmount());
   });
 
