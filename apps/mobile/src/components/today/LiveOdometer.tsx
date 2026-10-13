@@ -166,6 +166,9 @@ const OdometerDigit = memo(function OdometerDigit({
     }
     // Motion coming back alone leaves the strip where it rests.
     if (previous.digit === digit) return;
+    // The same stiffness, damping and mass as Reanimated's withSpring. React Native settles at 0.001 of
+    // displacement and speed (Reanimated uses a relative energy threshold), and a retarget starts from
+    // the strip's position without the earlier roll's speed (Codex r1 on #392).
     Animated.spring(offset, { ...BLOCKS_SPRING.roll, toValue: target, useNativeDriver: true }).start();
   }, [cellHeight, digit, offset, reduceMotion]);
 

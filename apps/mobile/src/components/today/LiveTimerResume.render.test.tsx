@@ -427,6 +427,23 @@ describe("Today in front moves the Dashboard on the minute (iPhone 17, 13 Oct: 2
       });
     }
     expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    // Nor after ten minutes in the background and a return to the app (Codex r1 on #392), nor when the
+    // Dashboard, which keeps counting the stopped entry it retains, offers a larger value.
+    act(() => setAppState("background"));
+    act(() => {
+      vi.advanceTimersByTime(600_000);
+    });
+    act(() => setAppState("active"));
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
+    act(() =>
+      tree.update(
+        <LiveBlockTime
+          active={{ ...running, elapsedLabel: "0:15:23", elapsedSeconds: 923, hasLiveActiveTimer: false }}
+          reduceMotion={false}
+        />
+      )
+    );
+    expect(shownDigits(shared.slice(-5))).toEqual([0, 0, 2, 2, 3]);
     act(() => tree.unmount());
   });
 

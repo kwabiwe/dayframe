@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAppForeground } from "../../lib/appForeground";
 import { useDashboardClockTicks } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
@@ -19,9 +19,10 @@ export type LiveBlockClockInput = {
  * running, 13 Oct); this clock re-renders the live block alone, so its time is right whenever the
  * block can be seen, also while a swipe back from Settings reveals it before the route changes (Codex
  * r1 on #384), and a return to the app reads the time in the same render (#377). Seconds tick only
- * while the block is live; when it stops, the clock reads the time once more, so a leaving block shows
- * the time it stopped at. The Dashboard's value and this one come from the same entry; the block shows
- * the fresher of the two.
+ * while the block is live and it shows the fresher of its own value and the Dashboard's (both from the
+ * same entry). When it stops, it reads the time once, in that render, and holds it while it leaves: no
+ * later tick, return to the app or Dashboard value (which keeps counting a stopped entry it retains for
+ * the exit) moves it on (Codex r2 on #390, r1 on #392).
  */
 export function useLiveBlockElapsed(active: LiveBlockClockInput) {
   const foreground = useAppForeground();
@@ -30,13 +31,21 @@ export function useLiveBlockElapsed(active: LiveBlockClockInput) {
   const clocked = startedAt !== undefined && durationSeconds !== undefined;
   const live = clocked && active.hasLiveActiveTimer;
   useDashboardClockTicks({ foreground: foreground && live, needsSecondClock: true, setNow });
-  // A stopping block reads the time once more, then holds it while it leaves (Codex r2 on #390: a
-  // minute tick could otherwise move it on during the exit).
-  useEffect(() => {
-    if (clocked && !live) setNow(Date.now());
-  }, [clocked, live]);
+  // The time held since the block stopped (React's "information from previous renders" pattern).
+  const [held, setHeld] = useState<{ seconds: number; startedAt: string } | null>(null);
   if (!clocked) return { label: active.elapsedLabel, seconds: active.elapsedSeconds };
-  const seconds = Math.max(active.elapsedSeconds, activeTimerElapsedSeconds({ durationSeconds, startedAt }, now));
+  const elapsedAt = (nowMs: number) =>
+    Math.max(active.elapsedSeconds, activeTimerElapsedSeconds({ durationSeconds, startedAt }, nowMs));
+  let seconds: number;
+  if (live) {
+    if (held !== null) setHeld(null);
+    seconds = elapsedAt(now);
+  } else if (held !== null && held.startedAt === startedAt) {
+    seconds = held.seconds;
+  } else {
+    seconds = elapsedAt(Date.now());
+    setHeld({ seconds, startedAt });
+  }
   return { label: seconds === active.elapsedSeconds ? active.elapsedLabel : formatLiveClock(seconds), seconds };
 }
 
