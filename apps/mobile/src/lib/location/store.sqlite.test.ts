@@ -316,6 +316,15 @@ describe("Motion & Fitness upload batches",()=>{
  });
 });
 describe("Motion & Fitness local retention",()=>{
+ it("retention's per-sample queries use indexes instead of scanning the journal",()=>{
+  const plan=(sql:string)=>JSON.stringify(db.prepare(`explain query plan ${sql}`).all());
+  expect(plan(store.RETENTION_EXPIRY_SQL.replace("?","'2026-01-01T00:00:00Z'"))).toContain("location_evidence_expires_idx");
+  for(const motion of [true,false]){
+   const detail=plan(store.retentionKindCountSql(motion));
+   expect(detail).toContain("COVERING INDEX location_evidence_motion_idx");
+   expect(detail).not.toMatch(/"SCAN location_evidence_journal"/);
+  }
+ });
  it("never lets frequent motion records displace uploaded location evidence",async()=>{
   const key=`${owner.workspaceId}:${owner.userId}`;
   const insert=db.prepare("insert into location_evidence_journal (client_evidence_id, account_key, occurred_at, expires_at, evidence_json, upload_state, inserted_at) values (?, ?, ?, ?, ?, 'acknowledged', ?)");
