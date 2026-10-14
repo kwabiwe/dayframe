@@ -15,17 +15,23 @@ HERE=${0:A:h}
 WORK=$(mktemp -d -t dayframe-perf)
 trap 'rm -rf "$WORK"' EXIT
 
-xcrun devicectl device info apps --device "$DEV" --timeout 60 --json-output "$WORK/apps.json" >/dev/null 2>&1
-read BUILD CONTAINER <<< "$(DAYFRAME_BUNDLE=$BUNDLE python3 -I - "$WORK/apps.json" <<'PY'
-import json, os, sys
+xcrun devicectl device info apps --device "$DEV" --timeout 60 --json-output "$WORK/apps.json" >/dev/null 2>&1 \
+  || { echo "could not list the device's apps" >&2; exit 1; }
+APP=$(DAYFRAME_BUNDLE=$BUNDLE python3 -I - "$WORK/apps.json" 2>/dev/null <<'PY'
+import json, os, re, sys
 apps = json.load(open(sys.argv[1]))["result"]["apps"]
-app = next((a for a in apps if a.get("bundleIdentifier") == os.environ["DAYFRAME_BUNDLE"]), None)
-print(f'{app.get("bundleVersion")} {app["url"].split("/Application/")[1].split("/")[0]}' if app else "- -")
+app = next(a for a in apps if a.get("bundleIdentifier") == os.environ["DAYFRAME_BUNDLE"])
+container = app["url"].split("/Application/")[1].split("/")[0]
+assert re.fullmatch(r"[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", container, re.I)
+print(app.get("bundleVersion"), container)
 PY
-)"
-PID=$(xcrun devicectl device info processes --device "$DEV" --timeout 60 2>/dev/null | grep "$CONTAINER/Dayframe.app/Dayframe *$" | awk '{print $1}' | head -1)
-echo "$BUNDLE build $BUILD, pid ${PID:-not running}"
-[ -n "$PID" ] || exit 1
+) || { echo "$BUNDLE is not installed, or its container could not be read" >&2; exit 1; }
+read BUILD CONTAINER <<< "$APP"
+PROCESSES=$(xcrun devicectl device info processes --device "$DEV" --timeout 60 2>/dev/null) \
+  || { echo "could not list the device's processes" >&2; exit 1; }
+PID=$(print -r -- "$PROCESSES" | grep -F "/$CONTAINER/Dayframe.app/Dayframe" | awk '{print $1}' | head -1)
+[[ "$PID" == <1-> ]] || { echo "$BUNDLE is not running" >&2; exit 1; }
+echo "$BUNDLE build $BUILD, pid $PID"
 
 # One sample: prints "<epoch seconds> <time> | <Activity Monitor row>". The time is the recording's own
 # start (its table of contents) plus the selected row's offset, so set-up delays never skew the window.
@@ -40,7 +46,7 @@ sample() {
 import re, sys
 from datetime import datetime
 match = re.search(r"<start-date>([^<]+)</start-date>", sys.stdin.read())
-print(f"{datetime.fromisoformat(match.group(1)).timestamp():.3f}" if match else "")') 
+print(f"{datetime.fromisoformat(match.group(1)).timestamp():.3f}" if match else "")')
   [ -n "$t0" ] || { echo "the recording has no start date" >&2; return 1; }
   row=$(python3 -I "$HERE/activity-monitor-parse.py" "$xml" "Dayframe ($PID)" | tail -1)
   local field
