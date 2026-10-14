@@ -379,7 +379,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   // "From 10:15 · after Write report": starts the block as Start would, at the previous block's
   // end. The offer is checked again when the Start runs: if a block is running by then, or a newer
-  // block has ended since, nothing starts and the bar says so (never a Start at now instead).
+  // block has ended since, nothing starts and the bar says so (never a Start at now instead). The
+  // server checks it once more under the timer lock (`afterPreviousEnd`), for a block added or
+  // moved on another device that this tab has not seen.
   function startFromPreviousEnd(offer: PreviousEndOffer) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
@@ -390,7 +392,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         startAt: (snapshot) => {
           if (snapshot.activeEntry) return null;
           const nowMs = Date.now();
-          const current = previousEndOffer(snapshot.entries, { dayStartMs: localDayStartMs(nowMs), startMs: nowMs });
+          const current = previousEndOffer(finishedBlocks(snapshot), { dayStartMs: localDayStartMs(nowMs), startMs: nowMs });
           return current?.startedAt === offer.startedAt ? current.startedAt : null;
         }
       }
@@ -456,7 +458,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // Owner idea 1 (14 Oct 2026): idle, with today's last block ended under 4 h ago, offer to start
   // from its end. Not beside a trailing duration (that logs a finished block, not a Start).
   const previousEnd = !active && idleNow && !parsedCommand?.durationSeconds
-    ? previousEndOffer(data.entries, { dayStartMs: localDayStartMs(idleNow), startMs: idleNow })
+    ? previousEndOffer(finishedBlocks(data), { dayStartMs: localDayStartMs(idleNow), startMs: idleNow })
     : null;
   const goLabel = parsedCommand?.durationSeconds
     ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
@@ -1170,6 +1172,15 @@ function manualEntryDefaults(selectedDate: string) {
 
 function dateTimeLocal(date: Date) {
   return `${dateKey(date)}T${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+/**
+ * The blocks "start at the previous end" looks at: the bar's own `entries` (with this tab's
+ * optimistic stops) and the bootstrap's `latestFinishedEntry`, which `entries` (the latest-started
+ * 100) can miss when a long block started earlier ends later (Codex r1 on #418).
+ */
+function finishedBlocks(data: BootstrapData) {
+  return data.latestFinishedEntry ? [...data.entries, data.latestFinishedEntry] : data.entries;
 }
 
 /** Midnight starting the viewer's local day containing `ms`. */

@@ -60,6 +60,21 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
     })).toBeNull();
   });
 
+  it("uses the bootstrap's latest-ending block when the bar's entries miss it (Codex r1 on #418)", async () => {
+    // `entries` is the latest-started 100: a long block that started earlier and ends later can be
+    // missing from it. The chip must offer that block's end, never the earlier one.
+    runtime = runtimeFixture({
+      entries: [finished({ id: "short", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) })],
+      latestFinishedEntry: finished({ id: "long", description: "Workshop", startedAt: iso(6, 0), stoppedAt: iso(10, 45) })
+    });
+    render(<PersistentTimerBar />);
+    await act(async () => { vi.advanceTimersByTime(0); });
+    const chip = screen.getByRole("button", { name: "Start from 10:45, after Workshop" });
+    await act(async () => { fireEvent.click(chip); });
+    const [, options] = (runtime.startTimer as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(options.startAt(runtime.shellData as BootstrapData)).toBe(iso(10, 45));
+  });
+
   it("offers nothing while recording, beside a trailing duration, or past the window", async () => {
     const ended = (stoppedAt: string) => [finished({ id: "a", description: "Write report", startedAt: iso(6, 0, 13), stoppedAt })];
     const cases: Parameters<typeof runtimeFixture>[0][] = [
@@ -96,6 +111,7 @@ function runtimeFixture(overrides: {
   activeEntry?: TimeEntryRow | null;
   description?: string;
   entries?: TimeEntryRow[];
+  latestFinishedEntry?: TimeEntryRow | null;
 } = {}) {
   const activeEntry = overrides.activeEntry ?? null;
   const data = {
@@ -104,6 +120,7 @@ function runtimeFixture(overrides: {
     categoryUsage: [],
     dateRange: { selectedDate: "2026-10-14" },
     entries: [...(overrides.entries ?? []), ...(activeEntry ? [activeEntry] : [])],
+    latestFinishedEntry: overrides.latestFinishedEntry ?? null,
     tags: [],
     taskSuggestions: []
   } as unknown as BootstrapData;

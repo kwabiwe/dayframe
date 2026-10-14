@@ -210,6 +210,20 @@ export class TimerReplacementWindowError extends Error {
   }
 }
 
+/**
+ * "Start at the previous end" (PRD D16) was asked for a gap that no longer exists: a block is
+ * running, or a block now ends after the requested start (added or moved on another device).
+ */
+export class PreviousEndChangedError extends Error {
+  readonly code = "previous_end_changed";
+  status = 409;
+
+  constructor(message = "That gap has changed, so nothing was started. Try again.") {
+    super(message);
+    this.name = "PreviousEndChangedError";
+  }
+}
+
 export class TimerMutationBusyError extends Error {
   readonly code = "timer_busy";
   readonly status = 503;
@@ -805,6 +819,10 @@ async function processActivityEventWithClient(
       stopOutcome = timeEntryId ? "stopped" : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
+      // Under the user's timer lock, so no Start or Stop can slip in between the check and the insert.
+      if (parsed.rawPayload.afterPreviousEnd === true) {
+        await assertStartsAfterEveryBlock(client, session, startedAt);
+      }
       if (candidate.shouldClosePrevious) {
         await closeActiveTimersForReplacement(client, session, startedAt);
       }
@@ -1123,6 +1141,23 @@ async function lockUserTimerState(client: pg.PoolClient, session: RequestSession
     "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
     [session.workspaceId, session.userId]
   );
+}
+
+async function assertStartsAfterEveryBlock(
+  client: pg.PoolClient,
+  session: RequestSession,
+  startedAt: string | Date
+) {
+  const result = await client.query(
+    `select 1
+     from time_entries
+     where workspace_id = $1
+       and user_id = $2
+       and (stopped_at is null or stopped_at > $3::timestamptz)
+     limit 1`,
+    [session.workspaceId, session.userId, startedAt]
+  );
+  if (result.rows.length) throw new PreviousEndChangedError();
 }
 
 async function closeActiveTimersForReplacement(

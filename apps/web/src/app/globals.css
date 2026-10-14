@@ -9687,6 +9687,7 @@ button.df-cmd-clock:hover {
 }
 
 .df-cmd-from {
+  position: relative;
   display: inline-flex;
   max-width: 260px;
   min-width: 0;
@@ -9703,6 +9704,13 @@ button.df-cmd-clock:hover {
   font-weight: 600;
   line-height: 15px;
   white-space: nowrap;
+}
+
+/* The chip stays 15 px tall so the bar keeps 64 px; its target is 44 px (14.5 px above and below). */
+.df-cmd-from::after {
+  position: absolute;
+  inset: -14.5px 0;
+  content: "";
 }
 
 .df-cmd-from:hover:not(:disabled) {
@@ -9925,6 +9933,11 @@ button.df-cmd-clock:hover {
     margin: 0;
     padding: 0 12px;
     font-size: 13px;
+  }
+
+  /* Already 44 px here; an extended target would reach the description and the quick starts. */
+  .df-cmd-from::after {
+    inset: 0;
   }
 
   .df-cmd-go-label,

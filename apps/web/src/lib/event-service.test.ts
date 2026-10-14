@@ -39,6 +39,7 @@ const {
   deleteTimeEntry,
   deleteTimeEntries,
   ensureAutomaticLoggingCategories,
+  PreviousEndChangedError,
   processActivityEvent,
   reprocessHealthReviewItems,
   resolveLearnedPlaceLocation,
@@ -724,6 +725,65 @@ describe("category persistence", () => {
       "event-1"
     ]);
     expect(client.release).toHaveBeenCalled();
+  });
+
+  // PRD D16: "start at the previous end" is refused under the timer lock when anything runs or
+  // ends after the requested start (a block added or moved on another device; Codex r1 on #418).
+  it.each([
+    ["a block now ends after it", [{ "?column?": 1 }], true],
+    ["nothing runs or ends after it", [], false]
+  ])("an afterPreviousEnd Start when %s", async (_case, laterRows, refused) => {
+    const startedAt = "2026-10-14T10:15:00.000Z";
+    const client = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("stopped_at is null or stopped_at > $3::timestamptz")) return { rows: laterRows };
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-prev-end" }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-prev-end" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    const run = processActivityEvent({
+      source: "manual_app",
+      type: "timer_start",
+      occurredAt: new Date(startedAt),
+      rawPayload: { origin: "web_timer", startedAt, afterPreviousEnd: true }
+    }, session);
+
+    const statements = () => client.query.mock.calls.map(([statement]) => String(statement));
+    if (refused) {
+      await expect(run).rejects.toBeInstanceOf(PreviousEndChangedError);
+      expect(statements().some((statement) => statement.includes("insert into time_entries"))).toBe(false);
+      expect(client.query).toHaveBeenCalledWith("rollback");
+    } else {
+      await expect(run).resolves.toMatchObject({ timeEntryId: "entry-prev-end" });
+    }
+    const lock = statements().findIndex((statement) => statement.includes("pg_advisory_xact_lock(hashtext($1), hashtext($2))"));
+    const check = statements().findIndex((statement) => statement.includes("stopped_at is null or stopped_at > $3::timestamptz"));
+    expect(lock).toBeGreaterThan(-1);
+    expect(check).toBeGreaterThan(lock);
+    expect(client.query.mock.calls[check][1]).toEqual([session.workspaceId, session.userId, startedAt]);
+  });
+
+  it("does not run the previous-end check for an ordinary or backdated Start without the flag", async () => {
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-plain" }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-plain" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+    await processActivityEvent({
+      source: "manual_app",
+      type: "timer_start",
+      occurredAt: new Date("2026-10-14T10:15:00.000Z"),
+      rawPayload: { origin: "web_timer", startedAt: "2026-10-14T10:15:00.000Z" }
+    }, session);
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("stopped_at is null or stopped_at > $3"))).toBe(false);
   });
 
   it("never stores the server-only Review decision keys from a client event payload (E1)", async () => {

@@ -41,6 +41,8 @@ export type TimerStartRequestPayload = {
   description?: string;
   /** A backdated start ("start at the previous end"); omitted, the server starts it now. */
   startedAt?: string;
+  /** With `startedAt`: the server refuses the Start if anything runs or ends after it (PRD D16). */
+  afterPreviousEnd?: true;
   tagNames: string[];
 };
 
@@ -343,12 +345,15 @@ export function timerStartRequestPayload(draft: TimerDraft, startedAt?: string):
     mode: "start",
     categoryId: draft.categoryId || undefined,
     description: draft.description.trim() || undefined,
-    ...(startedAt ? { startedAt } : {}),
+    ...(startedAt ? { afterPreviousEnd: true as const, startedAt } : {}),
     tagNames: draft.tagNames
   };
 }
 
-/** Why a "start at the previous end" Start did not run: the gap it offered is no longer there. */
+/**
+ * Why a "start at the previous end" Start did not run: the gap it offered is no longer there (the
+ * same words the server's 409 `previous_end_changed` carries).
+ */
 export const PREVIOUS_END_GONE_MESSAGE = "That gap has changed, so nothing was started. Try again.";
 
 export async function runTimerStartMutation({

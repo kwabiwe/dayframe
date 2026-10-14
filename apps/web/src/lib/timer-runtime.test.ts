@@ -94,7 +94,7 @@ describe("shell timer runtime", () => {
     });
 
     await expect(run(() => "2026-08-24T15:10:00.000Z")).resolves.toMatchObject({ ok: true, switchedAt: "2026-08-24T15:10:00.000Z" });
-    expect(sent).toEqual([{ mode: "start", categoryId: "focus", description: "Plan", startedAt: "2026-08-24T15:10:00.000Z", tagNames: [] }]);
+    expect(sent).toEqual([{ mode: "start", categoryId: "focus", description: "Plan", afterPreviousEnd: true, startedAt: "2026-08-24T15:10:00.000Z", tagNames: [] }]);
     expect(committed[0].activeEntry).toMatchObject({ id: "optimistic:2026-08-24T15:10:00.000Z", startedAt: "2026-08-24T15:10:00.000Z" });
 
     // Gone by the time it runs: no optimistic block, no request, no Start at now instead.

@@ -243,6 +243,12 @@ export type BootstrapData = {
   dayEntries: TimeEntryRow[];
   weekEntries: TimeEntryRow[];
   activeEntry: TimeEntryRow | null;
+  /**
+   * The finished block that ended last (started in the last 72 h), whether or not `entries` (the
+   * latest-started 100) holds it: "Start at the previous end" (PRD D16). Optional so a cached
+   * bootstrap from before the field still reads.
+   */
+  latestFinishedEntry?: TimeEntryRow | null;
   reviewItems: ReviewItemRow[];
   activityEvents: ActivityRow[];
   categoryUsage: CategoryUsageRank[];
@@ -280,6 +286,7 @@ export async function getBootstrapData(
     historyEntries,
     dayEntries,
     weekEntries,
+    latestFinishedEntries,
     activeEntry,
     reviewItems,
     activityEvents,
@@ -316,6 +323,7 @@ export async function getBootstrapData(
       limit: 300,
       capturedNow
     }),
+    getTimeEntries(session, { latestFinished: true, limit: 1, capturedNow }),
     getActiveEntry(session),
     getReviewItems(session),
     getActivityEvents(session),
@@ -367,6 +375,7 @@ export async function getBootstrapData(
     dayEntries,
     weekEntries,
     activeEntry,
+    latestFinishedEntry: latestFinishedEntries[0] ?? null,
     reviewItems,
     activityEvents,
     categoryUsage,
@@ -817,6 +826,12 @@ export type TimeEntryQueryOptions = {
   startedFrom?: string;
   startedBefore?: string;
   limit?: number;
+  /**
+   * The latest-ending finished blocks (newest end first) among those started in the last 72 h —
+   * every block is at most 24 h, so nothing ending later is left out. "Start at the previous end"
+   * (PRD D16) reads it: `entries` is the latest-started blocks, so a long block can be missing.
+   */
+  latestFinished?: boolean;
 };
 
 export function buildTimeEntriesQuery(
@@ -842,6 +857,10 @@ export function buildTimeEntriesQuery(
   if (options.startedBefore) {
     values.push(options.startedBefore);
     where.push(`te.started_at < $${values.length}::timestamptz`);
+  }
+  if (options.latestFinished) {
+    where.push("te.stopped_at is not null");
+    where.push(`te.started_at >= ${capturedNowParam}::timestamptz - interval '72 hours'`);
   }
   values.push(options.limit ?? 100);
 
@@ -901,7 +920,7 @@ export function buildTimeEntriesQuery(
      left join categories cat on cat.id = te.category_id and cat.workspace_id = te.workspace_id
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where ${where.join(" and ")}
-     order by te.started_at desc, te.id desc
+     order by ${options.latestFinished ? "te.stopped_at desc" : "te.started_at desc"}, te.id desc
      limit $${values.length}`,
     values
   };
