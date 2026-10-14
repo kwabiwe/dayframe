@@ -68,6 +68,17 @@ enum DayframeShortcutDirectEventClient {
     return StartDelivery(timeEntryId: entryId, runsNow: payload.startOutcome == nil, context: context)
   }
 
+  enum LiveActivityRegistration {
+    /// Registered for push, with its Stop control showing.
+    case registered
+    /// The server refused it because the block is no longer running (409): a Stop or Switch made
+    /// elsewhere committed first, so no push will ever reach this Activity.
+    case blockEnded
+    /// No token, transport failure or another refusal: the Activity stays, Stop hidden, for the app to
+    /// reconcile when it next runs.
+    case failed
+  }
+
   /// Registers a Shortcut-started Live Activity's APNs push token for its block with the session that
   /// delivered the Start (`POST /api/live-activities`), then shows its Stop control, as the app does for
   /// Activities it starts. Without this a Stop or Switch made on the web or another device could not end
@@ -76,7 +87,7 @@ enum DayframeShortcutDirectEventClient {
     activityId: String,
     entryId: String,
     context: DayframeShortcutRuntimeContext
-  ) async -> Bool {
+  ) async -> LiveActivityRegistration {
     guard
       let environment = DayframeLiveActivityController.pushEnvironment(),
       let token = await DayframeLiveActivityController.pushToken(activityId: activityId),
@@ -88,7 +99,7 @@ enum DayframeShortcutDirectEventClient {
         environment: environment
       ))
     else {
-      return false
+      return .failed
     }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -101,11 +112,20 @@ enum DayframeShortcutDirectEventClient {
     configuration.timeoutIntervalForResource = 10
     do {
       let (_, response) = try await URLSession(configuration: configuration).data(for: request)
-      guard (response as? HTTPURLResponse)?.statusCode == 201 else { return false }
+      switch (response as? HTTPURLResponse)?.statusCode {
+      case 201:
+        break
+      case 409:
+        return .blockEnded
+      default:
+        return .failed
+      }
     } catch {
-      return false
+      return .failed
     }
     return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)
+      ? .registered
+      : .failed
   }
 
   static func isCanonicalEntryId(_ value: String) -> Bool {
