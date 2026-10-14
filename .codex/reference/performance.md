@@ -1,0 +1,75 @@
+# Performance
+
+Canonical budgets and measurement method for Dayframe's CPU, memory and render cost on iPhone, and the guards that keep them. Read it before changing anything that runs often:
+- clocks, intervals and per-second state, especially at provider level above the native tabs;
+- looping or per-frame animation;
+- background capture (location, Motion & Fitness, Health);
+- per-sample or per-pass SQLite/AsyncStorage work;
+- sync and recovery passes, and bootstrap or network frequency.
+
+Owner decision 14 Oct 2026, after the freeze, memory and CPU investigation (`docs/investigations/2026-10-12-iphone-review-stale-items.md`).
+
+## Budgets
+
+Measured on the owner's iPhone 17 with production data, unless a row says otherwise. Baselines are TestFlight 0.1.0 (119).
+
+| Scenario | Budget | Baseline (119, 14 Oct) |
+| --- | --- | --- |
+| Today in front, a block running, phone untouched, 5 min | ≤ 10 % of one core | 6.8 % (26.3 s CPU in about 389 s) |
+| Memory slope in that window | ≤ 2 MB per minute | about 1.3 MB per minute |
+| Background, normal movement, 30 min | ≤ 2 % of one core on average, aiming at idle | 1.8 % (33 s CPU in about 1,812 s) |
+| Background CPU per stored location sample | set from the first after-measurement of the location-write batch (#398, #399, #401) | to be counted once that window's evidence is uploaded |
+| Long-run footprint | ≤ 500 MB after about 3 hours of normal use | 422–431 MB after about 2.5–3 hours |
+| Looping motion (the live block's ring, rolling digits, anything that repeats) | no per-frame view-tree commits: React Native's native driver or Core Animation, never a Reanimated loop | Reanimated per-frame commits were 54–88 % of main-thread time before #392 |
+| Per-sample and per-pass storage queries | index lookups only: no full table scans, no unbounded journal reads | retention went from about 37 ms to 0.35 ms per sample (#398, Mac) |
+
+A budget is breached when a measurement made by the method below exceeds it. A PR that knowingly exceeds a budget needs an owner decision recorded in the tracker.
+
+## Measurement method
+
+Activity Monitor CPU totals, not Time Profiler totals. Device Time Profiler recordings over Wi-Fi were cut to about 1.5 s (13 Oct), so they are only for per-thread shape.
+
+1. Build: name the build (TestFlight number, or a Staging build of an exact commit) and whether it ran on production or staging data.
+2. Scene:
+   - Foreground: Today in front, a block running, phone untouched and unlocked for the whole window. Auto-lock must not end it.
+   - Background: Dayframe not opened during the window; using the phone otherwise and moving around is fine.
+3. Sample: take an Activity Monitor sample of the Dayframe process at both ends of the window: `xctrace` Activity Monitor template, `cpu-total`, `memory-physical-footprint`, `memory-real` and `idle-wakeups`. The local helper `.codex-dayframe-qa/resume-clock-2026-10-13/prodcpu.sh <seconds>` finds the production app's process from its bundle container and does this; `cpuwindow.sh <pid> <seconds>` takes any process. Send no other device commands during the window.
+4. Compute: CPU % = Δ`cpu-total` ÷ elapsed time between the two samples (the printed sample times). Memory slope = Δ footprint ÷ elapsed minutes.
+5. Check the scene held:
+   - Foreground: the wakeup rate should match an in-front window (about 180–190 per second on 119), and the phone still unlocked at the end.
+   - Background: a falling `memory-real` confirms the app was suspended or compressed.
+   - Otherwise repeat the window.
+6. Per stored sample (background): divide the background CPU seconds by the location evidence production received for the window. This is a read-only count once the phone has uploaded the window, which happens on its next foreground pass.
+
+The Simulator can compare two builds of the same JavaScript (Debug app, Today in front, a 10 s Time Profiler, sample counts per thread), but it is never device evidence.
+
+## Automated guards
+
+These run in CI, so a regression fails the PR before a device measurement is needed:
+- `npm run test`: unit, DOM and real-SQLite tests.
+- `npm run validate:location-v2-db`: PostGIS.
+
+| Guard | Where |
+| --- | --- |
+| The Dashboard re-renders whole seconds only while they are on screen; the live block keeps its own clock | `idleClock.contract.test.ts`, `LiveTimerResume.render.test.tsx` (#384, #390) |
+| No clock ticks while backgrounded; the first foreground frame shows the right time | `LiveTimerResume.render.test.tsx` (#377, #384) |
+| Looping motion uses the native driver, not Reanimated | `idleClock.contract.test.ts`, `blocksMotion.test.tsx` (#392) |
+| Per-sample location retention uses indexes | `store.sqlite.test.ts` query-plan test (#398) |
+| A recovery pass's own location evidence never queues another pass | `connectivityRecovery.test.ts` (#383) |
+| Location writes do not refresh durable work in the background | `durableLocationRefreshGate.test.ts` (#399) |
+| A location pass reloads the Dashboard only when a replay changed something shown | `store.sqlite.test.ts`, `validate:location-v2-db` (#401) |
+
+Guardrail 5b adds render-count budgets for the Dashboard, Today and Reports per second and per minute (React Profiler on the existing render harnesses), a check that hot paths create no per-call `Intl` formatters, and query-plan tests for every per-sample and per-pass journal query. Each guard row names its tests here when it lands.
+
+## Release gate
+
+Before every TestFlight upload, take the 5-minute Today reading (foreground method above) on a Staging build of the exact release commit. Record it, with its baseline, in `.codex/reference/release-and-testflight.md`. After the TestFlight build is installed, repeat it on production data when the owner can leave the phone untouched. A reading over budget stops the release unless the owner accepts it.
+
+## Pull requests
+
+Every implementation PR fills the template's "Performance impact" section. It applies when the PR touches anything listed at the top of this document:
+- Name the budget rows it could affect.
+- Name the automated guard that covers it.
+- Say whether a device reading was taken, and its numbers.
+
+Otherwise write `Not applicable` with the reason.

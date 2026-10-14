@@ -42,6 +42,7 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Group: `Internal Health Debug`
 - Delivery/build ID: `ed98784d-2647-4b16-b1df-885e9e5a110a`
 - Archived commit: `a5c2b7a`
+- Performance gate reading (baseline for the next build): Today in front with a block running on the iPhone 17, 6.8 % of a core and about +1.3 MB per minute (production 119, 14 Oct; taken after upload, before the gate existed). Background 30-minute average 1.8 %.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
@@ -76,17 +77,18 @@ For any Dayframe implementation PR that changes shipped app, API, database, mobi
 
 If mobile/native/runtime configuration changed or TestFlight is an explicit success criterion, continue with the release lane:
 
-1. Run `npm run testflight:preflight`.
-2. Temporarily increment the iOS build number for release.
-3. Archive with full Xcode from merged `main`.
-4. Export and upload the `.ipa` to App Store Connect.
-5. Wait for Apple processing to become `VALID`.
-6. Set export compliance/encryption answer.
-7. Add/update TestFlight notes.
-8. Assign or verify the internal testing group.
-9. Verify TestFlight state is `IN_BETA_TESTING`.
-10. Restore the repo iOS build number back to its default if it was changed only for upload.
-11. Tell KB the exact build number, delivery UUID, verification state, and what changed.
+1. Take the release-gate performance reading (`.codex/reference/performance.md`): 5 minutes of Today in front with a block running on a Staging build of the exact release commit, on the physical iPhone. Record it below against the baseline; a reading over budget stops the release unless the owner accepts it.
+2. Run `npm run testflight:preflight`.
+3. Temporarily increment the iOS build number for release.
+4. Archive with full Xcode from merged `main`.
+5. Export and upload the `.ipa` to App Store Connect.
+6. Wait for Apple processing to become `VALID`.
+7. Set export compliance/encryption answer.
+8. Add/update TestFlight notes.
+9. Assign or verify the internal testing group.
+10. Verify TestFlight state is `IN_BETA_TESTING`.
+11. Restore the repo iOS build number back to its default if it was changed only for upload.
+12. Tell KB the exact build number, delivery UUID, verification state, and what changed.
 
 Otherwise record TestFlight as not applicable. Docs-only PR success is narrower: clean branch, docs-only diff, `npm run check:docs`, `git diff --check`, PR opened, checks observed, merged, and local `main` synced.
 
