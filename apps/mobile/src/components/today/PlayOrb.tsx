@@ -224,9 +224,9 @@ function PlayOrbView({
 
 /**
  * The seconds ring's track as a full circle that starts at 12 o'clock and runs clockwise (two half arcs,
- * sweep flag 1 in the y-down view box). The start is in the geometry itself: a `Circle` starts at 3 o'clock
- * and its `rotation`/`origin` turn was drawn a further quarter round on the device, so the zero point sat at
- * 9 o'clock (owner, TestFlight 119).
+ * sweep flag 1 in the y-down view box). The start is in the geometry itself: the earlier `Circle` (which starts
+ * at 3 o'clock) turned by `rotation`/`origin` showed its zero point at 9 o'clock on the owner's iPhone
+ * (TestFlight 119), so no transform is left to the renderer.
  */
 export function orbRingPath(center: number, radius: number) {
   const top = center - radius;
