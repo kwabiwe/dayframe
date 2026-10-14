@@ -209,4 +209,9 @@ describe("render budgets over two minutes with a block running (performance.md)"
     expect(await measure({ route: "reports", background: true })).toEqual({ liveBlock: 0, provider: 0 });
     expect(await measure({ route: "today", background: true })).toEqual({ liveBlock: 0, provider: 0 });
   });
+
+  it("with nothing running, the idle minute clock stops in the background too", async () => {
+    // Starts active (the minute timer is scheduled), then goes to the background (Codex r5 on #405).
+    expect(await measure({ route: "today", running: false, background: true })).toEqual({ liveBlock: 0, provider: 0 });
+  });
 });
