@@ -8,7 +8,7 @@ describe("connectivity status ownership", () => {
     const dashboard = source("./DayframeDashboard.tsx");
     const content = [
       source("./ActiveTimerEditSheet.tsx"),
-      source("./FloatingDatePicker.tsx"),
+      source("./DateSheet.tsx"),
       source("./OverflowMenu.tsx"),
       source("../../app/place-editor.tsx"),
       source("../../app/places.tsx"),
