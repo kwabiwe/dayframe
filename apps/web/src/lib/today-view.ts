@@ -264,6 +264,36 @@ export function coveredActivityTotals(entries: readonly TodayEntry[], startMs: n
     .sort(byTimeThenName);
 }
 
+export type WhereTodayWentBar = ActivityTotal & {
+  /** On the "Other" bar only: the activities it holds, largest first. */
+  includes?: string[];
+};
+
+export const WHERE_TODAY_WENT_BARS = 5;
+export const WHERE_TODAY_WENT_OTHER_KEY = "__other";
+
+/**
+ * The bars "Where today went" draws: every activity when there are five or fewer; otherwise the
+ * top four and a neutral "Other" bar, always last, holding the rest, so the bars still add up to
+ * the covered hero.
+ */
+export function whereTodayWentBars(totals: readonly ActivityTotal[], limit = WHERE_TODAY_WENT_BARS): WhereTodayWentBar[] {
+  if (totals.length <= limit) return [...totals];
+  const shown = totals.slice(0, limit - 1);
+  const rest = totals.slice(limit - 1);
+  return [
+    ...shown,
+    {
+      key: WHERE_TODAY_WENT_OTHER_KEY,
+      categoryId: null,
+      name: "Other",
+      color: null,
+      seconds: rest.reduce((sum, total) => sum + total.seconds, 0),
+      includes: rest.map((total) => total.name)
+    }
+  ];
+}
+
 export type WeekDaySummary = {
   dayStartMs: number;
   dateKey: string;

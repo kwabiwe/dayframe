@@ -208,6 +208,45 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("gathers activities after the top four into Other, so six overlapping activities still add up to the hero", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    // Six activities all 09:00–10:00: a 1h hero, 10m each. Top four by name, then Other with 20m.
+    const names = ["Admin", "Cooking", "Errands", "Focus", "Gym", "Reading"];
+    data.categories = names.map((name) => ({ id: name.toLowerCase(), name, color: "mint", isPinned: false })) as BootstrapData["categories"];
+    data.entries = names.map((name, index) =>
+      entry({
+        id: `80000000-0000-4000-8000-00000000001${index}`,
+        categoryId: name.toLowerCase(),
+        categoryName: name,
+        description: name,
+        startedAt: local(9),
+        stoppedAt: local(10),
+        durationSeconds: 3600
+      }));
+    data.activeEntry = null;
+    data.historyEntries = data.entries;
+    data.dayEntries = data.entries;
+    data.weekEntries = data.entries;
+    const { container, root } = await mount(data);
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("1h");
+    expect(container.querySelector(".df-today-went .df-faint")?.textContent).toBe("6 activities");
+    const rows = [...container.querySelectorAll(".df-bar-row")];
+    expect(rows.map((row) => [row.querySelector("b")?.firstChild?.textContent, row.querySelector(".df-tnum")?.textContent])).toEqual([
+      ["Admin", "10m"],
+      ["Cooking", "10m"],
+      ["Errands", "10m"],
+      ["Focus", "10m"],
+      ["Other", "20m"]
+    ]);
+    expect(rows[4].querySelector("b")?.textContent).toBe("Other: Gym and Reading");
+    expect(rows[4].querySelector(".df-bar-fill")?.classList.contains("is-none")).toBe(true);
+    expect(rows.reduce((sum, row) => sum + displayedSeconds(row.querySelector(".df-tnum")?.textContent ?? ""), 0)).toBe(3600);
+    expect(container.querySelector("#df-today-went-note")?.textContent).toContain("then Other for the rest");
+    await act(async () => root.unmount());
+  });
+
   it("never offers Delete or Start again on the running block", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);

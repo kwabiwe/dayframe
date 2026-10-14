@@ -16,6 +16,7 @@ import {
   ribbonHitAt,
   staleEditError,
   todayBlocks,
+  whereTodayWentBars,
   ribbonDrawnHitAt,
   ribbonNextStartMs,
   ribbonReach,
@@ -255,13 +256,15 @@ describe("Where today went (covered, overlaps shared)", () => {
       seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
       return seed / 2_147_483_648;
     };
-    const activities = ["focus", "admin", "sleep", "gym", null] as const;
+    // Up to twelve activities, so many days need the "Other" bar.
+    const activities = ["focus", "admin", "sleep", "gym", "reading", "cooking", "commute", "music", "family", "errands", "study", null] as const;
+    let otherDays = 0;
     for (let run = 0; run < 400; run += 1) {
       const now = at(10, 0) + Math.floor(random() * 24 * 3_600_000);
       const dayStart = localDayStart(now);
       const dayEnd = localDayEnd(dayStart);
       const entries: TodayEntry[] = [];
-      const count = 1 + Math.floor(random() * 9);
+      const count = 1 + Math.floor(random() * 16);
       for (let index = 0; index < count; index += 1) {
         // Some start yesterday, some run past now, some are still running; times to the millisecond.
         const from = dayStart - 3 * 3_600_000 + Math.floor(random() * 30 * 3_600_000);
@@ -272,6 +275,16 @@ describe("Where today went (covered, overlaps shared)", () => {
       const totals = coveredActivityTotals(entries, dayStart, dayEnd, now);
       const hero = buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds;
       expect(sum(totals)).toBe(hero);
+      const bars = whereTodayWentBars(totals);
+      expect(sum(bars)).toBe(hero);
+      expect(bars.length).toBe(Math.min(totals.length, 5));
+      if (totals.length > 5) {
+        expect(bars[4].name).toBe("Other");
+        expect(bars[4].includes).toEqual(totals.slice(4).map((total) => total.name));
+      } else {
+        expect(bars).toEqual(totals);
+      }
+      if (totals.length > 5) otherDays += 1;
       expect(totals.reduce((minutes, item) => minutes + Math.floor(item.seconds / 60), 0)).toBe(Math.floor(hero / 60));
       // Each bucket stays near its exact equal-split share (brute force over every boundary).
       const exact = bruteForceShares(entries, dayStart, dayEnd, now);
@@ -282,6 +295,36 @@ describe("Where today went (covered, overlaps shared)", () => {
         expect(before.seconds > after.seconds || (before.seconds === after.seconds && before.name.localeCompare(after.name) <= 0)).toBe(true);
       }
     }
+    expect(otherDays).toBeGreaterThan(50);
+  });
+
+  it("keeps the top four and gathers the rest into a neutral Other bar, last, when there are more than five", () => {
+    const now = at(10, 18);
+    for (const count of [6, 10]) {
+      const names = ["focus", "admin", "sleep", "gym", "reading", "cooking", "commute", "music", "family", "errands"].slice(0, count);
+      // Every activity runs 09:00–10:00 together, plus one more lone minute each so the order is fixed.
+      const entries = names.flatMap((name, index) => [
+        entry(`${name}-shared`, iso(10, 9), iso(10, 10), name),
+        entry(`${name}-own`, iso(10, 11, index * 2), iso(10, 11, index * 2 + count - index), name)
+      ]);
+      const hero = buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds;
+      const totals = coveredActivityTotals(entries, day, nextDay, now);
+      const bars = whereTodayWentBars(totals);
+      expect(totals).toHaveLength(count);
+      expect(bars).toHaveLength(5);
+      expect(bars.slice(0, 4)).toEqual(totals.slice(0, 4));
+      expect(bars[4]).toMatchObject({ key: "__other", name: "Other", categoryId: null, color: null });
+      expect(bars[4].includes).toEqual(totals.slice(4).map((total) => total.name));
+      expect(sum(bars)).toBe(hero);
+    }
+    // Five or fewer: every activity, unchanged.
+    const five = coveredActivityTotals(
+      ["focus", "admin", "sleep", "gym", "reading"].map((name) => entry(name, iso(10, 9), iso(10, 10), name)),
+      day,
+      nextDay,
+      now
+    );
+    expect(whereTodayWentBars(five)).toEqual(five);
   });
 });
 
