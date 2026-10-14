@@ -48,9 +48,33 @@ struct StopTrackingIntent: AppIntent {
       await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
       return .result()
     }
-    switch await DayframeShortcutDirectEventClient.serverRunningEntry() {
+    // The lookup, the queued event and its delivery must all belong to one account and one session.
+    guard let context = DayframeShortcutRuntimeContextStore.current() else {
+      DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)
+      return .result()
+    }
+    guard
+      let userId = context.userId,
+      let workspaceId = context.workspaceId,
+      DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
+    else {
+      DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
+      return .result()
+    }
+    guard !DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId) else {
+      DayframeShortcutDeliveryDiagnosticStore.record(.startPending)
+      return .result()
+    }
+    switch await DayframeShortcutDirectEventClient.serverRunningEntry(context: context) {
     case .running(let entryId):
-      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
+      guard
+        DayframeShortcutRuntimeContextStore.current() == context,
+        DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
+      else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
+        return .result()
+      }
+      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context)
     case .nothingRunning:
       DayframeShortcutDeliveryDiagnosticStore.record(.nothingRunning)
     case .unavailable:
@@ -152,7 +176,7 @@ private func dayframeCleanText(_ value: String?) -> String? {
 }
 
 private enum DayframeShortcutPerformer {
-  static func perform(_ action: DayframeShortcutAction) async {
+  static func perform(_ action: DayframeShortcutAction, context: DayframeShortcutRuntimeContext? = nil) async {
     let catalog = DayframeShortcutCatalogStore.catalog
     // App Intents can run while Dayframe is signed out. Never create an
     // ownerless event that a different account could inherit later.
@@ -186,7 +210,7 @@ private enum DayframeShortcutPerformer {
       // the bounded server/APNs path first, then dismiss locally. A failed
       // request remains queued for foreground replay.
       let activityIds = DayframeLiveActivityController.activityIds(entryId: entryId)
-      let delivered = await DayframeShortcutDirectEventClient.submit(event)
+      let delivered = await DayframeShortcutDirectEventClient.submit(event, context: context)
       if delivered {
         _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
         if queued {
@@ -342,6 +366,10 @@ private enum DayframeShortcutCatalogStore {
 private struct DayframeShortcutCatalog: Decodable {
   let user: DayframeShortcutUser?
   let workspace: DayframeShortcutWorkspace?
+
+  func belongs(userId: String, workspaceId: String) -> Bool {
+    user?.id == userId && workspace?.id == workspaceId
+  }
   let categories: [DayframeShortcutCategory]
 
   var categoryNames: [String] {

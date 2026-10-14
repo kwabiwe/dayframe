@@ -79,7 +79,7 @@ describe("native Live Activity presentation contract", () => {
     expect(scopedSubmit).toContain("pushToken.lowercased()");
     expect(stopCase).toContain("if delivered {");
     expect(ordinaryStop).toMatch(
-      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+if delivered \{\s+_ = await DayframeLiveActivityController\.stop/
+      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event, context: context\)\s+if delivered \{\s+_ = await DayframeLiveActivityController\.stop/
     );
   });
 
@@ -89,15 +89,31 @@ describe("native Live Activity presentation contract", () => {
     const storage = readFileSync(`${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`, "utf8");
     const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
     const liveActivity = intent.indexOf("DayframeLiveActivityController.currentCanonicalEntryId()");
-    const server = intent.indexOf("DayframeShortcutDirectEventClient.serverRunningEntry()");
+    const owner = intent.indexOf("DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)");
+    const pendingStart = intent.indexOf("DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId)");
+    const server = intent.indexOf("DayframeShortcutDirectEventClient.serverRunningEntry(context: context)");
     expect(liveActivity).toBeGreaterThan(-1);
-    expect(server).toBeGreaterThan(liveActivity);
-    expect(intent).toMatch(/case \.running\(let entryId\):\s+await DayframeShortcutPerformer\.perform\(\.stopEntry\(entryId: entryId\)\)/);
+    // Codex r1 on #403: one account and session for lookup, queued event and delivery; never past a queued Start.
+    expect(owner).toBeGreaterThan(liveActivity);
+    expect(pendingStart).toBeGreaterThan(owner);
+    expect(server).toBeGreaterThan(pendingStart);
+    expect(intent).toContain("let userId = context.userId,");
+    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)");
+    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.startPending)");
+    const running = intent.slice(intent.indexOf("case .running(let entryId):"), intent.indexOf("case .nothingRunning:"));
+    expect(running).toContain("DayframeShortcutRuntimeContextStore.current() == context");
+    expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context)");
+    expect(shortcuts).toContain("let delivered = await DayframeShortcutDirectEventClient.submit(event, context: context)");
+    expect(directClient).toContain("let context = pinned ?? DayframeShortcutRuntimeContextStore.current()");
+    expect(storage).toContain('event["type"] as? String == "shortcut_action"');
+    expect(storage).toContain("var userId: String? = nil");
+    const bridge = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`, "utf8");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
     // Nothing running or the server unreachable: fail closed, with a diagnostic, never an untargeted Stop.
     expect(intent).toMatch(/case \.nothingRunning:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.nothingRunning\)/);
     expect(intent).toMatch(/case \.unavailable:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.targetUnavailable\)/);
     expect(intent).not.toContain("stopScope");
-    const lookup = directClient.slice(directClient.indexOf("static func serverRunningEntry()"), directClient.indexOf("static func isCanonicalEntryId("));
+    const lookup = directClient.slice(directClient.indexOf("static func serverRunningEntry(context:"), directClient.indexOf("static func isCanonicalEntryId("));
     expect(lookup).toContain("/api/timer-state");
     expect(lookup).toContain('forHTTPHeaderField: "Authorization"');
     expect(lookup).toContain("httpResponse.statusCode == 200");
@@ -105,6 +121,8 @@ describe("native Live Activity presentation contract", () => {
     expect(directClient).toContain("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
     expect(storage).toContain('return "nothing-running"');
     expect(storage).toContain('return "target-unavailable"');
+    expect(storage).toContain('return "owner-unverified"');
+    expect(storage).toContain('return "start-pending"');
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {

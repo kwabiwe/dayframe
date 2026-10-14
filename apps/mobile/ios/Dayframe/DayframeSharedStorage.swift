@@ -6,6 +6,8 @@ enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
   case nothingRunning
   case targetUnavailable
+  case ownerUnverified
+  case startPending
   case started
   case contextUnavailable
   case capabilityUnavailable
@@ -23,6 +25,10 @@ enum DayframeShortcutDeliveryDiagnostic {
       return "nothing-running"
     case .targetUnavailable:
       return "target-unavailable"
+    case .ownerUnverified:
+      return "owner-unverified"
+    case .startPending:
+      return "start-pending"
     case .started:
       return "started"
     case .contextUnavailable:
@@ -72,6 +78,10 @@ enum DayframeShortcutDeliveryDiagnosticStore {
 struct DayframeShortcutRuntimeContext: Codable, Equatable {
   let apiBase: String
   let sessionToken: String
+  /// The account the session belongs to, so a lookup made with this session is attributed to the same
+  /// account as the queued event. Contexts written by older builds decode without it.
+  var userId: String? = nil
+  var workspaceId: String? = nil
 }
 
 enum DayframeShortcutRuntimeContextStore {
@@ -83,12 +93,18 @@ enum DayframeShortcutRuntimeContextStore {
     "https://dayframe-web.vercel.app"
   ])
 
-  static func set(apiBase: String, sessionToken: String) -> Bool {
+  static func set(apiBase: String, sessionToken: String, userId: String? = nil, workspaceId: String? = nil) -> Bool {
+    let owned = userId.map { !$0.isEmpty } == true && workspaceId.map { !$0.isEmpty } == true
     guard
       let normalizedAPIBase = normalizedAPIBase(apiBase),
       !sessionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       let data = try? JSONEncoder().encode(
-        DayframeShortcutRuntimeContext(apiBase: normalizedAPIBase, sessionToken: sessionToken)
+        DayframeShortcutRuntimeContext(
+          apiBase: normalizedAPIBase,
+          sessionToken: sessionToken,
+          userId: owned ? userId : nil,
+          workspaceId: owned ? workspaceId : nil
+        )
       )
     else {
       clear()
@@ -246,6 +262,17 @@ enum DayframeNativeShortcutQueue {
         return appendLegacy(event)
       }
       return result
+    }
+  }
+
+  /// Whether an undelivered Start is queued for this account. A Start intent only queues (the app
+  /// delivers it later), so a Stop resolved against the server could stop a newer block and leave this
+  /// older Start to open another one when it replays.
+  static func hasPendingStart(userId: String, workspaceId: String) -> Bool {
+    pendingDictionaries().contains { event in
+      event["type"] as? String == "shortcut_action" &&
+        event["userId"] as? String == userId &&
+        event["workspaceId"] as? String == workspaceId
     }
   }
 

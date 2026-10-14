@@ -37,9 +37,8 @@ enum DayframeShortcutDirectEventClient {
 
   /// The entry the server says is running for the signed-in account (`GET /api/timer-state`), so a
   /// Stop intent without a Live Activity still names one exact entry. Only a canonical entry ID counts.
-  static func serverRunningEntry() async -> ServerRunningEntry {
+  static func serverRunningEntry(context: DayframeShortcutRuntimeContext) async -> ServerRunningEntry {
     guard
-      let context = DayframeShortcutRuntimeContextStore.current(),
       let url = URL(string: "\(context.apiBase)/api/timer-state")
     else {
       return .unavailable
@@ -87,10 +86,12 @@ enum DayframeShortcutDirectEventClient {
     "https://dayframe-web.vercel.app"
   ])
 
-  static func submit(_ event: DayframeShortcutEvent) async -> Bool {
+  /// `context` pins the session a caller already checked (the Stop intent's server lookup); without it
+  /// the current one is read.
+  static func submit(_ event: DayframeShortcutEvent, context pinned: DayframeShortcutRuntimeContext? = nil) async -> Bool {
     DayframeShortcutDeliveryDiagnosticStore.record(.started)
     guard
-      let context = DayframeShortcutRuntimeContextStore.current()
+      let context = pinned ?? DayframeShortcutRuntimeContextStore.current()
     else {
       DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)
       return false
