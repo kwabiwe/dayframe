@@ -1004,6 +1004,8 @@ function withCurrentSharedBootstrap(
     learnedPlaces: current.learnedPlaces,
     automationRules: current.automationRules,
     entries: current.entries,
+    // With `entries`: "start at the previous end" reads both (Codex r3 on #418).
+    latestFinishedEntry: current.latestFinishedEntry,
     activeEntry: current.activeEntry,
     reviewItems: current.reviewItems,
     activityEvents: current.activityEvents,

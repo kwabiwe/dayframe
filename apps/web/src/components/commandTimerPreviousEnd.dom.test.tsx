@@ -169,3 +169,12 @@ function finished(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
     ...overrides
   };
 }
+
+describe("cached-period merge keeps the latest end current (Codex r3 on #418)", () => {
+  it("copies latestFinishedEntry from the current bootstrap with entries", async () => {
+    const { readFileSync } = await import("node:fs");
+    const runtimeSource = readFileSync(`${process.cwd()}/src/components/AppShellRuntime.tsx`, "utf8");
+    const merge = runtimeSource.slice(runtimeSource.indexOf("function withCurrentSharedBootstrap("), runtimeSource.indexOf("async function responseError("));
+    expect(merge).toMatch(/entries: current\.entries,[\s\S]*?latestFinishedEntry: current\.latestFinishedEntry,/);
+  });
+});
