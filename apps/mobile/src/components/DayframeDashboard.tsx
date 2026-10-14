@@ -85,9 +85,11 @@ import {
   deletedToastAnnouncement,
   deletedToastMessage,
   startMatchesRunning,
-  switchedToastMessage,
+  switchedToastCopy,
+  toastAccessibilityText,
   toastSwatchColor,
-  undoDeleteAccessibilityLabel
+  undoDeleteAccessibilityLabel,
+  type BlocksToastCopy
 } from "../lib/blocksToastCopy";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
@@ -1812,7 +1814,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!todayNoticeOwnerStill(noticeOwner)) return;
       const nextName = description.trim() || category?.name || "No activity";
       showTodayNotice(
-        switchedToastMessage(nextName, running, Date.now()),
+        switchedToastCopy(nextName, running, Date.now()),
         category ? toastSwatchColor({ categoryColor: category.color, categoryId: category.id, categoryName: category.name }, theme.mode) : null
       );
     });
@@ -1836,14 +1838,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       owner.workspaceId === (current?.workspace.id ?? null);
   }
 
-  function showTodayNotice(message: string, swatchColor: string | null) {
+  function showTodayNotice(copy: string | BlocksToastCopy, swatchColor: string | null) {
     if (authStateCurrent.current !== "authenticated") return;
     // The delete Undo toast holds the place: VoiceOver still hears the notice, nothing is drawn.
     if (deletionCoordinator.current?.current()?.phase === "active") {
-      AccessibilityInfo.announceForAccessibility(message);
+      AccessibilityInfo.announceForAccessibility(toastAccessibilityText(copy));
       return;
     }
-    todayNotice.show(message, swatchColor);
+    todayNotice.show(copy, swatchColor);
   }
 
   function stopFromToday() {
@@ -3228,6 +3230,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ) : todayNotice.notice && authState === "authenticated" ? (
         <BlocksToast
           key={`notice-${todayNotice.notice.token}`}
+          accessibilityLabel={todayNotice.notice.accessibilityLabel}
+          detail={todayNotice.notice.detail}
           message={todayNotice.notice.message}
           reduceMotion={reduceMotion}
           style={styles.todayToast}
