@@ -1,4 +1,4 @@
-import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
+import { coveredDurationMs, goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
 
 /**
  * Today's goal frame (Blocks prototype): the day's framed total against the daily goal, drawn as
@@ -47,8 +47,11 @@ export function buildTodayGoalFrame({
   const dayStart = new Date(nowMs);
   dayStart.setHours(0, 0, 0, 0);
   const startMs = dayStart.getTime();
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
 
-  const totalMs = coveredPieces(entries, startMs, nowMs).reduce((sum, piece) => sum + piece.ms, 0);
+  // The hero: the shared covered-time basis ("Earlier this week" uses it for past days, D14).
+  const totalMs = coveredDurationMs(entries, startMs, dayEnd.getTime(), nowMs);
   const pieces = coveredPieces(goalCountingEntries(entries, categories), startMs, nowMs);
   const goalCountedMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
   const cells: GoalFrameSlice[][] = Array.from({ length: cellCount }, () => []);

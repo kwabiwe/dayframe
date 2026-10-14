@@ -4,9 +4,9 @@
  * running in it, and two blocks of one activity count that moment once, so the activities add up
  * to the day's covered total (Today's hero on web and iPhone, PRD D14).
  *
- * This is the same algorithm as web's `coveredActivityTotals` in `apps/web/src/lib/today-view.ts`
- * (#409), written against a minimal entry shape so web and iPhone can share one copy. The cross
- * tests in `coveredActivityTotals.test.ts` use #409's fixtures.
+ * Web's `coveredActivityTotals` / `whereTodayWentBars` (`apps/web/src/lib/today-view.ts`, #409)
+ * and iPhone's strip (`apps/mobile/src/lib/todayWhereWent.ts`) both use this one copy; the tests
+ * in `coveredActivityTotals.test.ts` carry #409's fixtures.
  */
 export type CoveredActivityEntry = {
   id: string;
@@ -47,6 +47,31 @@ export function clipCoveredEntry(
   const fromMs = Math.max(started, startMs);
   const toMs = Math.min(stopped, endMs, nowMs);
   return toMs > fromMs ? { fromMs, toMs } : null;
+}
+
+/**
+ * Covered time in [startMs, endMs) up to now, in milliseconds: the union of every block, so time
+ * that overlapping blocks share counts once and a day never passes its real length (PRD D14). It
+ * equals the sum of `coveredActivityTotals`' exact shares; Today's hero and iPhone's "Earlier this
+ * week" day totals floor it to seconds.
+ */
+export function coveredDurationMs(
+  entries: readonly Pick<CoveredActivityEntry, "startedAt" | "stoppedAt">[],
+  startMs: number,
+  endMs: number,
+  nowMs: number
+) {
+  const clips = entries
+    .map((entry) => clipCoveredEntry(entry, startMs, endMs, nowMs))
+    .filter((clip): clip is { fromMs: number; toMs: number } => clip !== null)
+    .sort((a, b) => a.fromMs - b.fromMs);
+  let covered = 0;
+  let until = Number.NEGATIVE_INFINITY;
+  for (const clip of clips) {
+    covered += Math.max(0, clip.toMs - Math.max(clip.fromMs, until));
+    until = Math.max(until, clip.toMs);
+  }
+  return covered;
 }
 
 /** The bucket an entry's time goes to: its activity, or "No activity". */

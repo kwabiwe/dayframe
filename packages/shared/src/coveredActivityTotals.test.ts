@@ -3,6 +3,7 @@ import {
   COVERED_ACTIVITY_OTHER_KEY,
   coveredActivityBars,
   coveredActivityTotals,
+  coveredDurationMs,
   type CoveredActivityEntry,
   type CoveredActivityTotal
 } from "./coveredActivityTotals";
@@ -193,6 +194,7 @@ describe("coveredActivityTotals (web #409 parity)", () => {
       const totals = coveredActivityTotals(entries, dayStart.getTime(), dayEnd.getTime(), now);
       const hero = heroSeconds(entries, dayStart.getTime(), dayEnd.getTime(), now);
       expect(sum(totals)).toBe(hero);
+      expect(Math.floor(coveredDurationMs(entries, dayStart.getTime(), dayEnd.getTime(), now) / 1000)).toBe(hero);
       for (const limit of [4, 5]) {
         const bars = coveredActivityBars(totals, limit);
         expect(sum(bars)).toBe(hero);

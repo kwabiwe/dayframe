@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildHistoryDaySections } from "./historyPresentation";
 import { buildEarlierThisWeek, shortDuration, earlierDayReviewCounts } from "./earlierThisWeek";
+import { buildTodayGoalFrame } from "./todayGoalFrame";
 
 const today = new Date(2026, 9, 7);
 const nowMs = today.getTime() + 15 * 3_600_000;
@@ -44,6 +45,49 @@ describe("earlier this week", () => {
 
   it("leaves out days older than a week", () => {
     expect(earlier([entry("old", at(8, 9), at(8, 10))]).every((day) => day.segments.length === 0)).toBe(true);
+  });
+
+  it("counts overlapping time once in a past day's total, matching that day's Today hero (D14)", () => {
+    const entries = [entry("a", at(1, 9), at(1, 11)), entry("b", at(1, 10), at(1, 12), "lime")];
+    const [yesterday] = earlier(entries);
+    // 4h logged, 3h covered.
+    expect(yesterday.totalSeconds).toBe(3 * 3600);
+    // The same number yesterday's Today hero showed at the end of that day.
+    const endOfYesterday = new Date(2026, 9, 6, 23, 59, 59).getTime();
+    expect(yesterday.totalSeconds).toBe(buildTodayGoalFrame({ entries, goalMinutes: 480, nowMs: endOfYesterday }).totalSeconds);
+    // The mini ribbon still draws every block.
+    expect(yesterday.segments.map((segment) => segment.key)).toEqual(["a", "b"]);
+  });
+
+  it("counts two overlapping blocks of the same activity once", () => {
+    const [yesterday] = earlier([entry("a", at(1, 9), at(1, 11)), entry("b", at(1, 10), at(1, 12)), entry("c", at(1, 9, 30), at(1, 10, 30))]);
+    expect(yesterday.totalSeconds).toBe(3 * 3600);
+  });
+
+  it("splits overlapping blocks across midnight, counting each day's covered part once", () => {
+    const days = earlier([entry("sleep", at(2, 22), at(1, 6)), entry("read", at(2, 23), at(1, 0, 30), "lime")]);
+    // Day before yesterday: 22:00–24:00 covered (2h, not 3h); yesterday: 00:00–06:00 (6h, not 6h 30m).
+    expect(days[1].totalSeconds).toBe(2 * 3600);
+    expect(days[0].totalSeconds).toBe(6 * 3600);
+  });
+
+  it("totals a clock-change day by its real length, overlaps once", () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      // 25 Oct 2026 (clocks go back): 00:00–06:00 local is 7 real hours.
+      const now = new Date(2026, 9, 26, 15).getTime();
+      const iso = (h: number) => new Date(2026, 9, 25, h).toISOString();
+      const days = buildEarlierThisWeek(
+        buildHistoryDaySections({ days: 7, entries: [entry("a", iso(0), iso(6)), entry("b", iso(1), iso(6), "lime")] as never, nowMs: now }),
+        now
+      );
+      expect(days[0].dayKey).toBe("2026-10-25");
+      expect(days[0].totalSeconds).toBe(7 * 3600);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
   });
 
   it("writes totals the one Dayframe way (UIA-042)", () => {

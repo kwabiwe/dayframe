@@ -169,7 +169,9 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   (no split: Today). Earlier this week rows of days with open Review moments show a small hatched
   count chip before the total, and VoiceOver adds "2 moments to review" to the row. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
-  donut or logged/covered summary; earlier days show their total in "Earlier this week".
+  donut or logged/covered summary; earlier days show their covered total in "Earlier this week"
+  (overlaps once, as that day's hero showed: 09:00–11:00 plus 10:00–12:00 yesterday reads 3h; an
+  overnight block splits between its days; a clock-change day reads its real length).
 - Where today went (PRD D15) closes the Today ribbon card under one hairline:
   a 12-point bar, largest first, and a 2×2 legend whose durations add up to
   the hero (an Admin block 09:00–10:00 and a Work block running since 09:30

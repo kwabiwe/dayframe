@@ -53,4 +53,8 @@ describe("Today's \"Where today went\" wiring", () => {
     const mutation = body("    dashboardMutationRevision.current += 1;\n    const next = filterPendingDeletedTimeEntries(", "setData(next);");
     expect(mutation).not.toContain("loadedBootstrap");
   });
+
+  it("builds Earlier this week's covered day totals once a minute at most, memoised (D14)", () => {
+    expect(dashboard).toContain("const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);");
+  });
 });
