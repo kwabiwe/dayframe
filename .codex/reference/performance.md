@@ -58,8 +58,11 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 | A recovery pass's own location evidence never queues another pass | `connectivityRecovery.test.ts` (#383) |
 | Location writes do not refresh durable work in the background | `durableLocationRefreshGate.test.ts` (#399) |
 | A location pass reloads the Dashboard only when a replay changed something shown | `store.sqlite.test.ts`, `validate:location-v2-db` (#401) |
+| Render counts: over two minutes the Dashboard renders only at minute boundaries with Today, Calendar or Settings in front (or nothing running), at most once a second with Reports, a running entry's sheet or its Calendar editor open, never in the background; the live block once a second, never per frame | `renderBudgets.render.test.tsx` (#405) |
+| No per-call `Intl` formatters: dates go through `formatLocaleDate` / `localeDateFormatter`, or a module-level constant | `intlFormatters.contract.test.ts` (#404) |
+| Every journal and upload-outbox statement in the location store searches an index, never scans the table | `store.sqlite.test.ts` query-plan guard (#398, #406) |
 
-Guardrail 5b adds render-count budgets for the Dashboard, Today and Reports per second and per minute (React Profiler on the existing render harnesses), a check that hot paths create no per-call `Intl` formatters, and query-plan tests for every per-sample and per-pass journal query. Each guard row names its tests here when it lands.
+A new hot path adds its guard here in the PR that creates it.
 
 ## Release gate
 
