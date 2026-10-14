@@ -7512,14 +7512,117 @@ dialog.ui-dialog.manual-entry-dialog {
   font-size: 11px;
 }
 
-.dayframe-date-time-done {
+/* Neutral, as every date sheet's Done (date-picker audit, 14 Oct 2026): coral is for recording and
+   the one primary action of a screen. */
+.dayframe-date-time-done,
+.date-sheet-done {
   min-height: 44px;
   border: 0;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--foreground);
+  color: var(--background);
   font: inherit;
   font-weight: 700;
+}
+
+.date-sheet-done:disabled {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+/* Phone width (≤560 px, D6): the date picker is a bottom sheet over a scrim, with a grabber, its
+   title and a 44 px ✕, Today · Yesterday, the grid and a full-width Done. */
+.date-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 89;
+  background: var(--overlay);
+  animation: date-sheet-scrim-in 160ms ease-out;
+}
+
+@keyframes date-sheet-scrim-in {
+  from { opacity: 0; }
+}
+
+.timeline-date-picker-panel.is-sheet {
+  /* Beats `.is-portalled` (an anchored popover's fixed left/top) at phone width. */
+  position: fixed;
+  top: auto;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: auto;
+  max-height: calc(100dvh - 24px);
+  translate: none;
+  gap: 10px;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+}
+
+.date-sheet-grabber {
+  justify-self: center;
+  width: 42px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--border-strong, var(--border));
+}
+
+.date-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.date-sheet-head strong {
+  font-family: var(--font-display);
+  font-size: 20px;
+}
+
+.date-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.dayframe-date-time-sheet-head {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .dayframe-date-time-sheet-head {
+    display: flex;
+  }
+}
+
+.date-sheet-segments {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.date-sheet-segments button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 600;
+}
+
+.date-sheet-segments button[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.date-sheet-segments button:disabled {
+  opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .date-sheet-scrim {
+    animation: none;
+  }
 }
 
 .manual-entry-description {

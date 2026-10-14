@@ -324,6 +324,16 @@ Block pull-to-refresh:
 - Interruption: a digit that changes again mid-roll retargets from where it is.
 - Accessibility: Reduce Motion removes the roll and the press scale (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
 
+## Web date sheet at phone width (date-picker audit D1/D6, 14 Oct 2026)
+
+- Trigger: a date trigger (Calendar period, quick editor dates, List edges) at ≤560 px; Done, ✕, Escape or a press on the scrim.
+- Owner: the panel's existing `ui-floating-surface` fade; the scrim fades in over 160 ms with it (CSS); nothing else moves.
+- Entrance/update/exit: the sheet appears at the bottom with its scrim; day taps and Today · Yesterday change the selection in place; Done, ✕, Escape or the scrim close it with the surface's fade (the scrim leaves at once).
+- Surrounding layout: the sheet is fixed over the page; the page never scrolls or shifts.
+- Interruption: each opening seeds the draft from the current value; closing without Done drops the draft.
+- Async outcome: none (Done hands the day to its owner, as a desktop click does).
+- Accessibility: Reduce Motion removes the scrim fade (the surface already has its reduced path); ✕ is a 44 px labelled button; focus returns to the trigger on close.
+
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 
 - Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The activity block and the tag button open the same Activities and Tags lists (14 Oct 2026) with the same fade; they close on a pick (Activities), Escape, Close, a second press of the button or a press outside, and add no motion of their own (no landing, no row animation when a tag is toggled or the search filters). The portalled Activities list keeps its measured position and width through its exit fade (geometry is cleared only by the next open, which measures before paint). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.
