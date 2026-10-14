@@ -57,7 +57,7 @@ describe("mobile frame pacing", () => {
     expect(dashboard).toMatch(/buildHistoryDaySections\(\{[\s\S]*?nowMs: minuteNow[\s\S]*?\}\),\s*\[loggedSourceEntries, minuteNow\]/);
     expect(dashboard).toMatch(/buildNativeCalendarBridgeState\(\{[\s\S]*?now: minuteNow,/);
     expect(dashboard).toMatch(/<TodayBlockRows[\s\S]*?nowMs=\{minuteNow\}/);
-    expect(dashboard).toContain("buildEarlierThisWeek(historySections, minuteNow)");
+    expect(dashboard).toContain("buildEarlierThisWeek(historySections, minuteNow, loggedSourceEntries)");
     // A filtered array built inline would change identity every second and re-run the Review
     // presentation projection and the ribbon behind it.
     expect(dashboard).toContain("manualProjectedEntries={loggedSourceEntries}");

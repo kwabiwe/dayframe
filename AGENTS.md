@@ -77,6 +77,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - Treat health and precise location data as sensitive. Avoid logging raw payloads, do not send them to analytics, and preserve export/delete paths.
 - Do not add legacy third-party timer-brand wording, imports, scripts, docs, env vars, or hidden integration hooks. Dayframe stands on its own.
 - Any user-facing feature with navigation, presentation, gestures, layout changes, feedback, Undo, or other visible movement must follow `.codex/reference/motion.md`. Motion is part of the feature contract, not optional polish.
+- Anything that runs often (clocks and per-second state, looping animation, background capture, per-sample or per-pass storage work, sync and recovery passes, bootstrap or network frequency) must stay within `.codex/reference/performance.md`'s budgets: Today in front ≤ 10 % of a core on the iPhone 17, background near idle, memory slope ≤ 2 MB per minute, no per-frame Reanimated commits for looping motion, no unbounded journal reads. Fill the PR template's "Performance impact" section, and take the release-gate reading before every TestFlight upload.
 
 ## Web Patterns
 
@@ -175,6 +176,7 @@ npm run check:docs
 - `.codex/reference/database.md`: schema, RLS, and hosted migration checks.
 - `.codex/reference/debugging-playbook.md`: screenshot/regression investigation workflow.
 - `.codex/reference/motion.md`: canonical motion ownership, continuity, accessibility, and PR evidence requirements.
+- `.codex/reference/performance.md`: CPU, memory and render budgets, the device measurement method, automated guards and the release gate.
 - `.codex/reference/health-review-pipeline.md`: HealthKit import, Review, auto-log, and diagnostics flow.
 - `.codex/reference/release-and-testflight.md`: TestFlight, Vercel, Supabase, and runtime version checks.
 - `.codex/reference/validation-matrix.md`: feature-specific validation commands and manual checks.
