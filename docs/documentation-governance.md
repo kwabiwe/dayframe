@@ -13,6 +13,7 @@ This document defines where Dayframe guidance lives and how it stays aligned wit
 | How is hosted auth/deployment configured? | `docs/vercel-supabase-hosting.md` | TestFlight release history |
 | How is iOS released? | `.codex/reference/release-and-testflight.md` | Product requirements |
 | Which checks apply? | `.codex/reference/validation-matrix.md` | Repeating every behavioural acceptance criterion |
+| What may CPU, memory and render cost be, and how is it measured? | `.codex/reference/performance.md` | Per-build release readings (those go in the release reference) |
 | What behaviour must not regress? | `docs/dayframe-regression-checklist.md` | Branch status and historical test output |
 | What must every agent know? | `AGENTS.md` | Long feature-specific contracts |
 | Why did a particular fix happen? | `docs/investigations/*.md` | New canonical product policy unless promoted |

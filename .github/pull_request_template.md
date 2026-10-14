@@ -23,6 +23,10 @@ If documentation is not affected, explain why:
 
 Required for navigation, presentation, gestures, layout reflow, feedback, Undo, or other visible movement. Record trigger, single owner, entrance/update/exit, surrounding layout, interruption, async outcomes, and Reduce Motion; otherwise write `Not applicable`.
 
+## Performance impact
+
+Required for anything `.codex/reference/performance.md` lists (clocks, looping motion, background capture, per-sample or per-pass storage, sync passes, bootstrap or network frequency). Name the budget rows it could affect, the automated guard that covers it, and any device reading with its numbers; otherwise write `Not applicable` and why.
+
 ## Decisions and residual risk
 
 - Product/privacy/rollout decisions intentionally left for the owner:
