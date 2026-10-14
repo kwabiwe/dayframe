@@ -40,9 +40,11 @@ describe("persistent timer floating surfaces", () => {
     expect(categorySource).toContain(
       "ui-floating-surface swiss-category-menu"
     );
-    expect(tagSource).toContain(
-      "ui-floating-surface inline-tag-picker"
-    );
+    // The Activity block's and the Tags button's lists are that FloatingList too (owner, 14 Oct 2026).
+    expect(categorySource).toContain("<FloatingList");
+    expect(categorySource).toContain("className={`df-cmd-activity-panel");
+    expect(tagSource).toContain("className={`inline-tag-picker");
+    expect(tagSource).not.toContain("ui-floating-surface inline-tag-picker");
   });
 
   it("uses one semantic surface contract with bounded internal scrolling", () => {
@@ -52,11 +54,17 @@ describe("persistent timer floating surfaces", () => {
     expect(styles).toMatch(
       /\.ui-floating-surface\s*\{[^}]*border:\s*1px solid var\(--line\);/s
     );
+    // The Tags button's list is bounded like the typed lists (plus its search field); its rows
+    // scroll inside (.df-flist-rows).
     expect(styles).toMatch(
-      /\.inline-tag-picker\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;/s
+      /\.inline-activity-suggestions,\s*\.inline-tag-picker\s*\{[^}]*max-height:\s*min\(19rem, calc\(100dvh - 10rem\)\);[^}]*overflow:\s*hidden;/s
+    );
+    expect(styles).toMatch(/\n\.inline-tag-picker \{\s*max-height: min\(22\.5rem, calc\(100dvh - 10rem\)\);\s*\}/);
+    expect(styles).toMatch(
+      /\.df-flist-rows\s*\{[^}]*overflow-y:\s*auto;/s
     );
     expect(styles).toMatch(
-      /\.inline-tag-picker-list\s*\{[^}]*overflow-y:\s*auto;/s
+      /\.df-cmd-activity-panel\.is-portalled\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*min\(22\.5rem, calc\(100dvh - 24px\)\);[^}]*overflow:\s*hidden;/s
     );
     expect(styles).toMatch(
       /\.swiss-category-menu\s*\{[^}]*overflow-y:\s*auto;/s
@@ -91,7 +99,9 @@ describe("persistent timer floating surfaces", () => {
     );
     expect(tagSource).toContain("<TagIcon size={15} />");
     expect(tagSource).toContain("pickerTriggerRef.current?.focus()");
-    expect(tagSource).toContain("inert={!effectivePickerOpen}");
+    // FloatingList keeps a closed list mounted, hidden and inert.
+    expect(tagSource).toContain("isOpen={effectivePickerOpen}");
+    expect(floatingListSource).toContain("inert={!isOpen}");
   });
 
   it("uses one restrained presence transition with a reduced-motion path", () => {
@@ -107,9 +117,6 @@ describe("persistent timer floating surfaces", () => {
   });
 
   it("keeps compact low-height panels inside the viewport", () => {
-    expect(styles).toMatch(
-      /@media \(min-width: 561px\) and \(max-width: 840px\) and \(max-height: 560px\)[\s\S]*\.inline-tag-picker\s*\{[^}]*calc\(100dvh - 240px\)/s
-    );
     expect(styles).toMatch(
       /@media \(min-width: 561px\) and \(max-width: 840px\) and \(max-height: 560px\)[\s\S]*\.swiss-category-menu\s*\{[^}]*calc\(100dvh - 308px\)/s
     );

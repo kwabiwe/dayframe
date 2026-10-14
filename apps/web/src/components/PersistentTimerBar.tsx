@@ -343,7 +343,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   function startQuickAction(action: QuickAction) {
     const draft = quickActionTimerDraft(action.categoryId);
-    setCategoryMenuOpen(false);
+    // The Activities list is not closed here: a press on a quick start is a press outside it (which
+    // closes it unless a Create is saving), and the new block's scope closes it the same way, so a
+    // saving Create keeps its form and outcome (Codex r4 on #402). Keys 1–6 never run while it is open.
     setSuggestionsOpen(false);
     const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
     // The Start decides when it runs (a queued Start can run after earlier ones settle): asking for
@@ -442,7 +444,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         </label>
         <span className="sr-only" id="persistent-timer-category-label">Activity</span>
 
+        {/* The activity block opens the same Activities list as `@`, under the Description. */}
         <CategoryPicker
+          anchorRef={suggestionsRef}
           ariaLabelledBy="persistent-timer-category-label"
           categories={data.categories}
           className="df-cmd-activity-field"
@@ -456,6 +460,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           }}
           open={categoryMenuOpen}
           portal
+          scope={completionScope}
           selectedId={timerDraft.categoryId}
           variant="block"
         />
@@ -500,7 +505,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 setSuggestionsOpen(false);
               } else if (event.key === "ArrowDown") {
                 event.preventDefault();
-                suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
+                // Suggestions' first row (the Tags button's list shares this wrapper).
+                suggestionsRef.current?.querySelector<HTMLButtonElement>('.swiss-task-suggestions [role="option"]')?.focus();
               }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}

@@ -13,7 +13,7 @@ import {
   type RefObject
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, CheckCircle2, ChevronDown, Plus, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Plus } from "lucide-react";
 import {
   DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH,
   DAYFRAME_PALETTE_PICKER,
@@ -25,13 +25,22 @@ import {
 } from "@dayframe/shared";
 import type { CategoryRow } from "@/lib/queries";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import {
+  FLOATING_LIST_HINTS,
+  FloatingList,
+  FloatingListActivityOption,
+  FloatingListSearch,
+  restoreFocusIfDropped
+} from "@/components/FloatingList";
 import { blockStyle } from "@/lib/block-style";
+import { activitiesForMention } from "@/lib/command-parse";
 
 export type CreateCategoryOutcome =
   | { ok: true; category: CategoryRow }
   | { ok: false; error: string };
 
 export function CategoryPicker({
+  anchorRef,
   ariaLabelledBy,
   categories,
   className = "",
@@ -44,11 +53,17 @@ export function CategoryPicker({
   onSelect,
   open,
   portal: portalProp = false,
+  scope,
   selectedId,
   triggerId,
   triggerRef: externalTriggerRef,
   variant
 }: {
+  /**
+   * The "block" variant's Activities list lines up with this field (the command timer's
+   * Description, where the typed `@` list opens), and becomes the phone sheet under it.
+   */
+  anchorRef?: RefObject<HTMLElement | null>;
   ariaLabelledBy?: string;
   categories: CategoryRow[];
   className?: string;
@@ -61,13 +76,19 @@ export function CategoryPicker({
   onSelect: (categoryId: string) => void;
   open: boolean;
   portal?: boolean;
+  /**
+   * What the choice belongs to (the command timer passes its block scope, `completionScope`).
+   * A new scope closes the list, and a pick or Create made for an earlier one is not applied.
+   */
+  scope?: string;
   selectedId: string;
   triggerId?: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
   /**
-   * "block" is the Blocks command timer: a solid activity square opening the timer menu. "more" is
-   * the entry editor's "All activities" chip after its activity chips: it opens the searchable
-   * menu (with Create) and shows no selection of its own.
+   * "block" is the Blocks command timer: a solid activity square opening the Activities list (the
+   * same FloatingList as the typed `@` list, with a search field). "more" is the entry editor's
+   * "All activities" chip after its activity chips: it opens the searchable menu (with Create) and
+   * shows no selection of its own.
    */
   variant: "timer" | "quick" | "block" | "more";
 }) {
@@ -93,20 +114,35 @@ export function CategoryPicker({
   const [createError, setCreateError] = useState<string | null>(null);
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const [colorMenuPosition, setColorMenuPosition] = useState<CSSProperties | null>(null);
-  // The editor's "All activities" menu searches; the other variants list every activity.
-  const searchable = variant === "more";
-  // The command timer's activity square opens "Activity for this block": every activity as a chip.
-  const chipGrid = variant === "block";
+  // The command timer's activity block opens the Activities list (owner, 14 Oct 2026: one
+  // implementation with the typed `@` list): a search field, "No activity", every activity in the
+  // bootstrap order (pinned first, then A–Z) and Create.
+  const blockPanel = variant === "block";
+  // The editor's "All activities" menu and the block's Activities list search; the others list every activity.
+  const searchable = variant === "more" || blockPanel;
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const selectedCategory = categories.find((category) => category.id === selectedId) ?? null;
+  const trimmedQuery = query.trim();
   const listedCategories = useMemo(() => {
+    // The block's list filters with the `@` list's resolver: the exact name, then names starting
+    // with the query, then names containing it.
+    if (blockPanel) return activitiesForMention(query.trim(), categories);
     const needle = query.trim().toLocaleLowerCase();
     return searchable && needle ? categories.filter((category) => category.name.toLocaleLowerCase().includes(needle)) : categories;
-  }, [categories, query, searchable]);
+  }, [blockPanel, categories, query, searchable]);
+  // The block's list: "No activity" while nothing is searched; Create unless the name exists.
+  const blockShowsNone = !blockPanel || !trimmedQuery;
+  const blockShowsCreate = Boolean(onCreateCategory) && (!blockPanel || !categories.some(
+    (category) => category.name.trim().toLocaleLowerCase() === trimmedQuery.toLocaleLowerCase()
+  ));
   const optionValues = useMemo(
-    () => ["", ...listedCategories.map((category) => category.id), ...(onCreateCategory ? ["create"] : [])],
-    [listedCategories, onCreateCategory]
+    () => [
+      ...(blockShowsNone ? [""] : []),
+      ...listedCategories.map((category) => category.id),
+      ...(blockShowsCreate ? ["create"] : [])
+    ],
+    [blockShowsCreate, blockShowsNone, listedCategories]
   );
   const selectedIndex = Math.max(0, optionValues.indexOf(selectedId));
   const triggerRef = externalTriggerRef ?? localTriggerRef;
@@ -127,6 +163,25 @@ export function CategoryPicker({
     ? triggerRef.current?.closest("dialog") ?? document.body
     : null;
 
+  // The block (`scope`) the list was opened for, the bar's current one (read after an await) and
+  // the last one seen (Codex r3 on #402).
+  const openedScopeRef = useRef(scope);
+  const latestScopeRef = useRef(scope);
+  const seenScopeRef = useRef(scope);
+  useLayoutEffect(() => {
+    latestScopeRef.current = scope;
+  });
+  // A new block closes the list, as it closes the typed lists; focus that was in it returns to
+  // the button. A Create being saved keeps the list open so its outcome is seen; its new activity
+  // is then not applied to the new block (above).
+  useEffect(() => {
+    if (seenScopeRef.current === scope) return;
+    seenScopeRef.current = scope;
+    // Focus anywhere in the list or the Create form's colour palette (its own body portal) goes
+    // back to the block, never to the page (Codex r4 on #402).
+    if (open && !isCreateBusy) closePicker(pickerContains(document.activeElement));
+  });
+
   useEffect(() => {
     if (!open) return undefined;
     function closeOnOutside(event: MouseEvent) {
@@ -137,7 +192,12 @@ export function CategoryPicker({
         !colorMenuRef.current?.contains(target) &&
         !isCreateBusy
       ) {
+        // A press elsewhere closes the list; focus goes where the press puts it, and when that is
+        // nowhere (non-focusable content, or a button WebKit does not focus) back to the block,
+        // never the page (Codex r5 on #402).
+        const hadFocus = pickerContains(document.activeElement);
         closePicker(false);
+        if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(triggerRef.current), 0);
       }
     }
     function closeOnEscape(event: KeyboardEvent) {
@@ -236,15 +296,18 @@ export function CategoryPicker({
       const viewportHeight = viewport?.height ?? window.innerHeight;
       const margin = 12;
       const gap = 6;
-      const triggerRect = trigger.getBoundingClientRect();
-      const rootRect = root.getBoundingClientRect();
+      // The block's Activities list lines up with the Description field, where `@` opens it.
+      const anchor = blockPanel ? anchorRef?.current ?? root : null;
+      const triggerRect = (anchor ?? trigger).getBoundingClientRect();
+      const rootRect = (anchor ?? root).getBoundingClientRect();
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
       // The "All activities" chip is narrow; its menu takes a comfortable width of its own.
       const width = Math.min(
-        chipGrid ? 520 : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width,
+        blockPanel ? rootRect.width : searchable ? Math.max(300, rootRect.width) : rootRect.width || triggerRect.width,
         availableWidth
       );
-      const heightCap = chipGrid ? 420 : 220;
+      // The typed lists' 19rem plus the search field (22.5rem), so as many rows show; they scroll inside.
+      const heightCap = blockPanel ? 360 : 220;
       const left = Math.min(
         Math.max(viewportLeft + margin, rootRect.left),
         Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
@@ -286,7 +349,7 @@ export function CategoryPicker({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [chipGrid, open, portal, searchable, triggerRef]);
+  }, [anchorRef, blockPanel, open, portal, searchable, triggerRef]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -301,14 +364,19 @@ export function CategoryPicker({
       setIsColorMenuOpen(false);
       setCreateError(null);
     }
-    setPortalPosition(null);
+    // The block's Activities list fades out where it stood (#391: opacity only, at its final
+    // position and width), so its measured geometry stays through the exit; opening measures anew.
+    if (!blockPanel) setPortalPosition(null);
     setColorMenuPosition(null);
     onOpenChange(false);
     if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
   }
 
   function openPicker(focus: "selected" | "last" | null = null) {
-    if (disabled) return;
+    // Opening resets the Create form, so it never runs while a Create is saving (Codex r2 on
+    // #402): the form, its name and its late outcome stay where they are.
+    if (disabled || isCreateBusy) return;
+    openedScopeRef.current = scope;
     onBeforeOpen?.();
     setIsCreating(false);
     setCreateColor(null);
@@ -318,11 +386,13 @@ export function CategoryPicker({
     setColorMenuPosition(null);
     // Reopening clears the search, so the selected activity is found in the full list.
     const fullIndex = Math.max(0, ["", ...categories.map((category) => category.id)].indexOf(selectedId));
-    setActiveIndex(focus === "last" ? optionValues.length - 1 : searchable ? fullIndex : selectedIndex);
+    const fullCount = 1 + categories.length + (onCreateCategory ? 1 : 0);
+    setActiveIndex(focus === "last" ? (blockPanel ? fullCount : optionValues.length) - 1 : searchable ? fullIndex : selectedIndex);
     setQuery("");
     onOpenChange(true);
-    if (searchable && !focus) window.requestAnimationFrame(() => searchRef.current?.focus());
-    if (focus) {
+    // The block's list keeps focus in its search field (the combobox); ↑/↓ move the highlight.
+    if (searchable && (!focus || blockPanel)) window.requestAnimationFrame(() => searchRef.current?.focus());
+    if (focus && !blockPanel) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
         options[focus === "last" ? options.length - 1 : searchable ? fullIndex : selectedIndex]?.focus();
@@ -350,6 +420,10 @@ export function CategoryPicker({
   }
 
   function closeOnFocusLeave(event: ReactFocusEvent<HTMLElement>) {
+    // Focus moving to no element is not a dismissal: WebKit blurs this way when its button is
+    // pressed (the press then toggles the list closed, Codex r5 on #402), as does the window
+    // losing focus. A press elsewhere is handled by `closeOnOutside`.
+    if (!event.relatedTarget) return;
     if (open && !isCreateBusy && !pickerContains(event.relatedTarget)) closePicker(false);
   }
 
@@ -379,7 +453,8 @@ export function CategoryPicker({
         )].filter((element) => !menuRef.current?.contains(element) && !element.closest("[hidden], [inert]"));
         const triggerIndex = boundaryFocusable.indexOf(triggerRef.current as HTMLElement);
         boundaryFocusable[triggerIndex + 1]?.focus();
-        closePicker(false);
+        // A Create being saved keeps the list (and its outcome) open, as every other dismissal does.
+        if (!isCreateBusy) closePicker(false);
       }
       return;
     }
@@ -397,6 +472,11 @@ export function CategoryPicker({
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
+    // An open Create form (saving or not) is never reset from the button: ↑/↓ go back to it.
+    if (open && isCreating) {
+      if (!isCreateBusy) nameInputRef.current?.focus();
+      return;
+    }
     openPicker(event.key === "ArrowUp" ? "last" : "selected");
   }
 
@@ -405,9 +485,8 @@ export function CategoryPicker({
     if (!options.length) return;
     const currentIndex = options.indexOf(document.activeElement as HTMLButtonElement);
     let nextIndex: number | null = null;
-    // The chip grid reads left to right: Right and Left step like Down and Up.
-    const forward = event.key === "ArrowDown" || (chipGrid && event.key === "ArrowRight");
-    const backward = event.key === "ArrowUp" || (chipGrid && event.key === "ArrowLeft");
+    const forward = event.key === "ArrowDown";
+    const backward = event.key === "ArrowUp";
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     if (forward) nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % options.length;
     if (backward) nextIndex = currentIndex < 0 ? options.length - 1 : (currentIndex - 1 + options.length) % options.length;
@@ -419,9 +498,32 @@ export function CategoryPicker({
     options[nextIndex]?.focus();
   }
 
+  /** The block's search field: ↑/↓ move the highlight (wrapping), Enter picks or starts Create. */
+  function handleBlockSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    // Keys that drive an input method's candidates stay with the input method.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      event.stopPropagation();
+      return;
+    }
+    const count = optionValues.length;
+    const current = Math.min(activeIndex, Math.max(0, count - 1));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (count) setActiveIndex((current + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
+    } else if (event.key === "Enter") {
+      // Never the surrounding form's submit (the command timer's Start).
+      event.preventDefault();
+      const value = optionValues[current];
+      if (value === undefined) return;
+      if (value === "create") beginCreate();
+      else chooseCategory(value);
+    }
+  }
+
   function chooseCategory(categoryId: string) {
     if (disabled || isCreateBusy) return;
-    onSelect(categoryId);
+    // A pick only changes the block the list was opened for.
+    if (openedScopeRef.current === scope) onSelect(categoryId);
     closePicker(true);
   }
 
@@ -443,7 +545,7 @@ export function CategoryPicker({
     setCreateColor(null);
     setIsColorMenuOpen(false);
     setCreateError(null);
-    window.requestAnimationFrame(() => createOptionRef.current?.focus());
+    window.requestAnimationFrame(() => (blockPanel ? searchRef : createOptionRef).current?.focus());
   }
 
   async function submitCreate() {
@@ -480,7 +582,8 @@ export function CategoryPicker({
     setCreateName("");
     setCreateColor(null);
     setIsColorMenuOpen(false);
-    onSelect(outcome.category.id);
+    // The new activity is chosen only if the block the list was opened for is still the bar's.
+    if (openedScopeRef.current === latestScopeRef.current) onSelect(outcome.category.id);
     closePicker(true);
   }
 
@@ -557,119 +660,7 @@ export function CategoryPicker({
     ? `ui-floating-surface swiss-category-menu${open ? " is-open" : ""}`
     : "calendar-compact-category-menu";
 
-  function mountMenu(menu: ReactNode) {
-    return portal && portalTarget ? createPortal(menu, portalTarget) : menu;
-  }
-
-  return (
-    <div
-      className={wrapperClass}
-      onBlur={closeOnFocusLeave}
-      onKeyDown={handlePickerKeyDown}
-      ref={rootRef}
-    >
-      {label ? <span className="calendar-compact-field-label">{label}</span> : null}
-      {variant === "block" ? (
-        <button
-          aria-controls={menuId}
-          aria-expanded={open}
-          aria-haspopup={isCreating ? "dialog" : "listbox"}
-          aria-label={`Activity: ${selectedCategory?.name ?? "No activity"}`}
-          className={`df-cmd-activity${selectedCategory ? " df-block" : ""}`}
-          disabled={disabled}
-          id={triggerId}
-          onClick={() => {
-            if (open) {
-              if (!isCreateBusy) closePicker(false);
-              return;
-            }
-            openPicker();
-          }}
-          onKeyDown={handleTriggerKeyDown}
-          ref={assignTrigger}
-          style={selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined}
-          title={`Activity: ${selectedCategory?.name ?? "No activity"}`}
-          type="button"
-        >
-          {/* No activity is the neutral activity dot, as on Today's rows; never the tag glyph,
-              which means "add tags" (the description's own control). */}
-          <DayframeIcon
-            glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH}
-            size={20}
-          />
-        </button>
-      ) : variant === "more" ? (
-        <button
-          aria-controls={menuId}
-          aria-expanded={open}
-          aria-haspopup={isCreating ? "dialog" : "listbox"}
-          aria-label={`All activities, ${categories.length}`}
-          className="df-rchip df-rchip--more"
-          disabled={disabled}
-          id={triggerId}
-          onClick={() => {
-            if (open) {
-              if (!isCreateBusy) closePicker(false);
-              return;
-            }
-            openPicker();
-          }}
-          onKeyDown={handleTriggerKeyDown}
-          ref={assignTrigger}
-          type="button"
-        >
-          All activities
-          <span aria-hidden="true" className="df-tnum">{categories.length}</span>
-        </button>
-      ) : (
-      <button
-        aria-controls={menuId}
-        aria-expanded={open}
-        aria-haspopup={isCreating ? "dialog" : "listbox"}
-        aria-labelledby={ariaLabelledBy}
-        className={menuVariant === "timer" ? "swiss-category-trigger" : undefined}
-        disabled={disabled}
-        id={triggerId}
-        onClick={() => {
-          if (open) {
-            if (!isCreateBusy) closePicker(false);
-            return;
-          }
-          openPicker();
-        }}
-        onKeyDown={handleTriggerKeyDown}
-        ref={assignTrigger}
-        type="button"
-      >
-        <span className={menuVariant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}>
-          <span
-            aria-hidden="true"
-            className={menuVariant === "timer"
-              ? `swiss-focus-dot${selectedCategory ? "" : " is-muted"}`
-              : "calendar-compact-category-dot"}
-            style={{ background: selectedColor ?? (menuVariant === "timer" ? "transparent" : "var(--muted)") }}
-          />
-          <span>{selectedCategory?.name ?? "No activity"}</span>
-        </span>
-        <ChevronDown aria-hidden="true" size={menuVariant === "timer" ? 16 : 15} />
-      </button>
-      )}
-      {mountMenu(<div
-        aria-hidden={!open}
-        aria-labelledby={chipGrid && !isCreating ? `${menuId}-title` : undefined}
-        className={`${menuClass} category-picker-menu${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}${chipGrid ? " df-actmenu" : ""}`}
-        hidden={(variant === "quick" || variant === "more") && !open}
-        id={menuId}
-        inert={!open}
-        onBlur={closeOnFocusLeave}
-        onKeyDown={handlePickerKeyDown}
-        ref={menuRef}
-        style={portal ? {
-          ...portalPosition,
-          visibility: open && portalPosition ? "visible" : "hidden"
-        } : undefined}
-      >
-        {isCreating ? (
+  const createForm = (
           <div
             aria-label="Create new activity"
             className="category-picker-create-form"
@@ -743,21 +734,203 @@ export function CategoryPicker({
               </button>
             </div>
           </div>
-        ) : (
-          <>
-          {chipGrid ? (
-            <div className="df-actmenu-head">
-              <strong id={`${menuId}-title`}>Activity for this block</strong>
+  );
+
+  function mountMenu(menu: ReactNode) {
+    return portal && portalTarget ? createPortal(menu, portalTarget) : menu;
+  }
+
+  return (
+    <div
+      className={wrapperClass}
+      onBlur={closeOnFocusLeave}
+      onKeyDown={handlePickerKeyDown}
+      ref={rootRef}
+    >
+      {label ? <span className="calendar-compact-field-label">{label}</span> : null}
+      {variant === "block" ? (
+        <button
+          aria-controls={menuId}
+          aria-expanded={open}
+          aria-haspopup={isCreating ? "dialog" : "listbox"}
+          aria-label={`Activity: ${selectedCategory?.name ?? "No activity"}`}
+          className={`df-cmd-activity${selectedCategory ? " df-block" : ""}`}
+          disabled={disabled}
+          id={triggerId}
+          onClick={() => {
+            if (open) {
+              // A second press closes the list with focus on the block (WebKit leaves a clicked button unfocused).
+              if (!isCreateBusy) closePicker(true);
+              return;
+            }
+            openPicker();
+          }}
+          onKeyDown={handleTriggerKeyDown}
+          ref={assignTrigger}
+          style={selectedCategory ? blockStyle(selectedCategory.color, selectedCategory.name) : undefined}
+          title={`Activity: ${selectedCategory?.name ?? "No activity"}`}
+          type="button"
+        >
+          {/* No activity is the neutral activity dot, as on Today's rows; never the tag glyph,
+              which means "add tags" (the description's own control). */}
+          <DayframeIcon
+            glyph={selectedCategory ? resolveActivityIcon(selectedCategory).glyph : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH}
+            size={20}
+          />
+        </button>
+      ) : variant === "more" ? (
+        <button
+          aria-controls={menuId}
+          aria-expanded={open}
+          aria-haspopup={isCreating ? "dialog" : "listbox"}
+          aria-label={`All activities, ${categories.length}`}
+          className="df-rchip df-rchip--more"
+          disabled={disabled}
+          id={triggerId}
+          onClick={() => {
+            if (open) {
+              if (!isCreateBusy) closePicker(false);
+              return;
+            }
+            openPicker();
+          }}
+          onKeyDown={handleTriggerKeyDown}
+          ref={assignTrigger}
+          type="button"
+        >
+          All activities
+          <span aria-hidden="true" className="df-tnum">{categories.length}</span>
+        </button>
+      ) : (
+      <button
+        aria-controls={menuId}
+        aria-expanded={open}
+        aria-haspopup={isCreating ? "dialog" : "listbox"}
+        aria-labelledby={ariaLabelledBy}
+        className={menuVariant === "timer" ? "swiss-category-trigger" : undefined}
+        disabled={disabled}
+        id={triggerId}
+        onClick={() => {
+          if (open) {
+            if (!isCreateBusy) closePicker(false);
+            return;
+          }
+          openPicker();
+        }}
+        onKeyDown={handleTriggerKeyDown}
+        ref={assignTrigger}
+        type="button"
+      >
+        <span className={menuVariant === "timer" ? "swiss-category-trigger-value" : "category-picker-trigger-value"}>
+          <span
+            aria-hidden="true"
+            className={menuVariant === "timer"
+              ? `swiss-focus-dot${selectedCategory ? "" : " is-muted"}`
+              : "calendar-compact-category-dot"}
+            style={{ background: selectedColor ?? (menuVariant === "timer" ? "transparent" : "var(--muted)") }}
+          />
+          <span>{selectedCategory?.name ?? "No activity"}</span>
+        </span>
+        <ChevronDown aria-hidden="true" size={menuVariant === "timer" ? 16 : 15} />
+      </button>
+      )}
+      {blockPanel ? mountMenu(<FloatingList
+        activeId={optionValues.length ? `${menuId}-option-${Math.min(activeIndex, optionValues.length - 1)}` : undefined}
+        anchorRef={anchorRef}
+        body={isCreating ? createForm : undefined}
+        className={`df-cmd-activity-panel${portal ? " is-portalled" : ""}`}
+        heading="Activities"
+        hints={FLOATING_LIST_HINTS.activities}
+        id={menuId}
+        isOpen={open}
+        onBlur={closeOnFocusLeave}
+        // A Create being saved holds the list open (as Escape, a press outside and the block do), so
+        // its outcome — the new activity or the error beside the kept name — is always seen.
+        closeDisabled={isCreateBusy}
+        onClose={() => {
+          if (!isCreateBusy) closePicker(true);
+        }}
+        onKeyDown={handlePickerKeyDown}
+        panelRef={menuRef}
+        returnFocusRef={triggerRef}
+        search={(
+          <FloatingListSearch
+            activeDescendant={optionValues.length ? `${menuId}-option-${Math.min(activeIndex, optionValues.length - 1)}` : undefined}
+            expanded={open}
+            inputRef={searchRef}
+            label="Search activities"
+            listId={menuId}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveIndex(0);
+            }}
+            onKeyDown={handleBlockSearchKeyDown}
+            value={query}
+          />
+        )}
+        // Hidden only until it is first measured; after that the surface's own open state (and
+        // its fade, with visibility held until the fade ends) rules, at the kept geometry.
+        style={portal ? portalPosition ?? { visibility: "hidden" } : undefined}
+      >
+        {/* Nothing matches: say so above Create. */}
+        {listedCategories.length === 0 && trimmedQuery ? (
+          <span className="df-flist-empty">No activity called “{trimmedQuery}”</span>
+        ) : null}
+        {optionValues.map((value, index) => {
+          const highlighted = Math.min(activeIndex, optionValues.length - 1) === index;
+          const optionId = `${menuId}-option-${index}`;
+          if (value === "create") {
+            // Create reads like the Tags list's: primary text with a neutral "+", named by its text.
+            return (
               <button
-                aria-label="Close"
-                className="df-icon-action"
-                onClick={() => closePicker(true)}
+                aria-selected={false}
+                className={`df-flist-row df-flist-row--create is-create${highlighted ? " is-highlighted" : ""}`}
+                id={optionId}
+                key="create"
+                onClick={beginCreate}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setActiveIndex(index)}
+                ref={createOptionRef}
+                role="option"
+                tabIndex={-1}
                 type="button"
               >
-                <X aria-hidden="true" size={18} />
+                <span aria-hidden="true" className="df-flist-lead"><Plus size={14} strokeWidth={2.2} /></span>
+                <span className="df-flist-label">{trimmedQuery ? `Create “${trimmedQuery}”` : "Create new activity"}</span>
               </button>
-            </div>
-          ) : null}
+            );
+          }
+          const category = value ? categories.find((candidate) => candidate.id === value) ?? null : null;
+          return (
+            <FloatingListActivityOption
+              activity={category}
+              current={value === selectedId}
+              highlighted={highlighted}
+              id={optionId}
+              key={value || "none"}
+              onHighlight={() => setActiveIndex(index)}
+              onPick={() => chooseCategory(value)}
+              selected={value === selectedId}
+            />
+          );
+        })}
+      </FloatingList>) : null}
+      {!blockPanel ? mountMenu(<div
+        aria-hidden={!open}
+        className={`${menuClass} category-picker-menu${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+        hidden={(variant === "quick" || variant === "more") && !open}
+        id={menuId}
+        inert={!open}
+        onBlur={closeOnFocusLeave}
+        onKeyDown={handlePickerKeyDown}
+        ref={menuRef}
+        style={portal ? {
+          ...portalPosition,
+          visibility: open && portalPosition ? "visible" : "hidden"
+        } : undefined}
+      >
+        {isCreating ? createForm : (
+          <>
           {searchable ? (
             <input
               aria-controls={`${menuId}-options`}
@@ -791,7 +964,7 @@ export function CategoryPicker({
           ) : null}
           <div
             aria-label="Activities"
-            className={`category-picker-options${chipGrid ? " df-actmenu-chips" : ""}`}
+            className="category-picker-options"
             id={`${menuId}-options`}
             onKeyDown={handleOptionsKeyDown}
             ref={optionsRef}
@@ -803,7 +976,7 @@ export function CategoryPicker({
               onFocus={() => setActiveIndex(0)}
               onSelect={() => chooseCategory("")}
               selected={!selectedId}
-              variant={chipGrid ? "chip" : menuVariant}
+              variant={menuVariant}
             />
             {listedCategories.map((category, index) => (
               <CategoryOption
@@ -813,15 +986,13 @@ export function CategoryPicker({
                 onFocus={() => setActiveIndex(index + 1)}
                 onSelect={() => chooseCategory(category.id)}
                 selected={category.id === selectedId}
-                variant={chipGrid ? "chip" : menuVariant}
+                variant={menuVariant}
               />
             ))}
             {onCreateCategory ? (
               <button
                 aria-selected="false"
-                className={chipGrid
-                  ? "df-rchip df-rchip--more category-picker-create-option"
-                  : menuVariant === "timer"
+                className={menuVariant === "timer"
                   ? "swiss-category-option category-picker-create-option"
                   : `category-picker-create-option${activeIndex === optionValues.length - 1 ? " is-active" : ""}`}
                 onClick={beginCreate}
@@ -837,7 +1008,7 @@ export function CategoryPicker({
           </div>
           </>
         )}
-      </div>)}
+      </div>) : null}
       {isColorMenuOpen && colorPortalTarget ? createPortal(
         <div
           aria-label="Activity colour"
@@ -893,26 +1064,9 @@ function CategoryOption({
   onFocus: () => void;
   onSelect: () => void;
   selected: boolean;
-  variant: "timer" | "quick" | "chip";
+  variant: "timer" | "quick";
 }) {
   const color = category ? paletteCssColorFor(category.color, category.name) : null;
-  if (variant === "chip") {
-    return (
-      <button
-        aria-selected={selected}
-        className={`df-rchip${category ? " df-block" : " is-none"}${selected ? (category ? " is-checked" : " is-checked is-neutral") : ""}`}
-        onClick={onSelect}
-        onFocus={onFocus}
-        role="option"
-        style={category ? blockStyle(category.color, category.name) : undefined}
-        tabIndex={active ? 0 : -1}
-        type="button"
-      >
-        <i aria-hidden="true" />
-        {category?.name ?? "No activity"}
-      </button>
-    );
-  }
   return (
     <button
       aria-selected={selected}

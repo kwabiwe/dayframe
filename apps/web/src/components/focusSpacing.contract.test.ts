@@ -16,7 +16,9 @@ describe("web focus and control contracts", () => {
   it("assigns one compound focus owner to fields with nested actions", () => {
     expect(auth).toContain('className="ui-compound-control auth-password-field"');
     expect(inlineTags).toContain('className="ui-compound-control inline-tag-input-anchor"');
-    expect(inlineTags).toContain('className="ui-compound-control inline-tag-picker-search"');
+    // The Tags button's list keeps its search field's compound focus owner (FloatingListSearch).
+    expect(inlineTags).toContain('className="inline-tag-picker-search"');
+    expect(source("./FloatingList.tsx")).toContain("className={`ui-compound-control df-flist-search ${className}`.trim()}");
     expect(places).toContain('className="ui-compound-control place-search-control"');
     expect(styles).toMatch(/\.ui-compound-control:focus-within \{[^}]*border-color: var\(--web-focus-border\);/s);
     expect(styles).toMatch(/\.ui-compound-control > input \{[^}]*border: 0;[^}]*outline: 0;/s);
