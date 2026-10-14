@@ -1576,7 +1576,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [loggedSourceEntries, minuteNow]
   );
   const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);
-  const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);
+  // Day totals read the hero's entries (every positive clip), rebuilt on the minute clock only.
+  const earlierDays = useMemo(
+    () => buildEarlierThisWeek(historySections, minuteNow, loggedSourceEntries),
+    [historySections, loggedSourceEntries, minuteNow]
+  );
   const todayRibbonEntries = useMemo(
     () => (todaySections[0]?.entries ?? []).map(({ entry }) => entry),
     [todaySections]

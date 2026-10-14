@@ -55,6 +55,8 @@ describe("Today's \"Where today went\" wiring", () => {
   });
 
   it("builds Earlier this week's covered day totals once a minute at most, memoised (D14)", () => {
-    expect(dashboard).toContain("const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);");
+    expect(dashboard).toMatch(
+      /const earlierDays = useMemo\(\s*\(\) => buildEarlierThisWeek\(historySections, minuteNow, loggedSourceEntries\),\s*\[historySections, loggedSourceEntries, minuteNow\]\s*\);/
+    );
   });
 });
