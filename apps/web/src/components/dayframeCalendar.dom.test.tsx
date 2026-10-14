@@ -69,6 +69,19 @@ describe("DayframeCalendar (date-picker audit, 14 Oct 2026)", () => {
     expect(document.activeElement?.getAttribute("data-date")).toBe("2026-11-22");
   });
 
+  it("never pulls focus back after a key that doesn't move (Home on a Monday) (Codex r1 on #422)", async () => {
+    const { rerender } = render(<><Harness value="2026-10-12" /><input aria-label="Time" /></>);
+    const monday = screen.getByRole("button", { name: full("2026-10-12") });
+    // Focus first (the grid records the focused day), then Home, which has nowhere to go.
+    await act(async () => { monday.focus(); });
+    await act(async () => { fireEvent.keyDown(monday, { key: "Home" }); });
+    const time = screen.getByLabelText("Time");
+    time.focus();
+    rerender(<><Harness value="2026-10-12" /><input aria-label="Time" defaultValue="09" /></>);
+    await act(async () => { fireEvent.change(time, { target: { value: "0930" } }); });
+    expect(document.activeElement).toBe(time);
+  });
+
   it("works out each key's day, clamping a month move to the month's last day", () => {
     expect(keyTarget("ArrowLeft", "2026-10-01")).toBe("2026-09-30");
     expect(keyTarget("ArrowUp", "2026-10-03")).toBe("2026-09-26");

@@ -49,12 +49,20 @@ export function DayframeCalendar({
   const canGoBack = !min || addCalendarDays(`${monthKey}-01`, -1) >= min;
   const canGoForward = !max || `${nextMonthKey(view, 1)}-01` <= max;
 
+  // A key move focuses its day once it is drawn (the page may have turned), then forgets it.
   useEffect(() => {
     const date = focusAfterRender.current;
     if (!date) return;
     focusAfterRender.current = null;
     gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${date}"]`)?.focus();
-  });
+  }, [activeDate, view.year, view.month]);
+
+  // A new chosen day (picked here or set from outside) takes the tab stop back from an old key move.
+  const [seenValue, setSeenValue] = useState(value);
+  if (seenValue !== value) {
+    setSeenValue(value);
+    setActiveDate(null);
+  }
 
   function changeMonth(delta: number) {
     const next = new Date(view.year, view.month - 1 + delta, 1);
@@ -76,6 +84,9 @@ export function DayframeCalendar({
     const target = keyTarget(event.key, from);
     if (!target) return;
     event.preventDefault();
+    // Home on a Monday, End on a Sunday: nothing to move, and no focus request left waiting to
+    // pull focus back on a later render (Codex r1 on #422).
+    if (target === from) return;
     setActiveDate(target);
     focusAfterRender.current = target;
     if (!onPage(target) || !target.startsWith(monthKey)) showMonthOf(target);
