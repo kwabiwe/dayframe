@@ -244,8 +244,8 @@ export type BootstrapData = {
   weekEntries: TimeEntryRow[];
   activeEntry: TimeEntryRow | null;
   /**
-   * The finished block that ended last (started in the last 72 h), whether or not `entries` (the
-   * latest-started 100) holds it: "Start at the previous end" (PRD D16). Optional so a cached
+   * The finished block that ended last (if it ended in the last 72 h), whether or not `entries`
+   * (the latest-started 100) holds it: "Start at the previous end" (PRD D16). Optional so a cached
    * bootstrap from before the field still reads.
    */
   latestFinishedEntry?: TimeEntryRow | null;
@@ -827,9 +827,10 @@ export type TimeEntryQueryOptions = {
   startedBefore?: string;
   limit?: number;
   /**
-   * The latest-ending finished blocks (newest end first) among those started in the last 72 h —
-   * every block is at most 24 h, so nothing ending later is left out. "Start at the previous end"
-   * (PRD D16) reads it: `entries` is the latest-started blocks, so a long block can be missing.
+   * The latest-ending finished blocks (newest end first) among those that ended in the last 72 h,
+   * however long ago they started (a timer can run for days before its Stop). "Start at the
+   * previous end" (PRD D16) reads it: `entries` is the latest-started blocks, so a long block can
+   * be missing there; an end older than 72 h is never offered (today and 4 h at most).
    */
   latestFinished?: boolean;
 };
@@ -860,7 +861,7 @@ export function buildTimeEntriesQuery(
   }
   if (options.latestFinished) {
     where.push("te.stopped_at is not null");
-    where.push(`te.started_at >= ${capturedNowParam}::timestamptz - interval '72 hours'`);
+    where.push(`te.stopped_at >= ${capturedNowParam}::timestamptz - interval '72 hours'`);
   }
   values.push(options.limit ?? 100);
 

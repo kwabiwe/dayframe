@@ -1206,6 +1206,9 @@ export async function createManualEntry(input: {
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // A finished block written under the user's timer lock, so a "start at the previous end"
+    // Start (PRD D16) sees it or runs first: the two never overlap (Codex r2 on #418).
+    await lockUserTimerState(client, session);
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
           workspace_id,
@@ -2012,6 +2015,9 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    // A start or end change takes the user's timer lock before any row lock (the order Starts use),
+    // so a "start at the previous end" Start (PRD D16) sees it or runs first (Codex r2 on #418).
+    if (hasStartedAt || hasStoppedAt) await lockUserTimerState(client, session);
     if (input.expectedDetails) {
       // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
       // snapshot, so the read below (after any concurrent save has committed and released the

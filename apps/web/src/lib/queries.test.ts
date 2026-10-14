@@ -363,10 +363,12 @@ describe("time-entry range query", () => {
 });
 
 describe("latest finished block for \"start at the previous end\" (PRD D16)", () => {
-  it("orders finished blocks by their end, over the last 72 h of starts, not by start", () => {
+  it("orders finished blocks by their end, over ends in the last 72 h however old the start", () => {
     const statement = buildTimeEntriesQuery(session, { latestFinished: true, limit: 1, capturedNow: "2026-10-14T11:00:00.000Z" });
     expect(statement.text).toContain("te.stopped_at is not null");
-    expect(statement.text).toContain("te.started_at >= $3::timestamptz - interval '72 hours'");
+    // A timer started four days ago and stopped today still counts (Codex r2 on #418).
+    expect(statement.text).toContain("te.stopped_at >= $3::timestamptz - interval '72 hours'");
+    expect(statement.text).not.toContain("te.started_at >= $3::timestamptz - interval");
     expect(statement.text).toContain("order by te.stopped_at desc, te.id desc");
     expect(statement.values).toEqual([session.workspaceId, session.userId, "2026-10-14T11:00:00.000Z", 1]);
     // Every other list keeps its latest-started order.

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "./db";
-import { PreviousEndChangedError, processActivityEvent } from "./event-service";
+import { createManualEntry, PreviousEndChangedError, processActivityEvent } from "./event-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -145,6 +145,41 @@ describe.runIf(runDatabaseIntegration)("start at the previous end, Postgres", ()
       await client.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
       await client.query("delete from users where id = $1", [userId]).catch(() => undefined);
       client.release();
+    }
+  });
+});
+
+describe.runIf(runDatabaseIntegration)("manual add waits for the timer lock, Postgres", () => {
+  it("does not commit a finished block while a Start holds the user's timer lock", async () => {
+    const userId = randomUUID();
+    const workspaceId = randomUUID();
+    const lockClient = await pool.connect();
+    const session = {
+      authMode: "provider" as const,
+      scopes: ["app:read", "app:write", "events:write"],
+      userId,
+      workspaceId
+    };
+    try {
+      await lockClient.query(`insert into users (id, email, name) values ($1, $2, 'Lock order test')`, [userId, `dayframe-lock-order-${userId}@example.invalid`]);
+      await lockClient.query(`insert into workspaces (id, name) values ($1, 'Lock order test')`, [workspaceId]);
+      await lockClient.query(`insert into workspace_members (workspace_id, user_id) values ($1, $2)`, [workspaceId, userId]);
+      await lockClient.query("select pg_advisory_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
+      const end = new Date(Date.now() - 10 * 60 * 1000);
+      const add = createManualEntry({ startedAt: new Date(end.getTime() - 20 * 60 * 1000).toISOString(), stoppedAt: end.toISOString() }, session);
+      await expect(withDeadline(add, 500)).rejects.toThrow(/exceeded/);
+      await lockClient.query("select pg_advisory_unlock(hashtext($1), hashtext($2))", [workspaceId, userId]);
+      await add;
+      const rows = await lockClient.query<{ count: number }>(
+        "select count(*)::int as count from time_entries where workspace_id = $1 and user_id = $2",
+        [workspaceId, userId]
+      );
+      expect(rows.rows[0]?.count).toBe(1);
+    } finally {
+      await lockClient.query("select pg_advisory_unlock_all()").catch(() => undefined);
+      await lockClient.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
+      await lockClient.query("delete from users where id = $1", [userId]).catch(() => undefined);
+      lockClient.release();
     }
   });
 });

@@ -767,6 +767,45 @@ describe("category persistence", () => {
     expect(client.query.mock.calls[check][1]).toEqual([session.workspaceId, session.userId, startedAt]);
   });
 
+  // Manual adds and start/end edits take the user's timer lock before anything else, so a
+  // "start at the previous end" Start (PRD D16) never interleaves with them (Codex r2 on #418).
+  it("takes the user's timer lock first when adding a finished block or moving a start or end", async () => {
+    const lockStatement = "select pg_advisory_xact_lock(hashtext($1), hashtext($2))";
+    const addClient = {
+      query: vi.fn(async (statement: string, values?: unknown[]) => {
+        void values;
+        if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-add" }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-add" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(addClient);
+    await createManualEntry({ startedAt: "2026-10-14T09:00:00.000Z", stoppedAt: "2026-10-14T10:00:00.000Z" }, session).catch(() => undefined);
+    const addStatements = addClient.query.mock.calls.map(([statement]) => String(statement));
+    expect(addStatements.slice(0, 2)).toEqual(["begin", lockStatement]);
+    expect(addClient.query.mock.calls[1][1]).toEqual([session.workspaceId, session.userId]);
+
+    const editClient = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry", startedAt: "2026-10-14T09:00:00.000Z", stoppedAt: "2026-10-14T10:00:00.000Z" }] };
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(editClient);
+    await updateTimeEntry("00000000-0000-4000-8000-0000000000aa", { stoppedAt: "2026-10-14T10:30:00.000Z" }, session).catch(() => undefined);
+    const editStatements = editClient.query.mock.calls.map(([statement]) => String(statement));
+    expect(editStatements.slice(0, 2)).toEqual(["begin", lockStatement]);
+    expect(editStatements.findIndex((statement) => statement.includes("for update"))).toBeGreaterThan(1);
+
+    // A description-only edit does not wait for the timer lock.
+    const detailsClient = { query: vi.fn(async (statement: string) => { void statement; return { rows: [] }; }), release: vi.fn() };
+    mocks.pool.connect.mockResolvedValueOnce(detailsClient);
+    await updateTimeEntry("00000000-0000-4000-8000-0000000000aa", { description: "Notes" }, session).catch(() => undefined);
+    expect(detailsClient.query.mock.calls.map(([statement]) => String(statement))).not.toContain(lockStatement);
+  });
+
   it("does not run the previous-end check for an ordinary or backdated Start without the flag", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {
