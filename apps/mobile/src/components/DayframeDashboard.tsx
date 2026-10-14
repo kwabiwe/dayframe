@@ -465,6 +465,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The flight that may still finish, updated synchronously with every set or clear, so a completion
   // queued before a logout or a newer flight renders can never land (Codex r2 on #415).
   const liveStopFlightToken = useRef<number | null>(null);
+  const liveStopFlightEntryId = useRef<string | null>(null);
   const [rowPop, setRowPop] = useState<LandingRequest | null>(null);
   const stopFlightSequence = useRef(0);
   const pendingStartAgain = useRef<Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames"> | null>(null);
@@ -1904,6 +1905,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ) return;
       if (from) {
         liveStopFlightToken.current = token;
+        liveStopFlightEntryId.current = entryId;
         setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
       }
       runStopFromToday(entryId, from ? token : null, Boolean(to));
@@ -1948,6 +1950,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         dropFlight();
         return;
       }
+      // Rolled back before this acceptance ran (delivery rejected at once): the block is live again and
+      // its flight was already cancelled, so nothing flies, lands or plays.
+      if (flightToken !== null && liveStopFlightToken.current !== flightToken) return;
       playHaptic("stop", flightToken !== null ? { stopLandingDelayMs: STOP_FLIGHT.durationMs } : undefined);
       // A rolled-back Stop remounts the live block; it must not replay the Start landing.
       setLiveLanding(null);
@@ -1971,6 +1976,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   // A Stop rolled back while its ghost is still flying (delivery rejected) brings the live block
   // back at once: the ghost leaves without landing, so nothing pops on a row that is running again.
+  // The rollback cancels the flight synchronously (cancelStopFlightFor), so neither a queued
+  // completion nor a later acceptance can act on it; this effect covers rollbacks that arrive by refresh.
+  function cancelStopFlightFor(entryId: string) {
+    const flownEntryId = liveStopFlightEntryId.current;
+    if (liveStopFlightToken.current === null || !flownEntryId) return;
+    if (timerEntryIdentity(flownEntryId) !== timerEntryIdentity(entryId)) return;
+    const token = liveStopFlightToken.current;
+    liveStopFlightToken.current = null;
+    liveStopFlightEntryId.current = null;
+    setStopFlight((current) => (current?.token === token ? null : current));
+  }
   const stopFlightCommitted = useRef<number | null>(null);
   useEffect(() => {
     if (!stopFlight?.flying) return;
@@ -2467,6 +2483,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         summary.permanentRejectedClientEventIds.includes(pendingStop.clientEventId) &&
         generation === noticeSessionGeneration.current
       ) {
+        cancelStopFlightFor(activeEntry.id);
         updateDashboardData((current) => rollbackOptimisticStopSafely(
           current,
           bootstrap,

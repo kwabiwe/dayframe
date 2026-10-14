@@ -23,7 +23,7 @@ describe("Today Blocks feedback", () => {
     // Reduce Motion (or nothing to measure) keeps the row landing; otherwise the flight measures first.
     expect(stop).toMatch(/if \(reduceMotion \|\| !entryId \|\| !presentation \|\| !stopFlightOverlayReady\(\)\) \{\s*runStopFromToday\(entryId, null\);/);
     const run = body("function runStopFromToday(");
-    expect(run).toMatch(/if \(!accepted \|\| !entryId\) \{\s*dropFlight\(\);\s*return;\s*\}\s*playHaptic\("stop", flightToken !== null \? \{ stopLandingDelayMs: STOP_FLIGHT\.durationMs \} : undefined\);[\s\S]*?setLiveLanding\(null\);\s*if \(flightToken === null \|\| !flightHasRow\) \{[\s\S]*?setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
+    expect(run).toMatch(/if \(!accepted \|\| !entryId\) \{\s*dropFlight\(\);\s*return;\s*\}[\s\S]*?if \(flightToken !== null && liveStopFlightToken\.current !== flightToken\) return;\s*playHaptic\("stop", flightToken !== null \? \{ stopLandingDelayMs: STOP_FLIGHT\.durationMs \} : undefined\);[\s\S]*?setLiveLanding\(null\);\s*if \(flightToken === null \|\| !flightHasRow\) \{[\s\S]*?setRowLanding\(nextLandingRequest\(\[entryId\]\)\);/);
     // A Stop that throws drops the ghost too.
     expect(run).toContain("}, dropFlight);");
     // A refused Stop drops the ghost before any haptic.
