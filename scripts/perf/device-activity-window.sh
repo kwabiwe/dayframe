@@ -10,6 +10,7 @@ set -u
 DEV=${DAYFRAME_DEVICE:?Set DAYFRAME_DEVICE to the iPhone UDID or name}
 BUNDLE=${DAYFRAME_BUNDLE:-com.layereight.dayframe}
 WINDOW=${1:-300}
+[[ "$WINDOW" == <1-> ]] || { echo "The window must be a whole number of seconds" >&2; exit 2; }
 HERE=${0:A:h}
 WORK=$(mktemp -d -t dayframe-perf)
 trap 'rm -rf "$WORK"' EXIT
@@ -26,18 +27,26 @@ PID=$(xcrun devicectl device info processes --device "$DEV" --timeout 60 2>/dev/
 echo "$BUNDLE build $BUILD, pid ${PID:-not running}"
 [ -n "$PID" ] || exit 1
 
-# One sample: prints "<epoch seconds> <time> | <Activity Monitor row>". The time is the recording's start
-# plus the selected row's own offset, so device set-up delays never skew the window.
+# One sample: prints "<epoch seconds> <time> | <Activity Monitor row>". The time is the recording's own
+# start (its table of contents) plus the selected row's offset, so set-up delays never skew the window.
 sample() {
   local trace="$WORK/$1.trace" xml="$WORK/$1.xml" row t0
   xcrun devicectl device info details --device "$DEV" --timeout 60 >/dev/null 2>&1
-  t0=$(python3 -I -c 'import time; print(f"{time.time():.3f}")')
   xcrun xctrace record --template 'Activity Monitor' --device "$DEV" --all-processes --time-limit 5s --output "$trace" >/dev/null 2>&1 \
     || { echo "recording failed" >&2; return 1; }
   xcrun xctrace export --input "$trace" --xpath '/trace-toc/run[@number="1"]/data/table[@schema="activity-monitor-process-live"]' > "$xml" 2>/dev/null \
     || { echo "export failed" >&2; return 1; }
+  t0=$(xcrun xctrace export --input "$trace" --toc 2>/dev/null | python3 -I -c '
+import re, sys
+from datetime import datetime
+match = re.search(r"<start-date>([^<]+)</start-date>", sys.stdin.read())
+print(f"{datetime.fromisoformat(match.group(1)).timestamp():.3f}" if match else "")') 
+  [ -n "$t0" ] || { echo "the recording has no start date" >&2; return 1; }
   row=$(python3 -I "$HERE/activity-monitor-parse.py" "$xml" "Dayframe ($PID)" | tail -1)
-  [[ "$row" == *"cpu-total="* && "$row" != *"cpu-total=None"* ]] || { echo "no Dayframe ($PID) row in the recording" >&2; return 1; }
+  local field
+  for field in cpu-total memory-physical-footprint memory-real idle-wakeups; do
+    [[ "$row" == *"$field="* && "$row" != *"$field=None"* ]] || { echo "no complete Dayframe ($PID) row in the recording ($field)" >&2; return 1; }
+  done
   python3 -I - "$t0" "$row" <<'PY'
 import sys, time
 t0, row = float(sys.argv[1]), sys.argv[2]
@@ -50,7 +59,7 @@ PY
 }
 a=$(sample a) || exit 1
 echo "start: $a"
-sleep "$WINDOW"
+sleep "$WINDOW" || exit 1
 b=$(sample b) || exit 1
 echo "end:   $b"
 python3 -I - "$a" "$b" <<'PY'
