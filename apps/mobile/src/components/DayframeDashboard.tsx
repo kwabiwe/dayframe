@@ -118,6 +118,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { useShortcutStopHandoff } from "@/components/useShortcutStopHandoff";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
@@ -1369,6 +1370,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, [authState, syncHealthKitAndReload]);
 
+  // A `dayframe://action/stop` link stops the block shown as running, once timer state is loaded,
+  // through the same targeted Stop as the button (a request that waits too long, or that arrived for
+  // another account lifetime, is dropped).
+  const stopActiveTimerRef = useRef<() => Promise<boolean>>(async () => false);
+  useShortcutStopHandoff(authState === "authenticated" && data !== null, () => stopActiveTimerRef.current());
+
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
       await handleDayframeUrl(url);
@@ -2341,6 +2348,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     shiftSelectedCalendarDay(weeks * 7);
   }, [shiftSelectedCalendarDay]);
 
+  stopActiveTimerRef.current = stopActiveTimer;
   async function stopActiveTimer() {
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
