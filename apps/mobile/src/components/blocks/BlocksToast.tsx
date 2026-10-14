@@ -13,9 +13,9 @@ export const BLOCKS_TOAST_DURATION_MS = 5_000;
 
 /**
  * The toast's measures. At its 52-point rest height it is a pill (corners of half that height);
- * taller, with a second line wrapped at the largest text sizes, it keeps those corners instead of
- * becoming a capsule that would clip its text. Lines may wrap: the message to two lines, the muted
- * detail to two more; only a name too long for that ends in an ellipsis.
+ * a plain sentence may wrap to a second line at the largest text sizes, and the toast then keeps
+ * those corners instead of becoming a capsule that would clip its text. A named toast ("Switched
+ * to {name}") is always one line: its lead never shrinks and only the name ends in "…".
  */
 export const BLOCKS_TOAST_METRICS = {
   minHeight: 52,
@@ -29,9 +29,8 @@ export const BLOCKS_TOAST_METRICS = {
   messageFontSize: 13,
   messageLineHeight: 17,
   messageMaxLines: 2,
-  detailFontSize: 12,
-  detailLineHeight: 16,
-  detailMaxLines: 2,
+  /** A named toast: the space between its fixed lead and the name, which alone truncates. */
+  leadNameGap: 4,
   /** Dynamic Type stops growing here (the `control` role), so every line still fits on screen. */
   maxFontScale: MOBILE_TEXT_CAP.control
 } as const;
@@ -43,9 +42,13 @@ export type BlocksToastProps = {
   actionAccessibilityLabel?: string;
   actionTestID?: string;
   message: string;
-  /** A muted second line under the message ("42m logged to Client Work"); omitted for one sentence. */
-  detail?: string | null;
-  /** The one sentence VoiceOver reads for the message and detail; defaults to them joined. */
+  /**
+   * With `name`, the message is drawn as one line: this fixed lead ("Switched to"), never cut,
+   * then the name, which alone ends in "…" when it is too long. Omitted for a plain sentence.
+   */
+  lead?: string | null;
+  name?: string | null;
+  /** The one sentence VoiceOver reads for the toast; defaults to the message. */
   accessibilityLabel?: string;
   onAction?: () => void;
   reduceMotion: boolean;
@@ -64,10 +67,11 @@ export type BlocksToastProps = {
 
 /**
  * The iPhone Blocks toast (mirrors `apps/web/src/components/blocks/BlocksToast.tsx`): an inverse
- * pill with the activity swatch, one sentence (with an optional muted second line under it) and an
- * optional neutral pill action (never coral). The lines wrap rather than truncate, so the toast
- * may be taller than its pill height; its owner's out-of-flow place anchors one edge (Today's
- * bottom edge above the tab bar), so the extra line grows away from that edge and moves nothing.
+ * pill with the activity swatch, one sentence and an optional neutral pill action (never coral).
+ * A plain sentence may wrap to two lines at the largest text sizes, so the toast may be taller
+ * than its pill height; its owner's out-of-flow place anchors one edge (Today's bottom edge above
+ * the tab bar), so the extra line grows away from that edge and moves nothing. A named toast
+ * (`lead` + `name`, "Switched to School run") is one line whose name alone truncates.
  * Its owner keeps the notice's lifetime and token and renders it with `key={token}`, so a
  * replacing notice re-mounts (a fresh entrance) and a stale exit can never hide a newer one.
  * Reanimated owns the presence: rise + fade in, fade out; Reduce Motion fades only.
@@ -78,8 +82,9 @@ export function BlocksToast({
   actionAccessibilityLabel,
   actionLabel,
   actionTestID,
-  detail,
+  lead,
   message,
+  name,
   onAction,
   reduceMotion,
   style,
@@ -90,7 +95,8 @@ export function BlocksToast({
   // Where the entrance is, so the exit knows where to start (blocksToastExiting).
   const phase = useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering");
   const hasAction = Boolean(actionLabel && onAction);
-  const label = toastAccessibilityText({ accessibilityLabel, detail, message });
+  const label = toastAccessibilityText({ accessibilityLabel, message });
+  const named = Boolean(lead && name);
   return (
     <Reanimated.View
       accessibilityLiveRegion="polite"
@@ -104,7 +110,7 @@ export function BlocksToast({
       ]}
       testID={testID}
     >
-      {/* The swatch and both lines are one VoiceOver element reading one sentence. */}
+      {/* The swatch and the words are one VoiceOver element reading one sentence. */}
       <View accessibilityLabel={label} accessible style={toastStyles.label} testID={testID ? `${testID}-label` : undefined}>
         <View
           accessibilityElementsHidden
@@ -113,24 +119,37 @@ export function BlocksToast({
           testID={testID ? `${testID}-swatch` : undefined}
         />
         <View style={toastStyles.lines}>
-          <Text
-            {...mobileTextProps("control")}
-            numberOfLines={BLOCKS_TOAST_METRICS.messageMaxLines}
-            style={[toastStyles.message, { color: theme.background }]}
-            testID={testID ? `${testID}-message` : undefined}
-          >
-            {message}
-          </Text>
-          {detail ? (
+          {named ? (
+            // One line: the lead keeps its width, the name shrinks into what is left and ends in "…".
+            <View style={toastStyles.namedLine} testID={testID ? `${testID}-line` : undefined}>
+              <Text
+                {...mobileTextProps("control")}
+                numberOfLines={1}
+                style={[toastStyles.message, toastStyles.lead, { color: theme.background }]}
+                testID={testID ? `${testID}-lead` : undefined}
+              >
+                {lead}
+              </Text>
+              <Text
+                {...mobileTextProps("control")}
+                ellipsizeMode="tail"
+                numberOfLines={1}
+                style={[toastStyles.message, toastStyles.name, { color: theme.background }]}
+                testID={testID ? `${testID}-name` : undefined}
+              >
+                {name}
+              </Text>
+            </View>
+          ) : (
             <Text
               {...mobileTextProps("control")}
-              numberOfLines={BLOCKS_TOAST_METRICS.detailMaxLines}
-              style={[toastStyles.detail, { color: colorWithAlpha(theme.background, 0.72) }]}
-              testID={testID ? `${testID}-detail` : undefined}
+              numberOfLines={BLOCKS_TOAST_METRICS.messageMaxLines}
+              style={[toastStyles.message, { color: theme.background }]}
+              testID={testID ? `${testID}-message` : undefined}
             >
-              {detail}
+              {message}
             </Text>
-          ) : null}
+          )}
         </View>
       </View>
       {hasAction ? (
@@ -155,8 +174,9 @@ export function BlocksToast({
 
 export type BlocksNotice = {
   accessibilityLabel?: string;
-  detail?: string | null;
+  lead?: string | null;
   message: string;
+  name?: string | null;
   swatchColor?: string | null;
   token: number;
 };
@@ -184,8 +204,9 @@ export function useBlocksNotice(durationMs = BLOCKS_TOAST_DURATION_MS) {
     const words = typeof copy === "string" ? { message: copy } : copy;
     setNotice({
       accessibilityLabel: words.accessibilityLabel,
-      detail: words.detail ?? null,
+      lead: words.lead ?? null,
       message: words.message,
+      name: words.name ?? null,
       swatchColor: swatchColor ?? null,
       token: next
     });
@@ -249,10 +270,18 @@ const toastStyles = StyleSheet.create({
     fontWeight: "600",
     lineHeight: BLOCKS_TOAST_METRICS.messageLineHeight
   },
-  detail: {
-    fontSize: BLOCKS_TOAST_METRICS.detailFontSize,
-    fontWeight: "500",
-    lineHeight: BLOCKS_TOAST_METRICS.detailLineHeight
+  namedLine: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    gap: BLOCKS_TOAST_METRICS.leadNameGap,
+    minWidth: 0
+  },
+  lead: {
+    flexShrink: 0
+  },
+  name: {
+    flexShrink: 1,
+    minWidth: 0
   },
   action: {
     alignItems: "center",

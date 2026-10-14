@@ -38,10 +38,12 @@ describe("Today Blocks feedback", () => {
 
   it("never plays haptics from refresh, reconciliation or rollback paths", () => {
     const calls = [...dashboard.matchAll(/playHaptic\("(\w+)"[,)]/g)].map((match) => match[1]);
-    // "tick" is the selection haptic for tapping a day in "Earlier this week" (a user action).
+    // "tick" is the selection haptic for tapping a day in "Earlier this week" and for tapping
+    // "Where today went" (user actions).
     // The second "start" is the sheet's Start again for a bare block (a committed user action).
-    expect(calls.sort()).toEqual(["delete", "delete", "start", "start", "stop", "tick", "undoRestore"]);
+    expect(calls.sort()).toEqual(["delete", "delete", "start", "start", "stop", "tick", "tick", "undoRestore"]);
     expect(body("const openCalendarDay = useCallback(")).toContain('playHaptic("tick")');
+    expect(body("const openReportsToday = useCallback(")).toContain('playHaptic("tick")');
     for (const path of ["function rejectOptimisticTimerStart(", "async function syncQueuedEventsAndReload("]) {
       const index = dashboard.indexOf(path);
       if (index >= 0) expect(body(path)).not.toContain("playHaptic(");

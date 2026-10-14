@@ -11,7 +11,9 @@ const editSource = read("./ActiveTimerEditSheet.tsx");
 const placesSource = read("../../app/places.tsx");
 // Settings' sheets: the Location explanation (BlocksInfoSheet, UIA-022).
 const infoSheetSource = read("./blocks/BlocksInfoSheet.tsx");
-const reportsSource = read("./reports/ReportSheets.tsx");
+// Both Reports sheets (and every DateSheet) share one shell (date-picker audit, 14 Oct 2026).
+const reportsSource = read("./sheets/BottomSheetShell.tsx");
+const reportSheetsSource = read("./reports/ReportSheets.tsx");
 const consumerSources = [editSource, placesSource, infoSheetSource];
 
 describe("shared swipe-dismiss ownership integration", () => {
@@ -25,6 +27,8 @@ describe("shared swipe-dismiss ownership integration", () => {
   });
 
   it("gives both Reports sheets one handle-only shared motion owner", () => {
+    expect(reportSheetsSource).toContain("<BottomSheetShell");
+    expect(reportSheetsSource).toContain("<DateSheet");
     expect(reportsSource).toContain("<SwipeDismissSheet");
     expect(reportsSource).toContain("gestureHandleOnly");
     expect(reportsSource).toContain("presentationId={presentationId}");

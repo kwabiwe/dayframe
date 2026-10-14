@@ -110,7 +110,8 @@ describe("Calendar compact temporal DOM", () => {
 
   it("always renders both dates and supports keyboard selection in the shared picker", async () => {
     const user = userEvent.setup();
-    renderCompletedEditor();
+    // Viewed on 4 August, so the next day (3 August) is not in the future (owner decision D2).
+    renderEditor({ capturedNow: new Date(2026, 7, 4, 12), sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30") });
     const startDate = await screen.findByRole("button", { name: /Choose Start date, currently 2 August 2026/ });
     const finishDate = screen.getByRole("button", { name: /Choose End date, currently 2 August 2026/ });
     expect(startDate.textContent).toBe("");
@@ -127,6 +128,20 @@ describe("Calendar compact temporal DOM", () => {
     expect(screen.getByText("+1").getAttribute("title")).toBe("End time, one day after Start");
     expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30");
     expect(document.activeElement).toBe(finishDate);
+  });
+
+  it("never offers a day after today for a finished block's dates (owner decision D2)", async () => {
+    const user = userEvent.setup();
+    renderCompletedEditor();
+    const finishDate = await screen.findByRole("button", { name: /Choose End date, currently 2 August 2026/ });
+    finishDate.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Choose End date" })).not.toBeNull();
+    const tomorrow = screen.getByRole("button", { name: /Monday, 3 August 2026/i });
+    expect(tomorrow.getAttribute("aria-disabled")).toBe("true");
+    tomorrow.focus();
+    await user.keyboard("{Enter}");
+    expect(finishDate.getAttribute("aria-label")).toContain("2 August 2026");
   });
 
   it("retains invalid Finish, gives validation priority, then gives discard priority", async () => {

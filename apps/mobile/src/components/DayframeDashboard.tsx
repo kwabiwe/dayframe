@@ -97,6 +97,8 @@ import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
 import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
+import { buildTodayWhereWent } from "@/lib/todayWhereWent";
+import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
 import {
   ActivityNameTakenError,
   AuthRequiredError,
@@ -322,7 +324,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const { reloadThemePreference, styles, theme } = useMobileTheme();
   const connectivity = useConnectivity();
   const [data, setData] = useState<MobileBootstrap | null>(null);
+  // The last bootstrap a load, a recovered refresh or the cached launch committed: the commit that
+  // brings it is "quiet", so Today's "Where today went" strip never fades in on hydration or a
+  // refresh (motion.md), only when it appears mid-session.
+  const loadedBootstrap = useRef<MobileBootstrap | null>(null);
+  const previousTodayData = useRef<MobileBootstrap | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  // Today's "Where today went" opens Reports on Today: a tokenised, in-memory request that
+  // ReportsTab applies once and acknowledges (Reports still opens on Week otherwise, D9).
+  const [reportsRangeRequest, setReportsRangeRequest] = useState<ReportsRangeRequest | null>(null);
+  const reportsRangeRequestToken = useRef(0);
   const [todayPresentationRefreshGeneration, setTodayPresentationRefreshGeneration] = useState(0);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authState, setAuthState] = useState<AuthState>("checking");
@@ -536,8 +547,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     refreshQueued.current = false;
     queuedTimerStartRecoveryRequested.current = false;
     latestData.current = null;
+    loadedBootstrap.current = null;
     timerStateRef.current = null;
     setData(null);
+    setReportsRangeRequest(null);
     setRefreshing(false);
     setAuthSubmitting(false);
     authSubmittingRef.current = false;
@@ -621,6 +634,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshQueued.current = false;
+    loadedBootstrap.current = next;
     publishDashboardData(next);
     void readOwnedPendingTimerStops(next).then((stops) => {
       const visible = latestData.current;
@@ -916,6 +930,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           serverNow: new Date().toISOString()
         };
       }
+      loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
       setPendingTimerStops([...ownedPendingStops]);
       syncShortcutCatalog(bootstrap);
@@ -1224,6 +1239,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           filtered,
           pendingDeletionIds
         ) as MobileBootstrap;
+        loadedBootstrap.current = filtered;
         publishDashboardData(filtered);
         setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
         setAuthState("authenticated");
@@ -1580,7 +1596,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [loggedSourceEntries, minuteNow]
   );
   const todaySections = useMemo(() => historySections.filter((section) => section.isToday), [historySections]);
-  const earlierDays = useMemo(() => buildEarlierThisWeek(historySections, minuteNow), [historySections, minuteNow]);
+  // Day totals read the hero's entries (every positive clip), rebuilt on the minute clock only.
+  const earlierDays = useMemo(
+    () => buildEarlierThisWeek(historySections, minuteNow, loggedSourceEntries),
+    [historySections, loggedSourceEntries, minuteNow]
+  );
   const todayRibbonEntries = useMemo(
     () => (todaySections[0]?.entries ?? []).map(({ entry }) => entry),
     [todaySections]
@@ -1641,6 +1661,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [data?.categories, data?.goalExcludedCategoryIds, data?.user.dailyGoalMinutes, loggedSourceEntries, minuteNow]
   );
+  // "Where today went" (D15): covered time per activity on the same per-minute clock and entries as
+  // the goal frame, so it adds up to the hero; never rebuilt on the 1 s tick.
+  const todayWhereWent = useMemo(
+    () => buildTodayWhereWent({ entries: loggedSourceEntries, nowMs: minuteNow }),
+    [loggedSourceEntries, minuteNow]
+  );
+  const todayWhereWentQuiet = data !== previousTodayData.current && data === loadedBootstrap.current;
+  useEffect(() => {
+    previousTodayData.current = data;
+  }, [data]);
   const activeCategoryColor = displayedActiveEntry?.categoryName
     ? paletteColorFor(
         displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId,
@@ -1852,7 +1882,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!todayNoticeOwnerStill(noticeOwner)) return;
       const nextName = description.trim() || category?.name || "No activity";
       showTodayNotice(
-        switchedToastCopy(nextName, running, Date.now()),
+        switchedToastCopy(nextName),
         category ? toastSwatchColor({ categoryColor: category.color, categoryId: category.id, categoryName: category.name }, theme.mode) : null
       );
     });
@@ -2405,6 +2435,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     selectCalendarDay(dayKey);
     router.navigate("/(tabs)/calendar");
   }, [selectCalendarDay]);
+
+  // "Where today went" opens Reports on Today. A tap while a request is still waiting reuses it.
+  const openReportsToday = useCallback(() => {
+    playHaptic("tick");
+    setReportsRangeRequest((current) => {
+      if (current) return current;
+      reportsRangeRequestToken.current += 1;
+      return { choice: "today", token: reportsRangeRequestToken.current };
+    });
+    router.navigate("/(tabs)/reports");
+  }, []);
+  const acknowledgeReportsRangeRequest = useCallback((token: number) => {
+    setReportsRangeRequest((current) => (current?.token === token ? null : current));
+  }, []);
 
   const shiftSelectedCalendarWeek = useCallback((weeks: number) => {
     shiftSelectedCalendarDay(weeks * 7);
@@ -3132,7 +3176,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   entries={todayRibbonEntries}
                   nowMs={minuteNow}
                   onOpenEntry={openTodayEntry}
+                  onOpenWhereWent={openReportsToday}
+                  reduceMotion={reduceMotion}
                   theme={theme}
+                  whereWent={todayWhereWent}
+                  whereWentQuiet={todayWhereWentQuiet}
                 />
               </Reanimated.View>
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
@@ -3288,6 +3336,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               nowMs={isFocused ? now : minuteFloorNow}
               onScrubbingChange={setReportsScrubbing}
               timeZoneId={timeZoneId}
+              // Today's "Where today went" asks for Today once (D15); Reports acknowledges it.
+              onRangeRequestApplied={acknowledgeReportsRangeRequest}
+              rangeRequest={reportsRangeRequest}
               styles={styles}
               theme={theme}
             />
@@ -3321,8 +3372,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         <BlocksToast
           key={`notice-${todayNotice.notice.token}`}
           accessibilityLabel={todayNotice.notice.accessibilityLabel}
-          detail={todayNotice.notice.detail}
+          lead={todayNotice.notice.lead}
           message={todayNotice.notice.message}
+          name={todayNotice.notice.name}
           reduceMotion={reduceMotion}
           style={styles.todayToast}
           swatchColor={todayNotice.notice.swatchColor}

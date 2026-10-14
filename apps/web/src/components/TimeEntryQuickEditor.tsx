@@ -852,6 +852,7 @@ export function TimeEntryQuickEditorPanel({
                 panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
                 panelLabel="Choose Start date"
                 portal
+                max={today}
                 today={today}
                 triggerClassName="calendar-compact-date-trigger"
                 value={draft.startedAtDate}
@@ -894,6 +895,7 @@ export function TimeEntryQuickEditorPanel({
                   panelClassName="calendar-compact-date-picker-panel time-entry-quick-editor-nested-surface"
                   panelLabel="Choose End date"
                   portal
+                  max={today}
                   today={today}
                   triggerClassName="calendar-compact-date-trigger"
                   value={draft.stoppedAtDate}

@@ -26,6 +26,8 @@ export function DatePickerPopover({
   disabled = false,
   iconOnly = false,
   label,
+  max,
+  min,
   onChange,
   onOpenChange,
   open: controlledOpen,
@@ -45,6 +47,10 @@ export function DatePickerPopover({
   disabled?: boolean;
   iconOnly?: boolean;
   label: string;
+  /** The last choosable day, inclusive (finished blocks: today, owner decision D2). */
+  max?: string | null;
+  /** The first choosable day, inclusive. */
+  min?: string | null;
   onChange: (date: string) => void;
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
@@ -75,6 +81,18 @@ export function DatePickerPopover({
   const [portalPosition, setPortalPosition] = useState<CSSProperties | null>(null);
   const selected = new Date(`${value}T12:00:00`);
   const [view, setView] = useState({ year: selected.getFullYear(), month: selected.getMonth() + 1 });
+
+  // Each opening shows the chosen day's month, wherever the grid was left (Codex r1 on #422).
+  const [viewSeed, setViewSeed] = useState(false);
+  if (viewSeed !== effectiveOpen) {
+    setViewSeed(effectiveOpen);
+    if (effectiveOpen) {
+      const chosen = new Date(`${value}T12:00:00`);
+      if (chosen.getFullYear() !== view.year || chosen.getMonth() + 1 !== view.month) {
+        setView({ year: chosen.getFullYear(), month: chosen.getMonth() + 1 });
+      }
+    }
+  }
 
   const updateOpen = useCallback((next: boolean) => {
     if (controlledOpen === undefined) setUncontrolledOpen(next);
@@ -172,10 +190,10 @@ export function DatePickerPopover({
       role="dialog"
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
     >
-      <Button compact onClick={() => choose(today)} disabled={disabled}>
+      <Button compact onClick={() => choose(today)} disabled={disabled || Boolean((max && today > max) || (min && today < min))}>
         Today
       </Button>
-      <DayframeCalendar onChange={choose} onViewChange={setView} value={value} view={view} />
+      <DayframeCalendar max={max} min={min} onChange={choose} onViewChange={setView} today={today} value={value} view={view} />
     </section>
   );
 

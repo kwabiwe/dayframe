@@ -1,12 +1,8 @@
 /**
- * The latest day the entry sheet's date picker offers (UIA-011). A running block can't start in
- * the future, so its start stops at today; a finished block may end after today (an overnight
- * block edited before midnight) and its start may follow, so those stay open, as the API allows.
+ * The latest day the entry sheet's date sheet offers: today, for a running block's start and for a
+ * finished block's start and end alike (owner decision D2, 14 Oct 2026, replacing UIA-011's open
+ * finished-block days). Add past time's later days were offered but rejected by the server.
  */
-export function entryDatePickerMaxDate(input: {
-  running: boolean;
-  target: "start" | "end";
-  now: Date;
-}): Date | null {
-  return input.running && input.target === "start" ? input.now : null;
+export function entryDatePickerMaxDate(now: Date): Date {
+  return now;
 }
