@@ -34,6 +34,9 @@
   --warning-text: #805600;
   --danger: #d94f4f;
   --danger-text: #b42318;
+  /* The soft danger fill (error rows and states). It follows --danger and --surface-muted into each
+     theme; 10% keeps --danger-text at 4.5:1 or better on it in both (5.2 Daylight, 4.7 Midnight). */
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface-muted));
   --on-danger: #050914;
   --info: #3b82f6;
   --chart-track: #e5e9f0;
@@ -3988,8 +3991,7 @@ kbd {
   border-radius: var(--activity-marker-radius);
 }
 
-.report-filter-option-dot.is-uncategorized,
-.report-category-marker.is-uncategorized {
+.report-filter-option-dot.is-uncategorized {
   border: 1px solid var(--text-secondary);
   border-radius: var(--activity-marker-radius);
   background: repeating-linear-gradient(45deg, var(--surface-muted) 0 2px, var(--text-secondary) 2px 3px) !important;
@@ -4243,13 +4245,6 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-}
-
-.report-category-marker {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--activity-marker-radius);
-  background: var(--category-color);
 }
 
 .report-ranked-row strong {
@@ -6225,9 +6220,16 @@ kbd {
  * bottom and its max-height from the visual viewport, so it stays above the keyboard; the rows
  * scroll inside and a visible 44 px Close sits in the head.
  */
+/* Layers for the phone sheets and what opens from one (the Activities Create form's colour
+   palette, a separate body portal): the palette always sits above the sheet that owns it. */
+:root {
+  --df-layer-sheet: 130;
+  --df-layer-sheet-popover: calc(var(--df-layer-sheet) + 1);
+}
+
 .df-flist.ui-floating-surface.is-sheet {
   position: fixed;
-  z-index: 130;
+  z-index: var(--df-layer-sheet);
   max-width: calc(100vw - 24px);
   overflow: hidden;
 }
@@ -6392,6 +6394,67 @@ kbd {
   border-radius: 6px;
 }
 
+/* "No activity": the neutral activity dot on a quiet fill, as on the activity block itself. */
+.df-flist-block.is-none {
+  background: var(--surface-inset);
+  color: var(--muted);
+}
+
+/* A list opened from a button (the Activity block, the Tags button) starts with a search field:
+   the ordinary inset field, focus stays the neutral grey border. */
+.df-flist-search {
+  display: flex;
+  height: var(--web-control-height);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 4px 6px;
+  border-radius: var(--web-radius-control);
+  padding: 0 10px;
+  color: var(--muted);
+}
+
+.df-flist-search input {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  outline: 0;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* The Tags button's list holds several tags: a chosen one shows a neutral check and a remove ×. */
+.df-flist .df-flist-check {
+  border-radius: 6px;
+  background: var(--text-primary);
+  color: var(--surface);
+}
+
+.df-flist-remove,
+.df-flist-current {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+/* A tag that cannot be added (the tag limit) stays listed, dimmed. */
+.df-flist .df-flist-row.is-unavailable {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* Create rows read like the others (primary text, a neutral "+"): coral stays for recording and
+   the one primary action. */
+.df-flist .df-flist-row.is-create {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
 .swiss-task-suggestions {
   --task-suggestion-count: 5;
   --task-suggestion-header-height: 26px;
@@ -6536,18 +6599,6 @@ kbd {
   pointer-events: none;
 }
 
-/* In the activity chip grid ("Activity for this block") the Create chip is one more chip in the
-   flow: no divider drawn across the middle of the chips and no extra gap above it. */
-.df-rchip.category-picker-create-option {
-  margin-top: 0;
-  /* Neutral like the chips around it, never coral (the base create option's accent text). */
-  color: var(--text-secondary);
-}
-
-.df-rchip.category-picker-create-option::before {
-  content: none;
-}
-
 .category-picker-create-form {
   display: grid;
   min-width: 0;
@@ -6630,7 +6681,8 @@ kbd {
 
 .category-picker-color-menu {
   position: fixed;
-  z-index: 121;
+  /* Above every picker menu (120) and the phone sheet its Create form may sit in. */
+  z-index: var(--df-layer-sheet-popover);
   display: grid;
   grid-template-columns: repeat(5, minmax(44px, 1fr));
   gap: 4px;
@@ -7189,146 +7241,11 @@ kbd {
   color: var(--foreground);
 }
 
-.inline-tag-picker {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  z-index: 70;
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  width: min(17rem, calc(100vw - 24px));
-  max-height: min(17rem, calc(100dvh - 8rem));
-  overflow: hidden;
-}
-
-.inline-tag-picker-header {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-  padding-left: 0.75rem;
-  color: var(--foreground);
-  font-size: 0.8125rem;
-}
-
-.inline-tag-picker-header button {
-  display: inline-flex;
-  width: 44px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-}
-
-.inline-tag-picker-header button:hover {
-  background: var(--surface-muted);
-  color: var(--foreground);
-}
-
-.inline-tag-picker-search {
-  display: flex;
-  height: var(--web-control-height);
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.7rem;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 0 0.65rem;
-  color: var(--muted);
-}
-
-.inline-tag-picker-search input {
-  min-width: 0;
-  height: 100%;
-  min-height: 0;
-  flex: 1;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  outline: 0;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 0.8125rem;
-}
-
-.inline-tag-picker-list {
-  min-height: 2.75rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.inline-tag-picker-list button,
-.inline-tag-picker-create {
-  display: flex;
-  width: 100%;
-  min-height: 44px;
-  align-items: center;
-  gap: 0.65rem;
-  border: 0;
-  border-radius: var(--web-radius-control);
-  background: transparent;
-  padding: 0.55rem 0.75rem;
-  color: var(--foreground);
-  font: inherit;
-  font-size: 0.8125rem;
-  text-align: left;
-}
-
-.inline-tag-picker-list button:hover {
-  background: var(--surface-muted);
-}
-
-.inline-tag-picker-list .inline-tag-empty {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  padding: 0.55rem 0.75rem;
-}
-
-.inline-tag-check {
-  display: inline-flex;
-  width: 1rem;
-  height: 1rem;
-  flex: 0 0 1rem;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--control-border);
-  border-radius: 0.25rem;
-}
-
-.inline-tag-check.is-selected {
-  border-color: var(--foreground);
-  background: var(--foreground);
-  color: var(--background);
-}
-
-/* The picker's Create row reads like the # Tags list's: Create "#name" in primary text with a
-   neutral "+", no divider above it. */
-.inline-tag-picker-create {
-  color: var(--foreground);
-  font-weight: 600;
-}
-
-.inline-tag-picker-create:hover {
-  background: var(--surface-muted);
-}
-
-.inline-tag-picker-create .df-flist-lead {
-  display: inline-grid;
-  width: 20px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--muted);
-}
-
-/* The # Tags and @ Activities lists sit under the description (FloatingList draws them), at the
-   same gap and width as Suggestions: the field's full width. */
+/* The # Tags and @ Activities lists, and the Tags button's list, sit under the description
+   (FloatingList draws them), at the same gap and width as Suggestions: the field's full width. */
 .inline-tag-suggestions,
-.inline-activity-suggestions {
+.inline-activity-suggestions,
+.inline-tag-picker {
   position: absolute;
   top: calc(100% + var(--web-field-gap));
   left: 0;
@@ -7338,11 +7255,10 @@ kbd {
   overflow: hidden;
 }
 
-/* Create "#name" reads like the other rows (primary text, a neutral "+"): coral stays for
-   recording and the one primary action. */
-.inline-tag-suggestions .df-flist-row.is-create {
-  color: var(--foreground);
-  font-weight: 600;
+/* The Tags button's list is the typed lists' 19rem plus its search field, so as many rows show
+   (the Activity block's list sets the same cap). */
+.inline-tag-picker {
+  max-height: min(22.5rem, calc(100dvh - 10rem));
 }
 
 .inline-tag-empty,
@@ -7532,10 +7448,36 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--muted);
 }
 
+/* Today in coral text, no fill (as on iPhone); the chosen day's fill wins. */
+.dayframe-calendar-grid button.is-today {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
 .dayframe-calendar-grid button[aria-pressed="true"] {
   background: var(--foreground);
   color: var(--background);
   font-weight: 700;
+}
+
+/* Days outside min/max: dimmed, still focusable for the arrow keys, never chosen. */
+.dayframe-calendar-grid button.is-unavailable {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dayframe-calendar-grid button.is-unavailable:hover {
+  background: transparent;
+}
+
+.dayframe-calendar header button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dayframe-calendar header button:disabled:hover {
+  background: transparent;
 }
 
 .dayframe-time-row {
@@ -7593,16 +7535,6 @@ dialog.ui-dialog.manual-entry-dialog {
   z-index: 75;
 }
 
-.manual-entry-inline-tags .inline-tag-picker {
-  top: calc(100% + var(--web-field-gap));
-  right: 0;
-  bottom: auto;
-  left: auto;
-  z-index: 80;
-  width: min(17rem, calc(100vw - 24px));
-  max-height: min(240px, calc(100dvh - 180px));
-}
-
 .manual-entry-inline-tags .inline-tag-description-input {
   padding-left: 11px;
 }
@@ -7634,7 +7566,6 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 @media (max-width: 560px) {
-  .inline-tag-picker,
   .swiss-category-menu,
   .swiss-start-time-popover,
   .timeline-date-picker-panel {
@@ -7649,7 +7580,6 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 
   .manual-entry-description .swiss-task-suggestions,
-  .manual-entry-inline-tags .inline-tag-picker,
   .dayframe-date-time-panel {
     position: fixed;
     top: auto;
@@ -7675,10 +7605,6 @@ dialog.ui-dialog.manual-entry-dialog {
     max-width: none;
     max-height: calc(100dvh - 24px);
     overflow-y: auto;
-  }
-
-  .inline-tag-picker {
-    max-height: min(13rem, calc(100dvh - 240px));
   }
 
   .swiss-category-menu {
@@ -7749,7 +7675,7 @@ dialog.ui-dialog.manual-entry-dialog {
   margin: 0;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   backdrop-filter: blur(8px);
 }
 
@@ -7775,7 +7701,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .location-evidence-provider-state.is-error {
-  background: color-mix(in srgb, var(--danger-soft) 94%, transparent);
+  /* Opaque: the map's tiles under it can be white (Codex r2 on #425). */
+  background: var(--danger-soft);
   color: var(--danger-text);
 }
 
@@ -7964,7 +7891,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   color: var(--foreground);
 }
 
@@ -8233,7 +8160,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 12px;
   padding: 4px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
 }
 
 .category-picker-menu.is-portalled {
@@ -8653,7 +8580,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 12px;
   padding: 12px 14px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   color: var(--danger-text);
   animation: timeline-delete-notice-enter 160ms ease-out both;
 }
@@ -9773,6 +9700,60 @@ button.df-cmd-clock:hover {
   color: var(--text-muted);
 }
 
+/* Idle: the muted clock, and under it (beside it below 860 px) the "From 10:15 · after …" chip
+   (owner idea 1, 14 Oct 2026). Only the name ellipsises; the lead stays whole. */
+.df-cmd-idle {
+  display: grid;
+  justify-items: end;
+  min-width: 0;
+}
+
+.df-cmd-from {
+  position: relative;
+  display: inline-flex;
+  max-width: 260px;
+  min-width: 0;
+  align-items: center;
+  gap: 0.28em;
+  /* Tucked under the clock's padding so the bar keeps its 64 px height with or without it. */
+  margin: -5px 8px 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+/* The chip stays 15 px tall so the bar keeps 64 px; its target is 44 px (14.5 px above and below). */
+.df-cmd-from::after {
+  position: absolute;
+  inset: -14.5px 0;
+  content: "";
+}
+
+.df-cmd-from:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-cmd-from:disabled {
+  opacity: 0.6;
+}
+
+.df-cmd-from-lead {
+  flex: none;
+}
+
+.df-cmd-from-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .df-odometer {
   display: inline-flex;
   font-variant-numeric: tabular-nums;
@@ -9951,6 +9932,34 @@ button.df-cmd-clock:hover {
     align-items: center;
     gap: 8px;
     font-size: 24px;
+  }
+
+  .df-cmd-time {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .df-cmd-idle {
+    display: flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .df-cmd-idle .df-cmd-clock {
+    flex: none;
+  }
+
+  .df-cmd-from {
+    min-height: 44px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  /* Already 44 px here; an extended target would reach the description and the quick starts. */
+  .df-cmd-from::after {
+    inset: 0;
   }
 
   .df-cmd-go-label,
@@ -10879,6 +10888,22 @@ dialog.ui-dialog.df-palette {
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A lead ("Switched to") stays whole; only the name after it ends in "…" (owner option A, 14 Oct). */
+.df-toast-message.has-lead {
+  display: flex;
+  gap: 0.28em;
+}
+
+.df-toast-lead {
+  flex: none;
+}
+
+.df-toast-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .df-toast-action {
@@ -14047,92 +14072,24 @@ dialog.ui-dialog.df-rf-dialog {
   margin: 6px 6px 4px;
 }
 
-/* UIA-202: the command timer's "Activity for this block" — every activity as a chip, neutral
-   chrome; the chosen chip fills with its activity colour. Fits phones (portal width capped at the
-   viewport less 24 px, internal scrolling). */
-.category-picker-menu.is-portalled.df-actmenu {
-  display: grid;
-  gap: 12px;
-  border-radius: 20px;
-  padding: 16px;
-  max-height: min(420px, calc(100dvh - 24px));
+/* The command timer's activity block opens the Activities list (owner, 14 Oct 2026): the same
+   FloatingList as the typed @ list, portalled and lined up with the Description field (JS sets
+   its left, top, width and max-height), the rows scrolling inside. */
+.df-cmd-activity-panel.is-portalled {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+  z-index: 120;
+  max-height: min(22.5rem, calc(100dvh - 24px));
+  overflow: hidden;
 }
 
-.df-actmenu-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.df-actmenu-head strong {
-  color: var(--foreground);
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 750;
-}
-
-.df-actmenu-head .df-icon-action {
-  width: 44px;
-  height: 44px;
-  margin: -8px -8px -8px 0;
-}
-
-.df-actmenu-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.df-actmenu-chips .df-rchip.category-picker-create-option {
-  width: auto;
-  min-height: 36px;
-  margin: 0;
-  border: 0;
-  padding: 0 12px 0 10px;
-}
-
-.df-actmenu-chips .df-rchip {
-  min-height: 36px;
-  max-width: 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  text-align: start;
-  background: var(--surface-inset);
-  cursor: pointer;
-}
-
-.df-actmenu-chips .df-rchip.is-checked {
-  background: var(--block);
-}
-
-.df-actmenu-chips .df-rchip.is-none > i {
-  background: var(--text-muted);
-}
-
-.df-actmenu-chips .df-rchip.is-checked.is-neutral {
-  background: var(--text-primary);
-  color: var(--surface);
-}
-
-.df-actmenu-chips .df-rchip.is-checked.is-neutral > i {
-  background: var(--surface);
-}
-
-.df-actmenu-chips .df-rchip > i {
-  flex: none;
-}
-
-.df-actmenu-chips .df-rchip:not(.is-checked):hover {
-  background: var(--surface-muted);
-}
-
-@media (hover: none), (max-width: 760px) {
-  .df-actmenu-chips .df-rchip,
-  .df-actmenu-chips .df-rchip.category-picker-create-option {
-    min-height: 44px;
-  }
+/* Its Create form (name and colour) replaces the search and rows inside the same surface. */
+.df-cmd-activity-panel .category-picker-create-form {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* UIA-202: the command timer's start-time popover in Blocks: a display-type head without a rule,
@@ -14176,22 +14133,6 @@ dialog.ui-dialog.df-rf-dialog {
 
 .df-cmd-time .swiss-start-time-popover .ui-dialog-actions {
   border-top: 0;
-}
-
-/* UIA-202: the tag picker's head in Blocks: display type, no rule under it. */
-.inline-tag-picker {
-  border-radius: 20px;
-}
-
-.inline-tag-picker-header {
-  border-bottom: 0;
-  padding-left: 16px;
-}
-
-.inline-tag-picker-header strong {
-  font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 750;
 }
 
 /* Calendar › List in Blocks (owner on UIA-203: like Today's blocks). Rows are fill rows with the
@@ -14670,9 +14611,9 @@ dialog.ui-dialog.df-rf-dialog {
   overflow: hidden;
   border-radius: 9px;
   padding: 4px 8px;
-  background: color-mix(in srgb, var(--text) 10%, var(--surface));
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 45%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--text-primary) 10%, var(--surface));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text-primary) 45%, transparent);
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
@@ -14685,7 +14626,7 @@ dialog.ui-dialog.df-rf-dialog {
   z-index: 90;
   border-radius: 10px;
   padding: 6px 10px;
-  background: var(--text);
+  background: var(--text-primary);
   color: var(--surface);
   font-size: 12px;
   font-weight: 700;

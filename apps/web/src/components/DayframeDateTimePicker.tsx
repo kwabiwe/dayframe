@@ -4,7 +4,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Clock3 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
-import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { formatLocalDate, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 
 function parseLocal(value: string) {
   const [date = "", time = "09:00"] = value.split("T");
@@ -18,6 +18,7 @@ export function DayframeDateTimePicker({
   defaultValue,
   id,
   label,
+  max,
   name,
   onChange,
   required
@@ -27,6 +28,8 @@ export function DayframeDateTimePicker({
   defaultValue: string;
   id: string;
   label?: string;
+  /** The last choosable day (`YYYY-MM-DD`), inclusive: Add time can't add future time (D2). */
+  max?: string | null;
   name: string;
   onChange?: (value: string) => void;
   required?: boolean;
@@ -126,7 +129,7 @@ export function DayframeDateTimePicker({
         inert={!open}
         role="dialog"
       >
-        <DayframeCalendar onChange={chooseDay} onViewChange={setView} value={current.date} view={view} />
+        <DayframeCalendar max={max} onChange={chooseDay} onViewChange={setView} today={formatLocalDate(new Date())} value={current.date} view={view} />
         <div className="dayframe-time-row">
           <Clock3 aria-hidden="true" size={17} />
           <label htmlFor={`${id}-time`}>Time</label>

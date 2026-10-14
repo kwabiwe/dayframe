@@ -18,15 +18,22 @@ describe("web tag editor interaction contract", () => {
     expect(iconSource).toContain('fillRule="evenodd"');
   });
 
-  it("opens an icon-triggered search/select/create picker with mobile-safe semantics", () => {
+  it("opens the shared Tags list from its icon button: search, multi-select and create (owner, 14 Oct 2026)", () => {
     expect(source).toContain('aria-label="Add or filter tags"');
-    expect(source).toContain('placeholder="Search tags"');
-    // WCAG 2.5.3 label in name: the search field's accessible name is its visible wording.
-    expect(source).toMatch(/aria-label="Search tags"\s+autoComplete="off"[\s\S]{0,200}placeholder="Search tags"/);
+    expect(source).toContain('aria-haspopup="listbox"');
+    // WCAG 2.5.3 label in name: the search field's name is its visible placeholder (one prop for both).
+    expect(source).toContain('label="Search tags"');
+    const list = readFileSync(fileURLToPath(new URL("./FloatingList.tsx", import.meta.url)), "utf8");
+    expect(list).toMatch(/aria-label=\{label\}[\s\S]{0,200}placeholder=\{label\}/);
     expect(source).not.toMatch(/aria-label="Add or filter tags"\s+autoComplete="off"/);
     expect(source).toContain("pickerMatches.map");
     expect(source).toContain("pickerCreateName");
-    expect(source).toContain("aria-pressed={selected}");
+    // One FloatingList, multi-select: options say whether each tag is chosen, never aria-pressed.
+    expect(source).toContain("multiselectable");
+    expect(source).toContain("selected={checked}");
+    expect(source).not.toContain("aria-pressed");
+    expect(source).not.toContain('role="dialog"');
+    expect(source).not.toContain("inline-tag-picker-header");
   });
 
   it("keeps manual hashtag entry but consumes the command into separate selected-tag state", () => {

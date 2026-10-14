@@ -4,10 +4,9 @@ import {
   consumeActiveHashtag,
   findActiveHashtag,
   normalizeNewTagName,
-  normalizeTagName,
-  resolveActivityIcon
+  normalizeTagName
 } from "@dayframe/shared";
-import { Check, Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   useEffect,
@@ -21,15 +20,21 @@ import {
   type RefObject
 } from "react";
 import type { TagRow } from "@/lib/queries";
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { FLOATING_LIST_HINTS, FloatingList } from "@/components/FloatingList";
+import {
+  FLOATING_LIST_HINTS,
+  FloatingList,
+  FloatingListActivityOption,
+  FloatingListSearch,
+  FloatingListTagOption,
+  restoreFocusIfDropped,
+  type FloatingListActivity
+} from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
-import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention, findActiveMention } from "@/lib/command-parse";
 import { selectVisibleTags, TAG_SELECTION_MAX_COUNT } from "@/lib/tag-display";
 
 /** An activity the description's `@` list can offer (the command timer passes its activities). */
-export type MentionActivity = { id: string; name: string; color: string; icon?: string | null; isPinned?: boolean };
+export type MentionActivity = FloatingListActivity;
 
 /**
  * How an activity was chosen from the `@` list: Enter (the command timer may also start the
@@ -104,7 +109,7 @@ export function InlineTagInput({
   const localInputRef = useRef<HTMLInputElement | null>(null);
   const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const pickerPanelRef = useRef<HTMLElement | null>(null);
+  const pickerPanelRef = useRef<HTMLDivElement | null>(null);
   const suggestionsPanelRef = useRef<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(false);
   const [caret, setCaret] = useState(value.length);
@@ -116,6 +121,11 @@ export function InlineTagInput({
   const activityPanelRef = useRef<HTMLDivElement | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerIndex, setPickerIndex] = useState(0);
+  // The block (`completionScope`) the Tags button's list was opened for: its picks, Create and
+  // Backspace only ever change that block (Codex r3 on #402).
+  const [pickerScope, setPickerScope] = useState<string | null>(null);
+  const [pickerScopeHandoff, setPickerScopeHandoff] = useState(0);
   const [anchorWidth, setAnchorWidth] = useState(0);
   const [tagWidths, setTagWidths] = useState<number[]>([]);
   const [pickerPosition, setPickerPosition] = useState<CSSProperties | null>(null);
@@ -168,6 +178,12 @@ export function InlineTagInput({
     setTypedMention(null);
     setDismissedTagStart(null);
     setInteractionScope(null);
+    // A new block closes the Tags button's list and clears its search, as it closes the typed lists;
+    // focus that was in it is handed back to the button below.
+    if (pickerOpen) setPickerScopeHandoff((count) => count + 1);
+    setPickerOpen(false);
+    setPickerQuery("");
+    setPickerScope(null);
   }
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen
     && interactionScope === completionScope;
@@ -215,6 +231,14 @@ export function InlineTagInput({
       return null;
     }
   }, [pickerExactMatch, pickerQuery]);
+  const atTagLimit = selectedTagNames.length >= TAG_SELECTION_MAX_COUNT;
+  // The Tags button's rows: every matching tag (checked when it is on the block), then Create.
+  const pickerActions = useMemo(() => [
+    ...pickerMatches.map((tag) => ({ create: false, id: tag.id, label: tag.name, count: tag.usageCount as number | null })),
+    ...(pickerCreateName && !atTagLimit ? [{ create: true, id: "create", label: pickerCreateName, count: null }] : [])
+  ], [atTagLimit, pickerCreateName, pickerMatches]);
+  const activePickerIndex = Math.min(pickerIndex, Math.max(0, pickerActions.length - 1));
+  const tagPickerListId = `${name}-tag-picker`;
   const tagDisplay = selectVisibleTags(selectedTagNames, {
     availableWidth: anchorWidth ? Math.max(0, Math.min(anchorWidth * 0.52, anchorWidth - 190)) : undefined,
     tagWidths,
@@ -242,11 +266,15 @@ export function InlineTagInput({
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
 
-  // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
-  useEffect(() => {
-    if (!activityOpen) return;
-    document.getElementById(`${name}-activity-option-${activeActivityIndex}`)?.scrollIntoView?.({ block: "nearest" });
-  }, [activeActivityIndex, activityOpen, name]);
+  // A new block closed the Tags button's list: focus that was in it (or that the now inert list
+  // dropped on the page) goes back to the button, before the browser paints.
+  useLayoutEffect(() => {
+    if (!pickerScopeHandoff) return;
+    const activeElement = document.activeElement;
+    if (!activeElement || activeElement === document.body || pickerPanelRef.current?.contains(activeElement)) {
+      pickerTriggerRef.current?.focus();
+    }
+  }, [pickerScopeHandoff]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -276,10 +304,15 @@ export function InlineTagInput({
     if (!effectivePickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (!editorRef.current?.contains(target) && !pickerPanelRef.current?.contains(target)) setPickerOpen(false);
+      if (editorRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
+      // Focus goes where the press puts it, or back to the Tags button when that is nowhere
+      // (non-focusable content, or a button WebKit does not focus), never the page (Codex r5).
+      const hadFocus = Boolean(pickerPanelRef.current?.contains(document.activeElement));
+      setPickerOpen(false);
+      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerTriggerRef.current), 0);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         pickerInputRef.current?.blur();
         setPickerOpen(false);
@@ -309,7 +342,6 @@ export function InlineTagInput({
       const anchorRect = anchor.getBoundingClientRect();
       const availableWidth = Math.max(0, viewportWidth - margin * 2);
       const suggestionsWidth = Math.min(anchorRect.width, availableWidth);
-      const pickerWidth = Math.min(272, availableWidth);
       const place = (panel: HTMLElement | null, width: number, alignRight: boolean) => {
         const height = panel?.getBoundingClientRect().height ?? 260;
         const preferredLeft = alignRight ? anchorRect.right - width : anchorRect.left;
@@ -325,7 +357,8 @@ export function InlineTagInput({
       };
       if (shouldOpen) setSuggestionsPosition(place(suggestionsPanelRef.current, suggestionsWidth, false));
       else if (activityOpen) setSuggestionsPosition(place(activityPanelRef.current, suggestionsWidth, false));
-      if (effectivePickerOpen) setPickerPosition(place(pickerPanelRef.current, pickerWidth, true));
+      // The Tags button's list lines up with the field, like the typed lists.
+      if (effectivePickerOpen) setPickerPosition(place(pickerPanelRef.current, suggestionsWidth, false));
     }
     updatePosition();
     window.addEventListener("resize", updatePosition);
@@ -349,6 +382,62 @@ export function InlineTagInput({
     setCaret(nextCaret);
     // Moving the caret out of the `@word` being typed closes its list for good.
     if (typedMention && findActiveMention(input.value, nextCaret)?.start !== typedMention.start) setTypedMention(null);
+  }
+
+  function openPicker() {
+    if (disabled) return;
+    setPickerQuery("");
+    setPickerIndex(0);
+    setPickerScope(completionScope);
+    setPickerOpen(true);
+  }
+
+  /** Closes the Tags button's list; Escape, Close and Tab put focus back on the button. */
+  function closePicker(restoreFocus: boolean) {
+    setPickerOpen(false);
+    if (restoreFocus) window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
+  }
+
+  function pickPickerAction(action: (typeof pickerActions)[number] | undefined) {
+    // Only for the block the list was opened for, and only while it is open.
+    if (!action || disabled || !effectivePickerOpen || pickerScope !== completionScope) return;
+    if (action.create) {
+      addSelectedTag(action.label);
+      setPickerQuery("");
+      setPickerIndex(0);
+    } else {
+      const normalizedName = normalizeTagName(action.label).normalizedName;
+      if (!selectedNormalized.has(normalizedName) && atTagLimit) return;
+      toggleSelectedTag(action.label);
+    }
+    pickerInputRef.current?.focus();
+  }
+
+  function onPickerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+    // A list closed by a new block (or any stale keystroke) changes nothing and never submits.
+    if (!effectivePickerOpen || pickerScope !== completionScope) {
+      if (event.key === "Enter" || event.key === "Backspace") event.preventDefault();
+      return;
+    }
+    const count = pickerActions.length;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!count) return;
+      setPickerIndex((activePickerIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count);
+    } else if (event.key === "Enter") {
+      // Never the surrounding form's submit (the command timer's Start).
+      event.preventDefault();
+      pickPickerAction(pickerActions[activePickerIndex]);
+    } else if (event.key === "Backspace" && !pickerQuery && selectedTagNames.length) {
+      // An empty search: Backspace removes the last tag on the block.
+      event.preventDefault();
+      onSelectedTagNamesChange(selectedTagNames.slice(0, -1));
+    } else if (event.key === "Tab" || event.key === "Escape") {
+      // Escape is handled here, before a surrounding dialog (Add time) would take it and close.
+      event.preventDefault();
+      closePicker(true);
+    }
   }
 
   function addSelectedTag(tagName: string) {
@@ -544,10 +633,7 @@ export function InlineTagInput({
               aria-label={`Show ${tagDisplay.hiddenCount} more selected tags`}
               className="inline-selected-tag-overflow"
               disabled={disabled}
-              onClick={() => {
-                setPickerOpen(true);
-                setPickerQuery("");
-              }}
+              onClick={openPicker}
               type="button"
             >
               <span className="inline-selected-tag-overflow-visual">+{tagDisplay.hiddenCount}</span>
@@ -563,17 +649,16 @@ export function InlineTagInput({
           ))}
         </span>
         <button
+          aria-controls={tagPickerListId}
           aria-expanded={effectivePickerOpen}
-          aria-haspopup="dialog"
+          aria-haspopup="listbox"
           aria-label="Add or filter tags"
           className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
           disabled={disabled}
           onClick={() => {
-            setPickerOpen((open) => {
-              const next = !open;
-              return next;
-            });
-            setPickerQuery("");
+            // Focus ends on the button (WebKit leaves a clicked button unfocused).
+            if (effectivePickerOpen) closePicker(true);
+            else openPicker();
           }}
           ref={pickerTriggerRef}
           type="button"
@@ -581,6 +666,7 @@ export function InlineTagInput({
           <TagIcon size={15} />
         </button>
         {maybePortal(<FloatingList
+          activeId={actions.length ? `${name}-tag-option-${Math.min(highlightedIndex, actions.length - 1)}` : undefined}
           anchorRef={anchorRef}
           className={`inline-tag-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Tags"
@@ -594,29 +680,24 @@ export function InlineTagInput({
           {actions.map((action, index) => (
             // The option's name is its visible text ("#Deep work", "Create “#launch”"; WCAG 2.5.3
             // label in name): the lead glyph and the use count are hidden from it.
-            <button
-              aria-selected={highlightedIndex === index}
-              className={`df-flist-row df-flist-row--tag${highlightedIndex === index ? " is-highlighted" : ""}${action.create ? " is-create" : ""}`}
+            <FloatingListTagOption
+              count={action.count}
+              create={action.create}
               disabled={disabled}
+              highlighted={highlightedIndex === index}
               id={`${name}-tag-option-${index}`}
               key={action.id}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setHighlightedIndex(index)}
-              onClick={() => selectAction(action)}
-              role="option"
+              name={action.label}
+              onHighlight={() => setHighlightedIndex(index)}
+              onPick={() => selectAction(action)}
+              selected={highlightedIndex === index}
               tabIndex={shouldOpen ? 0 : -1}
-              type="button"
-            >
-              <span aria-hidden="true" className="df-flist-lead">
-                {action.create ? <Plus size={14} strokeWidth={2.2} /> : <DayframeIcon glyph="tag" size={14} />}
-              </span>
-              <span className="df-flist-label">{action.create ? `Create “#${action.label}”` : `#${action.label}`}</span>
-              {action.count !== null ? <span aria-hidden="true" className="df-flist-meta">{action.count}</span> : null}
-            </button>
+            />
           ))}
           {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
         </FloatingList>)}
         {activities ? maybePortal(<FloatingList
+          activeId={activityMatches.length ? `${name}-activity-option-${activeActivityIndex}` : undefined}
           anchorRef={anchorRef}
           className={`inline-activity-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Activities"
@@ -628,109 +709,79 @@ export function InlineTagInput({
           style={portal ? { ...suggestionsPosition, visibility: suggestionsPosition ? "visible" : "hidden" } : undefined}
         >
           {activityMatches.map((activity, index) => (
-            <button
-              aria-describedby={activity.isPinned ? `${name}-activity-pinned-${index}` : undefined}
-              aria-selected={activeActivityIndex === index}
-              className={`df-flist-row df-flist-row--activity${activeActivityIndex === index ? " is-highlighted" : ""}`}
-              disabled={disabled}
+            // A pinned activity is one of the quick starts: "Pinned" is the option's accessible
+            // description, kept out of its name, which stays the activity's name.
+            <FloatingListActivityOption
+              activity={activity}
+              highlighted={activeActivityIndex === index}
               id={`${name}-activity-option-${index}`}
               key={activity.id}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActivityIndex(index)}
-              onClick={() => chooseActivity(activity, "select")}
-              role="option"
-              tabIndex={-1}
-              type="button"
-            >
-              <span aria-hidden="true" className="df-flist-block df-block" style={blockStyle(activity.color, activity.name)}>
-                <DayframeIcon glyph={resolveActivityIcon(activity).glyph} size={13} />
-              </span>
-              <span className="df-flist-label">{activity.name}</span>
-              {/* A pinned activity is one of the quick starts: "Pinned" is the option's accessible
-                  description, kept out of its name, which stays the activity's name. */}
-              {activity.isPinned ? (
-                <span aria-hidden="true" className="df-flist-meta" id={`${name}-activity-pinned-${index}`}>Pinned</span>
-              ) : null}
-            </button>
+              onHighlight={() => setActivityIndex(index)}
+              onPick={() => chooseActivity(activity, "select")}
+              selected={activeActivityIndex === index}
+            />
           ))}
           {activityMatches.length === 0 ? (
             <span className="df-flist-empty">No activity called “{mention?.query}”</span>
           ) : null}
         </FloatingList>) : null}
-        {maybePortal(<section
-          aria-hidden={!effectivePickerOpen}
-          aria-label="Add or filter tags"
-          className={`ui-floating-surface inline-tag-picker${effectivePickerOpen ? " is-open" : ""}${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-          inert={!effectivePickerOpen}
-          ref={pickerPanelRef}
-          role="dialog"
+        {/* The Tags button opens the same Tags list as `#`, with a search field (there is no typed
+            query) and several choices at once: a chosen tag is checked and removable. */}
+        {maybePortal(<FloatingList
+          activeId={pickerActions.length ? `${tagPickerListId}-option-${activePickerIndex}` : undefined}
+          anchorRef={anchorRef}
+          className={`inline-tag-picker${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
+          heading="Tags"
+          hints={FLOATING_LIST_HINTS.tagsPicker}
+          id={tagPickerListId}
+          isOpen={effectivePickerOpen}
+          multiselectable
+          onClose={() => closePicker(true)}
+          panelRef={pickerPanelRef}
+          returnFocusRef={pickerTriggerRef}
+          search={(
+            <FloatingListSearch
+              activeDescendant={pickerActions.length ? `${tagPickerListId}-option-${activePickerIndex}` : undefined}
+              className="inline-tag-picker-search"
+              expanded={effectivePickerOpen}
+              inputRef={pickerInputRef}
+              label="Search tags"
+              listId={tagPickerListId}
+              onChange={(event) => {
+                setPickerQuery(event.target.value);
+                setPickerIndex(0);
+              }}
+              onKeyDown={onPickerKeyDown}
+              value={pickerQuery}
+            />
+          )}
           style={portal ? { ...pickerPosition, visibility: pickerPosition ? "visible" : "hidden" } : undefined}
         >
-            <div className="inline-tag-picker-header">
-              <strong>Tags</strong>
-              <button
-                aria-label="Close tag picker"
+          {pickerActions.map((action, index) => {
+            const checked = !action.create && selectedNormalized.has(normalizeTagName(action.label).normalizedName);
+            return (
+              <FloatingListTagOption
+                checked={action.create ? undefined : checked}
+                count={action.count}
+                create={action.create}
                 disabled={disabled}
-                onClick={() => {
-                  pickerInputRef.current?.blur();
-                  setPickerOpen(false);
-                  window.setTimeout(() => pickerTriggerRef.current?.focus(), 0);
-                }}
-                type="button"
-              >
-                <X aria-hidden="true" size={17} strokeWidth={1.8} />
-              </button>
-            </div>
-            <div className="ui-compound-control inline-tag-picker-search">
-              <TagIcon size={15} />
-              <input
-                aria-label="Search tags"
-                autoComplete="off"
-                disabled={disabled}
-                onChange={(event) => setPickerQuery(event.target.value)}
-                placeholder="Search tags"
-                ref={pickerInputRef}
-                value={pickerQuery}
+                highlighted={activePickerIndex === index}
+                id={`${tagPickerListId}-option-${index}`}
+                key={action.id}
+                name={action.label}
+                onHighlight={() => setPickerIndex(index)}
+                onPick={() => pickPickerAction(action)}
+                selected={checked}
+                unavailable={!action.create && !checked && atTagLimit}
               />
-            </div>
-            <div className="inline-tag-picker-list">
-              {pickerMatches.map((tag) => {
-                const selected = selectedNormalized.has(tag.normalizedName);
-                return (
-                  <button
-                    aria-pressed={selected}
-                    disabled={disabled || (!selected && selectedTagNames.length >= TAG_SELECTION_MAX_COUNT)}
-                    key={tag.id}
-                    onClick={() => toggleSelectedTag(tag.name)}
-                    type="button"
-                  >
-                    <span className={`inline-tag-check${selected ? " is-selected" : ""}`}>
-                      {selected ? <Check aria-hidden="true" size={13} strokeWidth={2.3} /> : null}
-                    </span>
-                    <span>{tag.name}</span>
-                  </button>
-                );
-              })}
-              {pickerMatches.length === 0 && !pickerCreateName ? (
-                <span className="inline-tag-empty">No matching tags</span>
-              ) : null}
-            </div>
-            {pickerCreateName && selectedTagNames.length < TAG_SELECTION_MAX_COUNT ? (
-              <button
-                className="inline-tag-picker-create"
-                disabled={disabled}
-                onClick={() => {
-                  addSelectedTag(pickerCreateName);
-                  setPickerQuery("");
-                  pickerInputRef.current?.focus();
-                }}
-                type="button"
-              >
-                <span aria-hidden="true" className="df-flist-lead"><Plus size={14} strokeWidth={2.2} /></span>
-                <span className="df-flist-label">Create “#{pickerCreateName}”</span>
-              </button>
-            ) : null}
-        </section>)}
+            );
+          })}
+          {pickerActions.length === 0 ? (
+            <span className="df-flist-empty inline-tag-empty">
+              {pickerQuery.trim() ? "No matching tags" : "Type a name to search or create"}
+            </span>
+          ) : null}
+        </FloatingList>)}
       </div>
       <span className="sr-only" id={`${name}-tag-help`}>
         {selectedTagNames.length

@@ -61,18 +61,23 @@ describe("one floating list (FloatingList)", () => {
   it("builds every row of the three lists from the same parts", () => {
     const suggestions = source("TaskSuggestionsPanel.tsx");
     const tagInput = source("InlineTagInput.tsx");
+    const list = source("FloatingList.tsx");
     expect(suggestions).toContain('className="df-flist-row df-flist-row--suggestion"');
-    expect(tagInput).toContain("`df-flist-row df-flist-row--tag");
-    expect(tagInput).toContain("`df-flist-row df-flist-row--activity");
-    for (const host of [suggestions, tagInput]) {
+    // Tag and activity rows are one component each, shared by the typed lists and the buttons' lists.
+    expect(list).toContain("`df-flist-row df-flist-row--tag");
+    expect(list).toContain("`df-flist-row df-flist-row--activity");
+    expect(tagInput).toContain("<FloatingListTagOption");
+    expect(tagInput).toContain("<FloatingListActivityOption");
+    expect(tagInput).not.toContain("`df-flist-row df-flist-row--");
+    for (const host of [suggestions, list]) {
       expect(host).toContain('className="df-flist-label"');
       expect(host).toContain('className="df-flist-meta"');
     }
     // Metadata is real data: the activity name, the tag's use count, a pinned (quick start) marker.
     expect(suggestions).toMatch(/df-flist-meta">\{suggestion\.categoryName/);
     expect(tagInput).toContain("count: tag.usageCount");
-    expect(tagInput).toContain('<span aria-hidden="true" className="df-flist-meta" id={`${name}-activity-pinned-${index}`}>Pinned</span>');
-    expect(tagInput).toContain("aria-describedby={activity.isPinned ? `${name}-activity-pinned-${index}` : undefined}");
+    expect(list).toContain('<span aria-hidden="true" className="df-flist-meta" id={pinnedId}>Pinned</span>');
+    expect(list).toContain("aria-describedby={pinnedId}");
     // No stray rules: the footer, the head and the rows draw no border.
     for (const selector of [".df-flist-foot", ".df-flist-head", ".df-flist .df-flist-row", ".df-flist-meta"]) {
       expect(rule(selector), selector).not.toMatch(/border(?:-top|-bottom)?:\s*1px/);
@@ -96,28 +101,56 @@ describe("one floating list (FloatingList)", () => {
     expect(source("PersistentTimerBar.tsx")).toContain("hints={active ? FLOATING_LIST_HINTS.suggestionsUse : FLOATING_LIST_HINTS.suggestionsStart}");
   });
 
-  it("reads Create “#name” in the Tags list and the tag picker, never the old Add/filter wording", () => {
+  it("reads Create “#name” in the Tags list and the Tags button's list, never the old Add/filter wording", () => {
     const tagInput = source("InlineTagInput.tsx");
-    expect(tagInput).toContain("`Create “#${action.label}”`");
-    expect(tagInput).toContain("Create “#{pickerCreateName}”");
+    // One Create row for both paths (FloatingListTagOption); the button's list adds it after the matches.
+    expect(source("FloatingList.tsx")).toContain("{create ? `Create “#${name}”` : `#${name}`}");
+    expect(tagInput).toContain("create: true, id: \"create\", label: pickerCreateName");
     expect(tagInput).not.toContain('placeholder="Add/filter tags"');
-    // The picker's Create row has no divider above it.
-    expect(rule(".inline-tag-picker-create")).not.toContain("border-top");
-    // Create rows are neutral like the others: coral stays for recording and the primary action.
-    expect(rule(".inline-tag-suggestions .df-flist-row.is-create")).toMatch(/color: var\(--foreground\);/);
-    expect(rule(".inline-tag-picker-create")).toMatch(/color: var\(--foreground\);/);
-    expect(rule(".inline-tag-picker-create .df-flist-lead")).toMatch(/color: var\(--muted\);/);
+    // Create rows are neutral like the others, no divider above: coral stays for recording and the primary action.
+    expect(rule(".df-flist .df-flist-row.is-create")).toMatch(/color: var\(--foreground\);/);
+    expect(rule(".df-flist .df-flist-row.is-create")).not.toContain("border-top");
+    expect(rule(".df-flist-lead")).toMatch(/color: var\(--muted\);/);
     expect(css).not.toMatch(/\.is-create[^{]*\{[^}]*accent/);
-    expect(css).not.toMatch(/\.inline-tag-picker-create[^{]*\{[^}]*accent/);
+    expect(css).not.toContain(".inline-tag-picker-create");
     // The Create row's name is its visible phrase (WCAG 2.5.3); the old "Create new tag, …" is gone.
     expect(tagInput).not.toContain("Create new tag, ");
     expect(tagInput).not.toContain("Existing tag, ");
   });
 
-  it("draws no divider across the activity chip grid", () => {
-    expect(rule(".df-rchip.category-picker-create-option::before")).toMatch(/content: none;/);
-    // The chip grid's Create chip is neutral, never coral.
-    expect(rule(".df-rchip.category-picker-create-option")).toMatch(/color: var\(--text-secondary\);/);
+  it("opens the same lists from the Activity block and the Tags button (owner, 14 Oct 2026)", () => {
+    const picker = source("CategoryPicker.tsx");
+    const tagInput = source("InlineTagInput.tsx");
+    // The old "Activity for this block" chip grid and the tag picker dialog are gone.
+    expect(picker).not.toContain("Activity for this block");
+    expect(picker).not.toContain("df-actmenu");
+    expect(picker).not.toContain('"chip"');
+    expect(css).not.toContain(".df-actmenu");
+    expect(css).not.toContain(".df-rchip.category-picker-create-option");
+    expect(tagInput).not.toContain("inline-tag-picker-header");
+    expect(tagInput).not.toContain("inline-tag-picker-list");
+    expect(css).not.toContain(".inline-tag-picker-header");
+    expect(css).not.toContain(".inline-tag-check");
+    // Both are the FloatingList with a search field, the shared rows and the shared hints.
+    expect(picker).toContain('heading="Activities"');
+    expect(picker).toContain("<FloatingListSearch");
+    expect(picker).toContain("<FloatingListActivityOption");
+    expect(picker).toContain("hints={FLOATING_LIST_HINTS.activities}");
+    expect(picker).toContain('label="Search activities"');
+    expect(tagInput).toContain("<FloatingListSearch");
+    expect(tagInput).toContain('label="Search tags"');
+    expect(tagInput).toContain("hints={FLOATING_LIST_HINTS.tagsPicker}");
+    const list = source("FloatingList.tsx");
+    const hints = list.slice(list.indexOf("  tagsPicker: ["), list.indexOf("]", list.indexOf("  tagsPicker: [")));
+    expect([...hints.matchAll(/glyph: "([^"]+)", label: "([^"]+)"/g)].map((match) => `${match[1]} ${match[2]}`).join(" · "))
+      .toBe("↵ add · ⌫ remove");
+    // The block's list filters with the `@` list's resolver and lines up with the Description.
+    expect(picker).toContain("activitiesForMention(query.trim(), categories)");
+    expect(source("PersistentTimerBar.tsx")).toContain("anchorRef={suggestionsRef}");
+    // The search field is the combobox; a closed list's field never reads as an open popup.
+    expect(list).toContain('role="combobox"');
+    expect(list).toContain("aria-expanded={expanded}");
+    expect(list).toContain("aria-multiselectable={multiselectable || undefined}");
   });
 
   it("appears with opacity only, and at once under Reduce Motion", () => {
@@ -145,7 +178,7 @@ describe("one floating list (FloatingList)", () => {
   });
 
   it("keeps the Tags and Activities lists inside the viewport with internal scrolling", () => {
-    const lists = rule(".inline-tag-suggestions,\n.inline-activity-suggestions");
+    const lists = rule(".inline-tag-suggestions,\n.inline-activity-suggestions,\n.inline-tag-picker");
     expect(lists).toMatch(/max-height: min\(19rem, calc\(100dvh - 10rem\)\);/);
     // The rows scroll inside the bounded surface; the head and the footer hints stay in view.
     expect(lists).toMatch(/overflow: hidden;/);

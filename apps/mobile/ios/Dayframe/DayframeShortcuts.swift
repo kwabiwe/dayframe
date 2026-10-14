@@ -164,13 +164,14 @@ private enum DayframeShortcutPerformer {
       if delivery != nil {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-      // A Start the server did not leave running (placed late, or at the same moment as a block) shows nothing.
+      // A Start the server did not leave running (placed late, superseded at the same moment, or finished
+      // by a Stop that ran while it waited) shows nothing.
       guard delivery?.runsNow != false else {
         return
       }
       if #available(iOS 17.0, *) {
         let category = catalog.category(named: categoryName)
-        let activity = await DayframeLiveActivityController.start(
+        guard let activity = await DayframeLiveActivityController.start(
           entryId: delivery?.timeEntryId,
           apiBase: delivery?.timeEntryId == nil ? nil : delivery?.context.apiBase,
           title: event.description ?? category?.name ?? "No activity",
@@ -178,9 +179,16 @@ private enum DayframeShortcutPerformer {
           categoryColor: category?.color,
           categoryColorLight: category?.lightColor,
           startedAt: event.occurredAt
-        )
+        ) else {
+          return
+        }
+        // A Shortcut Stop that ran after this Start may have looked for Activities before this one existed.
+        if stoppedAfter(event), DayframeShortcutCatalogStore.catalog.ownedBy(event) {
+          _ = await DayframeLiveActivityController.stop(activityIds: [activity.activityId])
+          return
+        }
         // Offline, the Activity starts without a block; the app adopts or replaces it when it next runs.
-        if let activity, let delivery, let entryId = delivery.timeEntryId {
+        if let delivery, let entryId = delivery.timeEntryId {
           _ = await DayframeShortcutDirectEventClient.registerLiveActivity(
             activityId: activity.activityId,
             entryId: entryId,
@@ -192,6 +200,9 @@ private enum DayframeShortcutPerformer {
       guard queued else {
         return
       }
+      if let userId = event.userId, let workspaceId = event.workspaceId {
+        DayframeShortcutStopMoments.record(userId: userId, workspaceId: workspaceId, at: event.occurredAt)
+      }
       // Ending the Activity can terminate the background intent process on current iOS before a
       // concurrent URLSession request completes, so deliver first, then end the Activities of blocks that
       // started before this Stop, read after delivery so one a Start created meanwhile ends too. They end
@@ -200,7 +211,12 @@ private enum DayframeShortcutPerformer {
       if await DayframeShortcutDirectEventClient.submit(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
+      // Activities carry no account: end them only while the Stop's account is still the signed-in one,
+      // so a sign-in to another account during delivery keeps that account's Activity (Codex r8 on #403).
+      guard DayframeShortcutCatalogStore.catalog.ownedBy(event) else {
+        return
+      }
+      let activityIds = DayframeLiveActivityController.activityIds(startedBefore: event.occurredAt)
       _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
       // The event and local dismissal share the immutable identity archived in
@@ -234,6 +250,18 @@ private enum DayframeShortcutPerformer {
   }
 }
 
+/// Whether a Shortcut Stop for this event's account ran at or after it.
+private func stoppedAfter(_ event: DayframeShortcutEvent) -> Bool {
+  guard
+    let userId = event.userId,
+    let workspaceId = event.workspaceId,
+    let stoppedAt = DayframeShortcutStopMoments.latest(userId: userId, workspaceId: workspaceId)
+  else {
+    return false
+  }
+  return stoppedAt > event.occurredAt
+}
+
 struct DayframeShortcutEvent: Codable {
   let localId: String
   let source: String
@@ -246,7 +274,10 @@ struct DayframeShortcutEvent: Codable {
   let workspaceId: String?
 
   fileprivate init(action: DayframeShortcutAction, catalog: DayframeShortcutCatalog) {
-    let now = Date()
+    // The moment as it is sent (whole milliseconds), so the native comparisons with Activities and Stop
+    // moments agree with the server's: a Start and a Stop that serialize to the same time are the same
+    // moment here too (Codex r9 on #403).
+    let now = ISO8601DateFormatter.dayframe.date(from: ISO8601DateFormatter.dayframe.string(from: Date())) ?? Date()
     let actionName: String
     var nextType: String
     var nextCategoryId: String?
@@ -351,6 +382,12 @@ private struct DayframeShortcutCatalog: Decodable {
   let user: DayframeShortcutUser?
   let workspace: DayframeShortcutWorkspace?
   let categories: [DayframeShortcutCategory]
+
+  /// Whether this catalog's signed-in account is the one the event was made for.
+  func ownedBy(_ event: DayframeShortcutEvent) -> Bool {
+    guard let userId = user?.id, let workspaceId = workspace?.id else { return false }
+    return event.userId == userId && event.workspaceId == workspaceId
+  }
 
   var categoryNames: [String] {
     unique(categories.map(\.name))

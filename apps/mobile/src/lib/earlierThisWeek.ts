@@ -1,12 +1,15 @@
 import { formatLocaleDate } from "./localeDateFormat";
-import { formatDuration } from "@dayframe/shared";
+import { coveredDurationMs, formatDuration } from "@dayframe/shared";
 import type { HistoryDaySection } from "./historyPresentation";
 import { reviewItemMoment, reviewMomentOverlapsDay } from "./reviewDeckSegments";
 
 /**
  * "Earlier this week" on Today (Blocks prototype): the six days before today, newest first, each
- * with a 24-hour mini ribbon of its entries and the day's logged total. Tapping a day opens it in
- * Calendar, which holds everything older.
+ * with a 24-hour mini ribbon of its entries and the day's covered total (PRD D14, 14 Oct 2026: time
+ * that overlapping blocks share counts once, every activity included, the same basis as Today's
+ * hero, so a day reads what its Today hero showed). The rows show no goal progress, so the goal
+ * rule doesn't apply. Tapping a day opens it in Calendar, which holds everything older. Built on
+ * the per-minute clock and memoised by the Dashboard, never on the 1 s tick.
  */
 export const EARLIER_DAYS = 6;
 const DAY_MS = 86_400_000;
@@ -32,7 +35,17 @@ export function shortDuration(seconds: number) {
   return formatDuration(seconds);
 }
 
-export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], nowMs: number): EarlierDay[] {
+/**
+ * `entries` are the same logged entries Today's hero reads. Each day's total is their covered time
+ * clipped to that day, not the history section's list: sections drop clips shorter than a whole
+ * second, which once let a day of a 59.9 s and a 0.5 s block read "<1m" here while its hero read
+ * "1m" (Codex Nice-to-have on #410).
+ */
+export function buildEarlierThisWeek(
+  sections: readonly HistoryDaySection[],
+  nowMs: number,
+  entries: readonly { startedAt: string; stoppedAt: string | null }[]
+): EarlierDay[] {
   const byKey = new Map(sections.map((section) => [section.key, section]));
   const today = new Date(nowMs);
   today.setHours(0, 0, 0, 0);
@@ -66,7 +79,7 @@ export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], now
       weekday: formatLocaleDate(date, { weekday: "short" }),
       dateLabel: formatLocaleDate(date, { day: "numeric", month: "short" }),
       spokenDate: formatLocaleDate(date, { weekday: "long", day: "numeric", month: "long" }),
-      totalSeconds: section?.totalSeconds ?? 0,
+      totalSeconds: Math.floor(coveredDurationMs(entries, dayStart, next.getTime(), nowMs) / 1000),
       segments,
     };
   });

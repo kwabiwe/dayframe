@@ -94,7 +94,13 @@ type RuntimeContext = {
   toggleTimer: () => Promise<MutationOutcome>;
   updateActiveDetails: (draft: TimerDraft) => Promise<MutationOutcome>;
   updateActiveEntryFromCalendar: (input: ActiveEntryCompactMutationInput) => Promise<MutationOutcome>;
-  updateActiveStartTime: (startedAt: string) => Promise<MutationOutcome>;
+  /**
+   * Moves the running block's start. With `expectedEntryIds` (the ids a Start just reported for its
+   * block: optimistic and server) it edits only that block, never one that has replaced it.
+   */
+  updateActiveStartTime: (startedAt: string, options?: { expectedEntryIds?: readonly string[] }) => Promise<MutationOutcome>;
+  /** The blocks as the runtime has them now (newer than the last render after an awaited mutation). */
+  readShellData: () => BootstrapData | null;
 };
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
@@ -549,10 +555,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
         // Accepted: record which real block the optimistic one on screen is, from the POST itself.
         const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
+        const serverId = typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined;
         const snapshot = dataRef.current;
         const optimisticId = snapshot?.activeEntry?.id ?? null;
-        if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || typeof result?.timeEntryId !== "string") return;
-        startHandoffsRef.current.set(optimisticId, result.timeEntryId);
+        if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || !serverId) return serverId;
+        startHandoffsRef.current.set(optimisticId, serverId);
         // Edits made while the POST was in flight had no block to go to: save them to it now,
         // before anything queued behind this Start (a switch, a Stop) runs. A switch asked for
         // meanwhile has already put its own draft on screen, so its capture of this block's edits
@@ -562,6 +569,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           ?? { draft: draftRef.current, base: timerDraftForEntry(snapshot.activeEntry) };
         outgoingDraftsRef.current.delete(optimisticId);
         await saveActiveDetails(snapshot, pending.draft, pending.base);
+        return serverId;
       },
       refresh: async () => {
         await refresh({ force: true });
@@ -760,9 +768,23 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     });
   }, [baseFor, commitData, refresh, setTimerDraft, setTimerDraftBase]);
 
-  const updateActiveStartTime = useCallback(async (startedAt: string): Promise<MutationOutcome> => {
+  const readShellData = useCallback(() => dataRef.current, []);
+
+  const updateActiveStartTime = useCallback(async (
+    startedAt: string,
+    options: { expectedEntryIds?: readonly string[] } = {}
+  ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
+    const expected = options.expectedEntryIds;
+    if (expected?.length) {
+      // The running block must be the Start's own, at its optimistic id, the server id the Start
+      // reported, or the server id it was handed off to (the hand-off map may already be cleared
+      // once the real block has rendered; Codex r6 on #418).
+      const activeId = snapshot.activeEntry.id;
+      const ownId = expected.includes(activeId) || expected.some((id) => serverEntryId(id) === activeId);
+      if (!ownId) return { ok: false, error: "That block is no longer running." };
+    }
     const draft = draftRef.current;
     const base = baseFor(snapshot.activeEntry);
     // The new start time, plus only the details this tab's user edited (with their base values).
@@ -776,7 +798,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       commitData(applyOptimisticActiveEntryPatch(snapshot, sending, startedAt), "optimistic");
       if (patch) setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), snapshot.activeEntry!.id);
       try {
-        const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
+        // A block shown at its optimistic id right after an accepted Start is edited at its real id
+        // ("From 10:15 · after …" edits the start straight after starting).
+        const response = await clientFetch(`/api/time-entries/${serverEntryId(snapshot.activeEntry!.id) ?? snapshot.activeEntry!.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -818,7 +842,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [adoptServerDetails, baseFor, commitData, refresh, setTimerDraftBase]);
+  }, [adoptServerDetails, baseFor, commitData, refresh, serverEntryId, setTimerDraftBase]);
 
   const createManualEntry = useCallback(async (input: ManualEntryInput): Promise<MutationOutcome> => {
     const result = await mutationGateRef.current.run(async () => {
@@ -916,7 +940,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     toggleTimer,
     updateActiveDetails,
     updateActiveEntryFromCalendar,
-    updateActiveStartTime
+    updateActiveStartTime,
+    readShellData
   }), [
     createCategory,
     createManualEntry,
@@ -942,7 +967,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     toggleTimer,
     updateActiveDetails,
     updateActiveEntryFromCalendar,
-    updateActiveStartTime
+    updateActiveStartTime,
+    readShellData
   ]);
 
   return <AppShellRuntimeContext.Provider value={value}>{children}</AppShellRuntimeContext.Provider>;

@@ -81,12 +81,21 @@ type DatePresentation = {
   initial: ReportRangeChoice;
 };
 
+/**
+ * A range another tab asks Reports to show (Today's "Where today went" opens Reports on Today,
+ * PRD D15). In memory only; the token makes each request apply once, and Reports acknowledges it
+ * so the Dashboard can drop it. Reports still opens on Week otherwise (D9).
+ */
+export type ReportsRangeRequest = { choice: ReportRangeChoice; token: number };
+
 function ReportsTabView({
   data,
   initialChoice = "week",
   isFocused,
+  onRangeRequestApplied,
   onScrubbingChange,
   nowMs,
+  rangeRequest = null,
   styles,
   theme,
   timeZoneId,
@@ -95,9 +104,13 @@ function ReportsTabView({
   /** Week, as in the prototype; tests start other ranges directly. */
   initialChoice?: ReportRangeChoice;
   isFocused: boolean;
+  /** Reports applied `rangeRequest` (its token): the Dashboard drops the request. */
+  onRangeRequestApplied?: (token: number) => void;
   /** The donut is being scrubbed: the screen's scroll view turns scrolling off meanwhile. */
   onScrubbingChange?: (scrubbing: boolean) => void;
   nowMs: number;
+  /** A range asked for from another tab (Today's "Where today went"); applied once per token. */
+  rangeRequest?: ReportsRangeRequest | null;
   styles: MobileStyles;
   theme: MobileTheme;
   /** The device zone: a change rebuilds the range and its labels, keeping selections and caches. */
@@ -133,6 +146,20 @@ function ReportsTabView({
   // A user change (range, focus, filter) is read out once its hero is ready; VoiceOver focus stays
   // on the control, and iOS has no live regions.
   const announceHero = useRef(false);
+  // A range request is applied during render (React's state-from-props pattern), so Reports never
+  // paints Week before Today; the token makes it apply once.
+  const [appliedRangeToken, setAppliedRangeToken] = useState<number | null>(null);
+  if (rangeRequest && rangeRequest.token !== appliedRangeToken) {
+    setAppliedRangeToken(rangeRequest.token);
+    setChoice(rangeRequest.choice);
+    setFocusedDayKey(null);
+  }
+  useEffect(() => {
+    if (!rangeRequest || rangeRequest.token !== appliedRangeToken) return;
+    // Read the new hero out once, as for a range chosen in Reports.
+    announceHero.current = true;
+    onRangeRequestApplied?.(rangeRequest.token);
+  }, [appliedRangeToken, onRangeRequestApplied, rangeRequest]);
   const [reload, setReload] = useState(0);
   const [tooltipOutsidePress, setTooltipOutsidePress] = useState(0);
   const [contentWidth, setContentWidth] = useState(256);

@@ -562,7 +562,8 @@ async function processActivityEventWithClient(
       processingDisposition: fastDuplicate.processingDisposition,
       candidate,
       duplicate: true,
-      ...(fastDuplicate.timeEntryId ? { timeEntryId: fastDuplicate.timeEntryId } : {})
+      ...(fastDuplicate.timeEntryId ? { timeEntryId: fastDuplicate.timeEntryId } : {}),
+      ...await duplicateShortcutStartOutcome(parsed, fastDuplicate.timeEntryId, session, boundedClient?.query)
     };
   }
   const client = boundedClient ?? await pool.connect();
@@ -603,7 +604,8 @@ async function processActivityEventWithClient(
           eventId: existingEvent.rows[0].id,
           candidate,
           duplicate: true,
-          ...(existingTimeEntry ? { timeEntryId: existingTimeEntry.id } : {})
+          ...(existingTimeEntry ? { timeEntryId: existingTimeEntry.id } : {}),
+          ...await duplicateShortcutStartOutcome(parsed, existingTimeEntry?.id ?? null, session, client.query.bind(client))
         };
       }
     }
@@ -741,7 +743,7 @@ async function processActivityEventWithClient(
         parsed.occurredAt,
         candidate.confidence,
         // Review decision keys are written only by the server's Review actions (E1).
-        JSON.stringify(withoutServerReviewDecision(parsed.rawPayload)),
+        JSON.stringify(withoutServerStopOutcome(withoutServerReviewDecision(parsed.rawPayload))),
         candidate.projectId ?? null,
         candidate.categoryId ?? null,
         candidate.placeId ?? null,
@@ -816,6 +818,15 @@ async function processActivityEventWithClient(
       }
       timeEntryId = stopResult.rows[0]?.id;
       stopOutcome = timeEntryId ? "stopped" : "superseded";
+      // Server-owned: a Stop that ended a block is a boundary for a Shortcut Start placed later (#403).
+      if (timeEntryId) {
+        await client.query(
+          `update activity_events set raw_payload = raw_payload || '{"serverStopOutcome":"stopped"}'::jsonb
+           where id = $1
+             and exists (select 1 from time_entries where id = $2 and source not in ('health_sleep', 'health_workout'))`,
+          [eventId, timeEntryId]
+        );
+      }
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
       // A Shortcut Start can reach the server after later blocks or a later Shortcut Stop (it waited
@@ -1076,7 +1087,8 @@ async function processActivityEventWithClient(
           eventId: duplicate.eventId,
           candidate,
           duplicate: true,
-          ...(duplicate.timeEntryId ? { timeEntryId: duplicate.timeEntryId } : {})
+          ...(duplicate.timeEntryId ? { timeEntryId: duplicate.timeEntryId } : {}),
+          ...await duplicateShortcutStartOutcome(parsed, duplicate.timeEntryId, session)
         };
       }
     }
@@ -1084,6 +1096,35 @@ async function processActivityEventWithClient(
   } finally {
     if (!boundedClient) client.release();
   }
+}
+
+const SERVER_STOP_OUTCOME_KEY = "serverStopOutcome";
+
+function withoutServerStopOutcome<T extends Record<string, unknown>>(payload: T): T {
+  if (!payload || typeof payload !== "object" || !(SERVER_STOP_OUTCOME_KEY in payload)) return payload;
+  const rest: Record<string, unknown> = { ...payload };
+  delete rest[SERVER_STOP_OUTCOME_KEY];
+  return rest as T;
+}
+
+/**
+ * A repeated Shortcut Start says whether its block is running now, as the first delivery did, so the iOS
+ * intent never keeps a Live Activity for a Start the server placed as finished or superseded (#403).
+ */
+async function duplicateShortcutStartOutcome(
+  event: { source: string; type: string },
+  timeEntryId: string | null | undefined,
+  session: RequestSession,
+  execute: typeof query = query
+): Promise<{ startOutcome?: "recorded_completed" | "superseded" }> {
+  if (event.source !== "shortcut" || !isExplicitStartEvent(event.type)) return {};
+  if (!timeEntryId) return { startOutcome: "superseded" };
+  const result = await execute<{ stopped: boolean }>(
+    `select stopped_at is not null as stopped from time_entries
+     where workspace_id = $1 and user_id = $2 and id = $3`,
+    [session.workspaceId, session.userId, timeEntryId]
+  );
+  return result?.rows?.[0]?.stopped === false ? {} : { startOutcome: "recorded_completed" };
 }
 
 async function findExistingActivityEventReceipt(
@@ -1215,21 +1256,35 @@ async function lateShortcutStartWindow(
      for update`,
     [session.workspaceId, session.userId, at]
   );
-  const later = await client.query<{ nextStartedAt: string | Date | null; laterStopAt: string | Date | null }>(
+  const later = await client.query<{
+    nextStartedAt: string | Date | null;
+    laterShortcutStopAt: string | Date | null;
+    laterStopAt: string | Date | null;
+  }>(
     `select
        (select min(started_at) from time_entries
          where workspace_id = $1 and user_id = $2 and started_at > $3${TIMELINE_BLOCK_FILTER}) as "nextStartedAt",
        (select min(occurred_at) from activity_events
          where workspace_id = $1 and user_id = $2 and occurred_at > $3
+           and event_type = 'timer_stop' and source = 'shortcut'
+           and raw_payload->>'stopScope' = 'running_at') as "laterShortcutStopAt",
+       (select min(occurred_at) from activity_events
+         where workspace_id = $1 and user_id = $2 and occurred_at > $3
            and event_type = 'timer_stop'
-           and not (source = 'shortcut' and raw_payload->>'origin' = 'ios_app_intent'
-                    and raw_payload->>'stopScope' is null)) as "laterStopAt"`,
+           and raw_payload->>'serverStopOutcome' = 'stopped') as "laterStopAt"`,
     [session.workspaceId, session.userId, at]
   );
   const nextStartedAt = later.rows[0]?.nextStartedAt ?? null;
-  const late = nextStartedAt !== null || Date.now() - startedMs > LATE_SHORTCUT_START_MS;
-  if (!late) return null;
-  const bounds = [nextStartedAt, later.rows[0]?.laterStopAt ?? null, ...covering.rows.map((row) => row.stoppedAt)]
+  // A Shortcut Stop after the Start comes from a phone's own clock, so it always bounds the Start (a Stop
+  // delivered first, even seconds later). Ends written by other clients (a web Stop, a block that was
+  // already finished) bound it only once the Start is late, so a phone clock a little behind the server
+  // never turns a fresh Start into a finished block.
+  const late = Date.now() - startedMs > LATE_SHORTCUT_START_MS;
+  const bounds = [
+    nextStartedAt,
+    later.rows[0]?.laterShortcutStopAt ?? null,
+    ...(late ? [later.rows[0]?.laterStopAt ?? null, ...covering.rows.map((row) => row.stoppedAt)] : []),
+  ]
     .filter((value): value is string | Date => value !== null && value !== undefined)
     .map((value) => new Date(value).getTime())
     .filter((value) => Number.isFinite(value) && value > startedMs);

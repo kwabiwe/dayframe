@@ -397,3 +397,42 @@ enum DayframeNativeShortcutQueue {
     UserDefaults.standard.removeObject(forKey: legacyKey)
   }
 }
+
+/// When a Shortcut Stop last ran, per account, for Live Activities only (Codex r7 on #403). A Stop records
+/// it before it delivers and before it reads which Activities to end; a Start that ran before that Stop
+/// checks it after creating its own Activity and ends that Activity, so one created after the Stop looked
+/// still ends. The server timeline never reads this.
+enum DayframeShortcutStopMoments {
+  private static let key = "dayframe.shortcutStopMoments.v1"
+  private static let lock = NSLock()
+
+  private static var defaults: UserDefaults? {
+    DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
+  }
+
+  private static func owner(_ userId: String, _ workspaceId: String) -> String {
+    "\(userId)|\(workspaceId)"
+  }
+
+  static func record(userId: String, workspaceId: String, at date: Date) {
+    lock.withLock {
+      guard let defaults else { return }
+      var moments = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
+      let name = owner(userId, workspaceId)
+      moments[name] = max(moments[name] ?? 0, date.timeIntervalSince1970)
+      defaults.set(moments, forKey: key)
+    }
+  }
+
+  static func latest(userId: String, workspaceId: String) -> Date? {
+    lock.withLock {
+      guard
+        let moments = defaults?.dictionary(forKey: key) as? [String: Double],
+        let seconds = moments[owner(userId, workspaceId)]
+      else {
+        return nil
+      }
+      return Date(timeIntervalSince1970: seconds)
+    }
+  }
+}

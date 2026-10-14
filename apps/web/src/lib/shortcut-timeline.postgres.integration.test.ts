@@ -200,6 +200,85 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     expect(await timeline()).toEqual([["Workout", 0, null]]);
   });
 
+  it("closes a recent Start delivered seconds after its Stop (Codex r7 on #403)", async () => {
+    const now = Date.now();
+    const id = randomUUID();
+    await pool.query(
+      `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
+       values ($1, $2, $3, 'mobile_app', 'high', 'confirmed', 'P', $4)`,
+      [id, workspaceId, userId, new Date(now - 60_000)]
+    );
+    const startedAt = new Date(now - 4_000);
+    await processActivityEvent({
+      clientEventId: `shortcut:${randomUUID()}`, occurredAt: new Date(now - 2_000),
+      rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" }, source: "shortcut", type: "timer_stop"
+    }, session);
+    const start = await processActivityEvent({
+      clientEventId: `shortcut:${randomUUID()}`, occurredAt: startedAt,
+      rawPayload: { origin: "ios_app_shortcut" }, description: "A", source: "shortcut", type: "shortcut_action"
+    }, session);
+    expect(start.startOutcome).toBe("recorded_completed");
+    const running = await pool.query(`select 1 from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]);
+    expect(running.rows).toHaveLength(0);
+  });
+
+  it("ignores a superseded exact-entry Stop as a bound for a later-placed Start (Codex r7 on #403)", async () => {
+    const p = await block(0, 5, "mobile_app", "P");
+    await block(40, null, "mobile_app", "Q");
+    await expect(processActivityEvent({
+      clientEventId: `live-activity:${randomUUID()}`, occurredAt: at(30),
+      rawPayload: { origin: "ios_live_activity", stopScope: "entry", targetEntryId: p },
+      source: "shortcut", type: "timer_stop"
+    }, session)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    await shortcutStart(20, "A");
+    expect(await timeline()).toEqual([["P", 0, 5], ["A", 20, 40], ["Q", 40, null]]);
+  });
+
+  it("uses an exact-entry Stop that ended a block as a bound", async () => {
+    const p = await block(0, null, "mobile_app", "P");
+    await expect(processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: at(30),
+      rawPayload: { origin: "web_timer_stop", stopScope: "entry", targetEntryId: p },
+      source: "manual_app", type: "timer_stop"
+    }, session)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    await shortcutStart(10, "A");
+    await shortcutStart(20, "B");
+    expect(await timeline()).toEqual([["P", 0, 10], ["A", 10, 20], ["B", 20, 30]]);
+  });
+
+  it("repeats a Start's outcome when it is delivered again", async () => {
+    await block(30, null, "mobile_app", "Q");
+    const clientEventId = `shortcut:${randomUUID()}`;
+    const input = {
+      clientEventId, occurredAt: at(10), rawPayload: { origin: "ios_app_shortcut" },
+      description: "A", source: "shortcut" as const, type: "shortcut_action" as const
+    };
+    await expect(processActivityEvent(input, session)).resolves.toMatchObject({ startOutcome: "recorded_completed" });
+    await expect(processActivityEvent(input, session)).resolves.toMatchObject({ duplicate: true, startOutcome: "recorded_completed" });
+  });
+
+  it("refuses a client-supplied server Stop outcome", async () => {
+    await shortcutStop(10);
+    const forged = await processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: at(20),
+      rawPayload: { origin: "web_timer_stop", serverStopOutcome: "stopped" }, source: "manual_app", type: "timer_stop"
+    }, session);
+    const stored = await pool.query(`select raw_payload->>'serverStopOutcome' as outcome from activity_events where id = $1`, [forged.eventId]);
+    expect(stored.rows[0]?.outcome ?? null).toBeNull();
+  });
+
+  it("does not use a Stop of a Health entry as a bound (Codex r8 on #403)", async () => {
+    const workout = await block(0, null, "health_workout", "Workout");
+    await processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: at(30),
+      rawPayload: { origin: "web_timer_stop", stopScope: "entry", targetEntryId: workout },
+      source: "manual_app", type: "timer_stop"
+    }, session);
+    await block(40, null, "mobile_app", "Q");
+    await shortcutStart(10, "A");
+    expect(await timeline()).toEqual([["Workout", 0, 30], ["A", 10, 40], ["Q", 40, null]]);
+  });
+
   it("leaves overlapping Health entries alone", async () => {
     await block(-60, 60, "health_sleep", "Sleep");
     await block(0, null, "mobile_app", "P");

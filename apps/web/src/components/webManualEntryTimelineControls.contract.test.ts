@@ -29,8 +29,9 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(timer).toContain('className="manual-entry-dialog"');
     expect(timer).toContain('className="manual-entry-inline-tags time-entry-quick-tags"');
     expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*bottom: auto;/s);
-    expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*right: 0;[^}]*bottom: auto;[^}]*left: auto;/s);
-    expect(styles).toMatch(/\.manual-entry-inline-tags \.inline-tag-picker \{[^}]*max-height: min\(240px, calc\(100dvh - 180px\)\);/s);
+    // The Tags button's list sits under the field at its full width, like the typed lists (14 Oct 2026).
+    expect(styles).toMatch(/\.inline-tag-suggestions,\s*\.inline-activity-suggestions,\s*\.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*left: 0;[^}]*right: 0;[^}]*max-height: min\(19rem, calc\(100dvh - 10rem\)\);/s);
+    expect(styles).not.toContain(".manual-entry-inline-tags .inline-tag-picker");
   });
 
   it("hard-limits suggestions to five complete rows", () => {
@@ -64,7 +65,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).not.toContain('contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"');
     expect(timer).not.toContain('type="datetime-local"');
     expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
-    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: 0 22px 52px var\(--shadow-color\), var\(--shadow-raised\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: var\(--shadow-floating\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*gap: 12px;[^}]*padding: 10px var\(--calendar-compact-horizontal-inset\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-header \{[^}]*height: 64px;[^}]*min-height: 64px;[^}]*max-height: 64px;/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
@@ -93,13 +94,10 @@ describe("web manual entry and Timeline control refinement", () => {
       styles.indexOf(".df-flist .df-flist-row:hover")
     );
     expect(suggestionRows.length).toBeGreaterThan(0);
-    const tagRows = styles.slice(
-      styles.indexOf(".inline-tag-picker-list button,"),
-      styles.indexOf(".inline-tag-picker-list button:hover")
-    );
+    // Suggestion and tag rows (typed or from the Tags button) are all the one FloatingList row.
     expect(suggestionRows).not.toContain("border-top");
-    expect(tagRows).not.toContain("border-top");
-    expect(styles).toMatch(/\.inline-tag-picker-search \{[^}]*height: var\(--web-control-height\);/s);
+    expect(styles).not.toContain(".inline-tag-picker-list");
+    expect(styles).toMatch(/\.df-flist-search \{[^}]*height: var\(--web-control-height\);/s);
   });
 
   it("keeps date navigation geometry stable through one shared picker", () => {
