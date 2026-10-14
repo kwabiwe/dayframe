@@ -788,6 +788,23 @@ describe("mobile API client", () => {
     expect(await readQueue()).toHaveLength(1);
   });
 
+  it("keeps a queued Shortcut Stop that names its own time replayable (#403)", async () => {
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({
+        source: "shortcut",
+        type: "timer_stop",
+        localId: "nfc-stop",
+        occurredAt: "2026-10-14T08:20:00.000Z",
+        rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" }
+      })
+    ]));
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).not.toHaveProperty("failureKind", "permanent");
+    expect(queue[0].lastError).toBeUndefined();
+    expect(queue[0].rawPayload).toMatchObject({ origin: "ios_app_shortcut", stopScope: "running_at" });
+  });
+
   it("retains a generic event until the response includes a canonical event ID", async () => {
     storeBoundSession("session-token");
     asyncStore.set("dayframe.offlineQueue.v1",JSON.stringify([storedQueuedEvent({source:"health_sleep",type:"health_sleep_import"})]));

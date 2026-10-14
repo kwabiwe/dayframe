@@ -4,6 +4,7 @@ import Security
 
 enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
+  case ownerUnverified
   case started
   case contextUnavailable
   case capabilityUnavailable
@@ -17,6 +18,8 @@ enum DayframeShortcutDeliveryDiagnostic {
     switch self {
     case .legacyUnscoped:
       return "legacy-unscoped"
+    case .ownerUnverified:
+      return "owner-unverified"
     case .started:
       return "started"
     case .contextUnavailable:
@@ -66,6 +69,10 @@ enum DayframeShortcutDeliveryDiagnosticStore {
 struct DayframeShortcutRuntimeContext: Codable, Equatable {
   let apiBase: String
   let sessionToken: String
+  /// The account the session belongs to, so a lookup made with this session is attributed to the same
+  /// account as the queued event. Contexts written by older builds decode without it.
+  var userId: String? = nil
+  var workspaceId: String? = nil
 }
 
 enum DayframeShortcutRuntimeContextStore {
@@ -77,12 +84,18 @@ enum DayframeShortcutRuntimeContextStore {
     "https://dayframe-web.vercel.app"
   ])
 
-  static func set(apiBase: String, sessionToken: String) -> Bool {
+  static func set(apiBase: String, sessionToken: String, userId: String? = nil, workspaceId: String? = nil) -> Bool {
+    let owned = userId.map { !$0.isEmpty } == true && workspaceId.map { !$0.isEmpty } == true
     guard
       let normalizedAPIBase = normalizedAPIBase(apiBase),
       !sessionToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
       let data = try? JSONEncoder().encode(
-        DayframeShortcutRuntimeContext(apiBase: normalizedAPIBase, sessionToken: sessionToken)
+        DayframeShortcutRuntimeContext(
+          apiBase: normalizedAPIBase,
+          sessionToken: sessionToken,
+          userId: owned ? userId : nil,
+          workspaceId: owned ? workspaceId : nil
+        )
       )
     else {
       clear()
@@ -382,5 +395,44 @@ enum DayframeNativeShortcutQueue {
 
   private static func clearLegacyEvents() {
     UserDefaults.standard.removeObject(forKey: legacyKey)
+  }
+}
+
+/// When a Shortcut Stop last ran, per account, for Live Activities only (Codex r7 on #403). A Stop records
+/// it before it delivers and before it reads which Activities to end; a Start that ran before that Stop
+/// checks it after creating its own Activity and ends that Activity, so one created after the Stop looked
+/// still ends. The server timeline never reads this.
+enum DayframeShortcutStopMoments {
+  private static let key = "dayframe.shortcutStopMoments.v1"
+  private static let lock = NSLock()
+
+  private static var defaults: UserDefaults? {
+    DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
+  }
+
+  private static func owner(_ userId: String, _ workspaceId: String) -> String {
+    "\(userId)|\(workspaceId)"
+  }
+
+  static func record(userId: String, workspaceId: String, at date: Date) {
+    lock.withLock {
+      guard let defaults else { return }
+      var moments = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
+      let name = owner(userId, workspaceId)
+      moments[name] = max(moments[name] ?? 0, date.timeIntervalSince1970)
+      defaults.set(moments, forKey: key)
+    }
+  }
+
+  static func latest(userId: String, workspaceId: String) -> Date? {
+    lock.withLock {
+      guard
+        let moments = defaults?.dictionary(forKey: key) as? [String: Double],
+        let seconds = moments[owner(userId, workspaceId)]
+      else {
+        return nil
+      }
+      return Date(timeIntervalSince1970: seconds)
+    }
   }
 }

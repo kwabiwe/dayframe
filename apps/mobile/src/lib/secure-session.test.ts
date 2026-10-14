@@ -8,6 +8,7 @@ const secureStore = vi.hoisted(() => ({
 }));
 const nativeModule = vi.hoisted(() => ({
   setRuntimeContext: vi.fn(),
+  setRuntimeContextWithOwner: vi.fn(),
   clearRuntimeContext: vi.fn(),
   clearRuntimeContextIfToken: vi.fn()
 }));
@@ -154,6 +155,36 @@ describe("secure mobile session", () => {
     expect(nativeModule.setRuntimeContext).toHaveBeenCalledWith(
       "https://dayframe-staging.vercel.app",
       "current-token"
+    );
+  });
+
+  it("mirrors the session's account for the Stop intent's server lookup", async () => {
+    const owner = { userId: "user-a", workspaceId: "workspace-a" };
+    await setSessionToken("owned-token", owner);
+    expect(nativeModule.setRuntimeContextWithOwner).toHaveBeenLastCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "owned-token",
+      "user-a",
+      "workspace-a"
+    );
+    expect(nativeModule.setRuntimeContext).not.toHaveBeenCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "owned-token"
+    );
+  });
+
+  it("re-mirrors an ownerless session once its account is bound", async () => {
+    await setSessionToken("unbound-token");
+    expect(nativeModule.setRuntimeContextWithOwner).not.toHaveBeenCalled();
+    const read = await readAuthenticatedSessionSnapshot();
+    if (read.status !== "authenticated") throw new Error("Expected an authenticated session.");
+    const owner = { userId: "user-b", workspaceId: "workspace-b" };
+    await expect(bindAuthenticatedSessionOwner(read.snapshot, owner)).resolves.toBe(true);
+    expect(nativeModule.setRuntimeContextWithOwner).toHaveBeenLastCalledWith(
+      "https://dayframe-staging.vercel.app",
+      "unbound-token",
+      "user-b",
+      "workspace-b"
     );
   });
 
