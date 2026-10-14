@@ -64,6 +64,7 @@ import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
 import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
+import { useStopFlightExit } from "./today/useStopFlightExit";
 import { TodayPullBlocks } from "./today/TodayPullBlocks";
 import { PlayOrb } from "./today/PlayOrb";
 import { ReportsSheetPortalContext } from "./reports/ReportsSheetPortal";
@@ -1632,7 +1633,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
-  const stopFlightOwnsLiveBlock = Boolean(stopFlight && stopFlight.entryId === displayedActiveEntry?.id);
+  const stopFlightExit = useStopFlightExit({
+    displayedEntryId: displayedActiveEntry?.id ?? null,
+    flightEntryId: stopFlight?.entryId ?? null,
+    hasLiveActiveTimer,
+  });
   const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
     categoryColor: displayedActiveEntry.categoryName
       ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
@@ -3036,9 +3041,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
               <TodayTimerSurface
                 // While the Stop flight's ghost holds the block's place, the block is hidden; once Stop
-                // commits the idle card comes in at once instead of waiting for the retained exit.
-                active={stopFlightOwnsLiveBlock && !hasLiveActiveTimer ? null : todayLivePresentation}
-                liveHidden={stopFlightOwnsLiveBlock}
+                // commits the idle card comes in at once instead of waiting for the retained exit, and
+                // the stopped block never comes back after the ghost has gone (useStopFlightExit).
+                active={stopFlightExit.showIdle ? null : todayLivePresentation}
+                liveHidden={stopFlightExit.liveHidden}
                 motionPaused={!isFocused}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}
