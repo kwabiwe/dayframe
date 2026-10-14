@@ -14,34 +14,40 @@ export function useStopFlightExit({
   displayedEntryId,
   flightEntryId,
   hasLiveActiveTimer,
+  resolveEntryId = identity,
 }: {
   /** The entry the Today surface would show (running, or retained just after Stop). */
   displayedEntryId: string | null;
   /** The entry a Stop flight is holding or flying, if any. */
   flightEntryId: string | null;
   hasLiveActiveTimer: boolean;
+  /** One identity for a block across its optimistic and canonical IDs. */
+  resolveEntryId?: (entryId: string) => string;
 }) {
   const [flownEntryId, setFlownEntryId] = useState<string | null>(null);
-  const flightHolds = Boolean(displayedEntryId && flightEntryId === displayedEntryId);
+  const displayed = displayedEntryId === null ? null : resolveEntryId(displayedEntryId);
+  const flight = flightEntryId === null ? null : resolveEntryId(flightEntryId);
+  const flown = flownEntryId === null ? null : resolveEntryId(flownEntryId);
+  const flightHolds = Boolean(displayed && flight === displayed);
 
   // Remember the entry once its flight is under way, so it outlives the ghost.
   useEffect(() => {
-    if (flightHolds && !hasLiveActiveTimer && flightEntryId !== flownEntryId) setFlownEntryId(flightEntryId);
-  }, [flightEntryId, flightHolds, flownEntryId, hasLiveActiveTimer]);
+    if (flightHolds && !hasLiveActiveTimer && flight !== flown) setFlownEntryId(flight);
+  }, [flight, flightHolds, flown, hasLiveActiveTimer]);
   // Let it go once the Dashboard shows another entry or none, or the block is live again (rolled back).
   useEffect(() => {
-    if (flownEntryId && (displayedEntryId !== flownEntryId || hasLiveActiveTimer)) setFlownEntryId(null);
-  }, [displayedEntryId, flownEntryId, hasLiveActiveTimer]);
+    if (flown && (displayed !== flown || hasLiveActiveTimer)) setFlownEntryId(null);
+  }, [displayed, flown, hasLiveActiveTimer]);
 
-  const flightOwnsExit = Boolean(
-    displayedEntryId &&
-      !hasLiveActiveTimer &&
-      (flightHolds || flownEntryId === displayedEntryId)
-  );
+  const flightOwnsExit = Boolean(displayed && !hasLiveActiveTimer && (flightHolds || flown === displayed));
   return {
     /** The ghost holds the block's place: draw the live block hidden. */
     liveHidden: flightHolds,
     /** The flight owns this entry's exit: show the idle card, never the stopped block again. */
     showIdle: flightOwnsExit,
   };
+}
+
+function identity(entryId: string) {
+  return entryId;
 }

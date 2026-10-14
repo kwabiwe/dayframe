@@ -1084,6 +1084,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return timerMutationVersions.current.get(entryId) === version;
   }
 
+  /** One identity for a block across its optimistic and canonical IDs (a Start reconciled mid-Stop). */
+  function timerEntryIdentity(entryId: string) {
+    return persistedTimerEntryId(entryId) ?? entryId;
+  }
+
   function persistedTimerEntryId(entryId: string) {
     if (!entryId.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) return entryId;
     return optimisticTimerIds.current.get(entryId) ?? null;
@@ -1637,6 +1642,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     displayedEntryId: displayedActiveEntry?.id ?? null,
     flightEntryId: stopFlight?.entryId ?? null,
     hasLiveActiveTimer,
+    resolveEntryId: timerEntryIdentity,
   });
   const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
     categoryColor: displayedActiveEntry.categoryName
@@ -1881,8 +1887,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (stopFlightMeasuring.current) return;
     stopFlightMeasuring.current = true;
     const token = ++stopFlightSequence.current;
+    const generation = noticeSessionGeneration.current;
     void Promise.all([measureFlightNode(LIVE_FLIGHT_NODE), measureFlightNode(rowFlightNode(entryId))]).then(([from, to]) => {
       stopFlightMeasuring.current = false;
+      // The Stop belongs to the account and block it was pressed for: a sign-out or account switch, or a
+      // block that changed while measuring, drops it (Codex r1 on #415).
+      const current = latestData.current?.activeEntry?.id;
+      if (
+        generation !== noticeSessionGeneration.current ||
+        !current ||
+        timerEntryIdentity(current) !== timerEntryIdentity(entryId)
+      ) return;
       if (from) setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
       runStopFromToday(entryId, from ? token : null, Boolean(to));
     });
@@ -1916,7 +1931,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const dropFlight = () => {
       if (flightToken !== null) setStopFlight((current) => (current?.token === flightToken ? null : current));
     };
+    const generation = noticeSessionGeneration.current;
     void stopActiveTimer().then((accepted) => {
+      // Signed out or switched account meanwhile: the flight and its feedback were already cleared.
+      if (generation !== noticeSessionGeneration.current) return;
       if (!accepted || !entryId) {
         dropFlight();
         return;
@@ -1948,7 +1966,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   useEffect(() => {
     if (!stopFlight?.flying) return;
     const activeId = data?.activeEntry?.id ?? null;
-    if (activeId !== stopFlight.entryId) {
+    if (!activeId || timerEntryIdentity(activeId) !== timerEntryIdentity(stopFlight.entryId)) {
       stopFlightCommitted.current = stopFlight.token;
       return;
     }
@@ -1973,7 +1991,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const onPlayOrbChooseStable = useCallback((activityId: string) => chooseFromPlayOrbRef.current(activityId), []);
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
+  const stopFlightRef = useRef(stopFlight);
+  stopFlightRef.current = stopFlight;
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
+    // A completion for a flight already replaced or cleared (logout) does nothing (Codex r1 on #415).
+    if (stopFlightRef.current?.token !== token) return;
     setStopFlight((current) => (current?.token === token ? null : current));
     // The row block pops and the row lights up as the ghost lands on it.
     // nextLandingRequest reads only refs, so the first render's copy stays correct.

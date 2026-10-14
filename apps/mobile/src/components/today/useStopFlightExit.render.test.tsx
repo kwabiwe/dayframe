@@ -1,3 +1,4 @@
+import { StrictMode, useEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,26 +11,34 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 const { useStopFlightExit } = await import("./useStopFlightExit");
 
-type Props = { displayedEntryId: string | null; flightEntryId: string | null; hasLiveActiveTimer: boolean };
+type Props = {
+  displayedEntryId: string | null;
+  flightEntryId: string | null;
+  hasLiveActiveTimer: boolean;
+  resolveEntryId?: (entryId: string) => string;
+};
 type Frame = { displayed: boolean; liveHidden: boolean; showIdle: boolean };
 
-/** Records what the Today surface is told on every commit, as the Dashboard passes it on. */
+/** Records what the Today surface is told on every commit (StrictMode, as in the app's dev builds). */
 function harness(initial: Props) {
   const frames: Frame[] = [];
   function Probe(props: Props) {
     const state = useStopFlightExit(props);
-    frames.push({ ...state, displayed: Boolean(props.displayedEntryId) });
+    const frame = { ...state, displayed: Boolean(props.displayedEntryId) };
+    useEffect(() => {
+      frames.push(frame);
+    });
     return null;
   }
   let renderer!: ReactTestRenderer;
   act(() => {
-    renderer = create(<Probe {...initial} />);
+    renderer = create(<StrictMode><Probe {...initial} /></StrictMode>);
   });
   return {
     frames,
     set(props: Props) {
       const from = frames.length;
-      act(() => renderer.update(<Probe {...props} />));
+      act(() => renderer.update(<StrictMode><Probe {...props} /></StrictMode>));
       return frames.slice(from);
     },
   };
@@ -56,6 +65,22 @@ describe("useStopFlightExit", () => {
     // The Dashboard releases the entry: idle stays.
     const released = view.set({ displayedEntryId: null, flightEntryId: null, hasLiveActiveTimer: false });
     expect(released.some(liveBlockShown)).toBe(false);
+  });
+
+  it("keeps owning the exit when the stopped block's optimistic ID is reconciled to its canonical ID (Codex r1 on #415)", () => {
+    const correlations = new Map<string, string>();
+    const resolveEntryId = (id: string) => correlations.get(id) ?? id;
+    const view = harness({ displayedEntryId: "optimistic:1", flightEntryId: null, hasLiveActiveTimer: true, resolveEntryId });
+    view.set({ displayedEntryId: "optimistic:1", flightEntryId: "optimistic:1", hasLiveActiveTimer: true, resolveEntryId });
+    // The Start is reconciled while the Stop is accepted: the Dashboard now shows the canonical ID.
+    correlations.set("optimistic:1", "entry-c");
+    const accepted = view.set({ displayedEntryId: "entry-c", flightEntryId: "optimistic:1", hasLiveActiveTimer: false, resolveEntryId });
+    expect(accepted.some(liveBlockShown)).toBe(false);
+    const ghostGone = view.set({ displayedEntryId: "entry-c", flightEntryId: null, hasLiveActiveTimer: false, resolveEntryId });
+    expect(ghostGone.some(liveBlockShown)).toBe(false);
+    // A rollback of the canonical block brings it back.
+    const rolledBack = view.set({ displayedEntryId: "entry-c", flightEntryId: null, hasLiveActiveTimer: true, resolveEntryId });
+    expect(liveBlockShown(rolledBack.at(-1)!)).toBe(true);
   });
 
   it("brings the live block back when Stop is rolled back", () => {
