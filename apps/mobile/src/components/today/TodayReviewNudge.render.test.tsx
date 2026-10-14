@@ -19,6 +19,7 @@ vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
 vi.mock("./TodayReviewPresentationContext", () => ({ useTodayReviewPresentationContext: () => mocks.context }));
 
 import { readFailedOnline, reviewNudgeCopy, reviewNudgeSplitCopy, TodayReviewNudge } from "./TodayReviewNudge";
+import { projectTodayReviewPresentation } from "../../lib/todayReviewPresentation";
 
 const theme = { mode: "dark", surface: "#151B26", surfaceMuted: "#202838", textMuted: "#707B91", textPrimary: "#FFF", textSecondary: "#8993A7" } as never;
 
@@ -122,6 +123,54 @@ describe("reviewNudgeCopy: today and earlier (14 Oct 2026)", () => {
 
   it("never shows more today than in total", () => {
     expect(reviewNudgeCopy(exact(2), NONE, false, exact(5))).toMatchObject({ detail: "All from today", segment: "today" });
+  });
+});
+
+describe("projection to nudge (Codex r1 on #408)", () => {
+  // A cached snapshot after a same-day clock rollback: today's 18:00–19:00 moment was skipped on
+  // this iPhone while one earlier-day moment remains. The nudge must not open an empty Today.
+  function record(id: string, start: string, end: string) {
+    return {
+      kind: "review", reviewItemId: id, eventId: null, locationSegmentId: null, sourceKind: "generic",
+      eventSource: "health_workout", eventType: "workout", title: id, category: null,
+      place: { id: null, label: null }, interval: { start, end }, confidence: "medium", status: "open",
+      createdAt: start, updatedAt: start, proposalHash: "a".repeat(64), canonicalEntryIds: [], semanticRevision: start,
+    };
+  }
+
+  it("says the remaining moment is from an earlier day and opens Earlier", () => {
+    const records = [record("earlier", "2026-09-11T10:00:00.000Z", "2026-09-11T11:00:00.000Z"), record("evening", "2026-09-12T18:00:00.000Z", "2026-09-12T19:00:00.000Z")];
+    const presentation = projectTodayReviewPresentation({
+      ownerKey: "owner",
+      snapshotOwnerKey: "owner",
+      response: {
+        version: 1,
+        scope: {
+          mode: "window",
+          timeZone: "Etc/UTC",
+          window: { start: "2026-07-15T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+          today: { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+        },
+        snapshotToken: "snapshot",
+        capturedAt: "2026-09-12T20:00:00.000Z",
+        nextCursor: null,
+        completeness: { records: true, outstandingCounts: true, completedToday: true, partialReason: null },
+        outstanding: { globalCount: 2, todayCount: 1, openReviewItemIds: ["earlier", "evening"] },
+        records,
+        links: [],
+        lookup: { reviewItems: [], entries: [] },
+      } as never,
+      effects: [{ reviewItemId: "evening", action: "ignore_once", state: "pending", localEffect: "hidden", resolution: "pending", canonicalEntryIds: [], source: null }] as never,
+      dashboardEntries: [],
+      day: { key: "2026-09-12", startMs: Date.parse("2026-09-12T00:00:00.000Z"), endMs: Date.parse("2026-09-13T00:00:00.000Z") },
+      // The clock reads noon, before the decided 18:00 moment.
+      nowMs: Date.parse("2026-09-12T12:00:00.000Z"),
+    });
+    expect(reviewNudgeCopy(presentation.globalReviewCount, NONE, false, presentation.todayReviewCount)).toMatchObject({
+      detail: "From an earlier day",
+      segment: "earlier",
+      title: "1 moment to review",
+    });
   });
 });
 

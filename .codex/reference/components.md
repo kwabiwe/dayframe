@@ -240,7 +240,10 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
   (VoiceOver "3 today, 9 earlier"), "All from earlier days" / "From an earlier
   day" with nothing today, and "All from today" / "From today" with nothing
   earlier; without exact counts it keeps "Dayframe found time you didn't
-  track.". Its colours still come from today's awaiting moments only. It names a count
+  track.". A moment decided on this iPhone leaves today's count by the same
+  full-day rule as the server's `todayCount` and the deck's Today segment
+  (`reviewMomentOverlapsDay`), not only the part of the day up to now. Its
+  colours still come from today's awaiting moments only. It names a count
   only when it is exact (the cached presentation's global count, else the
   bootstrap's `stats.reviewCount`; the bootstrap's Review list is capped at
   100, so its length is never shown as a count), says "Moments to review"

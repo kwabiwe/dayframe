@@ -4,6 +4,7 @@ import type {
   ReviewProposalPresentation
 } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
+import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
 
@@ -300,7 +301,7 @@ export function projectTodayReviewPresentation(input: TodayReviewProjectionInput
     .filter((activity) => !activity.interval)
     .sort(compareActivity);
   const today = timedActivities.sort(compareActivity);
-  const counts = adjustedCounts(response, input.effects, reviews, dayStart, capturedEnd);
+  const counts = adjustedCounts(response, input.effects, reviews, { startMs: dayStart, endMs: dayEnd });
   const coverage = response.completeness.completedToday && response.completeness.records && response.completeness.outstandingCounts
     ? "complete"
     : response.completeness.records || response.records.length > 0
@@ -424,8 +425,7 @@ function adjustedCounts(
   response: ReviewPresentationSnapshot,
   effects: readonly ReviewPresentationStoreEffect[],
   reviews: ReviewCandidate[],
-  dayStart: number,
-  capturedEnd: number
+  day: { startMs: number; endMs: number }
 ) {
   const openIds = new Set(response.outstanding.openReviewItemIds);
   const excluded = effects.filter((effect) =>
@@ -436,11 +436,16 @@ function adjustedCounts(
     value: Math.max(0, response.outstanding.globalCount - excluded.length),
     exact: globalExact
   };
+  // A local decision leaves today's count by the server's own `todayCount` rule (and the Review
+  // deck's Today segment): overlapping the whole local day, or detected today without a complete
+  // window. Not only the part of the day up to now (Codex r1 on #408: after a same-day clock
+  // rollback a decided 18:00 moment stayed in today's count and the nudge opened an empty Today).
   const todayEffectIds = new Set(reviews
-    .filter((candidate) => {
-      const interval = finiteInterval(candidate.record.interval.start, candidate.record.interval.end);
-      return interval ? Boolean(clipInterval(interval.startMs, interval.endMs, dayStart, capturedEnd)) : false;
-    })
+    .filter((candidate) => reviewMomentOverlapsDay({
+      startedAt: candidate.record.interval.start,
+      stoppedAt: candidate.record.interval.end,
+      detectedAt: candidate.record.createdAt
+    }, day))
     .map((candidate) => candidate.record.reviewItemId));
   const todayExcluded = excluded.filter((effect) => todayEffectIds.has(effect.reviewItemId)).length;
   return {

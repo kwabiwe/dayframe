@@ -345,3 +345,38 @@ describe("todayReviewNudgeSplit (the Today nudge, 14 Oct 2026)", () => {
     expect(todayReviewNudgeSplit(exact(2), exact(5))).toEqual({ today: 2, earlier: 0, segment: "today" });
   });
 });
+
+describe("today's count after a local decision (Codex r1 on #408)", () => {
+  const earlier = review("earlier", "Earlier walk", "2026-09-11T10:00:00.000Z", "2026-09-11T11:00:00.000Z");
+  const evening = review("evening", "Evening run", "2026-09-12T18:00:00.000Z", "2026-09-12T19:00:00.000Z");
+
+  it("takes a decided moment later today out of today's count even when now is earlier (a clock rollback)", () => {
+    const presentation = project({
+      response: response([earlier, evening], 2, 1),
+      effects: [effect("evening", "pending")],
+      nowMs: Date.parse("2026-09-12T12:00:00.000Z")
+    });
+    expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(presentation.todayReviewCount).toEqual({ value: 0, exact: true });
+    expect(todayReviewNudgeSplit(presentation.globalReviewCount, presentation.todayReviewCount))
+      .toEqual({ today: 0, earlier: 1, segment: "earlier" });
+  });
+
+  it("takes a decided moment without a complete window out of today's count by when it was detected", () => {
+    const open = { ...review("open", "Open stay", "2026-09-01T09:00:00.000Z", "2026-09-01T09:00:00.000Z"), interval: { start: "2026-09-01T09:00:00.000Z", end: null }, createdAt: "2026-09-12T08:00:00.000Z" };
+    const presentation = project({
+      response: response([earlier, open], 2, 1),
+      effects: [effect("open", "pending")]
+    });
+    expect(presentation.todayReviewCount).toEqual({ value: 0, exact: true });
+  });
+
+  it("keeps a decided earlier-day moment out of today's adjustment", () => {
+    const presentation = project({
+      response: response([earlier, evening], 2, 1),
+      effects: [effect("earlier", "pending")]
+    });
+    expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(presentation.todayReviewCount).toEqual({ value: 1, exact: true });
+  });
+});
