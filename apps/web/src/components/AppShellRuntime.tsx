@@ -43,6 +43,11 @@ import {
 } from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
+type TimerStartOptions = {
+  dedupeRunning?: boolean;
+  /** A backdated Start: its start, from the blocks as they are when it runs (see runTimerStartMutation). */
+  startAt?: (snapshot: BootstrapData) => string | null;
+};
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 type CategoryMutationOutcome =
   | { ok: true; category: CategoryRow }
@@ -76,7 +81,7 @@ type RuntimeContext = {
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
-  startTimer: (input?: TimerDraftInput, options?: { dedupeRunning?: boolean }) => Promise<TimerStartOutcome>;
+  startTimer: (input?: TimerDraftInput, options?: TimerStartOptions) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
   /**
@@ -499,7 +504,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const startTimer = useCallback(async (
     input: TimerDraftInput = {},
-    options: { dedupeRunning?: boolean } = {}
+    options: TimerStartOptions = {}
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
@@ -522,6 +527,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
       },
       dedupeRunning: options.dedupeRunning,
+      startAt: options.startAt,
       gate: mutationGateRef.current,
       snapshot,
       currentDraft: draftRef.current,

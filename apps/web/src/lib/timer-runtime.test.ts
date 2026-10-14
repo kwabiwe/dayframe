@@ -19,6 +19,8 @@ import {
   timerDraftsEqual,
   timerDraftVersion,
   timerStartErrorMessage,
+  timerStartRequestPayload,
+  PREVIOUS_END_GONE_MESSAGE,
   type TimerDraft,
   type TimerStartRequestPayload
 } from "./timer-runtime";
@@ -68,6 +70,46 @@ describe("shell timer runtime", () => {
       await expect(start).resolves.toMatchObject({ ok: false });
       expect(draft).toEqual(typedMeanwhile ?? { categoryId: "focus", description: "Plan", tagNames: [] });
     }
+  });
+
+  it("backdates an idle Start to the start it is given, and starts nothing when that start is gone", async () => {
+    const gate = createTimerMutationGate();
+    const sent: TimerStartRequestPayload[] = [];
+    const committed: BootstrapData[] = [];
+    const errors: (string | null)[] = [];
+    const run = (startAt: (snapshot: BootstrapData) => string | null) => runTimerStartMutation({
+      gate,
+      snapshot: bootstrapData(null),
+      currentDraft: timerDraftForEntry(null),
+      input: { categoryId: "focus", description: "Plan", tagNames: [] },
+      now: () => "2026-08-24T16:00:00.000Z",
+      createOptimisticId: (startedAt) => `optimistic:${startedAt}`,
+      commit: (data) => { committed.push(data); },
+      setDraft: () => undefined,
+      setBusy: () => undefined,
+      setError: (error) => { errors.push(error); },
+      send: async (payload) => { sent.push(payload); },
+      refresh: async () => undefined,
+      startAt
+    });
+
+    await expect(run(() => "2026-08-24T15:10:00.000Z")).resolves.toMatchObject({ ok: true, switchedAt: "2026-08-24T15:10:00.000Z" });
+    expect(sent).toEqual([{ mode: "start", categoryId: "focus", description: "Plan", startedAt: "2026-08-24T15:10:00.000Z", tagNames: [] }]);
+    expect(committed[0].activeEntry).toMatchObject({ id: "optimistic:2026-08-24T15:10:00.000Z", startedAt: "2026-08-24T15:10:00.000Z" });
+
+    // Gone by the time it runs: no optimistic block, no request, no Start at now instead.
+    sent.length = 0;
+    committed.length = 0;
+    await expect(run(() => null)).resolves.toMatchObject({ ok: false, error: PREVIOUS_END_GONE_MESSAGE });
+    expect(sent).toEqual([]);
+    expect(committed).toEqual([]);
+    expect(errors.at(-1)).toBe(PREVIOUS_END_GONE_MESSAGE);
+  });
+
+  it("sends no startedAt for an ordinary Start", () => {
+    expect(timerStartRequestPayload({ categoryId: "", description: " Plan ", tagNames: [] })).toEqual({
+      mode: "start", categoryId: undefined, description: "Plan", tagNames: []
+    });
   });
 
   it("returns a rejected switch to the still-running entry's own details", async () => {

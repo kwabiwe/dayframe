@@ -39,6 +39,8 @@ export type TimerStartRequestPayload = {
   mode: "start";
   categoryId?: string;
   description?: string;
+  /** A backdated start ("start at the previous end"); omitted, the server starts it now. */
+  startedAt?: string;
   tagNames: string[];
 };
 
@@ -336,14 +338,18 @@ export function quickActionTimerDraft(categoryId: string | null | undefined): Ti
   };
 }
 
-export function timerStartRequestPayload(draft: TimerDraft): TimerStartRequestPayload {
+export function timerStartRequestPayload(draft: TimerDraft, startedAt?: string): TimerStartRequestPayload {
   return {
     mode: "start",
     categoryId: draft.categoryId || undefined,
     description: draft.description.trim() || undefined,
+    ...(startedAt ? { startedAt } : {}),
     tagNames: draft.tagNames
   };
 }
+
+/** Why a "start at the previous end" Start did not run: the gap it offered is no longer there. */
+export const PREVIOUS_END_GONE_MESSAGE = "That gap has changed, so nothing was started. Try again.";
 
 export async function runTimerStartMutation({
   gate,
@@ -363,7 +369,8 @@ export async function runTimerStartMutation({
   send,
   refresh,
   beforeStart,
-  dedupeRunning = false
+  dedupeRunning = false,
+  startAt
 }: {
   gate: TimerMutationGate;
   snapshot: BootstrapData;
@@ -393,6 +400,12 @@ export async function runTimerStartMutation({
    * asked for) changes nothing instead of stopping and restarting it.
    */
   dedupeRunning?: boolean;
+  /**
+   * A backdated Start ("start at the previous end"): the start, worked out from the blocks as they
+   * are when this Start runs. Null (a block is now running, or the gap it offered has gone) starts
+   * nothing and says so; it never falls back to a Start at now.
+   */
+  startAt?: (snapshot: BootstrapData) => string | null;
 }): Promise<TimerStartOutcome> {
   const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
     const carried = beforeStart ? await beforeStart() : undefined;
@@ -400,7 +413,12 @@ export async function runTimerStartMutation({
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
-    const startedAt = now();
+    const backdatedAt = startAt ? startAt(acceptedSnapshot) : undefined;
+    if (backdatedAt === null) {
+      setError(PREVIOUS_END_GONE_MESSAGE);
+      return { ok: false, error: PREVIOUS_END_GONE_MESSAGE } as const;
+    }
+    const startedAt = backdatedAt ?? now();
     if (dedupeRunning && startMatchesRunning(acceptedSnapshot.activeEntry, { ...draft, categoryId: draft.categoryId || null })) {
       return { ok: true, own: true, alreadyRunning: true, unchanged: acceptedSnapshot.activeEntry, replaced: null, switchedAt: startedAt } as const;
     }
@@ -411,7 +429,7 @@ export async function runTimerStartMutation({
     setDraft(draft);
 
     try {
-      await send(timerStartRequestPayload(draft));
+      await send(timerStartRequestPayload(draft, backdatedAt));
       return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: acceptedSnapshot.activeEntry, switchedAt: startedAt } as const;
     } catch (error) {
       // A failed switch returns to the entry that is still running, with its own details (a

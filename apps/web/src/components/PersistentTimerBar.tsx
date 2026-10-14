@@ -9,7 +9,7 @@ import type {
   RefObject
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
+import { previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
 import { Clock3, Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -85,6 +85,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  // Idle: a 30 s clock for the "From 10:15 · after …" offer, first set after hydration (the
+  // server render has no offer, so nothing mismatches).
+  const [idleNow, setIdleNow] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
@@ -166,6 +169,16 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     if (!active) return undefined;
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
+  }, [active]);
+
+  useEffect(() => {
+    if (active) return undefined;
+    const first = window.setTimeout(() => setIdleNow(Date.now()), 0);
+    const interval = window.setInterval(() => setIdleNow(Date.now()), 30_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(interval);
+    };
   }, [active]);
 
   // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
@@ -364,6 +377,26 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
   }
 
+  // "From 10:15 · after Write report": starts the block as Start would, at the previous block's
+  // end. The offer is checked again when the Start runs: if a block is running by then, or a newer
+  // block has ended since, nothing starts and the bar says so (never a Start at now instead).
+  function startFromPreviousEnd(offer: PreviousEndOffer) {
+    setCommandNotice(null);
+    setSuggestionsOpen(false);
+    const command = parseCommand(timerDraft.description);
+    void startTimer(
+      { categoryId: timerDraft.categoryId, description: command.description, tagNames: timerDraft.tagNames },
+      {
+        startAt: (snapshot) => {
+          if (snapshot.activeEntry) return null;
+          const nowMs = Date.now();
+          const current = previousEndOffer(snapshot.entries, { dayStartMs: localDayStartMs(nowMs), startMs: nowMs });
+          return current?.startedAt === offer.startedAt ? current.startedAt : null;
+        }
+      }
+    );
+  }
+
   function announce(label: string, swatch?: CSSProperties) {
     setNotice({ exiting: false, label, swatch, token: ++noticeSequence.current });
   }
@@ -420,6 +453,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // list) beside a trailing duration.
   const previewCategory = parsedCommand?.durationSeconds ? selectedCategory : null;
   const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && parsedCommand.durationSeconds);
+  // Owner idea 1 (14 Oct 2026): idle, with today's last block ended under 4 h ago, offer to start
+  // from its end. Not beside a trailing duration (that logs a finished block, not a Start).
+  const previousEnd = !active && idleNow && !parsedCommand?.durationSeconds
+    ? previousEndOffer(data.entries, { dayStartMs: localDayStartMs(idleNow), startMs: idleNow })
+    : null;
   const goLabel = parsedCommand?.durationSeconds
     ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
     : "Start";
@@ -547,9 +585,23 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               <small>Started {formatTime(active.startedAt)}</small>
             </button>
           ) : (
-            <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
-              {formatClockDuration(0)}
-            </span>
+            <div className="df-cmd-idle">
+              <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
+                {formatClockDuration(0)}
+              </span>
+              {previousEnd ? (
+                <button
+                  aria-label={`Start from ${formatTime(previousEnd.startedAt)}, after ${previousEnd.previousName}`}
+                  className="df-cmd-from"
+                  disabled={isTimerBusy}
+                  onClick={() => startFromPreviousEnd(previousEnd)}
+                  type="button"
+                >
+                  <span className="df-cmd-from-lead">From <span className="tabular">{formatTime(previousEnd.startedAt)}</span> · after</span>
+                  <span className="df-cmd-from-name">{previousEnd.previousName}</span>
+                </button>
+              ) : null}
+            </div>
           )}
 
           {active ? (
@@ -1118,6 +1170,13 @@ function manualEntryDefaults(selectedDate: string) {
 
 function dateTimeLocal(date: Date) {
   return `${dateKey(date)}T${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+/** Midnight starting the viewer's local day containing `ms`. */
+function localDayStartMs(ms: number) {
+  const day = new Date(ms);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
 }
 
 function dateKey(date: Date) {
