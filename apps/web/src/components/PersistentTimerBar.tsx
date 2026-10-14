@@ -62,6 +62,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     isManualEntryOpen,
     isTimerBusy,
     openManualEntry,
+    readShellData,
     setTimerDraft,
     shellData: data,
     startTimer,
@@ -105,9 +106,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   const active = data?.activeEntry ?? null;
   const idle = !active;
-  // The newest blocks, for the check after an awaited Start (the render's `data` is from before it).
-  const latestDataRef = useRef(data);
-  latestDataRef.current = data;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
   const lastStoppedAt = useMemo(() => {
@@ -410,8 +408,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     setSuggestionsOpen(false);
     const command = parseCommand(timerDraft.description);
     const outcome = await startTimer({ categoryId: timerDraft.categoryId, description: command.description, tagNames: timerDraft.tagNames });
-    if (!outcome.ok || !outcome.own || outcome.alreadyRunning) return;
-    const current = latestDataRef.current;
+    if (!outcome.ok || !outcome.own || outcome.alreadyRunning || !outcome.startedEntryId) return;
+    // The runtime's blocks now (the render's `data` predates the Start and its refresh; Codex r5).
+    const current = readShellData();
     const running = current?.activeEntry;
     if (!current || !running) return;
     const runningStartMs = Date.parse(running.startedAt);
@@ -424,7 +423,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       setCommandNotice(PREVIOUS_END_CHANGED_NOTICE);
       return;
     }
-    await updateActiveStartTime(offer.startedAt);
+    // Only the block this Start created: never one that replaced it meanwhile (Codex r5).
+    await updateActiveStartTime(offer.startedAt, { expectedEntryId: outcome.startedEntryId });
   }
 
   function announce(label: string, swatch?: CSSProperties) {

@@ -94,7 +94,13 @@ type RuntimeContext = {
   toggleTimer: () => Promise<MutationOutcome>;
   updateActiveDetails: (draft: TimerDraft) => Promise<MutationOutcome>;
   updateActiveEntryFromCalendar: (input: ActiveEntryCompactMutationInput) => Promise<MutationOutcome>;
-  updateActiveStartTime: (startedAt: string) => Promise<MutationOutcome>;
+  /**
+   * Moves the running block's start. With `expectedEntryId` (a block a Start just put on screen, by
+   * its optimistic or server id) it edits only that block, never one that has replaced it.
+   */
+  updateActiveStartTime: (startedAt: string, options?: { expectedEntryId?: string }) => Promise<MutationOutcome>;
+  /** The blocks as the runtime has them now (newer than the last render after an awaited mutation). */
+  readShellData: () => BootstrapData | null;
 };
 
 const AppShellRuntimeContext = createContext<RuntimeContext | null>(null);
@@ -760,9 +766,23 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     });
   }, [baseFor, commitData, refresh, setTimerDraft, setTimerDraftBase]);
 
-  const updateActiveStartTime = useCallback(async (startedAt: string): Promise<MutationOutcome> => {
+  const readShellData = useCallback(() => dataRef.current, []);
+
+  const updateActiveStartTime = useCallback(async (
+    startedAt: string,
+    options: { expectedEntryId?: string } = {}
+  ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
+    const expected = options.expectedEntryId;
+    if (expected) {
+      // Still on screen at that id, or handed off to the server id the Start was accepted as.
+      const activeId = snapshot.activeEntry.id;
+      const handedOff = serverEntryId(expected);
+      if (activeId !== expected && (handedOff === null || activeId !== handedOff)) {
+        return { ok: false, error: "That block is no longer running." };
+      }
+    }
     const draft = draftRef.current;
     const base = baseFor(snapshot.activeEntry);
     // The new start time, plus only the details this tab's user edited (with their base values).
@@ -918,7 +938,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     toggleTimer,
     updateActiveDetails,
     updateActiveEntryFromCalendar,
-    updateActiveStartTime
+    updateActiveStartTime,
+    readShellData
   }), [
     createCategory,
     createManualEntry,
@@ -944,7 +965,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     toggleTimer,
     updateActiveDetails,
     updateActiveEntryFromCalendar,
-    updateActiveStartTime
+    updateActiveStartTime,
+    readShellData
   ]);
 
   return <AppShellRuntimeContext.Provider value={value}>{children}</AppShellRuntimeContext.Provider>;

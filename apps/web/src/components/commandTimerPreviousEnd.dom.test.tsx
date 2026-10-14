@@ -46,7 +46,8 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
 
     // One path (owner): the ordinary Start, then the same start-time edit as "Set to last stop time".
     expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "", description: "Review notes", tagNames: [] });
-    expect(runtime.updateActiveStartTime).toHaveBeenCalledWith(iso(10, 15));
+    // Only the block this Start created.
+    expect(runtime.updateActiveStartTime).toHaveBeenCalledWith(iso(10, 15), { expectedEntryId: "optimistic-timer:1" });
   });
 
   it("keeps the block at now and says so if a newer block has ended since", async () => {
@@ -63,7 +64,7 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
   });
 
   it("edits nothing when the Start was refused or another Start took over", async () => {
-    for (const result of [{ ok: false, error: "Offline" }, { ok: true, own: false, alreadyRunning: false }]) {
+    for (const result of [{ ok: false, error: "Offline" }, { ok: true, own: false, alreadyRunning: false, startedEntryId: "x" }, { ok: true, own: true, alreadyRunning: false }]) {
       runtime = runtimeFixture({ entries: [finished({ id: "a", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) })] });
       (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue(result);
       render(<PersistentTimerBar />);
@@ -112,9 +113,10 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
 function startsBlock(view: ReturnType<typeof render>, entries: TimeEntryRow[]) {
   const running = finished({ id: "run", startedAt: local(11, 0).toISOString(), stoppedAt: null });
   (runtime.startTimer as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-    runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: running, entries: [...entries, running] } };
-    view.rerender(<PersistentTimerBar />);
-    return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: null, switchedAt: running.startedAt };
+    const next = { ...(runtime.shellData as BootstrapData), activeEntry: running, entries: [...entries, running] };
+    // The runtime has the new blocks before React renders them (readShellData), as after a refresh.
+    (runtime.readShellData as ReturnType<typeof vi.fn>).mockImplementation(() => next);
+    return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: null, startedEntryId: "optimistic-timer:1", switchedAt: running.startedAt };
   });
 }
 
@@ -143,6 +145,7 @@ function runtimeFixture(overrides: {
     isTimerBusy: false,
     openManualEntry: vi.fn(),
     setTimerDraft: vi.fn(),
+    readShellData: vi.fn(() => data),
     shellData: data,
     startTimer: vi.fn().mockResolvedValue({ ok: true }),
     stopTimer: vi.fn().mockResolvedValue({ ok: true }),

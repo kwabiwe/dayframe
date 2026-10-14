@@ -32,6 +32,8 @@ export type TimerStartOutcome =
       unchanged: BootstrapData["activeEntry"];
       replaced: BootstrapData["activeEntry"];
       switchedAt: string;
+      /** The block this Start put on screen (its optimistic id); absent when it changed nothing. */
+      startedEntryId?: string;
     }
   | { ok: false; error: string };
 
@@ -407,12 +409,13 @@ export async function runTimerStartMutation({
     onAccepted?.();
     setBusy(true);
     setError(notice);
-    commit(applyOptimisticTimerStart(acceptedSnapshot, draft, startedAt, createOptimisticId(startedAt)));
+    const startedEntryId = createOptimisticId(startedAt);
+    commit(applyOptimisticTimerStart(acceptedSnapshot, draft, startedAt, startedEntryId));
     setDraft(draft);
 
     try {
       await send(timerStartRequestPayload(draft));
-      return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: acceptedSnapshot.activeEntry, switchedAt: startedAt } as const;
+      return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: acceptedSnapshot.activeEntry, startedEntryId, switchedAt: startedAt } as const;
     } catch (error) {
       // A failed switch returns to the entry that is still running, with its own details (a
       // draft typed for the rejected entry must not be saved onto it). From idle, keep anything
