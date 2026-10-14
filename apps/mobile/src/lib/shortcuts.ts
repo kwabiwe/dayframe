@@ -1,10 +1,9 @@
 import { NativeModules, Platform, Settings } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
-import { enqueueEvent, readQueue, subscribeActivityQueue, type MobileBootstrap } from "./api";
+import { enqueueEvent, type MobileBootstrap } from "./api";
 import {
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
-  subscribeActiveMobileAccount,
   type MobileAccountOwner
 } from "./mobileAccount";
 
@@ -27,10 +26,7 @@ type NativeShortcutEventType = "shortcut_action" | "timer_stop";
 type NativeShortcutQueueModule = {
   pendingShortcutEvents?: () => Promise<unknown>;
   removeShortcutEvents?: (localIds: string[]) => Promise<number>;
-  pendingShortcutStartMarkers?: () => Promise<unknown>;
-  addPendingShortcutStartMarkers?: (markers: Array<{ localId: string; userId: string; workspaceId: string }>) => Promise<number>;
-  markPendingShortcutStartsReconciled?: (userId: string, workspaceId: string) => Promise<boolean>;
-  clearPendingShortcutStartMarkers?: (localIds: string[]) => Promise<number>;
+  shortcutStopBarriers?: () => Promise<unknown>;
 };
 
 const nativeShortcutQueue = NativeModules.DayframeLiveActivityModule as NativeShortcutQueueModule | undefined;
@@ -87,9 +83,7 @@ export async function clearActiveOwnerNativeShortcutQueue(owner: MobileAccountOw
     )
     .map((event) => event.localId);
   if (!localIds.length) return 0;
-  const removed = await nativeShortcutQueue.removeShortcutEvents(localIds);
-  await reconcilePendingShortcutStartMarkers(owner).catch(() => 0);
-  return removed;
+  return nativeShortcutQueue.removeShortcutEvents(localIds);
 }
 
 export async function getNativeShortcutPendingCount(owner: MobileAccountOwner) {
@@ -108,10 +102,7 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
   if (!owner) return { transferredCount: 0, transferredLocalIds: [] as string[] };
   const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents())
     .filter((event) => nativeEventCanTransferToOwner(event, owner));
-  if (!events.length) {
-    await reconcilePendingShortcutStartMarkers(owner).catch(() => 0);
-    return { transferredCount: 0, transferredLocalIds: [] as string[] };
-  }
+  if (!events.length) return { transferredCount: 0, transferredLocalIds: [] as string[] };
 
   let transferredCount = 0;
   const transferredLocalIds: string[] = [];
@@ -138,63 +129,22 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
   }
 
   await nativeShortcutQueue.removeShortcutEvents(transferredLocalIds);
-  await reconcilePendingShortcutStartMarkers(owner).catch(() => 0);
   return { transferredCount, transferredLocalIds };
 }
 
 /**
- * Brings the native pending-Start markers (see `DayframePendingShortcutStarts`) in line with both queues
- * for an account: every Shortcut Start still queued anywhere, including one an older build moved into the
- * app queue, has a marker (even permanently failed: Sync help can retry it); a marker whose Start left both
- * queues (delivered, discarded, removed at logout) is cleared. The native queue is read before the app
- * queue, so a Start moving between them is never missed. Then the account is marked reconciled: until
- * that first run the Stop intent never resolves a running entry on the server (Codex r3 on #403).
- * Runs one at a time.
+ * When a Shortcut Stop last ran for this account (`DayframeShortcutStopBarriers`), or null. A Shortcut
+ * Start older than this that the app delivers later is stopped at this time, so a late Start never undoes
+ * the Stop (owner decision 14 Oct on #403).
  */
-export function reconcilePendingShortcutStartMarkers(requestedOwner?: MobileAccountOwner) {
-  const run = reconcileTail.catch(() => 0).then(() => reconcileUnserialised(requestedOwner));
-  reconcileTail = run.catch(() => 0);
-  return run;
-}
-let reconcileTail: Promise<unknown> = Promise.resolve();
-
-async function reconcileUnserialised(requestedOwner?: MobileAccountOwner) {
-  if (Platform.OS !== "ios") return 0;
-  const markersModule = nativeShortcutQueue;
-  if (
-    !markersModule?.pendingShortcutStartMarkers || !markersModule.clearPendingShortcutStartMarkers ||
-    !markersModule.addPendingShortcutStartMarkers || !markersModule.markPendingShortcutStartsReconciled ||
-    !markersModule.pendingShortcutEvents
-  ) return 0;
-  const owner = requestedOwner ?? await readActiveMobileAccount();
-  if (!owner) return 0;
-  const nativePending = parseNativeShortcutQueue(await markersModule.pendingShortcutEvents());
-  const appQueue = await readQueue(owner);
-  const stillQueued = new Set([...nativePending.map((event) => event.localId), ...appQueue.map((event) => event.localId)]);
-  const raw = await markersModule.pendingShortcutStartMarkers();
-  const marked = new Set((Array.isArray(raw) ? raw : []).filter(isRecord).filter((marker) =>
-    marker.userId === owner.userId && marker.workspaceId === owner.workspaceId && typeof marker.localId === "string"
-  ).map((marker) => marker.localId as string));
-  const missing = appQueue
-    .filter((event) => event.source === "shortcut" && event.type === "shortcut_action" && !marked.has(event.localId))
-    .map((event) => ({ localId: event.localId, userId: owner.userId, workspaceId: owner.workspaceId }));
-  if (missing.length) await markersModule.addPendingShortcutStartMarkers(missing);
-  const settled = [...marked].filter((localId) => !stillQueued.has(localId));
-  if (settled.length) await markersModule.clearPendingShortcutStartMarkers(settled);
-  await markersModule.markPendingShortcutStartsReconciled(owner.userId, owner.workspaceId);
-  return settled.length;
-}
-
-/** Keeps the markers in step with the activity queue while the app runs; returns the unsubscribe. */
-export function startPendingShortcutStartReconciliation() {
-  const reconcile = () => void reconcilePendingShortcutStartMarkers().catch(() => 0);
-  reconcile();
-  const unsubscribeQueue = subscribeActivityQueue(reconcile);
-  const unsubscribeAccount = subscribeActiveMobileAccount(reconcile);
-  return () => {
-    unsubscribeQueue();
-    unsubscribeAccount();
-  };
+export async function readShortcutStopBarrier(owner: MobileAccountOwner): Promise<string | null> {
+  if (Platform.OS !== "ios" || !nativeShortcutQueue?.shortcutStopBarriers) return null;
+  const raw = await nativeShortcutQueue.shortcutStopBarriers();
+  const barrier = (Array.isArray(raw) ? raw : []).filter(isRecord).find((item) =>
+    item.userId === owner.userId && item.workspaceId === owner.workspaceId
+  );
+  const stoppedAt = typeof barrier?.stoppedAt === "string" ? barrier.stoppedAt : null;
+  return stoppedAt && Number.isFinite(Date.parse(stoppedAt)) ? stoppedAt : null;
 }
 
 function parseNativeShortcutQueue(value: unknown) {

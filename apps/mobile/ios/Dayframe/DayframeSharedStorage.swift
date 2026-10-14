@@ -7,7 +7,6 @@ enum DayframeShortcutDeliveryDiagnostic {
   case nothingRunning
   case targetUnavailable
   case ownerUnverified
-  case startPending
   case started
   case contextUnavailable
   case capabilityUnavailable
@@ -27,8 +26,6 @@ enum DayframeShortcutDeliveryDiagnostic {
       return "target-unavailable"
     case .ownerUnverified:
       return "owner-unverified"
-    case .startPending:
-      return "start-pending"
     case .started:
       return "started"
     case .contextUnavailable:
@@ -265,14 +262,19 @@ enum DayframeNativeShortcutQueue {
     }
   }
 
-  /// Whether an undelivered Start is queued for this account. A Start intent only queues (the app
-  /// delivers it later), so a Stop resolved against the server could stop a newer block and leave this
-  /// older Start to open another one when it replays.
-  static func hasPendingStart(userId: String, workspaceId: String) -> Bool {
-    pendingDictionaries().contains { event in
-      event["type"] as? String == "shortcut_action" &&
-        event["userId"] as? String == userId &&
-        event["workspaceId"] as? String == workspaceId
+  /// Starts still waiting in this queue for an account (and ownerless ones from older builds, which the
+  /// app would adopt into the active account), oldest first. A Shortcut Stop delivers them before it asks
+  /// the server which block is running.
+  static func pendingStarts(userId: String, workspaceId: String) -> [DayframeShortcutEvent] {
+    processLock.withLock {
+      let events = withSharedQueueLock { queueURL in readSharedUnlocked(queueURL: queueURL) } ?? []
+      return events
+        .filter { event in
+          event.type == "shortcut_action" &&
+            ((event.userId == userId && event.workspaceId == workspaceId) ||
+              (event.userId == nil && event.workspaceId == nil))
+        }
+        .sorted { $0.occurredAt < $1.occurredAt }
     }
   }
 
@@ -418,68 +420,38 @@ enum DayframeNativeShortcutQueue {
   }
 }
 
-/// Start intents only queue: the app delivers the Start later, after moving it from the native queue
-/// into its own. A marker per queued Start (its local ID and account) survives that hand-off and is
-/// cleared by the app only when the Start has left both queues (delivered, or discarded for good). While
-/// any marker remains for an account, the Stop intent does not resolve a running entry on the server:
-/// it could stop a newer block and the older Start would replay afterwards (Codex r2 on #403).
-enum DayframePendingShortcutStarts {
-  private static let key = "dayframe.pendingShortcutStarts.v1"
-  /// Accounts whose markers the app has reconciled at least once (Codex r3 on #403): Starts that an
-  /// older build moved into the app's queue have no marker until then, so the fallback stays off.
-  private static let reconciledKey = "dayframe.pendingShortcutStarts.reconciled.v1"
+/// When a Shortcut Stop ran, per account (Codex r1–r4 on #403, owner decision 14 Oct). A Shortcut Start
+/// that was still waiting to be delivered (offline, or an app delivery that failed) belongs to the block the
+/// user then stopped: when the app later delivers a Start older than this time, it stops that Start's own
+/// entry at this time, so the Stop is never undone by a late Start and the time between is kept.
+enum DayframeShortcutStopBarriers {
+  private static let key = "dayframe.shortcutStopBarriers.v1"
   private static let lock = NSLock()
-
-  static func markReconciled(userId: String, workspaceId: String) {
-    lock.withLock {
-      guard let defaults else { return }
-      var owners = defaults.stringArray(forKey: reconciledKey) ?? []
-      let owner = "\(workspaceId):\(userId)"
-      guard !owners.contains(owner) else { return }
-      owners.append(owner)
-      defaults.set(owners, forKey: reconciledKey)
-    }
-  }
-
-  /// Whether the Stop fallback may run for this account: reconciled once, and no Start marker left.
-  static func allowsServerFallback(userId: String, workspaceId: String) -> Bool {
-    lock.withLock {
-      guard let defaults else { return false }
-      let reconciled = (defaults.stringArray(forKey: reconciledKey) ?? []).contains("\(workspaceId):\(userId)")
-      let markers = defaults.array(forKey: key) as? [[String: String]] ?? []
-      return reconciled && !markers.contains { $0["userId"] == userId && $0["workspaceId"] == workspaceId }
-    }
-  }
 
   private static var defaults: UserDefaults? {
     DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
   }
 
-  static func add(localId: String, userId: String, workspaceId: String) {
+  static func record(userId: String, workspaceId: String, at date: Date) {
     lock.withLock {
       guard let defaults else { return }
-      var markers = defaults.array(forKey: key) as? [[String: String]] ?? []
-      guard !markers.contains(where: { $0["localId"] == localId }) else { return }
-      markers.append(["localId": localId, "userId": userId, "workspaceId": workspaceId])
-      defaults.set(markers, forKey: key)
+      let stoppedAt = ISO8601DateFormatter.dayframeFractional.string(from: date)
+      var barriers = (defaults.array(forKey: key) as? [[String: String]] ?? [])
+        .filter { !($0["userId"] == userId && $0["workspaceId"] == workspaceId) }
+      barriers.append(["userId": userId, "workspaceId": workspaceId, "stoppedAt": stoppedAt])
+      defaults.set(barriers, forKey: key)
     }
   }
-
 
   static func all() -> [[String: String]] {
     lock.withLock { defaults?.array(forKey: key) as? [[String: String]] ?? [] }
   }
-
-  @discardableResult
-  static func remove(localIds: [String]) -> Int {
-    lock.withLock {
-      guard let defaults else { return 0 }
-      let ids = Set(localIds)
-      let markers = defaults.array(forKey: key) as? [[String: String]] ?? []
-      let kept = markers.filter { !ids.contains($0["localId"] ?? "") }
-      defaults.set(kept, forKey: key)
-      return markers.count - kept.count
-    }
-  }
 }
 
+extension ISO8601DateFormatter {
+  static let dayframeFractional: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+}

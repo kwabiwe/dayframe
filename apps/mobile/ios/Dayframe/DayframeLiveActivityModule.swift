@@ -139,46 +139,12 @@ class DayframeLiveActivityModule: NSObject {
     ))
   }
 
-  @objc(pendingShortcutStartMarkers:rejecter:)
-  func pendingShortcutStartMarkers(
+  @objc(shortcutStopBarriers:rejecter:)
+  func shortcutStopBarriers(
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
-    resolve(DayframePendingShortcutStarts.all())
-  }
-
-  @objc(addPendingShortcutStartMarkers:resolver:rejecter:)
-  func addPendingShortcutStartMarkers(
-    markers: [[String: String]],
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    for marker in markers {
-      if let localId = marker["localId"], let userId = marker["userId"], let workspaceId = marker["workspaceId"] {
-        DayframePendingShortcutStarts.add(localId: localId, userId: userId, workspaceId: workspaceId)
-      }
-    }
-    resolve(markers.count)
-  }
-
-  @objc(markPendingShortcutStartsReconciled:workspaceId:resolver:rejecter:)
-  func markPendingShortcutStartsReconciled(
-    userId: String,
-    workspaceId: String,
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    DayframePendingShortcutStarts.markReconciled(userId: userId, workspaceId: workspaceId)
-    resolve(true)
-  }
-
-  @objc(clearPendingShortcutStartMarkers:resolver:rejecter:)
-  func clearPendingShortcutStartMarkers(
-    localIds: [String],
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    resolve(DayframePendingShortcutStarts.remove(localIds: localIds))
+    resolve(DayframeShortcutStopBarriers.all())
   }
 
   @objc(clearRuntimeContext:rejecter:)

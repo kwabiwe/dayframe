@@ -41,9 +41,15 @@ struct StopTrackingIntent: AppIntent {
   func perform() async throws -> some IntentResult {
     // A replayable current/global Stop can target a different timer if the request is delayed, so the
     // Stop always names one entry: the running Live Activity's, else the entry the server says is running
-    // now. Without either it fails closed. Until 13 Oct the Live Activity was the only source, so NFC and
-    // Shortcuts Stops did nothing whenever no Live Activity carried an entry (none reached production from
-    // 13 Aug).
+    // now. Until 14 Oct the Live Activity was the only source, so NFC and Shortcuts Stops did nothing
+    // whenever no Live Activity carried an entry (none reached production from 13 Aug).
+    let stoppedAt = Date()
+    let catalog = DayframeShortcutCatalogStore.catalog
+    // Any Start still waiting for delivery belongs to the block being stopped: when the app later delivers
+    // one older than this, it stops that Start's own entry at this time (`DayframeShortcutStopBarriers`).
+    if let owner = catalog.owner {
+      DayframeShortcutStopBarriers.record(userId: owner.userId, workspaceId: owner.workspaceId, at: stoppedAt)
+    }
     if let entryId = DayframeLiveActivityController.currentCanonicalEntryId() {
       await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
       return .result()
@@ -56,29 +62,24 @@ struct StopTrackingIntent: AppIntent {
     guard
       let userId = context.userId,
       let workspaceId = context.workspaceId,
-      DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
+      catalog.belongs(userId: userId, workspaceId: workspaceId)
     else {
       DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
       return .result()
     }
-    let catalog = DayframeShortcutCatalogStore.catalog
-    guard !startPending(userId: userId, workspaceId: workspaceId) else {
-      DayframeShortcutDeliveryDiagnosticStore.record(.startPending)
-      return .result()
+    // Starts still waiting on this phone go first, oldest first, with the same session, so the block the
+    // server reports is the one the user means. One that cannot be delivered now is closed by the app later.
+    for start in DayframeNativeShortcutQueue.pendingStarts(userId: userId, workspaceId: workspaceId) {
+      guard await DayframeShortcutDirectEventClient.submit(start, context: context) else { break }
+      _ = DayframeNativeShortcutQueue.remove(localIds: [start.localId])
     }
     switch await DayframeShortcutDirectEventClient.serverRunningEntry(context: context) {
     case .running(let entryId):
       guard
         DayframeShortcutRuntimeContextStore.current() == context,
-        catalog.belongs(userId: userId, workspaceId: workspaceId),
         DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
       else {
         DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
-        return .result()
-      }
-      // A Start queued while the lookup ran must still win.
-      guard !startPending(userId: userId, workspaceId: workspaceId) else {
-        DayframeShortcutDeliveryDiagnosticStore.record(.startPending)
         return .result()
       }
       // The event is built from the checked catalog and delivered with the checked session.
@@ -89,11 +90,6 @@ struct StopTrackingIntent: AppIntent {
       DayframeShortcutDeliveryDiagnosticStore.record(.targetUnavailable)
     }
     return .result()
-  }
-
-  private func startPending(userId: String, workspaceId: String) -> Bool {
-    DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId) ||
-      !DayframePendingShortcutStarts.allowsServerFallback(userId: userId, workspaceId: workspaceId)
   }
 }
 
@@ -208,22 +204,23 @@ private enum DayframeShortcutPerformer {
       guard queued else {
         return
       }
-      if let userId = event.userId, let workspaceId = event.workspaceId {
-        DayframePendingShortcutStarts.add(localId: event.localId, userId: userId, workspaceId: workspaceId)
+      if #available(iOS 17.0, *) {
+        let category = catalog.category(named: categoryName)
+        _ = await DayframeLiveActivityController.start(
+          entryId: nil,
+          apiBase: nil,
+          title: event.description ?? category?.name ?? "No activity",
+          categoryName: category?.name ?? dayframeCleanText(categoryName),
+          categoryColor: category?.color,
+          categoryColorLight: category?.lightColor,
+          startedAt: event.occurredAt
+        )
       }
-      guard #available(iOS 17.0, *) else {
-        return
+      // Delivered now, as Stop is, so a later Stop finds this block on the server; the queued copy stays
+      // only when this fails (the app delivers it later; the server dedupes by its client event ID).
+      if await DayframeShortcutDirectEventClient.submit(event, context: context) {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-      let category = catalog.category(named: categoryName)
-      _ = await DayframeLiveActivityController.start(
-        entryId: nil,
-        apiBase: nil,
-        title: event.description ?? category?.name ?? "No activity",
-        categoryName: category?.name ?? dayframeCleanText(categoryName),
-        categoryColor: category?.color,
-        categoryColorLight: category?.lightColor,
-        startedAt: event.occurredAt
-      )
     case .stopEntry(let entryId):
       // Ending the Activity can terminate the background intent process on
       // current iOS before a concurrent URLSession request completes. Finish
@@ -389,6 +386,11 @@ private struct DayframeShortcutCatalog: Decodable {
 
   func belongs(userId: String, workspaceId: String) -> Bool {
     user?.id == userId && workspace?.id == workspaceId
+  }
+
+  var owner: (userId: String, workspaceId: String)? {
+    guard let userId = user?.id, let workspaceId = workspace?.id else { return nil }
+    return (userId, workspaceId)
   }
   let categories: [DayframeShortcutCategory]
 

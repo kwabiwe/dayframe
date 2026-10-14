@@ -87,50 +87,44 @@ describe("native Live Activity presentation contract", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
     const storage = readFileSync(`${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`, "utf8");
+    const bridge = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`, "utf8");
     const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
-    const liveActivity = intent.indexOf("DayframeLiveActivityController.currentCanonicalEntryId()");
-    const owner = intent.indexOf("DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)");
-    const pendingStart = intent.indexOf("guard !startPending(userId: userId, workspaceId: workspaceId) else {");
-    const server = intent.indexOf("DayframeShortcutDirectEventClient.serverRunningEntry(context: context)");
-    expect(liveActivity).toBeGreaterThan(-1);
-    // Codex r1 on #403: one account and session for lookup, queued event and delivery; never past a queued Start.
-    expect(owner).toBeGreaterThan(liveActivity);
-    expect(pendingStart).toBeGreaterThan(owner);
-    expect(server).toBeGreaterThan(pendingStart);
-    expect(intent).toContain("let userId = context.userId,");
-    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)");
-    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.startPending)");
+    const order = [
+      "DayframeShortcutStopBarriers.record(userId: owner.userId, workspaceId: owner.workspaceId, at: stoppedAt)",
+      "DayframeLiveActivityController.currentCanonicalEntryId()",
+      "guard let context = DayframeShortcutRuntimeContextStore.current() else {",
+      "catalog.belongs(userId: userId, workspaceId: workspaceId)",
+      "for start in DayframeNativeShortcutQueue.pendingStarts(userId: userId, workspaceId: workspaceId) {",
+      "DayframeShortcutDirectEventClient.serverRunningEntry(context: context)"
+    ].map((needle) => intent.indexOf(needle));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    // Pending Starts are delivered with the checked session before the lookup; a failure stops that loop.
+    expect(intent).toMatch(/guard await DayframeShortcutDirectEventClient\.submit\(start, context: context\) else \{ break \}\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[start\.localId\]\)/);
     const running = intent.slice(intent.indexOf("case .running(let entryId):"), intent.indexOf("case .nothingRunning:"));
     expect(running).toContain("DayframeShortcutRuntimeContextStore.current() == context");
     expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)");
-    // Codex r2: a Start queued while the lookup ran still wins, and the marker outlives the app's hand-off.
-    expect(running).toContain("guard !startPending(userId: userId, workspaceId: workspaceId) else {");
-    expect(intent).toMatch(/DayframeNativeShortcutQueue\.hasPendingStart\(userId: userId, workspaceId: workspaceId\) \|\|\s+!DayframePendingShortcutStarts\.allowsServerFallback\(userId: userId, workspaceId: workspaceId\)/);
-    // Codex r3: no fallback until the app has reconciled the account's markers once (older builds' Starts).
-    expect(storage).toMatch(/return reconciled && !markers\.contains/);
-    expect(shortcuts).toContain("let catalog = checked ?? DayframeShortcutCatalogStore.catalog");
-    expect(shortcuts).toMatch(/guard queued else \{\s+return\s+\}\s+if let userId = event\.userId, let workspaceId = event\.workspaceId \{\s+DayframePendingShortcutStarts\.add/);
-    expect(storage).toContain("enum DayframePendingShortcutStarts");
-    expect(shortcuts).toContain("let delivered = await DayframeShortcutDirectEventClient.submit(event, context: context)");
-    expect(directClient).toContain("let context = pinned ?? DayframeShortcutRuntimeContextStore.current()");
-    expect(storage).toContain('event["type"] as? String == "shortcut_action"');
-    expect(storage).toContain("var userId: String? = nil");
-    const bridge = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`, "utf8");
-    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
-    // Nothing running or the server unreachable: fail closed, with a diagnostic, never an untargeted Stop.
+    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)");
     expect(intent).toMatch(/case \.nothingRunning:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.nothingRunning\)/);
     expect(intent).toMatch(/case \.unavailable:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.targetUnavailable\)/);
     expect(intent).not.toContain("stopScope");
+    // A Start intent delivers at once as well; the queued copy stays only when that fails.
+    expect(shortcuts).toMatch(/if await DayframeShortcutDirectEventClient\.submit\(event, context: context\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}/);
+    expect(shortcuts).toContain("let catalog = checked ?? DayframeShortcutCatalogStore.catalog");
+    expect(storage).toContain("enum DayframeShortcutStopBarriers");
+    expect(storage).toMatch(/event\.type == "shortcut_action" &&\s+\(\(event\.userId == userId && event\.workspaceId == workspaceId\) \|\|\s+\(event\.userId == nil && event\.workspaceId == nil\)\)/);
+    expect(bridge).toContain("RCT_EXTERN_METHOD(shortcutStopBarriers:(RCTPromiseResolveBlock)resolve");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
     const lookup = directClient.slice(directClient.indexOf("static func serverRunningEntry(context:"), directClient.indexOf("static func isCanonicalEntryId("));
     expect(lookup).toContain("/api/timer-state");
     expect(lookup).toContain('forHTTPHeaderField: "Authorization"');
     expect(lookup).toContain("httpResponse.statusCode == 200");
     expect(lookup).toContain("isCanonicalEntryId(entryId) ? .running(entryId.lowercased()) : .unavailable");
-    expect(directClient).toContain("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+    expect(directClient).toContain("let context = pinned ?? DayframeShortcutRuntimeContextStore.current()");
+    expect(storage).toContain("var userId: String? = nil");
     expect(storage).toContain('return "nothing-running"');
     expect(storage).toContain('return "target-unavailable"');
     expect(storage).toContain('return "owner-unverified"');
-    expect(storage).toContain('return "start-pending"');
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {

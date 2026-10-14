@@ -15,7 +15,6 @@ import {
   subscribeConnectivity
 } from "./connectivityMonitor";
 import { startDurableWorkMonitor } from "./durableWorkMonitor";
-import { startPendingShortcutStartReconciliation } from "./shortcuts";
 import type {
   ConnectivityRecoveryStatus,
   ConnectivityStatus,
@@ -46,9 +45,7 @@ export function ConnectivityProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stopConnectivity = startConnectivityMonitor();
     const stopDurableWork = startDurableWorkMonitor();
-    const stopStartMarkers = startPendingShortcutStartReconciliation();
     return () => {
-      stopStartMarkers();
       stopDurableWork();
       stopConnectivity();
     };
