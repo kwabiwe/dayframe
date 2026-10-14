@@ -79,68 +79,48 @@ export function reviewDeckOlderThanWeek(moment: ReviewDeckMoment, nowMs: number)
 }
 
 /**
- * Item 5: legacy needs-review entries join the review items in date order (newest first) instead
- * of trailing every review item. The review items keep the order they came in (the backlog's own
- * order, which already is newest first); each legacy entry is placed before the first review item
- * that began earlier than it. Ties keep the review item first.
+ * Item 5: one date order for the whole deck, newest first. Review items and legacy needs-review
+ * entries are sorted together by when the moment began (the backlog's own key,
+ * `coalesce(suggested_started_at, created_at)`), whatever order their sources gave them: the
+ * bootstrap lists review items newest-created first, and a cached list can mix pages. Ties keep a
+ * review item before a legacy entry, then the order they came in (the backlog's own `id desc`).
+ * Sticky focus, Undo returns and deferrals are applied after this, on top of it.
  */
-export function mergeReviewDeckChronology<R, L>(
+export function orderReviewDeckChronology<R, L>(
   reviews: readonly R[],
   legacy: readonly L[],
   startOf: { review: (item: R) => number; legacy: (entry: L) => number }
 ): Array<{ kind: "review"; value: R } | { kind: "legacy"; value: L }> {
   const sortKey = (value: number) => (Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY);
-  const entries = [...legacy].sort((left, right) => sortKey(startOf.legacy(right)) - sortKey(startOf.legacy(left)));
-  const merged: Array<{ kind: "review"; value: R } | { kind: "legacy"; value: L }> = [];
-  let next = 0;
-  for (const review of reviews) {
-    const reviewAt = sortKey(startOf.review(review));
-    while (next < entries.length && sortKey(startOf.legacy(entries[next])) > reviewAt) {
-      merged.push({ kind: "legacy", value: entries[next] });
-      next += 1;
-    }
-    merged.push({ kind: "review", value: review });
-  }
-  for (; next < entries.length; next += 1) merged.push({ kind: "legacy", value: entries[next] });
-  return merged;
+  const sources = [
+    ...reviews.map((value, index) => ({ source: { kind: "review" as const, value }, at: sortKey(startOf.review(value)), rank: 0, index })),
+    ...legacy.map((value, index) => ({ source: { kind: "legacy" as const, value }, at: sortKey(startOf.legacy(value)), rank: 1, index }))
+  ];
+  sources.sort((left, right) => {
+    if (left.at !== right.at) return right.at > left.at ? 1 : -1;
+    if (left.rank !== right.rank) return left.rank - right.rank;
+    return left.index - right.index;
+  });
+  return sources.map((entry) => entry.source);
 }
 
 export type ReviewDeckSegmentCount = { value: number; exact: boolean };
 
 /**
- * Each segment's count. Today is exact once every moment that could overlap today is loaded: the
- * whole backlog, or (the backlog is ordered by when a moment began, newest first) once the loaded
- * pages reach a moment that began more than 7 days before today, since nothing still unloaded
- * began later and no Review moment runs for a week. Earlier is exact with the whole backlog, or
- * from the server's exact total less Today once Today is exact. Otherwise a count is what is
- * loaded, shown as "9+". `remaining` excludes moments decided on this iPhone (held or saving).
+ * Each segment's count. Both are exact only once the whole backlog is loaded: a moment without a
+ * complete window belongs to Today by when it was detected but sorts by its start, so it can sit on
+ * any later page, and a long moment can reach into today from far back. Until then each count is
+ * what is loaded, shown as "9+". `today`/`earlier` exclude moments decided on this iPhone.
  */
 export function reviewDeckSegmentCounts(input: {
   today: number;
   earlier: number;
   backlogComplete: boolean;
-  todayCovered: boolean;
-  /** The server's exact open total less what this iPhone has decided, when it is exact. */
-  serverRemaining: number | null;
 }): Record<ReviewDeckSegment, ReviewDeckSegmentCount> {
-  const todayExact = input.backlogComplete || input.todayCovered;
-  const today = { value: input.today, exact: todayExact };
-  if (input.backlogComplete) return { today, earlier: { value: input.earlier, exact: true } };
-  if (todayExact && input.serverRemaining !== null) {
-    return { today, earlier: { value: Math.max(input.serverRemaining - input.today, input.earlier), exact: true } };
-  }
-  return { today, earlier: { value: input.earlier, exact: false } };
-}
-
-/** Whether the loaded backlog reaches far enough back that every moment overlapping today is in it. */
-export function reviewDeckTodayCovered(input: {
-  backlogComplete: boolean;
-  /** The earliest start among the loaded backlog's moments (NaN when none is loaded). */
-  oldestLoadedStartMs: number;
-  today: ReviewDeckDay;
-}) {
-  if (input.backlogComplete) return true;
-  return Number.isFinite(input.oldestLoadedStartMs) && input.oldestLoadedStartMs < input.today.startMs - REVIEW_BULK_SKIP_AGE_MS;
+  return {
+    today: { value: input.today, exact: input.backlogComplete },
+    earlier: { value: input.earlier, exact: input.backlogComplete }
+  };
 }
 
 /** The count beside a segment's name: "3", "9+" (not exact yet), or nothing for an unknown zero. */
@@ -181,7 +161,7 @@ export function parseReviewDeckSegmentParam(value: string | readonly string[] | 
 /**
  * What the deck shows. "All framed" only when both segments are empty and a verified read agrees;
  * "Today is framed · 9 earlier" (or the Earlier equivalent) when only the selected one is empty and
- * its emptiness is certain; otherwise the cards, or the waiting copy while more may load.
+ * its count is an exact zero; otherwise the cards, or the waiting copy while more may load.
  */
 export function reviewDeckSegmentView(input: {
   selected: ReviewDeckSegment;
@@ -193,7 +173,8 @@ export function reviewDeckSegmentView(input: {
 }): "finished" | "cards" | "segment_framed" | "waiting" {
   if (input.allFinished) return "finished";
   if (input.selectedCards > 0) return "cards";
-  if (input.selectedCount.exact && input.otherCards > 0) return "segment_framed";
+  // Only a certain zero: an exact count of unloaded moments keeps the waiting copy and Show more.
+  if (input.selectedCount.exact && input.selectedCount.value === 0 && input.otherCards > 0) return "segment_framed";
   return "waiting";
 }
 

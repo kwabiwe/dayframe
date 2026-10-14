@@ -40,12 +40,17 @@ describe("Review deck Today · Earlier segments (owner decision 14 Oct 2026, opt
   it("makes \"N of M\", the auto-paging trigger and the bulk skip per segment", () => {
     expect(screen).toContain("decided: decidedInSegment,");
     expect(screen).toContain("exact: segmentCounts[deckSegment].exact");
-    expect(screen).toContain('const segmentWantsPage = deckSources.length < 3 && (deckSegment === "earlier" || !deckTodayCovered);');
+    // Codex r1: every segment keeps paging while it has fewer than three cards (Today's count is
+    // never assumed complete before the whole backlog is loaded).
+    expect(screen).toContain("const segmentWantsPage = deckSources.length < 3;");
+    expect(screen).not.toContain("TodayCovered");
     expect(screen).toContain("bulkSkip={deckSegment}");
   });
 
   it("puts legacy entries in date order with the review items", () => {
-    expect(screen).toContain("mergeReviewDeckChronology(openReviewItems, displayedReviewNeededEntries, {");
+    expect(screen).toContain("orderReviewDeckChronology(openReviewItems, displayedReviewNeededEntries, {");
+    // The date order comes first; deferrals and the sticky top are applied on top of it.
+    expect(screen.indexOf("orderReviewDeckChronology(openReviewItems")).toBeLessThan(screen.indexOf("const deferred = new Set(deferredDeckKeys);"));
     expect(screen).not.toMatch(/\.\.\.openReviewItems\.map\(\(item\) => \(\{ key: reviewFocusKey\("review"/);
   });
 

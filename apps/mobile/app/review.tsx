@@ -92,7 +92,7 @@ import {
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
 import {
   legacyEntryMoment,
-  mergeReviewDeckChronology,
+  orderReviewDeckChronology,
   otherReviewDeckSegment,
   parseReviewDeckSegmentParam,
   reviewDeckMomentStartMs,
@@ -103,7 +103,6 @@ import {
   reviewDeckSegmentFramedCopy,
   reviewDeckSegmentView,
   reviewDeckToday,
-  reviewDeckTodayCovered,
   reviewItemMoment,
   switchReviewDeckSegment,
   type ReviewDeckMoment,
@@ -1022,8 +1021,8 @@ export default function ReviewScreen() {
   const deckToday = useMemo(() => reviewDeckToday(Date.now()), [deckTodayKey]);
   // Every open card in date order, split by segment (hidden and deferred cards handled as before).
   const deckSegmentSources = useMemo(() => {
-    // Item 5: legacy needs-review entries join the review items in date order (newest first).
-    const sources: DeckSource[] = mergeReviewDeckChronology(openReviewItems, displayedReviewNeededEntries, {
+    // Item 5: one date order for every card, newest first, before deferrals and the sticky top.
+    const sources: DeckSource[] = orderReviewDeckChronology(openReviewItems, displayedReviewNeededEntries, {
       review: (item) => reviewDeckMomentStartMs(reviewItemMoment(item)),
       legacy: (entry) => reviewDeckMomentStartMs(legacyEntryMoment(entry))
     }).map((source): DeckSource => {
@@ -1155,39 +1154,15 @@ export default function ReviewScreen() {
     today: deckSegment === "today" ? deckRemaining : deckSegmentSources.today.length,
     earlier: deckSegment === "earlier" ? deckRemaining : deckSegmentSources.earlier.length
   };
-  // The server count still includes decisions held for Undo or saving on this iPhone.
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
-  // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
+  // turns "2 of 5" into "2 of 5+". The server's total has no Today/Earlier split, so until then
+  // each segment's count is what is loaded, marked "at least".
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
-  const locallyDecidedCount = reviewDeckHeldKeys(heldDeckDecision).length + committingDeckKeys.size;
-  // The backlog is ordered by when a moment began (newest first): once its loaded pages reach a
-  // moment that began more than a week before today, every moment overlapping today is loaded.
-  const oldestLoadedBacklogStartMs = useMemo(() => {
-    if (!reviewBacklog) return Number.NaN;
-    const loaded = new Set(reviewBacklog.reviewItemIds);
-    let oldest = Number.POSITIVE_INFINITY;
-    for (const item of openReviewItems) {
-      if (!loaded.has(item.id)) continue;
-      const start = reviewDeckMomentStartMs(reviewItemMoment(item));
-      if (start < oldest) oldest = start;
-    }
-    for (const entry of reviewBacklog.legacyEntries) {
-      const start = reviewDeckMomentStartMs(legacyEntryMoment(entry));
-      if (start < oldest) oldest = start;
-    }
-    return Number.isFinite(oldest) ? oldest : Number.NaN;
-  }, [openReviewItems, reviewBacklog]);
-  const deckTodayCovered = reviewDeckTodayCovered({
-    backlogComplete: deckBacklogComplete,
-    oldestLoadedStartMs: oldestLoadedBacklogStartMs,
-    today: deckToday
-  });
+  // Exact only once the whole backlog is loaded (reviewDeckSegmentCounts); "9+" until then.
   const segmentCounts = reviewDeckSegmentCounts({
     today: segmentRemaining.today,
     earlier: segmentRemaining.earlier,
-    backlogComplete: deckBacklogComplete,
-    todayCovered: deckTodayCovered,
-    serverRemaining: reviewCountIsExact ? Math.max(0, totalNeedsReview - locallyDecidedCount) : null
+    backlogComplete: deckBacklogComplete
   });
   // "N of M" follows the selected segment: this visit's decisions in it, plus its count.
   let decidedInSegment = 0;
@@ -1811,9 +1786,9 @@ export default function ReviewScreen() {
 
   // The next backlog page is read while fewer than three cards remain in the selected segment, once
   // per cursor; a failed read is not retried automatically (the empty deck offers "Show more"
-  // instead). Today stops asking once every moment overlapping today is loaded.
+  // instead).
   const autoLoadedCursor = useRef<string | null>(null);
-  const segmentWantsPage = deckSources.length < 3 && (deckSegment === "earlier" || !deckTodayCovered);
+  const segmentWantsPage = deckSources.length < 3;
   const deckNextCursor = segmentWantsPage ? reviewBacklog?.nextCursor ?? null : null;
   useEffect(() => {
     if (!deckNextCursor || reviewBacklogLoading || autoLoadedCursor.current === deckNextCursor) return;

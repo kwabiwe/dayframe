@@ -3,7 +3,7 @@ import { REVIEW_BULK_SKIP_AGE_MS } from "./reviewBulkSkip";
 import {
   formatReviewDeckSegmentCount,
   legacyEntryMoment,
-  mergeReviewDeckChronology,
+  orderReviewDeckChronology,
   parseReviewDeckSegmentParam,
   reviewDeckOlderThanWeek,
   reviewDeckSegmentAccessibilityLabel,
@@ -13,7 +13,6 @@ import {
   reviewDeckSegmentFramedCopy,
   reviewDeckSegmentView,
   reviewDeckToday,
-  reviewDeckTodayCovered,
   reviewItemMoment,
   switchReviewDeckSegment
 } from "./reviewDeckSegments";
@@ -95,64 +94,59 @@ describe("reviewDeckSegmentFor (overlaps today, as the server's todayCount and t
   });
 });
 
-describe("mergeReviewDeckChronology (item 5: legacy entries in date order)", () => {
+describe("orderReviewDeckChronology (item 5: one date order)", () => {
   const at = (day: number, hour: number) => new Date(2026, 9, day, hour).getTime();
   type Dated = { id: string; at: number };
   const startOf = { review: (item: Dated) => item.at, legacy: (entry: Dated) => entry.at };
+  const ids = (sources: Array<{ value: Dated }>) => sources.map((source) => source.value.id);
 
   it("places each legacy entry among the review items by when it began, newest first", () => {
     const reviews = [{ id: "r1", at: at(14, 9) }, { id: "r2", at: at(13, 9) }, { id: "r3", at: at(10, 9) }];
     const legacy = [{ id: "old", at: at(1, 9) }, { id: "mid", at: at(12, 9) }, { id: "new", at: at(14, 12) }];
-    expect(mergeReviewDeckChronology(reviews, legacy, startOf).map((source) => source.value.id))
-      .toEqual(["new", "r1", "r2", "mid", "r3", "old"]);
+    expect(ids(orderReviewDeckChronology(reviews, legacy, startOf))).toEqual(["new", "r1", "r2", "mid", "r3", "old"]);
   });
 
-  it("keeps the review items in the order they came in, and a tie puts the review item first", () => {
-    // The review items' own order is never changed, even when it is not strictly by time.
-    const unordered = [{ id: "b", at: at(13, 9) }, { id: "a", at: at(14, 9) }];
-    expect(mergeReviewDeckChronology(unordered, [], startOf).map((source) => source.value.id)).toEqual(["b", "a"]);
-    const reviews = [{ id: "a", at: at(14, 9) }, { id: "b", at: at(13, 9) }];
+  it("sorts review items that arrive newest-created first (the bootstrap and cache path) by when they began (Codex r1)", () => {
+    // The bootstrap lists 5 Oct before 13 Oct because the 5 Oct row was created later.
+    const reviews = [{ id: "oct5", at: at(5, 9) }, { id: "oct13", at: at(13, 9) }];
+    const legacy = [{ id: "oct12", at: at(12, 9) }];
+    expect(ids(orderReviewDeckChronology(reviews, legacy, startOf))).toEqual(["oct13", "oct12", "oct5"]);
+    expect(ids(orderReviewDeckChronology(reviews, [], startOf))).toEqual(["oct13", "oct5"]);
+  });
+
+  it("keeps a review item before a legacy entry on a tie, and the incoming order among equals", () => {
+    const reviews = [{ id: "b", at: at(13, 9) }, { id: "a", at: at(13, 9) }];
     const legacy = [{ id: "tie", at: at(13, 9) }];
-    expect(mergeReviewDeckChronology(reviews, legacy, startOf).map((source) => source.value.id)).toEqual(["a", "b", "tie"]);
+    expect(ids(orderReviewDeckChronology(reviews, legacy, startOf))).toEqual(["b", "a", "tie"]);
   });
 
-  it("puts a legacy entry without a usable start last", () => {
-    expect(mergeReviewDeckChronology([{ id: "r", at: at(1, 9) }], [{ id: "x", at: Number.NaN }], startOf).map((source) => source.kind))
+  it("puts a source without a usable start last", () => {
+    expect(orderReviewDeckChronology([{ id: "r", at: at(1, 9) }], [{ id: "x", at: Number.NaN }], startOf).map((source) => source.kind))
       .toEqual(["review", "legacy"]);
   });
 });
 
 describe("reviewDeckSegmentCounts", () => {
   it("counts each segment from the deck once the whole backlog is loaded", () => {
-    expect(reviewDeckSegmentCounts({ today: 3, earlier: 9, backlogComplete: true, todayCovered: false, serverRemaining: null }))
+    expect(reviewDeckSegmentCounts({ today: 3, earlier: 9, backlogComplete: true }))
       .toEqual({ today: { value: 3, exact: true }, earlier: { value: 9, exact: true } });
   });
 
-  it("derives Earlier from the server's exact total once Today is covered", () => {
-    expect(reviewDeckSegmentCounts({ today: 3, earlier: 97, backlogComplete: false, todayCovered: true, serverRemaining: 340 }))
-      .toEqual({ today: { value: 3, exact: true }, earlier: { value: 337, exact: true } });
+  it("marks both counts \"at least\" while pages are still to load (Codex r1)", () => {
+    expect(reviewDeckSegmentCounts({ today: 0, earlier: 97, backlogComplete: false }))
+      .toEqual({ today: { value: 0, exact: false }, earlier: { value: 97, exact: false } });
   });
 
-  it("never claims fewer than the loaded cards", () => {
-    expect(reviewDeckSegmentCounts({ today: 3, earlier: 97, backlogComplete: false, todayCovered: true, serverRemaining: 50 }).earlier)
-      .toEqual({ value: 97, exact: true });
-  });
-
-  it("marks counts \"at least\" while pages are still to load", () => {
-    expect(reviewDeckSegmentCounts({ today: 3, earlier: 97, backlogComplete: false, todayCovered: false, serverRemaining: 340 }))
-      .toEqual({ today: { value: 3, exact: false }, earlier: { value: 97, exact: false } });
-    expect(reviewDeckSegmentCounts({ today: 3, earlier: 97, backlogComplete: false, todayCovered: true, serverRemaining: null }).earlier)
-      .toEqual({ value: 97, exact: false });
-  });
-});
-
-describe("reviewDeckTodayCovered", () => {
-  const today = reviewDeckToday(new Date(2026, 9, 14, 15).getTime());
-  it("is covered by a complete backlog, or loaded pages that reach a week before today", () => {
-    expect(reviewDeckTodayCovered({ backlogComplete: true, oldestLoadedStartMs: Number.NaN, today })).toBe(true);
-    expect(reviewDeckTodayCovered({ backlogComplete: false, oldestLoadedStartMs: today.startMs - REVIEW_BULK_SKIP_AGE_MS - 1, today })).toBe(true);
-    expect(reviewDeckTodayCovered({ backlogComplete: false, oldestLoadedStartMs: today.startMs - REVIEW_BULK_SKIP_AGE_MS, today })).toBe(false);
-    expect(reviewDeckTodayCovered({ backlogComplete: false, oldestLoadedStartMs: Number.NaN, today })).toBe(false);
+  it("never treats Today as complete just because loaded pages reach far back (Codex r1)", () => {
+    // Started 1 Oct with no end, created today: Today by when it was detected, yet it sorts by its
+    // start, behind a week of older pages. Only the whole backlog proves Today is empty.
+    const today = reviewDeckToday(new Date(2026, 9, 14, 15).getTime());
+    const late = window(local(1, 9), null, local(14, 10));
+    expect(reviewDeckSegmentFor(late, today)).toBe("today");
+    const counts = reviewDeckSegmentCounts({ today: 0, earlier: 100, backlogComplete: false });
+    expect(counts.today.exact).toBe(false);
+    expect(reviewDeckSegmentView({ selected: "today", selectedCards: 0, otherCards: 100, selectedCount: counts.today, allFinished: false }))
+      .toBe("waiting");
   });
 });
 
@@ -193,6 +187,11 @@ describe("reviewDeckSegmentView", () => {
   it("shows \"All framed\" only when both segments are empty", () => {
     expect(reviewDeckSegmentView({ selected: "today", selectedCards: 0, otherCards: 0, selectedCount: exact(0), allFinished: true })).toBe("finished");
     expect(reviewDeckSegmentView({ selected: "today", selectedCards: 0, otherCards: 9, selectedCount: exact(0), allFinished: false })).toBe("segment_framed");
+  });
+
+  it("never says a segment is framed while its exact count is above zero (Codex r1)", () => {
+    // 240 earlier moments are open on the server, none loaded yet: keep waiting (and Show more).
+    expect(reviewDeckSegmentView({ selected: "earlier", selectedCards: 0, otherCards: 3, selectedCount: exact(240), allFinished: false })).toBe("waiting");
   });
 
   it("shows \"Today is framed\" only when Today is certainly empty", () => {

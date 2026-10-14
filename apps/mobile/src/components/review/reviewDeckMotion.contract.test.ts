@@ -51,9 +51,9 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
     expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
-    // Since the Today · Earlier segments (14 Oct 2026) the server's exact total, less what this
-    // iPhone has decided, feeds the segment counts; "N of M" never drops below the deck itself.
-    expect(screen).toContain("serverRemaining: reviewCountIsExact ? Math.max(0, totalNeedsReview - locallyDecidedCount) : null");
+    // Since the Today · Earlier segments (14 Oct 2026) each segment counts its own cards (exact once
+    // the whole backlog is loaded); "N of M" never drops below the deck itself.
+    expect(screen).toContain("backlogComplete: deckBacklogComplete");
     expect(screen).toContain("remaining: Math.max(segmentCounts[deckSegment].value, deckRemaining),");
     expect(screen).toContain('today: deckSegment === "today" ? deckRemaining : deckSegmentSources.today.length,');
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
