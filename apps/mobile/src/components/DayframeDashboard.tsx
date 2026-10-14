@@ -1,4 +1,4 @@
-import { clearLocaleDateFormats, currentTimeZoneId } from "@/lib/localeDateFormat";
+import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
 import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
@@ -3494,7 +3494,7 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
 
 /** Today's eyebrow (Blocks prototype): weekday, day and month, without the year. */
 function formatEyebrowDay(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     weekday: "long",
     month: "long",
     day: "numeric"

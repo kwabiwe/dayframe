@@ -50,6 +50,7 @@ import { DAYFRAME_BLOCKS, contrastRatio } from "@dayframe/shared";
 import { ActivityIcon } from "../icons/DayframeIcon";
 import { playHaptic } from "../../lib/haptics";
 import { reportFilterApplyLabel, reportFilterSections } from "../../lib/reportsBlocks";
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 
 export function ReportFiltersSheet({
   rootHosted = false,
@@ -271,7 +272,7 @@ export function ReportDateSheet({
   const result = reportDraftResult(draft, nowMs);
   const highlight = reportDraftHighlight(draft, nowMs);
   const readable = (key: string) =>
-    parseLocalDate(key)!.toLocaleDateString(undefined, {
+    formatLocaleDate(parseLocalDate(key)!, {
       day: "numeric",
       month: "short",
       year: "numeric",

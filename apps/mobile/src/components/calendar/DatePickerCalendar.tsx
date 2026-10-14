@@ -13,6 +13,7 @@ import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
 import { MOBILE_MOTION } from "@/lib/motion";
 import type { MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT } from "../../lib/mobileTypography";
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 
 export function CalendarGlyph({
   kind,
@@ -132,7 +133,7 @@ export function DatePickerCalendar({
           numberOfLines={1}
           style={[s.month, { color: theme.textPrimary }]}
         >
-          {current.toLocaleDateString(undefined, {
+          {formatLocaleDate(current, {
             month: "long",
             year: "numeric",
           })}
@@ -199,7 +200,7 @@ export function DatePickerCalendar({
                       key={cell.key}
                       testID={`calendar-${outgoing ? "outgoing-" : ""}day-${cell.key}`}
                       accessibilityRole="button"
-                      accessibilityLabel={`${cell.date.toLocaleDateString(undefined, { dateStyle: "full" })}${cell.meaning ? `, ${cell.meaning}` : ""}`}
+                      accessibilityLabel={`${formatLocaleDate(cell.date, { dateStyle: "full" })}${cell.meaning ? `, ${cell.meaning}` : ""}`}
                       accessibilityState={{
                         disabled: outgoing || cell.disabled,
                         selected: cell.selected,

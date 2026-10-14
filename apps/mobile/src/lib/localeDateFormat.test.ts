@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { clearLocaleDateFormats, formatLocaleDate } from "./localeDateFormat";
+import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "./localeDateFormat";
 
 describe("formatLocaleDate", () => {
   const date = new Date(2026, 9, 12, 18, 45);
@@ -52,6 +52,20 @@ describe("formatLocaleDate", () => {
       clearLocaleDateFormats();
       const tuesdayMidnight = new Date(2026, 9, 13, 0, 0);
       expect(formatLocaleDate(tuesdayMidnight, { weekday: "long" })).toBe(tuesdayMidnight.toLocaleDateString(undefined, { weekday: "long" }));
+    } finally {
+      process.env.TZ = original;
+      clearLocaleDateFormats();
+    }
+  });
+
+  it("follows a zone change with a different UTC offset at once, without waiting for the 30 s recheck", () => {
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "Europe/London";
+      const now = Date.parse("2026-08-14T12:00:00Z");
+      expect(currentTimeZoneId(now)).toBe("Europe/London");
+      process.env.TZ = "America/New_York";
+      expect(currentTimeZoneId(now + 1_000)).toBe("America/New_York");
     } finally {
       process.env.TZ = original;
       clearLocaleDateFormats();

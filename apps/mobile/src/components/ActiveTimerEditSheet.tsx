@@ -110,6 +110,7 @@ import {
   type PendingDescriptionSelectionSync,
   type TimeEntrySheetTagSessionEvent
 } from "@/lib/timeEntrySheetTagSession";
+import { formatLocaleDate } from "../lib/localeDateFormat";
 
 const HISTORICAL_SUGGESTION_LIMIT = 12;
 const HISTORICAL_OVERLAY_MAX_HEIGHT = 384;
@@ -3081,7 +3082,7 @@ function HashtagSuggestionRow({
 
 function formatPickerDate(date: Date) {
   if (isToday(date)) return "Today";
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     weekday: "short",
     month: "short",
     day: "numeric"
@@ -3155,7 +3156,7 @@ const ACTIVITY_CHIP_GAP = 8;
 /** "WEDNESDAY 7 OCTOBER" (in the device's language and order), the eyebrow of a stopped block's sheet. */
 function formatSheetDay(date: Date) {
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" }).replace(",", "").toLocaleUpperCase();
+  return formatLocaleDate(date, { day: "numeric", month: "long", weekday: "long" }).replace(",", "").toLocaleUpperCase();
 }
 
 // The prototype's sheet head and action row (design/blocks/ios.html .sheet-head, .sheet-actions).

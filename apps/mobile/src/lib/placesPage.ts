@@ -1,4 +1,5 @@
 import { placeRoleLabel, placeSecondaryName, type PlaceRole } from "@dayframe/shared";
+import { formatLocaleDate } from "./localeDateFormat";
 
 type PagePlace = {
   name: string;
@@ -39,7 +40,7 @@ export function learnedPlaceSubtitle(input: { visitCount: number; distinctDayCou
   const lastSeen = new Date(input.lastSeenAt);
   const seen = Number.isNaN(lastSeen.getTime())
     ? "recently"
-    : lastSeen.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    : formatLocaleDate(lastSeen, { day: "numeric", month: "short" });
   return `${visits} on ${days} · last seen ${seen}`;
 }
 
