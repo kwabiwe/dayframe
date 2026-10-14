@@ -38,13 +38,16 @@ function instant(value: string | null | undefined) {
  * overnight sleep that ends this morning stays under Today; everything else is Earlier.
  */
 export function reviewDeckSegmentFor(moment: ReviewDeckMoment, today: ReviewDeckDay): ReviewDeckSegment {
+  return reviewMomentOverlapsDay(moment, today) ? "today" : "earlier";
+}
+
+/** Whether a moment overlaps a local day (half-open), by the server's `todayCount` rule. */
+export function reviewMomentOverlapsDay(moment: ReviewDeckMoment, day: ReviewDeckDay) {
   const start = instant(moment.startedAt);
   const stop = instant(moment.stoppedAt);
-  if (Number.isFinite(start) && Number.isFinite(stop)) {
-    return start < today.endMs && stop > today.startMs ? "today" : "earlier";
-  }
+  if (Number.isFinite(start) && Number.isFinite(stop)) return start < day.endMs && stop > day.startMs;
   const detected = instant(moment.detectedAt);
-  return Number.isFinite(detected) && detected >= today.startMs && detected < today.endMs ? "today" : "earlier";
+  return Number.isFinite(detected) && detected >= day.startMs && detected < day.endMs;
 }
 
 /** A Review item's moment: its suggested window, else when it was created. */
@@ -70,6 +73,30 @@ export function reviewDeckMomentStartMs(moment: ReviewDeckMoment) {
   if (Number.isFinite(start)) return start;
   const detected = instant(moment.detectedAt);
   return Number.isFinite(detected) ? detected : Number.NaN;
+}
+
+/**
+ * Quick win (a): the cached deck shown before any backlog read (offline) in the backlog's own order,
+ * newest suggested start first (`coalesce(suggested_started_at, created_at) desc, id desc`), instead
+ * of the bootstrap's newest-created-first.
+ */
+export function orderReviewItemsByStart<T extends {
+  id: string;
+  suggestedStartedAt: string | null;
+  suggestedStoppedAt: string | null;
+  createdAt?: string | null;
+}>(items: readonly T[]): T[] {
+  const key = (item: T) => {
+    const start = instant(item.suggestedStartedAt);
+    if (Number.isFinite(start)) return start;
+    const created = instant(item.createdAt);
+    return Number.isFinite(created) ? created : Number.NEGATIVE_INFINITY;
+  };
+  return [...items].sort((left, right) => {
+    const difference = key(right) - key(left);
+    if (difference) return difference;
+    return left.id === right.id ? 0 : left.id > right.id ? -1 : 1;
+  });
 }
 
 /** An Earlier card that started more than 7 days ago (the bulk skip's line and Location's evidence retention). */

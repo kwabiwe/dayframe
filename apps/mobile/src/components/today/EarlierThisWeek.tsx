@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import Svg, { Path, Rect } from "react-native-svg";
 import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { EarlierDay } from "../../lib/earlierThisWeek";
 import { shortDuration } from "../../lib/earlierThisWeek";
@@ -9,16 +10,20 @@ import { spokenDuration } from "./todayBlocksLayout";
 
 /**
  * "Earlier this week" (Blocks prototype): one row per earlier day with a 24-hour mini ribbon and
- * the day's total. Tapping a day opens it in Calendar. Re-renders only when the days change (the
+ * the day's total. A day with open Review moments shows a small hatched count chip (14 Oct 2026).
+ * Tapping a day opens it in Calendar. Re-renders only when the days or the counts change (the
  * Dashboard rebuilds them on the per-minute clock).
  */
 export const EarlierThisWeek = memo(function EarlierThisWeek({
   days,
   onOpenDay,
+  reviewCounts,
   theme,
 }: {
   days: readonly EarlierDay[];
   onOpenDay: (dayKey: string) => void;
+  /** Open Review moments per day (`earlierDayReviewCounts`); a day without any has no chip. */
+  reviewCounts?: ReadonlyMap<string, number>;
   theme: MobileTheme;
 }) {
   return (
@@ -30,10 +35,16 @@ export const EarlierThisWeek = memo(function EarlierThisWeek({
         <Text {...mobileTextProps("metadata")} style={[styles.caption, { color: theme.textMuted }]}>Tap a day</Text>
       </View>
       <View style={[styles.list, { backgroundColor: theme.surface }]}>
-        {days.map((day) => (
+        {days.map((day) => {
+          const reviewCount = reviewCounts?.get(day.dayKey) ?? 0;
+          return (
           <Pressable
             accessibilityHint="Opens this day in Calendar"
-            accessibilityLabel={`${day.spokenDate}, ${day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing framed"}`}
+            accessibilityLabel={[
+              day.spokenDate,
+              day.totalSeconds ? spokenDuration(day.totalSeconds) : "nothing framed",
+              reviewCount ? `${reviewCount} ${reviewCount === 1 ? "moment" : "moments"} to review` : null,
+            ].filter(Boolean).join(", ")}
             accessibilityRole="button"
             key={day.dayKey}
             onPress={() => onOpenDay(day.dayKey)}
@@ -59,15 +70,34 @@ export const EarlierThisWeek = memo(function EarlierThisWeek({
                 />
               ))}
             </View>
+            {reviewCount ? (
+              <View style={[styles.chip, { backgroundColor: theme.surfaceMuted }]} testID={`earlier-day-review-${day.dayKey}`}>
+                <HatchGlyph color={theme.textSecondary} />
+                <Text {...mobileTextProps("numeric")} numberOfLines={1} style={[styles.chipText, { color: theme.textPrimary }]}>
+                  {reviewCount}
+                </Text>
+              </View>
+            ) : null}
             <Text {...mobileTextProps("numeric")} numberOfLines={1} style={[styles.total, { color: theme.textSecondary }]}>
               {shortDuration(day.totalSeconds)}
             </Text>
           </Pressable>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
 });
+
+/** A 10-point hatched square: the same "needs review" hatch as the ribbon and Calendar suggestions. */
+function HatchGlyph({ color }: { color: string }) {
+  return (
+    <Svg height={10} viewBox="0 0 10 10" width={10}>
+      <Rect fill="none" height={9} rx={2.5} stroke={color} strokeWidth={1} width={9} x={0.5} y={0.5} />
+      <Path d="M-1 6 L4 11 M-1 1 L9 11 M3 -1 L11 7" stroke={color} strokeWidth={1.2} />
+    </Svg>
+  );
+}
 
 const styles = StyleSheet.create({
   section: { gap: 10 },
@@ -83,4 +113,6 @@ const styles = StyleSheet.create({
   ribbon: { borderRadius: 4, flex: 1, height: 12, overflow: "hidden" },
   segment: { borderRadius: 3, bottom: 0, minWidth: 2, position: "absolute", top: 0 },
   total: { fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "700", minWidth: 58, textAlign: "right" },
+  chip: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, flexDirection: "row", gap: 4, height: 20, paddingHorizontal: 7 },
+  chipText: { fontSize: 11, fontVariant: ["tabular-nums"], fontWeight: "700" },
 });

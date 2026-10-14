@@ -67,6 +67,22 @@ export type TodayReviewPresentation = {
   daySections: readonly TodayActivitySection[];
 };
 
+/**
+ * The Today nudge's split (owner decision 14 Oct 2026): how many open moments overlap today (the
+ * server's `todayCount`, less local decisions) and how many are from earlier days. Only when both
+ * counts are exact; otherwise null and the nudge says no split. `segment` is the Review segment the
+ * nudge opens: Today when it has moments, otherwise Earlier.
+ */
+export function todayReviewNudgeSplit(
+  global: { value: number | null; exact: boolean } | null | undefined,
+  today: { value: number | null; exact: boolean } | null | undefined
+): { today: number; earlier: number; segment: "today" | "earlier" } | null {
+  if (!global?.exact || !today?.exact || global.value === null || today.value === null) return null;
+  const todayCount = Math.min(today.value, global.value);
+  const earlier = Math.max(0, global.value - todayCount);
+  return { today: todayCount, earlier, segment: todayCount > 0 ? "today" : "earlier" };
+}
+
 export type TodayReviewProjectionInput = {
   ownerKey: string;
   snapshotOwnerKey: string | null;

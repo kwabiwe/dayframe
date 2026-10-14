@@ -12,6 +12,7 @@ vi.mock("react-native", () => ({
   View: "View",
 }));
 vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
+vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path", Rect: "Rect" }));
 
 import type { EarlierDay } from "../../lib/earlierThisWeek";
 import { EarlierThisWeek } from "./EarlierThisWeek";
@@ -55,5 +56,29 @@ describe("EarlierThisWeek", () => {
 
     act(() => first.props.onPress());
     expect(onOpenDay).toHaveBeenCalledWith("2026-10-06");
+  });
+
+  it("adds a hatched count chip to a day with open Review moments, and says so to VoiceOver", () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <EarlierThisWeek
+          days={[day("2026-10-12", 0), day("2026-10-11", 3600)]}
+          onOpenDay={vi.fn()}
+          reviewCounts={new Map([["2026-10-12", 2]])}
+          theme={theme}
+        />,
+      );
+    });
+    const row = tree.root.findByProps({ testID: "earlier-day-2026-10-12" });
+    expect(row.props.accessibilityLabel).toBe("Tuesday 6 October, nothing framed, 2 moments to review");
+    const chip = tree.root.findByProps({ testID: "earlier-day-review-2026-10-12" });
+    expect(chip.findAllByType("Text" as never).map((node) => node.props.children)).toEqual([2]);
+    expect(chip.findAllByType("Svg" as never)).toHaveLength(1);
+    // A neutral chip: the muted surface, not an activity or coral colour.
+    expect(chip.props.style[1]).toEqual({ backgroundColor: "#202838" });
+    // A day without open moments has no chip and an unchanged label.
+    expect(tree.root.findAllByProps({ testID: "earlier-day-review-2026-10-11" })).toHaveLength(0);
+    expect(tree.root.findByProps({ testID: "earlier-day-2026-10-11" }).props.accessibilityLabel).toBe("Tuesday 6 October, 1 hour");
   });
 });
