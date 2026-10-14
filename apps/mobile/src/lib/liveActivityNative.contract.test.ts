@@ -98,6 +98,16 @@ describe("native Live Activity presentation contract", () => {
     // A Start the server did not leave running (placed late, or same moment as a block) ends its Activity.
     expect(shortcuts).toMatch(/if let delivery = await DayframeShortcutDirectEventClient\.submitStart\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)[\s\S]*?if !delivery\.runsNow, let activityId \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
     expect(directClient).toContain("runsNow: payload.startOutcome == nil");
+    // A Stop records its moment before delivery and before reading Activities; a Start whose Activity
+    // appeared later ends it (Codex r7 on #403).
+    const ordinaryStop = shortcuts.slice(
+      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
+    );
+    expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeGreaterThan(-1);
+    expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeLessThan(ordinaryStop.indexOf("DayframeShortcutDirectEventClient.submit(event)"));
+    expect(shortcuts).toMatch(/if let activityId, stoppedAfter\(event\) \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(storage).toContain("enum DayframeShortcutStopMoments");
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");
     expect(storage).toContain("var userId: String? = nil");

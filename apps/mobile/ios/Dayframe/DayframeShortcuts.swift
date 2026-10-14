@@ -169,6 +169,10 @@ private enum DayframeShortcutPerformer {
           startedAt: event.occurredAt
         )?.activityId
       }
+      // A Shortcut Stop that ran after this Start may have looked for Activities before this one existed.
+      if let activityId, stoppedAfter(event) {
+        _ = await DayframeLiveActivityController.stop(activityIds: [activityId])
+      }
       // Delivered now, as Stop is; the queued copy stays only when this fails (the app delivers it later,
       // and the server dedupes by its client event ID and places a late Start in its own slot).
       if let delivery = await DayframeShortcutDirectEventClient.submitStart(event) {
@@ -181,6 +185,9 @@ private enum DayframeShortcutPerformer {
     case .stopRunning:
       guard queued else {
         return
+      }
+      if let userId = event.userId, let workspaceId = event.workspaceId {
+        DayframeShortcutStopMoments.record(userId: userId, workspaceId: workspaceId, at: event.occurredAt)
       }
       // Ending the Activity can terminate the background intent process on current iOS before a
       // concurrent URLSession request completes, so deliver first, then end the Activities of blocks that
@@ -222,6 +229,18 @@ private enum DayframeShortcutPerformer {
       }
     }
   }
+}
+
+/// Whether a Shortcut Stop for this event's account ran at or after it.
+private func stoppedAfter(_ event: DayframeShortcutEvent) -> Bool {
+  guard
+    let userId = event.userId,
+    let workspaceId = event.workspaceId,
+    let stoppedAt = DayframeShortcutStopMoments.latest(userId: userId, workspaceId: workspaceId)
+  else {
+    return false
+  }
+  return stoppedAt >= event.occurredAt
 }
 
 struct DayframeShortcutEvent: Codable {
