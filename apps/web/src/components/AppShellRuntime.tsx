@@ -95,10 +95,10 @@ type RuntimeContext = {
   updateActiveDetails: (draft: TimerDraft) => Promise<MutationOutcome>;
   updateActiveEntryFromCalendar: (input: ActiveEntryCompactMutationInput) => Promise<MutationOutcome>;
   /**
-   * Moves the running block's start. With `expectedEntryId` (a block a Start just put on screen, by
-   * its optimistic or server id) it edits only that block, never one that has replaced it.
+   * Moves the running block's start. With `expectedEntryIds` (the ids a Start just reported for its
+   * block: optimistic and server) it edits only that block, never one that has replaced it.
    */
-  updateActiveStartTime: (startedAt: string, options?: { expectedEntryId?: string }) => Promise<MutationOutcome>;
+  updateActiveStartTime: (startedAt: string, options?: { expectedEntryIds?: readonly string[] }) => Promise<MutationOutcome>;
   /** The blocks as the runtime has them now (newer than the last render after an awaited mutation). */
   readShellData: () => BootstrapData | null;
 };
@@ -555,10 +555,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
         // Accepted: record which real block the optimistic one on screen is, from the POST itself.
         const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
+        const serverId = typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined;
         const snapshot = dataRef.current;
         const optimisticId = snapshot?.activeEntry?.id ?? null;
-        if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || typeof result?.timeEntryId !== "string") return;
-        startHandoffsRef.current.set(optimisticId, result.timeEntryId);
+        if (!snapshot || !optimisticId || !isOptimisticTimerId(optimisticId) || !serverId) return serverId;
+        startHandoffsRef.current.set(optimisticId, serverId);
         // Edits made while the POST was in flight had no block to go to: save them to it now,
         // before anything queued behind this Start (a switch, a Stop) runs. A switch asked for
         // meanwhile has already put its own draft on screen, so its capture of this block's edits
@@ -568,6 +569,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           ?? { draft: draftRef.current, base: timerDraftForEntry(snapshot.activeEntry) };
         outgoingDraftsRef.current.delete(optimisticId);
         await saveActiveDetails(snapshot, pending.draft, pending.base);
+        return serverId;
       },
       refresh: async () => {
         await refresh({ force: true });
@@ -770,18 +772,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const updateActiveStartTime = useCallback(async (
     startedAt: string,
-    options: { expectedEntryId?: string } = {}
+    options: { expectedEntryIds?: readonly string[] } = {}
   ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
-    const expected = options.expectedEntryId;
-    if (expected) {
-      // Still on screen at that id, or handed off to the server id the Start was accepted as.
+    const expected = options.expectedEntryIds;
+    if (expected?.length) {
+      // The running block must be the Start's own, at its optimistic id, the server id the Start
+      // reported, or the server id it was handed off to (the hand-off map may already be cleared
+      // once the real block has rendered; Codex r6 on #418).
       const activeId = snapshot.activeEntry.id;
-      const handedOff = serverEntryId(expected);
-      if (activeId !== expected && (handedOff === null || activeId !== handedOff)) {
-        return { ok: false, error: "That block is no longer running." };
-      }
+      const ownId = expected.includes(activeId) || expected.some((id) => serverEntryId(id) === activeId);
+      if (!ownId) return { ok: false, error: "That block is no longer running." };
     }
     const draft = draftRef.current;
     const base = baseFor(snapshot.activeEntry);

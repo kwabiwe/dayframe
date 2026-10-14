@@ -47,7 +47,7 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
     // One path (owner): the ordinary Start, then the same start-time edit as "Set to last stop time".
     expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "", description: "Review notes", tagNames: [] });
     // Only the block this Start created.
-    expect(runtime.updateActiveStartTime).toHaveBeenCalledWith(iso(10, 15), { expectedEntryId: "optimistic-timer:1" });
+    expect(runtime.updateActiveStartTime).toHaveBeenCalledWith(iso(10, 15), { expectedEntryIds: ["optimistic-timer:1", "run"] });
   });
 
   it("keeps the block at now and says so if a newer block has ended since", async () => {
@@ -116,7 +116,7 @@ function startsBlock(view: ReturnType<typeof render>, entries: TimeEntryRow[]) {
     const next = { ...(runtime.shellData as BootstrapData), activeEntry: running, entries: [...entries, running] };
     // The runtime has the new blocks before React renders them (readShellData), as after a refresh.
     (runtime.readShellData as ReturnType<typeof vi.fn>).mockImplementation(() => next);
-    return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: null, startedEntryId: "optimistic-timer:1", switchedAt: running.startedAt };
+    return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: null, startedEntryId: "optimistic-timer:1", startedServerId: "run", switchedAt: running.startedAt };
   });
 }
 

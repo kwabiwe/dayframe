@@ -424,7 +424,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       return;
     }
     // Only the block this Start created: never one that replaced it meanwhile (Codex r5).
-    await updateActiveStartTime(offer.startedAt, { expectedEntryId: outcome.startedEntryId });
+    await updateActiveStartTime(offer.startedAt, {
+      expectedEntryIds: [outcome.startedEntryId, ...(outcome.startedServerId ? [outcome.startedServerId] : [])]
+    });
   }
 
   function announce(label: string, swatch?: CSSProperties) {

@@ -123,6 +123,20 @@ describe("Start at the previous end through the real runtime", () => {
     expect(server.patches).toHaveLength(0);
   });
 
+  it("still edits its own block after another refresh has rendered it at its server id (Codex r6)", async () => {
+    const { chip, runtime } = await openBar();
+    // Hold the chip Start's refresh; a second refresh renders started-1 (the hand-off map is then
+    // cleared); releasing the first must still move started-1's start.
+    server.holdBootstrap = true;
+    await act(async () => { fireEvent.click(chip); });
+    await waitFor(() => expect(server.release).not.toBeNull());
+    await act(async () => { await runtime().refresh({ force: true }); });
+    await act(async () => { server.release!(); });
+    await waitFor(() => expect(server.patches).toHaveLength(1));
+    expect(server.patches[0].url).toBe("/api/time-entries/started-1");
+    expect(server.active?.startedAt).toBe(server.finished[0].stoppedAt);
+  });
+
   it("never backdates a block that replaced this Start's own", async () => {
     const { chip, runtime } = await openBar();
     // The chip Start's refresh is held; meanwhile its block is discarded and another started.
