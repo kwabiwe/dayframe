@@ -721,3 +721,80 @@ describe("Codex r3 on #402: the Create form's colour palette sits above the phon
     expect(surfaceOf(form).contains(palette)).toBe(false);
   });
 });
+
+describe("Codex r4 on #402: a saving Create and focus survive quick starts and block changes", () => {
+  const blockB = () => running({ id: "block-b", categoryId: "focus", categoryName: "Focus", description: "", tagNames: [] });
+
+  async function pendingCreate(options: Parameters<typeof renderBar>[0] = {}) {
+    let settle: (outcome: unknown) => void = () => undefined;
+    const createCategory = vi.fn(() => new Promise((resolve) => { settle = resolve; }));
+    const rendered = renderBar({ ...options, createCategory });
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    await user.click(within(form).getByRole("button", { name: "Create" }));
+    return { ...rendered, form, settle: (outcome: unknown) => settle(outcome), user };
+  }
+
+  it("a quick start pressed while a Create is saving keeps the form; a late failure shows with the name", async () => {
+    const { calls, form, settle, switchTo, user } = await pendingCreate();
+    await user.click(screen.getByRole("button", { name: "Start Focus (1)" }));
+    expect(calls.startTimer).toHaveBeenCalled();
+    // The started block arrives: a new scope, while the Create is still saving.
+    await switchTo(blockB());
+    expect(screen.getByRole("dialog", { name: "Create new activity" })).toBe(form);
+    expect(surfaceOf(form).className).toContain("is-open");
+    await act(async () => settle({ ok: false, error: "Unable to create this activity." }));
+    expect(within(form).getByRole("alert").textContent).toBe("Unable to create this activity.");
+    expect((within(form).getByLabelText("Name") as HTMLInputElement).value).toBe("Reading");
+    expect(surfaceOf(form).className).toContain("is-open");
+  });
+
+  it("a quick start pressed while a Create is saving never gives the new block the new activity", async () => {
+    const { calls, settle, switchTo, user } = await pendingCreate();
+    await user.click(screen.getByRole("button", { name: "Start Focus (1)" }));
+    await switchTo(blockB());
+    calls.setTimerDraft.mockClear();
+    await act(async () => settle({ ok: true, category: { id: "reading", name: "Reading", color: "teal", isPinned: false } }));
+    expect(calls.setTimerDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Activity: Focus" })).not.toBeNull();
+  });
+
+  it("a new block with a colour swatch focused hands focus back to the activity block, not the page", async () => {
+    const { switchTo } = renderBar({ activeEntry: running() });
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    await user.click(within(form).getByRole("button", { name: /Choose activity colour/ }));
+    const palette = await screen.findByRole("listbox", { name: "Activity colour" });
+    await waitFor(() => expect(palette.contains(document.activeElement)).toBe(true));
+    await switchTo(blockB());
+    expect(screen.queryByRole("listbox", { name: "Activity colour" })).toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+  });
+
+  it("a new block hands focus to the Tags button even when the closing list had already dropped it", async () => {
+    const { switchTo } = renderBar({ activeEntry: running() });
+    const { search } = await openTags();
+    // A browser blurs a focused field when its list turns inert; focus is then on the page.
+    act(() => search.blur());
+    expect(document.activeElement).toBe(document.body);
+    await switchTo(blockB());
+    expect(document.activeElement).toBe(tagsButton());
+  });
+
+  it("a second press on either button closes its list with focus on that button", async () => {
+    renderBar();
+    const { user } = await openActivities();
+    await user.click(activityButton());
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+    await openTags(user);
+    await user.click(tagsButton());
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
+  });
+});

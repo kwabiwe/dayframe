@@ -124,6 +124,7 @@ export function InlineTagInput({
   // The block (`completionScope`) the Tags button's list was opened for: its picks, Create and
   // Backspace only ever change that block (Codex r3 on #402).
   const [pickerScope, setPickerScope] = useState<string | null>(null);
+  const [pickerScopeHandoff, setPickerScopeHandoff] = useState(0);
   const [anchorWidth, setAnchorWidth] = useState(0);
   const [tagWidths, setTagWidths] = useState<number[]>([]);
   const [pickerPosition, setPickerPosition] = useState<CSSProperties | null>(null);
@@ -176,7 +177,9 @@ export function InlineTagInput({
     setTypedMention(null);
     setDismissedTagStart(null);
     setInteractionScope(null);
-    // A new block closes the Tags button's list and clears its search, as it closes the typed lists.
+    // A new block closes the Tags button's list and clears its search, as it closes the typed lists;
+    // focus that was in it is handed back to the button below.
+    if (pickerOpen) setPickerScopeHandoff((count) => count + 1);
     setPickerOpen(false);
     setPickerQuery("");
     setPickerScope(null);
@@ -262,11 +265,15 @@ export function InlineTagInput({
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
 
-  // A new block closed the Tags button's list: focus that was in it goes back to the button.
-  useEffect(() => {
+  // A new block closed the Tags button's list: focus that was in it (or that the now inert list
+  // dropped on the page) goes back to the button, before the browser paints.
+  useLayoutEffect(() => {
+    if (!pickerScopeHandoff) return;
     const activeElement = document.activeElement;
-    if (activeElement && pickerPanelRef.current?.contains(activeElement)) pickerTriggerRef.current?.focus();
-  }, [completionScope]);
+    if (!activeElement || activeElement === document.body || pickerPanelRef.current?.contains(activeElement)) {
+      pickerTriggerRef.current?.focus();
+    }
+  }, [pickerScopeHandoff]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -643,7 +650,8 @@ export function InlineTagInput({
           className={`inline-tag-picker-trigger${effectivePickerOpen ? " is-open" : ""}`}
           disabled={disabled}
           onClick={() => {
-            if (effectivePickerOpen) closePicker(false);
+            // Focus ends on the button (WebKit leaves a clicked button unfocused).
+            if (effectivePickerOpen) closePicker(true);
             else openPicker();
           }}
           ref={pickerTriggerRef}

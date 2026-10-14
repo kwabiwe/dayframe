@@ -343,7 +343,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   function startQuickAction(action: QuickAction) {
     const draft = quickActionTimerDraft(action.categoryId);
-    setCategoryMenuOpen(false);
+    // The Activities list is not closed here: a press on a quick start is a press outside it (which
+    // closes it unless a Create is saving), and the new block's scope closes it the same way, so a
+    // saving Create keeps its form and outcome (Codex r4 on #402). Keys 1–6 never run while it is open.
     setSuggestionsOpen(false);
     const swatch = action.categoryId ? blockStyle(action.color, action.label) : undefined;
     // The Start decides when it runs (a queued Start can run after earlier ones settle): asking for

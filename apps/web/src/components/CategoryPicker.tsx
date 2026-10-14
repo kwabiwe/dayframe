@@ -176,7 +176,9 @@ export function CategoryPicker({
   useEffect(() => {
     if (seenScopeRef.current === scope) return;
     seenScopeRef.current = scope;
-    if (open && !isCreateBusy) closePicker(Boolean(menuRef.current?.contains(document.activeElement)));
+    // Focus anywhere in the list or the Create form's colour palette (its own body portal) goes
+    // back to the block, never to the page (Codex r4 on #402).
+    if (open && !isCreateBusy) closePicker(pickerContains(document.activeElement));
   });
 
   useEffect(() => {
@@ -747,7 +749,8 @@ export function CategoryPicker({
           id={triggerId}
           onClick={() => {
             if (open) {
-              if (!isCreateBusy) closePicker(false);
+              // A second press closes the list with focus on the block (WebKit leaves a clicked button unfocused).
+              if (!isCreateBusy) closePicker(true);
               return;
             }
             openPicker();
