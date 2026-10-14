@@ -38,6 +38,22 @@ describe("location refresh gate for the durable-work snapshot", () => {
     expect(refresh).toHaveBeenCalledTimes(2);
   });
 
+  it("defers a foreground timer that fires after the app left, and never refreshes twice on return", () => {
+    let active = true;
+    const refresh = vi.fn();
+    const gate = createLocationRefreshGate({ isActive: () => active, refresh });
+    gate.locationChanged();
+    active = false;
+    vi.advanceTimersByTime(LOCATION_REFRESH_COALESCE_MS);
+    expect(refresh).not.toHaveBeenCalled();
+    active = true;
+    gate.locationChanged();
+    gate.appBecameActive();
+    expect(refresh).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(LOCATION_REFRESH_COALESCE_MS);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
   it("drops a pending refresh when disposed", () => {
     const refresh = vi.fn();
     const gate = createLocationRefreshGate({ isActive: () => true, refresh });
