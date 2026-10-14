@@ -45,12 +45,13 @@ describe("Today's \"Where today went\" wiring", () => {
   });
 
   it("marks commits from a load, a recovered refresh and the cached launch as quiet, so the strip never fades in on them", () => {
-    expect(dashboard).toContain("latestData.current = bootstrap;\n      loadedBootstrap.current = bootstrap;\n      setData(bootstrap);");
-    expect(dashboard).toContain("latestData.current = next;\n    loadedBootstrap.current = next;\n    setData(next);");
-    expect(dashboard).toContain("latestData.current = filtered;\n        loadedBootstrap.current = filtered;\n        setData(filtered);");
+    // Each is marked before it is published (publishDashboardData writes latestData and state together).
+    expect(dashboard).toContain("loadedBootstrap.current = bootstrap;\n      publishDashboardData(bootstrap);");
+    expect(dashboard).toContain("loadedBootstrap.current = next;\n    publishDashboardData(next);");
+    expect(dashboard).toContain("loadedBootstrap.current = filtered;\n        publishDashboardData(filtered);");
     expect(dashboard).toContain("const todayWhereWentQuiet = data !== previousTodayData.current && data === loadedBootstrap.current;");
     // Mutations (Start, Stop, edits) never mark the commit quiet.
-    const mutation = body("    dashboardMutationRevision.current += 1;\n    const next = filterPendingDeletedTimeEntries(", "setData(next);");
+    const mutation = body("    dashboardMutationRevision.current += 1;\n    const next = filterPendingDeletedTimeEntries(", "publishDashboardData(next);");
     expect(mutation).not.toContain("loadedBootstrap");
   });
 

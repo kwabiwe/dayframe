@@ -182,9 +182,10 @@ describe("Today rows swipe-to-delete contract", () => {
       startSource.indexOf("await startTaskWith(")
     );
     expect(canonicalStartSource).toContain("blankTimerStartGate.current.bindEntry(");
-    expect(stateUpdateSource.indexOf("latestData.current = next")).toBeLessThan(
-      stateUpdateSource.indexOf("setData(next)")
-    );
+    expect(stateUpdateSource).toContain("publishDashboardData(next)");
+    const publishSource = dashboardSource.slice(dashboardSource.indexOf("function publishDashboardData("));
+    expect(publishSource.indexOf("latestData.current = next")).toBeGreaterThan(-1);
+    expect(publishSource.indexOf("latestData.current = next")).toBeLessThan(publishSource.indexOf("setData(next)"));
   });
 
   it("invalidates deletion and dependent optimistic work when start permanently fails", () => {
