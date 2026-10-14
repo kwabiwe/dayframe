@@ -4,6 +4,7 @@ import {
   formatReviewDeckSegmentCount,
   legacyEntryMoment,
   orderReviewDeckChronology,
+  orderReviewItemsByStart,
   parseReviewDeckSegmentParam,
   reviewDeckOlderThanWeek,
   reviewDeckSegmentAccessibilityLabel,
@@ -247,5 +248,18 @@ describe("reviewDeckOlderThanWeek", () => {
     expect(reviewDeckOlderThanWeek(window(new Date(now - REVIEW_BULK_SKIP_AGE_MS + 60_000).toISOString(), local(7, 16)), now)).toBe(false);
     expect(reviewDeckOlderThanWeek(window(null, null, local(1, 9)), now)).toBe(true);
     expect(reviewDeckOlderThanWeek(window(null, null, null), now)).toBe(false);
+  });
+});
+
+describe("orderReviewItemsByStart (quick win a: the offline deck)", () => {
+  it("orders by suggested start, newest first, like the backlog, not by when the row was created", () => {
+    const items = [
+      { id: "a", suggestedStartedAt: local(5, 9), suggestedStoppedAt: local(5, 10), createdAt: local(14, 8) },
+      { id: "b", suggestedStartedAt: local(13, 21), suggestedStoppedAt: local(13, 22), createdAt: local(13, 22) },
+      { id: "c", suggestedStartedAt: null, suggestedStoppedAt: null, createdAt: local(12, 9) },
+      { id: "d", suggestedStartedAt: local(13, 21), suggestedStoppedAt: local(13, 23), createdAt: local(13, 23) }
+    ];
+    // Equal starts break by id, newest id first (the server's `id desc`).
+    expect(orderReviewItemsByStart(items).map((item) => item.id)).toEqual(["d", "b", "c", "a"]);
   });
 });

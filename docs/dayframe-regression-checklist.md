@@ -159,7 +159,12 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   review" when the count is inexact (including more than 100 open items before
   the presentation loads, or a cached zero after a presentation read failed
   online while the bootstrap reports items). Logging the last item in Review
-  and returning to Today removes the card at once, online or offline. It opens Review. Goals that are not
+  and returning to Today removes the card at once, online or offline. With exact counts it adds
+  the split under the title ("3 today · 9 earlier"; "All from earlier days" / "From an earlier
+  day" with nothing today; "All from today" / "From today" with nothing earlier), keeps its colours
+  from today's moments, and opens Review on Today when today has moments and on Earlier otherwise
+  (no split: Today). Earlier this week rows of days with open Review moments show a small hatched
+  count chip before the total, and VoiceOver adds "2 moments to review" to the row. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
   donut or logged/covered summary; earlier days show their total in "Earlier this week".
 - Verify capped/partial/cache/offline states never claim zero or complete

@@ -93,7 +93,7 @@ import {
 } from "../lib/blocksToastCopy";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
-import { buildEarlierThisWeek, EARLIER_DAYS } from "@/lib/earlierThisWeek";
+import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/lib/earlierThisWeek";
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import {
   ActivityNameTakenError,
@@ -1702,6 +1702,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
+  // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
+  const earlierDayReviewCountMap = useMemo(
+    () => earlierDayReviewCounts(earlierDays, (calendarData?.reviewItems ?? []).filter(isOpenReviewItem)),
+    [calendarData?.reviewItems, earlierDays]
+  );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       data: calendarData,
@@ -3060,7 +3066,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
                 <TodayReviewNudge
                   fallback={todayReviewFallback}
-                  onOpenReview={() => router.push("/review")}
+                  // Opens the Review segment that has moments: Today when it has any, else Earlier.
+                  onOpenReview={(segment) => segment
+                    ? router.push({ pathname: "/review", params: { segment } })
+                    : router.push("/review")}
                   reduceMotion={reduceMotion}
                   theme={theme}
                 />
@@ -3092,7 +3101,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             // The footer is not a FlatList cell, so it owns its own layout transition and moves
             // with the rows above it rather than popping (motion.md).
             <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.todayListFooter}>
-              <EarlierThisWeek days={earlierDays} onOpenDay={openCalendarDay} theme={theme} />
+              <EarlierThisWeek days={earlierDays} onOpenDay={openCalendarDay} reviewCounts={earlierDayReviewCountMap} theme={theme} />
             </Reanimated.View>
           )}
           ItemSeparatorComponent={() => <View style={styles.historyDayGap} />}

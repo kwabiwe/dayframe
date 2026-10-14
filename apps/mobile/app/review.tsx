@@ -93,6 +93,7 @@ import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/rev
 import {
   legacyEntryMoment,
   orderReviewDeckChronology,
+  orderReviewItemsByStart,
   otherReviewDeckSegment,
   parseReviewDeckSegmentParam,
   reviewDeckMomentStartMs,
@@ -953,7 +954,9 @@ export default function ReviewScreen() {
     [data?.reviewItems]
   );
   const openReviewItems = useMemo(() => {
-    if (!reviewBacklog) return cachedOpenReviewItems;
+    // Before any backlog read (offline), the cached deck takes the backlog's own order: newest
+    // suggested start first, not the bootstrap's newest-created first.
+    if (!reviewBacklog) return orderReviewItemsByStart(cachedOpenReviewItems);
     const byId = new Map(cachedOpenReviewItems.map((item) => [item.id, item]));
     const ordered = reviewBacklog.reviewItemIds.flatMap((id) => {
       const item = byId.get(id);

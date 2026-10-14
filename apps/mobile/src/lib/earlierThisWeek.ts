@@ -1,6 +1,7 @@
 import { formatLocaleDate } from "./localeDateFormat";
 import { formatDuration } from "@dayframe/shared";
 import type { HistoryDaySection } from "./historyPresentation";
+import { reviewItemMoment, reviewMomentOverlapsDay } from "./reviewDeckSegments";
 
 /**
  * "Earlier this week" on Today (Blocks prototype): the six days before today, newest first, each
@@ -69,4 +70,32 @@ export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], now
       segments,
     };
   });
+}
+
+/**
+ * Quick win (b, 14 Oct 2026): how many open Review moments each earlier day has, for the hatched
+ * count chip on its row. A moment counts on every day it overlaps (as the Calendar draws it), so
+ * overnight sleep counts on both nights' days. Days are local and DST-exact.
+ */
+export function earlierDayReviewCounts(
+  days: readonly Pick<EarlierDay, "dayKey" | "date">[],
+  reviewItems: readonly {
+    suggestedStartedAt: string | null;
+    suggestedStoppedAt: string | null;
+    createdAt?: string | null;
+  }[]
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  if (!reviewItems.length) return counts;
+  for (const day of days) {
+    const start = new Date(day.date);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 1);
+    const bounds = { startMs: start.getTime(), endMs: end.getTime() };
+    let count = 0;
+    for (const item of reviewItems) if (reviewMomentOverlapsDay(reviewItemMoment(item), bounds)) count += 1;
+    if (count) counts.set(day.dayKey, count);
+  }
+  return counts;
 }
