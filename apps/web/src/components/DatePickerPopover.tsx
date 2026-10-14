@@ -26,6 +26,8 @@ export function DatePickerPopover({
   disabled = false,
   iconOnly = false,
   label,
+  max,
+  min,
   onChange,
   onOpenChange,
   open: controlledOpen,
@@ -45,6 +47,10 @@ export function DatePickerPopover({
   disabled?: boolean;
   iconOnly?: boolean;
   label: string;
+  /** The last choosable day, inclusive (finished blocks: today, owner decision D2). */
+  max?: string | null;
+  /** The first choosable day, inclusive. */
+  min?: string | null;
   onChange: (date: string) => void;
   onOpenChange?: (open: boolean) => void;
   open?: boolean;
@@ -172,10 +178,10 @@ export function DatePickerPopover({
       role="dialog"
       style={portal ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
     >
-      <Button compact onClick={() => choose(today)} disabled={disabled}>
+      <Button compact onClick={() => choose(today)} disabled={disabled || Boolean((max && today > max) || (min && today < min))}>
         Today
       </Button>
-      <DayframeCalendar onChange={choose} onViewChange={setView} value={value} view={view} />
+      <DayframeCalendar max={max} min={min} onChange={choose} onViewChange={setView} today={today} value={value} view={view} />
     </section>
   );
 

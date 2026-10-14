@@ -1002,6 +1002,7 @@ function ManualEntryDialog({
               compact
               id="manual-entry-start"
               label="Start"
+              max={dateKey(new Date())}
               name="startedAt"
               defaultValue={defaults.start}
               onChange={setStartedAtDraft}
@@ -1015,6 +1016,7 @@ function ManualEntryDialog({
               dayOffset={finishDayOffset}
               id="manual-entry-finish"
               label="Finish"
+              max={dateKey(new Date())}
               name="stoppedAt"
               defaultValue={defaults.finish}
               onChange={setStoppedAtDraft}
