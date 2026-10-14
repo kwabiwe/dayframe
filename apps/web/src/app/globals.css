@@ -7675,7 +7675,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .location-evidence-provider-state.is-error {
-  background: color-mix(in srgb, var(--danger-soft) 94%, transparent);
+  /* Opaque: the map's tiles under it can be white (Codex r2 on #425). */
+  background: var(--danger-soft);
   color: var(--danger-text);
 }
 

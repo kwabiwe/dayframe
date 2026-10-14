@@ -113,5 +113,7 @@ describe("globals.css custom properties", () => {
 describe("soft danger fill keeps its text readable (Codex r1 on #425)", () => {
   it("is a 10% danger tint over the muted surface", () => {
     expect(css).toContain("--danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface-muted));");
+    // Over the map, opaque: its tiles can be white.
+    expect(css).not.toContain("var(--danger-soft) 94%");
   });
 });
