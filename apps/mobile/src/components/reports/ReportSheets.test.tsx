@@ -62,6 +62,15 @@ vi.mock(
   async () => import("../../lib/datePickerCalendar"),
 );
 vi.mock("@/lib/motion", () => ({ MOBILE_MOTION: { control: 140 } }));
+vi.mock("@/components/DateSheet", async () => import("../DateSheet"));
+vi.mock(
+  "@/components/sheets/BottomSheetShell",
+  async () => import("../sheets/BottomSheetShell"),
+);
+vi.mock(
+  "@/lib/mobileTypography",
+  async () => import("../../lib/mobileTypography"),
+);
 vi.mock("@/components/SwipeDismissSheet", async () => {
   // @ts-expect-error The renderer peer React is installed at the repository root.
   const React = await import("../../../../../node_modules/react/index.js");
@@ -104,12 +113,11 @@ vi.mock("react-native-reanimated", () => ({
   useAnimatedStyle: (factory: () => unknown) => factory(),
   withTiming: (value: number) => value,
 }));
+import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
-  REPORT_SHEET_NATIVE_TAB_OFFSET,
-  ReportDateSheet,
-  ReportFiltersSheet,
-  reportSheetBottomGeometry,
-} from "./ReportSheets";
+  BOTTOM_SHEET_NATIVE_TAB_OFFSET as REPORT_SHEET_NATIVE_TAB_OFFSET,
+  bottomSheetGeometry as reportSheetBottomGeometry,
+} from "../sheets/BottomSheetShell";
 import { DatePickerCalendar } from "../calendar/DatePickerCalendar";
 import { DAYFRAME_THEME } from "@dayframe/shared";
 const theme = { borderStrong: "strong-handle" } as never;
@@ -321,7 +329,7 @@ describe("Reports sheet interactions", () => {
       expect(button("Select all activities")).toBeDefined();
       expect(button("Cancel Activities")).toBeUndefined();
       const scroll = tree.root.findByProps({
-        testID: "report-filter-options-scroll",
+        testID: "report-filter-sheet-scroll",
       });
       expect(scroll.props.showsVerticalScrollIndicator).toBe(false);
       expect(scroll.findAllByType("TextInput" as never)).toHaveLength(0);
@@ -534,12 +542,10 @@ describe("Reports sheet interactions", () => {
       });
       expect(preset.findByType("View" as never).props.style[0].height).toBe(34);
       expect(button("Done").props.disabled).toBe(false);
-      expect(button("Done").props.style[0]).toMatchObject({
-        alignSelf: "center",
-        width: 160,
-        maxWidth: "60%",
-      });
-      expect(button("Done").props.style[1]).toMatchObject({ marginTop: 16 });
+      // Full-width neutral Done (date-picker audit, 14 Oct 2026), not the old centred 160-point pill.
+      expect(button("Done").props.style[0]).toMatchObject({ alignSelf: "stretch" });
+      expect(button("Done").props.style[0].width).toBeUndefined();
+      expect(button("Done").props.style[1]).toMatchObject({ marginTop: 16, marginHorizontal: 10 });
       expect(button("Next month").props.disabled).toBe(true);
       expect(button(day(10)).props.disabled).toBe(true);
       expect(button(day(9)).props.style).toMatchObject({
@@ -719,5 +725,89 @@ describe("Neutral selection in Reports sheets and the date picker (UIA-010/011/0
     } finally {
       mockLayout.windowHeight = previous;
     }
+  });
+});
+
+describe("Shared DateSheet (date-picker audit, 14 Oct 2026)", () => {
+  const dark = { ...DAYFRAME_THEME.dark, mode: "dark", pressed: "x" } as unknown as Record<string, string>;
+  const styleOf = (node: { props: Record<string, unknown> }) =>
+    Object.assign({}, ...([node.props.style].flat(3).filter(Boolean) as object[])) as Record<string, unknown>;
+  it("picks a single date as a draft with Today · Yesterday, and Done saves it once", async () => {
+    const { DateSheet } = await import("../DateSheet");
+    const onDone = vi.fn(() => true);
+    const onDismissed = vi.fn();
+    const onSelectDay = vi.fn();
+    const segment = vi.fn();
+    const { tree, button, press } = mount(
+      <DateSheet
+        presentationId={4}
+        theme={dark as never}
+        reduceMotion
+        eyebrow="START"
+        title="Choose a date"
+        segments={[
+          { key: "today", label: "Today", selected: false, onPress: segment },
+          { key: "yesterday", label: "Yesterday", selected: true, onPress: segment },
+        ]}
+        caption="Tuesday 15 September 2026"
+        month="2026-09-15"
+        onMonthChange={vi.fn()}
+        start="2026-09-15"
+        end="2026-09-15"
+        today="2026-09-16"
+        maxDate="2026-09-16"
+        onSelectDay={onSelectDay}
+        onDone={onDone}
+        onDismissed={onDismissed}
+      />,
+    );
+    const texts = tree.root.findAllByType("Text" as never).map((node) => node.props.children);
+    expect(texts).toEqual(expect.arrayContaining(["START", "Choose a date", "Tuesday 15 September 2026"]));
+    expect(tree.root.findByProps({ testID: "date-sheet" })).toBeTruthy();
+    // The selected segment and Done are neutral (textPrimary), never coral.
+    expect(styleOf(button("Yesterday").findByType("View" as never)).backgroundColor).toBe(dark.textPrimary);
+    expect(styleOf(button("Done")).backgroundColor).toBe(dark.textPrimary);
+    expect(button("Done").props.style[0]).toMatchObject({ alignSelf: "stretch" });
+    // A day past maxDate cannot be picked; a day before it only changes the draft.
+    const day = (n: number) => new Date(2026, 8, n).toLocaleDateString(undefined, { dateStyle: "full" });
+    expect(button(day(17)).props.disabled).toBe(true);
+    press(day(14));
+    expect(onSelectDay).toHaveBeenCalledOnce();
+    expect(onDone).not.toHaveBeenCalled();
+    press("Today");
+    expect(segment).toHaveBeenCalledOnce();
+    press("Done");
+    press("Done");
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDismissed).toHaveBeenCalledWith(4);
+  });
+
+  it("keeps the sheet when Done is refused and disables Done while the draft is invalid", async () => {
+    const { DateSheet } = await import("../DateSheet");
+    const onDone = vi.fn(() => false);
+    const onDismissed = vi.fn();
+    const props = {
+      presentationId: 5,
+      theme: dark as never,
+      reduceMotion: true,
+      eyebrow: "END",
+      title: "Choose a date",
+      caption: "Pick a day",
+      month: "2026-09-15",
+      onMonthChange: vi.fn(),
+      start: null,
+      end: null,
+      today: "2026-09-16",
+      onSelectDay: vi.fn(),
+      onDone,
+      onDismissed,
+    };
+    const disabled = mount(<DateSheet {...props} doneDisabled />);
+    expect(disabled.button("Done").props.disabled).toBe(true);
+    act(() => disabled.tree.unmount());
+    const refused = mount(<DateSheet {...props} />);
+    refused.press("Done");
+    expect(onDone).toHaveBeenCalledOnce();
+    expect(onDismissed).not.toHaveBeenCalled();
   });
 });

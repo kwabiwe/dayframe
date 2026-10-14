@@ -1,0 +1,348 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Dimensions,
+  Keyboard,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type KeyboardEvent,
+  useWindowDimensions,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { FullWindowOverlay } from "react-native-screens";
+import {
+  SwipeDismissSheet,
+  type SwipeDismissSheetHandle,
+} from "@/components/SwipeDismissSheet";
+import { keyboardInsetFromScreenY } from "@/lib/editSheetKeyboard";
+import type { MobileTheme } from "@/lib/mobileTheme";
+import { REPORT_TEXT_CAP } from "@/lib/reportsTypography";
+import { DAYFRAME_BLOCKS } from "@dayframe/shared";
+
+type BottomSheetOutcome = "commit" | "discard";
+// Expo Router's iOS NativeTabs host reserves a 52-point presentation strip
+// below React sheet content, even though window/screen metrics remain full-size.
+// A root-hosted overlay is attached to UIWindow, so it can safely settle through
+// that strip while the tab bar is hidden by the root portal owner.
+export const BOTTOM_SHEET_NATIVE_TAB_OFFSET = 52;
+
+export function bottomSheetGeometry({
+  rootHosted,
+  safeAreaBottom,
+  keyboardInset,
+}: {
+  rootHosted: boolean;
+  safeAreaBottom: number;
+  keyboardInset: number;
+}) {
+  // NativeTabs reserves its 52-point control plus the device safe area. The
+  // root-hosted sheet crosses both once, then restores the safe area as
+  // content padding so the action remains above the home indicator.
+  const nativeTabsBottomOffset = rootHosted
+    ? BOTTOM_SHEET_NATIVE_TAB_OFFSET + safeAreaBottom
+    : 0;
+  const contentBottomInset =
+    keyboardInset > 0 ? keyboardInset + 16 : Math.max(10, safeAreaBottom);
+
+  return {
+    backdropBottom: nativeTabsBottomOffset === 0 ? 0 : -nativeTabsBottomOffset,
+    contentPaddingBottom: contentBottomInset + nativeTabsBottomOffset,
+    nativeTabsBottomOffset,
+    surfaceTranslateY: nativeTabsBottomOffset,
+  };
+}
+
+/**
+ * The Blocks bottom sheet shared by the Reports filter sheet and `DateSheet`: one
+ * `SwipeDismissSheet` only the handle drags, root-hosted (`FullWindowOverlay`) or in a Modal, with
+ * the action pinned at the bottom. The action commits once (`onApply` returning false keeps the
+ * sheet); a swipe, the backdrop or escape discards.
+ */
+export function BottomSheetShell({
+  rootHosted,
+  title,
+  calendarLayout = false,
+  presentationId,
+  theme,
+  reduceMotion,
+  onApply,
+  onDismissed,
+  action,
+  disabled = false,
+  fixedHeader,
+  testID,
+  children,
+}: {
+  rootHosted: boolean;
+  title: string;
+  calendarLayout?: boolean;
+  presentationId: number;
+  theme: MobileTheme;
+  reduceMotion: boolean;
+  onApply: () => boolean | void;
+  onDismissed: (presentationId: number) => void;
+  action: string;
+  disabled?: boolean;
+  fixedHeader?: React.ReactNode;
+  /** The sheet's test id; its body, scroll and action are `${testID}-body`, `-scroll`, `-action`. */
+  testID: string;
+  children: React.ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const compactCalendarLayout = calendarLayout && windowHeight <= 700;
+  const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const outcome = useRef<{
+    presentationId: number;
+    value: BottomSheetOutcome;
+  } | null>(null);
+  const [closing, setClosing] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const bottomGeometry = bottomSheetGeometry({
+    rootHosted,
+    safeAreaBottom: insets.bottom,
+    keyboardInset,
+  });
+
+  useEffect(() => {
+    outcome.current = null;
+    setClosing(false);
+  }, [presentationId]);
+
+  useEffect(() => {
+    const update = (event: KeyboardEvent) => {
+      setKeyboardInset(
+        keyboardInsetFromScreenY({
+          keyboardScreenY: event.endCoordinates.screenY,
+          screenHeight: Dimensions.get("screen").height,
+          windowHeight,
+        }),
+      );
+    };
+    const change = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
+      update,
+    );
+    const show =
+      Platform.OS === "ios"
+        ? Keyboard.addListener("keyboardDidShow", update)
+        : null;
+    const hide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardInset(0);
+      },
+    );
+    const didHide =
+      Platform.OS === "ios"
+        ? Keyboard.addListener("keyboardDidHide", () => setKeyboardInset(0))
+        : null;
+    return () => {
+      change.remove();
+      show?.remove();
+      hide.remove();
+      didHide?.remove();
+    };
+  }, [windowHeight]);
+
+  const claimDiscard = useCallback(() => {
+    if (outcome.current?.presentationId !== presentationId)
+      outcome.current = null;
+    if (outcome.current) return outcome.current.value === "discard";
+    outcome.current = { presentationId, value: "discard" };
+    setClosing(true);
+    return true;
+  }, [presentationId]);
+
+  const requestCommit = () => {
+    if (outcome.current?.presentationId !== presentationId)
+      outcome.current = null;
+    if (disabled || outcome.current) return;
+    if (onApply() === false) return;
+    outcome.current = { presentationId, value: "commit" };
+    setClosing(true);
+    sheetRef.current?.dismiss();
+  };
+
+  const requestDiscard = () => sheetRef.current?.dismiss();
+
+  const overlay = (
+    <View style={s.modal}>
+      <SwipeDismissSheet
+        ref={sheetRef}
+        accessibilityLabel={title}
+        backdropAccessibilityLabel={`Close ${title}`}
+        backdropStyle={[
+          StyleSheet.absoluteFill,
+          {
+            backgroundColor: theme.overlay,
+            bottom: bottomGeometry.backdropBottom,
+          },
+        ]}
+        disabled={closing}
+        gestureHandleOnly
+        handleStyle={[s.handle, { backgroundColor: theme.borderStrong }]}
+        keyboardInset={keyboardInset}
+        onDismiss={(dismissedPresentationId) => {
+          if (dismissedPresentationId !== presentationId) return;
+          onDismissed(dismissedPresentationId);
+        }}
+        onDismissStart={(dismissedPresentationId) => {
+          if (dismissedPresentationId !== presentationId) return false;
+          return outcome.current?.presentationId === presentationId
+            ? true
+            : claimDiscard();
+        }}
+        onGestureStart={() => Keyboard.dismiss()}
+        presentationId={presentationId}
+        reduceMotion={reduceMotion}
+        style={[
+          s.sheet,
+          calendarLayout ? s.dateSheet : s.filterSheet,
+          compactCalendarLayout ? s.compactDateSheet : null,
+          {
+            backgroundColor: theme.surfaceRaised,
+            paddingBottom: bottomGeometry.contentPaddingBottom,
+          },
+        ]}
+        testID={testID}
+        translateYOffset={bottomGeometry.surfaceTranslateY}
+        visible
+      >
+        <View
+          accessibilityElementsHidden={closing}
+          importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
+          pointerEvents={closing ? "none" : "auto"}
+          style={[
+            s.sheetContent,
+            calendarLayout ? s.dateSheetContent : s.filterSheetContent,
+            compactCalendarLayout ? s.compactDateSheetContent : null,
+          ]}
+        >
+          {fixedHeader}
+          {calendarLayout ? (
+            <View
+              testID={`${testID}-body`}
+              style={[
+                s.body,
+                s.dateBody,
+                compactCalendarLayout ? s.compactDateBody : null,
+              ]}
+            >
+              {children}
+            </View>
+          ) : (
+            <ScrollView
+              testID={`${testID}-scroll`}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets
+              contentContainerStyle={s.body}
+              showsVerticalScrollIndicator={false}
+              style={s.scroll}
+            >
+              {children}
+            </ScrollView>
+          )}
+          <Pressable
+            testID={`${testID}-action`}
+            accessibilityRole="button"
+            accessibilityLabel={action}
+            accessibilityState={{ disabled: disabled || closing }}
+            disabled={disabled || closing}
+            onPress={requestCommit}
+            style={[
+              s.apply,
+              calendarLayout ? s.dateAction : s.filterAction,
+              compactCalendarLayout ? s.compactDateAction : null,
+              {
+                // The filter's "Show N activities" is the sheet's primary action (coral); a
+                // date sheet's Done is neutral (UIA-026). Both are full width.
+                backgroundColor:
+                  disabled || closing
+                    ? theme.surfaceMuted
+                    : calendarLayout
+                      ? theme.textPrimary
+                      : theme.accent,
+              },
+            ]}
+          >
+            <Text
+              maxFontSizeMultiplier={REPORT_TEXT_CAP.control}
+              style={[
+                s.actionText,
+                {
+                  color:
+                    disabled || closing
+                      ? theme.textSecondary
+                      : calendarLayout
+                        ? theme.background
+                        : theme.onAccent,
+                },
+              ]}
+            >
+              {action}
+            </Text>
+          </Pressable>
+        </View>
+      </SwipeDismissSheet>
+    </View>
+  );
+
+  return rootHosted ? (
+    <FullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      {overlay}
+    </FullWindowOverlay>
+  ) : (
+    <Modal
+      transparent
+      animationType="none"
+      onRequestClose={requestDiscard}
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      visible
+    >
+      {overlay}
+    </Modal>
+  );
+}
+
+const s = StyleSheet.create({
+  modal: { flex: 1, justifyContent: "flex-end" },
+  sheet: {
+    maxHeight: "90%",
+    borderTopLeftRadius: DAYFRAME_BLOCKS.radius.sheet,
+    borderTopRightRadius: DAYFRAME_BLOCKS.radius.sheet,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  dateSheet: { maxHeight: "100%", paddingHorizontal: 6 },
+  filterSheet: { maxHeight: "100%" },
+  compactDateSheet: { paddingTop: 4 },
+  sheetContent: { flexShrink: 1, gap: 8 },
+  dateSheetContent: { flexShrink: 0 },
+  compactDateSheetContent: { gap: 4 },
+  filterSheetContent: { flexShrink: 1, minHeight: 0 },
+  handle: { width: 42, height: 5, borderRadius: 999 },
+  actionText: { fontSize: 14, fontWeight: "600" },
+  scroll: { flexShrink: 1, minHeight: 0 },
+  body: { gap: 4 },
+  dateBody: { flexShrink: 0 },
+  compactDateBody: { gap: 0 },
+  // One full-width pill: coral "Show 3 activities" on the filter sheet, a neutral Done on a date
+  // sheet (date-picker audit 14 Oct 2026: the centred 160-point Done is gone).
+  apply: {
+    alignSelf: "stretch",
+    minHeight: 48,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 12,
+  },
+  dateAction: { marginTop: 16, marginHorizontal: 10 },
+  filterAction: { alignSelf: "stretch", width: "100%", maxWidth: "100%" },
+  compactDateAction: { marginTop: 6 },
+});
