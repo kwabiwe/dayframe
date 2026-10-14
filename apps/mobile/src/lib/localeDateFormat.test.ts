@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { clearLocaleDateFormats, formatLocaleDate } from "./localeDateFormat";
+import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "./localeDateFormat";
 
 describe("formatLocaleDate", () => {
   const date = new Date(2026, 9, 12, 18, 45);
@@ -31,7 +31,7 @@ describe("formatLocaleDate", () => {
       clearLocaleDateFormats();
       formatLocaleDate(new Date(2026, 6, 1), { month: "short" });
       process.env.TZ = "Africa/Lagos";
-      // No clear: only the throttled zone re-read (30 s) separates the two zones' formatters.
+      // No clear: only the throttled zone re-read (once a second) separates the two zones' formatters.
       vi.setSystemTime(Date.now() + 31_000);
       const january = new Date(2026, 0, 1, 0, 30);
       expect(formatLocaleDate(january, { month: "short" })).toBe(january.toLocaleDateString(undefined, { month: "short" }));
@@ -52,6 +52,21 @@ describe("formatLocaleDate", () => {
       clearLocaleDateFormats();
       const tuesdayMidnight = new Date(2026, 9, 13, 0, 0);
       expect(formatLocaleDate(tuesdayMidnight, { weekday: "long" })).toBe(tuesdayMidnight.toLocaleDateString(undefined, { weekday: "long" }));
+    } finally {
+      process.env.TZ = original;
+      clearLocaleDateFormats();
+    }
+  });
+
+  it("follows a zone change within a second (Hermes caches offsets, so the zone itself is re-read)", () => {
+    const original = process.env.TZ;
+    try {
+      process.env.TZ = "Europe/London";
+      const now = Date.parse("2026-08-14T12:00:00Z");
+      expect(currentTimeZoneId(now)).toBe("Europe/London");
+      process.env.TZ = "America/New_York";
+      // Within the second it may still read the old zone; a second later it reads the new one.
+      expect(currentTimeZoneId(now + 1_001)).toBe("America/New_York");
     } finally {
       process.env.TZ = original;
       clearLocaleDateFormats();

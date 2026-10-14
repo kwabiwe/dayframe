@@ -338,6 +338,36 @@ describe("Dashboard reload after a location pass",()=>{
   expect(changed({acknowledgedCount:0,replayed:true,semanticSegmentCount:2})).toBe(true);
   expect(changed({acknowledgedCount:3,replayed:false,semanticChangeCount:0})).toBe(true);
   expect(changed({acknowledgedCount:0,replayed:false})).toBe(false);
+describe("location journal query plans (performance.md: no unbounded journal reads)",()=>{
+ const TABLES=/\b(location_evidence_journal|location_upload_outbox)\b/;
+ const plan=(sql:string)=>(db.prepare(`explain query plan ${sql}`).all() as Array<{detail:string}>).map(row=>row.detail);
+ const scans=(details:string[])=>details.filter(detail=>/^SCAN (location_evidence_journal|location_upload_outbox)\b/.test(detail));
+ it("every journal and upload-outbox statement in the store searches an index, never scans the table",async()=>{
+  const {readFileSync}=await import("node:fs");
+  const source=readFileSync(new URL("./store.ts",import.meta.url),"utf8");
+  const statements=[...source.matchAll(/(?:getFirstAsync|getAllAsync|runAsync)(?:<[^(]*?>)?\(\s*(`[^`]*`|"[^"]*")/g)]
+   .map(match=>match[1].slice(1,-1)).filter(sql=>TABLES.test(sql));
+  const templated=statements.filter(sql=>sql.includes("${"));
+  const plain=statements.filter(sql=>!sql.includes("${"));
+  // The three templated statements are checked below in their no-exclusion form; a new one must be added there.
+  expect(templated).toHaveLength(3);
+  expect(plain.length).toBeGreaterThan(15);
+  const offenders=plain.flatMap(sql=>{const found=scans(plan(sql));return found.length?[`${sql.replace(/\s+/g," ").slice(0,90)} → ${found.join("; ")}`]:[];});
+  expect(offenders).toEqual([]);
+ });
+ it("the templated upload and retention statements search indexes too",()=>{
+  const templated=[
+   `select account_key, client_batch_id, body_json, attempt_count from location_upload_outbox
+     where account_key = ? and state = 'pending' and (?=1 or next_attempt_at is null or next_attempt_at <= ?)
+     order by created_at, client_batch_id limit 1`,
+   `select evidence_json from location_evidence_journal where account_key = ? and upload_state = 'pending'
+     order by occurred_at, client_evidence_id limit ?`,
+   `delete from location_evidence_journal where client_evidence_id in (
+     select client_evidence_id from location_evidence_journal
+     where upload_state in ('acknowledged', 'rejected') and ${store.MOTION_KIND_EXPRESSION} = 1
+     order by case upload_state when 'acknowledged' then 0 else 1 end, occurred_at limit ?)`
+  ];
+  for(const sql of templated)expect(scans(plan(sql))).toEqual([]);
  });
 });
 describe("Motion & Fitness local retention",()=>{

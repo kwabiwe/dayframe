@@ -1,4 +1,4 @@
-import { clearLocaleDateFormats, currentTimeZoneId } from "@/lib/localeDateFormat";
+import { clearLocaleDateFormats, currentTimeZoneId, formatLocaleDate } from "@/lib/localeDateFormat";
 import { useAppForeground } from "@/lib/appForeground";
 import { useDashboardClockTicks, useLiveTimeInFront } from "@/lib/dashboardClock";
 import { DAYFRAME_NATIVE_TABS } from "@/lib/nativeTabs";
@@ -85,9 +85,11 @@ import {
   deletedToastAnnouncement,
   deletedToastMessage,
   startMatchesRunning,
-  switchedToastMessage,
+  switchedToastCopy,
+  toastAccessibilityText,
   toastSwatchColor,
-  undoDeleteAccessibilityLabel
+  undoDeleteAccessibilityLabel,
+  type BlocksToastCopy
 } from "../lib/blocksToastCopy";
 import { EarlierThisWeek } from "./today/EarlierThisWeek";
 import { TodayRibbonSection } from "./today/TodayRibbon";
@@ -116,6 +118,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { useShortcutStopHandoff } from "@/components/useShortcutStopHandoff";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
@@ -1367,6 +1370,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, [authState, syncHealthKitAndReload]);
 
+  // A `dayframe://action/stop` link stops the block shown as running, once timer state is loaded,
+  // through the same targeted Stop as the button (a request that waits too long, or that arrived for
+  // another account lifetime, is dropped).
+  const stopActiveTimerRef = useRef<() => Promise<boolean>>(async () => false);
+  useShortcutStopHandoff(authState === "authenticated" && data !== null, () => stopActiveTimerRef.current());
+
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
       await handleDayframeUrl(url);
@@ -1812,7 +1821,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!todayNoticeOwnerStill(noticeOwner)) return;
       const nextName = description.trim() || category?.name || "No activity";
       showTodayNotice(
-        switchedToastMessage(nextName, running, Date.now()),
+        switchedToastCopy(nextName, running, Date.now()),
         category ? toastSwatchColor({ categoryColor: category.color, categoryId: category.id, categoryName: category.name }, theme.mode) : null
       );
     });
@@ -1836,14 +1845,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       owner.workspaceId === (current?.workspace.id ?? null);
   }
 
-  function showTodayNotice(message: string, swatchColor: string | null) {
+  function showTodayNotice(copy: string | BlocksToastCopy, swatchColor: string | null) {
     if (authStateCurrent.current !== "authenticated") return;
     // The delete Undo toast holds the place: VoiceOver still hears the notice, nothing is drawn.
     if (deletionCoordinator.current?.current()?.phase === "active") {
-      AccessibilityInfo.announceForAccessibility(message);
+      AccessibilityInfo.announceForAccessibility(toastAccessibilityText(copy));
       return;
     }
-    todayNotice.show(message, swatchColor);
+    todayNotice.show(copy, swatchColor);
   }
 
   function stopFromToday() {
@@ -2339,6 +2348,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     shiftSelectedCalendarDay(weeks * 7);
   }, [shiftSelectedCalendarDay]);
 
+  stopActiveTimerRef.current = stopActiveTimer;
   async function stopActiveTimer() {
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
@@ -3228,6 +3238,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       ) : todayNotice.notice && authState === "authenticated" ? (
         <BlocksToast
           key={`notice-${todayNotice.notice.token}`}
+          accessibilityLabel={todayNotice.notice.accessibilityLabel}
+          detail={todayNotice.notice.detail}
           message={todayNotice.notice.message}
           reduceMotion={reduceMotion}
           style={styles.todayToast}
@@ -3494,7 +3506,7 @@ function entryDurationSeconds(entry: TimeEntry, now: number) {
 
 /** Today's eyebrow (Blocks prototype): weekday, day and month, without the year. */
 function formatEyebrowDay(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     weekday: "long",
     month: "long",
     day: "numeric"

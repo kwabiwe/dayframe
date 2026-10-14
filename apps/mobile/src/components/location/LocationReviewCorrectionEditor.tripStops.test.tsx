@@ -60,6 +60,7 @@ afterEach(() => {
   if (tree) act(() => tree!.unmount());
   tree = undefined;
   if (priorTz === undefined) delete process.env.TZ; else process.env.TZ = priorTz;
+  vi.useRealTimers();
 });
 
 const stop = { startedAt: "2026-08-14T09:22:00Z", stoppedAt: "2026-08-14T09:28:00Z", durationSeconds: 360, approximate: false };
@@ -107,11 +108,15 @@ describe("trip stops in mobile Location Evidence", () => {
 
   // Codex review of 52cf92b: rows were memoised on evidence only.
   it("follows a time-zone change while the evidence stays the same", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     process.env.TZ = "Europe/London";
     const evidence = fixture([stop]);
     act(() => { tree = create(editor(evidence)); });
     const london = text(stopRows()[0]);
     process.env.TZ = "America/New_York";
+    // Formats go through the cache, which re-reads the zone once a second: the next render a second
+    // later shows the new zone.
+    vi.setSystemTime(Date.now() + 1_001);
     act(() => tree!.update(editor(evidence, true)));
     const newYork = text(stopRows()[0]);
     expect(newYork).not.toBe(london);

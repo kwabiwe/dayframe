@@ -7,6 +7,7 @@ import {
 import type { MobileBootstrap, MobileReviewItem } from "./api";
 import { isLocationReviewItem } from "./review";
 import { mergeTimeEntryDialLocalDateTime } from "./timeEntryDurationDial";
+import { formatLocaleDate } from "./localeDateFormat";
 
 export type LocationReviewNewPlace = {
   name: string;
@@ -247,7 +248,7 @@ export function formatLocationReviewDateLabel(date: Date) {
   ) {
     return "Today";
   }
-  return date.toLocaleDateString(undefined, {
+  return formatLocaleDate(date, {
     weekday: "short",
     month: "short",
     day: "numeric"

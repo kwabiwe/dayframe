@@ -1,5 +1,6 @@
 import * as ExpoLinking from "expo-linking";
 import { enqueueEvent } from "./api";
+import { requestShortcutStop } from "./shortcutStopRequests";
 
 type ShortcutQuery = Record<string, string | string[] | undefined>;
 
@@ -34,11 +35,10 @@ export async function enqueueShortcutAction(
   }
 
   if (action === "action/stop") {
-    return enqueueEvent({
-      source: "shortcut",
-      type: "timer_stop",
-      rawPayload
-    });
+    // The link names no entry, and an untargeted Stop is never replayed: the Dashboard stops the block it
+    // shows as running, through its targeted Stop outbox (`shortcutStopRequests.ts`).
+    requestShortcutStop();
+    return null;
   }
 
   return null;

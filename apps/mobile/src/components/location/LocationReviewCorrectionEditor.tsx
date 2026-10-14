@@ -65,6 +65,7 @@ import {
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
 import { DayframeIcon } from "../icons/DayframeIcon";
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
 type Place = MobileBootstrap["places"][number];
@@ -1309,7 +1310,7 @@ function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
 function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   const startedAt = new Date(evidence.segment.startedAt);
   const stoppedAt = evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null;
-  const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(startedAt);
+  const date = formatLocaleDate(startedAt, { day: "numeric", month: "short" });
   const start = formatTime(evidence.segment.startedAt);
   const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
   const durationSeconds = stoppedAt ? Math.max(0, (stoppedAt.getTime() - startedAt.getTime()) / 1000) : null;
@@ -1320,7 +1321,7 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
 }
 
 function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return formatLocaleDate(new Date(value), { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
