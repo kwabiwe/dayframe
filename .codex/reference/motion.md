@@ -334,6 +334,16 @@ Block pull-to-refresh:
 - Async outcome: the Start is optimistic as always; if it fails or another Start takes over, nothing is edited. If a newer loaded block has ended since the chip appeared, the block stays at now with the bar's notice "Started now: an earlier block ends later than that, so the start wasn't moved." A rejected start edit rolls back as the start editor's does.
 - Accessibility: no motion to reduce. The chip's name is "Start from 10:15, after Write report"; it is a native button in the tab order after the description.
 
+## Entry sheet "From 10:15 · after …" (PRD D16, 14 Oct 2026)
+
+- Trigger: the running block's sheet presented with an offer (Dashboard's `previousEndOffer`); a tap on the chip.
+- Owner: none of its own. The chip is read once when the sheet hydrates and stays for that presentation, so it never appears or leaves while the sheet is up; a tap goes through the dial's `applyDialInterval`, so the start card, the dial and its arc update in the same render exactly as a dial shortcut does.
+- Entrance/update/exit: present from the sheet's first frame (part of the sheet's own entrance); a tap toggles its selected state in place (check glyph, primary text); it leaves with the sheet.
+- Surrounding layout: one 32-point row (44-point target) under the time cards; its height never changes, so the dial and actions never move after presentation.
+- Interruption: disabled while a mutation is in flight; a turn of the dial afterwards simply un-selects it. If the previous block's end has moved since the sheet opened (refresh, another device, a reconciled queued Stop), a tap or Done shows the sheet's inline error instead of moving or saving the start; nothing animates.
+- Async outcome: none — it changes the draft only; Done saves the start (a running start edit), and closing without Done keeps the block's own start.
+- Accessibility: no motion to reduce. Name "Start from 10:15, after Write report", role button, selected while applied, with a hint that Done saves it.
+
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 
 - Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The activity block and the tag button open the same Activities and Tags lists (14 Oct 2026) with the same fade; they close on a pick (Activities), Escape, Close, a second press of the button or a press outside, and add no motion of their own (no landing, no row animation when a tag is toggled or the search filters). The portalled Activities list keeps its measured position and width through its exit fade (geometry is cleared only by the next open, which measures before paint). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.

@@ -30,8 +30,14 @@ import {
   normalizeTagName,
   DAYFRAME_APP_ICONS,
   activityControlColor,
+  type PreviousEndOffer,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
+import {
+  PREVIOUS_END_CHANGED_MESSAGE,
+  draftInstantMs,
+  previousEndStillHolds
+} from "@/lib/previousEndChip";
 import { FloatingDatePicker } from "@/components/FloatingDatePicker";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
 import {
@@ -145,6 +151,12 @@ type ActiveTimerEditSheetProps = {
   onPresented?: (presentationId: number) => void;
   onApplySuggestion?: (entryId: string, suggestion: RecentActivitySuggestion) => Promise<boolean>;
   onSave?: (entryId: string, patch: TimeEntryUpdatePatch) => Promise<boolean>;
+  /**
+   * PRD D16: where today's last finished block ended, when the running block started 1 min–4 h
+   * after it. Fixed for each presentation (read when the sheet hydrates), so the chip never appears
+   * or leaves while the sheet is up.
+   */
+  previousEnd?: PreviousEndOffer | null;
   /** A stopped block's "Start again": called with the saved values once its edits are saved. */
   onStartAgain?: (values: Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames">) => void;
   onStop?: () => Promise<boolean>;
@@ -180,6 +192,7 @@ export function ActiveTimerEditSheet({
   onStartAgain,
   onStop,
   presentation,
+  previousEnd = null,
   reduceMotion,
   deleting = false,
   saving,
@@ -212,6 +225,11 @@ export function ActiveTimerEditSheet({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [sheetHeightAnimating, setSheetHeightAnimating] = useState(false);
   const [startTimeEdited, setStartTimeEdited] = useState(false);
+  const [presentedPreviousEnd, setPresentedPreviousEnd] = useState<PreviousEndOffer | null>(null);
+  const [presentedPreviousEndEntryStart, setPresentedPreviousEndEntryStart] = useState<string | null>(null);
+  const previousEndRef = useRef(previousEnd);
+  previousEndRef.current = previousEnd;
+  const previousEndEntryStartRef = useRef<string | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [datePickerDismissGuarded, setDatePickerDismissGuarded] = useState(false);
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
@@ -494,6 +512,7 @@ export function ActiveTimerEditSheet({
     presentedEntryRef.current = null;
   }
   const entry = currentEntry ?? (visible ? presentedEntryRef.current : null);
+  previousEndEntryStartRef.current = entry?.startedAt ?? null;
 
   const isRunningMode = mode === "running";
   const isEntryMode = mode === "entry";
@@ -679,6 +698,9 @@ export function ActiveTimerEditSheet({
     setPickerStartAt(startedAt);
     setDatePickerTarget("start");
     setStartTimeEdited(false);
+    // Only the running block's sheet is given one (Dashboard).
+    setPresentedPreviousEnd(previousEndRef.current);
+    setPresentedPreviousEndEntryStart(previousEndRef.current ? previousEndEntryStartRef.current : null);
     setDatePickerOpen(false);
     setValidationError(null);
     hashtagPanelProgress.setValue(0);
@@ -717,7 +739,8 @@ export function ActiveTimerEditSheet({
   // The non-scrolling sheet keeps Discard/Stop on screen only if the chips stay within their rows:
   // show the most leading chips that wrap, with All activities, into the row budget (the chosen one
   // always stays). Until every candidate is measured, show them all (the sheet is still entering).
-  const chipRowBudget = ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity];
+  // The "From 10:15 · after …" row (PRD D16) takes one activity row, so Discard/Stop stay on screen.
+  const chipRowBudget = Math.max(1, ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity] - (presentedPreviousEnd ? 1 : 0));
   const chipActivities = useMemo(() => {
     const widths = chipCandidates.map((category) => chipWidths[category.id]);
     if (chipRowWidth <= 0 || chipPillWidth <= 0 || widths.some((width) => !width)) return chipCandidates;
@@ -1368,9 +1391,18 @@ export function ActiveTimerEditSheet({
       dateText,
       timeText
     });
+    // The draft's own instant while the fields still show it (the repeated hour at a clock change).
+    const startMs = draftInstantMs({
+      dateText,
+      draftMs: draftStartMs,
+      formatDate: formatDateInput,
+      formatTime: formatTimeInput,
+      parse: () => result.timestampMs,
+      timeText
+    });
     return {
-      date: result.timestampMs === null ? null : new Date(result.timestampMs),
-      error: result.error
+      date: startMs === null ? null : new Date(startMs),
+      error: startMs === null ? result.error : null
     };
   }, [dateText, draftStartMs, timeText]);
   const parsedStop = useMemo(() => {
@@ -1379,9 +1411,18 @@ export function ActiveTimerEditSheet({
       dateText: stoppedDateText,
       timeText: stoppedTimeText
     });
+    // The draft's own end while the fields still show it, as for the start (Codex r2 on #419).
+    const endMs = draftInstantMs({
+      dateText: stoppedDateText,
+      draftMs: draftEndMs,
+      formatDate: formatDateInput,
+      formatTime: formatTimeInput,
+      parse: () => result.timestampMs,
+      timeText: stoppedTimeText
+    });
     return {
-      date: result.timestampMs === null ? null : new Date(result.timestampMs),
-      error: result.error
+      date: endMs === null ? null : new Date(endMs),
+      error: endMs === null ? result.error : null
     };
   }, [draftEndMs, stoppedDateText, stoppedTimeText]);
   const previewStartAt = datePickerOpen && datePickerTarget === "start" && pickerStartAt
@@ -1733,6 +1774,11 @@ export function ActiveTimerEditSheet({
     }
     if (isRunningMode && Date.now() - parsed.date.getTime() > TIME_ENTRY_DIAL_MAX_DURATION_MS) {
       setValidationError("A block can be no longer than 24 hours.");
+      return;
+    }
+    // A start the chip moved to the previous end saves only while that end still holds (PRD D16).
+    if (presentedPreviousEnd && parsed.date.getTime() === previousEndMs && !previousEndHolds()) {
+      setValidationError(PREVIOUS_END_CHANGED_MESSAGE);
       return;
     }
 
@@ -2107,6 +2153,30 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
+  // PRD D16: "From 10:15 · after Write report" moves the draft start to the previous block's end
+  // (saved with Done, like any start edit); pressed again it returns to the block's own start.
+  const previousEndMs = presentedPreviousEnd ? Date.parse(presentedPreviousEnd.startedAt) : Number.NaN;
+  const previousEndApplied = Number.isFinite(previousEndMs) && parsedStart.date?.getTime() === previousEndMs;
+  const previousEndHolds = () => previousEndStillHolds({
+    current: previousEndRef.current,
+    currentEntryStartedAt: entry?.startedAt,
+    presented: presentedPreviousEnd,
+    presentedEntryStartedAt: presentedPreviousEndEntryStart
+  });
+  function togglePreviousEnd() {
+    if (busy || !Number.isFinite(previousEndMs)) return;
+    const ownStart = editorSnapshot.current.startedAt ? Date.parse(editorSnapshot.current.startedAt) : Number.NaN;
+    const startMs = previousEndApplied ? ownStart : previousEndMs;
+    if (!Number.isFinite(startMs)) return;
+    // Moving to the end it offered only while that end still holds; going back always works.
+    if (!previousEndApplied && !previousEndHolds()) {
+      setValidationError(PREVIOUS_END_CHANGED_MESSAGE);
+      return;
+    }
+    dismissTransientEditingSurfaces();
+    applyDialInterval({ startMs, endMs: Date.now() });
+  }
+
   function dismissTransientEditingSurfaces() {
     cancelPendingTagFocus();
     descriptionInputRef.current?.blur();
@@ -2160,6 +2230,15 @@ export function ActiveTimerEditSheet({
   }
 
   function selectDate(date: Date) {
+    // The same day keeps the draft's exact instant (the repeated hour at a clock change; Codex r2 on
+    // #419): there is nothing to merge.
+    const ownDraftMs = datePickerTarget === "end" ? draftEndMs : draftStartMs;
+    if (formatDateInput(date) === (datePickerTarget === "end" ? stoppedDateText : dateText) && ownDraftMs > 0) {
+      setPickerStartAt(new Date(ownDraftMs));
+      closeDatePickerAfterTouch();
+      setValidationError(null);
+      return;
+    }
     if (datePickerTarget === "end") {
       const merged = mergeTimeEntryDialLocalDateTime({
         baseTimestampMs: draftEndMs,
@@ -2808,6 +2887,33 @@ export function ActiveTimerEditSheet({
                       </View>
                     )}
                   </View>
+                  {presentedPreviousEnd ? (
+                    <Pressable
+                      accessibilityHint={previousEndApplied ? "Returns the start to when this block started" : "Moves the start back to when that block ended; Done saves it"}
+                      accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ disabled: busy, selected: previousEndApplied }}
+                      disabled={busy}
+                      hitSlop={{ top: 6, bottom: 6 }}
+                      onPress={togglePreviousEnd}
+                      style={({ pressed }) => [
+                        sheetStyles.tagChip,
+                        sheetStyles.previousEndChip,
+                        { backgroundColor: theme.surfaceMuted },
+                        pressed && !busy ? styles.buttonPressed : null,
+                        busy ? styles.buttonDisabled : null
+                      ]}
+                      testID="time-entry-previous-end"
+                    >
+                      {previousEndApplied ? <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
+                      <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
+                        From {formatTimeInput(new Date(previousEndMs))} · after
+                      </Text>
+                      <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
+                        {presentedPreviousEnd.previousName}
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
@@ -3173,6 +3279,8 @@ const sheetStyles = StyleSheet.create({
   tagChipName: { flexShrink: 1, minWidth: 0 },
   // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
   tagAdd: { gap: 4 },
+  // PRD D16: one line under the time cards; only the previous block's name truncates.
+  previousEndChip: { alignSelf: "flex-start", gap: 4, marginTop: 8 },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {
