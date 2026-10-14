@@ -1,8 +1,7 @@
-import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 /**
- * Copy for the web Blocks switch toasts (UIA-209, the same wording as the iPhone's UIA-004):
- * "Switched to Work · 42m logged to Client Work" and "Already recording Deep work". Neither has
- * Undo: there is no un-switch contract.
+ * Copy for the web Blocks switch toasts, the same as the iPhone's: "Switched to Work" (owner
+ * option A, 14 Oct 2026: one line, no logged-time detail) and "Already recording Deep work".
+ * Neither has Undo: there is no un-switch contract (owner decision, 7 and 14 Oct 2026).
  */
 type ToastEntry = {
   categoryId: string | null;
@@ -17,22 +16,12 @@ export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "descrip
   return entry.description?.trim() || entry.categoryName || "No activity";
 }
 
-function compactDuration(seconds: number) {
-  return formatSharedDuration(seconds);
-}
+/** The fixed lead of a switch toast; it never truncates, only the activity name does. */
+export const SWITCHED_TOAST_LEAD = "Switched to";
 
-/**
- * "Switched to Work · 42m logged to Client Work": what is recording now, and where the time of
- * the block it replaced went. A previous block under a minute says "under a minute".
- */
-export function switchedToastMessage(
-  nextName: string,
-  previous: Pick<ToastEntry, "categoryName" | "description" | "startedAt">,
-  nowMs: number
-) {
-  const seconds = Math.max(0, (nowMs - Date.parse(previous.startedAt)) / 1000);
-  const logged = seconds < 60 ? "under a minute" : compactDuration(seconds);
-  return `Switched to ${nextName} · ${logged} logged to ${toastBlockName(previous)}`;
+/** "Switched to Work": the full sentence, as announced and as the toast's accessible text. */
+export function switchedToastMessage(nextName: string) {
+  return `${SWITCHED_TOAST_LEAD} ${nextName}`;
 }
 
 export function alreadyRecordingToastMessage(active: Pick<ToastEntry, "categoryName" | "description">) {
