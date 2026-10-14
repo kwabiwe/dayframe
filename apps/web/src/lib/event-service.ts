@@ -512,7 +512,7 @@ async function processActivityEventWithClient(
   duplicate?: boolean;
   updatedExistingTimeEntry?: boolean;
   stopOutcome?: "stopped" | "superseded" | "ignored_unscoped";
-  startOutcome?: "recorded_completed";
+  startOutcome?: "recorded_completed" | "superseded";
 }> {
   const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
@@ -753,7 +753,7 @@ async function processActivityEventWithClient(
     let reviewItemId: string | undefined;
     let stopOutcome: "stopped" | "superseded" | "ignored_unscoped" | undefined =
       stopScope.mode === "ignored_unscoped" ? "ignored_unscoped" : undefined;
-    let startOutcome: "recorded_completed" | undefined;
+    let startOutcome: "recorded_completed" | "superseded" | undefined;
 
     if(sourceDecision.kind==="existing_workout") {
       await client.query(`update activity_events ae set resolved_time_entry_id=te.id from time_entries te
@@ -773,7 +773,18 @@ async function processActivityEventWithClient(
       if (timeEntryId) await recordHealthSleepResolution(client, session, eventId, timeEntryId);
     } else if (candidate.action === "stop_timer") {
       const scopedStopStartedAt = Date.now();
-      const stopResult = stopScope.mode === "entry"
+      const stopResult = stopScope.mode === "running_at"
+        // Whatever covered the Stop's moment ends there, running or already finished (a Start
+        // delivered before its Stop was given a later end), never a block started after it.
+        ? await client.query<{ id: string }>(
+            `update time_entries
+             set stopped_at = $1, updated_at = now()
+             where workspace_id = $2 and user_id = $3
+               and started_at < $1 and (stopped_at is null or stopped_at > $1)${TIMELINE_BLOCK_FILTER}
+             returning id`,
+            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
+          )
+        : stopScope.mode === "entry"
         ? await client.query<{ id: string }>(
             `update time_entries
              set stopped_at = $1, updated_at = now()
@@ -789,7 +800,6 @@ async function processActivityEventWithClient(
                select id
                from time_entries
                where workspace_id = $2 and user_id = $3 and stopped_at is null
-                 and ($4::boolean is false or started_at < $1)
                order by started_at desc
                limit 1
                for update
@@ -799,7 +809,7 @@ async function processActivityEventWithClient(
              from current_timer
              where te.id = current_timer.id
              returning te.id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId, stopScope.mode === "running_at"]
+            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
           );
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
@@ -815,13 +825,16 @@ async function processActivityEventWithClient(
       const lateStart = parsed.source === "shortcut" && isExplicitStartEvent(parsed.type)
         ? await lateShortcutStartWindow(client, session, startedAt)
         : null;
-      if (lateStart) {
-        if (lateStart.interruptedEntryId) {
+      if (lateStart?.kind === "same_start") {
+        startOutcome = "superseded";
+      } else if (lateStart?.kind === "window") {
+        if (lateStart.interruptedEntryIds.length) {
           await client.query(
             `update time_entries
              set stopped_at = $1, updated_at = now()
-             where workspace_id = $2 and user_id = $3 and id = $4 and started_at < $1`,
-            [startedAt, session.workspaceId, session.userId, lateStart.interruptedEntryId]
+             where workspace_id = $2 and user_id = $3 and id = any($4::uuid[])
+               and started_at < $1 and (stopped_at is null or stopped_at > $1)`,
+            [startedAt, session.workspaceId, session.userId, lateStart.interruptedEntryIds]
           );
         }
         startOutcome = "recorded_completed";
@@ -829,7 +842,7 @@ async function processActivityEventWithClient(
         await closeActiveTimersForReplacement(client, session, startedAt);
       }
 
-      const timeEntryResult = await client.query<{ id: string }>(
+      const timeEntryResult = startOutcome === "superseded" ? { rows: [] } : await client.query<{ id: string }>(
         `insert into time_entries (
             workspace_id,
             user_id,
@@ -856,7 +869,7 @@ async function processActivityEventWithClient(
           candidate.confidence,
           parsed.description ?? candidate.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
           startedAt,
-          lateStart?.stoppedAt ?? null,
+          lateStart?.kind === "window" ? lateStart.stoppedAt : null,
           eventId
         ]
       );
@@ -1154,53 +1167,78 @@ async function lockUserTimerState(client: pg.PoolClient, session: RequestSession
   );
 }
 
-/**
- * Where a Shortcut Start that arrives late belongs, or null when it is the newest thing on the timeline
- * (the usual case: it replaces the running block). Runs under the user's timer lock.
- */
-// Health sleep and workout entries may overlap tracked blocks; they neither end nor bound a late Start.
+// Health sleep and workout entries may overlap tracked blocks: Shortcut Stops and late Starts never end
+// them or use them as bounds.
 const TIMELINE_BLOCK_FILTER = `
            and review_status = 'confirmed' and source not in ('health_sleep', 'health_workout')`;
 
+/** A Shortcut Start delivered this long after it happened is late (queued offline, or replayed by the app). */
+const LATE_SHORTCUT_START_MS = 10_000;
+
+/**
+ * Where a Shortcut Start belongs when it reaches the server late, or null when it is the newest thing on
+ * the timeline (the usual case: it replaces the running block). Runs under the user's timer lock.
+ *
+ * The rules give the same timeline whatever order a phone's queued Starts and `running_at` Stops arrive in
+ * (#403): a late Start ends the block that covered its moment there, and itself ends at the earliest of the
+ * next block's start and any recorded Stop after it; a `running_at` Stop ends whatever covered its moment.
+ * A Start that arrives on time always runs, so a phone clock a little behind the server never turns a fresh
+ * Start into a finished block. One that arrives on time but older than a block already started is placed
+ * as late (it used to fail with `TimerReplacementWindowError`).
+ */
 async function lateShortcutStartWindow(
   client: pg.PoolClient,
   session: RequestSession,
   startedAt: string | Date
-): Promise<{ stoppedAt: Date; interruptedEntryId: string | null } | null> {
+): Promise<
+  | { kind: "window"; stoppedAt: Date; interruptedEntryIds: string[] }
+  | { kind: "same_start" }
+  | null
+> {
   const startedMs = new Date(startedAt).getTime();
   if (!Number.isFinite(startedMs)) return null;
-  const result = await client.query<{
-    interruptedEntryId: string | null;
-    interruptedStoppedAt: string | Date | null;
-    nextStartedAt: string | Date | null;
-    laterStopAt: string | Date | null;
-  }>(
+  const at = new Date(startedMs);
+  const sameStart = await client.query(
+    `select 1 from time_entries
+     where workspace_id = $1 and user_id = $2 and started_at = $3${TIMELINE_BLOCK_FILTER}
+     limit 1`,
+    [session.workspaceId, session.userId, at]
+  );
+  if (sameStart.rows.length) return { kind: "same_start" };
+  // Lock what covers the Start's moment first, so a concurrent entry-scoped Stop (which does not take the
+  // timer lock) either commits before these rows are read or waits for this transaction.
+  const covering = await client.query<{ id: string; stoppedAt: string | Date | null }>(
+    `select id, stopped_at as "stoppedAt" from time_entries
+     where workspace_id = $1 and user_id = $2 and started_at < $3
+       and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
+     order by started_at
+     for update`,
+    [session.workspaceId, session.userId, at]
+  );
+  const later = await client.query<{ nextStartedAt: string | Date | null; laterStopAt: string | Date | null }>(
     `select
-       (select id from time_entries
-         where workspace_id = $1 and user_id = $2 and started_at < $3
-           and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
-         order by started_at desc limit 1) as "interruptedEntryId",
-       (select stopped_at from time_entries
-         where workspace_id = $1 and user_id = $2 and started_at < $3
-           and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
-         order by started_at desc limit 1) as "interruptedStoppedAt",
        (select min(started_at) from time_entries
          where workspace_id = $1 and user_id = $2 and started_at > $3${TIMELINE_BLOCK_FILTER}) as "nextStartedAt",
        (select min(occurred_at) from activity_events
          where workspace_id = $1 and user_id = $2 and occurred_at > $3
-           and event_type = 'timer_stop' and source = 'shortcut'
-           and raw_payload->>'stopScope' = 'running_at') as "laterStopAt"`,
-    [session.workspaceId, session.userId, new Date(startedMs)]
+           and event_type = 'timer_stop'
+           and not (source = 'shortcut' and raw_payload->>'origin' = 'ios_app_intent'
+                    and raw_payload->>'stopScope' is null)) as "laterStopAt"`,
+    [session.workspaceId, session.userId, at]
   );
-  const row = result.rows[0];
-  if (!row) return null;
-  const bounds = [row.interruptedStoppedAt, row.nextStartedAt, row.laterStopAt]
+  const nextStartedAt = later.rows[0]?.nextStartedAt ?? null;
+  const late = nextStartedAt !== null || Date.now() - startedMs > LATE_SHORTCUT_START_MS;
+  if (!late) return null;
+  const bounds = [nextStartedAt, later.rows[0]?.laterStopAt ?? null, ...covering.rows.map((row) => row.stoppedAt)]
     .filter((value): value is string | Date => value !== null && value !== undefined)
-    .map((value) => new Date(value))
-    .filter((value) => Number.isFinite(value.getTime()) && value.getTime() > startedMs);
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value) && value > startedMs);
   if (!bounds.length) return null;
-  const stoppedAt = new Date(Math.min(...bounds.map((value) => value.getTime())));
-  return { stoppedAt, interruptedEntryId: row.interruptedEntryId };
+  return {
+    kind: "window",
+    stoppedAt: new Date(Math.min(...bounds)),
+    interruptedEntryIds: covering.rows.map((row) => row.id),
+  };
 }
 
 async function closeActiveTimersForReplacement(

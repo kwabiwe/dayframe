@@ -164,8 +164,8 @@ private enum DayframeShortcutPerformer {
       if delivery != nil {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-      // A late Start recorded as a finished block has nothing running to show.
-      guard delivery?.recordedCompleted != true else {
+      // A Start the server did not leave running (placed late, or at the same moment as a block) shows nothing.
+      guard delivery?.runsNow != false else {
         return
       }
       if #available(iOS 17.0, *) {
@@ -194,12 +194,13 @@ private enum DayframeShortcutPerformer {
       }
       // Ending the Activity can terminate the background intent process on current iOS before a
       // concurrent URLSession request completes, so deliver first, then end the Activities of blocks that
-      // started before this Stop. They end even when delivery fails: the queued Stop names its own time,
-      // so the app's later delivery stops the same block.
-      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
+      // started before this Stop, read after delivery so one a Start created meanwhile ends too. They end
+      // even when delivery fails: the queued Stop names its own time, so the app's later delivery stops the
+      // same block.
       if await DayframeShortcutDirectEventClient.submit(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
+      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
       _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
       // The event and local dismissal share the immutable identity archived in

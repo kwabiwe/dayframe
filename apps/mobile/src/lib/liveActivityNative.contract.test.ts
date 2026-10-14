@@ -77,9 +77,9 @@ describe("native Live Activity presentation contract", () => {
     expect(scopedSubmit).toContain("pushToken.lowercased()");
     expect(stopCase).toContain("if delivered {");
     // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
-    // started before the Stop whether or not delivery worked: the queued Stop names its own time.
+    // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(
-      /let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
+      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
     );
   });
 
@@ -95,6 +95,7 @@ describe("native Live Activity presentation contract", () => {
     // Direct delivery only with the app's session for the event's own account.
     const submit = directClient.slice(directClient.indexOf("private static func deliver(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
     expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return nil/);
+    expect(directClient).toContain("runsNow: payload.startOutcome == nil");
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");
     expect(storage).toContain("var userId: String? = nil");
@@ -110,7 +111,7 @@ describe("native Live Activity presentation contract", () => {
     const order = [
       "let delivery = await DayframeShortcutDirectEventClient.submitStart(event)",
       "_ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])",
-      "guard delivery?.recordedCompleted != true else {",
+      "guard delivery?.runsNow != false else {",
       "DayframeLiveActivityController.start(",
       "entryId: delivery?.timeEntryId,",
       "DayframeShortcutDirectEventClient.registerLiveActivity("
@@ -126,9 +127,7 @@ describe("native Live Activity presentation contract", () => {
     expect(register).toContain("DayframeLiveActivityController.pushEnvironment()");
     expect(register).toContain("statusCode == 201");
     expect(register).toContain("return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)");
-    const submitStart = directClient.slice(directClient.indexOf("static func submitStart("), directClient.indexOf("static func registerLiveActivity("));
-    expect(submitStart).toContain('recordedCompleted: payload.startOutcome == "recorded_completed"');
-    expect(submitStart).toContain("isCanonicalEntryId($0) ? $0.lowercased() : nil");
+    expect(directClient).toContain("runsNow: payload.startOutcome == nil");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {

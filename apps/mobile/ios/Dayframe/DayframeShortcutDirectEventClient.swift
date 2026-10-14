@@ -30,8 +30,9 @@ enum DayframeShortcutDirectEventClient {
   /// What the server made of a delivered Shortcut Start, and the checked session that delivered it.
   struct StartDelivery {
     let timeEntryId: String?
-    /// A late Start the server recorded as an already finished block (#403): nothing is running for it.
-    let recordedCompleted: Bool
+    /// A late Start the server placed as an already finished block, or a duplicate of a block that starts
+    /// at the same moment (#403): nothing is running for it.
+    let runsNow: Bool
     let context: DayframeShortcutRuntimeContext
   }
 
@@ -60,15 +61,11 @@ enum DayframeShortcutDirectEventClient {
     await deliver(event) != nil
   }
 
-  /// Delivers a Shortcut Start like `submit`, returning the block the server created for it.
+  /// Delivers a Shortcut Start like `submit`, returning the block the server made of it.
   static func submitStart(_ event: DayframeShortcutEvent) async -> StartDelivery? {
     guard let (payload, context) = await deliver(event) else { return nil }
     let entryId = payload.timeEntryId.flatMap { isCanonicalEntryId($0) ? $0.lowercased() : nil }
-    return StartDelivery(
-      timeEntryId: entryId,
-      recordedCompleted: payload.startOutcome == "recorded_completed",
-      context: context
-    )
+    return StartDelivery(timeEntryId: entryId, runsNow: payload.startOutcome == nil, context: context)
   }
 
   /// Registers a Shortcut-started Live Activity's APNs push token for its block with the session that
