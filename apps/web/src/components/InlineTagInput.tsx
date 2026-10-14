@@ -26,6 +26,7 @@ import {
   FloatingListActivityOption,
   FloatingListSearch,
   FloatingListTagOption,
+  restoreFocusIfDropped,
   type FloatingListActivity
 } from "@/components/FloatingList";
 import { TagIcon } from "@/components/TagIcon";
@@ -303,7 +304,12 @@ export function InlineTagInput({
     if (!effectivePickerOpen) return undefined;
     function closeOnOutside(event: MouseEvent) {
       const target = event.target as Node;
-      if (!editorRef.current?.contains(target) && !pickerPanelRef.current?.contains(target)) setPickerOpen(false);
+      if (editorRef.current?.contains(target) || pickerPanelRef.current?.contains(target)) return;
+      // Focus goes where the press puts it, or back to the Tags button when that is nowhere
+      // (non-focusable content, or a button WebKit does not focus), never the page (Codex r5).
+      const hadFocus = Boolean(pickerPanelRef.current?.contains(document.activeElement));
+      setPickerOpen(false);
+      if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(pickerTriggerRef.current), 0);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape" && !event.defaultPrevented) {

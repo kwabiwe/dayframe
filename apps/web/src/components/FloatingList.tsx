@@ -222,6 +222,16 @@ export function FloatingList({
 }
 
 /**
+ * After a press outside a list opened from a button (Codex r5 on #402): focus goes back to
+ * the opener only if the press left focus on no element (non-focusable content, or a button
+ * WebKit does not focus), so focus never ends on the page.
+ */
+export function restoreFocusIfDropped(opener: HTMLElement | null | undefined) {
+  const activeElement = document.activeElement;
+  if (!activeElement || activeElement === document.body) opener?.focus();
+}
+
+/**
  * The search field at the top of a list opened from a button (the Activity block, the Tags
  * button): the combobox for the rows below it. Focus stays here; ↑/↓ move the highlight
  * (`aria-activedescendant`) and Enter picks, as in the typed `@`/`#` lists.

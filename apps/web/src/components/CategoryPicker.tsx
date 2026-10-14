@@ -29,7 +29,8 @@ import {
   FLOATING_LIST_HINTS,
   FloatingList,
   FloatingListActivityOption,
-  FloatingListSearch
+  FloatingListSearch,
+  restoreFocusIfDropped
 } from "@/components/FloatingList";
 import { blockStyle } from "@/lib/block-style";
 import { activitiesForMention } from "@/lib/command-parse";
@@ -191,7 +192,12 @@ export function CategoryPicker({
         !colorMenuRef.current?.contains(target) &&
         !isCreateBusy
       ) {
+        // A press elsewhere closes the list; focus goes where the press puts it, and when that is
+        // nowhere (non-focusable content, or a button WebKit does not focus) back to the block,
+        // never the page (Codex r5 on #402).
+        const hadFocus = pickerContains(document.activeElement);
         closePicker(false);
+        if (hadFocus) window.setTimeout(() => restoreFocusIfDropped(triggerRef.current), 0);
       }
     }
     function closeOnEscape(event: KeyboardEvent) {
@@ -414,6 +420,10 @@ export function CategoryPicker({
   }
 
   function closeOnFocusLeave(event: ReactFocusEvent<HTMLElement>) {
+    // Focus moving to no element is not a dismissal: WebKit blurs this way when its button is
+    // pressed (the press then toggles the list closed, Codex r5 on #402), as does the window
+    // losing focus. A press elsewhere is handled by `closeOnOutside`.
+    if (!event.relatedTarget) return;
     if (open && !isCreateBusy && !pickerContains(event.relatedTarget)) closePicker(false);
   }
 

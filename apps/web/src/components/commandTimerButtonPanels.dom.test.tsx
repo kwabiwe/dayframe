@@ -798,3 +798,78 @@ describe("Codex r4 on #402: a saving Create and focus survive quick starts and b
     await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
   });
 });
+
+describe("Codex r5 on #402: WebKit's button press and presses outside keep focus off the page", () => {
+  // WebKit does not focus a pressed button: the field blurs to no element (relatedTarget null),
+  // then the click arrives. jsdom focuses clicked buttons, so the sequence is written out.
+  async function webkitPress(button: HTMLElement, focused: HTMLElement) {
+    fireEvent.pointerDown(button);
+    fireEvent.mouseDown(button);
+    act(() => focused.blur());
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.pointerUp(button);
+    fireEvent.mouseUp(button);
+    fireEvent.click(button);
+  }
+
+  it("a second press on the activity block in WebKit closes the list and keeps it closed", async () => {
+    renderBar();
+    const { search } = await openActivities();
+    await webkitPress(activityButton(), search);
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    expect(activityButton().getAttribute("aria-expanded")).toBe("false");
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+    // Still closed a moment later (it never reopened).
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+  });
+
+  it("a second press on the tag button in WebKit closes the list and keeps it closed", async () => {
+    renderBar();
+    const { search } = await openTags();
+    await webkitPress(tagsButton(), search);
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+  });
+
+  it("a press on non-focusable content closes either list and puts focus on its button", async () => {
+    renderBar();
+    const band = screen.getByTestId("persistent-timer");
+    const { user } = await openActivities();
+    await user.click(band);
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+
+    await openTags(user);
+    await user.click(band);
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
+  });
+
+  it("a press on a focusable control outside closes either list and leaves focus on that control", async () => {
+    renderBar();
+    const add = screen.getByRole("button", { name: "Add time manually" });
+    const { user } = await openActivities();
+    await user.click(add);
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(document.activeElement).toBe(add);
+
+    await openTags(user);
+    await user.click(add);
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(document.activeElement).toBe(add);
+  });
+
+  it("a WebKit-style press on an outside button (left unfocused) still lands focus on the list's button", async () => {
+    renderBar();
+    const add = screen.getByRole("button", { name: "Add time manually" });
+    const { search } = await openActivities();
+    await webkitPress(add, search);
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+  });
+});
