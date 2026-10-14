@@ -32,7 +32,7 @@ type RenderedPresentation = {
 type PresentationPhase = "idle" | "presenting" | "open" | "closing" | "dismissing";
 
 export function OverflowMenu({
-  bulkSkip = false,
+  bulkSkip = null,
   disabled,
   instanceId,
   onClose,
@@ -41,8 +41,11 @@ export function OverflowMenu({
   title,
   visible
 }: {
-  /** Shows the "Review all" bulk skips (the Review deck's card menu). */
-  bulkSkip?: boolean;
+  /**
+   * Shows the "Clear the pile" bulk skips for the Review deck's selected segment: "Skip older than
+   * 7 days" and "Skip all earlier" in Earlier, "Skip all today" in Today.
+   */
+  bulkSkip?: "today" | "earlier" | null;
   disabled: boolean;
   instanceId: string | null;
   onClose: () => void;
@@ -288,28 +291,34 @@ export function OverflowMenu({
               <>
                 <View style={styles.overflowMenuDivider} />
                 <Text accessibilityRole="header" style={styles.overflowMenuSectionLabel}>Clear the pile</Text>
+                {bulkSkip === "earlier" ? (
+                  <>
+                    <Pressable
+                      accessibilityHint="Asks before skipping every earlier moment older than 7 days."
+                      accessibilityLabel="Skip older than 7 days"
+                      accessibilityRole="button"
+                      disabled={disabled || !interactive}
+                      style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
+                      onPress={() => select("skip_older")}
+                      testID="review-menu-skip-older"
+                    >
+                      <Text style={styles.overflowMenuRowText}>Skip older than 7 days</Text>
+                    </Pressable>
+                    <View style={styles.overflowMenuDivider} />
+                  </>
+                ) : null}
                 <Pressable
-                  accessibilityHint="Asks before skipping every moment older than 7 days."
-                  accessibilityLabel="Skip older than 7 days"
-                  accessibilityRole="button"
-                  disabled={disabled || !interactive}
-                  style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
-                  onPress={() => select("skip_older")}
-                  testID="review-menu-skip-older"
-                >
-                  <Text style={styles.overflowMenuRowText}>Skip older than 7 days</Text>
-                </Pressable>
-                <View style={styles.overflowMenuDivider} />
-                <Pressable
-                  accessibilityHint="Asks before skipping every moment waiting for review."
-                  accessibilityLabel="Skip all"
+                  accessibilityHint={bulkSkip === "earlier"
+                    ? "Asks before skipping every earlier moment waiting for review."
+                    : "Asks before skipping every moment from today waiting for review."}
+                  accessibilityLabel={bulkSkip === "earlier" ? "Skip all earlier" : "Skip all today"}
                   accessibilityRole="button"
                   disabled={disabled || !interactive}
                   style={pressable(styles.overflowMenuRow, styles.buttonPressed)}
                   onPress={() => select("skip_all")}
                   testID="review-menu-skip-all"
                 >
-                  <Text style={styles.overflowMenuRowText}>Skip all</Text>
+                  <Text style={styles.overflowMenuRowText}>{bulkSkip === "earlier" ? "Skip all earlier" : "Skip all today"}</Text>
                 </Pressable>
               </>
             ) : null}
