@@ -8,6 +8,8 @@ vi.mock("./api", () => ({
   enqueueEvent: apiMocks.enqueueEvent
 }));
 
+vi.mock("./mobileAccount", () => ({ currentMobileAccountEpoch: () => 0 }));
+
 vi.mock("expo-linking", () => ({
   parse: vi.fn()
 }));
