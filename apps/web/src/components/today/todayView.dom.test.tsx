@@ -180,6 +180,34 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("shares overlapping time in Where today went, so the bars add up to the hero", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    // Inbox (Admin) 09:00–10:00 and Deep work (Focus) running since 09:30: 3h framed at 12:00,
+    // but 3h 30m logged. The shared 09:30–10:00 splits 15m each.
+    const live = { ...data.activeEntry!, startedAt: local(9, 30), updatedAt: local(9, 30) } as TimeEntryRow;
+    const finished = data.entries.find((item) => item.id === INBOX_ID)!;
+    data.activeEntry = live;
+    data.entries = [finished, live];
+    data.historyEntries = data.entries;
+    data.dayEntries = data.entries;
+    data.weekEntries = data.entries;
+    const { container, root } = await mount(data);
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("3h");
+    const bars = [...container.querySelectorAll(".df-bar-row")].map((row) => [
+      row.querySelector("b")?.textContent,
+      row.querySelector(".df-tnum")?.textContent
+    ]);
+    expect(bars).toEqual([
+      ["Focus", "2h 15m"],
+      ["Admin", "45m"]
+    ]);
+    const barSeconds = bars.reduce((sum, [, text]) => sum + displayedSeconds(text ?? ""), 0);
+    expect(barSeconds).toBe(3 * 3600);
+    await act(async () => root.unmount());
+  });
+
   it("never offers Delete or Start again on the running block", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
@@ -192,6 +220,13 @@ describe("Today", () => {
 });
 
 const INBOX_ID = "80000000-0000-4000-8000-000000000002";
+
+/** "2h 15m" → 8100; the bars and hero read in whole minutes. */
+function displayedSeconds(text: string) {
+  const hours = /(\d+)h/.exec(text)?.[1] ?? "0";
+  const minutes = /(\d+)m/.exec(text)?.[1] ?? "0";
+  return Number(hours) * 3600 + Number(minutes) * 60;
+}
 
 function bootstrap(): BootstrapData {
   const finished = entry({

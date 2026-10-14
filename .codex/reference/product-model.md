@@ -49,7 +49,7 @@ Use this when changing timer flows, dashboards, reports, entity management, onbo
 - A time overlap is not a duplicate. Preserve source/client-event, Health sample, location segment, and Review mutation idempotency independently.
 - Only one active timer is allowed. Overlap support does not permit a second running timer.
 - Automatic Health allows overlaps subject to independent sample/session safety. Trusted stays allow manual/Health overlaps; commutes and conflicting location activities use an inclusive five-minute per-entry intersection tolerance. See the canonical automatic logging table in `docs/PRD.md`; presentation/report overlap thresholds remain separate.
-- Show one total wherever totals appear: `Total logged`, the sum of entry durations with overlaps included, so a day can pass 24h (owner decision UIA-305, 11 Oct 2026; replaces showing `Time covered` beside it). Goals still fill with covered time (interval union) in activities that count, and say so where the two differ; weekly activity totals and category allocation remain logged time.
+- Show one total wherever totals appear: `Total logged`, the sum of entry durations with overlaps included, so a day can pass 24h (owner decision UIA-305, 11 Oct 2026; replaces showing `Time covered` beside it). Goals still fill with covered time (interval union) in activities that count, and say so where the two differ; weekly activity totals and category allocation remain logged time. Exception: web Today's "Where today went" shares overlapping time equally among the activities running in it, so its bars add up to the web Today hero (covered time; owner decision 14 Oct 2026).
 
 ## Standalone Product Copy
 

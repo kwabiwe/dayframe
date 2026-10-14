@@ -4,6 +4,7 @@ import {
   activityTotals,
   blockRowHeight,
   buildGoalFrame,
+  coveredActivityTotals,
   formatGoalHours,
   hourPercent,
   isUnsavedEntryId,
@@ -154,6 +155,150 @@ describe("Where today went", () => {
     expect(totals[2].color).toBeNull();
   });
 });
+
+describe("Where today went (covered, overlaps shared)", () => {
+  const day = at(10, 0);
+  const nextDay = at(11, 0);
+  const named = (totals: ReturnType<typeof coveredActivityTotals>) => totals.map((total) => [total.name, total.seconds]);
+  const sum = (totals: ReturnType<typeof coveredActivityTotals>) => totals.reduce((total, item) => total + item.seconds, 0);
+
+  it("no longer adds up to more than the hero when two activities overlap", () => {
+    const now = at(10, 13);
+    const entries = [entry("a", iso(10, 9), iso(10, 11)), entry("b", iso(10, 10), iso(10, 12), "admin")];
+    const hero = buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds;
+    expect(hero).toBe(3 * 3600);
+    // Logged time (Reports, the Calendar head) counts 10:00–11:00 twice.
+    expect(sum(activityTotals(entries, day, nextDay, now))).toBe(4 * 3600);
+    // Today shares it: 1h 30m each.
+    expect(named(coveredActivityTotals(entries, day, nextDay, now))).toEqual([
+      ["Admin", 5400],
+      ["Focus", 5400]
+    ]);
+    expect(sum(coveredActivityTotals(entries, day, nextDay, now))).toBe(hero);
+  });
+
+  it("splits a shared slice equally among two and three activities running in it", () => {
+    const now = at(10, 18);
+    const totals = coveredActivityTotals(
+      [
+        entry("a", iso(10, 9), iso(10, 12)),
+        entry("b", iso(10, 10), iso(10, 12), "admin"),
+        entry("c", iso(10, 11), iso(10, 12), null)
+      ],
+      day,
+      nextDay,
+      now
+    );
+    // 09–10 Focus alone; 10–11 Focus + Admin (30m each); 11–12 all three (20m each).
+    expect(named(totals)).toEqual([
+      ["Focus", 3600 + 1800 + 1200],
+      ["Admin", 1800 + 1200],
+      ["No activity", 1200]
+    ]);
+    expect(totals[2].color).toBeNull();
+    expect(sum(totals)).toBe(3 * 3600);
+  });
+
+  it("counts two overlapping blocks of the same activity once", () => {
+    const now = at(10, 18);
+    const totals = coveredActivityTotals(
+      [entry("a", iso(10, 9), iso(10, 11)), entry("b", iso(10, 10), iso(10, 12)), entry("c", iso(10, 10, 30), iso(10, 11), "admin")],
+      day,
+      nextDay,
+      now
+    );
+    // Focus covers 09–12; Admin shares 10:30–11:00 with Focus only (two Focus blocks count as one).
+    expect(named(totals)).toEqual([
+      ["Focus", 3 * 3600 - 900],
+      ["Admin", 900]
+    ]);
+  });
+
+  it("runs a running block to now", () => {
+    const now = at(10, 12, 30);
+    const entries = [entry("a", iso(10, 9), iso(10, 11), "admin"), entry("live", iso(10, 10), null)];
+    const totals = coveredActivityTotals(entries, day, nextDay, now);
+    expect(named(totals)).toEqual([
+      ["Focus", 1800 + 5400],
+      ["Admin", 3600 + 1800]
+    ]);
+    expect(sum(totals)).toBe(buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds);
+  });
+
+  it("clips blocks to local midnight", () => {
+    const now = at(10, 2);
+    const entries = [entry("night", iso(9, 22), iso(10, 1)), entry("late", iso(9, 23), iso(10, 0, 30), "admin")];
+    // Only 00:00–01:00 is today: 00:00–00:30 shared, then Focus alone.
+    expect(named(coveredActivityTotals(entries, day, nextDay, now))).toEqual([
+      ["Focus", 900 + 1800],
+      ["Admin", 900]
+    ]);
+  });
+
+  it("rounds to the hero's whole minutes, so the displayed bars add up to the displayed hero", () => {
+    const now = at(10, 18);
+    const focusEnd = new Date(at(10, 10, 30) + 40_000).toISOString();
+    const adminEnd = new Date(at(10, 11, 30) + 30_000).toISOString();
+    const entries = [entry("a", iso(10, 9), focusEnd), entry("b", iso(10, 11), adminEnd, "admin")];
+    // Exactly 1h 30m 40s and 30m 30s: floored bars would read 1h 30m + 30m against a 2h 1m hero.
+    const totals = coveredActivityTotals(entries, day, nextDay, now);
+    expect(named(totals)).toEqual([
+      ["Focus", 91 * 60],
+      ["Admin", 30 * 60 + 10]
+    ]);
+    expect(sum(totals)).toBe(buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds);
+  });
+
+  it("always sums to the hero across random days", () => {
+    let seed = 20261014;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const activities = ["focus", "admin", "sleep", "gym", null] as const;
+    for (let run = 0; run < 400; run += 1) {
+      const now = at(10, 0) + Math.floor(random() * 24 * 3_600_000);
+      const dayStart = localDayStart(now);
+      const dayEnd = localDayEnd(dayStart);
+      const entries: TodayEntry[] = [];
+      const count = 1 + Math.floor(random() * 9);
+      for (let index = 0; index < count; index += 1) {
+        // Some start yesterday, some run past now, some are still running; times to the millisecond.
+        const from = dayStart - 3 * 3_600_000 + Math.floor(random() * 30 * 3_600_000);
+        const to = random() < 0.15 ? null : from + 1 + Math.floor(random() * 4 * 3_600_000);
+        const activity = activities[Math.floor(random() * activities.length)];
+        entries.push(entry(`e${index}`, new Date(from).toISOString(), to === null ? null : new Date(to).toISOString(), activity));
+      }
+      const totals = coveredActivityTotals(entries, dayStart, dayEnd, now);
+      const hero = buildGoalFrame({ entries, goalMinutes: 480, nowMs: now }).totalSeconds;
+      expect(sum(totals)).toBe(hero);
+      expect(totals.reduce((minutes, item) => minutes + Math.floor(item.seconds / 60), 0)).toBe(Math.floor(hero / 60));
+      // Each bucket stays near its exact equal-split share (brute force over every boundary).
+      const exact = bruteForceShares(entries, dayStart, dayEnd, now);
+      for (const total of totals) expect(Math.abs(total.seconds - exact.get(total.key)! / 1000)).toBeLessThan(120);
+      for (const [key, ms] of exact) if (ms >= 120_000) expect(totals.some((total) => total.key === key)).toBe(true);
+      for (let index = 1; index < totals.length; index += 1) {
+        const [before, after] = [totals[index - 1], totals[index]];
+        expect(before.seconds > after.seconds || (before.seconds === after.seconds && before.name.localeCompare(after.name) <= 0)).toBe(true);
+      }
+    }
+  });
+});
+
+function bruteForceShares(entries: readonly TodayEntry[], startMs: number, endMs: number, nowMs: number) {
+  const clips = entries.flatMap((item) => {
+    const from = Math.max(Date.parse(item.startedAt), startMs);
+    const to = Math.min(item.stoppedAt ? Date.parse(item.stoppedAt) : nowMs, endMs, nowMs);
+    return to > from ? [{ key: item.categoryId ?? "none", from, to }] : [];
+  });
+  const points = [...new Set(clips.flatMap((clip) => [clip.from, clip.to]))].sort((a, b) => a - b);
+  const shares = new Map<string, number>();
+  for (let index = 1; index < points.length; index += 1) {
+    const keys = new Set(clips.filter((clip) => clip.from <= points[index - 1] && clip.to >= points[index]).map((clip) => clip.key));
+    for (const key of keys) shares.set(key, (shares.get(key) ?? 0) + (points[index] - points[index - 1]) / keys.size);
+  }
+  return shares;
+}
 
 describe("This week", () => {
   it("summarises the six days before today, newest first, with covered totals", () => {

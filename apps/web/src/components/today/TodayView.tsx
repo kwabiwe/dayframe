@@ -19,9 +19,9 @@ import { formatDuration as formatFullDuration, formatTime } from "@/lib/format";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
 import {
-  activityTotals,
   blockRowHeight,
   buildGoalFrame,
+  coveredActivityTotals,
   formatGoalHours,
   hourPercent,
   isUnsavedEntryId,
@@ -36,6 +36,7 @@ import {
   ribbonNextStartMs,
   staleEditError,
   todayBlocks,
+  type ActivityTotal,
   type GoalCellSlice
 } from "@/lib/today-view";
 
@@ -174,7 +175,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const dayEnd = localDayEnd(dayStart);
   const goal = buildGoalFrame({ categories: withGoalExclusions(data.categories, data.goalExcludedCategoryIds), entries, goalMinutes: data.user.dailyGoalMinutes, nowMs });
   const blocks = todayBlocks(entries, dayStart, nowMs);
-  const totals = activityTotals(entries, dayStart, dayEnd, nowMs);
+  const totals = coveredActivityTotals(entries, dayStart, dayEnd, nowMs);
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
   const week = previousDays(entries, nowMs);
   const reviewCount = data.stats.reviewCount;
@@ -210,13 +211,22 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         />
       </section>
 
-      <section className="df-card df-today-went" aria-labelledby="df-today-went-title">
+      <section
+        className="df-card df-today-went"
+        aria-describedby={totals.length ? "df-today-went-note" : undefined}
+        aria-labelledby="df-today-went-title"
+      >
         <div className="df-card-head">
           <h2 id="df-today-went-title">Where today went</h2>
           <span className="df-faint">{totals.length} {totals.length === 1 ? "activity" : "activities"}</span>
         </div>
         {totals.length ? (
-          <WhereTodayWent totals={totals.slice(0, 5)} />
+          <>
+            <p className="sr-only" id="df-today-went-note">
+              Framed time per activity. Time when blocks overlap is shared equally, so these add up to today&apos;s total.
+            </p>
+            <WhereTodayWent totals={totals.slice(0, 5)} />
+          </>
         ) : (
           <p className="df-muted">Nothing tracked yet.</p>
         )}
@@ -587,7 +597,7 @@ function RibbonTip({
   );
 }
 
-function WhereTodayWent({ totals }: { totals: ReturnType<typeof activityTotals> }) {
+function WhereTodayWent({ totals }: { totals: readonly ActivityTotal[] }) {
   const max = Math.max(1, ...totals.map((total) => total.seconds));
   const land = springTransition("land");
   return (
