@@ -181,6 +181,7 @@ function TimelineInlineTimeControl({
         panelClassName="timeline-inline-date-picker-panel"
         panelLabel={`Choose ${edgeLabel} date`}
         portal
+        max={today}
         showTrigger={false}
         today={today}
         value={date}

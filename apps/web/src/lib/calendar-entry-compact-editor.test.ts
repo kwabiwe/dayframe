@@ -242,6 +242,22 @@ describe("Calendar compact editor temporal model", () => {
     expect(futureFinish.durationSeconds).toBe(9_978);
   });
 
+  // Owner decision D2 (14 Oct 2026; Codex r1 on #422): a finished block never ends on a day after
+  // today, however the finish got there — including a longer duration carried past midnight.
+  it("rejects a finish on a day after today, but keeps an unchanged one", () => {
+    const source = timeEntry();
+    const draft = synchronize(source, {
+      ...calendarEntryCompactInitialDraft(source),
+      duration: "18:00"
+    }, "duration");
+    expect(draft.stoppedAtDate).toBe("2026-01-04");
+    expect(() => savePlan(source, draft, new Date(2026, 0, 3, 23, 45))).toThrow("Finish can't be on a day after today.");
+    expect(savePlan(source, draft, new Date(2026, 0, 4, 9)).payload.stoppedAt).toBeDefined();
+    // A block already ending tomorrow (from before D2) can still be renamed.
+    const ahead = { ...source, stoppedAt: localIso("2026-01-04T08:00") };
+    expect(() => savePlan(ahead, { ...calendarEntryCompactInitialDraft(ahead), description: "Renamed" }, new Date(2026, 0, 3, 12), dirty({ description: true }))).not.toThrow();
+  });
+
   it("emits only quick-editor-owned fields and never clears hidden Place metadata", () => {
     const source = timeEntry({ placeId: "office", projectId: "legacy", tagNames: ["private"] });
     const cases = [
