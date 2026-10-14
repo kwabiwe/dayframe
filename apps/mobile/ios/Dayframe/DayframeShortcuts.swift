@@ -156,9 +156,10 @@ private enum DayframeShortcutPerformer {
       guard queued else {
         return
       }
+      var activityId: String?
       if #available(iOS 17.0, *) {
         let category = catalog.category(named: categoryName)
-        _ = await DayframeLiveActivityController.start(
+        activityId = await DayframeLiveActivityController.start(
           entryId: nil,
           apiBase: nil,
           title: event.description ?? category?.name ?? "No activity",
@@ -166,12 +167,16 @@ private enum DayframeShortcutPerformer {
           categoryColor: category?.color,
           categoryColorLight: category?.lightColor,
           startedAt: event.occurredAt
-        )
+        )?.activityId
       }
       // Delivered now, as Stop is; the queued copy stays only when this fails (the app delivers it later,
       // and the server dedupes by its client event ID and places a late Start in its own slot).
-      if await DayframeShortcutDirectEventClient.submit(event) {
+      if let delivery = await DayframeShortcutDirectEventClient.submitStart(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+        // A Stop that ran while this Start waited already finished its block on the server: nothing runs.
+        if !delivery.runsNow, let activityId {
+          _ = await DayframeLiveActivityController.stop(activityIds: [activityId])
+        }
       }
     case .stopRunning:
       guard queued else {
@@ -179,12 +184,13 @@ private enum DayframeShortcutPerformer {
       }
       // Ending the Activity can terminate the background intent process on current iOS before a
       // concurrent URLSession request completes, so deliver first, then end the Activities of blocks that
-      // started before this Stop. They end even when delivery fails: the queued Stop names its own time,
-      // so the app's later delivery stops the same block.
-      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
+      // started before this Stop, read after delivery so one a Start created meanwhile ends too. They end
+      // even when delivery fails: the queued Stop names its own time, so the app's later delivery stops the
+      // same block.
       if await DayframeShortcutDirectEventClient.submit(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
+      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
       _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
       // The event and local dismissal share the immutable identity archived in

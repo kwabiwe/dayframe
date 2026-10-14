@@ -77,9 +77,9 @@ describe("native Live Activity presentation contract", () => {
     expect(scopedSubmit).toContain("pushToken.lowercased()");
     expect(stopCase).toContain("if delivered {");
     // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
-    // started before the Stop whether or not delivery worked: the queued Stop names its own time.
+    // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(
-      /let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
+      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
     );
   });
 
@@ -92,11 +92,12 @@ describe("native Live Activity presentation contract", () => {
     expect(intent).toContain("await DayframeShortcutPerformer.perform(.stopRunning)");
     expect(intent).not.toContain("currentCanonicalEntryId");
     expect(shortcuts).toMatch(/case \.stopRunning:\s+actionName = "stop"\s+nextType = "timer_stop"\s+payload = \[\s+"origin": "ios_app_shortcut",\s+"stopScope": "running_at"\s+\]/);
-    // A Start delivers at once as well; the queued copy stays only when that fails.
-    expect(shortcuts).toMatch(/if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+case \.stopRunning:/);
     // Direct delivery only with the app's session for the event's own account.
-    const submit = directClient.slice(directClient.indexOf("static func submit(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
-    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return false/);
+    const submit = directClient.slice(directClient.indexOf("private static func deliver(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
+    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return nil/);
+    // A Start the server did not leave running (placed late, or same moment as a block) ends its Activity.
+    expect(shortcuts).toMatch(/if let delivery = await DayframeShortcutDirectEventClient\.submitStart\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)[\s\S]*?if !delivery\.runsNow, let activityId \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(directClient).toContain("runsNow: payload.startOutcome == nil");
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");
     expect(storage).toContain("var userId: String? = nil");
