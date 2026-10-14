@@ -1,18 +1,15 @@
-import { formatDuration } from "@dayframe/shared";
 import { paletteColorFor, type DayframeThemeMode } from "@dayframe/shared";
-import { spokenDuration } from "../components/today/todayBlocksLayout";
 import { displayTimerDescription } from "./timerPresentation";
 
 /**
  * Copy and swatches for the iPhone Blocks toasts (UIA-003/004): "Deleted Deep work",
- * "Switched to Work" (with "42m logged to Client Work" under it), "Already recording Deep work".
+ * "Switched to Work", "Already recording Deep work".
  */
 type ToastEntry = {
   categoryColor?: string | null;
   categoryId?: string | null;
   categoryName?: string | null;
   description?: string | null;
-  startedAt: string;
   tagNames?: readonly string[] | null;
   tags?: readonly { name: string }[] | null;
 };
@@ -31,10 +28,6 @@ export function toastSwatchColor(
   return paletteColorFor(entry.categoryColor ?? entry.categoryId, entry.categoryName ?? "", mode);
 }
 
-function compactDuration(seconds: number) {
-  return formatDuration(seconds);
-}
-
 export function deletedToastMessage(entries: readonly Pick<ToastEntry, "categoryName" | "description">[]) {
   if (entries.length === 1) return `Deleted ${toastBlockName(entries[0])}`;
   return `Deleted ${entries.length} blocks`;
@@ -49,44 +42,33 @@ export function undoDeleteAccessibilityLabel(entries: readonly Pick<ToastEntry, 
 }
 
 /**
- * A toast's words: the sentence it shows, an optional muted second line under it, and the one
- * sentence VoiceOver reads (and hears announced) for both.
+ * A toast's words: the sentence it shows and the one sentence VoiceOver reads (and hears
+ * announced). A toast that names something may split its one line into a fixed `lead`
+ * ("Switched to") and the `name`: then only the name ends in "…" when it is too long, and the
+ * lead is never cut.
  */
 export type BlocksToastCopy = {
   message: string;
-  detail?: string | null;
+  lead?: string | null;
+  name?: string | null;
   accessibilityLabel?: string;
 };
 
 /**
- * "Switched to School run" over a muted "42m logged to Client Work" (Trello "That message is too
- * long"): what is recording now on the first line, where the replaced block's time went on the
- * second. The duration is the shared `formatDuration` ("<1m", "42m", "2h 5m"); VoiceOver hears one
- * sentence with the spoken duration ("Switched to School run, 42 minutes logged to Client Work.").
- * Without a previous block there is no second line.
+ * "Switched to School run" (owner decision 14 Oct, option A): one line naming what is recording
+ * now, nothing about the replaced block. "Switched to" is always shown whole; only a very long
+ * name ends in "…". VoiceOver hears "Switched to School run." once, as one element.
  */
-export function switchedToastCopy(
-  nextName: string,
-  previous: Pick<ToastEntry, "categoryName" | "description" | "startedAt"> | null | undefined,
-  nowMs: number
-): BlocksToastCopy {
-  const message = `Switched to ${nextName}`;
-  if (!previous) return { message, detail: null, accessibilityLabel: `${message}.` };
-  const startedMs = Date.parse(previous.startedAt);
-  // A block switched away from in the same second (or with a clock skew) still logged under a minute.
-  const seconds = Number.isFinite(startedMs) ? Math.max(1, (nowMs - startedMs) / 1000) : 1;
-  const previousName = toastBlockName(previous);
-  return {
-    message,
-    detail: `${compactDuration(seconds)} logged to ${previousName}`,
-    accessibilityLabel: `${message}, ${spokenDuration(seconds)} logged to ${previousName}.`
-  };
+export function switchedToastCopy(nextName: string): BlocksToastCopy {
+  const lead = "Switched to";
+  const message = `${lead} ${nextName}`;
+  return { message, lead, name: nextName, accessibilityLabel: `${message}.` };
 }
 
-/** The sentence VoiceOver reads for a toast's copy: its label, else the visible lines joined. */
+/** The sentence VoiceOver reads for a toast's copy: its label, else the visible sentence. */
 export function toastAccessibilityText(copy: string | BlocksToastCopy) {
   if (typeof copy === "string") return copy;
-  return copy.accessibilityLabel ?? (copy.detail ? `${copy.message}. ${copy.detail}` : copy.message);
+  return copy.accessibilityLabel ?? copy.message;
 }
 
 export function alreadyRecordingToastMessage(active: Pick<ToastEntry, "categoryName" | "description">) {
