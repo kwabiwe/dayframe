@@ -34,9 +34,9 @@
   --warning-text: #805600;
   --danger: #d94f4f;
   --danger-text: #b42318;
-  /* The soft danger fill (error rows and states): the same tint the other danger backgrounds use;
-     it follows --danger and --surface-muted into each theme. */
-  --danger-soft: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  /* The soft danger fill (error rows and states). It follows --danger and --surface-muted into each
+     theme; 10% keeps --danger-text at 4.5:1 or better on it in both (5.2 Daylight, 4.7 Midnight). */
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface-muted));
   --on-danger: #050914;
   --info: #3b82f6;
   --chart-track: #e5e9f0;
@@ -7864,7 +7864,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-floating);
+  box-shadow: var(--shadow-floating);
   color: var(--foreground);
 }
 

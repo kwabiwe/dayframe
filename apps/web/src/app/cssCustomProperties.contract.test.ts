@@ -109,3 +109,9 @@ describe("globals.css custom properties", () => {
     expect(`${ghost}${tip}`).not.toMatch(/var\(--text\)/);
   });
 });
+
+describe("soft danger fill keeps its text readable (Codex r1 on #425)", () => {
+  it("is a 10% danger tint over the muted surface", () => {
+    expect(css).toContain("--danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface-muted));");
+  });
+});
