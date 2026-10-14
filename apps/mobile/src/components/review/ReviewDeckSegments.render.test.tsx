@@ -69,6 +69,7 @@ function renderControl(props: Partial<Parameters<typeof ReviewDeckSegmentControl
   let tree!: ReturnType<typeof create>;
   const element = (next: Partial<Parameters<typeof ReviewDeckSegmentControl>[0]>) => (
     <ReviewDeckSegmentControl
+      animateChange={false}
       counts={counts(3, 9)}
       onSelect={onSelect}
       reduceMotion={false}
@@ -132,27 +133,27 @@ describe("ReviewDeckSegmentControl", () => {
     expect(onSelect).toHaveBeenCalledWith("earlier");
   });
 
-  it("slides the thumb with the sheet spring only after a tap, and places it at once otherwise", () => {
-    const { rerender, tree } = renderControl();
+  it("slides the thumb with the sheet spring only for the user's switch, and places it at once otherwise", () => {
+    const { rerender } = renderControl();
     // First placement: no motion.
     expect(mocks.springs).toEqual([]);
-    act(() => tree.root.findByProps({ testID: "review-deck-segment-earlier" }).props.onPress());
-    rerender({ selected: "earlier" });
+    rerender({ animateChange: true, selected: "earlier" });
     expect(mocks.springs).toEqual([{ to: 150, config: { stiffness: 340, damping: 34, mass: 1, reduceMotion: "never" } }]);
-    // A rapid second tap retargets the same spring.
-    act(() => tree.root.findByProps({ testID: "review-deck-segment-today" }).props.onPress());
-    rerender({ selected: "today" });
+    // A rapid second switch retargets the same spring.
+    rerender({ animateChange: true, selected: "today" });
     expect(mocks.springs.at(-1)?.to).toBe(0);
-    // A change that is not a tap (a focused card) places the thumb without motion.
+    // A count changing moves nothing.
     mocks.springs.length = 0;
-    rerender({ selected: "earlier" });
+    rerender({ animateChange: true, counts: counts(2, 9), selected: "today" });
+    expect(mocks.springs).toEqual([]);
+    // A placement (a focused card, the route) puts the thumb there without motion.
+    rerender({ animateChange: false, selected: "earlier" });
     expect(mocks.springs).toEqual([]);
   });
 
   it("moves the thumb at once under Reduce Motion", () => {
     const { rerender, tree } = renderControl({ reduceMotion: true });
-    act(() => tree.root.findByProps({ testID: "review-deck-segment-earlier" }).props.onPress());
-    rerender({ selected: "earlier" });
+    rerender({ animateChange: true, selected: "earlier" });
     expect(mocks.springs).toEqual([]);
     // (The stand-in animated style reads the value on the next render.)
     rerender({ selected: "earlier", theme: { ...(theme as object) } as never });

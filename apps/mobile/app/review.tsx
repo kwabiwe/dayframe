@@ -250,6 +250,9 @@ export default function ReviewScreen() {
   );
   const deckSegmentRef = useRef(deckSegment);
   deckSegmentRef.current = deckSegment;
+  // Whether the latest segment change was the user's switch (the thumb slides) or a placement
+  // (a focused card, the route), which places the thumb at once.
+  const [deckSegmentSwitched, setDeckSegmentSwitched] = useState(false);
   // Bumped by a segment switch: VoiceOver focus moves once to the new top card's title (or the
   // "Today is framed" heading); a token is spent once it has moved focus.
   const [segmentFocusToken, setSegmentFocusToken] = useState(0);
@@ -1787,6 +1790,7 @@ export default function ReviewScreen() {
         applyReviewMenuEvent({ type: "close" });
         setDeckThrowRequest(null);
         setDeckReturn(null);
+        setDeckSegmentSwitched(true);
         setDeckSegment(segment);
         setSegmentFocusToken((token) => token + 1);
         AccessibilityInfo.announceForAccessibility(reviewDeckSegmentAccessibilityLabel(segment, segmentCounts[segment]));
@@ -1827,6 +1831,7 @@ export default function ReviewScreen() {
       // saved first, as any segment change saves it.
       deckHold.flush();
       deckSegmentRef.current = segment;
+      setDeckSegmentSwitched(false);
       setDeckSegment(segment);
     }
     setHighlightedFocusKey(key);
@@ -2379,6 +2384,7 @@ export default function ReviewScreen() {
       >
         {/* Today · Earlier (owner decision 14 Oct 2026, option C): neutral, no coral; it owns its thumb. */}
         <ReviewDeckSegmentControl
+          animateChange={deckSegmentSwitched}
           counts={segmentCounts}
           onSelect={selectDeckSegment}
           reduceMotion={reduceMotion}

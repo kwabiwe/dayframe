@@ -14,7 +14,7 @@ describe("Review deck Today · Earlier segments (owner decision 14 Oct 2026, opt
   it("saves a held decision before switching segment, and ignores a tap on the selected one", () => {
     expect(screen).toMatch(/function selectDeckSegment\(next: ReviewDeckSegment\) \{\s*switchReviewDeckSegment\(deckSegmentRef\.current, next, \{\s*flushHeld: \(\) => deckHold\.flush\(\),/);
     // A focused card that lives in the other segment selects it the same way.
-    expect(screen).toMatch(/if \(segment !== deckSegmentRef\.current\) \{[\s\S]*?deckHold\.flush\(\);\s*deckSegmentRef\.current = segment;\s*setDeckSegment\(segment\);/);
+    expect(screen).toMatch(/if \(segment !== deckSegmentRef\.current\) \{[\s\S]*?deckHold\.flush\(\);\s*deckSegmentRef\.current = segment;\s*setDeckSegmentSwitched\(false\);\s*setDeckSegment\(segment\);/);
     expect(segments).toContain("if (isSelected) return;");
   });
 
@@ -64,9 +64,13 @@ describe("Review deck Today · Earlier segments (owner decision 14 Oct 2026, opt
     expect(deck).toContain("exiting={localPresenceExiting(reduceMotion)}");
   });
 
-  it("slides the thumb with the sheet spring after a tap only, at once with Reduce Motion", () => {
+  it("slides the thumb with the sheet spring for the user's switch only, at once with Reduce Motion", () => {
     expect(segments).toContain("const thumbSpring = { ...BLOCKS_SPRING.sheet, reduceMotion: ReduceMotion.Never };");
-    expect(segments).toContain("const animate = pressed.current && placed.current && !reduceMotion;");
+    expect(segments).toContain("const animate = animateChange && placed.current && !reduceMotion;");
+    // A tap or the "Today is framed" pill slides it; a focused card places it.
+    expect(screen).toMatch(/setDeckReturn\(null\);\s*setDeckSegmentSwitched\(true\);/);
+    expect(screen).toMatch(/setDeckSegmentSwitched\(false\);\s*setDeckSegment\(segment\);/);
+    expect(screen).toContain("animateChange={deckSegmentSwitched}");
     expect(segments).toContain("thumbX.value = animate ? withSpring(target, thumbSpring) : target;");
   });
 

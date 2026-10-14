@@ -29,18 +29,22 @@ export function reviewDeckSegmentColors(theme: MobileTheme) {
 
 /**
  * The Review deck's Today · Earlier control (owner decision 14 Oct 2026, option C). It owns its
- * thumb: a tap slides it with the Blocks `sheet` spring (a rapid second tap retargets the same
- * spring from where it is); with Reduce Motion, and whenever the selection changes for any other
- * reason (a focused card, hydration), the thumb is placed at once. VoiceOver reads it as a tab bar:
+ * thumb: a switch the user asked for (a tap here or on the "Today is framed" pill) slides it with
+ * the Blocks `sheet` spring (a rapid second tap retargets the same spring from where it is); with
+ * Reduce Motion, on first layout, and whenever the selection changes for any other reason (a
+ * focused card, the route), the thumb is placed at once. VoiceOver reads it as a tab bar:
  * "Earlier, 9 moments, selected".
  */
 export function ReviewDeckSegmentControl({
+  animateChange,
   counts,
   onSelect,
   reduceMotion,
   selected,
   theme
 }: {
+  /** The latest selection was the user's switch (it slides); otherwise it is placed at once. */
+  animateChange: boolean;
   counts: Record<ReviewDeckSegment, ReviewDeckSegmentCount>;
   onSelect: (segment: ReviewDeckSegment) => void;
   reduceMotion: boolean;
@@ -52,16 +56,15 @@ export function ReviewDeckSegmentControl({
   const segmentWidth = trackWidth ? (trackWidth - TRACK_PADDING * 2) / REVIEW_DECK_SEGMENTS.length : 0;
   const index = REVIEW_DECK_SEGMENTS.indexOf(selected);
   const thumbX = useSharedValue(0);
-  // Only a tap on the control animates the thumb.
-  const pressed = useRef(false);
   const placed = useRef(false);
   useEffect(() => {
     if (!segmentWidth) return;
     const target = index * segmentWidth;
-    const animate = pressed.current && placed.current && !reduceMotion;
-    pressed.current = false;
+    const animate = animateChange && placed.current && !reduceMotion;
     placed.current = true;
     thumbX.value = animate ? withSpring(target, thumbSpring) : target;
+    // Only a change of segment (or width) moves the thumb; animateChange says how.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, reduceMotion, segmentWidth, thumbX]);
   const thumbStyle = useAnimatedStyle(() => ({ transform: [{ translateX: thumbX.value }] }));
 
@@ -94,7 +97,6 @@ export function ReviewDeckSegmentControl({
             onPress={() => {
               // Tapping the selected segment does nothing.
               if (isSelected) return;
-              pressed.current = true;
               onSelect(segment);
             }}
             style={styles.segment}
