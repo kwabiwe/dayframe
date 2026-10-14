@@ -25,6 +25,56 @@ enum DayframeShortcutDirectEventClient {
     let eventId: String
   }
 
+  private struct TimerStateResponse: Decodable {
+    let activeEntryId: String?
+  }
+
+  enum ServerRunningEntry: Equatable {
+    case running(String)
+    case nothingRunning
+    case unavailable
+  }
+
+  /// The entry the server says is running for the signed-in account (`GET /api/timer-state`), so a
+  /// Stop intent without a Live Activity still names one exact entry. Only a canonical entry ID counts.
+  static func serverRunningEntry() async -> ServerRunningEntry {
+    guard
+      let context = DayframeShortcutRuntimeContextStore.current(),
+      let url = URL(string: "\(context.apiBase)/api/timer-state")
+    else {
+      return .unavailable
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.timeoutInterval = 6
+    request.setValue("Bearer \(context.sessionToken)", forHTTPHeaderField: "Authorization")
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 6
+    configuration.timeoutIntervalForResource = 8
+    let session = URLSession(configuration: configuration)
+    do {
+      let (data, response) = try await session.data(for: request)
+      guard
+        let httpResponse = response as? HTTPURLResponse,
+        httpResponse.statusCode == 200,
+        let payload = try? JSONDecoder().decode(TimerStateResponse.self, from: data)
+      else {
+        return .unavailable
+      }
+      guard let entryId = payload.activeEntryId else { return .nothingRunning }
+      return isCanonicalEntryId(entryId) ? .running(entryId.lowercased()) : .unavailable
+    } catch {
+      return .unavailable
+    }
+  }
+
+  static func isCanonicalEntryId(_ value: String) -> Bool {
+    value.range(
+      of: "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      options: [.regularExpression, .caseInsensitive]
+    ) != nil
+  }
+
   private struct LiveActivityStopRequest: Encodable {
     let token: String
     let activityId: String

@@ -4,6 +4,8 @@ import Security
 
 enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
+  case nothingRunning
+  case targetUnavailable
   case started
   case contextUnavailable
   case capabilityUnavailable
@@ -17,6 +19,10 @@ enum DayframeShortcutDeliveryDiagnostic {
     switch self {
     case .legacyUnscoped:
       return "legacy-unscoped"
+    case .nothingRunning:
+      return "nothing-running"
+    case .targetUnavailable:
+      return "target-unavailable"
     case .started:
       return "started"
     case .contextUnavailable:

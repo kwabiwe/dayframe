@@ -83,6 +83,30 @@ describe("native Live Activity presentation contract", () => {
     );
   });
 
+  it("Stop tracking names one entry: the Live Activity's, else the server's running entry, else nothing", () => {
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
+    const storage = readFileSync(`${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`, "utf8");
+    const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
+    const liveActivity = intent.indexOf("DayframeLiveActivityController.currentCanonicalEntryId()");
+    const server = intent.indexOf("DayframeShortcutDirectEventClient.serverRunningEntry()");
+    expect(liveActivity).toBeGreaterThan(-1);
+    expect(server).toBeGreaterThan(liveActivity);
+    expect(intent).toMatch(/case \.running\(let entryId\):\s+await DayframeShortcutPerformer\.perform\(\.stopEntry\(entryId: entryId\)\)/);
+    // Nothing running or the server unreachable: fail closed, with a diagnostic, never an untargeted Stop.
+    expect(intent).toMatch(/case \.nothingRunning:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.nothingRunning\)/);
+    expect(intent).toMatch(/case \.unavailable:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.targetUnavailable\)/);
+    expect(intent).not.toContain("stopScope");
+    const lookup = directClient.slice(directClient.indexOf("static func serverRunningEntry()"), directClient.indexOf("static func isCanonicalEntryId("));
+    expect(lookup).toContain("/api/timer-state");
+    expect(lookup).toContain('forHTTPHeaderField: "Authorization"');
+    expect(lookup).toContain("httpResponse.statusCode == 200");
+    expect(lookup).toContain("isCanonicalEntryId(entryId) ? .running(entryId.lowercased()) : .unavailable");
+    expect(directClient).toContain("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+    expect(storage).toContain('return "nothing-running"');
+    expect(storage).toContain('return "target-unavailable"');
+  });
+
   it("limits background delivery to the staging and production Dayframe APIs", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(

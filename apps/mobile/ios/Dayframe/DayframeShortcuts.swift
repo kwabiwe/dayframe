@@ -39,13 +39,23 @@ struct StopTrackingIntent: AppIntent {
   static var openAppWhenRun: Bool = false
 
   func perform() async throws -> some IntentResult {
-    guard let entryId = DayframeLiveActivityController.currentCanonicalEntryId() else {
-      // A replayable current/global Stop can target a different timer if the
-      // request is delayed. Without an immutable canonical entry, fail closed.
-      DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)
+    // A replayable current/global Stop can target a different timer if the request is delayed, so the
+    // Stop always names one entry: the running Live Activity's, else the entry the server says is running
+    // now. Without either it fails closed. Until 13 Oct the Live Activity was the only source, so NFC and
+    // Shortcuts Stops did nothing whenever no Live Activity carried an entry (none reached production from
+    // 13 Aug).
+    if let entryId = DayframeLiveActivityController.currentCanonicalEntryId() {
+      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
       return .result()
     }
-    await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
+    switch await DayframeShortcutDirectEventClient.serverRunningEntry() {
+    case .running(let entryId):
+      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
+    case .nothingRunning:
+      DayframeShortcutDeliveryDiagnosticStore.record(.nothingRunning)
+    case .unavailable:
+      DayframeShortcutDeliveryDiagnosticStore.record(.targetUnavailable)
+    }
     return .result()
   }
 }
