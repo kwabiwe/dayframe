@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-time-wheel",
+  "version": "0.1.0",
+  "description": "Dayframe's iOS-native time wheel (UIDatePicker wheels) for the time cards",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}
