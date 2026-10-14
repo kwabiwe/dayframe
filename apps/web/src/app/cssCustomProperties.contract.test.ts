@@ -14,6 +14,45 @@ const css = readFileSync(join(root, "src/app/globals.css"), "utf8");
 /** Pre-existing undefined tokens (`--category-color` is only read by the unused `.report-category-marker` rule), tracked as a separate follow-up; do not add to this list. */
 const KNOWN_UNDEFINED = new Set(["--danger-soft", "--shadow-raised", "--category-color"]);
 
+const NAME = "--[A-Za-z0-9_-]+";
+
+/** CSS without comments, strings and url(...) bodies, so literal "var(--x)" text is never read as code. */
+function stripCssNoise(source: string) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/url\(\s*(?:"[^"]*"|'[^']*'|[^)]*)\s*\)/g, "url()")
+    .replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, "\"\"");
+}
+
+/** Custom properties a stylesheet declares (`--x: …` inside a block) or registers (`@property --x`). */
+export function definedInCss(source: string) {
+  const clean = stripCssNoise(source);
+  const defined = new Set<string>();
+  // A declaration starts after `{` or `;` (selectors like `.chip--live:hover` never do).
+  for (const match of clean.matchAll(new RegExp(`(?:^|[{;])\\s*(${NAME})\\s*:`, "gm"))) defined.add(match[1]);
+  for (const match of clean.matchAll(new RegExp(`@property\\s+(${NAME})\\s*\\{`, "g"))) defined.add(match[1]);
+  return defined;
+}
+
+/** Custom properties code writes: style-object keys, `style.setProperty("--x", …)`, next/font `variable`. */
+export function definedInCode(source: string) {
+  const defined = new Set<string>();
+  for (const match of source.matchAll(new RegExp(`["'\`](${NAME})["'\`]\\s*:`, "g"))) defined.add(match[1]);
+  for (const match of source.matchAll(new RegExp(`\\.setProperty\\(\\s*["'\`](${NAME})["'\`]`, "g"))) defined.add(match[1]);
+  for (const match of source.matchAll(new RegExp(`variable:\\s*["'](${NAME})["']`, "g"))) defined.add(match[1]);
+  return defined;
+}
+
+/** `var(--x)` reads with no fallback whose property is not in `defined`. */
+export function undefinedReads(source: string, defined: Set<string>) {
+  const reads = new Set<string>();
+  for (const match of stripCssNoise(source).matchAll(new RegExp(`var\\(\\s*(${NAME})\\s*(,)?`, "g"))) {
+    const [, name, fallback] = match;
+    if (!fallback && !defined.has(name)) reads.add(name);
+  }
+  return [...reads].sort();
+}
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
@@ -22,25 +61,40 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-function definedProperties() {
-  const defined = new Set(css.match(/--[A-Za-z0-9_-]+(?=\s*:)/g) ?? []);
+function appDefinitions() {
+  const defined = definedInCss(css);
   for (const file of sourceFiles(join(root, "src"))) {
-    const source = readFileSync(file, "utf8");
-    for (const match of source.matchAll(/["'`](--[A-Za-z0-9_-]+)["'`]\s*[:,)]/g)) defined.add(match[1]);
-    for (const match of source.matchAll(/variable:\s*["'](--[A-Za-z0-9_-]+)["']/g)) defined.add(match[1]);
+    for (const name of definedInCode(readFileSync(file, "utf8"))) defined.add(name);
   }
   return defined;
 }
 
+describe("custom property scanner", () => {
+  it("recognises only real declarations, registrations and code writes", () => {
+    expect([...definedInCss(".a { --x: 1px; color: red; --y:2px }")].sort()).toEqual(["--x", "--y"]);
+    expect([...definedInCss("@property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }")]).toContain("--angle");
+    // A BEM-style selector is not a definition.
+    expect(definedInCss(".chip--live:hover { color: var(--text-primary); } .x--more:focus { }").has("--live")).toBe(false);
+    expect(definedInCss(".x--more:focus { }").has("--more")).toBe(false);
+    // Reading a property in code is not a write.
+    expect(definedInCode('getComputedStyle(el).getPropertyValue("--text-primary")').has("--text-primary")).toBe(false);
+    expect(definedInCode('el.style.setProperty("--x", "1px"); const s = { "--block": c };')).toEqual(new Set(["--x", "--block"]));
+  });
+
+  it("flags undefined reads but not fallbacks, strings, urls or comments", () => {
+    const defined = new Set(["--defined"]);
+    expect(undefinedReads(".a { color: var(--missing); background: var(--defined); }", defined)).toEqual(["--missing"]);
+    expect(undefinedReads(".a { color: var(--missing, red); }", defined)).toEqual([]);
+    expect(undefinedReads('.a::after { content: "var(--in-string)"; background: url("x-var(--in-url).svg"); } /* var(--in-comment) */', defined)).toEqual([]);
+    // Removing a real definition makes its reads fail.
+    expect(undefinedReads(".a { color: var(--text-primary); }", definedInCss(".chip--live:hover { }"))).toEqual(["--text-primary"]);
+  });
+});
+
 describe("globals.css custom properties", () => {
   it("never reads an undefined custom property without a fallback", () => {
-    const defined = definedProperties();
-    const undefinedReads = new Set<string>();
-    for (const match of css.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*(,)?/g)) {
-      const [, name, fallback] = match;
-      if (!fallback && !defined.has(name) && !KNOWN_UNDEFINED.has(name)) undefinedReads.add(name);
-    }
-    expect([...undefinedReads]).toEqual([]);
+    const missing = undefinedReads(css, appDefinitions()).filter((name) => !KNOWN_UNDEFINED.has(name));
+    expect(missing).toEqual([]);
   });
 
   it("draws the Calendar drag ghost and resize tip from real tokens", () => {
@@ -53,6 +107,7 @@ describe("globals.css custom properties", () => {
     expect(ghost).toContain("background: color-mix(in srgb, var(--text-primary) 10%, var(--surface))");
     expect(ghost).toContain("box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text-primary) 45%, transparent)");
     expect(tip).toContain("background: var(--text-primary)");
+    expect(definedInCss(css).has("--text-primary")).toBe(true);
     expect(`${ghost}${tip}`).not.toMatch(/var\(--text\)/);
   });
 });
