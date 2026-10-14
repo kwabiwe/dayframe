@@ -16,7 +16,8 @@ describe("Calendar compact temporal DOM", () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
-      value: () => ({ matches: true, addListener: vi.fn(), removeListener: vi.fn() })
+      // A 1200 px desktop: not the phone-width date sheet.
+      value: (query: string) => ({ matches: query !== "(max-width: 560px)", addListener: vi.fn(), removeListener: vi.fn() })
     });
   });
 

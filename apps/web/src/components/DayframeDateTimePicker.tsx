@@ -1,7 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { Clock3 } from "lucide-react";
+import { Clock3, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
 import { formatLocalDate, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
@@ -129,6 +129,21 @@ export function DayframeDateTimePicker({
         inert={!open}
         role="dialog"
       >
+        {/* Phone width only (CSS): the sheet's title and a 44 px ✕ (D6). */}
+        <header className="date-sheet-head dayframe-date-time-sheet-head">
+          <strong>{label ? `${label} date and time` : "Date and time"}</strong>
+          <button
+            aria-label="Close"
+            className="ui-icon-button date-sheet-close"
+            onClick={() => {
+              setOpen(false);
+              triggerRef.current?.focus();
+            }}
+            type="button"
+          >
+            <X aria-hidden="true" size={18} />
+          </button>
+        </header>
         <DayframeCalendar max={max} onChange={chooseDay} onViewChange={setView} today={formatLocalDate(new Date())} value={current.date} view={view} />
         <div className="dayframe-time-row">
           <Clock3 aria-hidden="true" size={17} />

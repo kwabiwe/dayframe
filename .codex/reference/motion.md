@@ -324,6 +324,16 @@ Block pull-to-refresh:
 - Interruption: a digit that changes again mid-roll retargets from where it is.
 - Accessibility: Reduce Motion removes the roll and the press scale (values change in place). The rolling strips are hidden from assistive technology; the clock button's label carries the start time and elapsed time.
 
+## Web date sheet at phone width (date-picker audit D1/D6, 14 Oct 2026)
+
+- Trigger: a date trigger (Calendar period, quick editor dates, List edges) at ≤560 px; Done, ✕, Escape or a press on the scrim.
+- Owner: the panel's existing `ui-floating-surface` fade; the scrim fades in over 160 ms with it (CSS); nothing else moves.
+- Entrance/update/exit: the sheet appears at the bottom with its scrim; day taps and Today · Yesterday change the selection in place; Done, ✕, Escape or the scrim close it with the surface's fade (the scrim leaves at once).
+- Surrounding layout: the sheet is fixed over the page; the page never scrolls or shifts.
+- Interruption: each opening seeds the draft from the current value; closing without Done drops the draft.
+- Async outcome: none (Done hands the day to its owner, as a desktop click does).
+- Accessibility: Reduce Motion removes the scrim fade (the surface already has its reduced path); ✕ is a 44 px labelled button; focus returns to the trigger on close.
+
 ## Web command timer "From 10:15 · after …" (PRD D16, 14 Oct 2026)
 
 - Trigger: the bar idle with today's last loaded block ended 1 min–4 h ago (checked after hydration and on the minute clock); a click on the chip.
