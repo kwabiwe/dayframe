@@ -127,7 +127,9 @@ describe("shell timer runtime", () => {
     rejectWriting!(new Error("offline"));
     await expect(writing).resolves.toMatchObject({ ok: false });
     await expect(admin).resolves.toEqual({
-      ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: focus, switchedAt: "2026-08-24T16:05:00.000Z"
+      ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: focus, switchedAt: "2026-08-24T16:05:00.000Z",
+      // The block this Start put on screen, for an edit that must reach only it.
+      startedEntryId: "optimistic:admin:2026-08-24T16:05:00.000Z"
     });
   });
 
