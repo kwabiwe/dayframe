@@ -61,7 +61,8 @@ struct StopTrackingIntent: AppIntent {
       DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
       return .result()
     }
-    guard !DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId) else {
+    let catalog = DayframeShortcutCatalogStore.catalog
+    guard !startPending(userId: userId, workspaceId: workspaceId) else {
       DayframeShortcutDeliveryDiagnosticStore.record(.startPending)
       return .result()
     }
@@ -69,18 +70,30 @@ struct StopTrackingIntent: AppIntent {
     case .running(let entryId):
       guard
         DayframeShortcutRuntimeContextStore.current() == context,
+        catalog.belongs(userId: userId, workspaceId: workspaceId),
         DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
       else {
         DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
         return .result()
       }
-      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context)
+      // A Start queued while the lookup ran must still win.
+      guard !startPending(userId: userId, workspaceId: workspaceId) else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.startPending)
+        return .result()
+      }
+      // The event is built from the checked catalog and delivered with the checked session.
+      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)
     case .nothingRunning:
       DayframeShortcutDeliveryDiagnosticStore.record(.nothingRunning)
     case .unavailable:
       DayframeShortcutDeliveryDiagnosticStore.record(.targetUnavailable)
     }
     return .result()
+  }
+
+  private func startPending(userId: String, workspaceId: String) -> Bool {
+    DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId) ||
+      DayframePendingShortcutStarts.contains(userId: userId, workspaceId: workspaceId)
   }
 }
 
@@ -176,8 +189,12 @@ private func dayframeCleanText(_ value: String?) -> String? {
 }
 
 private enum DayframeShortcutPerformer {
-  static func perform(_ action: DayframeShortcutAction, context: DayframeShortcutRuntimeContext? = nil) async {
-    let catalog = DayframeShortcutCatalogStore.catalog
+  static func perform(
+    _ action: DayframeShortcutAction,
+    context: DayframeShortcutRuntimeContext? = nil,
+    catalog checked: DayframeShortcutCatalog? = nil
+  ) async {
+    let catalog = checked ?? DayframeShortcutCatalogStore.catalog
     // App Intents can run while Dayframe is signed out. Never create an
     // ownerless event that a different account could inherit later.
     guard catalog.user != nil, catalog.workspace != nil else {
@@ -190,6 +207,9 @@ private enum DayframeShortcutPerformer {
     case .start(_, let categoryName, _):
       guard queued else {
         return
+      }
+      if let userId = event.userId, let workspaceId = event.workspaceId {
+        DayframePendingShortcutStarts.add(localId: event.localId, userId: userId, workspaceId: workspaceId)
       }
       guard #available(iOS 17.0, *) else {
         return

@@ -417,3 +417,51 @@ enum DayframeNativeShortcutQueue {
     UserDefaults.standard.removeObject(forKey: legacyKey)
   }
 }
+
+/// Start intents only queue: the app delivers the Start later, after moving it from the native queue
+/// into its own. A marker per queued Start (its local ID and account) survives that hand-off and is
+/// cleared by the app only when the Start has left both queues (delivered, or discarded for good). While
+/// any marker remains for an account, the Stop intent does not resolve a running entry on the server:
+/// it could stop a newer block and the older Start would replay afterwards (Codex r2 on #403).
+enum DayframePendingShortcutStarts {
+  private static let key = "dayframe.pendingShortcutStarts.v1"
+  private static let lock = NSLock()
+
+  private static var defaults: UserDefaults? {
+    DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
+  }
+
+  static func add(localId: String, userId: String, workspaceId: String) {
+    lock.withLock {
+      guard let defaults else { return }
+      var markers = defaults.array(forKey: key) as? [[String: String]] ?? []
+      guard !markers.contains(where: { $0["localId"] == localId }) else { return }
+      markers.append(["localId": localId, "userId": userId, "workspaceId": workspaceId])
+      defaults.set(markers, forKey: key)
+    }
+  }
+
+  static func contains(userId: String, workspaceId: String) -> Bool {
+    lock.withLock {
+      let markers = defaults?.array(forKey: key) as? [[String: String]] ?? []
+      return markers.contains { $0["userId"] == userId && $0["workspaceId"] == workspaceId }
+    }
+  }
+
+  static func all() -> [[String: String]] {
+    lock.withLock { defaults?.array(forKey: key) as? [[String: String]] ?? [] }
+  }
+
+  @discardableResult
+  static func remove(localIds: [String]) -> Int {
+    lock.withLock {
+      guard let defaults else { return 0 }
+      let ids = Set(localIds)
+      let markers = defaults.array(forKey: key) as? [[String: String]] ?? []
+      let kept = markers.filter { !ids.contains($0["localId"] ?? "") }
+      defaults.set(kept, forKey: key)
+      return markers.count - kept.count
+    }
+  }
+}
+

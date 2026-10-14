@@ -139,6 +139,23 @@ class DayframeLiveActivityModule: NSObject {
     ))
   }
 
+  @objc(pendingShortcutStartMarkers:rejecter:)
+  func pendingShortcutStartMarkers(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframePendingShortcutStarts.all())
+  }
+
+  @objc(clearPendingShortcutStartMarkers:resolver:rejecter:)
+  func clearPendingShortcutStartMarkers(
+    localIds: [String],
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframePendingShortcutStarts.remove(localIds: localIds))
+  }
+
   @objc(clearRuntimeContext:rejecter:)
   func clearRuntimeContext(
     resolve: @escaping RCTPromiseResolveBlock,

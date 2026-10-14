@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   enqueueEvent: vi.fn(),
   pendingShortcutEvents: vi.fn(),
   removeShortcutEvents: vi.fn(),
+  pendingShortcutStartMarkers: vi.fn(),
+  clearPendingShortcutStartMarkers: vi.fn(),
+  readQueue: vi.fn(),
   settingsStore: new Map<string, unknown>()
 }));
 
@@ -11,7 +14,9 @@ vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
       pendingShortcutEvents: mocks.pendingShortcutEvents,
-      removeShortcutEvents: mocks.removeShortcutEvents
+      removeShortcutEvents: mocks.removeShortcutEvents,
+      pendingShortcutStartMarkers: mocks.pendingShortcutStartMarkers,
+      clearPendingShortcutStartMarkers: mocks.clearPendingShortcutStartMarkers
     }
   },
   Platform: { OS: "ios" },
@@ -26,7 +31,9 @@ vi.mock("react-native", () => ({
 }));
 
 vi.mock("./api", () => ({
-  enqueueEvent: mocks.enqueueEvent
+  enqueueEvent: mocks.enqueueEvent,
+  readQueue: mocks.readQueue,
+  subscribeActivityQueue: () => () => undefined
 }));
 
 vi.mock("./mobileAccount", () => ({
@@ -41,6 +48,7 @@ const {
   clearActiveOwnerNativeShortcutQueue,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
+  reconcilePendingShortcutStartMarkers,
   syncShortcutCatalog
 } = await import("./shortcuts");
 const OWNER = { userId: "user-1", workspaceId: "workspace-1" };
@@ -54,6 +62,38 @@ describe("native Shortcut bridge", () => {
     mocks.removeShortcutEvents.mockReset();
     mocks.removeShortcutEvents.mockResolvedValue(0);
     mocks.settingsStore.clear();
+    mocks.pendingShortcutStartMarkers.mockReset();
+    mocks.pendingShortcutStartMarkers.mockResolvedValue([]);
+    mocks.clearPendingShortcutStartMarkers.mockReset();
+    mocks.clearPendingShortcutStartMarkers.mockResolvedValue(0);
+    mocks.readQueue.mockReset();
+    mocks.readQueue.mockResolvedValue([]);
+  });
+
+  it("clears a pending-Start marker only once that Start has left both queues (Codex r2 on #403)", async () => {
+    mocks.pendingShortcutStartMarkers.mockResolvedValue([
+      { localId: "start-delivered", userId: "user-1", workspaceId: "workspace-1" },
+      { localId: "start-in-app-queue", userId: "user-1", workspaceId: "workspace-1" },
+      { localId: "start-still-native", userId: "user-1", workspaceId: "workspace-1" },
+      { localId: "start-other-account", userId: "user-2", workspaceId: "workspace-2" }
+    ]);
+    mocks.pendingShortcutEvents.mockResolvedValue([
+      { localId: "start-still-native", type: "shortcut_action", occurredAt: "2026-10-14T08:00:00.000Z", userId: "user-1", workspaceId: "workspace-1" }
+    ]);
+    // Moved into the app's queue but not yet acknowledged (or permanently failed: Sync help can retry it).
+    mocks.readQueue.mockResolvedValue([{ localId: "start-in-app-queue", type: "shortcut_action", failureKind: "permanent" }]);
+    await reconcilePendingShortcutStartMarkers(OWNER);
+    expect(mocks.clearPendingShortcutStartMarkers).toHaveBeenCalledExactlyOnceWith(["start-delivered"]);
+  });
+
+  it("keeps the marker of a Start the drain just moved into the app queue", async () => {
+    const start = { localId: "start-1", type: "shortcut_action", occurredAt: "2026-10-14T08:00:00.000Z", userId: "user-1", workspaceId: "workspace-1" };
+    mocks.pendingShortcutEvents.mockResolvedValueOnce([start]).mockResolvedValue([]);
+    mocks.pendingShortcutStartMarkers.mockResolvedValue([{ localId: "start-1", userId: "user-1", workspaceId: "workspace-1" }]);
+    mocks.readQueue.mockResolvedValue([{ localId: "start-1", type: "shortcut_action" }]);
+    await drainNativeShortcutQueue(OWNER);
+    expect(mocks.removeShortcutEvents).toHaveBeenCalledWith(["start-1"]);
+    expect(mocks.clearPendingShortcutStartMarkers).not.toHaveBeenCalled();
   });
 
   it("mirrors non-secret native Shortcut config with the catalog", () => {

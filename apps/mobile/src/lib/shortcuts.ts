@@ -1,6 +1,6 @@
 import { NativeModules, Platform, Settings } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
-import { enqueueEvent, type MobileBootstrap } from "./api";
+import { enqueueEvent, readQueue, subscribeActivityQueue, type MobileBootstrap } from "./api";
 import {
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -26,6 +26,8 @@ type NativeShortcutEventType = "shortcut_action" | "timer_stop";
 type NativeShortcutQueueModule = {
   pendingShortcutEvents?: () => Promise<unknown>;
   removeShortcutEvents?: (localIds: string[]) => Promise<number>;
+  pendingShortcutStartMarkers?: () => Promise<unknown>;
+  clearPendingShortcutStartMarkers?: (localIds: string[]) => Promise<number>;
 };
 
 const nativeShortcutQueue = NativeModules.DayframeLiveActivityModule as NativeShortcutQueueModule | undefined;
@@ -128,7 +130,43 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
   }
 
   await nativeShortcutQueue.removeShortcutEvents(transferredLocalIds);
+  await reconcilePendingShortcutStartMarkers(owner).catch(() => 0);
   return { transferredCount, transferredLocalIds };
+}
+
+/**
+ * Clears the native pending-Start markers (see `DayframePendingShortcutStarts`) whose Start has left both
+ * queues: delivered, or discarded for good. A Start still queued anywhere (even permanently failed, since
+ * Sync help can retry it) keeps its marker, so the Stop intent never resolves a running entry on the
+ * server while that Start could still replay.
+ */
+export async function reconcilePendingShortcutStartMarkers(requestedOwner?: MobileAccountOwner) {
+  if (Platform.OS !== "ios") return 0;
+  const markersModule = nativeShortcutQueue;
+  if (!markersModule?.pendingShortcutStartMarkers || !markersModule.clearPendingShortcutStartMarkers) return 0;
+  const owner = requestedOwner ?? await readActiveMobileAccount();
+  if (!owner) return 0;
+  const raw = await markersModule.pendingShortcutStartMarkers();
+  const markers = (Array.isArray(raw) ? raw : []).filter(isRecord).filter((marker) =>
+    marker.userId === owner.userId && marker.workspaceId === owner.workspaceId && typeof marker.localId === "string"
+  ) as Array<{ localId: string }>;
+  if (!markers.length) return 0;
+  const nativePending = markersModule === nativeShortcutQueue && nativeShortcutQueue?.pendingShortcutEvents
+    ? parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents())
+    : [];
+  const stillQueued = new Set([
+    ...nativePending.map((event) => event.localId),
+    ...(await readQueue(owner)).map((event) => event.localId)
+  ]);
+  const settled = markers.map((marker) => marker.localId).filter((localId) => !stillQueued.has(localId));
+  return settled.length ? markersModule.clearPendingShortcutStartMarkers(settled) : 0;
+}
+
+/** Keeps the markers in step with the activity queue while the app runs; returns the unsubscribe. */
+export function startPendingShortcutStartReconciliation() {
+  const reconcile = () => void reconcilePendingShortcutStartMarkers().catch(() => 0);
+  reconcile();
+  return subscribeActivityQueue(reconcile);
 }
 
 function parseNativeShortcutQueue(value: unknown) {

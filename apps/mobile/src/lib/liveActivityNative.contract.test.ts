@@ -90,7 +90,7 @@ describe("native Live Activity presentation contract", () => {
     const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
     const liveActivity = intent.indexOf("DayframeLiveActivityController.currentCanonicalEntryId()");
     const owner = intent.indexOf("DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)");
-    const pendingStart = intent.indexOf("DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId)");
+    const pendingStart = intent.indexOf("guard !startPending(userId: userId, workspaceId: workspaceId) else {");
     const server = intent.indexOf("DayframeShortcutDirectEventClient.serverRunningEntry(context: context)");
     expect(liveActivity).toBeGreaterThan(-1);
     // Codex r1 on #403: one account and session for lookup, queued event and delivery; never past a queued Start.
@@ -102,7 +102,13 @@ describe("native Live Activity presentation contract", () => {
     expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.startPending)");
     const running = intent.slice(intent.indexOf("case .running(let entryId):"), intent.indexOf("case .nothingRunning:"));
     expect(running).toContain("DayframeShortcutRuntimeContextStore.current() == context");
-    expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context)");
+    expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)");
+    // Codex r2: a Start queued while the lookup ran still wins, and the marker outlives the app's hand-off.
+    expect(running).toContain("guard !startPending(userId: userId, workspaceId: workspaceId) else {");
+    expect(intent).toMatch(/DayframeNativeShortcutQueue\.hasPendingStart\(userId: userId, workspaceId: workspaceId\) \|\|\s+DayframePendingShortcutStarts\.contains\(userId: userId, workspaceId: workspaceId\)/);
+    expect(shortcuts).toContain("let catalog = checked ?? DayframeShortcutCatalogStore.catalog");
+    expect(shortcuts).toMatch(/guard queued else \{\s+return\s+\}\s+if let userId = event\.userId, let workspaceId = event\.workspaceId \{\s+DayframePendingShortcutStarts\.add/);
+    expect(storage).toContain("enum DayframePendingShortcutStarts");
     expect(shortcuts).toContain("let delivered = await DayframeShortcutDirectEventClient.submit(event, context: context)");
     expect(directClient).toContain("let context = pinned ?? DayframeShortcutRuntimeContextStore.current()");
     expect(storage).toContain('event["type"] as? String == "shortcut_action"');
