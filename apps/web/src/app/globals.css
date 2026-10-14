@@ -6225,9 +6225,16 @@ kbd {
  * bottom and its max-height from the visual viewport, so it stays above the keyboard; the rows
  * scroll inside and a visible 44 px Close sits in the head.
  */
+/* Layers for the phone sheets and what opens from one (the Activities Create form's colour
+   palette, a separate body portal): the palette always sits above the sheet that owns it. */
+:root {
+  --df-layer-sheet: 130;
+  --df-layer-sheet-popover: calc(var(--df-layer-sheet) + 1);
+}
+
 .df-flist.ui-floating-surface.is-sheet {
   position: fixed;
-  z-index: 130;
+  z-index: var(--df-layer-sheet);
   max-width: calc(100vw - 24px);
   overflow: hidden;
 }
@@ -6679,7 +6686,8 @@ kbd {
 
 .category-picker-color-menu {
   position: fixed;
-  z-index: 121;
+  /* Above every picker menu (120) and the phone sheet its Create form may sit in. */
+  z-index: var(--df-layer-sheet-popover);
   display: grid;
   grid-template-columns: repeat(5, minmax(44px, 1fr));
   gap: 4px;

@@ -458,6 +458,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
           }}
           open={categoryMenuOpen}
           portal
+          scope={completionScope}
           selectedId={timerDraft.categoryId}
           variant="block"
         />

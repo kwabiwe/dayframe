@@ -2,6 +2,8 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
@@ -71,12 +73,20 @@ function renderBar({
     taskSuggestions: []
   } as unknown as BootstrapData;
 
+  // `switchTo` replaces the running block (another device, a quick start): a new block scope.
+  let switchTo: (entry: TimeEntryRow) => void = () => undefined;
   function Harness() {
+    const [entry, setEntry] = useState(activeEntry);
     const [timerDraft, setDraft] = useState<TimerDraft>({
       categoryId: activeEntry?.categoryId ?? categoryId,
       description: activeEntry?.description ?? "",
       tagNames: activeEntry?.tagNames ?? tagNames
     });
+    switchTo = (next) => {
+      setEntry(next);
+      setDraft({ categoryId: next.categoryId ?? "", description: next.description ?? "", tagNames: next.tagNames });
+    };
+    const shellData = entry === activeEntry ? data : ({ ...data, activeEntry: entry, entries: entry ? [entry] : [] } as BootstrapData);
     runtime = {
       clearTimerError: vi.fn(),
       closeManualEntry: vi.fn(),
@@ -90,11 +100,11 @@ function renderBar({
         calls.setTimerDraft(next);
         setDraft(next);
       },
-      shellData: data,
+      shellData,
       startTimer: calls.startTimer,
       stopTimer: calls.stopTimer,
       timerDraft,
-      timerDraftEdited: activeEntry ? timerDraftEditedFields(timerDraft, timerDraftForEntry(activeEntry)).length > 0 : false,
+      timerDraftEdited: entry ? timerDraftEditedFields(timerDraft, timerDraftForEntry(entry)).length > 0 : false,
       timerError: null,
       updateActiveDetails: calls.updateActiveDetails,
       updateActiveStartTime: vi.fn().mockResolvedValue({ ok: true })
@@ -103,7 +113,7 @@ function renderBar({
   }
 
   render(<Harness />);
-  return { calls };
+  return { calls, switchTo: (entry: TimeEntryRow) => act(() => switchTo(entry)) };
 }
 
 function running(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
@@ -605,5 +615,109 @@ describe("Codex r2 on #402: a saving Create keeps its form whatever the Activity
     const name = within(form).getByLabelText("Name") as HTMLInputElement;
     expect(name.value).toBe("Reading");
     expect(document.activeElement).toBe(name);
+  });
+});
+
+describe("Codex r3 on #402: the buttons' lists belong to the block they were opened for", () => {
+  const blockB = () => running({ id: "block-b", categoryId: "write", categoryName: "Writing", description: "Call", tagNames: ["Admin"] });
+  const removeTag = (name: string) => screen.queryByRole("button", { name: `Remove tag ${name}` });
+
+  it("a new block closes the Tags list; a stale Enter adds nothing to it and focus returns to the button", async () => {
+    const { switchTo } = renderBar({ activeEntry: running() });
+    const { search, user } = await openTags();
+    await user.type(search, "launch");
+    expect(within(listbox("Tags")).getByRole("option", { name: "Create “#launch”" })).not.toBeNull();
+    await switchTo(blockB());
+    expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
+    expect(search.value).toBe("");
+    expect(tagsButton().getAttribute("aria-expanded")).toBe("false");
+    // A keystroke still reaching the old search changes nothing on block B and never submits.
+    expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+    expect(removeTag("launch")).toBeNull();
+    expect(removeTag("Admin")).not.toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(tagsButton()));
+  });
+
+  it("a stale Backspace in the empty search never removes the new block's last tag", async () => {
+    const { switchTo } = renderBar({ activeEntry: running({ tagNames: ["Deep work"] }) });
+    const { search } = await openTags();
+    await switchTo(blockB());
+    expect(fireEvent.keyDown(search, { key: "Backspace" })).toBe(false);
+    expect(removeTag("Admin")).not.toBeNull();
+  });
+
+  it("a stale click on a tag row changes nothing on the new block", async () => {
+    const { switchTo } = renderBar({ activeEntry: running() });
+    await openTags();
+    const deepWork = within(listbox("Tags")).getByRole("option", { name: "#Deep work" });
+    await switchTo(blockB());
+    fireEvent.click(deepWork);
+    expect(removeTag("Deep work")).toBeNull();
+    expect(removeTag("Admin")).not.toBeNull();
+  });
+
+  it("a new block closes the Activities list; a stale pick never changes the new block", async () => {
+    const { calls, switchTo } = renderBar({ activeEntry: running() });
+    const { search } = await openActivities();
+    const focus = within(listbox("Activities")).getByRole("option", { name: "Focus" });
+    await switchTo(blockB());
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull());
+    expect(activityButton().getAttribute("aria-expanded")).toBe("false");
+    await waitFor(() => expect(document.activeElement).toBe(activityButton()));
+    calls.setTimerDraft.mockClear();
+    expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+    fireEvent.click(focus);
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    expect(calls.setTimerDraft).not.toHaveBeenCalled();
+  });
+
+  it("a Create saving across a block change keeps its list open but never applies the new activity to the new block", async () => {
+    let settle: (outcome: unknown) => void = () => undefined;
+    const createCategory = vi.fn(() => new Promise((resolve) => { settle = resolve; }));
+    const { calls, switchTo } = renderBar({ activeEntry: running(), createCategory });
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    await user.click(within(form).getByRole("button", { name: "Create" }));
+    await switchTo(blockB());
+    expect(surfaceOf(form).className).toContain("is-open");
+    calls.setTimerDraft.mockClear();
+    await act(async () => settle({ ok: true, category: { id: "reading", name: "Reading", color: "teal", isPinned: false } }));
+    expect(calls.setTimerDraft).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
+  });
+});
+
+describe("Codex r3 on #402: the Create form's colour palette sits above the phone sheet", () => {
+  // vitest runs from apps/web.
+  const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+  const declaration = (selector: string, property: string) => {
+    const start = css.indexOf(`\n${selector} {`);
+    expect(start, selector).toBeGreaterThan(-1);
+    const block = css.slice(start, css.indexOf("}", start));
+    return new RegExp(`${property}: ([^;]+);`).exec(block)?.[1];
+  };
+
+  it("layers the palette (a separate body portal) above the sheet through one token pair", () => {
+    expect(css).toMatch(/:root \{\s*--df-layer-sheet: 130;\s*--df-layer-sheet-popover: calc\(var\(--df-layer-sheet\) \+ 1\);/);
+    expect(declaration(".df-flist.ui-floating-surface.is-sheet", "z-index")).toBe("var(--df-layer-sheet)");
+    expect(declaration(".category-picker-color-menu", "z-index")).toBe("var(--df-layer-sheet-popover)");
+  });
+
+  it("opens the palette from the phone sheet's Create form as a body portal over it", async () => {
+    phone();
+    renderBar();
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    expect(surfaceOf(form).className).toContain("is-sheet");
+    await user.click(within(form).getByRole("button", { name: /Choose activity colour/ }));
+    const palette = await screen.findByRole("listbox", { name: "Activity colour" });
+    expect(palette.className).toContain("category-picker-color-menu");
+    expect(palette.parentElement).toBe(document.body);
+    expect(surfaceOf(form).contains(palette)).toBe(false);
   });
 });

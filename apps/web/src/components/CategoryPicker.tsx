@@ -52,6 +52,7 @@ export function CategoryPicker({
   onSelect,
   open,
   portal: portalProp = false,
+  scope,
   selectedId,
   triggerId,
   triggerRef: externalTriggerRef,
@@ -74,6 +75,11 @@ export function CategoryPicker({
   onSelect: (categoryId: string) => void;
   open: boolean;
   portal?: boolean;
+  /**
+   * What the choice belongs to (the command timer passes its block scope, `completionScope`).
+   * A new scope closes the list, and a pick or Create made for an earlier one is not applied.
+   */
+  scope?: string;
   selectedId: string;
   triggerId?: string;
   triggerRef?: RefObject<HTMLButtonElement | null>;
@@ -155,6 +161,23 @@ export function CategoryPicker({
   const colorPortalTarget = typeof document !== "undefined"
     ? triggerRef.current?.closest("dialog") ?? document.body
     : null;
+
+  // The block (`scope`) the list was opened for, the bar's current one (read after an await) and
+  // the last one seen (Codex r3 on #402).
+  const openedScopeRef = useRef(scope);
+  const latestScopeRef = useRef(scope);
+  const seenScopeRef = useRef(scope);
+  useLayoutEffect(() => {
+    latestScopeRef.current = scope;
+  });
+  // A new block closes the list, as it closes the typed lists; focus that was in it returns to
+  // the button. A Create being saved keeps the list open so its outcome is seen; its new activity
+  // is then not applied to the new block (above).
+  useEffect(() => {
+    if (seenScopeRef.current === scope) return;
+    seenScopeRef.current = scope;
+    if (open && !isCreateBusy) closePicker(Boolean(menuRef.current?.contains(document.activeElement)));
+  });
 
   useEffect(() => {
     if (!open) return undefined;
@@ -345,6 +368,7 @@ export function CategoryPicker({
     // Opening resets the Create form, so it never runs while a Create is saving (Codex r2 on
     // #402): the form, its name and its late outcome stay where they are.
     if (disabled || isCreateBusy) return;
+    openedScopeRef.current = scope;
     onBeforeOpen?.();
     setIsCreating(false);
     setCreateColor(null);
@@ -486,7 +510,8 @@ export function CategoryPicker({
 
   function chooseCategory(categoryId: string) {
     if (disabled || isCreateBusy) return;
-    onSelect(categoryId);
+    // A pick only changes the block the list was opened for.
+    if (openedScopeRef.current === scope) onSelect(categoryId);
     closePicker(true);
   }
 
@@ -545,7 +570,8 @@ export function CategoryPicker({
     setCreateName("");
     setCreateColor(null);
     setIsColorMenuOpen(false);
-    onSelect(outcome.category.id);
+    // The new activity is chosen only if the block the list was opened for is still the bar's.
+    if (openedScopeRef.current === latestScopeRef.current) onSelect(outcome.category.id);
     closePicker(true);
   }
 

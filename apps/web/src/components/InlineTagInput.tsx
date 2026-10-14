@@ -121,6 +121,9 @@ export function InlineTagInput({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
   const [pickerIndex, setPickerIndex] = useState(0);
+  // The block (`completionScope`) the Tags button's list was opened for: its picks, Create and
+  // Backspace only ever change that block (Codex r3 on #402).
+  const [pickerScope, setPickerScope] = useState<string | null>(null);
   const [anchorWidth, setAnchorWidth] = useState(0);
   const [tagWidths, setTagWidths] = useState<number[]>([]);
   const [pickerPosition, setPickerPosition] = useState<CSSProperties | null>(null);
@@ -173,6 +176,10 @@ export function InlineTagInput({
     setTypedMention(null);
     setDismissedTagStart(null);
     setInteractionScope(null);
+    // A new block closes the Tags button's list and clears its search, as it closes the typed lists.
+    setPickerOpen(false);
+    setPickerQuery("");
+    setPickerScope(null);
   }
   const shouldOpen = !disabled && focused && Boolean(active) && active?.start !== dismissedTagStart && !pickerOpen
     && interactionScope === completionScope;
@@ -254,6 +261,12 @@ export function InlineTagInput({
   useEffect(() => {
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
+
+  // A new block closed the Tags button's list: focus that was in it goes back to the button.
+  useEffect(() => {
+    const activeElement = document.activeElement;
+    if (activeElement && pickerPanelRef.current?.contains(activeElement)) pickerTriggerRef.current?.focus();
+  }, [completionScope]);
 
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
@@ -362,6 +375,7 @@ export function InlineTagInput({
     if (disabled) return;
     setPickerQuery("");
     setPickerIndex(0);
+    setPickerScope(completionScope);
     setPickerOpen(true);
   }
 
@@ -372,7 +386,8 @@ export function InlineTagInput({
   }
 
   function pickPickerAction(action: (typeof pickerActions)[number] | undefined) {
-    if (!action || disabled) return;
+    // Only for the block the list was opened for, and only while it is open.
+    if (!action || disabled || !effectivePickerOpen || pickerScope !== completionScope) return;
     if (action.create) {
       addSelectedTag(action.label);
       setPickerQuery("");
@@ -387,6 +402,11 @@ export function InlineTagInput({
 
   function onPickerKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing) return;
+    // A list closed by a new block (or any stale keystroke) changes nothing and never submits.
+    if (!effectivePickerOpen || pickerScope !== completionScope) {
+      if (event.key === "Enter" || event.key === "Backspace") event.preventDefault();
+      return;
+    }
     const count = pickerActions.length;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
