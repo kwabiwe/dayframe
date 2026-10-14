@@ -107,19 +107,24 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     const start = between(dashboard, "function startFromToday(", "function showTodayNotice(");
     expect(start).toContain("startMatchesRunning(running, { categoryId, description, tagNames })");
     expect(start).toContain("alreadyRecordingToastMessage(running)");
-    expect(start).toContain("switchedToastMessage(nextName, running, Date.now())");
+    expect(start).toContain("switchedToastCopy(nextName, running, Date.now())");
     // The notice follows the accepted start only.
-    expect(start.indexOf("if (!accepted) return;")).toBeLessThan(start.indexOf("switchedToastMessage("));
+    expect(start.indexOf("if (!accepted) return;")).toBeLessThan(start.indexOf("switchedToastCopy("));
     const stop = between(dashboard, "function stopFromToday()", "function tapPlayOrb()");
     expect(stop).not.toContain("showTodayNotice");
     expect(stop).not.toContain("todayNotice");
     // A start accepted after the account or session changed shows nothing (Codex r1 #4).
     expect(start).toContain("const noticeOwner = todayNoticeOwner();");
-    expect(start.indexOf("if (!todayNoticeOwnerStill(noticeOwner)) return;")).toBeLessThan(start.indexOf("switchedToastMessage("));
+    expect(start.indexOf("if (!todayNoticeOwnerStill(noticeOwner)) return;")).toBeLessThan(start.indexOf("switchedToastCopy("));
     const signedOut = between(dashboard, "const transitionToSignedOut = useCallback(", "}, [clearTodayNotice]);");
     expect(signedOut).toContain("noticeSessionGeneration.current += 1;");
     expect(signedOut).toContain("clearTodayNotice();");
     expect(dashboard).toContain('todayNotice.notice && authState === "authenticated" ? (');
+    // The switch's second line and its one VoiceOver sentence reach the toast, and a notice held
+    // back by the delete Undo toast is still announced as that sentence.
+    expect(dashboard).toContain("detail={todayNotice.notice.detail}");
+    expect(dashboard).toContain("accessibilityLabel={todayNotice.notice.accessibilityLabel}");
+    expect(dashboard).toContain("AccessibilityInfo.announceForAccessibility(toastAccessibilityText(copy));");
     // The delete Undo toast always holds the place.
     expect(dashboard).toContain('if (deletionCoordinator.current?.current()?.phase === "active") {');
     expect(dashboard).toMatch(/pendingDeletion\?\.phase === "active" \? \([\s\S]*?<BlocksToast[\s\S]*?\) : todayNotice\.notice && authState === "authenticated" \? \(/);
