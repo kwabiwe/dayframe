@@ -1,13 +1,17 @@
 import { goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
 
 /**
- * Today's goal frame (Blocks prototype): the day's tracked total against the daily goal, drawn as
- * one cell per goal hour that fills with entries in the order they happened. The total is every
- * block's own time, overlaps included (UIA-305, owner: one total wherever totals appear, so a day
- * can pass 24h). Goals use covered time (product-model.md): time that overlapping entries share
- * counts once toward the goal and is drawn in the colour of the entry that started first. Cells
- * stop at the goal; the total does not. The cells and percent use only activities that count
- * toward the goal (`goalCountingEntries`, UIA-043: Sleep does not by default).
+ * Today's goal frame (Blocks prototype): the day's framed total against the daily goal, drawn as
+ * one cell per goal hour that fills with entries in the order they happened. The total is covered
+ * time: time that overlapping blocks share counts once, so the day never passes 24h (owner
+ * decision 14 Oct 2026, PRD D14, superseding UIA-305 for Today's hero; it matches web Today's hero
+ * and "Where today went"). Reports keeps logged time. Time that overlapping entries share is drawn
+ * in the colour of the entry that started first. Cells stop at the goal; the total does not.
+ *
+ * Goal rule (D14): the cells and percent are the covered time of goal-counting activities only
+ * (`goalCountingEntries`, UIA-043: Sleep does not count by default). Where a goal-counting block
+ * overlaps one that doesn't count, the overlap fills the goal in full: the activity that doesn't
+ * count is simply left out before the union is taken, never split against it.
  */
 type GoalFrameEntry = {
   id: string;
@@ -44,7 +48,7 @@ export function buildTodayGoalFrame({
   dayStart.setHours(0, 0, 0, 0);
   const startMs = dayStart.getTime();
 
-  const totalMs = loggedMs(entries, startMs, nowMs);
+  const totalMs = coveredPieces(entries, startMs, nowMs).reduce((sum, piece) => sum + piece.ms, 0);
   const pieces = coveredPieces(goalCountingEntries(entries, categories), startMs, nowMs);
   const goalCountedMs = pieces.reduce((sum, piece) => sum + piece.ms, 0);
   const cells: GoalFrameSlice[][] = Array.from({ length: cellCount }, () => []);
@@ -71,22 +75,12 @@ export function buildTodayGoalFrame({
   return {
     cells,
     goalHours: minutes / 60,
-    /** Framed time that fills the goal (all of it unless an activity is switched off). */
+    /** Covered time that fills the goal (all of it unless an activity is switched off). */
     goalSeconds: Math.floor(goalCountedMs / 1000),
     percent: Math.min(100, Math.round((goalCountedMs / goalMs) * 100)),
+    /** Covered time today: overlapping blocks count once (D14). */
     totalSeconds: Math.floor(totalMs / 1000),
   };
-}
-
-/** Every entry's own time today, overlaps included. */
-function loggedMs(entries: readonly GoalFrameEntry[], startMs: number, nowMs: number) {
-  let total = 0;
-  for (const entry of entries) {
-    const from = Math.max(Date.parse(entry.startedAt), startMs);
-    const to = Math.min(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs, nowMs);
-    if (Number.isFinite(from) && Number.isFinite(to) && to > from) total += to - from;
-  }
-  return total;
 }
 
 /** Union in start order: each entry contributes only the time no earlier entry already covers. */

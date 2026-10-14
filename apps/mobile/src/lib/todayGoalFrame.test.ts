@@ -100,7 +100,7 @@ describe("buildTodayGoalFrame", () => {
     expect(buildTodayGoalFrame({ entries: [], goalMinutes: 20, nowMs: day }).cells).toHaveLength(1);
   });
 
-  it("counts overlapping time once toward the goal, in the colour of the entry that started first; the total keeps every block's time (UIA-305)", () => {
+  it("counts overlapping time once in the total and toward the goal, in the colour of the entry that started first (D14)", () => {
     const frame = buildTodayGoalFrame({
       entries: [
         entry("work", at(9), at(11), "blue"),
@@ -110,14 +110,113 @@ describe("buildTodayGoalFrame", () => {
       goalMinutes: 480,
       nowMs: day + 12 * 3_600_000,
     });
-    // 2h + 1h + 30m logged; 2h 30m covered fills the goal.
-    expect(frame.totalSeconds).toBe(210 * 60);
+    // 2h + 1h + 30m logged, but only 09:00–11:30 is covered: the hero and the goal both read 2h 30m.
+    expect(frame.totalSeconds).toBe(150 * 60);
     expect(frame.goalSeconds).toBe(150 * 60);
     expect(frame.percent).toBe(31);
     expect(frame.cells[0]).toEqual([{ key: "work:0", color: "blue", fraction: 1, live: false }]);
     expect(frame.cells[1]).toEqual([{ key: "work:1", color: "blue", fraction: 1, live: false }]);
     expect(frame.cells[2]).toEqual([{ key: "walk:2", color: "lime", fraction: 0.5, live: false }]);
     expect(frame.cells.flat().some((slice) => slice.key.startsWith("call"))).toBe(false);
+  });
+
+  it("counts two overlapping blocks of the same activity once", () => {
+    const frame = buildTodayGoalFrame({
+      entries: [entry("a", at(9), at(11)), entry("b", at(10), at(12))],
+      goalMinutes: 480,
+      nowMs: day + 13 * 3_600_000,
+    });
+    expect(frame.totalSeconds).toBe(3 * 3600);
+    expect(frame.goalSeconds).toBe(3 * 3600);
+  });
+
+  it("runs a running block that overlaps a finished one to now, counting the shared time once", () => {
+    const frame = buildTodayGoalFrame({
+      entries: [entry("inbox", at(9), at(10), "steel"), entry("live", at(9, 30), null, "blue")],
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    // Inbox 09:00–10:00 and Deep work since 09:30: 3h covered at 12:00 (logged would be 3h 30m).
+    expect(frame.totalSeconds).toBe(3 * 3600);
+    expect(frame.cells[2]).toEqual([{ key: "live:2", color: "blue", fraction: 1, live: true }]);
+  });
+
+  it("counts only today's part of blocks that overlap across midnight", () => {
+    const frame = buildTodayGoalFrame({
+      entries: [
+        entry("night", new Date(day - 2 * 3_600_000).toISOString(), at(1)),
+        entry("late", new Date(day - 3_600_000).toISOString(), at(0, 30), "steel"),
+      ],
+      goalMinutes: 480,
+      nowMs: day + 2 * 3_600_000,
+    });
+    expect(frame.totalSeconds).toBe(3600);
+    expect(frame.goalSeconds).toBe(3600);
+  });
+
+  it("never passes the real day on a clock-change day", () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = "Europe/London";
+    try {
+      // 25 Oct 2026: clocks go back at 02:00 BST, so the local day is 25 hours long.
+      const longDay = new Date(2026, 9, 25).getTime();
+      const nowMs = new Date(2026, 9, 25, 23, 59).getTime();
+      const frame = buildTodayGoalFrame({
+        entries: [
+          { id: "a", startedAt: new Date(longDay).toISOString(), stoppedAt: new Date(nowMs).toISOString(), categoryColor: "blue" },
+          { id: "b", startedAt: new Date(longDay).toISOString(), stoppedAt: new Date(nowMs).toISOString(), categoryColor: "lime" },
+        ],
+        goalMinutes: 480,
+        nowMs,
+      });
+      // 24h 59m of real time, covered once (logged would read twice that).
+      expect(frame.totalSeconds).toBe((24 * 60 + 59) * 60);
+      expect(nowMs - longDay).toBe((24 * 60 + 59) * 60_000);
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
+  it("fills the goal with the covered time of goal-counting activities only, overlaps with Sleep included in full", () => {
+    const categories = [{ id: "cat-sleep", countsTowardGoal: false }, { id: "cat-blue", countsTowardGoal: true }];
+    const frame = buildTodayGoalFrame({
+      categories,
+      entries: [
+        entry("night", at(0), at(7), "sleep"),
+        // Reading in bed overlaps Sleep 06:00–07:00; it counts toward the goal in full.
+        entry("reading", at(6), at(8), "blue"),
+        entry("work", at(7, 30), at(9), "blue"),
+      ],
+      goalMinutes: 480,
+      nowMs: day + 12 * 3_600_000,
+    });
+    // Hero: 00:00–09:00 covered once. Cells: Reading ∪ Work = 06:00–09:00.
+    expect(frame.totalSeconds).toBe(9 * 3600);
+    expect(frame.goalSeconds).toBe(3 * 3600);
+    expect(frame.percent).toBe(38);
+    expect(frame.cells.flat().every((slice) => slice.color === "blue")).toBe(true);
+    // The goal never exceeds the hero.
+    expect(frame.goalSeconds).toBeLessThanOrEqual(frame.totalSeconds);
+  });
+
+  it("keeps the goal time equal to the hero when every activity counts, whatever overlaps", () => {
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    for (let run = 0; run < 200; run += 1) {
+      const nowMs = day + Math.floor(random() * 24 * 3_600_000);
+      const entries = Array.from({ length: 1 + Math.floor(random() * 8) }, (_, index) => {
+        const from = day - 3_600_000 + Math.floor(random() * 25 * 3_600_000);
+        const to = random() < 0.15 ? null : new Date(from + 1 + Math.floor(random() * 4 * 3_600_000)).toISOString();
+        return entry(`e${index}`, new Date(from).toISOString(), to, ["blue", "lime", "rose"][index % 3]);
+      });
+      const frame = buildTodayGoalFrame({ entries, goalMinutes: 1440, nowMs });
+      expect(frame.goalSeconds).toBe(frame.totalSeconds);
+      expect(frame.totalSeconds).toBeLessThanOrEqual(Math.floor((nowMs - day) / 1000));
+    }
   });
 
   it("terminates for goals whose hour cells are not whole milliseconds", () => {

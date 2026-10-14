@@ -221,17 +221,19 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
   first letter; "Account and settings"; 44 points) which opens Settings, where
   account management and logout live.
 - `TodayGoalFrame` shows the date eyebrow (a VoiceOver header), the day's
-  framed total (every block's time, overlaps included — UIA-305; the cells and
-  percentage fill with covered time, and "framed · Xh toward" appears when the
-  two differ) "framed of" the daily goal from the bootstrap's
+  framed total (covered time: time that overlapping blocks share counts once,
+  so it never passes 24h — PRD D14, 14 Oct 2026, superseding UIA-305 for this
+  hero; it matches web Today's hero) "framed of" the daily goal from the bootstrap's
   `user.dailyGoalMinutes` (eight hours when unset), the percentage, and one
   cell per goal hour filled with activity colours in the order the time
   happened (`buildTodayGoalFrame`). It reads the per-minute clock; the running
   entry's slice carries the recording edge. VoiceOver reads the frame as one
   summary. The cells and percentage use only activities that count toward the
-  goal (`categories` from the bootstrap; Sleep is off by default, UIA-043);
-  when some framed time doesn't count, the line reads "framed · 2h toward 8h"
-  and VoiceOver says how much is toward the goal.
+  goal (`categories` from the bootstrap; Sleep is off by default, UIA-043):
+  the covered time of goal-counting blocks only, so a goal-counting block that
+  overlaps Sleep fills the goal in full and the goal time never exceeds the
+  hero (D14). When some framed time doesn't count, the line reads "framed · 2h
+  toward 8h" and VoiceOver says how much is toward the goal.
 - `TodayReviewNudge` ("N moments to review") opens Review on the segment that
   has moments (14 Oct 2026): `?segment=today` when today's count is above zero,
   `?segment=earlier` otherwise, and no parameter (Today) when the split is not
