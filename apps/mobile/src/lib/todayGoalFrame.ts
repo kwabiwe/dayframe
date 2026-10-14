@@ -3,7 +3,8 @@ import { coveredDurationMs, goalCountingEntries, type GoalCountingCategory } fro
 /**
  * Today's goal frame (Blocks prototype): the day's framed total against the daily goal, drawn as
  * one cell per goal hour that fills with entries in the order they happened. The total is covered
- * time: time that overlapping blocks share counts once, so the day never passes 24h (owner
+ * time: time that overlapping blocks share counts once, so the total never passes the day's real
+ * length, 23–25 hours across a clock change (owner
  * decision 14 Oct 2026, PRD D14, superseding UIA-305 for Today's hero; it matches web Today's hero
  * and "Where today went"). Reports keeps logged time. Time that overlapping entries share is drawn
  * in the colour of the entry that started first. Cells stop at the goal; the total does not.
