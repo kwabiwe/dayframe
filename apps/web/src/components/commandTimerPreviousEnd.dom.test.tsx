@@ -10,7 +10,7 @@ vi.mock("@/components/AppShellRuntime", () => ({
   useAppShellRuntime: () => runtime
 }));
 
-const { PersistentTimerBar } = await import("./PersistentTimerBar");
+const { PersistentTimerBar, PREVIOUS_END_CHANGED_NOTICE } = await import("./PersistentTimerBar");
 
 // Local times, so "today" and the chip's HH:MM are the viewer's in any test time zone.
 const local = (hours: number, minutes = 0, day = 14) => new Date(2026, 9, day, hours, minutes);
@@ -28,51 +28,50 @@ afterEach(() => {
 });
 
 describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
-  it("offers today's last end once hydrated, and starts the draft from it", async () => {
-    runtime = runtimeFixture({
-      description: "Review notes",
-      entries: [
-        finished({ id: "a", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) }),
-        finished({ id: "b", categoryName: "Reading", startedAt: iso(8, 0), stoppedAt: iso(9, 0) })
-      ]
-    });
-    render(<PersistentTimerBar />);
+  it("offers today's last end once hydrated: Start, then the existing start edit to that end", async () => {
+    const entries = [
+      finished({ id: "a", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) }),
+      finished({ id: "b", categoryName: "Reading", startedAt: iso(8, 0), stoppedAt: iso(9, 0) })
+    ];
+    runtime = runtimeFixture({ description: "Review notes", entries });
+    const view = render(<PersistentTimerBar />);
     // The server render (and the first client render) has no offer.
     expect(screen.queryByRole("button", { name: /^Start from/ })).toBeNull();
     await act(async () => { vi.advanceTimersByTime(0); });
 
     const chip = screen.getByRole("button", { name: "Start from 10:15, after Write report" });
     expect(chip.textContent).toBe("From 10:15 · afterWrite report");
+    startsBlock(view, entries);
     await act(async () => { fireEvent.click(chip); });
 
-    const startTimer = runtime.startTimer as ReturnType<typeof vi.fn>;
-    expect(startTimer).toHaveBeenCalledTimes(1);
-    const [draft, options] = startTimer.mock.calls[0];
-    expect(draft).toEqual({ categoryId: "", description: "Review notes", tagNames: [] });
-    // Checked again when the Start runs: the same gap starts at its end…
-    const snapshot = runtime.shellData as BootstrapData;
-    expect(options.startAt(snapshot)).toBe(iso(10, 15));
-    // …a block running by then, or a newer block ended since, starts nothing.
-    expect(options.startAt({ ...snapshot, activeEntry: finished({ id: "run", stoppedAt: null }) })).toBeNull();
-    expect(options.startAt({
-      ...snapshot,
-      entries: [...snapshot.entries, finished({ id: "c", startedAt: iso(10, 20), stoppedAt: iso(10, 40) })]
-    })).toBeNull();
+    // One path (owner): the ordinary Start, then the same start-time edit as "Set to last stop time".
+    expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "", description: "Review notes", tagNames: [] });
+    expect(runtime.updateActiveStartTime).toHaveBeenCalledWith(iso(10, 15));
   });
 
-  it("uses the bootstrap's latest-ending block when the bar's entries miss it (Codex r1 on #418)", async () => {
-    // `entries` is the latest-started 100: a long block that started earlier and ends later can be
-    // missing from it. The chip must offer that block's end, never the earlier one.
-    runtime = runtimeFixture({
-      entries: [finished({ id: "short", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) })],
-      latestFinishedEntry: finished({ id: "long", description: "Workshop", startedAt: iso(6, 0), stoppedAt: iso(10, 45) })
-    });
-    render(<PersistentTimerBar />);
+  it("keeps the block at now and says so if a newer block has ended since", async () => {
+    const entries = [finished({ id: "a", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) })];
+    runtime = runtimeFixture({ entries });
+    const view = render(<PersistentTimerBar />);
     await act(async () => { vi.advanceTimersByTime(0); });
-    const chip = screen.getByRole("button", { name: "Start from 10:45, after Workshop" });
+    const chip = screen.getByRole("button", { name: "Start from 10:15, after Write report" });
+    // By the time the Start lands, the loaded blocks include one that ended at 10:40.
+    startsBlock(view, [...entries, finished({ id: "c", startedAt: iso(10, 20), stoppedAt: iso(10, 40) })]);
     await act(async () => { fireEvent.click(chip); });
-    const [, options] = (runtime.startTimer as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(options.startAt(runtime.shellData as BootstrapData)).toBe(iso(10, 45));
+    expect(runtime.updateActiveStartTime).not.toHaveBeenCalled();
+    expect(screen.getByText(PREVIOUS_END_CHANGED_NOTICE)).not.toBeNull();
+  });
+
+  it("edits nothing when the Start was refused or another Start took over", async () => {
+    for (const result of [{ ok: false, error: "Offline" }, { ok: true, own: false, alreadyRunning: false }]) {
+      runtime = runtimeFixture({ entries: [finished({ id: "a", description: "Write report", startedAt: iso(9, 30), stoppedAt: iso(10, 15) })] });
+      (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValue(result);
+      render(<PersistentTimerBar />);
+      await act(async () => { vi.advanceTimersByTime(0); });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /^Start from/ })); });
+      expect(runtime.updateActiveStartTime).not.toHaveBeenCalled();
+      cleanup();
+    }
   });
 
   it("offers nothing while recording, beside a trailing duration, or past the window", async () => {
@@ -101,17 +100,28 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
     render(<PersistentTimerBar />);
     await act(async () => { vi.advanceTimersByTime(0); });
     expect(screen.getByRole("button", { name: "Start from 10:15, after Write report" })).not.toBeNull();
-    // 14:15 is exactly 4 h (still offered); the next 30 s tick is past it.
-    await act(async () => { vi.advanceTimersByTime(90_000); });
+    // The minute clock: 14:15 is exactly 4 h (still offered); 14:16 is past it.
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(screen.getByRole("button", { name: "Start from 10:15, after Write report" })).not.toBeNull();
+    await act(async () => { vi.advanceTimersByTime(60_000); });
     expect(screen.queryByRole("button", { name: /^Start from/ })).toBeNull();
   });
 });
+
+/** The Start resolves with a running block now in the bar's data (re-rendered, as React would). */
+function startsBlock(view: ReturnType<typeof render>, entries: TimeEntryRow[]) {
+  const running = finished({ id: "run", startedAt: local(11, 0).toISOString(), stoppedAt: null });
+  (runtime.startTimer as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: running, entries: [...entries, running] } };
+    view.rerender(<PersistentTimerBar />);
+    return { ok: true, own: true, alreadyRunning: false, unchanged: null, replaced: null, switchedAt: running.startedAt };
+  });
+}
 
 function runtimeFixture(overrides: {
   activeEntry?: TimeEntryRow | null;
   description?: string;
   entries?: TimeEntryRow[];
-  latestFinishedEntry?: TimeEntryRow | null;
 } = {}) {
   const activeEntry = overrides.activeEntry ?? null;
   const data = {
@@ -120,7 +130,6 @@ function runtimeFixture(overrides: {
     categoryUsage: [],
     dateRange: { selectedDate: "2026-10-14" },
     entries: [...(overrides.entries ?? []), ...(activeEntry ? [activeEntry] : [])],
-    latestFinishedEntry: overrides.latestFinishedEntry ?? null,
     tags: [],
     taskSuggestions: []
   } as unknown as BootstrapData;
@@ -169,12 +178,3 @@ function finished(overrides: Partial<TimeEntryRow> = {}): TimeEntryRow {
     ...overrides
   };
 }
-
-describe("cached-period merge keeps the latest end current (Codex r3 on #418)", () => {
-  it("copies latestFinishedEntry from the current bootstrap with entries", async () => {
-    const { readFileSync } = await import("node:fs");
-    const runtimeSource = readFileSync(`${process.cwd()}/src/components/AppShellRuntime.tsx`, "utf8");
-    const merge = runtimeSource.slice(runtimeSource.indexOf("function withCurrentSharedBootstrap("), runtimeSource.indexOf("async function responseError("));
-    expect(merge).toMatch(/entries: current\.entries,[\s\S]*?latestFinishedEntry: current\.latestFinishedEntry,/);
-  });
-});

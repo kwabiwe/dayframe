@@ -362,32 +362,6 @@ describe("time-entry range query", () => {
   });
 });
 
-describe("latest finished block for \"start at the previous end\" (PRD D16)", () => {
-  it("orders finished blocks by their end, over ends in the last 72 h however old the start", () => {
-    const statement = buildTimeEntriesQuery(session, { latestFinished: true, limit: 1, capturedNow: "2026-10-14T11:00:00.000Z" });
-    expect(statement.text).toContain("te.stopped_at is not null");
-    // A timer started four days ago and stopped today still counts (Codex r2 on #418).
-    expect(statement.text).toContain("te.stopped_at >= $3::timestamptz - interval '72 hours'");
-    expect(statement.text).not.toContain("te.started_at >= $3::timestamptz - interval");
-    expect(statement.text).toContain("order by te.stopped_at desc, te.id desc");
-    expect(statement.values).toEqual([session.workspaceId, session.userId, "2026-10-14T11:00:00.000Z", 1]);
-    // Every other list keeps its latest-started order.
-    expect(buildTimeEntriesQuery(session, { limit: 100 }).text).toContain("order by te.started_at desc, te.id desc");
-  });
-
-  it("sends the latest-ending block with bootstrap even when entries miss it", async () => {
-    const long = { id: "long", startedAt: "2026-10-14T06:00:00.000Z", stoppedAt: "2026-10-14T10:45:00.000Z" };
-    mocks.query.mockImplementation(async (statement: string) => {
-      if (statement.includes("order by te.stopped_at desc")) return { rows: [long] };
-      return { rows: [] };
-    });
-    const data = await getBootstrapData(session);
-    expect(data.latestFinishedEntry).toMatchObject(long);
-    mocks.query.mockImplementation(async () => ({ rows: [] }));
-    expect((await getBootstrapData(session)).latestFinishedEntry).toBeNull();
-  });
-});
-
 describe("confirmed-in-Review flag on history entries (E1)", () => {
   it("marks blocks created by an accepted Review item or a Review correction, scoped to the session", () => {
     const statement = buildTimeEntriesQuery(session, { limit: 2000 });

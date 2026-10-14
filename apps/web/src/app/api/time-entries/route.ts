@@ -5,7 +5,6 @@ import {
   processActivityEvent,
   splitActiveEntry,
   TimerMutationBusyError,
-  PreviousEndChangedError,
   TimerReplacementWindowError
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
@@ -78,11 +77,8 @@ export async function POST(request: Request) {
 
     const startedAt = optionalTimestamp(body.startedAt, "startedAt");
     const occurredAt = startedAt ? new Date(startedAt) : new Date();
-    // "Start at the previous end" (PRD D16): refused unless nothing runs or ends after `startedAt`.
-    const afterPreviousEnd = Boolean(startedAt) && body.afterPreviousEnd === true;
     const rawPayload = {
       ...(startedAt ? { origin, startedAt } : { origin }),
-      ...(afterPreviousEnd ? { afterPreviousEnd: true } : {}),
       ...(tagNames ? { tagNames } : {})
     };
 
@@ -104,9 +100,6 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;
-    if (error instanceof PreviousEndChangedError) {
-      return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
-    }
     if (error instanceof TimerReplacementWindowError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

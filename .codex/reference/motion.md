@@ -326,12 +326,12 @@ Block pull-to-refresh:
 
 ## Web command timer "From 10:15 · after …" (PRD D16, 14 Oct 2026)
 
-- Trigger: the bar idle with today's last block ended 1 min–4 h ago (checked after hydration and every 30 s); a click on the chip.
-- Owner: none — the chip has no animation of its own. It appears and leaves in place; the click is an ordinary Start, so the bar's existing live-state change (ring colour, clock) is the only movement.
+- Trigger: the bar idle with today's last loaded block ended 1 min–4 h ago (checked after hydration and on the minute clock); a click on the chip.
+- Owner: none — the chip has no animation of its own. It appears and leaves in place; the click is an ordinary Start followed by the start-time edit, so the bar's existing live-state change (ring colour, rolling clock) is the only movement: the clock may roll from 00:00 to the backdated elapsed time once the edit lands.
 - Entrance/update/exit: the chip is absent from the server render and appears after hydration without motion; it leaves when the window passes, a trailing duration is typed, or the Start puts the bar live.
 - Surrounding layout: on desktop the chip sits under the muted idle clock, tucked into the clock's padding so the bar stays 64 px with or without it; below 860 px it sits beside the clock on the clock's own row (44 px), and only the activity name ellipsises. Nothing else moves.
 - Interruption: a second click while the Start is pending is ignored (the chip is disabled while the timer is busy; then it is gone).
-- Async outcome: the optimistic block starts at the previous end; if a block is running by the time the Start runs, or a newer block has ended since, nothing starts and the bar's inline error says "That gap has changed, so nothing was started. Try again." The server refuses the same case it alone can see (another device's block) with a 409, and the optimistic block rolls back as any rejected Start does, with the same words.
+- Async outcome: the Start is optimistic as always; if it fails or another Start takes over, nothing is edited. If a newer loaded block has ended since the chip appeared, the block stays at now with the bar's notice "Started now: an earlier block ends later than that, so the start wasn't moved." A rejected start edit rolls back as the start editor's does.
 - Accessibility: no motion to reduce. The chip's name is "Start from 10:15, after Write report"; it is a native button in the tab order after the description.
 
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)

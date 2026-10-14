@@ -43,11 +43,6 @@ import {
 } from "@/lib/timer-bootstrap-reconciliation";
 
 type MutationOutcome = { ok: true } | { ok: false; error: string };
-type TimerStartOptions = {
-  dedupeRunning?: boolean;
-  /** A backdated Start: its start, from the blocks as they are when it runs (see runTimerStartMutation). */
-  startAt?: (snapshot: BootstrapData) => string | null;
-};
 type DateLoadOutcome = { ok: true } | { ok: false; error: string };
 type CategoryMutationOutcome =
   | { ok: true; category: CategoryRow }
@@ -81,7 +76,7 @@ type RuntimeContext = {
   setTimerDraft: (draft: TimerDraft | ((current: TimerDraft) => TimerDraft)) => void;
   shellData: BootstrapData | null;
   startEntryAgain: (entry: TimeEntryRow) => Promise<MutationOutcome>;
-  startTimer: (input?: TimerDraftInput, options?: TimerStartOptions) => Promise<TimerStartOutcome>;
+  startTimer: (input?: TimerDraftInput, options?: { dedupeRunning?: boolean }) => Promise<TimerStartOutcome>;
   stopTimer: (input?: TimerDraftInput) => Promise<MutationOutcome>;
   timerDraft: TimerDraft;
   /**
@@ -504,7 +499,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   const startTimer = useCallback(async (
     input: TimerDraftInput = {},
-    options: TimerStartOptions = {}
+    options: { dedupeRunning?: boolean } = {}
   ): Promise<TimerStartOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
@@ -527,7 +522,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         }
       },
       dedupeRunning: options.dedupeRunning,
-      startAt: options.startAt,
       gate: mutationGateRef.current,
       snapshot,
       currentDraft: draftRef.current,
@@ -782,7 +776,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       commitData(applyOptimisticActiveEntryPatch(snapshot, sending, startedAt), "optimistic");
       if (patch) setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), snapshot.activeEntry!.id);
       try {
-        const response = await clientFetch(`/api/time-entries/${snapshot.activeEntry!.id}`, {
+        // A block shown at its optimistic id right after an accepted Start is edited at its real id
+        // ("From 10:15 · after …" edits the start straight after starting).
+        const response = await clientFetch(`/api/time-entries/${serverEntryId(snapshot.activeEntry!.id) ?? snapshot.activeEntry!.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -824,7 +820,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [adoptServerDetails, baseFor, commitData, refresh, setTimerDraftBase]);
+  }, [adoptServerDetails, baseFor, commitData, refresh, serverEntryId, setTimerDraftBase]);
 
   const createManualEntry = useCallback(async (input: ManualEntryInput): Promise<MutationOutcome> => {
     const result = await mutationGateRef.current.run(async () => {
@@ -1004,8 +1000,6 @@ function withCurrentSharedBootstrap(
     learnedPlaces: current.learnedPlaces,
     automationRules: current.automationRules,
     entries: current.entries,
-    // With `entries`: "start at the previous end" reads both (Codex r3 on #418).
-    latestFinishedEntry: current.latestFinishedEntry,
     activeEntry: current.activeEntry,
     reviewItems: current.reviewItems,
     activityEvents: current.activityEvents,

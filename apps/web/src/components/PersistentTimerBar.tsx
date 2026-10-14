@@ -48,6 +48,8 @@ type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; to
  * Phones get a shorter one so it is not cut off beside the activity block and Start.
  */
 export const COMMAND_PLACEHOLDER = "Try “Write report @work #client”";
+/** The block started, but the end the chip offered is no longer the last one: it stays at now. */
+export const PREVIOUS_END_CHANGED_NOTICE = "Started now: an earlier block ends later than that, so the start wasn't moved.";
 export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
@@ -85,9 +87,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  // Idle: a 30 s clock for the "From 10:15 · after …" offer, first set after hydration (the
-  // server render has no offer, so nothing mismatches).
-  const [idleNow, setIdleNow] = useState(0);
+  // Idle: the minute clock for the "From 10:15 · after …" offer (a start of minute, set after
+  // hydration so the server render has no offer; no per-second work).
+  const [idleMinute, setIdleMinute] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
@@ -102,6 +104,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const timerActionsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const active = data?.activeEntry ?? null;
+  const idle = !active;
+  // The newest blocks, for the check after an awaited Start (the render's `data` is from before it).
+  const latestDataRef = useRef(data);
+  latestDataRef.current = data;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
   const lastStoppedAt = useMemo(() => {
@@ -111,6 +117,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .map((entry) => entry.stoppedAt as string)
       .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
   }, [active?.id, data]);
+  // Owner idea 1 (14 Oct 2026; PRD D16): idle, with today's last block ended 1 min–4 h ago, offer
+  // to start from its end. Only the blocks already loaded, worked out once a minute (owner: no new
+  // query, field or per-second work). Not beside a trailing duration (that adds a finished block).
+  const entries = data?.entries;
+  const durationShorthand = Boolean(timerDraft.description.trim() && parseCommand(timerDraft.description).durationSeconds);
+  const previousEnd = useMemo(
+    () => (idle && idleMinute && entries && !durationShorthand
+      ? previousEndOffer(entries, { dayStartMs: localDayStartMs(idleMinute), startMs: idleMinute })
+      : null),
+    [durationShorthand, entries, idle, idleMinute]
+  );
   const durationSeconds = active
     ? Math.max(active.durationSeconds, Math.floor((now - activeStartedAtMs) / 1000))
     : 0;
@@ -172,14 +189,20 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }, [active]);
 
   useEffect(() => {
-    if (active) return undefined;
-    const first = window.setTimeout(() => setIdleNow(Date.now()), 0);
-    const interval = window.setInterval(() => setIdleNow(Date.now()), 30_000);
+    if (!idle) return undefined;
+    const tick = () => setIdleMinute(Math.floor(Date.now() / 60_000) * 60_000);
+    let interval = 0;
+    const first = window.setTimeout(tick, 0);
+    const aligned = window.setTimeout(() => {
+      tick();
+      interval = window.setInterval(tick, 60_000);
+    }, 60_000 - (Date.now() % 60_000));
     return () => {
       window.clearTimeout(first);
+      window.clearTimeout(aligned);
       window.clearInterval(interval);
     };
-  }, [active]);
+  }, [idle]);
 
   // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
   // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
@@ -377,26 +400,31 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
   }
 
-  // "From 10:15 · after Write report": starts the block as Start would, at the previous block's
-  // end. The offer is checked again when the Start runs: if a block is running by then, or a newer
-  // block has ended since, nothing starts and the bar says so (never a Start at now instead). The
-  // server checks it once more under the timer lock (`afterPreviousEnd`), for a block added or
-  // moved on another device that this tab has not seen.
-  function startFromPreviousEnd(offer: PreviousEndOffer) {
+  // "From 10:15 · after Write report": the usual Start, then the same start-time edit as the start
+  // editor's "Set to last stop time" (owner: one path). Before the edit the loaded blocks are checked
+  // again: if a newer block has ended since, or the Start did not run, the block stays at now and
+  // the bar says so. Another device's change the bar hasn't loaded yet is not seen (accepted, as
+  // for the existing button).
+  async function startFromPreviousEnd(offer: PreviousEndOffer) {
     setCommandNotice(null);
     setSuggestionsOpen(false);
     const command = parseCommand(timerDraft.description);
-    void startTimer(
-      { categoryId: timerDraft.categoryId, description: command.description, tagNames: timerDraft.tagNames },
-      {
-        startAt: (snapshot) => {
-          if (snapshot.activeEntry) return null;
-          const nowMs = Date.now();
-          const current = previousEndOffer(finishedBlocks(snapshot), { dayStartMs: localDayStartMs(nowMs), startMs: nowMs });
-          return current?.startedAt === offer.startedAt ? current.startedAt : null;
-        }
-      }
-    );
+    const outcome = await startTimer({ categoryId: timerDraft.categoryId, description: command.description, tagNames: timerDraft.tagNames });
+    if (!outcome.ok || !outcome.own || outcome.alreadyRunning) return;
+    const current = latestDataRef.current;
+    const running = current?.activeEntry;
+    if (!current || !running) return;
+    const runningStartMs = Date.parse(running.startedAt);
+    const still = previousEndOffer(current.entries, {
+      dayStartMs: localDayStartMs(runningStartMs),
+      excludeId: running.id,
+      startMs: runningStartMs
+    });
+    if (still?.startedAt !== offer.startedAt) {
+      setCommandNotice(PREVIOUS_END_CHANGED_NOTICE);
+      return;
+    }
+    await updateActiveStartTime(offer.startedAt);
   }
 
   function announce(label: string, swatch?: CSSProperties) {
@@ -455,11 +483,6 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   // list) beside a trailing duration.
   const previewCategory = parsedCommand?.durationSeconds ? selectedCategory : null;
   const commandHasShorthand = Boolean(parsedCommand && timerDraft.description.trim() && parsedCommand.durationSeconds);
-  // Owner idea 1 (14 Oct 2026): idle, with today's last block ended under 4 h ago, offer to start
-  // from its end. Not beside a trailing duration (that logs a finished block, not a Start).
-  const previousEnd = !active && idleNow && !parsedCommand?.durationSeconds
-    ? previousEndOffer(finishedBlocks(data), { dayStartMs: localDayStartMs(idleNow), startMs: idleNow })
-    : null;
   const goLabel = parsedCommand?.durationSeconds
     ? `Add ${formatDuration(parsedCommand.durationSeconds)}`
     : "Start";
@@ -596,7 +619,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   aria-label={`Start from ${formatTime(previousEnd.startedAt)}, after ${previousEnd.previousName}`}
                   className="df-cmd-from"
                   disabled={isTimerBusy}
-                  onClick={() => startFromPreviousEnd(previousEnd)}
+                  onClick={() => void startFromPreviousEnd(previousEnd)}
                   type="button"
                 >
                   <span className="df-cmd-from-lead">From <span className="tabular">{formatTime(previousEnd.startedAt)}</span> · after</span>
@@ -1172,15 +1195,6 @@ function manualEntryDefaults(selectedDate: string) {
 
 function dateTimeLocal(date: Date) {
   return `${dateKey(date)}T${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-}
-
-/**
- * The blocks "start at the previous end" looks at: the bar's own `entries` (with this tab's
- * optimistic stops) and the bootstrap's `latestFinishedEntry`, which `entries` (the latest-started
- * 100) can miss when a long block started earlier ends later (Codex r1 on #418).
- */
-function finishedBlocks(data: BootstrapData) {
-  return data.latestFinishedEntry ? [...data.entries, data.latestFinishedEntry] : data.entries;
 }
 
 /** Midnight starting the viewer's local day containing `ms`. */

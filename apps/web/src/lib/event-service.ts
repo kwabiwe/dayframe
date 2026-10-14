@@ -210,20 +210,6 @@ export class TimerReplacementWindowError extends Error {
   }
 }
 
-/**
- * "Start at the previous end" (PRD D16) was asked for a gap that no longer exists: a block is
- * running, or a block now ends after the requested start (added or moved on another device).
- */
-export class PreviousEndChangedError extends Error {
-  readonly code = "previous_end_changed";
-  status = 409;
-
-  constructor(message = "That gap has changed, so nothing was started. Try again.") {
-    super(message);
-    this.name = "PreviousEndChangedError";
-  }
-}
-
 export class TimerMutationBusyError extends Error {
   readonly code = "timer_busy";
   readonly status = 503;
@@ -819,10 +805,6 @@ async function processActivityEventWithClient(
       stopOutcome = timeEntryId ? "stopped" : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
-      // Under the user's timer lock, so no Start or Stop can slip in between the check and the insert.
-      if (parsed.rawPayload.afterPreviousEnd === true) {
-        await assertStartsAfterEveryBlock(client, session, startedAt);
-      }
       if (candidate.shouldClosePrevious) {
         await closeActiveTimersForReplacement(client, session, startedAt);
       }
@@ -1143,23 +1125,6 @@ async function lockUserTimerState(client: pg.PoolClient, session: RequestSession
   );
 }
 
-async function assertStartsAfterEveryBlock(
-  client: pg.PoolClient,
-  session: RequestSession,
-  startedAt: string | Date
-) {
-  const result = await client.query(
-    `select 1
-     from time_entries
-     where workspace_id = $1
-       and user_id = $2
-       and (stopped_at is null or stopped_at > $3::timestamptz)
-     limit 1`,
-    [session.workspaceId, session.userId, startedAt]
-  );
-  if (result.rows.length) throw new PreviousEndChangedError();
-}
-
 async function closeActiveTimersForReplacement(
   client: pg.PoolClient,
   session: RequestSession,
@@ -1206,9 +1171,6 @@ export async function createManualEntry(input: {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    // A finished block written under the user's timer lock, so a "start at the previous end"
-    // Start (PRD D16) sees it or runs first: the two never overlap (Codex r2 on #418).
-    await lockUserTimerState(client, session);
     const eventResult = await client.query<{ id: string }>(
       `insert into activity_events (
           workspace_id,
@@ -2015,9 +1977,6 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
-    // A start or end change takes the user's timer lock before any row lock (the order Starts use),
-    // so a "start at the previous end" Start (PRD D16) sees it or runs first (Codex r2 on #418).
-    if (hasStartedAt || hasStoppedAt) await lockUserTimerState(client, session);
     if (input.expectedDetails) {
       // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
       // snapshot, so the read below (after any concurrent save has committed and released the

@@ -23,15 +23,6 @@ vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
   createManualEntry: mocks.createManualEntry,
   splitActiveEntry: mocks.splitActiveEntry,
-  PreviousEndChangedError: class PreviousEndChangedError extends Error {
-    readonly code = "previous_end_changed";
-    status = 409;
-
-    constructor(message = "That gap has changed, so nothing was started. Try again.") {
-      super(message);
-      this.name = "PreviousEndChangedError";
-    }
-  },
   TimerReplacementWindowError: class TimerReplacementWindowError extends Error {
     status = 409;
 
@@ -169,38 +160,6 @@ describe("POST /api/time-entries", () => {
       }),
       session
     );
-  });
-
-  // PRD D16: "start at the previous end" asks the server to refuse the Start if anything runs or
-  // ends after it; the flag only travels with a start time.
-  it("passes afterPreviousEnd through with a start time, and ignores it without one", async () => {
-    const startedAt = "2026-07-04T09:15:00.000Z";
-    await POST(jsonRequest({ mode: "start", startedAt, afterPreviousEnd: true }));
-    expect(mocks.processActivityEvent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ rawPayload: { origin: "web_timer", startedAt, afterPreviousEnd: true } }),
-      session
-    );
-    await POST(jsonRequest({ mode: "start", afterPreviousEnd: true }));
-    expect(mocks.processActivityEvent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ rawPayload: { origin: "web_timer" } }),
-      session
-    );
-    await POST(jsonRequest({ mode: "start", startedAt, afterPreviousEnd: "yes" }));
-    expect(mocks.processActivityEvent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ rawPayload: { origin: "web_timer", startedAt } }),
-      session
-    );
-  });
-
-  it("maps a changed previous end to a 409 with its code", async () => {
-    const { PreviousEndChangedError } = await import("@/lib/event-service");
-    mocks.processActivityEvent.mockRejectedValueOnce(new PreviousEndChangedError());
-    const response = await POST(jsonRequest({ mode: "start", startedAt: "2026-07-04T09:15:00.000Z", afterPreviousEnd: true }));
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toEqual({
-      code: "previous_end_changed",
-      error: "That gap has changed, so nothing was started. Try again."
-    });
   });
 
   it("adds optional tag names to the event payload without changing older requests", async () => {
