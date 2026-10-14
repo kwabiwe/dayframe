@@ -64,6 +64,8 @@ import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
 import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
+import { useStopFlightExit } from "./today/useStopFlightExit";
+import { createStopFlightLedger, type StopFlightLedger } from "./today/stopFlightLedger";
 import { TodayPullBlocks } from "./today/TodayPullBlocks";
 import { PlayOrb } from "./today/PlayOrb";
 import { ReportsSheetPortalContext } from "./reports/ReportsSheetPortal";
@@ -404,8 +406,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // A bootstrap already in flight carries the old goals: treat this like a mutation so it is
     // reconciled instead of applied over the new ones.
     dashboardMutationRevision.current += 1;
-    latestData.current = next;
-    setData(next);
+    publishDashboardData(next);
   }), []);
   // An activity saved in Settings (name, colour, icon or "Counts toward goal") reaches Today's goal
   // frame and Reports at once, for the same account and workspace only; an older answer never
@@ -418,8 +419,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (next === current) return;
     // A bootstrap already in flight may predate this change: reconcile it like a mutation.
     dashboardMutationRevision.current += 1;
-    latestData.current = next;
-    setData(next);
+    publishDashboardData(next);
   }), []);
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
@@ -472,6 +472,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     },
   });
   const [stopFlight, setStopFlight] = useState<StopFlight | null>(null);
+  // The flight that may still finish, updated synchronously with every set, clear, rollback or restoring
+  // publication, so a queued completion can never land on a block that is running again (stopFlightLedger).
+  const stopFlightLedgerRef = useRef<StopFlightLedger | null>(null);
+  stopFlightLedgerRef.current ??= createStopFlightLedger((entryId) => timerEntryIdentity(entryId));
+  const stopFlightLedger = stopFlightLedgerRef.current;
+  function dropCancelledStopFlight(token: number | null) {
+    if (token !== null) setStopFlight((current) => (current?.token === token ? null : current));
+  }
+  /**
+   * Every publication of dashboard data except sign-out's clear goes through here. Mutation handlers share latestData as
+   * their canonical synchronous view, and a publication that shows a flown block running again cancels its
+   * flight before React renders it.
+   */
+  function publishDashboardData(next: MobileBootstrap | null) {
+    dropCancelledStopFlight(stopFlightLedger.published(latestData.current?.activeEntry?.id, next?.activeEntry?.id));
+    latestData.current = next;
+    setData(next);
+  }
   const [rowPop, setRowPop] = useState<LandingRequest | null>(null);
   const stopFlightSequence = useRef(0);
   const pendingStartAgain = useRef<Pick<TimeEntryUpdatePatch, "categoryId" | "description" | "tagNames"> | null>(null);
@@ -551,6 +569,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setPendingDeletion(null);
     setSwitchSheetRecents(null);
     // Today's motion requests belong to the session that made them.
+    stopFlightLedger.clear();
     setStopFlight(null);
     setRowPop(null);
     setRowLanding(null);
@@ -615,9 +634,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return;
     }
     refreshQueued.current = false;
-    latestData.current = next;
     loadedBootstrap.current = next;
-    setData(next);
+    publishDashboardData(next);
     void readOwnedPendingTimerStops(next).then((stops) => {
       const visible = latestData.current;
       if (visible && sameTimerStopOwner(timerStopOwner(visible), timerStopOwner(next))) {
@@ -912,9 +930,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           serverNow: new Date().toISOString()
         };
       }
-      latestData.current = bootstrap;
       loadedBootstrap.current = bootstrap;
-      setData(bootstrap);
+      publishDashboardData(bootstrap);
       setPendingTimerStops([...ownedPendingStops]);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
@@ -979,8 +996,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
     // Mutation handlers share this ref as their canonical synchronous view.
     // React may batch two Play callbacks before committing component state.
-    latestData.current = next;
-    setData(next);
+    publishDashboardData(next);
   }
 
   function createSheetPresentation(
@@ -1096,6 +1112,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function isCurrentTimerMutation(entryId: string, version: number) {
     return timerMutationVersions.current.get(entryId) === version;
+  }
+
+  /** One identity for a block across its optimistic and canonical IDs (a Start reconciled mid-Stop). */
+  function timerEntryIdentity(entryId: string) {
+    return persistedTimerEntryId(entryId) ?? entryId;
   }
 
   function persistedTimerEntryId(entryId: string) {
@@ -1218,9 +1239,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           filtered,
           pendingDeletionIds
         ) as MobileBootstrap;
-        latestData.current = filtered;
         loadedBootstrap.current = filtered;
-        setData(filtered);
+        publishDashboardData(filtered);
         setPendingTimerStops([...(durableWork?.timerStops ?? [])]);
         setAuthState("authenticated");
       }
@@ -1662,7 +1682,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
-  const stopFlightOwnsLiveBlock = Boolean(stopFlight && stopFlight.entryId === displayedActiveEntry?.id);
+  const stopFlightExit = useStopFlightExit({
+    displayedEntryId: displayedActiveEntry?.id ?? null,
+    flightEntryId: stopFlight?.entryId ?? null,
+    hasLiveActiveTimer,
+    resolveEntryId: timerEntryIdentity,
+  });
   const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
     categoryColor: displayedActiveEntry.categoryName
       ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
@@ -1906,9 +1931,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (stopFlightMeasuring.current) return;
     stopFlightMeasuring.current = true;
     const token = ++stopFlightSequence.current;
+    const generation = noticeSessionGeneration.current;
     void Promise.all([measureFlightNode(LIVE_FLIGHT_NODE), measureFlightNode(rowFlightNode(entryId))]).then(([from, to]) => {
       stopFlightMeasuring.current = false;
-      if (from) setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
+      // The Stop belongs to the account and block it was pressed for: a sign-out or account switch, or a
+      // block that changed while measuring, drops it (Codex r1 on #415).
+      const current = latestData.current?.activeEntry?.id;
+      if (
+        generation !== noticeSessionGeneration.current ||
+        !current ||
+        timerEntryIdentity(current) !== timerEntryIdentity(entryId)
+      ) return;
+      if (from) {
+        stopFlightLedger.begin(token, entryId);
+        setStopFlight({ entryId, flying: false, from, presentation, to: to ?? "none", token });
+      }
       runStopFromToday(entryId, from ? token : null, Boolean(to));
     });
   }
@@ -1939,13 +1976,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function runStopFromToday(entryId: string | undefined, flightToken: number | null, flightHasRow = false) {
     // A refused, failed or rejected Stop keeps the live block: the ghost leaves without flying.
     const dropFlight = () => {
-      if (flightToken !== null) setStopFlight((current) => (current?.token === flightToken ? null : current));
+      if (flightToken === null) return;
+      stopFlightLedger.clear(flightToken);
+      setStopFlight((current) => (current?.token === flightToken ? null : current));
     };
+    const generation = noticeSessionGeneration.current;
     void stopActiveTimer().then((accepted) => {
+      // Signed out or switched account meanwhile: the flight and its feedback were already cleared.
+      if (generation !== noticeSessionGeneration.current) return;
       if (!accepted || !entryId) {
         dropFlight();
         return;
       }
+      // Rolled back before this acceptance ran (delivery rejected at once): the block is live again and
+      // its flight was already cancelled, so nothing flies, lands or plays.
+      if (flightToken !== null && !stopFlightLedger.isLive(flightToken)) return;
       playHaptic("stop", flightToken !== null ? { stopLandingDelayMs: STOP_FLIGHT.durationMs } : undefined);
       // A rolled-back Stop remounts the live block; it must not replay the Start landing.
       setLiveLanding(null);
@@ -1969,15 +2014,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   // A Stop rolled back while its ghost is still flying (delivery rejected) brings the live block
   // back at once: the ghost leaves without landing, so nothing pops on a row that is running again.
+  // The rollback cancels the flight synchronously (cancelStopFlightFor), and so does any publication
+  // that shows the flown block running again (publishDashboardData, Codex r4 on #415), so neither a
+  // queued completion nor a later acceptance can act on it; this effect then clears the ghost.
+  function cancelStopFlightFor(entryId: string) {
+    dropCancelledStopFlight(stopFlightLedger.cancelFor(entryId));
+  }
   const stopFlightCommitted = useRef<number | null>(null);
   useEffect(() => {
     if (!stopFlight?.flying) return;
     const activeId = data?.activeEntry?.id ?? null;
-    if (activeId !== stopFlight.entryId) {
+    if (!activeId || timerEntryIdentity(activeId) !== timerEntryIdentity(stopFlight.entryId)) {
       stopFlightCommitted.current = stopFlight.token;
       return;
     }
-    if (stopFlightCommitted.current === stopFlight.token) setStopFlight(null);
+    if (stopFlightCommitted.current === stopFlight.token) {
+      stopFlightLedger.clear(stopFlight.token);
+      setStopFlight(null);
+    }
   }, [data?.activeEntry?.id, stopFlight]);
 
   // The native tab item under the orb (VoiceOver's way in) reports presses here and reads the
@@ -1999,6 +2053,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   // Stable, so the flight's ghost is not re-rendered by the Dashboard's 1 s tick handing it a new callback.
   const finishStopFlight = useCallback((token: number, landed: boolean, entryId: string) => {
+    // Only the live flight finishes, once; one already replaced or cleared (logout) does nothing.
+    if (!stopFlightLedger.finish(token)) return;
     setStopFlight((current) => (current?.token === token ? null : current));
     // The row block pops and the row lights up as the ghost lands on it.
     // nextLandingRequest reads only refs, so the first render's copy stays correct.
@@ -2405,6 +2461,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (!optimisticTimerStartReconciler.current.canRunDependentMutation(activeEntry.id)) return false;
     const bootstrap = latestData.current;
     if (!bootstrap) return false;
+    const generation = noticeSessionGeneration.current;
     const stoppedAt = new Date().toISOString();
     let pendingStop: PendingTimerStop;
     let stopBackgroundReservation: Promise<void> | null;
@@ -2435,6 +2492,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return false;
     }
 
+    // The Stop is durable for the block it was pressed for. If the account or the running block changed
+    // while it was saved, it must not stop or annotate what is showing now; the outbox still delivers it
+    // for that account (Codex r2 on #415).
+    const showing = latestData.current?.activeEntry?.id;
+    if (
+      generation !== noticeSessionGeneration.current ||
+      !showing ||
+      timerEntryIdentity(showing) !== timerEntryIdentity(activeEntry.id)
+    ) {
+      return false;
+    }
     setPendingTimerStops((current) => [
       ...current.filter((item) => item.clientEventId !== pendingStop.clientEventId),
       pendingStop
@@ -2457,7 +2525,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const summary = await deliverOwnedPendingTimerStops(bootstrap, {
         reloadAfterDelivery: false
       });
-      if (summary.permanentRejectedClientEventIds.includes(pendingStop.clientEventId)) {
+      if (
+        summary.permanentRejectedClientEventIds.includes(pendingStop.clientEventId) &&
+        generation === noticeSessionGeneration.current
+      ) {
+        cancelStopFlightFor(activeEntry.id);
         updateDashboardData((current) => rollbackOptimisticStopSafely(
           current,
           bootstrap,
@@ -3080,9 +3152,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
               <TodayTimerSurface
                 // While the Stop flight's ghost holds the block's place, the block is hidden; once Stop
-                // commits the idle card comes in at once instead of waiting for the retained exit.
-                active={stopFlightOwnsLiveBlock && !hasLiveActiveTimer ? null : todayLivePresentation}
-                liveHidden={stopFlightOwnsLiveBlock}
+                // commits the idle card comes in at once instead of waiting for the retained exit, and
+                // the stopped block never comes back after the ghost has gone (useStopFlightExit).
+                active={stopFlightExit.showIdle ? null : todayLivePresentation}
+                liveHidden={stopFlightExit.liveHidden}
                 motionPaused={!isFocused}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}
