@@ -26,7 +26,8 @@ import {
   synchroniseReviewMutations,
 } from "./reviewSyncStore";
 import { syncLocationIntelligenceOnForeground } from "./location/runtime";
-import { getActiveLocationAccountIdentity, locationSyncChangedDashboard } from "./location/store";
+import { getActiveLocationAccountIdentity } from "./location/store";
+import { locationSyncChangedDashboard } from "./location/locationSyncChange";
 import { beginRecoveredDashboardBootstrapPublication } from "./dashboardBootstrapChannel";
 import { projectDurableLocalWork } from "./durableLocalProjection";
 import { readDurableLocalWork } from "./durableLocalWork";

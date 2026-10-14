@@ -53,7 +53,8 @@ import {
   getActiveReviewAccountIdentity,
   synchroniseReviewMutations
 } from "@/lib/reviewSyncStore";
-import { getActiveLocationAccountIdentity, locationSyncChangedDashboard } from "@/lib/location/store";
+import { getActiveLocationAccountIdentity } from "@/lib/location/store";
+import { locationSyncChangedDashboard } from "@/lib/location/locationSyncChange";
 import { drainNativeShortcutQueue } from "@/lib/shortcuts";
 import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
 import { synchroniseTimeEntryCommands } from "@/lib/timeEntryOutbox";

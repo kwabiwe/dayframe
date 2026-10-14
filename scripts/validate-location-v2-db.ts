@@ -928,6 +928,35 @@ async function validateCommuteReviewCategoryAndDescription() {
     ),
     /not found/i
   );
+
+  // A replay whose only effect is recreating an archived Commute activity still changes what the app shows.
+  await pool.query(
+    `update review_items set status = 'ignored', ignored_scope = 'once', resolved_at = now()
+     where workspace_id = $1 and user_id = $2 and status = 'open'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  await pool.query(
+    `update activity_events set review_status = 'ignored'
+     where workspace_id = $1 and user_id = $2 and source = 'location_learning' and review_status = 'needs_review'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  await pool.query("update categories set is_archived = true where id = $1", [commuteCategoryId]);
+  try {
+    const recreate = await ingestAndReplayLocationEvidence(commuteBatches[0], session, PROCESSING_AT);
+    const active = await pool.query(
+      `select id from categories
+       where workspace_id = $1 and lower(name) = 'commute' and coalesce(is_archived, false) = false`,
+      [WORKSPACE_ID]
+    );
+    assert.equal(active.rowCount, 1, "Replay did not recreate the archived Commute activity.");
+    assert.equal(recreate.replay.semanticChangeCount, 1, "Recreating the Commute activity was not counted as a change.");
+  } finally {
+    await pool.query(
+      "delete from categories where workspace_id = $1 and lower(name) = 'commute' and id <> $2",
+      [WORKSPACE_ID, commuteCategoryId]
+    );
+    await pool.query("update categories set is_archived = false where id = $1", [commuteCategoryId]);
+  }
 }
 
 async function validateShadowToReviewCutover() {
@@ -1306,14 +1335,21 @@ async function validateSupersededReviewReactivation() {
     assert.deepEqual(await stayState(unknown.clientSegmentId),
       { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" }, "The edge stop was not offered in Review.");
 
-    await ingest("enter", [callback("enter", 1_100, "geofence_enter")]);
+    // Retiring the proposal is the replay's only Review effect (logging is off at this place): it still counts.
+    const entered = await ingestAndReplayLocationEvidence(
+      batch("db-flip-enter", [callback("enter", 1_100, "geofence_enter")], "v2_review", cutoverAt), session, PROCESSING_AT
+    );
+    assert.equal(entered.replay.semanticChangeCount, 1, "A retirement-only replay reported no change.");
     const [saved] = await currentStays();
     assert.equal(saved?.placeId, placeId, "A genuine entry did not make the stop the saved place.");
     assert.notEqual(saved.clientSegmentId, unknown.clientSegmentId, "The saved-place stay kept the unknown segment's ID.");
     assert.deepEqual(await stayState(unknown.clientSegmentId),
       { status: "superseded", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" }, "Replay did not retire the unknown proposal.");
 
-    await ingest("exit", [callback("exit", 1_150, "geofence_exit")]);
+    const exited = await ingestAndReplayLocationEvidence(
+      batch("db-flip-exit", [callback("exit", 1_150, "geofence_exit")], "v2_review", cutoverAt), session, PROCESSING_AT
+    );
+    assert((exited.replay.semanticChangeCount ?? 0) >= 1, "Reopening a retired proposal reported no change.");
     const [returned] = await currentStays();
     assert.equal(returned?.clientSegmentId, unknown.clientSegmentId, "Revoking the entry did not restore the unknown segment.");
     assert.deepEqual(await stayState(unknown.clientSegmentId),

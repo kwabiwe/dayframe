@@ -894,19 +894,7 @@ export type LocationSyncResult = { synced: boolean; reason?: string; message?: s
   remainingEvidenceCount?:number|null; remainingBatchCount?:number|null; remainingPendingEvidence?: number|null; remainingBatches?: number|null; rejectedEvidenceCount?: number; nextRetryAt?: string|null; warnings?: string[] };
 const locationCoalescer=createOwnerSyncCoalescer<LocationSyncResult>();
 
-/**
- * Whether a location pass may have changed what the Dashboard shows, so it should reload. A replay that
- * reports `semanticChangeCount` says exactly: zero means no Review item was added, reopened or changed. A
- * replay re-emits every finalised segment, so `semanticSegmentCount` is almost never zero, and an
- * acknowledged upload alone changes nothing the Dashboard shows. Without the count (older servers, or no
- * replay this pass) any acknowledged upload or emitted segment still counts, as before.
- */
-export function locationSyncChangedDashboard(
-  result: Pick<LocationSyncResult, "acknowledgedCount" | "replayed" | "semanticChangeCount" | "semanticSegmentCount">
-) {
-  if (result.replayed && typeof result.semanticChangeCount === "number") return result.semanticChangeCount > 0;
-  return (result.acknowledgedCount ?? 0) > 0 || (result.semanticSegmentCount ?? 0) > 0;
-}
+export { locationSyncChangedDashboard } from "./locationSyncChange";
 
 export async function syncLocationEvidence(options: LocationSyncOptions = {}): Promise<LocationSyncResult> {
   const owner=await getActiveLocationAccountIdentity();

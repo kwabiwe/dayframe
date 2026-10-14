@@ -269,8 +269,11 @@ async function replayAndEmitLocationSemantics(
     remainingOperationMs?: LocationObservation["remainingOperationMs"];
   }
 ) {
+  // One counter for everything this replay changes that the app shows (see `semanticChangeCount`).
+  const semanticChanges: SemanticChangeCounter = { count: 0 };
   const replay = await replayLocationEvidence(client, session, {
     ...options,
+    semanticChanges,
     // This is deliberately derived from the server decision, never from the
     // requested rollout mode or a request-visible profile field.
     persistenceProfile: options.rollout.effectiveMode === "v2_review"
@@ -281,7 +284,6 @@ async function replayAndEmitLocationSemantics(
   observeLocationTiming(options, "semantic_review_persistence", "started");
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
   let semanticSegmentCount = 0;
-  const semanticChanges: SemanticChangeCounter = { count: 0 };
   if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
     const eligible = finalisedSegments.filter((item) =>
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)

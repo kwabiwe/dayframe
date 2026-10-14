@@ -173,7 +173,8 @@ export const LocationReplayResponseSchema = z.object({
   /** Suggestions waiting in Review; only sent to clients that ask with `REVIEW_COUNT_REQUEST_HEADER`. */
   reviewCount: z.number().int().nonnegative().optional(),
   /**
-   * Review items this replay inserted, reopened or really changed (automatic modes: every emitted segment).
+   * Review items this replay inserted, reopened, retired or really changed, plus a Commute activity it
+   * created (automatic modes: every emitted segment too).
    * Zero means nothing the app shows changed, so it need not reload its Dashboard. Only sent to clients
    * that ask with `SEMANTIC_CHANGE_COUNT_REQUEST_HEADER`, for the same strict-schema reason as `reviewCount`.
    */

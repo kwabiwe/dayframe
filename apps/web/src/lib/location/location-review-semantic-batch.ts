@@ -114,8 +114,8 @@ async function displayContext(
 }
 
 /**
- * Counts what a replay changed that the app shows: Review items inserted, reopened, or with a changed
- * title, place, category, time, confidence or note. A replay re-emits every finalised segment, so the
+ * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
+ * with a changed title, place, category, time, confidence or note, and a created Commute activity. A replay re-emits every finalised segment, so the
  * emitted count is almost never zero; the app refreshes its Dashboard only when this count is.
  */
 export type SemanticChangeCounter = { count: number };
@@ -154,7 +154,7 @@ export async function emitReviewSemanticSegments(
     changes.count += reopened.size;
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
-    ? await ensureCommuteCategoryId(client, session) : null;
+    ? await ensureCommuteCategoryId(client, session, changes) : null;
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
     // Time away suggests no category: the user chooses what it was.
