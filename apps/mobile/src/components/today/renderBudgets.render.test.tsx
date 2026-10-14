@@ -112,7 +112,7 @@ function DashboardProbe({ calendarEdit, route, running, sheetOpen }: {
 }
 
 
-function measure(scene: {
+async function measure(scene: {
   route: Route; running?: boolean; sheetOpen?: boolean; background?: boolean; calendarEdit?: "running" | "completed";
 }) {
   let tree!: ReturnType<typeof create>;
@@ -135,11 +135,15 @@ function measure(scene: {
   commits.clear();
   // One timer callback per act, so no two updates can share a commit (Codex r2 on #405).
   const end = Date.now() + WINDOW_SECONDS * 1000;
+  // Async acts flush promise microtasks after each callback, so updates they schedule are counted too.
   while (vi.getTimerCount() > 0 && Date.now() <= end) {
-    act(() => {
-      vi.advanceTimersToNextTimer();
+    await act(async () => {
+      await vi.advanceTimersToNextTimerAsync();
     });
   }
+  await act(async () => {
+    await Promise.resolve();
+  });
   const within = (id: string) => (commits.get(id) ?? []).filter((at) => at <= end).length;
   const result = { liveBlock: within("liveBlock"), provider: within("provider") };
   act(() => tree.unmount());
@@ -165,20 +169,20 @@ describe("render budgets over two minutes with a block running (performance.md)"
     ["Settings covering the tabs", { route: "settings" as const }, 2],
     ["Today in front, nothing running", { route: "today" as const, running: false }, 2],
     ["Calendar editing a completed entry", { route: "calendar" as const, calendarEdit: "completed" as const }, 2],
-  ])("%s: the Dashboard renders only at minute boundaries", (_name, scene, budget) => {
-    expect(measure(scene).provider).toBeLessThanOrEqual(budget);
+  ])("%s: the Dashboard renders only at minute boundaries", async (_name, scene, budget) => {
+    expect((await measure(scene)).provider).toBeLessThanOrEqual(budget);
   });
 
-  it("Reports in front: the Dashboard renders once a second, never more", () => {
-    expect(measure({ route: "reports" }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  it("Reports in front: the Dashboard renders once a second, never more", async () => {
+    expect((await measure({ route: "reports" })).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
   });
 
-  it("a running entry's sheet open: once a second, never more", () => {
-    expect(measure({ route: "today", sheetOpen: true }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  it("a running entry's sheet open: once a second, never more", async () => {
+    expect((await measure({ route: "today", sheetOpen: true })).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
   });
 
-  it("Calendar editing the running entry: once a second, never more", () => {
-    expect(measure({ route: "calendar", calendarEdit: "running", running: false }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  it("Calendar editing the running entry: once a second, never more", async () => {
+    expect((await measure({ route: "calendar", calendarEdit: "running", running: false })).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
   });
 
   it("the probe's Calendar-edit rule is the Dashboard's", async () => {
@@ -188,14 +192,14 @@ describe("render budgets over two minutes with a block running (performance.md)"
     expect(dashboard).toContain("const needsSecondClock = Boolean(retainedActiveEntryForSheet) || runningCalendarEdit;");
   });
 
-  it("the live block renders once a second (plus the Dashboard's minute renders), never per frame", () => {
-    const { liveBlock } = measure({ route: "today" });
+  it("the live block renders once a second (plus the Dashboard's minute renders), never per frame", async () => {
+    const { liveBlock } = await measure({ route: "today" });
     expect(liveBlock).toBeGreaterThanOrEqual(WINDOW_SECONDS - 1);
     expect(liveBlock).toBeLessThanOrEqual(WINDOW_SECONDS + 2);
   });
 
-  it("in the background nothing renders at all", () => {
-    expect(measure({ route: "reports", background: true })).toEqual({ liveBlock: 0, provider: 0 });
-    expect(measure({ route: "today", background: true })).toEqual({ liveBlock: 0, provider: 0 });
+  it("in the background nothing renders at all", async () => {
+    expect(await measure({ route: "reports", background: true })).toEqual({ liveBlock: 0, provider: 0 });
+    expect(await measure({ route: "today", background: true })).toEqual({ liveBlock: 0, provider: 0 });
   });
 });
