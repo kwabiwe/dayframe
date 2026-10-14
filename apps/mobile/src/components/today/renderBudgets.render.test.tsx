@@ -7,8 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * 13 Oct a per-second provider render cost 17–19 % of a core behind Settings and 28 % with Today in
  * front. The probe below composes the real clock hooks exactly as `DayframeDashboard` does (the
  * expressions are pinned by `idleClock.contract.test.ts`) around the real live block clock and
- * odometer. Over two minutes of fake time per scene it counts the provider's own commits and, with
- * React's Profiler, every commit inside the live block.
+ * odometer. Over two minutes of fake time per scene, in 100 ms steps, it counts the provider's own commits
+ * and, with React's Profiler, every commit inside the live block. Scope: React commits only; the breathing
+ * ring and digit springs run on the native driver, guarded by idleClock.contract.test.ts.
  */
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -77,12 +78,16 @@ function LiveBlock({ active }: { active: LiveBlockClockInput }) {
 }
 
 /** `DayframeDashboard`'s clock wiring: Reports shows live seconds; the live block keeps its own clock. */
-function DashboardProbe({ route, running, sheetOpen }: { route: Route; running: boolean; sheetOpen: boolean }) {
+function DashboardProbe({ calendarEdit, route, running, sheetOpen }: {
+  calendarEdit: "running" | "completed" | null; route: Route; running: boolean; sheetOpen: boolean;
+}) {
   const foreground = useAppForeground();
   const [now, setNow] = useState(() => Date.now());
   const liveTimeInFront = useLiveTimeInFront(route === "reports", setNow);
-  const needsSecondClock = running;
-  const secondsShown = (running && liveTimeInFront) || sheetOpen;
+  // As DayframeDashboard: only a running entry's Calendar editor shows live seconds.
+  const runningCalendarEdit = calendarEdit === "running";
+  const needsSecondClock = running || runningCalendarEdit;
+  const secondsShown = (running && liveTimeInFront) || sheetOpen || runningCalendarEdit;
   useDashboardClockTicks({ foreground, needsSecondClock, secondsShown, setNow });
   const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
   // The provider's own renders (a Profiler around it would also count the live block's own updates).
@@ -106,11 +111,21 @@ function DashboardProbe({ route, running, sheetOpen }: { route: Route; running: 
   );
 }
 
-function measure(scene: { route: Route; running?: boolean; sheetOpen?: boolean; background?: boolean }) {
+/** Fake time advances in 100 ms steps, each its own act, so a faster clock is not batched away. */
+const STEP_MS = 100;
+
+function measure(scene: {
+  route: Route; running?: boolean; sheetOpen?: boolean; background?: boolean; calendarEdit?: "running" | "completed";
+}) {
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(
-      <DashboardProbe route={scene.route} running={scene.running ?? true} sheetOpen={scene.sheetOpen ?? false} />
+      <DashboardProbe
+        calendarEdit={scene.calendarEdit ?? null}
+        route={scene.route}
+        running={scene.running ?? true}
+        sheetOpen={scene.sheetOpen ?? false}
+      />
     );
   });
   if (scene.background) {
@@ -120,9 +135,9 @@ function measure(scene: { route: Route; running?: boolean; sheetOpen?: boolean; 
     });
   }
   commits.clear();
-  for (let second = 0; second < WINDOW_SECONDS; second += 1) {
+  for (let step = 0; step < (WINDOW_SECONDS * 1000) / STEP_MS; step += 1) {
     act(() => {
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(STEP_MS);
     });
   }
   const result = { liveBlock: commits.get("liveBlock") ?? 0, provider: commits.get("provider") ?? 0 };
@@ -148,6 +163,7 @@ describe("render budgets over two minutes with a block running (performance.md)"
     ["Calendar in front", { route: "calendar" as const }, 2],
     ["Settings covering the tabs", { route: "settings" as const }, 2],
     ["Today in front, nothing running", { route: "today" as const, running: false }, 2],
+    ["Calendar editing a completed entry", { route: "calendar" as const, calendarEdit: "completed" as const }, 2],
   ])("%s: the Dashboard renders only at minute boundaries", (_name, scene, budget) => {
     expect(measure(scene).provider).toBeLessThanOrEqual(budget);
   });
@@ -158,6 +174,17 @@ describe("render budgets over two minutes with a block running (performance.md)"
 
   it("a running entry's sheet open: once a second, never more", () => {
     expect(measure({ route: "today", sheetOpen: true }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  });
+
+  it("Calendar editing the running entry: once a second, never more", () => {
+    expect(measure({ route: "calendar", calendarEdit: "running", running: false }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  });
+
+  it("the probe's Calendar-edit rule is the Dashboard's", async () => {
+    const { readFileSync } = await import("node:fs");
+    const dashboard = readFileSync(new URL("../DayframeDashboard.tsx", import.meta.url), "utf8");
+    expect(dashboard).toContain("const runningCalendarEdit = Boolean(calendarEditEntry && !calendarEditEntry.stoppedAt);");
+    expect(dashboard).toContain("const needsSecondClock = Boolean(retainedActiveEntryForSheet) || runningCalendarEdit;");
   });
 
   it("the live block renders once a second (plus the Dashboard's minute renders), never per frame", () => {
