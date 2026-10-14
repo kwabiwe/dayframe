@@ -170,6 +170,20 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   count chip before the total, and VoiceOver adds "2 moments to review" to the row. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
   donut or logged/covered summary; earlier days show their total in "Earlier this week".
+- Where today went (PRD D15) closes the Today ribbon card under one hairline:
+  a 12-point bar, largest first, and a 2×2 legend whose durations add up to
+  the hero (an Admin block 09:00–10:00 and a Work block running since 09:30
+  read Work 2h 15m with the coral edge and Admin 45m at 12:00 against a 3h
+  hero; overnight Sleep is
+  included even when it doesn't count toward the goal). Five or more
+  activities show the top three and a neutral Other. An empty day shows no
+  strip; a block started from empty adds the strip after its first whole
+  minute with a short fade (no fade on launch or pull-to-refresh), and the
+  running segment grows each minute without moving anything else. Tapping it
+  plays the tick haptic and opens Reports on Today (VoiceOver: one button,
+  "Opens Reports for today"); opening Reports from the tab bar still shows
+  Week. At the largest text sizes the legend drops to one column and
+  durations stay whole; Reduce Motion keeps only short fades.
 - Verify capped/partial/cache/offline states never claim zero or complete
   coverage. In Review, the accessible Load more action reaches the 101st
   backlog source without mixing a changed snapshot into the prior page or

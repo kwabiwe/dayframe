@@ -10,6 +10,7 @@ import { playHaptic } from "../../lib/haptics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { todayReviewNavigationTarget } from "../../lib/todayReviewNavigation";
+import type { TodayWhereWentModel } from "../../lib/todayWhereWent";
 import {
   buildTodayRibbon,
   RIBBON_LABEL_HOURS,
@@ -27,6 +28,7 @@ import {
 } from "../../lib/todayRibbon";
 import { colorWithAlpha } from "./todayBlocksLayout";
 import { useTodayReviewPresentationContext } from "./TodayReviewPresentationContext";
+import { TodayWhereWent } from "./TodayWhereWent";
 
 const TRACK_HEIGHT = 46;
 /** Room above and below the track for the now line's dot and a lifted block. */
@@ -44,16 +46,26 @@ const TIP_GAP = 6;
  * Today's ribbon card (Blocks prototype): "Today · Drag to scrub" over a 24-hour strip. A
  * horizontal drag scrubs (tooltip, a selection haptic per block), a tap opens what is under the
  * finger; vertical drags stay with the list. VoiceOver steps through the blocks as an adjustable
- * element and activates the current one.
+ * element and activates the current one. "Where today went" (PRD D15) closes the card under one
+ * hairline, outside the strip's gesture, as its own button.
  */
 export const TodayRibbon = memo(function TodayRibbon({
   model,
   onOpenBlock,
+  onOpenWhereWent,
+  reduceMotion = false,
   theme,
+  whereWent = null,
+  whereWentQuiet = false,
 }: {
   model: RibbonModel;
   onOpenBlock: (block: RibbonBlock) => void;
+  onOpenWhereWent?: () => void;
+  reduceMotion?: boolean;
   theme: MobileTheme;
+  /** Today's covered time per activity (null: nothing framed yet, no strip). */
+  whereWent?: TodayWhereWentModel | null;
+  whereWentQuiet?: boolean;
 }) {
   const [width, setWidth] = useState(0);
   const [hit, setHit] = useState<RibbonHit | null>(null);
@@ -282,6 +294,9 @@ export const TodayRibbon = memo(function TodayRibbon({
           </Text>
         ))}
       </View>
+      {onOpenWhereWent ? (
+        <TodayWhereWent model={whereWent} onOpen={onOpenWhereWent} quiet={whereWentQuiet} reduceMotion={reduceMotion} theme={theme} />
+      ) : null}
     </View>
   );
 });
@@ -295,12 +310,21 @@ export function TodayRibbonSection({
   entries,
   nowMs,
   onOpenEntry,
+  onOpenWhereWent,
+  reduceMotion,
   theme,
+  whereWent,
+  whereWentQuiet,
 }: {
   entries: readonly MobileTimeEntry[];
   nowMs: number;
   onOpenEntry: (entry: MobileTimeEntry) => void;
+  /** Opens Reports on Today; with it, the card ends with "Where today went". */
+  onOpenWhereWent?: () => void;
+  reduceMotion?: boolean;
   theme: MobileTheme;
+  whereWent?: TodayWhereWentModel | null;
+  whereWentQuiet?: boolean;
 }) {
   const context = useTodayReviewPresentationContext();
   const presentation = context?.isSummaryAvailable ? context.presentation : null;
@@ -322,7 +346,17 @@ export function TodayRibbonSection({
     if (target.kind === "canonical_entry") return;
     router.push({ pathname: target.pathname, params: target.params } as never);
   }, [onOpenEntry]);
-  return <TodayRibbon model={model} onOpenBlock={onOpenBlock} theme={theme} />;
+  return (
+    <TodayRibbon
+      model={model}
+      onOpenBlock={onOpenBlock}
+      onOpenWhereWent={onOpenWhereWent}
+      reduceMotion={reduceMotion}
+      theme={theme}
+      whereWent={whereWent}
+      whereWentQuiet={whereWentQuiet}
+    />
+  );
 }
 
 function patternId(block: RibbonBlock) {
