@@ -19,9 +19,9 @@ import { formatDuration as formatFullDuration, formatTime } from "@/lib/format";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
 import {
-  activityTotals,
   blockRowHeight,
   buildGoalFrame,
+  coveredActivityTotals,
   formatGoalHours,
   hourPercent,
   isUnsavedEntryId,
@@ -36,7 +36,9 @@ import {
   ribbonNextStartMs,
   staleEditError,
   todayBlocks,
-  type GoalCellSlice
+  whereTodayWentBars,
+  type GoalCellSlice,
+  type WhereTodayWentBar
 } from "@/lib/today-view";
 
 const ROW_EXIT_MS = 180;
@@ -174,7 +176,8 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const dayEnd = localDayEnd(dayStart);
   const goal = buildGoalFrame({ categories: withGoalExclusions(data.categories, data.goalExcludedCategoryIds), entries, goalMinutes: data.user.dailyGoalMinutes, nowMs });
   const blocks = todayBlocks(entries, dayStart, nowMs);
-  const totals = activityTotals(entries, dayStart, dayEnd, nowMs);
+  const totals = coveredActivityTotals(entries, dayStart, dayEnd, nowMs);
+  const bars = whereTodayWentBars(totals);
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
   const week = previousDays(entries, nowMs);
   const reviewCount = data.stats.reviewCount;
@@ -210,13 +213,24 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         />
       </section>
 
-      <section className="df-card df-today-went" aria-labelledby="df-today-went-title">
+      <section
+        className="df-card df-today-went"
+        aria-describedby={totals.length ? "df-today-went-note" : undefined}
+        aria-labelledby="df-today-went-title"
+      >
         <div className="df-card-head">
           <h2 id="df-today-went-title">Where today went</h2>
           <span className="df-faint">{totals.length} {totals.length === 1 ? "activity" : "activities"}</span>
         </div>
         {totals.length ? (
-          <WhereTodayWent totals={totals.slice(0, 5)} />
+          <>
+            <p className="sr-only" id="df-today-went-note">
+              {bars.some((bar) => bar.includes)
+                ? "Framed time per activity, the top four and then Other for the rest. Time when blocks overlap is shared equally, so these add up to today's total."
+                : "Framed time per activity. Time when blocks overlap is shared equally, so these add up to today's total."}
+            </p>
+            <WhereTodayWent bars={bars} />
+          </>
         ) : (
           <p className="df-muted">Nothing tracked yet.</p>
         )}
@@ -587,18 +601,21 @@ function RibbonTip({
   );
 }
 
-function WhereTodayWent({ totals }: { totals: ReturnType<typeof activityTotals> }) {
-  const max = Math.max(1, ...totals.map((total) => total.seconds));
+function WhereTodayWent({ bars }: { bars: readonly WhereTodayWentBar[] }) {
+  const max = Math.max(1, ...bars.map((total) => total.seconds));
   const land = springTransition("land");
   return (
     <ul className="df-bars" style={{ "--df-land": land.easing, "--df-land-ms": `${land.durationMs}ms` } as CSSProperties}>
-      {totals.map((total, index) => (
+      {bars.map((total, index) => (
         <li
           className="df-bar-row"
           key={total.key}
           style={{ ...(total.color ? blockStyle(total.color, total.name) : {}), "--df-bar-delay": `${index * 40}ms` } as CSSProperties}
         >
-          <b>{total.name}</b>
+          <b title={total.includes?.join(", ")}>
+            {total.name}
+            {total.includes ? <span className="sr-only">: {listNames(total.includes)}</span> : null}
+          </b>
           <span className="df-bar-track" aria-hidden="true">
             <span
               className={`df-bar-fill${total.categoryId ? "" : " is-none"}`}
@@ -610,6 +627,11 @@ function WhereTodayWent({ totals }: { totals: ReturnType<typeof activityTotals> 
       ))}
     </ul>
   );
+}
+
+/** "Admin, Gym and Sleep" for the Other bar's accessible text. */
+function listNames(names: readonly string[]) {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names.join("");
 }
 
 function TodayBlockRow({

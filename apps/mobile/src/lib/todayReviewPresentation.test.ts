@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectTodayReviewPresentation } from "./todayReviewPresentation";
+import { projectTodayReviewPresentation, todayReviewNudgeSplit } from "./todayReviewPresentation";
 import type { ReviewPresentationSnapshot } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
@@ -324,3 +324,59 @@ function mobileEntry(id: string, title: string, startedAt: string, stoppedAt: st
     durationSeconds: 0
   };
 }
+
+describe("todayReviewNudgeSplit (the Today nudge, 14 Oct 2026)", () => {
+  const exact = (value: number) => ({ value, exact: true });
+
+  it("splits the exact total into today and earlier and targets the segment with moments", () => {
+    expect(todayReviewNudgeSplit(exact(12), exact(3))).toEqual({ today: 3, earlier: 9, segment: "today" });
+    expect(todayReviewNudgeSplit(exact(9), exact(0))).toEqual({ today: 0, earlier: 9, segment: "earlier" });
+    expect(todayReviewNudgeSplit(exact(3), exact(3))).toEqual({ today: 3, earlier: 0, segment: "today" });
+  });
+
+  it("has no split unless both counts are exact", () => {
+    expect(todayReviewNudgeSplit({ value: 12, exact: false }, exact(3))).toBeNull();
+    expect(todayReviewNudgeSplit(exact(12), { value: 3, exact: false })).toBeNull();
+    expect(todayReviewNudgeSplit(exact(12), { value: null, exact: true })).toBeNull();
+    expect(todayReviewNudgeSplit(null, null)).toBeNull();
+  });
+
+  it("never counts more today than in total", () => {
+    expect(todayReviewNudgeSplit(exact(2), exact(5))).toEqual({ today: 2, earlier: 0, segment: "today" });
+  });
+});
+
+describe("today's count after a local decision (Codex r1 on #408)", () => {
+  const earlier = review("earlier", "Earlier walk", "2026-09-11T10:00:00.000Z", "2026-09-11T11:00:00.000Z");
+  const evening = review("evening", "Evening run", "2026-09-12T18:00:00.000Z", "2026-09-12T19:00:00.000Z");
+
+  it("takes a decided moment later today out of today's count even when now is earlier (a clock rollback)", () => {
+    const presentation = project({
+      response: response([earlier, evening], 2, 1),
+      effects: [effect("evening", "pending")],
+      nowMs: Date.parse("2026-09-12T12:00:00.000Z")
+    });
+    expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(presentation.todayReviewCount).toEqual({ value: 0, exact: true });
+    expect(todayReviewNudgeSplit(presentation.globalReviewCount, presentation.todayReviewCount))
+      .toEqual({ today: 0, earlier: 1, segment: "earlier" });
+  });
+
+  it("takes a decided moment without a complete window out of today's count by when it was detected", () => {
+    const open = { ...review("open", "Open stay", "2026-09-01T09:00:00.000Z", "2026-09-01T09:00:00.000Z"), interval: { start: "2026-09-01T09:00:00.000Z", end: null }, createdAt: "2026-09-12T08:00:00.000Z" };
+    const presentation = project({
+      response: response([earlier, open], 2, 1),
+      effects: [effect("open", "pending")]
+    });
+    expect(presentation.todayReviewCount).toEqual({ value: 0, exact: true });
+  });
+
+  it("keeps a decided earlier-day moment out of today's adjustment", () => {
+    const presentation = project({
+      response: response([earlier, evening], 2, 1),
+      effects: [effect("earlier", "pending")]
+    });
+    expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(presentation.todayReviewCount).toEqual({ value: 1, exact: true });
+  });
+});

@@ -24,6 +24,11 @@ import {
 } from "@dayframe/shared";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import {
+  ReviewDeckOlderDivider,
+  ReviewDeckSegmentControl,
+  ReviewDeckSegmentFramed
+} from "@/components/review/ReviewDeckSegments";
+import {
   ReviewDeckActions,
   ReviewDeckFinished,
   ReviewDeckStack,
@@ -79,11 +84,31 @@ import {
   formatReviewDeckDuration,
   formatReviewDeckWhen,
   orderReviewDeck,
+  reviewDeckDayWord,
   reviewDeckPicture,
   reviewDeckPosition,
   reviewDeckSource
 } from "@/lib/reviewDeck";
 import { beginReviewDeckVisit, takeReviewDeckEvidenceDecisions } from "@/lib/reviewDeckDecisions";
+import {
+  legacyEntryMoment,
+  orderReviewDeckChronology,
+  orderReviewItemsByStart,
+  otherReviewDeckSegment,
+  parseReviewDeckSegmentParam,
+  reviewDeckMomentStartMs,
+  reviewDeckOlderThanWeek,
+  reviewDeckSegmentAccessibilityLabel,
+  reviewDeckSegmentCounts,
+  reviewDeckSegmentFor,
+  reviewDeckSegmentFramedCopy,
+  reviewDeckSegmentView,
+  reviewDeckToday,
+  reviewItemMoment,
+  switchReviewDeckSegment,
+  type ReviewDeckMoment,
+  type ReviewDeckSegment
+} from "@/lib/reviewDeckSegments";
 import { createReviewKnownItems, reviewDataOwnerKey } from "@/lib/reviewKnownItems";
 import { liveReviewItems, projectReviewScreenData } from "@/lib/reviewScreenProjection";
 import {
@@ -189,6 +214,8 @@ export default function ReviewScreen() {
   const routeParams = useLocalSearchParams<{
     focusReviewId?: string | string[];
     focusEntryId?: string | string[];
+    /** The Today nudge opens the segment that has moments (`today` or `earlier`). */
+    segment?: string | string[];
   }>();
   const focusRequest = useMemo(
     () => parseReviewFocusRequest(routeParams),
@@ -217,6 +244,23 @@ export default function ReviewScreen() {
     decided: 0,
     logged: []
   });
+  // Owner decision 14 Oct 2026 (option C): the deck shows one segment, Today or Earlier. A focused
+  // card (Today ribbon, Calendar) selects its own segment; otherwise the route's `segment`, else Today.
+  const [deckSegment, setDeckSegment] = useState<ReviewDeckSegment>(
+    () => parseReviewDeckSegmentParam(routeParams.segment) ?? "today"
+  );
+  const deckSegmentRef = useRef(deckSegment);
+  deckSegmentRef.current = deckSegment;
+  // Whether the latest segment change was the user's switch (the thumb slides) or a placement
+  // (a focused card, the route), which places the thumb at once.
+  const [deckSegmentSwitched, setDeckSegmentSwitched] = useState(false);
+  // Bumped by a segment switch: VoiceOver focus moves once to the new top card's title (or the
+  // "Today is framed" heading); a token is spent once it has moved focus.
+  const [segmentFocusToken, setSegmentFocusToken] = useState(0);
+  const spentSegmentFocusToken = useRef(0);
+  // The segment each card was last shown in, so this visit's decisions count toward their own
+  // segment's "N of M" after the card has left the deck.
+  const knownDeckSegments = useRef(new Map<string, ReviewDeckSegment>());
   // Legacy needs-review entries have no skip mutation; Skip moves them behind the rest for this visit.
   const [deferredDeckKeys, setDeferredDeckKeys] = useState<readonly string[]>([]);
   // A deferred card was thrown off screen; it comes back as a fresh card at the back of the deck.
@@ -910,7 +954,9 @@ export default function ReviewScreen() {
     [data?.reviewItems]
   );
   const openReviewItems = useMemo(() => {
-    if (!reviewBacklog) return cachedOpenReviewItems;
+    // Before any backlog read (offline), the cached deck takes the backlog's own order: newest
+    // suggested start first, not the bootstrap's newest-created first.
+    if (!reviewBacklog) return orderReviewItemsByStart(cachedOpenReviewItems);
     const byId = new Map(cachedOpenReviewItems.map((item) => [item.id, item]));
     const ordered = reviewBacklog.reviewItemIds.flatMap((id) => {
       const item = byId.get(id);
@@ -972,17 +1018,37 @@ export default function ReviewScreen() {
   ) ?? null;
 
   type DeckSource =
-    | { key: string; kind: "review"; item: MobileReviewItem }
-    | { key: string; kind: "legacy_entry"; entry: MobileTimeEntry };
-  const deckSources = useMemo(() => {
-    const sources: DeckSource[] = [
-      ...openReviewItems.map((item) => ({ key: reviewFocusKey("review", item.id), kind: "review" as const, item })),
-      ...displayedReviewNeededEntries.map((entry) => ({
-        key: reviewFocusKey("legacy_entry", entry.id),
-        kind: "legacy_entry" as const,
-        entry
-      }))
-    ];
+    | { key: string; kind: "review"; item: MobileReviewItem; moment: ReviewDeckMoment; segment: ReviewDeckSegment }
+    | { key: string; kind: "legacy_entry"; entry: MobileTimeEntry; moment: ReviewDeckMoment; segment: ReviewDeckSegment };
+  // Today is "overlaps today" (the server's todayCount and the ribbon); the day rolls at local midnight.
+  const deckTodayKey = new Date(now).toDateString();
+  const deckToday = useMemo(() => reviewDeckToday(Date.now()), [deckTodayKey]);
+  // Every open card in date order, split by segment (hidden and deferred cards handled as before).
+  const deckSegmentSources = useMemo(() => {
+    // Item 5: one date order for every card, newest first, before deferrals and the sticky top.
+    const sources: DeckSource[] = orderReviewDeckChronology(openReviewItems, displayedReviewNeededEntries, {
+      review: (item) => reviewDeckMomentStartMs(reviewItemMoment(item)),
+      legacy: (entry) => reviewDeckMomentStartMs(legacyEntryMoment(entry))
+    }).map((source): DeckSource => {
+      if (source.kind === "review") {
+        const moment = reviewItemMoment(source.value);
+        return {
+          key: reviewFocusKey("review", source.value.id),
+          kind: "review",
+          item: source.value,
+          moment,
+          segment: reviewDeckSegmentFor(moment, deckToday)
+        };
+      }
+      const moment = legacyEntryMoment(source.value);
+      return {
+        key: reviewFocusKey("legacy_entry", source.value.id),
+        kind: "legacy_entry",
+        entry: source.value,
+        moment,
+        segment: reviewDeckSegmentFor(moment, deckToday)
+      };
+    });
     const deferred = new Set(deferredDeckKeys);
     // A held card stays while it flies out; a held bulk skip hides every card it covers.
     const heldKeys = new Set(reviewDeckHeldKeys(heldDeckDecision).filter((key) => (
@@ -993,6 +1059,16 @@ export default function ReviewScreen() {
       ...sources.filter((source) => !deferred.has(source.key) && !hidden(source.key)),
       ...deferredDeckKeys.flatMap((key) => sources.filter((source) => source.key === key && !hidden(key)))
     ];
+    return {
+      all: ordered,
+      today: ordered.filter((source) => source.segment === "today"),
+      earlier: ordered.filter((source) => source.segment === "earlier")
+    };
+  }, [committingDeckKeys, deckToday, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, openReviewItems]);
+  // The selected segment's cards: the deck itself.
+  const deckSources = useMemo(() => {
+    const ordered = deckSegmentSources[deckSegment];
+    const deferred = new Set(deferredDeckKeys);
     // The card on top stays on top while it is open: a backlog page or refresh arriving with a
     // different order never swaps the card being read. A ribbon focus or a deferral still wins.
     const stickyKey = deferred.has(deckTopKeyRef.current ?? "") ? null : deckTopKeyRef.current;
@@ -1004,7 +1080,10 @@ export default function ReviewScreen() {
     const returnKey = deckReturn && ordered.some((source) => source.key === deckReturn.key) ? deckReturn.key : null;
     // Undo wins over a ribbon focus: the card the user brought back is the one they want.
     return orderReviewDeck(ordered, returnKey ?? focusKey ?? stickyKey);
-  }, [committingDeckKeys, deckReturn, deferredDeckKeys, displayedReviewNeededEntries, flyingDeckKey, heldDeckDecision, highlightedFocusKey, openReviewItems]);
+  }, [deckReturn, deckSegment, deckSegmentSources, deferredDeckKeys, highlightedFocusKey]);
+  for (const source of deckSegmentSources.all) knownDeckSegments.current.set(source.key, source.segment);
+  // The other segment's top card is measured invisibly, so a switch lands it at its final size.
+  const standbyDeckSource = deckSegmentSources[otherReviewDeckSegment(deckSegment)][0] ?? null;
   useEffect(() => {
     deckTopKeyRef.current = deckSources[0]?.key ?? null;
   }, [deckSources]);
@@ -1024,25 +1103,32 @@ export default function ReviewScreen() {
     // deferDeckCard only touches refs and state setters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deckReturn, deckSources, flyingDeckKey, heldDeckCard]);
+  function deckCardForSource(source: DeckSource): ReviewDeckCardModel {
+    const card = source.kind === "review"
+      ? reviewDeckCardForItem(source.key, source.item, {
+          categories: data?.categories,
+          draft: {
+            categoryId: logAsDrafts.get(source.item.id)?.categoryId,
+            description: logAsNames.current.get(source.item.id)
+          },
+          menuOpen: reviewMenuState.openItemId === source.item.id,
+          mode: theme.mode,
+          neutral: theme.textSecondary,
+          now,
+          overlapCount: overlapCounts.get(source.item.id) ?? 0,
+          syncState: reviewItemSyncStates.get(source.item.id) ?? null
+        })
+      : reviewDeckCardForEntry(source.key, source.entry, { mode: theme.mode, neutral: theme.textSecondary, now });
+    const start = reviewDeckMomentStartMs(source.moment);
+    return {
+      ...card,
+      // An Earlier card names its day on the picture ("Yesterday", "Mon 12 Oct").
+      dayPill: source.segment === "earlier" && Number.isFinite(start) ? reviewDeckDayWord(new Date(start), now) : null
+    };
+  }
   const deckCards = useMemo(
     // One more than the visible stack: while the top card flies out, the card behind moves in.
-    () => deckSources.slice(0, 4).map((source): ReviewDeckCardModel => (
-      source.kind === "review"
-        ? reviewDeckCardForItem(source.key, source.item, {
-            categories: data?.categories,
-            draft: {
-              categoryId: logAsDrafts.get(source.item.id)?.categoryId,
-              description: logAsNames.current.get(source.item.id)
-            },
-            menuOpen: reviewMenuState.openItemId === source.item.id,
-            mode: theme.mode,
-            neutral: theme.textSecondary,
-            now,
-            overlapCount: overlapCounts.get(source.item.id) ?? 0,
-            syncState: reviewItemSyncStates.get(source.item.id) ?? null
-          })
-        : reviewDeckCardForEntry(source.key, source.entry, { mode: theme.mode, neutral: theme.textSecondary, now })
-    )).map((card) => ({
+    () => deckSources.slice(0, 4).map(deckCardForSource).map((card) => ({
       ...card,
       // Deferring the only card would change nothing.
       canSkip: card.canSkip && !(card.skipDefers && deckSources.length <= 1),
@@ -1050,9 +1136,15 @@ export default function ReviewScreen() {
       controlsDisabled: card.controlsDisabled || card.key === flyingDeckKey,
       renderKey: `${card.key}#${deferGenerations.current.get(card.key) ?? 0}`
     })),
-    // deferredDeckKeys changes whenever a defer generation does.
+    // deferredDeckKeys changes whenever a defer generation does; deckCardForSource reads the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [data?.categories, deckSources, deferredDeckKeys, flyingDeckKey, logAsDrafts, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
+  );
+  const standbyDeckCard = useMemo(
+    () => standbyDeckSource ? deckCardForSource(standbyDeckSource) : null,
+    // deckCardForSource reads the same inputs as deckCards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data?.categories, logAsDrafts, now, overlapCounts, reviewItemSyncStates, standbyDeckSource, theme.mode, theme.textSecondary]
   );
   const topDeckSource = deckSources[0] ?? null;
   // The top card is the held card still flying out: the round actions wait for the next card.
@@ -1061,23 +1153,50 @@ export default function ReviewScreen() {
   // flying to the back still does).
   const heldInFlight = deckFlying && heldDeckCard?.key === flyingDeckKey;
   const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;
-  // The server count still includes decisions held for Undo or saving on this iPhone.
+  // Each segment's cards still to decide (the held card flying out of the selected one is decided).
+  const segmentRemaining: Record<ReviewDeckSegment, number> = {
+    today: deckSegment === "today" ? deckRemaining : deckSegmentSources.today.length,
+    earlier: deckSegment === "earlier" ? deckRemaining : deckSegmentSources.earlier.length
+  };
   // Every open item is loaded: the deck itself is the count, so a decision still syncing never
-  // turns "2 of 5" into "2 of 5+". Otherwise the server count is used when it is exact.
+  // turns "2 of 5" into "2 of 5+". The server's total has no Today/Earlier split, so until then
+  // each segment's count is what is loaded, marked "at least".
   const deckBacklogComplete = reviewBacklog !== null && !reviewBacklog.nextCursor && reviewBacklog.recordsComplete;
-  const locallyDecidedCount = reviewDeckHeldKeys(heldDeckDecision).length + committingDeckKeys.size;
-  const deckPosition = reviewDeckPosition({
-    decided: deckVisit.decided,
-    remaining: deckBacklogComplete
-      ? deckRemaining
-      : reviewCountIsExact ? Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining) : deckRemaining,
-    exact: deckBacklogComplete || reviewCountIsExact
+  // Exact only once the whole backlog is loaded (reviewDeckSegmentCounts); "9+" until then.
+  const segmentCounts = reviewDeckSegmentCounts({
+    today: segmentRemaining.today,
+    earlier: segmentRemaining.earlier,
+    backlogComplete: deckBacklogComplete
   });
-  // "All framed" only once a verified read says nothing else is open; a cached-only deck (offline,
-  // no backlog read yet) never claims completeness.
+  // "N of M" follows the selected segment: this visit's decisions in it, plus its count.
+  let decidedInSegment = 0;
+  for (const key of ownDeckDecisionKeys.current) {
+    if ((knownDeckSegments.current.get(key) ?? deckSegment) === deckSegment) decidedInSegment += 1;
+  }
+  const deckPosition = reviewDeckPosition({
+    decided: decidedInSegment,
+    remaining: Math.max(segmentCounts[deckSegment].value, deckRemaining),
+    exact: segmentCounts[deckSegment].exact
+  });
+  // "All framed" only when both segments are empty and a verified read says nothing else is open;
+  // a cached-only deck (offline, no backlog read yet) never claims completeness.
   // A reload after the last decision keeps the previous complete read until it is replaced, so
   // "All framed" does not blink back to the waiting copy.
-  const deckFinished = deckSources.length === 0 && deckBacklogComplete;
+  const deckFinished = deckSegmentSources.all.length === 0 && deckBacklogComplete;
+  const deckView = reviewDeckSegmentView({
+    selected: deckSegment,
+    selectedCards: deckSources.length,
+    otherCards: deckSegmentSources[otherReviewDeckSegment(deckSegment)].length,
+    selectedCount: segmentCounts[deckSegment],
+    allFinished: deckFinished
+  });
+  const segmentFramedCopy = reviewDeckSegmentFramedCopy(deckSegment, segmentCounts[otherReviewDeckSegment(deckSegment)]);
+  // The slim "Older than 7 days" divider: an Earlier top card that began more than a week ago.
+  const showOlderDivider = deckView === "cards" && deckSegment === "earlier" && topDeckSourceIsOlder();
+  function topDeckSourceIsOlder() {
+    const top = deckSources[0];
+    return Boolean(top && reviewDeckOlderThanWeek(top.moment, now));
+  }
   // Decided while rendering so the finished screen mounts knowing whether to celebrate: only when
   // the cards last on screen were all this visit's own decisions (a refresh emptying it is quiet).
   if (deckFinished && !deckWasFinished.current) {
@@ -1085,7 +1204,7 @@ export default function ReviewScreen() {
       lastDeckKeys.current.every((key) => ownDeckDecisionKeys.current.has(key));
   }
   deckWasFinished.current = deckFinished;
-  if (deckSources.length) lastDeckKeys.current = deckSources.map((source) => source.key);
+  if (deckSegmentSources.all.length) lastDeckKeys.current = deckSegmentSources.all.map((source) => source.key);
   const deckWaitingCopy = reviewBacklogLoading || refreshing || data === null
     ? "Looking for moments to review…"
     : reviewBacklog === null
@@ -1293,6 +1412,8 @@ export default function ReviewScreen() {
   async function startBulkSkip(scope: ReviewBulkSkipScope) {
     if (bulkSkipInFlight.current) return;
     bulkSkipInFlight.current = true;
+    // A bulk skip covers only the segment it was started in (Earlier, or Today).
+    const segment = deckSegmentRef.current;
     // Like any other decision, a bulk skip saves a held card first.
     deckHold.flush();
     const generation = screenOwnerGeneration.current;
@@ -1323,8 +1444,8 @@ export default function ReviewScreen() {
     }
     const backlog = reviewBacklogRef.current;
     const complete = Boolean(backlog && !backlog.nextCursor && backlog.recordsComplete);
-    const candidates = bulkSkipCandidates(scope);
-    const confirmation = reviewBulkSkipConfirmation(candidates.length, scope, complete);
+    const candidates = bulkSkipCandidates(scope, segment);
+    const confirmation = reviewBulkSkipConfirmation(candidates.length, scope, complete, segment);
     if (!confirmation.confirmLabel) {
       bulkSkipInFlight.current = false;
       deckNotice.show(`${confirmation.title}. ${confirmation.message}`);
@@ -1342,15 +1463,18 @@ export default function ReviewScreen() {
         bulkSkipInFlight.current = false;
         if (!stillHere()) return;
         // Only what the user confirmed, and only what can still be skipped now.
-        holdBulkSkip(bulkSkipCandidates(scope).filter((item) => chosen.has(item.id)));
+        holdBulkSkip(bulkSkipCandidates(scope, segment).filter((item) => chosen.has(item.id)));
       }
     });
     if (!shown) bulkSkipInFlight.current = false;
   }
 
-  function bulkSkipCandidates(scope: ReviewBulkSkipScope) {
+  function bulkSkipCandidates(scope: ReviewBulkSkipScope, segment: ReviewDeckSegment) {
     const held = new Set(reviewDeckHeldKeys(deckHold.current()));
+    const today = reviewDeckToday(Date.now());
     return reviewBulkSkipCandidates((dataRef.current?.reviewItems ?? []).filter(isOpenReviewItem), {
+      // Only the selected segment's moments, by the deck's own Today predicate.
+      inSegment: (item) => reviewDeckSegmentFor(reviewItemMoment(item), today) === segment,
       now: Date.now(),
       scope,
       // The same rule as a single Skip: a card that would only move behind the rest is left alone.
@@ -1633,29 +1757,65 @@ export default function ReviewScreen() {
     };
   }
 
+  // A tap on the Today · Earlier control (or the "Today is framed" pill). Tapping the selected
+  // segment does nothing; otherwise a held decision is saved first, as leaving the screen saves it,
+  // then the stacks cross-fade (each card's own presence fade) and VoiceOver hears the new segment
+  // and lands on its top card's title.
+  function selectDeckSegment(next: ReviewDeckSegment) {
+    switchReviewDeckSegment(deckSegmentRef.current, next, {
+      flushHeld: () => deckHold.flush(),
+      select: (segment) => {
+        deckSegmentRef.current = segment;
+        applyReviewMenuEvent({ type: "close" });
+        setDeckThrowRequest(null);
+        setDeckReturn(null);
+        setDeckSegmentSwitched(true);
+        setDeckSegment(segment);
+        setSegmentFocusToken((token) => token + 1);
+        AccessibilityInfo.announceForAccessibility(reviewDeckSegmentAccessibilityLabel(segment, segmentCounts[segment]));
+      }
+    });
+  }
+
+  function spendSegmentFocusToken(token: number) {
+    spentSegmentFocusToken.current = Math.max(spentSegmentFocusToken.current, token);
+  }
+  const unspentSegmentFocusToken = segmentFocusToken > spentSegmentFocusToken.current ? segmentFocusToken : 0;
+
   const loadMoreReviewBacklog = useCallback(() => {
     const cursor = reviewBacklogRef.current?.nextCursor;
     if (!cursor) return;
     void loadReviewBacklogPage({ cursor, reset: false });
   }, [loadReviewBacklogPage]);
 
-  // The next backlog page is read while cards remain on the stack, once per cursor; a failed read
-  // is not retried automatically (the empty deck offers "Show more" instead).
+  // The next backlog page is read while fewer than three cards remain in the selected segment, once
+  // per cursor; a failed read is not retried automatically (the empty deck offers "Show more"
+  // instead).
   const autoLoadedCursor = useRef<string | null>(null);
-  const deckNextCursor = deckSources.length < 3 ? reviewBacklog?.nextCursor ?? null : null;
+  const segmentWantsPage = deckSources.length < 3;
+  const deckNextCursor = segmentWantsPage ? reviewBacklog?.nextCursor ?? null : null;
   useEffect(() => {
     if (!deckNextCursor || reviewBacklogLoading || autoLoadedCursor.current === deckNextCursor) return;
     autoLoadedCursor.current = deckNextCursor;
     loadMoreReviewBacklog();
   }, [deckNextCursor, loadMoreReviewBacklog, reviewBacklogLoading]);
 
-  // The exact item a Today ribbon tap asked for leads the deck (orderReviewDeck).
-  const beginExactFocus = useCallback((key: string) => {
+  // The exact item a Today ribbon or Calendar tap asked for leads the deck (orderReviewDeck), in
+  // its own segment: a ribbon moment overlaps today, so it opens Today; an earlier day's opens Earlier.
+  const beginExactFocus = useCallback((key: string, segment: ReviewDeckSegment) => {
     if (focusConsumedKey.current === key) return;
     focusConsumedKey.current = key;
+    if (segment !== deckSegmentRef.current) {
+      // Placed at once (no thumb slide, no announcement beyond the one below); a held decision is
+      // saved first, as any segment change saves it.
+      deckHold.flush();
+      deckSegmentRef.current = segment;
+      setDeckSegmentSwitched(false);
+      setDeckSegment(segment);
+    }
     setHighlightedFocusKey(key);
     AccessibilityInfo.announceForAccessibility("Opened that moment.");
-  }, []);
+  }, [deckHold]);
 
   useEffect(() => {
     const request = focusRequest;
@@ -1669,13 +1829,17 @@ export default function ReviewScreen() {
     if (!data) return;
 
     if (request.kind === "review") {
-      if (openReviewItems.some((item) => item.id === request.id)) {
-        beginExactFocus(focusKey);
+      const item = openReviewItems.find((candidate) => candidate.id === request.id);
+      if (item) {
+        beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(item), reviewDeckToday(Date.now())));
         return;
       }
-    } else if (displayedReviewNeededEntries.some((entry) => entry.id === request.id)) {
-      beginExactFocus(focusKey);
-      return;
+    } else {
+      const entry = displayedReviewNeededEntries.find((candidate) => candidate.id === request.id);
+      if (entry) {
+        beginExactFocus(focusKey, reviewDeckSegmentFor(legacyEntryMoment(entry), reviewDeckToday(Date.now())));
+        return;
+      }
     }
 
     if (focusLookupKey.current === focusKey) return;
@@ -2197,6 +2361,15 @@ export default function ReviewScreen() {
         }
         style={styles.settingsScrollView}
       >
+        {/* Today · Earlier (owner decision 14 Oct 2026, option C): neutral, no coral; it owns its thumb. */}
+        <ReviewDeckSegmentControl
+          animateChange={deckSegmentSwitched}
+          counts={segmentCounts}
+          onSelect={selectDeckSegment}
+          reduceMotion={reduceMotion}
+          selected={deckSegment}
+          theme={theme}
+        />
         {reviewAvailabilityMessage ? (
           <View style={styles.queueDiagnosticCard}>
             <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.muted}>
@@ -2214,7 +2387,10 @@ export default function ReviewScreen() {
           theme={theme}
         />
 
-        {deckFinished ? (
+        {/* Always reserved in both segments, so the divider appearing never moves the deck. */}
+        <ReviewDeckOlderDivider reduceMotion={reduceMotion} theme={theme} visible={showOlderDivider} />
+
+        {deckView === "finished" ? (
           <ReviewDeckFinished
             backLabel={backLabel}
             blocks={deckVisit.logged.map((block) => block.color)}
@@ -2225,10 +2401,27 @@ export default function ReviewScreen() {
             reduceMotion={reduceMotion}
             theme={theme}
           />
+        ) : deckView === "segment_framed" ? (
+          <ReviewDeckSegmentFramed
+            action={segmentFramedCopy.action}
+            actionAccessibilityLabel={segmentFramedCopy.actionAccessibilityLabel}
+            detail={segmentFramedCopy.detail}
+            focusToken={unspentSegmentFocusToken}
+            footer={deckToastSlot("under")}
+            key={deckSegment}
+            onAction={() => selectDeckSegment(otherReviewDeckSegment(deckSegment))}
+            onFocused={spendSegmentFocusToken}
+            reduceMotion={reduceMotion}
+            theme={theme}
+            title={segmentFramedCopy.title}
+          />
         ) : topDeckSource ? (
           <>
             <ReviewDeckStack
               cards={deckCards}
+              focusTitleToken={unspentSegmentFocusToken}
+              onTitleFocused={spendSegmentFocusToken}
+              standby={standbyDeckCard}
               onEdit={(key) => {
                 const source = deckSources.find((candidate) => candidate.key === key);
                 if (!source) return;
@@ -2330,7 +2523,7 @@ export default function ReviewScreen() {
       ) : null}
 
       <OverflowMenu
-        bulkSkip
+        bulkSkip={deckSegment}
         disabled={
           !overflowItemId ||
           reviewMenuState.pendingAction != null

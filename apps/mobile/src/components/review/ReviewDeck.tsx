@@ -1,6 +1,6 @@
 import { backActionLabel } from "@/lib/blocksNav";
-import { memo, useEffect, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { AccessibilityInfo, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
@@ -87,6 +87,8 @@ export type ReviewDeckCardModel = {
   skipDefers: boolean;
   /** React key: changes when a deferred card comes back, so it returns as a fresh card. */
   renderKey?: string;
+  /** An Earlier card's day ("Yesterday", "Mon 12 Oct"), as the first pill on its picture. */
+  dayPill?: string | null;
 };
 
 const SOURCE_GLYPH: Record<ReviewDeckSourceIcon, DayframeGlyph> = {
@@ -241,11 +243,28 @@ function Pill({ children, round, theme }: { children: ReactNode; round?: boolean
   );
 }
 
+function DayPill({ label, theme }: { label: string; theme: MobileTheme }) {
+  // A stronger glass than the source pill (prototype `.gpill.day`), white text in both themes.
+  return (
+    <View
+      style={[
+        deckStyles.pill,
+        { backgroundColor: theme.mode === "dark" ? "rgba(5, 9, 20, 0.78)" : "rgba(16, 22, 34, 0.78)" }
+      ]}
+      testID="review-deck-day-pill"
+    >
+      <Text {...mobileTextProps("counter")} style={[deckStyles.pillText, { color: "#FFFFFF" }]}>{label}</Text>
+    </View>
+  );
+}
+
 function ReviewDeckCardView({
   card,
   depth,
   diagnostic,
+  focusTitleToken = 0,
   onBodyHeight,
+  onTitleFocused,
   onEdit,
   onLogAsActivity,
   onLogAsName,
@@ -268,6 +287,9 @@ function ReviewDeckCardView({
   locked?: boolean;
   /** Synthetic accessibility probe only: the top card reports its frames. */
   diagnostic?: MobileAccessibilityDiagnostic;
+  /** A segment switch: once mounted on top, VoiceOver focus moves to this card's title. */
+  focusTitleToken?: number;
+  onTitleFocused?: (token: number) => void;
   onBodyHeight: (height: number) => void;
   onEdit: () => void;
   onLogAsActivity: () => void;
@@ -292,6 +314,14 @@ function ReviewDeckCardView({
       : withSpring(depth, { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never });
   }, [animatedDepth, depth, reduceMotion]);
   const top = depth === 0 && !flying && !locked;
+  const titleRef = useRef<Text>(null);
+  useEffect(() => {
+    if (!top || !focusTitleToken || !titleRef.current) return;
+    AccessibilityInfo.sendAccessibilityEvent(titleRef.current, "focus");
+    onTitleFocused?.(focusTitleToken);
+    // Once per token (the stack forgets a token once it has been spent).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTitleToken, top]);
 
   // The top card's drag (Blocks parity step 5b): one Pan owner on the UI thread. It follows the
   // finger (40 % vertically, tilting dx/18°), arms past ±110 with one tick, and on release either
@@ -435,6 +465,7 @@ function ReviewDeckCardView({
         <View style={[deckStyles.picture, { height: pictureHeight }]}>
           <ReviewDeckPictureView color={card.color} picture={card.picture} theme={theme} />
           <View style={deckStyles.pillRow}>
+            {card.dayPill ? <DayPill label={card.dayPill} theme={theme} /> : null}
             <Pill theme={theme}>
               <DayframeIcon color={theme.textPrimary} glyph={SOURCE_GLYPH[card.source.icon]} size={14} />
               <Text {...mobileTextProps("counter")} style={[deckStyles.pillText, { color: theme.textPrimary }]}>
@@ -507,6 +538,7 @@ function ReviewDeckCardView({
             {...mobileTextProps("screenHeading")}
             numberOfLines={2}
             onLayout={(event) => recordMobileLayout(diagnostic, "review-deck.title.frame", event)}
+            ref={titleRef}
             style={[deckStyles.title, { color: theme.textPrimary }]}
           >
             {card.title}
@@ -606,6 +638,9 @@ function ReviewDeckCardView({
 export function ReviewDeckStack({
   cards,
   diagnostic,
+  focusTitleToken = 0,
+  onTitleFocused,
+  standby = null,
   onEdit,
   onLogAsActivity,
   onLogAsName,
@@ -622,6 +657,15 @@ export function ReviewDeckStack({
   flyingKey?: string | null;
   cards: readonly ReviewDeckCardModel[];
   diagnostic?: MobileAccessibilityDiagnostic;
+  /** Bumped by a segment switch: the new top card's title takes VoiceOver focus once (0: none). */
+  focusTitleToken?: number;
+  /** The token has been spent: the screen stops passing it. */
+  onTitleFocused?: (token: number) => void;
+  /**
+   * The other segment's top card, drawn invisibly behind the stack only so its body is measured:
+   * switching segment then lands it at its final size, with no layout shift after the cross-fade.
+   */
+  standby?: ReviewDeckCardModel | null;
   onEdit: (key: string) => void;
   onLogAsActivity?: (key: string) => void;
   onLogAsName?: (key: string, name: string) => void;
@@ -643,6 +687,11 @@ export function ReviewDeckStack({
   // Each card reports its own body; the top card's decides. A card promoted from beneath does not
   // lay out again, so its height must already be known.
   const [bodyHeights, setBodyHeights] = useState<Record<string, number>>({});
+  const reportBodyHeight = (key: string, height: number) => {
+    const rounded = Math.ceil(height);
+    setBodyHeights((current) => (current[key] === rounded ? current : { ...current, [key]: rounded }));
+  };
+  const measuring = standby && !cards.some((card) => card.key === standby.key) ? standby : null;
   // Sized for the card taking the top, not the one flying out.
   const sizingCard = visible[topFlying ? 1 : 0] ?? visible[0];
   const bodyHeight = sizingCard ? bodyHeights[sizingCard.key] ?? 0 : 0;
@@ -664,12 +713,11 @@ export function ReviewDeckStack({
           depth={depth}
           diagnostic={depth === 0 && !flying ? diagnostic : undefined}
           flying={flying}
+          focusTitleToken={depth === 0 && !flying ? focusTitleToken : 0}
+          onTitleFocused={onTitleFocused}
           locked={topFlying && !flying}
           key={card.renderKey ?? card.key}
-          onBodyHeight={(height) => {
-            const rounded = Math.ceil(height);
-            setBodyHeights((current) => (current[card.key] === rounded ? current : { ...current, [card.key]: rounded }));
-          }}
+          onBodyHeight={(height) => reportBodyHeight(card.key, height)}
           onEdit={() => onEdit(card.key)}
           onLogAsActivity={() => onLogAsActivity?.(card.key)}
           onLogAsName={(name) => onLogAsName?.(card.key, name)}
@@ -684,6 +732,35 @@ export function ReviewDeckStack({
         />
         );
       })}
+      {measuring ? (
+        // Invisible, untouchable and hidden from VoiceOver: measured only.
+        <View
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          pointerEvents="none"
+          style={deckStyles.standby}
+          testID="review-deck-standby"
+        >
+          <ReviewDeckCardView
+            card={measuring}
+            depth={REVIEW_DECK_VISIBLE_CARDS}
+            key={`standby:${measuring.renderKey ?? measuring.key}`}
+            locked
+            onBodyHeight={(height) => reportBodyHeight(measuring.key, height)}
+            onEdit={() => undefined}
+            onLogAsActivity={() => undefined}
+            onLogAsName={() => undefined}
+            onMore={() => undefined}
+            onThrow={() => undefined}
+            onThrowStart={() => undefined}
+            pictureHeight={pictureHeight}
+            reduceMotion
+            returnFrom={null}
+            theme={theme}
+            throwRequest={null}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -952,6 +1029,15 @@ const deckStyles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.45
+  },
+  standby: {
+    bottom: 0,
+    left: 0,
+    opacity: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
+    zIndex: -1
   },
   finished: {
     alignItems: "center",

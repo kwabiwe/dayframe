@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildHistoryDaySections } from "./historyPresentation";
-import { buildEarlierThisWeek, shortDuration } from "./earlierThisWeek";
+import { buildEarlierThisWeek, shortDuration, earlierDayReviewCounts } from "./earlierThisWeek";
 
 const today = new Date(2026, 9, 7);
 const nowMs = today.getTime() + 15 * 3_600_000;
@@ -51,5 +51,32 @@ describe("earlier this week", () => {
     expect(shortDuration(35 * 60)).toBe("35m");
     expect(shortDuration(2 * 3600)).toBe("2h");
     expect(shortDuration(125 * 60)).toBe("2h 5m");
+  });
+});
+
+describe("earlierDayReviewCounts (the hatched chip, 14 Oct 2026)", () => {
+  const days = [12, 11, 10].map((day) => ({ dayKey: `2026-10-${day}`, date: new Date(2026, 9, day) }));
+  const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).toISOString();
+  const item = (start: string | null, stop: string | null, createdAt: string | null = null) => ({
+    suggestedStartedAt: start,
+    suggestedStoppedAt: stop,
+    createdAt
+  });
+
+  it("counts each day's open moments, an overnight one on both days", () => {
+    const counts = earlierDayReviewCounts(days, [
+      item(at(12, 9), at(12, 10)),
+      item(at(11, 23), at(12, 7)),
+      item(at(10, 12), at(10, 12, 30)),
+      item(null, null, at(10, 18)),
+      item(at(9, 9), at(9, 10))
+    ]);
+    expect([...counts]).toEqual([["2026-10-12", 2], ["2026-10-11", 1], ["2026-10-10", 2]]);
+  });
+
+  it("leaves a day with nothing open out, and a moment ending at midnight on its own day", () => {
+    const counts = earlierDayReviewCounts(days, [item(at(11, 22), at(12, 0))]);
+    expect([...counts]).toEqual([["2026-10-11", 1]]);
+    expect(earlierDayReviewCounts(days, []).size).toBe(0);
   });
 });

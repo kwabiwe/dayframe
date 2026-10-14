@@ -1,4 +1,4 @@
-import { emitReviewSemanticSegments, timeAwayPlaceName } from "./location-review-semantic-batch";
+import { emitReviewSemanticSegments, type SemanticChangeCounter, timeAwayPlaceName } from "./location-review-semantic-batch";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
@@ -249,6 +249,7 @@ export async function replayRetainedLocationEvidence(
       clientAcknowledgedMode: rollout.clientAcknowledgedMode,
       finalisedSegmentCount: semanticReplay.finalisedSegmentCount,
       semanticSegmentCount: semanticReplay.semanticSegmentCount,
+      semanticChangeCount: semanticReplay.semanticChangeCount,
       warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
     };
   }, transactionOptions);
@@ -268,8 +269,11 @@ async function replayAndEmitLocationSemantics(
     remainingOperationMs?: LocationObservation["remainingOperationMs"];
   }
 ) {
+  // One counter for everything this replay changes that the app shows (see `semanticChangeCount`).
+  const semanticChanges: SemanticChangeCounter = { count: 0 };
   const replay = await replayLocationEvidence(client, session, {
     ...options,
+    semanticChanges,
     // This is deliberately derived from the server decision, never from the
     // requested rollout mode or a request-visible profile field.
     persistenceProfile: options.rollout.effectiveMode === "v2_review"
@@ -285,13 +289,19 @@ async function replayAndEmitLocationSemantics(
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
     );
     if (options.rollout.effectiveMode === "v2_review") {
-      semanticSegmentCount = await emitReviewSemanticSegments(client, session, eligible, replay.stayIds, replay.commuteIds);
+      semanticSegmentCount = await emitReviewSemanticSegments(
+        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges
+      );
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(
           client, session, options.rollout.effectiveMode, segment, replay.stayIds, replay.commuteIds
         );
-        if (emitted) semanticSegmentCount += 1;
+        // Automatic modes may create or change entries: every emitted segment counts as a change.
+        if (emitted) {
+          semanticSegmentCount += 1;
+          semanticChanges.count += 1;
+        }
       }
     }
   }
@@ -299,7 +309,8 @@ async function replayAndEmitLocationSemantics(
   return {
     replay,
     finalisedSegmentCount: finalisedSegments.length,
-    semanticSegmentCount
+    semanticSegmentCount,
+    semanticChangeCount: semanticChanges.count
   };
 }
 

@@ -171,7 +171,14 @@ export const LocationReplayResponseSchema = z.object({
   semanticSegmentCount: z.number().int().nonnegative(),
   warnings: z.array(z.string()),
   /** Suggestions waiting in Review; only sent to clients that ask with `REVIEW_COUNT_REQUEST_HEADER`. */
-  reviewCount: z.number().int().nonnegative().optional()
+  reviewCount: z.number().int().nonnegative().optional(),
+  /**
+   * Review items this replay inserted, reopened, retired or really changed, plus a Commute activity it
+   * created (automatic modes: every emitted segment too).
+   * Zero means nothing the app shows changed, so it need not reload its Dashboard. Only sent to clients
+   * that ask with `SEMANTIC_CHANGE_COUNT_REQUEST_HEADER`, for the same strict-schema reason as `reviewCount`.
+   */
+  semanticChangeCount: z.number().int().nonnegative().optional()
 }).strict();
 
 /**
@@ -180,6 +187,9 @@ export const LocationReplayResponseSchema = z.object({
  * gains the field for clients whose strict reply schema accepts it.
  */
 export const REVIEW_COUNT_REQUEST_HEADER = "x-dayframe-review-count";
+
+/** Asks the location replay reply to carry `semanticChangeCount` (see `LocationReplayResponseSchema`). */
+export const SEMANTIC_CHANGE_COUNT_REQUEST_HEADER = "x-dayframe-semantic-change-count";
 
 export const ReviewEntryEditSchema = z
   .object({

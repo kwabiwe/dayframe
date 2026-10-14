@@ -18,7 +18,8 @@ vi.mock("../../lib/mobileTypography", () => ({ mobileTextProps: () => ({}) }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
 vi.mock("./TodayReviewPresentationContext", () => ({ useTodayReviewPresentationContext: () => mocks.context }));
 
-import { readFailedOnline, reviewNudgeCopy, TodayReviewNudge } from "./TodayReviewNudge";
+import { readFailedOnline, reviewNudgeCopy, reviewNudgeSplitCopy, TodayReviewNudge } from "./TodayReviewNudge";
+import { projectTodayReviewPresentation } from "../../lib/todayReviewPresentation";
 
 const theme = { mode: "dark", surface: "#151B26", surfaceMuted: "#202838", textMuted: "#707B91", textPrimary: "#FFF", textSecondary: "#8993A7" } as never;
 
@@ -65,6 +66,8 @@ describe("reviewNudgeCopy", () => {
     expect(reviewNudgeCopy({ value: 0, exact: true }, { value: 3, exact: true }, true)).toEqual({
       count: null,
       detail: "Open Review for the latest items.",
+      segment: null,
+      spokenDetail: "Open Review for the latest items.",
       title: "Moments to review",
     });
   });
@@ -78,10 +81,96 @@ describe("reviewNudgeCopy", () => {
     expect(reviewNudgeCopy({ value: 12, exact: false }, { value: 3, exact: true })).toEqual({
       count: null,
       detail: "Open Review for the latest items.",
+      segment: null,
+      spokenDetail: "Open Review for the latest items.",
       title: "Moments to review",
     });
     expect(reviewNudgeCopy({ value: null, exact: false }, { value: 2, exact: true })?.title).toBe("2 moments to review");
     expect(reviewNudgeCopy(null, NONE)).toBeNull();
+  });
+});
+
+describe("reviewNudgeCopy: today and earlier (14 Oct 2026)", () => {
+  const exact = (value: number) => ({ value, exact: true });
+
+  it("splits an exact count into today and earlier, and opens Today when it has moments", () => {
+    expect(reviewNudgeCopy(exact(12), NONE, false, exact(3))).toEqual({
+      count: 12,
+      detail: "3 today · 9 earlier",
+      segment: "today",
+      spokenDetail: "3 today, 9 earlier",
+      title: "12 moments to review",
+    });
+  });
+
+  it("uses plain words when one side is empty, and opens Earlier when Today has nothing", () => {
+    expect(reviewNudgeCopy(exact(9), NONE, false, exact(0))).toMatchObject({ detail: "All from earlier days", segment: "earlier" });
+    expect(reviewNudgeCopy(exact(1), NONE, false, exact(0))).toMatchObject({ detail: "From an earlier day", segment: "earlier" });
+    expect(reviewNudgeCopy(exact(3), NONE, false, exact(3))).toMatchObject({ detail: "All from today", segment: "today" });
+    expect(reviewNudgeCopy(exact(1), NONE, false, exact(1))).toMatchObject({ detail: "From today", segment: "today" });
+    expect(reviewNudgeSplitCopy({ today: 2, earlier: 1 })).toEqual({ detail: "2 today · 1 earlier", spokenDetail: "2 today, 1 earlier" });
+  });
+
+  it("says no split, and opens the default segment, when today's count is not exact", () => {
+    expect(reviewNudgeCopy(exact(12), NONE, false, { value: 3, exact: false })).toMatchObject({
+      detail: "Dayframe found time you didn't track.",
+      segment: null,
+    });
+    expect(reviewNudgeCopy(exact(12), NONE, false, null)).toMatchObject({ segment: null });
+    // The bootstrap's count alone has no split.
+    expect(reviewNudgeCopy(null, exact(4))).toMatchObject({ detail: "Dayframe found time you didn't track.", segment: null });
+  });
+
+  it("never shows more today than in total", () => {
+    expect(reviewNudgeCopy(exact(2), NONE, false, exact(5))).toMatchObject({ detail: "All from today", segment: "today" });
+  });
+});
+
+describe("projection to nudge (Codex r1 on #408)", () => {
+  // A cached snapshot after a same-day clock rollback: today's 18:00–19:00 moment was skipped on
+  // this iPhone while one earlier-day moment remains. The nudge must not open an empty Today.
+  function record(id: string, start: string, end: string) {
+    return {
+      kind: "review", reviewItemId: id, eventId: null, locationSegmentId: null, sourceKind: "generic",
+      eventSource: "health_workout", eventType: "workout", title: id, category: null,
+      place: { id: null, label: null }, interval: { start, end }, confidence: "medium", status: "open",
+      createdAt: start, updatedAt: start, proposalHash: "a".repeat(64), canonicalEntryIds: [], semanticRevision: start,
+    };
+  }
+
+  it("says the remaining moment is from an earlier day and opens Earlier", () => {
+    const records = [record("earlier", "2026-09-11T10:00:00.000Z", "2026-09-11T11:00:00.000Z"), record("evening", "2026-09-12T18:00:00.000Z", "2026-09-12T19:00:00.000Z")];
+    const presentation = projectTodayReviewPresentation({
+      ownerKey: "owner",
+      snapshotOwnerKey: "owner",
+      response: {
+        version: 1,
+        scope: {
+          mode: "window",
+          timeZone: "Etc/UTC",
+          window: { start: "2026-07-15T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+          today: { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" },
+        },
+        snapshotToken: "snapshot",
+        capturedAt: "2026-09-12T20:00:00.000Z",
+        nextCursor: null,
+        completeness: { records: true, outstandingCounts: true, completedToday: true, partialReason: null },
+        outstanding: { globalCount: 2, todayCount: 1, openReviewItemIds: ["earlier", "evening"] },
+        records,
+        links: [],
+        lookup: { reviewItems: [], entries: [] },
+      } as never,
+      effects: [{ reviewItemId: "evening", action: "ignore_once", state: "pending", localEffect: "hidden", resolution: "pending", canonicalEntryIds: [], source: null }] as never,
+      dashboardEntries: [],
+      day: { key: "2026-09-12", startMs: Date.parse("2026-09-12T00:00:00.000Z"), endMs: Date.parse("2026-09-13T00:00:00.000Z") },
+      // The clock reads noon, before the decided 18:00 moment.
+      nowMs: Date.parse("2026-09-12T12:00:00.000Z"),
+    });
+    expect(reviewNudgeCopy(presentation.globalReviewCount, NONE, false, presentation.todayReviewCount)).toMatchObject({
+      detail: "From an earlier day",
+      segment: "earlier",
+      title: "1 moment to review",
+    });
   });
 });
 
@@ -106,6 +195,41 @@ describe("TodayReviewNudge", () => {
     expect(blocks.map((block) => block.props.style[1].opacity)).toEqual([0.55, 0.8, 1]);
     // A Review item without an activity draws a neutral block.
     expect(blocks[2].props.style[2].backgroundColor).toBe("#202838");
+  });
+
+  it("says \"3 today · 9 earlier\" and opens the segment that has moments, keeping its colours", () => {
+    mocks.context = {
+      isSummaryAvailable: true,
+      presentation: {
+        globalReviewCount: { value: 9, exact: true },
+        todayReviewCount: { value: 0, exact: true },
+        daySections: [{ activities: [] }],
+      },
+    };
+    const onOpenReview = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TodayReviewNudge fallback={{ value: 9, exact: true }} onOpenReview={onOpenReview} reduceMotion={false} theme={theme} />);
+    });
+    const nudge = tree.root.findByProps({ testID: "today-review-nudge" });
+    expect(nudge.props.accessibilityLabel).toBe("9 moments to review. All from earlier days");
+    expect(nudge.props.accessibilityHint).toBe("Opens Review on earlier days");
+    act(() => nudge.props.onPress());
+    expect(onOpenReview).toHaveBeenCalledWith("earlier");
+
+    mocks.context = {
+      isSummaryAvailable: true,
+      presentation: {
+        globalReviewCount: { value: 12, exact: true },
+        todayReviewCount: { value: 3, exact: true },
+        daySections: [{ activities: [activity("blue")] }],
+      },
+    };
+    act(() => tree.update(<TodayReviewNudge fallback={{ value: 12, exact: true }} onOpenReview={onOpenReview} reduceMotion={false} theme={theme} />));
+    const updated = tree.root.findByProps({ testID: "today-review-nudge" });
+    expect(updated.findAllByType("Text" as never).map((node) => node.props.children)).toEqual(["12 moments to review", "3 today · 9 earlier"]);
+    act(() => updated.props.onPress());
+    expect(onOpenReview).toHaveBeenLastCalledWith("today");
   });
 
   it("fades in only after first paint and always fades out", () => {

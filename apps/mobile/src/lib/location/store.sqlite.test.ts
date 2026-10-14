@@ -315,6 +315,31 @@ describe("Motion & Fitness upload batches",()=>{
   expect(states).toEqual({"fix-0":"acknowledged","fix-2":"acknowledged","fix-4":"acknowledged","motion-1":"rejected","motion-3":"rejected","motion-5":"rejected"});
  });
 });
+describe("Dashboard reload after a location pass",()=>{
+ it("asks the replay for its change count and returns it",async()=>{
+  await seed(1);
+  mocks.fetch.mockImplementation(async(url:string,init:RequestInit)=>{
+   if(url.endsWith("/replay")){
+    expect((init.headers as Record<string,string>)["x-dayframe-semantic-change-count"]).toBe("1");
+    return new Response(JSON.stringify({...replay(),semanticSegmentCount:3,semanticChangeCount:0}));
+   }
+   const body=JSON.parse(String(init.body));return new Response(JSON.stringify({ok:true,acknowledgedEvidenceIds:body.evidence.map((e:{clientEvidenceId:string})=>e.clientEvidenceId),replayVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,rolloutMode:"v2_shadow",warnings:[]}));
+  });
+  const result=await store.syncLocationEvidence({forceReplay:true,forceUploadRetry:true});
+  expect(result).toMatchObject({acknowledgedCount:1,replayed:true,semanticSegmentCount:3,semanticChangeCount:0});
+  expect(store.locationSyncChangedDashboard(result)).toBe(false);
+ });
+ it("reloads only for real Review changes, and falls back to the old rule without a count",()=>{
+  const changed=store.locationSyncChangedDashboard;
+  expect(changed({acknowledgedCount:5,replayed:true,semanticSegmentCount:4,semanticChangeCount:0})).toBe(false);
+  expect(changed({acknowledgedCount:0,replayed:true,semanticSegmentCount:4,semanticChangeCount:2})).toBe(true);
+  // Older servers send no count; a pass without a replay has none either.
+  expect(changed({acknowledgedCount:5,replayed:true,semanticSegmentCount:0})).toBe(true);
+  expect(changed({acknowledgedCount:0,replayed:true,semanticSegmentCount:2})).toBe(true);
+  expect(changed({acknowledgedCount:3,replayed:false,semanticChangeCount:0})).toBe(true);
+  expect(changed({acknowledgedCount:0,replayed:false})).toBe(false);
+ });
+});
 describe("location journal query plans (performance.md: no unbounded journal reads)",()=>{
  const TABLES=/\b(location_evidence_journal|location_upload_outbox)\b/;
  const plan=(sql:string)=>(db.prepare(`explain query plan ${sql}`).all() as Array<{detail:string}>).map(row=>row.detail);
