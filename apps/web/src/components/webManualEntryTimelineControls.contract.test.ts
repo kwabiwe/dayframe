@@ -65,7 +65,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(manual).not.toContain('contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"');
     expect(timer).not.toContain('type="datetime-local"');
     expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
-    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: 0 22px 52px var\(--shadow-color\), var\(--shadow-raised\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: var\(--shadow-floating\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*gap: 12px;[^}]*padding: 10px var\(--calendar-compact-horizontal-inset\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-header \{[^}]*height: 64px;[^}]*min-height: 64px;[^}]*max-height: 64px;/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
