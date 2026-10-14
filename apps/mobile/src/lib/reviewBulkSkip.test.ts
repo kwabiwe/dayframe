@@ -34,6 +34,38 @@ describe("reviewBulkSkipCandidates", () => {
   });
 });
 
+describe("reviewBulkSkipCandidates in a deck segment (14 Oct 2026)", () => {
+  // Only the selected segment's moments: the predicate decides, the rest of the rule is unchanged.
+  const earlier = (item: { id: string }) => item.id !== "recent";
+  const today = (item: { id: string }) => item.id === "recent";
+
+  it("skips only the selected segment's moments", () => {
+    expect(reviewBulkSkipCandidates(items, { inSegment: earlier, now, scope: "all", skippable }).map((item) => item.id))
+      .toEqual(["old", "edge", "no-window"]);
+    expect(reviewBulkSkipCandidates(items, { inSegment: today, now, scope: "all", skippable }).map((item) => item.id))
+      .toEqual(["recent"]);
+  });
+
+  it("still keeps the last week out of \"Skip older than 7 days\" in Earlier", () => {
+    expect(reviewBulkSkipCandidates(items, { inSegment: earlier, now, scope: "older", skippable }).map((item) => item.id))
+      .toEqual(["old"]);
+  });
+
+  it("still leaves out a card that could not be skipped by itself", () => {
+    expect(reviewBulkSkipCandidates(items, { inSegment: () => true, now, scope: "all", skippable }).some((item) => item.id === "locked"))
+      .toBe(false);
+  });
+
+  it("says which segment stays to review", () => {
+    expect(reviewBulkSkipConfirmation(9, "all", true, "earlier").message)
+      .toBe("Every earlier moment waiting for review is skipped; today stays to review. You can undo for a few seconds.");
+    expect(reviewBulkSkipConfirmation(3, "all", true, "today").message)
+      .toBe("Every moment from today waiting for review is skipped; earlier days stay to review. You can undo for a few seconds.");
+    expect(reviewBulkSkipConfirmation(0, "all", true, "today").message).toBe("No moment from today can be skipped right now.");
+    expect(reviewBulkSkipConfirmation(0, "older", true, "earlier").message).toBe("Every earlier moment left is from the last week.");
+  });
+});
+
 describe("reviewBulkSkipConfirmation", () => {
   it("states the count once and offers one confirm", () => {
     expect(reviewBulkSkipConfirmation(42, "older", true)).toEqual({
