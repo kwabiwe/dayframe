@@ -1,4 +1,12 @@
-import { formatDuration, goalCountingEntries, type GoalCountingCategory } from "@dayframe/shared";
+import {
+  COVERED_ACTIVITY_OTHER_KEY,
+  coveredActivityBars,
+  coveredActivityTotals as sharedCoveredActivityTotals,
+  formatDuration,
+  goalCountingEntries,
+  type CoveredActivityBar,
+  type GoalCountingCategory
+} from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 /**
@@ -181,117 +189,28 @@ export function activityTotals(entries: readonly TodayEntry[], startMs: number, 
 }
 
 /**
- * Covered time per activity ("Where today went"), largest first. Where blocks overlap, each
- * moment is split equally among the distinct activities running in it (two blocks of one
- * activity count that moment once), so the buckets add up to `coveredPieces`' total, the hero.
- * Running blocks run to now and everything is clipped to the range, as `clipEntry` does.
- *
- * Rounding matches the hero's display: the hero floors covered seconds and shows whole minutes,
- * so the buckets get exactly the hero's whole minutes (largest remainder first) and then exactly
- * its leftover seconds (each bucket nearest its exact share first). The seconds therefore sum to
- * the hero's seconds and the displayed minutes sum to the hero's minutes.
+ * Covered time per activity ("Where today went"), largest first: the shared helper (PRD D15,
+ * `packages/shared/src/coveredActivityTotals.ts`), which iPhone Today's strip uses too. Where
+ * blocks overlap, each moment is split equally among the distinct activities running in it (two
+ * blocks of one activity count that moment once), rounded to the hero's whole minutes, so the
+ * buckets add up to `coveredPieces`' total, the hero.
  */
 export function coveredActivityTotals(entries: readonly TodayEntry[], startMs: number, endMs: number, nowMs: number): ActivityTotal[] {
-  const buckets = new Map<string, ActivityTotal>();
-  const events: Array<{ atMs: number; key: string; delta: 1 | -1 }> = [];
-  for (const entry of entries) {
-    const clip = clipEntry(entry, startMs, endMs, nowMs);
-    if (!clip) continue;
-    const bucket = buckets.get(entry.categoryId ?? "none") ?? activityBucket(entry);
-    buckets.set(bucket.key, bucket);
-    events.push({ atMs: clip.fromMs, key: bucket.key, delta: 1 }, { atMs: clip.toMs, key: bucket.key, delta: -1 });
-  }
-  events.sort((a, b) => a.atMs - b.atMs);
-
-  // Sweep the day: between consecutive boundaries the same activities are running.
-  const exactMs = new Map<string, number>();
-  const running = new Map<string, number>();
-  let previousMs = events[0]?.atMs ?? 0;
-  for (let index = 0; index < events.length; ) {
-    const atMs = events[index].atMs;
-    const sliceMs = atMs - previousMs;
-    if (sliceMs > 0 && running.size > 0) {
-      // Whole milliseconds, the odd ones to the first keys, so the shares sum exactly.
-      const keys = [...running.keys()].sort();
-      const share = Math.floor(sliceMs / keys.length);
-      const extra = sliceMs - share * keys.length;
-      keys.forEach((key, position) =>
-        exactMs.set(key, (exactMs.get(key) ?? 0) + share + Math.min(1, Math.max(0, extra - position))));
-    }
-    for (; index < events.length && events[index].atMs === atMs; index += 1) {
-      const { key, delta } = events[index];
-      const count = (running.get(key) ?? 0) + delta;
-      if (count > 0) running.set(key, count);
-      else running.delete(key);
-    }
-    previousMs = atMs;
-  }
-
-  const shares = [...exactMs].map(([key, ms]) => ({ key, ms, minutes: Math.floor(ms / 60_000), seconds: 0 }));
-  const coveredMs = shares.reduce((sum, share) => sum + share.ms, 0);
-  const heroSeconds = Math.floor(coveredMs / 1000);
-  const heroMinutes = Math.floor(heroSeconds / 60);
-  const order = (a: { key: string }, b: { key: string }) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
-
-  // Whole minutes: the hero's, the spare ones to the largest remainders.
-  let spareMinutes = heroMinutes - shares.reduce((sum, share) => sum + share.minutes, 0);
-  for (const share of [...shares].sort((a, b) => (b.ms % 60_000) - (a.ms % 60_000) || b.ms - a.ms || order(a, b))) {
-    if (spareMinutes <= 0) break;
-    share.minutes += 1;
-    spareMinutes -= 1;
-  }
-
-  // Leftover seconds (under a minute, so no bucket's minutes change): start from each bucket's
-  // whole seconds past its minutes, then move one second at a time toward the exact shares.
-  const gapMs = (share: (typeof shares)[number]) => share.ms - share.minutes * 60_000 - share.seconds * 1000;
-  for (const share of shares) share.seconds = Math.min(59, Math.max(0, Math.floor((share.ms - share.minutes * 60_000) / 1000)));
-  let spareSeconds = heroSeconds - heroMinutes * 60 - shares.reduce((sum, share) => sum + share.seconds, 0);
-  while (spareSeconds !== 0) {
-    const adding = spareSeconds > 0;
-    const candidates = shares.filter((share) => (adding ? share.seconds < 59 : share.seconds > 0));
-    if (!candidates.length) break;
-    const pick = candidates.reduce((best, share) => {
-      const difference = gapMs(share) - gapMs(best);
-      return (adding ? difference > 0 : difference < 0) || (difference === 0 && order(share, best) < 0) ? share : best;
-    });
-    pick.seconds += adding ? 1 : -1;
-    spareSeconds += adding ? -1 : 1;
-  }
-
-  return shares
-    .map((share) => ({ ...buckets.get(share.key)!, seconds: share.minutes * 60 + share.seconds }))
-    .filter((total) => total.seconds > 0)
-    .sort(byTimeThenName);
+  return sharedCoveredActivityTotals(entries, startMs, endMs, nowMs);
 }
 
-export type WhereTodayWentBar = ActivityTotal & {
-  /** On the "Other" bar only: the activities it holds, largest first. */
-  includes?: string[];
-};
+export type WhereTodayWentBar = CoveredActivityBar;
 
 export const WHERE_TODAY_WENT_BARS = 5;
-export const WHERE_TODAY_WENT_OTHER_KEY = "__other";
+export const WHERE_TODAY_WENT_OTHER_KEY = COVERED_ACTIVITY_OTHER_KEY;
 
 /**
  * The bars "Where today went" draws: every activity when there are five or fewer; otherwise the
  * top four and a neutral "Other" bar, always last, holding the rest, so the bars still add up to
- * the covered hero.
+ * the covered hero (iPhone draws four: top three and Other).
  */
 export function whereTodayWentBars(totals: readonly ActivityTotal[], limit = WHERE_TODAY_WENT_BARS): WhereTodayWentBar[] {
-  if (totals.length <= limit) return [...totals];
-  const shown = totals.slice(0, limit - 1);
-  const rest = totals.slice(limit - 1);
-  return [
-    ...shown,
-    {
-      key: WHERE_TODAY_WENT_OTHER_KEY,
-      categoryId: null,
-      name: "Other",
-      color: null,
-      seconds: rest.reduce((sum, total) => sum + total.seconds, 0),
-      includes: rest.map((total) => total.name)
-    }
-  ];
+  return coveredActivityBars(totals, limit);
 }
 
 export type WeekDaySummary = {

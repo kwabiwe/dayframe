@@ -149,10 +149,13 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
 ## Today top and Review (Blocks parity; the Stage B presentation reads)
 
 - Today's top shows the avatar (opens Settings, account and logout), the
-  date eyebrow and the goal frame: today's framed total (every block's time,
-  overlaps included — 09:00–11:00 plus 10:00–12:00 reads 4h — and the running
-  block up to now) against the daily goal, the cells and percentage filling
-  with covered time ("framed · 3h toward 8h" in that example), one cell per
+  date eyebrow and the goal frame: today's framed total (covered time, D14:
+  09:00–11:00 plus 10:00–12:00 reads 3h, two overlapping blocks of one
+  activity count once, the running block counts up to now and a clock-change
+  day never reads past its real length) against the daily goal, the cells and
+  percentage filling with the covered time of goal-counting activities (Sleep
+  00:00–07:00 with Reading 06:00–08:00 reads 8h framed, "framed · 2h toward
+  8h"; with no Sleep the line reads "framed of 8h"), one cell per
   goal hour filled in time order, the percentage capped at 100 while the total
   keeps counting. The default goal is eight hours when the account has none.
 - The Review nudge says "N moments to review" with an exact count, "Moments to
@@ -166,7 +169,23 @@ Review this checklist before and after changes that touch Dayframe UI, timer beh
   (no split: Today). Earlier this week rows of days with open Review moments show a small hatched
   count chip before the total, and VoiceOver adds "2 moments to review" to the row. Goals that are not
   whole hours (for example 6h 34m) must render without freezing. Today shows no Review rows, Quick Confirm, "Incomplete time",
-  donut or logged/covered summary; earlier days show their total in "Earlier this week".
+  donut or logged/covered summary; earlier days show their covered total in "Earlier this week"
+  (overlaps once, as that day's hero showed: 09:00–11:00 plus 10:00–12:00 yesterday reads 3h; an
+  overnight block splits between its days; a clock-change day reads its real length).
+- Where today went (PRD D15) closes the Today ribbon card under one hairline:
+  a 12-point bar, largest first, and a 2×2 legend whose durations add up to
+  the hero (an Admin block 09:00–10:00 and a Work block running since 09:30
+  read Work 2h 15m with the coral edge and Admin 45m at 12:00 against a 3h
+  hero; overnight Sleep is
+  included even when it doesn't count toward the goal). Five or more
+  activities show the top three and a neutral Other. An empty day shows no
+  strip; a block started from empty adds the strip after its first whole
+  minute with a short fade (no fade on launch or pull-to-refresh), and the
+  running segment grows each minute without moving anything else. Tapping it
+  plays the tick haptic and opens Reports on Today (VoiceOver: one button,
+  "Opens Reports for today"); opening Reports from the tab bar still shows
+  Week. At the largest text sizes the legend drops to one column and
+  durations stay whole; Reduce Motion keeps only short fades.
 - Verify capped/partial/cache/offline states never claim zero or complete
   coverage. In Review, the accessible Load more action reaches the 101st
   backlog source without mixing a changed snapshot into the prior page or

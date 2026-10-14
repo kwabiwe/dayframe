@@ -820,3 +820,76 @@ describe("Blocks Reports owner (parity step 10a)", () => {
     act(() => tree.unmount());
   });
 });
+
+describe("Reports range request from Today's \"Where today went\" (PRD D15)", () => {
+  beforeEach(() => {
+    mocks.fetch
+      .mockReset()
+      .mockImplementation(async (input: ReportSummaryRequest) => result(input));
+    mocks.haptic.mockReset();
+    mocks.announce.mockReset();
+  });
+  const tab = (props: { isFocused?: boolean; rangeRequest?: { choice: ReportRangeChoice; token: number } | null; onApplied?: (token: number) => void }) => (
+    <ReportsTab
+      data={data}
+      isFocused={props.isFocused ?? true}
+      nowMs={nowMs}
+      onRangeRequestApplied={props.onApplied}
+      rangeRequest={props.rangeRequest ?? null}
+      styles={{} as never}
+      theme={{ mode: "dark", textMuted: "#707B91" } as never}
+    />
+  );
+  const choice = (tree: ReturnType<typeof create>) => tree.root.findByType("ReportRangeSwitch" as never).props.choice;
+
+  it("opens on Week without a request, applies a Today request once per token and acknowledges it", async () => {
+    const applied = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(tab({ isFocused: false, onApplied: applied }));
+    });
+    // D9: Reports still opens on Week.
+    expect(choice(tree)).toBe("week");
+
+    const request = { choice: "today" as const, token: 1 };
+    await act(async () => tree.update(tab({ isFocused: false, onApplied: applied, rangeRequest: request })));
+    expect(choice(tree)).toBe("today");
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(applied).toHaveBeenCalledWith(1);
+    // Arriving on Reports reads Today's range (one local day) and the new hero out once.
+    await act(async () => tree.update(tab({ isFocused: true, onApplied: applied, rangeRequest: request })));
+    expect((rangeCalls().at(-1)?.[0] as ReportSummaryRequest).buckets).toHaveLength(1);
+    expect(mocks.announce).toHaveBeenCalledTimes(1);
+    expect(String(mocks.announce.mock.calls[0][0])).toContain("today");
+
+    // The person picks Week; the same (not yet dropped) request never pulls Reports back to Today.
+    await act(async () => tree.root.findByType("ReportRangeSwitch" as never).props.onChoose("week"));
+    expect(choice(tree)).toBe("week");
+    await act(async () => tree.update(tab({ onApplied: applied, rangeRequest: request })));
+    expect(choice(tree)).toBe("week");
+    expect(applied).toHaveBeenCalledTimes(1);
+
+    // Dropped, then asked again with a new token: Today again.
+    await act(async () => tree.update(tab({ onApplied: applied, rangeRequest: null })));
+    expect(choice(tree)).toBe("week");
+    await act(async () => tree.update(tab({ onApplied: applied, rangeRequest: { choice: "today", token: 2 } })));
+    expect(choice(tree)).toBe("today");
+    expect(applied).toHaveBeenLastCalledWith(2);
+    act(() => tree.unmount());
+  });
+
+  it("starts on Today when it first mounts with a waiting request, never painting Week first", async () => {
+    const applied = vi.fn();
+    const choices: unknown[] = [];
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(tab({ onApplied: applied, rangeRequest: { choice: "today", token: 7 } }));
+    });
+    choices.push(choice(tree));
+    expect(choices).toEqual(["today"]);
+    // Only Today's range was ever read: no Week read went out before the request applied.
+    expect(rangeCalls().every(([input]) => (input as ReportSummaryRequest).buckets.length === 1)).toBe(true);
+    expect(applied).toHaveBeenCalledWith(7);
+    act(() => tree.unmount());
+  });
+});

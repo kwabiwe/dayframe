@@ -199,6 +199,16 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Async outcome: none; opening hands off to the existing editors and Review routes.
 - Accessibility: nothing moves under Reduce Motion beyond the finger-following tooltip; VoiceOver uses the adjustable element instead of scrubbing.
 
+## Today "Where today went" (PRD D15, 14 Oct 2026)
+
+- Trigger: entries change (start, stop, edit, delete, Undo, refresh), the per-minute clock while a block runs, midnight; a tap on the strip.
+- Owner: the strip (`TodayWhereWent`) has no animation of its own. It is memoised and its model (`buildTodayWhereWent`) is built on `minuteNow`, so it re-renders in place once a minute at most, never on the 1 s tick (protects the 13 Oct Today CPU fix; `TodayWhereWent.render.test.tsx` budgets it). Its presence uses the shared Reanimated `entering`/`exiting` fades; the ribbon card's `Reanimated.View` with `localLayoutTransition` and the nudge's own transition move what is below when the card grows or shrinks. The tap hands off to the native tab switch.
+- Entrance/update/exit: no entrance on first paint, a cached launch, hydration or a refresh (the Dashboard marks the commit that brings a loaded bootstrap `quiet`); a strip that appears mid-session (the day's first whole minute) fades in, and it fades out when the day empties (midnight, the last block deleted). Updates change bar widths, legend order and durations in place: no tween, no grow-in (unlike web's bars), nothing replays on a refresh or rollback.
+- Surrounding layout: the legend always keeps four slots (2×2, or 4×1 at large text), so a re-ranking or a new activity never resizes the card; only the strip's appearance or exit does.
+- Interruption: a second tap while the first request is still waiting reuses its token; Reports applies a token once.
+- Async outcome: optimistic Start, Stop, edit and Delete come through the Dashboard's entries like the goal frame; a rollback restores the widths in place.
+- Accessibility: Reduce Motion shortens the fades to 90 ms in and 70 ms out; VoiceOver reads one button with the hint "Opens Reports for today", and Reports reads the new hero out once on arrival.
+
 ## Live block rolling timer (Blocks parity step 2b-1)
 
 - Trigger: the 1 s timer tick changes a digit of the live block's `H:MM:SS` clock.
