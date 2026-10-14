@@ -149,6 +149,7 @@ import {
   reviewSyncStatusCopy
 } from "@/lib/reviewSyncPresentation";
 import type { TimeEntrySheetPresentation } from "@/lib/timeEntrySheetPresentation";
+import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type ReviewEditTarget =
   | {
@@ -2689,7 +2690,7 @@ function displayEntryTitle(entry: MobileTimeEntry) {
 function formatCachedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "earlier";
-  return date.toLocaleString(undefined, {
+  return formatLocaleDate(date, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
