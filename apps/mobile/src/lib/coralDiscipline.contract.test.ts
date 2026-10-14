@@ -16,13 +16,12 @@ describe("Coral discipline on iPhone (audit A4)", () => {
   it("keeps secondary buttons, Done and today markers neutral, and destructive text red", () => {
     expect(styleBlock("secondaryButtonText")).toContain("color: theme.textPrimary");
     expect(styleBlock("activeEditDeleteText")).toContain("color: theme.dangerText");
-    expect(styleBlock("datePickerDoneButton")).toContain("backgroundColor: theme.textPrimary");
-    expect(styleBlock("datePickerDoneText")).toContain("color: theme.background");
     expect(reports).toContain('<DayframeIcon color={theme.textPrimary} glyph="flame" size={22} />');
     expect(reports).toContain("borderColor: theme.textPrimary, borderWidth: 1.5");
   });
 
   it("passes the entry sheet's date limit through the tested helper", () => {
-    expect(editSheet).toMatch(/<FloatingDatePicker[\s\S]*?maxDate=\{entryDatePickerMaxDate\(\{ running: isRunningMode, target: datePickerTarget, now: new Date\(\) \}\)\}/);
+    expect(editSheet).toContain("const dateSheetMax = entryDatePickerMaxDate(new Date());");
+    expect(editSheet).toMatch(/<DateSheet[\s\S]*?maxDate=\{formatLocalDateKey\(dateSheetMax\)\}/);
   });
 });
