@@ -550,3 +550,60 @@ describe("Codex r1 on #402", () => {
     expect(surface.style.visibility).toBe("");
   });
 });
+
+describe("Codex r2 on #402: a saving Create keeps its form whatever the Activity button does", () => {
+  async function pendingCreate() {
+    let settle: (outcome: unknown) => void = () => undefined;
+    const createCategory = vi.fn(() => new Promise((resolve) => { settle = resolve; }));
+    renderBar({ createCategory });
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    await user.click(within(form).getByRole("button", { name: "Create" }));
+    expect(createCategory).toHaveBeenCalledWith("Reading", undefined);
+    return { form, settle: (outcome: unknown) => settle(outcome), user };
+  }
+
+  async function failsVisibly(form: HTMLElement, settle: (outcome: unknown) => void) {
+    expect(screen.getByRole("dialog", { name: "Create new activity" })).toBe(form);
+    expect(surfaceOf(form).className).toContain("is-open");
+    await act(async () => settle({ ok: false, error: "Unable to create this activity." }));
+    expect(within(form).getByRole("alert").textContent).toBe("Unable to create this activity.");
+    expect((within(form).getByLabelText("Name") as HTMLInputElement).value).toBe("Reading");
+    expect(surfaceOf(form).className).toContain("is-open");
+  }
+
+  for (const key of ["ArrowDown", "ArrowUp"]) {
+    it(`a click on Activity, then ${key === "ArrowDown" ? "↓" : "↑"} on it, keeps the form; a late failure shows with the name`, async () => {
+      const { form, settle, user } = await pendingCreate();
+      await user.click(activityButton());
+      fireEvent.keyDown(activityButton(), { key });
+      await failsVisibly(form, settle);
+    });
+  }
+
+  it("↓ and ↑ on the focused button, a second click and Tab never reset it either", async () => {
+    const { form, settle, user } = await pendingCreate();
+    activityButton().focus();
+    fireEvent.keyDown(activityButton(), { key: "ArrowDown" });
+    fireEvent.keyDown(activityButton(), { key: "ArrowUp" });
+    await user.click(activityButton());
+    await user.click(activityButton());
+    fireEvent.keyDown(activityButton(), { key: "Tab" });
+    await failsVisibly(form, settle);
+  });
+
+  it("before saving, ↓ on the button returns to the form and keeps the typed name", async () => {
+    renderBar();
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    fireEvent.keyDown(activityButton(), { key: "ArrowDown" });
+    expect(screen.getByRole("dialog", { name: "Create new activity" })).toBe(form);
+    const name = within(form).getByLabelText("Name") as HTMLInputElement;
+    expect(name.value).toBe("Reading");
+    expect(document.activeElement).toBe(name);
+  });
+});

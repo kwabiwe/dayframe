@@ -342,7 +342,9 @@ export function CategoryPicker({
   }
 
   function openPicker(focus: "selected" | "last" | null = null) {
-    if (disabled) return;
+    // Opening resets the Create form, so it never runs while a Create is saving (Codex r2 on
+    // #402): the form, its name and its late outcome stay where they are.
+    if (disabled || isCreateBusy) return;
     onBeforeOpen?.();
     setIsCreating(false);
     setCreateColor(null);
@@ -415,7 +417,8 @@ export function CategoryPicker({
         )].filter((element) => !menuRef.current?.contains(element) && !element.closest("[hidden], [inert]"));
         const triggerIndex = boundaryFocusable.indexOf(triggerRef.current as HTMLElement);
         boundaryFocusable[triggerIndex + 1]?.focus();
-        closePicker(false);
+        // A Create being saved keeps the list (and its outcome) open, as every other dismissal does.
+        if (!isCreateBusy) closePicker(false);
       }
       return;
     }
@@ -433,6 +436,11 @@ export function CategoryPicker({
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
+    // An open Create form (saving or not) is never reset from the button: ↑/↓ go back to it.
+    if (open && isCreating) {
+      if (!isCreateBusy) nameInputRef.current?.focus();
+      return;
+    }
     openPicker(event.key === "ArrowUp" ? "last" : "selected");
   }
 
