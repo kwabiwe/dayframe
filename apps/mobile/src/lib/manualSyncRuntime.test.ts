@@ -124,6 +124,8 @@ describe("Sync now runtime", () => {
       expect.objectContaining({ force: true }),
     );
     expect(mocks.location).toHaveBeenCalledOnce();
+    // The Location lane runs its change rule for real (an earlier mock missed it and the lane failed silently).
+    expect(result.lanes.location.outcome).toBe("complete");
     expect(mocks.publish).toHaveBeenCalled();
     expect(result.lanes.review.outcome).toBe("server_busy");
   });
