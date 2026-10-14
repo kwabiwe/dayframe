@@ -21,7 +21,7 @@ Measured on the owner's iPhone 17 with production data, unless a row says otherw
 | Background CPU per stored location sample | set from the first after-measurement of the location-write batch (#398, #399, #401) | to be counted once that window's evidence is uploaded |
 | Long-run footprint | ≤ 500 MB after about 3 hours of normal use | 422–431 MB after about 2.5–3 hours |
 | Looping motion (the live block's ring, rolling digits, anything that repeats) | no per-frame view-tree commits: React Native's native driver or Core Animation, never a Reanimated loop | Reanimated per-frame commits were 54–88 % of main-thread time before #392 |
-| Per-sample and per-pass storage queries | index lookups only: no full table scans, no unbounded journal reads | retention went from about 37 ms to 0.35 ms per sample (#398, Mac) |
+| Per-sample and per-pass storage queries | index lookups only: no full table scans, no unbounded journal reads | retention went from about 37 ms to about 0.7 ms per sample (#398, Mac: one indexed delete and two indexed counts) |
 
 A budget is breached when a measurement made by the method below exceeds it. A PR that knowingly exceeds a budget needs an owner decision recorded in the tracker.
 
@@ -33,8 +33,8 @@ Activity Monitor CPU totals, not Time Profiler totals. Device Time Profiler reco
 2. Scene:
    - Foreground: Today in front, a block running, phone untouched and unlocked for the whole window. Auto-lock must not end it.
    - Background: Dayframe not opened during the window; using the phone otherwise and moving around is fine.
-3. Sample: take an Activity Monitor sample of the Dayframe process at both ends of the window: `xctrace` Activity Monitor template, `cpu-total`, `memory-physical-footprint`, `memory-real` and `idle-wakeups`. The local helper `.codex-dayframe-qa/resume-clock-2026-10-13/prodcpu.sh <seconds>` finds the production app's process from its bundle container and does this; `cpuwindow.sh <pid> <seconds>` takes any process. Send no other device commands during the window.
-4. Compute: CPU % = Δ`cpu-total` ÷ elapsed time between the two samples (the printed sample times). Memory slope = Δ footprint ÷ elapsed minutes.
+3. Sample: take an Activity Monitor sample of the Dayframe process at both ends of the window: `xctrace` Activity Monitor template, `cpu-total`, `memory-physical-footprint`, `memory-real` and `idle-wakeups`. `DAYFRAME_DEVICE=<UDID or name> [DAYFRAME_BUNDLE=com.layereight.dayframe.staging] scripts/perf/device-activity-window.sh <seconds>` finds the app's process from its bundle container and does this (the bundle defaults to production). Send no other device commands during the window.
+4. Compute: CPU % = 100 × Δ`cpu-total` (seconds) ÷ elapsed seconds between the two printed sample times (for example 100 × 26.3 ÷ 389 ≈ 6.8 %). Memory slope = Δ footprint (MB) ÷ elapsed minutes. After a fresh launch, take a 5-minute warm-up window first and gate on the next one: memory swings in the first minutes.
 5. Check the scene held:
    - Foreground: the wakeup rate should match an in-front window (about 180–190 per second on 119), and the phone still unlocked at the end.
    - Background: a falling `memory-real` confirms the app was suspended or compressed.
@@ -57,8 +57,8 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 | Per-sample location retention uses indexes | `store.sqlite.test.ts` query-plan test (#398) |
 | A recovery pass's own location evidence never queues another pass | `connectivityRecovery.test.ts` (#383) |
 | Location writes do not refresh durable work in the background | `durableLocationRefreshGate.test.ts` (#399) |
-| A location pass reloads the Dashboard only when a replay changed something shown | `store.sqlite.test.ts`, `validate:location-v2-db` (#401) |
-| Render counts: over two minutes the Dashboard renders only at minute boundaries with Today, Calendar or Settings in front (or nothing running), at most once a second with Reports, a running entry's sheet or its Calendar editor open, never in the background; the live block once a second, never per frame | `renderBudgets.render.test.tsx` (#405) |
+| A location pass reloads the Dashboard only when a replay changed something shown (a server without the change count still reloads, deliberately) | `store.sqlite.test.ts`, `validate:location-v2-db` (#401) |
+| Render counts: over two minutes the Dashboard renders only at minute boundaries with Today, Calendar or Settings in front (or nothing running), at most once a second with Reports, a running entry's sheet or its Calendar editor open, never in the background; the live block once a second (plus at most two minute-boundary renders over the two minutes), never per frame | `renderBudgets.render.test.tsx` (#405) |
 | No per-call `Intl` formatters: dates go through `formatLocaleDate` / `localeDateFormatter`, or a module-level constant | `intlFormatters.contract.test.ts` (#404) |
 | Every journal and upload-outbox statement in the location store searches an index, never scans the table | `store.sqlite.test.ts` query-plan guard (#398, #406) |
 
