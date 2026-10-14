@@ -3,24 +3,22 @@
 // models format every day they show, so per-call formatting dominated idle re-renders
 // (investigation 2026-10-12, Instruments run 2). Same output as toLocaleDateString(undefined, options).
 const formatters = new Map<string, Intl.DateTimeFormat>();
-const ZONE_RECHECK_MS = 30_000;
+const ZONE_RECHECK_MS = 1_000;
 let zone: string | null = null;
 let zoneCheckedAt = 0;
-let zoneCheckedOffset = 0;
 
 /**
- * The device's time zone identity, re-read at most every 30 s (reading it builds a formatter), at once
- * after clearLocaleDateFormats, and at once when the UTC offset moved (`getTimezoneOffset` builds no
- * formatter), so a zone change while a screen is open shows on its next render. A formatter keeps the zone it was made in, so the zone is
+ * The device's time zone identity, re-read at most once a second (reading it builds one formatter) and at
+ * once after clearLocaleDateFormats, so a zone change while a screen is open shows on its first render a
+ * second later, as per-call formatting did. `getTimezoneOffset` cannot detect it: Hermes caches the
+ * offset (Codex r1 on #404). A formatter keeps the zone it was made in, so the zone is
  * part of every cache key: a zone change never reuses a formatter, even between zones that share an
  * offset but not daylight-saving rules.
  */
 export function currentTimeZoneId(now = Date.now()): string {
-  const offset = new Date(now).getTimezoneOffset();
-  if (zone === null || now - zoneCheckedAt > ZONE_RECHECK_MS || offset !== zoneCheckedOffset) {
+  if (zone === null || now - zoneCheckedAt > ZONE_RECHECK_MS) {
     zone = new Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local";
     zoneCheckedAt = now;
-    zoneCheckedOffset = offset;
   }
   return zone;
 }
