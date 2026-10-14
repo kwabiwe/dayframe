@@ -1,7 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import type { CSSProperties, RefObject } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -209,6 +209,32 @@ export function DatePickerPopover({
     (anchorRef?.current ?? triggerRef.current)?.focus();
   }
 
+  // The phone sheet takes focus (the grid's tab stop) and keeps Tab inside it while open.
+  useEffect(() => {
+    if (!phone || !effectiveOpen) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      panelRef.current?.querySelector<HTMLElement>('.dayframe-calendar-grid button[tabindex="0"]')?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [effectiveOpen, phone]);
+
+  function trapTab(event: ReactKeyboardEvent<HTMLElement>) {
+    if (!phone || event.key !== "Tab" || !panelRef.current) return;
+    const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]):not([tabindex="-1"]), [href], input:not([disabled]), [tabindex="0"]'
+    ));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   function dismiss() {
     updateOpen(false);
     (anchorRef?.current ?? triggerRef.current)?.focus();
@@ -224,6 +250,7 @@ export function DatePickerPopover({
       className={`ui-floating-surface timeline-date-picker-panel${effectiveOpen ? " is-open" : ""}${portal ? " is-portalled" : ""}${phone ? " is-sheet" : ""}${panelClassName ? ` ${panelClassName}` : ""}`}
       id={panelId}
       inert={!effectiveOpen}
+      onKeyDown={trapTab}
       ref={panelRef}
       role="dialog"
       style={portal && !phone ? { ...portalPosition, visibility: portalPosition ? "visible" : "hidden" } : undefined}
@@ -270,8 +297,21 @@ export function DatePickerPopover({
     </section>
   );
   // Phone width: a scrim behind the sheet (a press on it is a press outside, which closes it).
+  // Its own press handler (a non-portalled scrim is inside the picker, so the outside-press listener
+  // ignores it), and the quick editor's nested-surface marker so a press here never reaches the
+  // editor's own outside-press dismissal (Codex r1 on #423).
   const scrim = phone && effectiveOpen
-    ? <div aria-hidden="true" className="date-sheet-scrim" style={scrimZ === null ? undefined : { zIndex: scrimZ }} />
+    ? (
+      <div
+        aria-hidden="true"
+        className={`date-sheet-scrim${portal ? " time-entry-quick-editor-nested-surface" : ""}`}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          dismiss();
+        }}
+        style={scrimZ === null ? undefined : { zIndex: scrimZ }}
+      />
+    )
     : null;
 
   return (
