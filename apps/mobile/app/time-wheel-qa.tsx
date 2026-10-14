@@ -51,7 +51,9 @@ export default function TimeWheelQaRoute() {
           <Text style={{ color: theme.textPrimary }}>−7 min (outside change)</Text>
         </Pressable>
       </View>
-      {/* Clock-change and bounds fixtures (Europe/London dates). */}
+      {/* Clock-change and bounds fixtures. The clock-change instants are Europe/London's: set the
+          Simulator or iPhone to that time zone, or these land on ordinary hours. */}
+      <Text style={{ color: theme.textSecondary }}>Clock-change fixtures need the device in Europe/London.</Text>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {[
           ["Second 01:15, 25 Oct", Date.parse("2026-10-25T01:15:00Z")],
