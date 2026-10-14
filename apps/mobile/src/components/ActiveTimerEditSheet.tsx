@@ -38,8 +38,9 @@ import {
   draftInstantMs,
   previousEndStillHolds
 } from "@/lib/previousEndChip";
-import { FloatingDatePicker } from "@/components/FloatingDatePicker";
+import { DateSheet } from "@/components/DateSheet";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
+import { addLocalDays, formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
 import {
   HistoricalSuggestionsOverlay,
   type HistoricalSuggestionsOverlayRenderState
@@ -233,7 +234,11 @@ export function ActiveTimerEditSheet({
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [datePickerDismissGuarded, setDatePickerDismissGuarded] = useState(false);
   const [datePickerTarget, setDatePickerTarget] = useState<"start" | "end">("start");
-  const [pickerStartAt, setPickerStartAt] = useState<Date | null>(null);
+  // The date sheet's own draft (D1, 14 Oct 2026: a day tap only changes it; Done applies it).
+  const [dateDraftKey, setDateDraftKey] = useState<string | null>(null);
+  const [dateSheetMonth, setDateSheetMonth] = useState("");
+  const [dateSheetPresentationId, setDateSheetPresentationId] = useState(0);
+  const dateSheetPresentationRef = useRef(0);
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
   const [descriptionSelectionOverride, setDescriptionSelectionOverride] =
     useState<DescriptionSelection | undefined>(undefined);
@@ -695,7 +700,7 @@ export function ActiveTimerEditSheet({
       timeText: hydratedTimeText
     });
     setDraftRevision(0);
-    setPickerStartAt(startedAt);
+    setDateDraftKey(null);
     setDatePickerTarget("start");
     setStartTimeEdited(false);
     // Only the running block's sheet is given one (Dashboard).
@@ -1425,13 +1430,8 @@ export function ActiveTimerEditSheet({
       error: endMs === null ? result.error : null
     };
   }, [draftEndMs, stoppedDateText, stoppedTimeText]);
-  const previewStartAt = datePickerOpen && datePickerTarget === "start" && pickerStartAt
-    ? new Date(mergeTimeEntryDialLocalDateTime({
-        baseTimestampMs: draftStartMs,
-        dateText: formatDateInput(pickerStartAt),
-        timeText
-      }).timestampMs ?? draftStartMs)
-    : parsedStart.date;
+  // The date sheet keeps its own draft until Done, so the cards always show what Done would save.
+  const previewStartAt = parsedStart.date;
   const dialNowMs = Date.now();
   const busy = saving || stopping || deleting || sheetState.mutationPhase !== "idle";
   const canStop = isRunningMode && Boolean(onStop);
@@ -1751,19 +1751,7 @@ export function ActiveTimerEditSheet({
 
   async function saveChanges(afterSave?: (patch: TimeEntryUpdatePatch) => void) {
     if (busy || !entry || !onSave) return;
-    const parsed = datePickerOpen && datePickerTarget === "start" && pickerStartAt
-      ? (() => {
-          const merged = mergeTimeEntryDialLocalDateTime({
-            baseTimestampMs: draftStartMs,
-            dateText: formatDateInput(pickerStartAt),
-            timeText
-          });
-          return {
-            date: merged.timestampMs === null ? null : new Date(merged.timestampMs),
-            error: merged.error
-          };
-        })()
-      : parsedStart;
+    const parsed = parsedStart;
     if (parsed.error || !parsed.date) {
       setValidationError(parsed.error ?? "Choose a valid start date and time.");
       return;
@@ -2207,37 +2195,37 @@ export function ActiveTimerEditSheet({
     });
   }
 
-  function openStartPicker() {
+  function openDateSheet(target: "start" | "end", current: Date) {
     setDatePickerDismissGuarded(false);
     dismissTransientEditingSurfaces();
     dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
-    const currentStart = parsedStart.date ?? fallbackStartAt();
-    setDatePickerTarget("start");
-    setPickerStartAt(currentStart);
+    const key = formatLocalDateKey(current);
+    setDatePickerTarget(target);
+    setDateDraftKey(key);
+    setDateSheetMonth(key);
+    dateSheetPresentationRef.current += 1;
+    setDateSheetPresentationId(dateSheetPresentationRef.current);
     setDatePickerOpen(true);
     setValidationError(null);
+  }
+
+  function openStartPicker() {
+    openDateSheet("start", parsedStart.date ?? fallbackStartAt());
   }
 
   function openEndPicker() {
-    setDatePickerDismissGuarded(false);
-    dismissTransientEditingSurfaces();
-    dispatchSheetEvent({ type: "date_picker_requested", presentationId: presentation.id });
-    const currentEnd = parsedStop.date ?? parsedStart.date ?? fallbackStartAt();
-    setDatePickerTarget("end");
-    setPickerStartAt(currentEnd);
-    setDatePickerOpen(true);
-    setValidationError(null);
+    openDateSheet("end", parsedStop.date ?? parsedStart.date ?? fallbackStartAt());
   }
 
-  function selectDate(date: Date) {
+  // Done on the date sheet: the chosen day with the card's own time. False (an invalid merge)
+  // keeps the date sheet up with the reason.
+  function selectDate(date: Date): boolean {
     // The same day keeps the draft's exact instant (the repeated hour at a clock change; Codex r2 on
     // #419): there is nothing to merge.
     const ownDraftMs = datePickerTarget === "end" ? draftEndMs : draftStartMs;
     if (formatDateInput(date) === (datePickerTarget === "end" ? stoppedDateText : dateText) && ownDraftMs > 0) {
-      setPickerStartAt(new Date(ownDraftMs));
-      closeDatePickerAfterTouch();
       setValidationError(null);
-      return;
+      return true;
     }
     if (datePickerTarget === "end") {
       const merged = mergeTimeEntryDialLocalDateTime({
@@ -2247,16 +2235,14 @@ export function ActiveTimerEditSheet({
       });
       if (merged.error || merged.timestampMs === null) {
         setValidationError(merged.error ?? "Choose a valid end date and time.");
-        return;
+        return false;
       }
       const parsedDate = new Date(merged.timestampMs);
       setDraftEndMs(merged.timestampMs);
       setDraftRevision((current) => current + 1);
-      setPickerStartAt(parsedDate);
       setStoppedDateText(formatDateInput(parsedDate));
-      closeDatePickerAfterTouch();
       setValidationError(null);
-      return;
+      return true;
     }
 
     const merged = mergeTimeEntryDialLocalDateTime({
@@ -2266,23 +2252,28 @@ export function ActiveTimerEditSheet({
     });
     if (merged.error || merged.timestampMs === null) {
       setValidationError(merged.error ?? "Choose a valid start date and time.");
-      return;
+      return false;
     }
     const parsedDate = new Date(merged.timestampMs);
     setDraftStartMs(merged.timestampMs);
     setDraftRevision((current) => current + 1);
-    setPickerStartAt(parsedDate);
     setDateText(formatDateInput(parsedDate));
     if (isRunningMode) setStartTimeEdited(true);
-    closeDatePickerAfterTouch();
     setValidationError(null);
+    return true;
   }
 
   const displayedStartAt = previewStartAt ?? fallbackStartAt();
   const displayedEndAt = parsedStop.date ?? displayedStartAt;
-  const pickerDate = pickerStartAt ?? (
-    datePickerTarget === "end" ? displayedEndAt : displayedStartAt
-  );
+  // The date sheet (D1/D2, 14 Oct 2026): a single day, Today · Yesterday, no day after today.
+  const dateSheetTodayKey = formatLocalDateKey(new Date());
+  const dateSheetYesterdayKey = formatLocalDateKey(addLocalDays(parseLocalDate(dateSheetTodayKey)!, -1));
+  const dateSheetMax = entryDatePickerMaxDate(new Date());
+  const dateSheetDraftDate = dateDraftKey ? parseLocalDate(dateDraftKey) : null;
+  const pickDateSheetDay = (key: string) => {
+    setDateDraftKey(key);
+    setDateSheetMonth(key);
+  };
   const showDoneButton = Boolean(onSave);
   const hashtagPanelAnimatedStyle = {
     opacity: hashtagPanelProgress,
@@ -3104,17 +3095,36 @@ export function ActiveTimerEditSheet({
           testID="entry-sheet-discard-confirm"
           theme={theme}
         />
-        <FloatingDatePicker
-          maxDate={entryDatePickerMaxDate({ running: isRunningMode, target: datePickerTarget, now: new Date() })}
-          onClose={() => {
-            closeDatePickerAfterTouch();
-          }}
-          onSelect={selectDate}
-          selectedDate={pickerDate}
-          styles={styles}
-          theme={theme}
-          visible={datePickerOpen}
-        />
+        {datePickerOpen && dateDraftKey ? (
+          <DateSheet
+            inline
+            presentationId={dateSheetPresentationId}
+            theme={theme}
+            reduceMotion={reduceMotion}
+            eyebrow={datePickerTarget === "end" ? "END" : "START"}
+            title="Choose a date"
+            accessibilityTitle={datePickerTarget === "end" ? "Choose the end date" : "Choose the start date"}
+            segments={[
+              { key: "today", label: "Today", selected: dateDraftKey === dateSheetTodayKey, onPress: () => pickDateSheetDay(dateSheetTodayKey) },
+              { key: "yesterday", label: "Yesterday", selected: dateDraftKey === dateSheetYesterdayKey, onPress: () => pickDateSheetDay(dateSheetYesterdayKey) }
+            ]}
+            caption={dateSheetDraftDate ? formatLocaleDate(dateSheetDraftDate, { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : ""}
+            month={dateSheetMonth}
+            onMonthChange={setDateSheetMonth}
+            start={dateDraftKey}
+            end={dateDraftKey}
+            today={dateSheetTodayKey}
+            maxDate={formatLocalDateKey(dateSheetMax)}
+            onSelectDay={(date) => setDateDraftKey(formatLocalDateKey(date))}
+            notice={validationError}
+            onDone={() => (dateSheetDraftDate ? selectDate(dateSheetDraftDate) : false)}
+            onDismissed={(id) => {
+              if (id !== dateSheetPresentationRef.current) return;
+              closeDatePickerAfterTouch();
+            }}
+            testID="entry-date-sheet"
+          />
+        ) : null}
         {__DEV__ && debugTelemetry ? (
           <View
             collapsable={false}

@@ -344,6 +344,16 @@ Block pull-to-refresh:
 - Async outcome: none — it changes the draft only; Done saves the start (a running start edit), and closing without Done keeps the block's own start.
 - Accessibility: no motion to reduce. Name "Start from 10:15, after Write report", role button, selected while applied, with a hint that Done saves it.
 
+## Entry sheet date sheet (date pickers PR 2, owner decisions D1/D2, 14 Oct 2026)
+
+- Trigger: a date chip on the START or END card (or VoiceOver's "Edit start date" / "Edit end date"); Done, a swipe on the handle, the backdrop or escape.
+- Owner: the shared `DateSheet` in `BottomSheetShell` drawn inline over the entry sheet (one `SwipeDismissSheet`: its timed entrance with the coupled scrim, and its existing exit and return springs); the grid owns the month crossfade. The entry sheet behind does not move and is covered by the scrim.
+- Entrance/update/exit: the date sheet rises over the entry sheet; day taps and Today · Yesterday change the draft in place (selection fill, caption); Done applies the day to the card and the sheet slides out; a swipe, the backdrop or escape slides it out and keeps the card's day.
+- Surrounding layout: the date chip's text changes only after Done; the dial and duration follow in the same render as any start or end edit.
+- Interruption: each opening gets a new presentation id and a stale exit never closes a newer sheet; opening dismisses the keyboard and any open surface first; an invalid merge keeps the sheet with its reason in the notice slot.
+- Async outcome: none — it only changes the entry sheet's draft; the entry sheet's Done saves.
+- Accessibility: the layer is modal to VoiceOver with escape discarding; the title is the header and the sheet is named "Choose the start date" or "Choose the end date"; Reduce Motion fades it (the shell's existing path).
+
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 
 - Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The activity block and the tag button open the same Activities and Tags lists (14 Oct 2026) with the same fade; they close on a pick (Activities), Escape, Close, a second press of the button or a press outside, and add no motion of their own (no landing, no row animation when a tag is toggled or the search filters). The portalled Activities list keeps its measured position and width through its exit fade (geometry is cleared only by the next open, which measures before paint). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.
