@@ -1,4 +1,6 @@
+import { AppState } from "react-native";
 import type {SyncDueTimes} from "./syncDueTimes";
+import { createLocationRefreshGate } from "./durableLocationRefreshGate";
 import {
   getQueueDiagnostics,
   readQueue,
@@ -91,13 +93,23 @@ export function startDurableWorkMonitor() {
   referenceCount += 1;
   if (referenceCount === 1) {
     const request = () => void refreshDurableWorkSnapshot();
+    // Location changes are frequent and the snapshot is read only in the foreground (see the gate).
+    const locationGate = createLocationRefreshGate({
+      isActive: () => AppState.currentState === "active",
+      refresh: request
+    });
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") locationGate.appBecameActive();
+    });
     unsubscribers = [
+      () => appState.remove(),
+      () => locationGate.dispose(),
       subscribeActiveMobileAccount(request),
       subscribeActivityQueue(request),
       subscribeTimerStopOutbox(request),
       subscribeTimeEntryOutbox(request),
       subscribeReviewSync(request),
-      subscribeLocationStore(request)
+      subscribeLocationStore(locationGate.locationChanged)
     ];
     void readActiveMobileAccount().then(request, request);
   }
