@@ -1,4 +1,4 @@
-import { formatLocaleDate } from "./localeDateFormat";
+import { formatLocaleDate, localeDateFormatter } from "./localeDateFormat";
 import type { ReportSummaryRequest } from "@dayframe/shared";
 
 export type ReportPreset = "today" | "week" | "month" | "year";
@@ -34,7 +34,7 @@ export function reportRangeDisplayTitle(
   if (typeof choice === "string") return range.title;
   const start = range.start;
   const end = addLocalDays(range.end, -1);
-  const formatter = new Intl.DateTimeFormat(undefined, {
+  const formatter = localeDateFormatter({
     day: "numeric",
     month: "short",
     year: "numeric",

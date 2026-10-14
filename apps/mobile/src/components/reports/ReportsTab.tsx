@@ -69,6 +69,7 @@ import {
 } from "./ReportsBlocks";
 import { ReportsSheetPortalContext } from "./ReportsSheetPortal";
 import { useReportTextMeasure } from "./ReportTextMeasure";
+import { formatLocaleDate } from "../../lib/localeDateFormat";
 
 type FilterPresentation = {
   id: number;
@@ -556,7 +557,7 @@ function ReportsTabView({
         )
       : null;
   const focusLabel = focusedDay
-    ? focusedDay.start.toLocaleDateString(undefined, {
+    ? formatLocaleDate(focusedDay.start, {
         weekday: "long",
         day: "numeric",
         month: "long",

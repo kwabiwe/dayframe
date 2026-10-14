@@ -54,13 +54,13 @@ vi.mock("react-native-reanimated", async () => {
     withTiming: (value: unknown) => value,
   };
 });
-vi.mock("react-native-svg", () => ({ Circle: "Circle", default: "Svg" }));
+vi.mock("react-native-svg", () => ({ Circle: "Circle", Path: "Path", default: "Svg" }));
 vi.mock("../../lib/haptics", () => ({ playHaptic: mocks.haptic }));
 vi.mock("../PrimaryTimerAction", () => ({ PrimaryTimerGlyph: ({ mode }: { mode: string }) => `glyph:${mode}` }));
 vi.mock("../icons/DayframeIcon", () => ({ ActivityIcon: () => null }));
 
 import { PLAY_ORB, bloomSpots, playOrbFrame } from "../../lib/playOrb";
-import { PlayOrb } from "./PlayOrb";
+import { orbRingPath, PlayOrb } from "./PlayOrb";
 
 const theme = { ...DAYFRAME_THEME.dark, mode: "dark" } as never;
 const activities = ["work", "learn", "gym"].map((id) => ({ color: "blue", icon: null, id, name: id, pinned: true }));
@@ -95,6 +95,13 @@ describe("playOrbFrame", () => {
   });
 });
 
+describe("orbRingPath", () => {
+  it("starts at 12 o'clock and runs clockwise through 6 o'clock back to the top", () => {
+    // y grows downwards: the top is (c, c - r); sweep flag 1 is clockwise on screen.
+    expect(orbRingPath(30, 26.5)).toBe("M30 3.5 A26.5 26.5 0 1 1 30 56.5 A26.5 26.5 0 1 1 30 3.5");
+  });
+});
+
 describe("PlayOrb", () => {
   it("taps to start or stop, and shows the seconds ring only while running", () => {
     const idle = render();
@@ -109,6 +116,14 @@ describe("PlayOrb", () => {
     const ring = running.tree.root.findByProps({ testID: "play-orb-ring" });
     const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
     expect(ring.props.strokeDasharray).toBe(`${(15 / 60) * circumference} ${circumference}`);
+    // The zero point is 12 o'clock in the path itself, with no transform for the renderer to apply.
+    const radius = PLAY_ORB.size / 2 + 5 - 1.5;
+    const center = PLAY_ORB.size / 2 + 5;
+    expect(ring.props.d).toBe(orbRingPath(center, radius));
+    expect(ring.props.d.startsWith(`M${center} ${center - radius} `)).toBe(true);
+    expect(ring.props.rotation).toBeUndefined();
+    expect(ring.props.origin).toBeUndefined();
+    expect(ring.props.transform).toBeUndefined();
     act(() => running.tree.unmount());
     vi.useRealTimers();
   });

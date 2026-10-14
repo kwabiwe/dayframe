@@ -259,6 +259,10 @@ async function database() {
       await db.execAsync(`
         create index if not exists location_evidence_expires_idx on location_evidence_journal(expires_at);
         create index if not exists location_evidence_motion_idx on location_evidence_journal(${MOTION_KIND_EXPRESSION});
+        create index if not exists location_evidence_batch_idx on location_evidence_journal(client_batch_id)
+          where client_batch_id is not null;
+        create index if not exists location_upload_outbox_account_state_idx
+          on location_upload_outbox(account_key, state, next_attempt_at);
       `);
     } catch {
       // The next open tries again.

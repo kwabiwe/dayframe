@@ -212,6 +212,7 @@ import { splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnos
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
 import { healthMappingWriter } from "@/lib/healthMappingOwner";
+import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
 const GOAL_SAVE_DELAY_MS = 600;
@@ -3275,10 +3276,10 @@ function formatQueueTime(value?: Date | string) {
   if (!value) return "unknown time";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "unknown time";
-  return new Intl.DateTimeFormat(undefined, {
+  return formatLocaleDate(date, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit"
-  }).format(date);
+  });
 }
