@@ -338,6 +338,8 @@ describe("Dashboard reload after a location pass",()=>{
   expect(changed({acknowledgedCount:0,replayed:true,semanticSegmentCount:2})).toBe(true);
   expect(changed({acknowledgedCount:3,replayed:false,semanticChangeCount:0})).toBe(true);
   expect(changed({acknowledgedCount:0,replayed:false})).toBe(false);
+ });
+});
 describe("location journal query plans (performance.md: no unbounded journal reads)",()=>{
  const TABLES=/\b(location_evidence_journal|location_upload_outbox)\b/;
  const plan=(sql:string)=>(db.prepare(`explain query plan ${sql}`).all() as Array<{detail:string}>).map(row=>row.detail);
