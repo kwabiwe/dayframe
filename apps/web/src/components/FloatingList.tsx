@@ -1,16 +1,21 @@
 "use client";
 
-import { X } from "lucide-react";
+import { DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH, resolveActivityIcon } from "@dayframe/shared";
+import { Check, Plus, Search, X } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
   useState,
+  type ChangeEventHandler,
   type CSSProperties,
+  type FocusEventHandler,
   type KeyboardEventHandler,
   type ReactNode,
   type Ref,
   type RefObject
 } from "react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { blockStyle } from "@/lib/block-style";
 
 /** Phones get the sheet (the command timer's own narrow breakpoint). */
 export const FLOATING_LIST_PHONE_QUERY = "(max-width: 560px)";
@@ -53,6 +58,11 @@ export const FLOATING_LIST_HINTS = {
   tags: [
     { glyph: "↵", label: "add", spoken: "Enter adds the tag." },
     { glyph: "⌫", label: "remove", spoken: "Backspace removes the typed tag." }
+  ],
+  /** The Tags button's list: Enter toggles the highlighted tag, Backspace in an empty search removes the last. */
+  tagsPicker: [
+    { glyph: "↵", label: "add", spoken: "Enter adds or removes the highlighted tag." },
+    { glyph: "⌫", label: "remove", spoken: "Backspace in an empty search removes the last tag." }
   ]
 } as const satisfies Record<string, readonly FloatingListHint[]>;
 
@@ -70,9 +80,13 @@ export const FLOATING_LIST_HINTS = {
  * with a visible 44 px Close (`onClose`; a focused row hands focus back to the anchor's
  * combobox field first). It stays mounted while closed (hidden, inert) so it can
  * fade: opacity only, none under Reduce Motion.
+ *
+ * The Activity and Tags buttons open the same list with a `search` field at the top (there is no
+ * typed query to filter by): focus sits in that field, which is the combobox for the rows.
  */
 export function FloatingList({
   anchorRef,
+  body,
   children,
   className = "",
   heading,
@@ -80,13 +94,19 @@ export function FloatingList({
   hints,
   id,
   isOpen,
+  multiselectable = false,
+  onBlur,
   onClose,
   onKeyDown,
   panelRef,
+  returnFocusRef,
   rowsClassName = "",
+  search,
   style
 }: {
   anchorRef?: RefObject<HTMLElement | null>;
+  /** Shown instead of the search, rows and hints (the Activity button's Create form). */
+  body?: ReactNode;
   children: ReactNode;
   className?: string;
   heading: FloatingListHeading;
@@ -96,11 +116,18 @@ export function FloatingList({
   /** The listbox's id (what the field's `aria-controls` names). */
   id?: string;
   isOpen: boolean;
+  /** A list that holds several choices at once (the Tags button): options say whether each is chosen. */
+  multiselectable?: boolean;
+  onBlur?: FocusEventHandler<HTMLDivElement>;
   /** Closes the list: the phone sheet's Close control. */
   onClose: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   panelRef?: Ref<HTMLDivElement>;
+  /** Where the phone sheet's Close puts focus when it was inside the list (default: the anchor's field). */
+  returnFocusRef?: RefObject<HTMLElement | null>;
   rowsClassName?: string;
+  /** A search field above the rows (`FloatingListSearch`), for a list opened from a button. */
+  search?: ReactNode;
   style?: CSSProperties;
 }) {
   const sheetStyle = usePhoneSheet(isOpen, anchorRef);
@@ -110,7 +137,14 @@ export function FloatingList({
       aria-hidden={!isOpen}
       className={`ui-floating-surface df-flist ${className}${isOpen ? " is-open" : ""}${sheet ? " is-sheet" : ""}`}
       inert={!isOpen}
+      onBlur={onBlur}
       onKeyDown={onKeyDown}
+      // A press on the surface itself (its head, padding or hints) keeps focus where it is (the
+      // field or the list's search), so the list never closes under the pointer; fields inside
+      // it (the search, a Create form) still take focus.
+      onMouseDown={(event) => {
+        if (!(event.target instanceof Element) || !event.target.closest("input, textarea, select")) event.preventDefault();
+      }}
       ref={panelRef}
       style={sheetStyle ? { ...style, ...sheetStyle } : style}
     >
@@ -127,7 +161,8 @@ export function FloatingList({
             // anchor's combobox) first, so it is never lost and the list stays closed.
             const surface = event.currentTarget.closest(".df-flist");
             if (surface?.contains(document.activeElement)) {
-              anchorRef?.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
+              if (returnFocusRef) returnFocusRef.current?.focus();
+              else anchorRef?.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
             }
             onClose();
           }}
@@ -137,10 +172,21 @@ export function FloatingList({
           <X aria-hidden="true" size={18} />
         </button>
       </div>
-      <div aria-label={heading} className={`df-flist-rows ${rowsClassName}`.trim()} id={id} role="listbox">
-        {children}
-      </div>
-      {hints?.length ? (
+      {body ?? (
+        <>
+          {search}
+          <div
+            aria-label={heading}
+            aria-multiselectable={multiselectable || undefined}
+            className={`df-flist-rows ${rowsClassName}`.trim()}
+            id={id}
+            role="listbox"
+          >
+            {children}
+          </div>
+        </>
+      )}
+      {hints?.length && !body ? (
         <p className="df-flist-foot">
           {hints.map((hint, index) => (
             <span className="df-flist-hint" key={hint.glyph}>
@@ -153,6 +199,184 @@ export function FloatingList({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The search field at the top of a list opened from a button (the Activity block, the Tags
+ * button): the combobox for the rows below it. Focus stays here; ↑/↓ move the highlight
+ * (`aria-activedescendant`) and Enter picks, as in the typed `@`/`#` lists.
+ */
+export function FloatingListSearch({
+  activeDescendant,
+  className = "",
+  expanded,
+  inputRef,
+  label,
+  listId,
+  onBlur,
+  onChange,
+  onKeyDown,
+  value
+}: {
+  activeDescendant?: string;
+  className?: string;
+  /** Whether the list is open (a closed list's field must not read as an open popup). */
+  expanded: boolean;
+  inputRef?: Ref<HTMLInputElement>;
+  /** The field's visible placeholder and its accessible name ("Search activities", "Search tags"). */
+  label: string;
+  listId: string;
+  onBlur?: FocusEventHandler<HTMLInputElement>;
+  onChange: ChangeEventHandler<HTMLInputElement>;
+  onKeyDown: KeyboardEventHandler<HTMLInputElement>;
+  value: string;
+}) {
+  return (
+    <div className={`ui-compound-control df-flist-search ${className}`.trim()}>
+      <Search aria-hidden="true" size={15} />
+      <input
+        aria-activedescendant={expanded ? activeDescendant : undefined}
+        aria-autocomplete="list"
+        aria-controls={listId}
+        aria-expanded={expanded}
+        aria-label={label}
+        autoComplete="off"
+        onBlur={onBlur}
+        onChange={onChange}
+        onKeyDown={onKeyDown}
+        placeholder={label}
+        ref={inputRef}
+        role="combobox"
+        spellCheck={false}
+        type="text"
+        value={value}
+      />
+    </div>
+  );
+}
+
+/** An activity the Activities list offers (the `@` list and the Activity block's list). */
+export type FloatingListActivity = { id: string; name: string; color: string; icon?: string | null; isPinned?: boolean };
+
+/**
+ * One Activities row, typed (`@`) or from the Activity block: the activity's solid block with its
+ * icon (the neutral activity dot for "No activity"), its name, "Pinned" for a quick start (the
+ * option's accessible description, never part of its name) and, from the block, a check on the
+ * block's current activity. The option's name is its visible text (WCAG 2.5.3).
+ */
+export function FloatingListActivityOption({
+  activity,
+  current = false,
+  highlighted,
+  id,
+  onHighlight,
+  onPick,
+  selected
+}: {
+  /** null is "No activity". */
+  activity: FloatingListActivity | null;
+  /** The block's current activity (the Activity block's list): a check, hidden from the name. */
+  current?: boolean;
+  highlighted: boolean;
+  id: string;
+  onHighlight: () => void;
+  onPick: () => void;
+  selected: boolean;
+}) {
+  const pinnedId = activity?.isPinned ? `${id}-pinned` : undefined;
+  return (
+    <button
+      aria-describedby={pinnedId}
+      aria-selected={selected}
+      className={`df-flist-row df-flist-row--activity${highlighted ? " is-highlighted" : ""}${activity ? "" : " is-none"}`}
+      id={id}
+      // The field keeps focus (and the phone keyboard stays up).
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={onHighlight}
+      onClick={onPick}
+      role="option"
+      tabIndex={-1}
+      type="button"
+    >
+      <span
+        aria-hidden="true"
+        className={`df-flist-block${activity ? " df-block" : " is-none"}`}
+        style={activity ? blockStyle(activity.color, activity.name) : undefined}
+      >
+        <DayframeIcon glyph={activity ? resolveActivityIcon(activity).glyph : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH} size={13} />
+      </span>
+      <span className="df-flist-label">{activity?.name ?? "No activity"}</span>
+      {pinnedId ? <span aria-hidden="true" className="df-flist-meta" id={pinnedId}>Pinned</span> : null}
+      {current ? <Check aria-hidden="true" className="df-flist-current" size={15} strokeWidth={2.2} /> : null}
+    </button>
+  );
+}
+
+/**
+ * One Tags row, typed (`#`) or from the Tags button: the tag glyph, `#name` and its use count, or
+ * `Create “#name”` with a neutral "+". From the button the list is multi-select: a chosen tag
+ * shows a check and a remove ×, and its option is `aria-selected`; `unavailable` is a tag that
+ * cannot be added (the tag limit). The option's name is its visible text (WCAG 2.5.3).
+ */
+export function FloatingListTagOption({
+  checked,
+  count,
+  create = false,
+  disabled = false,
+  highlighted,
+  id,
+  name,
+  onHighlight,
+  onPick,
+  selected,
+  tabIndex = -1,
+  unavailable = false
+}: {
+  /** The Tags button's list: whether the tag is on the block (undefined in the typed list). */
+  checked?: boolean;
+  count?: number | null;
+  create?: boolean;
+  disabled?: boolean;
+  highlighted: boolean;
+  id: string;
+  name: string;
+  onHighlight: () => void;
+  onPick: () => void;
+  selected: boolean;
+  tabIndex?: number;
+  unavailable?: boolean;
+}) {
+  return (
+    <button
+      aria-disabled={unavailable || undefined}
+      aria-selected={selected}
+      className={`df-flist-row df-flist-row--tag${highlighted ? " is-highlighted" : ""}${create ? " is-create" : ""}${checked ? " is-checked" : ""}${unavailable ? " is-unavailable" : ""}`}
+      disabled={disabled}
+      id={id}
+      onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={onHighlight}
+      onClick={() => {
+        if (!unavailable) onPick();
+      }}
+      role="option"
+      tabIndex={tabIndex}
+      type="button"
+    >
+      <span aria-hidden="true" className={`df-flist-lead${checked ? " df-flist-check" : ""}`}>
+        {create
+          ? <Plus size={14} strokeWidth={2.2} />
+          : checked
+            ? <Check size={13} strokeWidth={2.4} />
+            : <DayframeIcon glyph="tag" size={14} />}
+      </span>
+      <span className="df-flist-label">{create ? `Create “#${name}”` : `#${name}`}</span>
+      {checked
+        ? <X aria-hidden="true" className="df-flist-remove" size={14} strokeWidth={2} />
+        : count !== null && count !== undefined && !create
+          ? <span aria-hidden="true" className="df-flist-meta">{count}</span>
+          : null}
+    </button>
   );
 }
 

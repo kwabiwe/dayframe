@@ -442,7 +442,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
         </label>
         <span className="sr-only" id="persistent-timer-category-label">Activity</span>
 
+        {/* The activity block opens the same Activities list as `@`, under the Description. */}
         <CategoryPicker
+          anchorRef={suggestionsRef}
           ariaLabelledBy="persistent-timer-category-label"
           categories={data.categories}
           className="df-cmd-activity-field"
@@ -500,7 +502,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                 setSuggestionsOpen(false);
               } else if (event.key === "ArrowDown") {
                 event.preventDefault();
-                suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
+                // Suggestions' first row (the Tags button's list shares this wrapper).
+                suggestionsRef.current?.querySelector<HTMLButtonElement>('.swiss-task-suggestions [role="option"]')?.focus();
               }
             }}
             onSelectedTagNamesChange={(tagNames) => setTimerDraft((current) => ({ ...current, tagNames }))}

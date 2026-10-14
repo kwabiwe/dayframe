@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CalendarEntryCompactSavePlan } from "@/lib/calendar-entry-compact-editor";
@@ -89,8 +89,8 @@ describe("TimeEntryQuickEditorModal", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Remove tag Planning" }));
     await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));
-    const picker = await screen.findByRole("dialog", { name: "Add or filter tags" });
-    await userEvent.click(picker.querySelectorAll("button")[2]);
+    const picker = await screen.findByRole("listbox", { name: "Tags" });
+    await userEvent.click(within(picker).getByRole("option", { name: "#Deep work" }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce());
@@ -106,7 +106,7 @@ describe("TimeEntryQuickEditorModal", () => {
 
     const tagTrigger = await screen.findByRole("button", { name: "Add or filter tags" });
     await userEvent.click(tagTrigger);
-    expect(await screen.findByRole("dialog", { name: "Add or filter tags" })).not.toBeNull();
+    expect(await screen.findByRole("listbox", { name: "Tags" })).not.toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(tagTrigger.getAttribute("aria-expanded")).toBe("false"));
     expect(onClose).not.toHaveBeenCalled();
