@@ -180,6 +180,73 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("shares overlapping time in Where today went, so the bars add up to the hero", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    // Inbox (Admin) 09:00–10:00 and Deep work (Focus) running since 09:30: 3h framed at 12:00,
+    // but 3h 30m logged. The shared 09:30–10:00 splits 15m each.
+    const live = { ...data.activeEntry!, startedAt: local(9, 30), updatedAt: local(9, 30) } as TimeEntryRow;
+    const finished = data.entries.find((item) => item.id === INBOX_ID)!;
+    data.activeEntry = live;
+    data.entries = [finished, live];
+    data.historyEntries = data.entries;
+    data.dayEntries = data.entries;
+    data.weekEntries = data.entries;
+    const { container, root } = await mount(data);
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("3h");
+    const bars = [...container.querySelectorAll(".df-bar-row")].map((row) => [
+      row.querySelector("b")?.textContent,
+      row.querySelector(".df-tnum")?.textContent
+    ]);
+    expect(bars).toEqual([
+      ["Focus", "2h 15m"],
+      ["Admin", "45m"]
+    ]);
+    const barSeconds = bars.reduce((sum, [, text]) => sum + displayedSeconds(text ?? ""), 0);
+    expect(barSeconds).toBe(3 * 3600);
+    await act(async () => root.unmount());
+  });
+
+  it("gathers activities after the top four into Other, so six overlapping activities still add up to the hero", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    // Six activities all 09:00–10:00: a 1h hero, 10m each. Top four by name, then Other with 20m.
+    const names = ["Admin", "Cooking", "Errands", "Focus", "Gym", "Reading"];
+    data.categories = names.map((name) => ({ id: name.toLowerCase(), name, color: "mint", isPinned: false })) as BootstrapData["categories"];
+    data.entries = names.map((name, index) =>
+      entry({
+        id: `80000000-0000-4000-8000-00000000001${index}`,
+        categoryId: name.toLowerCase(),
+        categoryName: name,
+        description: name,
+        startedAt: local(9),
+        stoppedAt: local(10),
+        durationSeconds: 3600
+      }));
+    data.activeEntry = null;
+    data.historyEntries = data.entries;
+    data.dayEntries = data.entries;
+    data.weekEntries = data.entries;
+    const { container, root } = await mount(data);
+    expect(container.querySelector("#df-today-total")?.textContent).toContain("1h");
+    expect(container.querySelector(".df-today-went .df-faint")?.textContent).toBe("6 activities");
+    const rows = [...container.querySelectorAll(".df-bar-row")];
+    expect(rows.map((row) => [row.querySelector("b")?.firstChild?.textContent, row.querySelector(".df-tnum")?.textContent])).toEqual([
+      ["Admin", "10m"],
+      ["Cooking", "10m"],
+      ["Errands", "10m"],
+      ["Focus", "10m"],
+      ["Other", "20m"]
+    ]);
+    expect(rows[4].querySelector("b")?.textContent).toBe("Other: Gym and Reading");
+    expect(rows[4].querySelector(".df-bar-fill")?.classList.contains("is-none")).toBe(true);
+    expect(rows.reduce((sum, row) => sum + displayedSeconds(row.querySelector(".df-tnum")?.textContent ?? ""), 0)).toBe(3600);
+    expect(container.querySelector("#df-today-went-note")?.textContent).toContain("then Other for the rest");
+    await act(async () => root.unmount());
+  });
+
   it("never offers Delete or Start again on the running block", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
@@ -192,6 +259,13 @@ describe("Today", () => {
 });
 
 const INBOX_ID = "80000000-0000-4000-8000-000000000002";
+
+/** "2h 15m" → 8100; the bars and hero read in whole minutes. */
+function displayedSeconds(text: string) {
+  const hours = /(\d+)h/.exec(text)?.[1] ?? "0";
+  const minutes = /(\d+)m/.exec(text)?.[1] ?? "0";
+  return Number(hours) * 3600 + Number(minutes) * 60;
+}
 
 function bootstrap(): BootstrapData {
   const finished = entry({

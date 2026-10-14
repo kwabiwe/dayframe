@@ -113,10 +113,19 @@ async function displayContext(
   };
 }
 
+/**
+ * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
+ * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
+ * suggestions or payload changed (Review renders the payload); and a created Commute activity. A replay re-emits every finalised segment, so the
+ * emitted count is almost never zero; the app refreshes its Dashboard only when this count is.
+ */
+export type SemanticChangeCounter = { count: number };
+
 /** Dedicated review-only persistence. The v2_enabled automatic emitter remains separate. */
 export async function emitReviewSemanticSegments(
   client: pg.PoolClient, session: RequestSession, segments: LocationSegment[],
-  stayIds: Map<string, string>, commuteIds: Map<string, string>
+  stayIds: Map<string, string>, commuteIds: Map<string, string>,
+  changes: SemanticChangeCounter = { count: 0 }
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
@@ -143,9 +152,10 @@ export async function emitReviewSemanticSegments(
   for (const batch of chunks(ignored)) {
     const reopened = await reopenSupersededReviews(client, session, batch.map((row) => row.id));
     for (const row of batch) if (reopened.has(row.id)) row.reviewStatus = "needs_review";
+    changes.count += reopened.size;
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
-    ? await ensureCommuteCategoryId(client, session) : null;
+    ? await ensureCommuteCategoryId(client, session, changes) : null;
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
     // Time away suggests no category: the user chooses what it was.
@@ -213,7 +223,16 @@ export async function emitReviewSemanticSegments(
   });
   const eventIds = new Map<string, string>();
   for (const batch of chunks(rows)) {
-    const events = await client.query<{id: string; clientEventId: string}>(`
+    // `previous` reads the rows as they were before this statement (all CTEs share one snapshot), so
+    // `changed` says whether an existing event's stored fields really changed: Review renders its payload
+    // (Motion & Fitness travel mode, for one) even when the Review item's own columns stay the same.
+    const events = await client.query<{id: string; clientEventId: string; changed: boolean}>(`
+      with previous as (
+        select client_event_id, occurred_at, confidence, raw_payload, suggested_category_id, suggested_place_id
+        from activity_events
+        where workspace_id = $1 and user_id = $2
+          and client_event_id in (select r.client_event_id from jsonb_to_recordset($3::jsonb) as r(client_event_id text))
+      ), upserted as (
       insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at,
         confidence, raw_payload, suggested_category_id, suggested_place_id, review_status)
       select $1, $2, r.client_event_id, 'location_learning', r.event_type, r.occurred_at,
@@ -243,29 +262,46 @@ export async function emitReviewSemanticSegments(
          else activity_events.suggested_place_id
        end
 
-      returning id, client_event_id as "clientEventId"`, [session.workspaceId, session.userId, JSON.stringify(batch)]);
+      returning id, client_event_id, occurred_at, confidence, raw_payload, suggested_category_id, suggested_place_id
+      )
+      select u.id, u.client_event_id as "clientEventId",
+        (p.client_event_id is not null and
+          (p.occurred_at, p.confidence, p.raw_payload, p.suggested_category_id, p.suggested_place_id)
+          is distinct from (u.occurred_at, u.confidence, u.raw_payload, u.suggested_category_id, u.suggested_place_id)
+        ) as changed
+      from upserted u left join previous p on p.client_event_id = u.client_event_id`,
+      [session.workspaceId, session.userId, JSON.stringify(batch)]);
     for (const event of events.rows) eventIds.set(event.clientEventId, event.id);
+    // New events are counted through the Review item inserted for each below.
+    changes.count += events.rows.filter((event) => event.changed).length;
   }
   const linked = rows.map(row => ({ ...row, event_id: eventIds.get(row.client_event_id)! }));
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {
     const parameters = [session.workspaceId, session.userId, JSON.stringify(batch)];
-    await client.query(`insert into review_items (workspace_id,user_id,event_id,location_segment_id,type,title,
+    const inserted = await client.query(`insert into review_items (workspace_id,user_id,event_id,location_segment_id,type,title,
       suggested_category_id,suggested_place_id,suggested_started_at,suggested_stopped_at,confidence,status,notes)
       select $1,$2,r.event_id,r.segment_id,r.event_type || '_suggestion',r.title,r.category_id,r.place_id,
         r.occurred_at,r.stopped_at,r.confidence,'open',r.notes
       from jsonb_to_recordset($3::jsonb) as r(event_id uuid,segment_id uuid,event_type text,title text,
         category_id uuid,place_id uuid,occurred_at timestamptz,stopped_at timestamptz,confidence text,notes text)
       where not exists (select 1 from review_items where workspace_id=$1 and user_id=$2 and event_id=r.event_id)`, parameters);
+    changes.count += inserted.rowCount ?? 0;
     // Keep every title Dayframe suggested (E1): the outgoing one before a retitle, the new one after.
     const batchEventIds = batch.map(row => row.event_id);
     await recordReviewTitleHistory(client, session, batchEventIds);
     // Preserve the original update list: in particular type and status are never changed.
-    await client.query(`update review_items target set location_segment_id=r.segment_id,title=r.title,
+    // Unchanged rows are skipped (no other effect: review_items has no updated_at, and its owner trigger
+    // fires only on owner columns), so the row count is the number of items that really changed.
+    const updated = await client.query(`update review_items target set location_segment_id=r.segment_id,title=r.title,
       suggested_category_id=r.category_id,suggested_place_id=r.place_id,suggested_started_at=r.occurred_at,
       suggested_stopped_at=r.stopped_at,confidence=r.confidence,notes=r.notes
       from jsonb_to_recordset($3::jsonb) as r(event_id uuid,segment_id uuid,title text,category_id uuid,place_id uuid,
         occurred_at timestamptz,stopped_at timestamptz,confidence text,notes text)
-      where target.workspace_id=$1 and target.user_id=$2 and target.event_id=r.event_id and target.status='open'`, parameters);
+      where target.workspace_id=$1 and target.user_id=$2 and target.event_id=r.event_id and target.status='open'
+        and (target.location_segment_id,target.title,target.suggested_category_id,target.suggested_place_id,
+          target.suggested_started_at,target.suggested_stopped_at,target.confidence,target.notes)
+          is distinct from (r.segment_id,r.title,r.category_id,r.place_id,r.occurred_at,r.stopped_at,r.confidence,r.notes)`, parameters);
+    changes.count += updated.rowCount ?? 0;
     await recordReviewTitleHistory(client, session, batchEventIds);
   }
   for (const batch of chunks(linked.filter(row => row.kind === "stay"))) {

@@ -77,7 +77,9 @@ export async function lockActivityNames(
 export async function ensureAutomaticCategoryId(
   client: pg.PoolClient,
   session: RequestSession,
-  spec: AutomaticCategorySpec
+  spec: AutomaticCategorySpec,
+  /** Counts a created category (the app's activity list changes). */
+  changes?: { count: number }
 ) {
   await client.query(
     "select pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -113,6 +115,7 @@ export async function ensureAutomaticCategoryId(
      returning id`,
     [session.workspaceId, spec.name, spec.color, spec.icon, spec.starterKey, spec.countsTowardGoal]
   );
+  if (changes) changes.count += 1;
   return created.rows[0].id;
 }
 
@@ -126,7 +129,8 @@ export async function ensureHealthEventCategoryId(
 
 export async function ensureCommuteCategoryId(
   client: pg.PoolClient,
-  session: RequestSession
+  session: RequestSession,
+  changes?: { count: number }
 ) {
-  return ensureAutomaticCategoryId(client, session, commuteCategorySpec());
+  return ensureAutomaticCategoryId(client, session, commuteCategorySpec(), changes);
 }
