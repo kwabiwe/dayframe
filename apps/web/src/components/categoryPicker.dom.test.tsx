@@ -318,28 +318,30 @@ describe("CategoryPicker block variant (UIA-202)", () => {
     );
   }
 
-  it("opens 'Activity for this block' as chips that arrow left to right, with a Close button", async () => {
+  it("opens the shared Activities list (owner, 14 Oct 2026): a search field, ↑/↓ highlight, Enter picks", async () => {
     const onSelect = vi.fn();
     render(<BlockHarness onSelect={onSelect} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "Activity: Work" }), { key: "ArrowDown" });
     const menu = await screen.findByRole("listbox", { name: "Activities" });
-    expect(document.getElementById("block-menu-title")?.textContent).toBe("Activity for this block");
+    expect(menu.closest(".df-flist")?.className).toContain("df-cmd-activity-panel");
+    expect(screen.queryByText("Activity for this block")).toBeNull();
     const options = within(menu).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual(["No activity", "Work", "Writing", "Create new activity"]);
-    // The chosen chip is the one tab stop and carries the selection; no coral check marks.
+    expect(options.map((option) => option.querySelector(".df-flist-label")?.textContent))
+      .toEqual(["No activity", "Work", "Writing", "Create new activity"]);
+    // The current activity carries the selection and a check; focus stays in the search field.
     expect(options[1].getAttribute("aria-selected")).toBe("true");
-    expect(options[1].className).toContain("is-checked");
-    expect(options[1].getAttribute("tabindex")).toBe("0");
-    await waitFor(() => expect(document.activeElement).toBe(options[1]));
-    fireEvent.keyDown(options[1], { key: "ArrowRight" });
-    expect(document.activeElement).toBe(options[2]);
-    fireEvent.keyDown(options[2], { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(options[1]);
-    // A modified arrow belongs to the browser.
-    fireEvent.keyDown(options[1], { key: "ArrowRight", altKey: true });
-    expect(document.activeElement).toBe(options[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(options[1].querySelector(".df-flist-current")).not.toBeNull();
+    const search = screen.getByRole("combobox", { name: "Search activities" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(search.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search.getAttribute("aria-activedescendant")).toBe(options[2].id);
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    fireEvent.keyDown(search, { key: "ArrowUp" });
+    expect(search.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("");
     await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Work" }).getAttribute("aria-expanded")).toBe("false"));
-    expect(onSelect).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Activity: Work" })));
   });
 });
