@@ -28,6 +28,8 @@ vi.mock("@/lib/location/location-ingest-service", () => ({
   replayRetainedLocationEvidence: mocks.replayRetainedLocationEvidence
 }));
 
+import { LocationReplayResponseSchema } from "@dayframe/shared";
+
 const { POST } = await import("./route");
 
 describe("POST /api/location/replay", () => {
@@ -41,8 +43,30 @@ describe("POST /api/location/replay", () => {
       clientAcknowledgedMode: true,
       finalisedSegmentCount: 2,
       semanticSegmentCount: 1,
+      semanticChangeCount: 0,
       warnings: []
     });
+  });
+
+  it("adds the semantic change count only for clients that ask, and older replies parse strictly", async () => {
+    const body = JSON.stringify({ deviceId: "ios-device", algorithmVersion: "location-v2.0", rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-08-11T12:00:00.000Z" });
+    const asked = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-dayframe-semantic-change-count": "1" },
+      body
+    }));
+    const askedPayload = await asked.json();
+    expect(askedPayload).toMatchObject({ ok: true, semanticSegmentCount: 1, semanticChangeCount: 0 });
+    expect(LocationReplayResponseSchema.parse(askedPayload).semanticChangeCount).toBe(0);
+    const older = await POST(new Request("https://dayframe.test/api/location/replay", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body
+    }));
+    const olderPayload = await older.json();
+    expect(olderPayload).not.toHaveProperty("semanticChangeCount");
+    // TestFlight 119's strict schema had no semanticChangeCount: the default reply must still satisfy it.
+    expect(() => LocationReplayResponseSchema.omit({ semanticChangeCount: true }).strict().parse(olderPayload)).not.toThrow();
   });
 
   it("adds the open Review count for the phone's evening reminder", async () => {

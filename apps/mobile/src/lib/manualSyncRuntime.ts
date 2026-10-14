@@ -26,7 +26,7 @@ import {
   synchroniseReviewMutations,
 } from "./reviewSyncStore";
 import { syncLocationIntelligenceOnForeground } from "./location/runtime";
-import { getActiveLocationAccountIdentity } from "./location/store";
+import { getActiveLocationAccountIdentity, locationSyncChangedDashboard } from "./location/store";
 import { beginRecoveredDashboardBootstrapPublication } from "./dashboardBootstrapChannel";
 import { projectDurableLocalWork } from "./durableLocalProjection";
 import { readDurableLocalWork } from "./durableLocalWork";
@@ -176,10 +176,7 @@ export async function synchroniseDeviceNow(options: { date?: string } = {}) {
           return { outcome: "complete", stage: "disabled" };
         return {
           outcome: result.outcome ?? "partial",
-          changed:
-            (result.acknowledgedCount ?? 0) > 0 ||
-            ("semanticSegmentCount" in result &&
-              (result.semanticSegmentCount ?? 0) > 0),
+          changed: locationSyncChangedDashboard(result),
           remainingCount: result.remainingEvidenceCount ?? undefined,
         };
       },

@@ -65,8 +65,16 @@ async function ingestLocationEvidence(
   requestSession: RequestSession,
   processingAt = PROCESSING_AT
 ) {
+  return (await ingestAndReplayLocationEvidence(evidenceBatch, requestSession, processingAt)).ingest;
+}
+
+async function ingestAndReplayLocationEvidence(
+  evidenceBatch: ReturnType<typeof batch>,
+  requestSession: RequestSession,
+  processingAt = PROCESSING_AT
+) {
   const ingest = await storeLocationEvidence(evidenceBatch, requestSession, processingAt);
-  await replayRetainedLocationEvidence(
+  const replay = await replayRetainedLocationEvidence(
     {
       deviceId: evidenceBatch.deviceId,
       algorithmVersion: evidenceBatch.algorithmVersion,
@@ -76,7 +84,7 @@ async function ingestLocationEvidence(
     requestSession,
     processingAt
   );
-  return ingest;
+  return { ingest, replay };
 }
 
 function trustedCommuteFixture(prefix = "trusted-commute") {
@@ -268,12 +276,16 @@ async function validateSemanticIdempotencyAndRollback() {
     "v2_review",
     fixture.evidence[0].occurredAt
   );
-  await ingestLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  const first = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
   const reviewBeforeRetry = await count("review_items");
   const eventBeforeRetry = await count("activity_events");
   assert(reviewBeforeRetry > 1, "Review mode did not create review items.");
   assert.equal(await count("time_entries"), 0, "Review mode auto-confirmed a time entry.");
-  await ingestLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  // The app reloads its Dashboard only when a replay changed something it shows.
+  assert.equal(first.replay.semanticChangeCount, reviewBeforeRetry, "First Review replay did not count each new Review item.");
+  const retry = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  assert(retry.replay.semanticSegmentCount > 0, "Retry did not re-emit the finalised segments.");
+  assert.equal(retry.replay.semanticChangeCount, 0, "An identical replay reported Review changes.");
   assert.equal(await count("review_items"), reviewBeforeRetry, "Semantic retry duplicated review items.");
   assert.equal(await count("activity_events"), eventBeforeRetry, "Semantic retry duplicated activity events.");
 

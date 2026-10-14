@@ -6,7 +6,7 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
-import { REVIEW_COUNT_REQUEST_HEADER } from "@dayframe/shared";
+import { REVIEW_COUNT_REQUEST_HEADER, SEMANTIC_CHANGE_COUNT_REQUEST_HEADER } from "@dayframe/shared";
 import {
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
   LocationIngestError,
@@ -67,7 +67,12 @@ export async function POST(request: Request) {
     const reviewCount = request.headers.get(REVIEW_COUNT_REQUEST_HEADER) === "1"
       ? await openReviewCountFor(session)
       : undefined;
-    return respond(withReviewCount(result, reviewCount));
+    // Likewise only clients that ask get the change count; older builds would reject the field.
+    const { semanticChangeCount, ...reply } = result;
+    const withChanges = request.headers.get(SEMANTIC_CHANGE_COUNT_REQUEST_HEADER) === "1"
+      ? { ...reply, semanticChangeCount }
+      : reply;
+    return respond(withReviewCount(withChanges, reviewCount));
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

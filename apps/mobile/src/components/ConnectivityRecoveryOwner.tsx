@@ -53,7 +53,7 @@ import {
   getActiveReviewAccountIdentity,
   synchroniseReviewMutations
 } from "@/lib/reviewSyncStore";
-import { getActiveLocationAccountIdentity } from "@/lib/location/store";
+import { getActiveLocationAccountIdentity, locationSyncChangedDashboard } from "@/lib/location/store";
 import { drainNativeShortcutQueue } from "@/lib/shortcuts";
 import { synchronisePendingTimerStops } from "@/lib/timerStopSync";
 import { synchroniseTimeEntryCommands } from "@/lib/timeEntryOutbox";
@@ -405,7 +405,7 @@ async function runRootRecoveryPass(_epoch?:number, context?:{dueOnly:boolean}) {
               return "continue";
             }
             const result=await syncLocationIntelligenceOnForeground({forceReplay:!context?.dueOnly});
-            changed ||= (result.acknowledgedCount??0)>0 || ("semanticSegmentCount" in result && (result.semanticSegmentCount??0)>0);
+            changed ||= locationSyncChangedDashboard(result);
             return locationConnectivityRecoveryStepResult(result);
           }
         },

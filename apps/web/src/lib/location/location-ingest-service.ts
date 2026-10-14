@@ -1,4 +1,4 @@
-import { emitReviewSemanticSegments, timeAwayPlaceName } from "./location-review-semantic-batch";
+import { emitReviewSemanticSegments, type SemanticChangeCounter, timeAwayPlaceName } from "./location-review-semantic-batch";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
@@ -249,6 +249,7 @@ export async function replayRetainedLocationEvidence(
       clientAcknowledgedMode: rollout.clientAcknowledgedMode,
       finalisedSegmentCount: semanticReplay.finalisedSegmentCount,
       semanticSegmentCount: semanticReplay.semanticSegmentCount,
+      semanticChangeCount: semanticReplay.semanticChangeCount,
       warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
     };
   }, transactionOptions);
@@ -280,18 +281,25 @@ async function replayAndEmitLocationSemantics(
   observeLocationTiming(options, "semantic_review_persistence", "started");
   const finalisedSegments = replay.segments.filter((segment) => segment.status === "finalised");
   let semanticSegmentCount = 0;
+  const semanticChanges: SemanticChangeCounter = { count: 0 };
   if (options.rollout.emitV2ReviewItems && options.rollout.semanticCutoverAt) {
     const eligible = finalisedSegments.filter((item) =>
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
     );
     if (options.rollout.effectiveMode === "v2_review") {
-      semanticSegmentCount = await emitReviewSemanticSegments(client, session, eligible, replay.stayIds, replay.commuteIds);
+      semanticSegmentCount = await emitReviewSemanticSegments(
+        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges
+      );
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(
           client, session, options.rollout.effectiveMode, segment, replay.stayIds, replay.commuteIds
         );
-        if (emitted) semanticSegmentCount += 1;
+        // Automatic modes may create or change entries: every emitted segment counts as a change.
+        if (emitted) {
+          semanticSegmentCount += 1;
+          semanticChanges.count += 1;
+        }
       }
     }
   }
@@ -299,7 +307,8 @@ async function replayAndEmitLocationSemantics(
   return {
     replay,
     finalisedSegmentCount: finalisedSegments.length,
-    semanticSegmentCount
+    semanticSegmentCount,
+    semanticChangeCount: semanticChanges.count
   };
 }
 
