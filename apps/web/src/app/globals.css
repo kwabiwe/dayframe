@@ -9674,6 +9674,60 @@ button.df-cmd-clock:hover {
   color: var(--text-muted);
 }
 
+/* Idle: the muted clock, and under it (beside it below 860 px) the "From 10:15 · after …" chip
+   (owner idea 1, 14 Oct 2026). Only the name ellipsises; the lead stays whole. */
+.df-cmd-idle {
+  display: grid;
+  justify-items: end;
+  min-width: 0;
+}
+
+.df-cmd-from {
+  position: relative;
+  display: inline-flex;
+  max-width: 260px;
+  min-width: 0;
+  align-items: center;
+  gap: 0.28em;
+  /* Tucked under the clock's padding so the bar keeps its 64 px height with or without it. */
+  margin: -5px 8px 0;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 8px;
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+/* The chip stays 15 px tall so the bar keeps 64 px; its target is 44 px (14.5 px above and below). */
+.df-cmd-from::after {
+  position: absolute;
+  inset: -14.5px 0;
+  content: "";
+}
+
+.df-cmd-from:hover:not(:disabled) {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+}
+
+.df-cmd-from:disabled {
+  opacity: 0.6;
+}
+
+.df-cmd-from-lead {
+  flex: none;
+}
+
+.df-cmd-from-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .df-odometer {
   display: inline-flex;
   font-variant-numeric: tabular-nums;
@@ -9852,6 +9906,34 @@ button.df-cmd-clock:hover {
     align-items: center;
     gap: 8px;
     font-size: 24px;
+  }
+
+  .df-cmd-time {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .df-cmd-idle {
+    display: flex;
+    max-width: 100%;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .df-cmd-idle .df-cmd-clock {
+    flex: none;
+  }
+
+  .df-cmd-from {
+    min-height: 44px;
+    margin: 0;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  /* Already 44 px here; an extended target would reach the description and the quick starts. */
+  .df-cmd-from::after {
+    inset: 0;
   }
 
   .df-cmd-go-label,
