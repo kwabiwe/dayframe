@@ -11,7 +11,7 @@ const entry = (id: string, start: string, stop: string | null, color = "blue") =
 }) as never;
 
 function earlier(entries: unknown[]) {
-  return buildEarlierThisWeek(buildHistoryDaySections({ days: 7, entries: entries as never, nowMs }), nowMs);
+  return buildEarlierThisWeek(buildHistoryDaySections({ days: 7, entries: entries as never, nowMs }), nowMs, entries as never);
 }
 
 describe("earlier this week", () => {
@@ -78,16 +78,28 @@ describe("earlier this week", () => {
       // 25 Oct 2026 (clocks go back): 00:00–06:00 local is 7 real hours.
       const now = new Date(2026, 9, 26, 15).getTime();
       const iso = (h: number) => new Date(2026, 9, 25, h).toISOString();
-      const days = buildEarlierThisWeek(
-        buildHistoryDaySections({ days: 7, entries: [entry("a", iso(0), iso(6)), entry("b", iso(1), iso(6), "lime")] as never, nowMs: now }),
-        now
-      );
+      const entries = [entry("a", iso(0), iso(6)), entry("b", iso(1), iso(6), "lime")];
+      const days = buildEarlierThisWeek(buildHistoryDaySections({ days: 7, entries: entries as never, nowMs: now }), now, entries as never);
       expect(days[0].dayKey).toBe("2026-10-25");
       expect(days[0].totalSeconds).toBe(7 * 3600);
     } finally {
       if (originalTimezone === undefined) delete process.env.TZ;
       else process.env.TZ = originalTimezone;
     }
+  });
+
+  it("keeps sub-second clips, so a past day's total always matches that day's hero (Codex on #410)", () => {
+    const base = new Date(2026, 9, 6, 9).getTime();
+    // Two separate blocks: 59.9 s and 0.5 s. The hero covers 60.4 s and reads "1m".
+    const entries = [
+      entry("a", new Date(base).toISOString(), new Date(base + 59_900).toISOString()),
+      entry("b", new Date(base + 120_000).toISOString(), new Date(base + 120_500).toISOString(), "lime"),
+    ];
+    const [yesterday] = earlier(entries);
+    const hero = buildTodayGoalFrame({ entries, goalMinutes: 480, nowMs: new Date(2026, 9, 6, 23, 59, 59).getTime() }).totalSeconds;
+    expect(hero).toBe(60);
+    expect(yesterday.totalSeconds).toBe(hero);
+    expect(shortDuration(yesterday.totalSeconds)).toBe("1m");
   });
 
   it("writes totals the one Dayframe way (UIA-042)", () => {

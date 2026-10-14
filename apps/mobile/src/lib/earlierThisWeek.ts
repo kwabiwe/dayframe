@@ -35,7 +35,17 @@ export function shortDuration(seconds: number) {
   return formatDuration(seconds);
 }
 
-export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], nowMs: number): EarlierDay[] {
+/**
+ * `entries` are the same logged entries Today's hero reads. Each day's total is their covered time
+ * clipped to that day, not the history section's list: sections drop clips shorter than a whole
+ * second, which once let a day of a 59.9 s and a 0.5 s block read "<1m" here while its hero read
+ * "1m" (Codex Nice-to-have on #410).
+ */
+export function buildEarlierThisWeek(
+  sections: readonly HistoryDaySection[],
+  nowMs: number,
+  entries: readonly { startedAt: string; stoppedAt: string | null }[]
+): EarlierDay[] {
   const byKey = new Map(sections.map((section) => [section.key, section]));
   const today = new Date(nowMs);
   today.setHours(0, 0, 0, 0);
@@ -69,9 +79,7 @@ export function buildEarlierThisWeek(sections: readonly HistoryDaySection[], now
       weekday: formatLocaleDate(date, { weekday: "short" }),
       dateLabel: formatLocaleDate(date, { day: "numeric", month: "short" }),
       spokenDate: formatLocaleDate(date, { weekday: "long", day: "numeric", month: "long" }),
-      totalSeconds: section
-        ? Math.floor(coveredDurationMs(section.entries.map(({ entry }) => entry), dayStart, next.getTime(), nowMs) / 1000)
-        : 0,
+      totalSeconds: Math.floor(coveredDurationMs(entries, dayStart, next.getTime(), nowMs) / 1000),
       segments,
     };
   });
