@@ -19,9 +19,9 @@ describe("shared date-picker geometry", () => {
     expect((320 - DATE_PICKER_HORIZONTAL_INSET * 2) / 7).toBe(44);
   });
 
-  it("keeps the entry picker and Reports sheet on the shared caps", () => {
+  it("keeps the entry picker and the shared date sheet (Reports) on the shared caps", () => {
     const floating = read("../components/FloatingDatePicker.tsx");
-    const reports = read("../components/reports/ReportSheets.tsx");
+    const reports = read("../components/DateSheet.tsx");
     expect(floating).toContain("DATE_PICKER_SHELL_MAX_WIDTH");
     expect(floating).toContain("DATE_PICKER_HORIZONTAL_INSET");
     expect(reports).toContain("DATE_PICKER_CALENDAR_MAX_WIDTH");

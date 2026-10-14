@@ -877,6 +877,12 @@ function ManualEntryDialog({
       setFormError("Use valid start and finish times.");
       return;
     }
+    // No day after today (owner decision D2), however Start or Finish was set (Codex r1 on #422).
+    const todayKey = dateKey(new Date());
+    if (dateKey(new Date(startedAt)) > todayKey || dateKey(new Date(stoppedAt)) > todayKey) {
+      setFormError("Add time can't go past today.");
+      return;
+    }
     let validatedWindow: { startedAt: string; stoppedAt: string };
     try {
       validatedWindow = validateManualTimeEntryWindow({
@@ -1107,7 +1113,9 @@ function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
 function manualEntryDefaults(selectedDate: string) {
   const [year, month, day] = selectedDate.split("-").map(Number);
   const today = new Date();
-  if (dateKey(today) === selectedDate) {
+  // Today, or a day after it (Calendar can show one; Add time never adds a later day, D2): the
+  // hour ending now.
+  if (dateKey(today) <= selectedDate) {
     const finish = new Date(today);
     finish.setSeconds(0, 0);
     const start = new Date(finish.getTime() - 60 * 60 * 1000);

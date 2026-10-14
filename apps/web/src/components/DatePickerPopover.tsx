@@ -110,6 +110,18 @@ export function DatePickerPopover({
   const selected = new Date(`${value}T12:00:00`);
   const [view, setView] = useState({ year: selected.getFullYear(), month: selected.getMonth() + 1 });
 
+  // Each opening shows the chosen day's month, wherever the grid was left (Codex r1 on #422).
+  const [viewSeed, setViewSeed] = useState(false);
+  if (viewSeed !== effectiveOpen) {
+    setViewSeed(effectiveOpen);
+    if (effectiveOpen) {
+      const chosen = new Date(`${value}T12:00:00`);
+      if (chosen.getFullYear() !== view.year || chosen.getMonth() + 1 !== view.month) {
+        setView({ year: chosen.getFullYear(), month: chosen.getMonth() + 1 });
+      }
+    }
+  }
+
   const updateOpen = useCallback((next: boolean) => {
     if (controlledOpen === undefined) setUncontrolledOpen(next);
     onOpenChange?.(next);

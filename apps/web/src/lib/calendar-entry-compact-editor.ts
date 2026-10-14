@@ -281,6 +281,7 @@ export function buildCalendarEntryCompactSavePlan({
     originalStoppedAt: entry.stoppedAt
   });
   validateStartNotFuture(window.startedAt, now);
+  validateFinishDayNotAfterToday(window.stoppedAt, entry.stoppedAt, now);
 
   const payload: CalendarEntryCompactPatch = {};
   if (dirty.description && description !== entry.description) payload.description = description;
@@ -316,6 +317,7 @@ export function buildCalendarEntryCompactCreatePlan({
     originalStoppedAt: source.stoppedAt
   });
   validateStartNotFuture(window.startedAt, now);
+  validateFinishDayNotAfterToday(window.stoppedAt, null, now);
   const stoppedAt = window.stoppedAt as string;
 
   return {
@@ -523,6 +525,18 @@ function draftEdgeCandidates({
 
 function validateStartNotFuture(startedAt: string, now: Date) {
   if (new Date(startedAt).getTime() > now.getTime()) throw new Error("Start time cannot be in the future.");
+}
+
+/**
+ * A finished block never ends on a day after today (owner decision D2, 14 Oct 2026), however its
+ * finish was reached: the date picker, a typed time or a longer duration carried past midnight
+ * (Codex r1 on #422). A finish that is unchanged from the saved block is left as it is.
+ */
+function validateFinishDayNotAfterToday(stoppedAt: string | null, originalStoppedAt: string | null, now: Date) {
+  if (!stoppedAt || stoppedAt === originalStoppedAt) return;
+  if (localParts(stoppedAt).date > localParts(now.toISOString()).date) {
+    throw new Error("Finish can't be on a day after today.");
+  }
 }
 
 function localParts(value: string) {
