@@ -74,6 +74,7 @@ export function subscribeAuthenticatedSession(listener: () => void) {
 
 type DayframeLiveActivityNativeModule = {
   setRuntimeContext?: (apiBase: string, sessionToken: string) => Promise<boolean>;
+  setRuntimeContextWithOwner?: (apiBase: string, sessionToken: string, userId: string, workspaceId: string) => Promise<boolean>;
   clearRuntimeContext?: () => Promise<boolean>;
   clearRuntimeContextIfToken?: (sessionToken: string) => Promise<boolean>;
 };
@@ -83,9 +84,18 @@ function liveActivityNativeModule() {
   return NativeModules.DayframeLiveActivityModule as DayframeLiveActivityNativeModule | undefined;
 }
 
-async function mirrorRuntimeContext(token: string) {
+/**
+ * Mirrors the session to the native Shortcut runtime, with its account when known: the Stop intent only
+ * resolves a running entry through the server for a session whose account matches its catalog.
+ */
+async function mirrorRuntimeContext(token: string, owner: MobileAccountOwner | null) {
   try {
-    await liveActivityNativeModule()?.setRuntimeContext?.(DAYFRAME_API_BASE, token);
+    const native = liveActivityNativeModule();
+    if (owner && native?.setRuntimeContextWithOwner) {
+      await native.setRuntimeContextWithOwner(DAYFRAME_API_BASE, token, owner.userId, owner.workspaceId);
+      return;
+    }
+    await native?.setRuntimeContext?.(DAYFRAME_API_BASE, token);
   } catch {
     // The normal app session remains authoritative; the native shortcut queue is the fallback.
   }
@@ -155,7 +165,7 @@ export async function getSessionToken() {
     if (current) {
       const parsed = parseStoredSession(current);
       cachedSession = parsed;
-      await mirrorRuntimeContext(parsed.token);
+      await mirrorRuntimeContext(parsed.token, parsed.owner ?? null);
       return revision === sessionRevision ? parsed.token : currentCachedSessionToken();
     }
 
@@ -172,7 +182,7 @@ export async function getSessionToken() {
     await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
     if (revision !== sessionRevision) return currentCachedSessionToken();
     cachedSession = { owner: null, token: legacy };
-    await mirrorRuntimeContext(legacy);
+    await mirrorRuntimeContext(legacy, null);
     return revision === sessionRevision ? legacy : currentCachedSessionToken();
   });
 }
@@ -233,7 +243,7 @@ export async function setSessionToken(token: string, owner?: MobileAccountOwner)
     await withInteractionRetry(() => SecureStore.deleteItemAsync(LEGACY_SESSION_TOKEN_KEY));
     if (revision !== sessionRevision) return;
     cachedSession = session;
-    await mirrorRuntimeContext(token);
+    await mirrorRuntimeContext(token, owner ?? null);
     emitSessionChange();
   });
 }
@@ -260,6 +270,7 @@ export async function bindAuthenticatedSessionOwner(
     );
     if (!isAuthenticatedSessionSnapshotCurrent(snapshot)) return false;
     cachedSession = session;
+    await mirrorRuntimeContext(snapshot.token, owner);
     emitSessionChange();
     return true;
   });

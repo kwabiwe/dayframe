@@ -2087,6 +2087,8 @@ function migrateQueuedEvent(
 
 function hasCanonicalStopTarget(rawPayload: unknown) {
   if (!isRecord(rawPayload)) return false;
+  // A Shortcut Stop names its own time instead of an entry: the server stops only what was running then.
+  if (rawPayload.stopScope === "running_at") return true;
   return rawPayload.stopScope === "entry" && isCanonicalEntryId(rawPayload.targetEntryId);
 }
 

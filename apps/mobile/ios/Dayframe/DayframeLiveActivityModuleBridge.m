@@ -40,6 +40,13 @@ RCT_EXTERN_METHOD(setRuntimeContext:(NSString *)apiBase
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase
+                  sessionToken:(NSString *)sessionToken
+                  userId:(NSString *)userId
+                  workspaceId:(NSString *)workspaceId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(clearRuntimeContext:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 

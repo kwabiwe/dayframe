@@ -721,6 +721,7 @@ describe("category persistence", () => {
       "high",
       null,
       occurredAt,
+      null,
       "event-1"
     ]);
     expect(client.release).toHaveBeenCalled();

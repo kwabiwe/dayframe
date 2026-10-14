@@ -122,6 +122,23 @@ class DayframeLiveActivityModule: NSObject {
     resolve(DayframeShortcutRuntimeContextStore.set(apiBase: apiBase, sessionToken: sessionToken))
   }
 
+  @objc(setRuntimeContextWithOwner:sessionToken:userId:workspaceId:resolver:rejecter:)
+  func setRuntimeContextWithOwner(
+    apiBase: String,
+    sessionToken: String,
+    userId: String,
+    workspaceId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    resolve(DayframeShortcutRuntimeContextStore.set(
+      apiBase: apiBase,
+      sessionToken: sessionToken,
+      userId: userId,
+      workspaceId: workspaceId
+    ))
+  }
+
   @objc(clearRuntimeContext:rejecter:)
   func clearRuntimeContext(
     resolve: @escaping RCTPromiseResolveBlock,

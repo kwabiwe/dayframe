@@ -34,8 +34,8 @@ describe("native Live Activity presentation contract", () => {
       shortcuts.indexOf("struct DayframeShortcutEvent")
     );
     const ordinaryStop = shortcuts.slice(
-      shortcuts.indexOf("case .stopEntry"),
-      shortcuts.indexOf("case .stopLiveActivity")
+      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
     );
 
     expect(shortcuts).toContain('@Parameter(title: "Activity ID")');
@@ -57,9 +57,7 @@ describe("native Live Activity presentation contract", () => {
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
     expect(shortcuts).not.toContain("DayframeLiveActivityController.stopLegacyActivities()");
-    expect(shortcuts).toContain("DayframeLiveActivityController.currentCanonicalEntryId()");
     expect(shortcuts).not.toContain('"stopScope": "current"');
-    expect(shortcuts).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
     expect(directClient).toContain('/api/live-activities/stop');
@@ -78,9 +76,44 @@ describe("native Live Activity presentation contract", () => {
     expect(scopedSubmit).not.toContain('forHTTPHeaderField: "Authorization"');
     expect(scopedSubmit).toContain("pushToken.lowercased()");
     expect(stopCase).toContain("if delivered {");
+    // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
+    // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(
-      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event\)\s+if delivered \{\s+_ = await DayframeLiveActivityController\.stop/
+      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}[\s\S]*?guard DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\) else \{\s+return\s+\}\s+let activityIds = DayframeLiveActivityController\.activityIds\(startedBefore: event\.occurredAt\)\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
     );
+  });
+
+  it("Stop tracking stops what was running when it ran, with no Live Activity or lookup (#403)", () => {
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
+    const storage = readFileSync(`${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`, "utf8");
+    const bridge = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`, "utf8");
+    const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
+    expect(intent).toContain("await DayframeShortcutPerformer.perform(.stopRunning)");
+    expect(intent).not.toContain("currentCanonicalEntryId");
+    expect(shortcuts).toMatch(/case \.stopRunning:\s+actionName = "stop"\s+nextType = "timer_stop"\s+payload = \[\s+"origin": "ios_app_shortcut",\s+"stopScope": "running_at"\s+\]/);
+    // Direct delivery only with the app's session for the event's own account.
+    const submit = directClient.slice(directClient.indexOf("private static func deliver(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
+    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return nil/);
+    // A Start the server did not leave running (placed late, or same moment as a block) ends its Activity.
+    expect(shortcuts).toMatch(/if let delivery = await DayframeShortcutDirectEventClient\.submitStart\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)[\s\S]*?if !delivery\.runsNow, let activityId \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(directClient).toContain("runsNow: payload.startOutcome == nil");
+    // A Stop records its moment before delivery and before reading Activities; a Start whose Activity
+    // appeared later ends it (Codex r7 on #403).
+    const ordinaryStop = shortcuts.slice(
+      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
+    );
+    expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeGreaterThan(-1);
+    expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeLessThan(ordinaryStop.indexOf("DayframeShortcutDirectEventClient.submit(event)"));
+    expect(shortcuts).toMatch(/if let activityId, stoppedAfter\(event\), DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\) \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(storage).toContain("enum DayframeShortcutStopMoments");
+    expect(directClient).not.toContain("/api/timer-state");
+    expect(storage).not.toContain("DayframeShortcutStopBarriers");
+    expect(storage).toContain("var userId: String? = nil");
+    expect(storage).toContain('return "owner-unverified"');
+    expect(bridge).not.toContain("shortcutStopBarriers");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {
