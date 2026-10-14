@@ -62,6 +62,7 @@ import {
   localPresenceExiting,
   useReduceMotionPreference
 } from "@/lib/motion";
+import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
 
@@ -874,7 +875,7 @@ function learnedPlaceCategoryLabel(learnedPlace: MobileLearnedPlace, categories:
 function formatShortDateTime(value: string) {
   const timestamp = new Date(value);
   if (Number.isNaN(timestamp.getTime())) return "recently";
-  return timestamp.toLocaleDateString(undefined, {
+  return formatLocaleDate(timestamp, {
     month: "short",
     day: "numeric"
   });
