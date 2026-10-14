@@ -14,7 +14,7 @@ import Reanimated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import { BlurView } from "expo-blur";
 import { blockColorsFor } from "@dayframe/shared";
 import { BLOCKS_SPRING } from "../../lib/blocksMotion";
@@ -222,6 +222,18 @@ function PlayOrbView({
   );
 }
 
+/**
+ * The seconds ring's track as a full circle that starts at 12 o'clock and runs clockwise (two half arcs,
+ * sweep flag 1 in the y-down view box). The start is in the geometry itself: a `Circle` starts at 3 o'clock
+ * and its `rotation`/`origin` turn was drawn a further quarter round on the device, so the zero point sat at
+ * 9 o'clock (owner, TestFlight 119).
+ */
+export function orbRingPath(center: number, radius: number) {
+  const top = center - radius;
+  const bottom = center + radius;
+  return `M${center} ${top} A${radius} ${radius} 0 1 1 ${center} ${bottom} A${radius} ${radius} 0 1 1 ${center} ${top}`;
+}
+
 /** The running orb's coral ring, filling with the current minute's seconds; it owns its own 1 s clock. */
 function OrbSecondsRing({ color }: { color: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -240,14 +252,10 @@ function OrbSecondsRing({ color }: { color: string }) {
   const box = PLAY_ORB.size + RING.inset * 2;
   return (
     <Svg height={box} style={styles.ring} width={box}>
-      <Circle
-        cx={box / 2}
-        cy={box / 2}
+      <Path
+        d={orbRingPath(box / 2, ringRadius)}
         fill="none"
         opacity={RING.opacity}
-        origin={`${box / 2}, ${box / 2}`}
-        r={ringRadius}
-        rotation={-90}
         stroke={color}
         strokeDasharray={`${(seconds / 60) * circumference} ${circumference}`}
         strokeLinecap="round"
