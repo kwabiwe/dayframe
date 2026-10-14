@@ -170,7 +170,7 @@ private enum DayframeShortcutPerformer {
         )?.activityId
       }
       // A Shortcut Stop that ran after this Start may have looked for Activities before this one existed.
-      if let activityId, stoppedAfter(event) {
+      if let activityId, stoppedAfter(event), DayframeShortcutCatalogStore.catalog.ownedBy(event) {
         _ = await DayframeLiveActivityController.stop(activityIds: [activityId])
       }
       // Delivered now, as Stop is; the queued copy stays only when this fails (the app delivers it later,
@@ -197,7 +197,12 @@ private enum DayframeShortcutPerformer {
       if await DayframeShortcutDirectEventClient.submit(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
+      // Activities carry no account: end them only while the Stop's account is still the signed-in one,
+      // so a sign-in to another account during delivery keeps that account's Activity (Codex r8 on #403).
+      guard DayframeShortcutCatalogStore.catalog.ownedBy(event) else {
+        return
+      }
+      let activityIds = DayframeLiveActivityController.activityIds(startedBefore: event.occurredAt)
       _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
       // The event and local dismissal share the immutable identity archived in
@@ -240,7 +245,7 @@ private func stoppedAfter(_ event: DayframeShortcutEvent) -> Bool {
   else {
     return false
   }
-  return stoppedAt >= event.occurredAt
+  return stoppedAt > event.occurredAt
 }
 
 struct DayframeShortcutEvent: Codable {
@@ -360,6 +365,12 @@ private struct DayframeShortcutCatalog: Decodable {
   let user: DayframeShortcutUser?
   let workspace: DayframeShortcutWorkspace?
   let categories: [DayframeShortcutCategory]
+
+  /// Whether this catalog's signed-in account is the one the event was made for.
+  func ownedBy(_ event: DayframeShortcutEvent) -> Bool {
+    guard let userId = user?.id, let workspaceId = workspace?.id else { return false }
+    return event.userId == userId && event.workspaceId == workspaceId
+  }
 
   var categoryNames: [String] {
     unique(categories.map(\.name))

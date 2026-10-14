@@ -79,7 +79,7 @@ describe("native Live Activity presentation contract", () => {
     // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
     // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(
-      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
+      /if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}[\s\S]*?guard DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\) else \{\s+return\s+\}\s+let activityIds = DayframeLiveActivityController\.activityIds\(startedBefore: event\.occurredAt\)\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
     );
   });
 
@@ -106,7 +106,7 @@ describe("native Live Activity presentation contract", () => {
     );
     expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeGreaterThan(-1);
     expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeLessThan(ordinaryStop.indexOf("DayframeShortcutDirectEventClient.submit(event)"));
-    expect(shortcuts).toMatch(/if let activityId, stoppedAfter\(event\) \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(shortcuts).toMatch(/if let activityId, stoppedAfter\(event\), DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\) \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
     expect(storage).toContain("enum DayframeShortcutStopMoments");
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");

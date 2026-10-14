@@ -822,8 +822,9 @@ async function processActivityEventWithClient(
       if (timeEntryId) {
         await client.query(
           `update activity_events set raw_payload = raw_payload || '{"serverStopOutcome":"stopped"}'::jsonb
-           where id = $1`,
-          [eventId]
+           where id = $1
+             and exists (select 1 from time_entries where id = $2 and source not in ('health_sleep', 'health_workout'))`,
+          [eventId, timeEntryId]
         );
       }
     } else if (candidate.action === "start_timer") {

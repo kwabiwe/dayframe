@@ -197,13 +197,14 @@ enum DayframeLiveActivityController {
       .map(\.id)
   }
 
-  /// Activities for blocks that started at or before `date`: what a Shortcut Stop at `date` stopped.
-  static func activityIds(startedAtOrBefore date: Date) -> [String] {
+  /// Activities for blocks that started before `date`: what a Shortcut Stop at `date` stopped (the server
+  /// stops only blocks with `started_at < occurredAt`).
+  static func activityIds(startedBefore date: Date) -> [String] {
     guard #available(iOS 16.2, *) else {
       return []
     }
     return Activity<DayframeTimerAttributes>.activities
-      .filter { ($0.content.state.startedAt ?? .distantPast) <= date }
+      .filter { ($0.content.state.startedAt ?? .distantPast) < date }
       .map(\.id)
   }
 

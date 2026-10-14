@@ -267,6 +267,18 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     expect(stored.rows[0]?.outcome ?? null).toBeNull();
   });
 
+  it("does not use a Stop of a Health entry as a bound (Codex r8 on #403)", async () => {
+    const workout = await block(0, null, "health_workout", "Workout");
+    await processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: at(30),
+      rawPayload: { origin: "web_timer_stop", stopScope: "entry", targetEntryId: workout },
+      source: "manual_app", type: "timer_stop"
+    }, session);
+    await block(40, null, "mobile_app", "Q");
+    await shortcutStart(10, "A");
+    expect(await timeline()).toEqual([["Workout", 0, 30], ["A", 10, 40], ["Q", 40, null]]);
+  });
+
   it("leaves overlapping Health entries alone", async () => {
     await block(-60, 60, "health_sleep", "Sleep");
     await block(0, null, "mobile_app", "P");
