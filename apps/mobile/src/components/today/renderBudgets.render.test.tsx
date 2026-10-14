@@ -56,7 +56,7 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-import { Profiler, useLayoutEffect, useState } from "react";
+import { Profiler, useCallback, useLayoutEffect, useState } from "react";
 import { useAppForeground } from "../../lib/appForeground";
 import { useDashboardClockTicks, useLiveTimeInFront } from "../../lib/dashboardClock";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
@@ -82,7 +82,13 @@ function DashboardProbe({ calendarEdit, route, running, sheetOpen }: {
   calendarEdit: "running" | "completed" | null; route: Route; running: boolean; sheetOpen: boolean;
 }) {
   const foreground = useAppForeground();
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNowState] = useState(() => Date.now());
+  // Counts every clock update, not only commits: an update with the same fake timestamp makes React skip
+  // the commit here, though on a real clock it would render (Codex r4 on #405).
+  const setNow = useCallback((value: number) => {
+    count("clockUpdate");
+    setNowState(value);
+  }, []);
   const liveTimeInFront = useLiveTimeInFront(route === "reports", setNow);
   // As DayframeDashboard: only a running entry's Calendar editor shows live seconds.
   const runningCalendarEdit = calendarEdit === "running";
@@ -145,7 +151,8 @@ async function measure(scene: {
     await Promise.resolve();
   });
   const within = (id: string) => (commits.get(id) ?? []).filter((at) => at <= end).length;
-  const result = { liveBlock: within("liveBlock"), provider: within("provider") };
+  // The provider's budget applies to its commits and to its clock updates, whichever is higher.
+  const result = { liveBlock: within("liveBlock"), provider: Math.max(within("provider"), within("clockUpdate")) };
   act(() => tree.unmount());
   return result;
 }
