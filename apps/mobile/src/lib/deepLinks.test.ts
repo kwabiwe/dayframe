@@ -13,6 +13,7 @@ vi.mock("expo-linking", () => ({
 }));
 
 const { enqueueShortcutAction } = await import("./deepLinks");
+const { resetShortcutStopRequestsForTests, takeShortcutStopRequest } = await import("./shortcutStopRequests");
 
 describe("Dayframe deep links", () => {
   beforeEach(() => {
@@ -48,13 +49,14 @@ describe("Dayframe deep links", () => {
     });
   });
 
-  it("queues Shortcut stop actions", async () => {
+  it("hands a Shortcut Stop to the Dashboard instead of queueing a Stop with no target", async () => {
+    // An untargeted timer_stop is marked permanently failed when the queue is read and never sent.
+    resetShortcutStopRequestsForTests();
     await enqueueShortcutAction("action/stop", {}, { route: "action/stop" });
+    await enqueueShortcutAction("action/stop", {}, { url: "dayframe://action/stop" });
 
-    expect(apiMocks.enqueueEvent).toHaveBeenCalledWith({
-      source: "shortcut",
-      type: "timer_stop",
-      rawPayload: { route: "action/stop" }
-    });
+    expect(apiMocks.enqueueEvent).not.toHaveBeenCalled();
+    expect(takeShortcutStopRequest()).toBe(true);
+    expect(takeShortcutStopRequest()).toBe(false);
   });
 });

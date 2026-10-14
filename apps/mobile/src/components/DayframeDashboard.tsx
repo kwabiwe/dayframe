@@ -116,6 +116,7 @@ import {
   type TimeEntryUpdatePatch
 } from "@/lib/api";
 import { handleDayframeUrl } from "@/lib/deepLinks";
+import { subscribeShortcutStopRequests, takeShortcutStopRequest } from "@/lib/shortcutStopRequests";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
 import { resolveCalendarManualEntryRequest } from "@/lib/calendarManualEntry";
 import { IS_DAYFRAME_STAGING } from "@/lib/config";
@@ -1367,6 +1368,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return () => subscription.remove();
   }, [authState, syncHealthKitAndReload]);
 
+  // A `dayframe://action/stop` link stops the block shown as running, once timer state is loaded,
+  // through the same targeted Stop as the button (a request that waits too long expires unused).
+  const stopActiveTimerRef = useRef<() => Promise<boolean>>(async () => false);
+  useEffect(() => {
+    const take = () => {
+      if (authState !== "authenticated" || !latestData.current) return;
+      if (takeShortcutStopRequest()) void stopActiveTimerRef.current();
+    };
+    take();
+    return subscribeShortcutStopRequests(take);
+  }, [authState, data]);
+
   useEffect(() => {
     const subscription = Linking.addEventListener("url", async ({ url }) => {
       await handleDayframeUrl(url);
@@ -2339,6 +2352,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     shiftSelectedCalendarDay(weeks * 7);
   }, [shiftSelectedCalendarDay]);
 
+  stopActiveTimerRef.current = stopActiveTimer;
   async function stopActiveTimer() {
     const activeEntry = latestData.current?.activeEntry;
     if (!activeEntry) return false;
