@@ -103,6 +103,17 @@ enum DayframeLiveActivityController {
     }
   }
 
+  /// The APNs environment this build's Live Activity tokens belong to (`DayframeAPNSEnvironment`).
+  static func pushEnvironment() -> String? {
+    guard
+      let value = Bundle.main.object(forInfoDictionaryKey: "DayframeAPNSEnvironment") as? String,
+      value == "development" || value == "production"
+    else {
+      return nil
+    }
+    return value
+  }
+
   static func immediatePushToken(activityId: String, entryId: String) -> String? {
     guard #available(iOS 16.2, *) else {
       return nil

@@ -95,8 +95,6 @@ describe("native Live Activity presentation contract", () => {
     // Direct delivery only with the app's session for the event's own account.
     const submit = directClient.slice(directClient.indexOf("private static func deliver(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
     expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return nil/);
-    // A Start the server did not leave running (placed late, or same moment as a block) ends its Activity.
-    expect(shortcuts).toMatch(/if let delivery = await DayframeShortcutDirectEventClient\.submitStart\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)[\s\S]*?if !delivery\.runsNow, let activityId \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
     expect(directClient).toContain("runsNow: payload.startOutcome == nil");
     // A Stop records its moment before delivery and before reading Activities; a Start whose Activity
     // appeared later ends it (Codex r7 on #403).
@@ -106,7 +104,8 @@ describe("native Live Activity presentation contract", () => {
     );
     expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeGreaterThan(-1);
     expect(ordinaryStop.indexOf("DayframeShortcutStopMoments.record(")).toBeLessThan(ordinaryStop.indexOf("DayframeShortcutDirectEventClient.submit(event)"));
-    expect(shortcuts).toMatch(/if let activityId, stoppedAfter\(event\), DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\) \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activityId\]\)/);
+    expect(shortcuts).toMatch(/guard DayframeShortcutCatalogStore\.catalog\.ownedBy\(event\), !stoppedAfter\(event\) else \{\s+await endThisActivity\(\)\s+return\s+\}/);
+    expect(shortcuts).toMatch(/let endThisActivity = \{\s+_ = await DayframeLiveActivityController\.stop\(activityIds: \[activity\.activityId\]\)\s+\}/);
     expect(storage).toContain("enum DayframeShortcutStopMoments");
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");
@@ -114,6 +113,42 @@ describe("native Live Activity presentation contract", () => {
     expect(storage).toContain('return "owner-unverified"');
     expect(bridge).not.toContain("shortcutStopBarriers");
     expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
+  });
+
+  it("a Shortcut Start delivers first, then starts its Live Activity for that block and registers its push token", () => {
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
+    const start = shortcuts.slice(shortcuts.indexOf("case .start(_, let categoryName, _):"), shortcuts.indexOf("case .stopRunning:\n      guard queued"));
+    const order = [
+      "let delivery = await DayframeShortcutDirectEventClient.submitStart(event)",
+      "_ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])",
+      // Ownership is checked before the Activity starts, and again (with a later Shortcut Stop's cleanup)
+      // once it exists, before it is registered; a block ended elsewhere or an account change during
+      // registration ends it (Codex r1 on #413).
+      "guard delivery?.runsNow != false, DayframeShortcutCatalogStore.catalog.ownedBy(event) else {",
+      "DayframeLiveActivityController.start(",
+      "entryId: delivery?.timeEntryId,",
+      "guard DayframeShortcutCatalogStore.catalog.ownedBy(event), !stoppedAfter(event) else {",
+      "DayframeShortcutDirectEventClient.registerLiveActivity(",
+      "if registration == .blockEnded || !DayframeShortcutCatalogStore.catalog.ownedBy(event) {"
+    ].map((needle) => start.indexOf(needle));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    expect(start).toContain("apiBase: delivery?.timeEntryId == nil ? nil : delivery?.context.apiBase,");
+    expect(start).toMatch(/guard let activity = await DayframeLiveActivityController\.start\(/);
+    expect(start).toMatch(/guard let delivery, let entryId = delivery\.timeEntryId else \{\s+return\s+\}/);
+    // Event times are whole milliseconds, as serialized, so native moment comparisons match the server's.
+    expect(shortcuts).toContain("let now = moment.date(from: moment.string(from: Date())) ?? Date()");
+    expect(shortcuts).toContain("let moment = ISO8601DateFormatter()");
+    const register = directClient.slice(directClient.indexOf("static func registerLiveActivity("), directClient.indexOf("static func isCanonicalEntryId("));
+    expect(register).toContain("/api/live-activities");
+    expect(register).toContain('forHTTPHeaderField: "Authorization"');
+    expect(register).toContain("activeEntryId: entryId");
+    expect(register).toContain("DayframeLiveActivityController.pushEnvironment()");
+    expect(register).toMatch(/case 201:\s+break/);
+    expect(register).toMatch(/case 409:\s+return \.blockEnded/);
+    expect(register).toContain("return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)\n      ? .registered\n      : .failed");
+    expect(directClient).toContain("runsNow: payload.startOutcome == nil");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {
@@ -202,7 +237,8 @@ describe("native Live Activity presentation contract", () => {
     expect(controller).toContain("for await token in activity.pushTokenUpdates");
     expect(infoPlist).toContain("<key>DayframeAPNSEnvironment</key>");
     expect(infoPlist).toContain("<string>$(APS_ENVIRONMENT)</string>");
-    expect(module).toContain('object(forInfoDictionaryKey: "DayframeAPNSEnvironment")');
+    expect(controller).toContain('object(forInfoDictionaryKey: "DayframeAPNSEnvironment")');
+    expect(module).toContain("DayframeLiveActivityController.pushEnvironment()");
     expect(module).not.toContain("#if DEBUG");
     expect(project).toContain("APS_ENVIRONMENT = development;");
     expect(project).toContain("APS_ENVIRONMENT = production;");

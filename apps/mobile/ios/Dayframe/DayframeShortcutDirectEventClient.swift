@@ -36,6 +36,13 @@ enum DayframeShortcutDirectEventClient {
     let context: DayframeShortcutRuntimeContext
   }
 
+  private struct LiveActivityRegistrationRequest: Encodable {
+    let token: String
+    let activityId: String
+    let activeEntryId: String
+    let environment: String
+  }
+
   private struct LiveActivityStopRequest: Encodable {
     let token: String
     let activityId: String
@@ -59,6 +66,66 @@ enum DayframeShortcutDirectEventClient {
     guard let (payload, context) = await deliver(event) else { return nil }
     let entryId = payload.timeEntryId.flatMap { isCanonicalEntryId($0) ? $0.lowercased() : nil }
     return StartDelivery(timeEntryId: entryId, runsNow: payload.startOutcome == nil, context: context)
+  }
+
+  enum LiveActivityRegistration {
+    /// Registered for push, with its Stop control showing.
+    case registered
+    /// The server refused it because the block is no longer running (409): a Stop or Switch made
+    /// elsewhere committed first, so no push will ever reach this Activity.
+    case blockEnded
+    /// No token, transport failure or another refusal: the Activity stays, Stop hidden, for the app to
+    /// reconcile when it next runs.
+    case failed
+  }
+
+  /// Registers a Shortcut-started Live Activity's APNs push token for its block with the session that
+  /// delivered the Start (`POST /api/live-activities`), then shows its Stop control, as the app does for
+  /// Activities it starts. Without this a Stop or Switch made on the web or another device could not end
+  /// or update the Activity (roadmap card 10).
+  static func registerLiveActivity(
+    activityId: String,
+    entryId: String,
+    context: DayframeShortcutRuntimeContext
+  ) async -> LiveActivityRegistration {
+    guard
+      let environment = DayframeLiveActivityController.pushEnvironment(),
+      let token = await DayframeLiveActivityController.pushToken(activityId: activityId),
+      let url = URL(string: "\(context.apiBase)/api/live-activities"),
+      let body = try? JSONEncoder.dayframe.encode(LiveActivityRegistrationRequest(
+        token: token,
+        activityId: activityId,
+        activeEntryId: entryId,
+        environment: environment
+      ))
+    else {
+      return .failed
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.httpBody = body
+    request.timeoutInterval = 8
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(context.sessionToken)", forHTTPHeaderField: "Authorization")
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 8
+    configuration.timeoutIntervalForResource = 10
+    do {
+      let (_, response) = try await URLSession(configuration: configuration).data(for: request)
+      switch (response as? HTTPURLResponse)?.statusCode {
+      case 201:
+        break
+      case 409:
+        return .blockEnded
+      default:
+        return .failed
+      }
+    } catch {
+      return .failed
+    }
+    return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)
+      ? .registered
+      : .failed
   }
 
   static func isCanonicalEntryId(_ value: String) -> Bool {
