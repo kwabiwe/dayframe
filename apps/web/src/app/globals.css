@@ -34,6 +34,9 @@
   --warning-text: #805600;
   --danger: #d94f4f;
   --danger-text: #b42318;
+  /* The soft danger fill (error rows and states). It follows --danger and --surface-muted into each
+     theme; 10% keeps --danger-text at 4.5:1 or better on it in both (5.2 Daylight, 4.7 Midnight). */
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--surface-muted));
   --on-danger: #050914;
   --info: #3b82f6;
   --chart-track: #e5e9f0;
@@ -3988,8 +3991,7 @@ kbd {
   border-radius: var(--activity-marker-radius);
 }
 
-.report-filter-option-dot.is-uncategorized,
-.report-category-marker.is-uncategorized {
+.report-filter-option-dot.is-uncategorized {
   border: 1px solid var(--text-secondary);
   border-radius: var(--activity-marker-radius);
   background: repeating-linear-gradient(45deg, var(--surface-muted) 0 2px, var(--text-secondary) 2px 3px) !important;
@@ -4243,13 +4245,6 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-}
-
-.report-category-marker {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--activity-marker-radius);
-  background: var(--category-color);
 }
 
 .report-ranked-row strong {
@@ -7654,7 +7649,7 @@ dialog.ui-dialog.manual-entry-dialog {
   margin: 0;
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   backdrop-filter: blur(8px);
 }
 
@@ -7680,7 +7675,8 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .location-evidence-provider-state.is-error {
-  background: color-mix(in srgb, var(--danger-soft) 94%, transparent);
+  /* Opaque: the map's tiles under it can be white (Codex r2 on #425). */
+  background: var(--danger-soft);
   color: var(--danger-text);
 }
 
@@ -7869,7 +7865,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: 0 22px 52px var(--shadow-color), var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   color: var(--foreground);
 }
 
@@ -8138,7 +8134,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 12px;
   padding: 4px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
 }
 
 .category-picker-menu.is-portalled {
@@ -8558,7 +8554,7 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 12px;
   padding: 12px 14px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-floating);
   color: var(--danger-text);
   animation: timeline-delete-notice-enter 160ms ease-out both;
 }
