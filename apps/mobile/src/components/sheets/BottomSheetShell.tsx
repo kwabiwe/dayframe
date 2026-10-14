@@ -64,6 +64,7 @@ export function bottomSheetGeometry({
  */
 export function BottomSheetShell({
   rootHosted,
+  inline = false,
   title,
   calendarLayout = false,
   presentationId,
@@ -78,6 +79,11 @@ export function BottomSheetShell({
   children,
 }: {
   rootHosted: boolean;
+  /**
+   * Drawn in place, over whatever it is mounted inside (the entry sheet's own Modal), instead of
+   * presenting another Modal: an absolute layer that is modal to VoiceOver, escape discards.
+   */
+  inline?: boolean;
   title: string;
   calendarLayout?: boolean;
   presentationId: number;
@@ -291,6 +297,18 @@ export function BottomSheetShell({
       </SwipeDismissSheet>
     </View>
   );
+
+  if (inline) {
+    return (
+      <View
+        accessibilityViewIsModal
+        onAccessibilityEscape={requestDiscard}
+        style={StyleSheet.absoluteFill}
+      >
+        {overlay}
+      </View>
+    );
+  }
 
   return rootHosted ? (
     <FullWindowOverlay unstable_accessibilityContainerViewIsModal>

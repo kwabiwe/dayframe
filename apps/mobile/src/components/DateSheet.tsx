@@ -27,6 +27,7 @@ export type DateSheetSegment = {
  */
 export function DateSheet({
   rootHosted = false,
+  inline = false,
   presentationId,
   theme,
   reduceMotion,
@@ -50,6 +51,8 @@ export function DateSheet({
   testID = "date-sheet",
 }: {
   rootHosted?: boolean;
+  /** Drawn inside the host's own Modal (the entry sheet) rather than presenting another. */
+  inline?: boolean;
   presentationId: number;
   theme: MobileTheme;
   reduceMotion: boolean;
@@ -78,6 +81,7 @@ export function DateSheet({
   return (
     <BottomSheetShell
       rootHosted={rootHosted}
+      inline={inline}
       title={accessibilityTitle ?? title}
       calendarLayout
       presentationId={presentationId}
