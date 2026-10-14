@@ -7448,10 +7448,36 @@ dialog.ui-dialog.manual-entry-dialog {
   color: var(--muted);
 }
 
+/* Today in coral text, no fill (as on iPhone); the chosen day's fill wins. */
+.dayframe-calendar-grid button.is-today {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
 .dayframe-calendar-grid button[aria-pressed="true"] {
   background: var(--foreground);
   color: var(--background);
   font-weight: 700;
+}
+
+/* Days outside min/max: dimmed, still focusable for the arrow keys, never chosen. */
+.dayframe-calendar-grid button.is-unavailable {
+  color: var(--muted);
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dayframe-calendar-grid button.is-unavailable:hover {
+  background: transparent;
+}
+
+.dayframe-calendar header button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dayframe-calendar header button:disabled:hover {
+  background: transparent;
 }
 
 .dayframe-time-row {

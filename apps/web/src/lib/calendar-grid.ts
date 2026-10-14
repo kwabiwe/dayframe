@@ -4,9 +4,12 @@ export type CalendarGridDay = {
   inCurrentMonth: boolean;
 };
 
+/** Monday first, everywhere (owner decision D4, 14 Oct 2026; a week-start setting is a Future track). */
+export const CALENDAR_WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"] as const;
+
 export function buildCalendarGrid(year: number, month: number): CalendarGridDay[] {
   const first = new Date(year, month - 1, 1);
-  const start = new Date(year, month - 1, 1 - first.getDay());
+  const start = new Date(year, month - 1, 1 - ((first.getDay() + 6) % 7));
 
   return Array.from({ length: 42 }, (_, index) => {
     const date = new Date(start);
@@ -17,6 +20,12 @@ export function buildCalendarGrid(year: number, month: number): CalendarGridDay[
       inCurrentMonth: date.getMonth() === month - 1
     };
   });
+}
+
+/** The `YYYY-MM-DD` day `days` days from `date` (local calendar days, DST-safe). */
+export function addCalendarDays(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  return formatLocalDate(new Date(year, month - 1, day + days, 12));
 }
 
 export function formatLocalDate(date: Date) {
