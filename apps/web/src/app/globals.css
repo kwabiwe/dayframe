@@ -10812,6 +10812,22 @@ dialog.ui-dialog.df-palette {
   white-space: nowrap;
 }
 
+/* A lead ("Switched to") stays whole; only the name after it ends in "…" (owner option A, 14 Oct). */
+.df-toast-message.has-lead {
+  display: flex;
+  gap: 0.28em;
+}
+
+.df-toast-lead {
+  flex: none;
+}
+
+.df-toast-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .df-toast-action {
   min-width: 44px;
   min-height: 44px;
