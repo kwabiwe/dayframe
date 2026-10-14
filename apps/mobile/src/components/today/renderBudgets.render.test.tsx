@@ -1,0 +1,173 @@
+import { act, create } from "react-test-renderer";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * Render-count budgets (`.codex/reference/performance.md`, guardrail 5b). The Dashboard provider sits
+ * above the three native tabs, so every provider render re-renders Today, Calendar and Reports: on
+ * 13 Oct a per-second provider render cost 17–19 % of a core behind Settings and 28 % with Today in
+ * front. The probe below composes the real clock hooks exactly as `DayframeDashboard` does (the
+ * expressions are pinned by `idleClock.contract.test.ts`) around the real live block clock and
+ * odometer. Over two minutes of fake time per scene it counts the provider's own commits and, with
+ * React's Profiler, every commit inside the live block.
+ */
+vi.mock("react", async () => {
+  // @ts-expect-error Renderer peer lives at the repository root.
+  return import("../../../../../node_modules/react/index.js");
+});
+
+vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+
+const appState = vi.hoisted(() => ({
+  currentState: "active",
+  listeners: new Set<(state: string) => void>(),
+}));
+vi.mock("react-native", async () => {
+  const { createFakeAnimated, fakeNativeEasing } = await import("../../test/fakeNativeAnimated");
+  return {
+    Animated: createFakeAnimated(),
+    Easing: fakeNativeEasing,
+    AppState: {
+      get currentState() {
+        return appState.currentState;
+      },
+      addEventListener: (_type: string, listener: (state: string) => void) => {
+        appState.listeners.add(listener);
+        return { remove: () => appState.listeners.delete(listener) };
+      },
+    },
+    Platform: { OS: "ios", select: (choices: Record<string, unknown>) => choices.ios ?? choices.default },
+    StyleSheet: { create: (styles: unknown) => styles },
+    Text: "Text",
+    View: "View",
+    useWindowDimensions: () => ({ fontScale: 1, height: 874, scale: 3, width: 402 }),
+  };
+});
+
+vi.mock("react-native-reanimated", async () => {
+  const React = await import("react");
+  return {
+    default: { View: "ReanimatedView" },
+    ReduceMotion: { Never: "never" },
+    cancelAnimation: vi.fn(),
+    useAnimatedStyle: (factory: () => unknown) => factory(),
+    useSharedValue: (initial: unknown) => React.useRef({ value: initial }).current,
+    withSpring: (to: unknown, config: Record<string, unknown>) => ({ config, kind: "spring", to }),
+  };
+});
+
+import { Profiler, useLayoutEffect, useState } from "react";
+import { useAppForeground } from "../../lib/appForeground";
+import { useDashboardClockTicks, useLiveTimeInFront } from "../../lib/dashboardClock";
+import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
+import { LiveOdometer } from "./LiveOdometer";
+import { useLiveBlockElapsed, type LiveBlockClockInput } from "./liveBlockClock";
+import { formatLiveClock } from "./todayBlocksLayout";
+
+const STARTED_AT = "2026-10-14T08:00:00.000Z";
+const WINDOW_SECONDS = 120;
+type Route = "today" | "calendar" | "reports" | "settings";
+
+/** Counts commits per Profiler id. */
+const commits = new Map<string, number>();
+const count = (id: string) => commits.set(id, (commits.get(id) ?? 0) + 1);
+
+function LiveBlock({ active }: { active: LiveBlockClockInput }) {
+  const elapsed = useLiveBlockElapsed(active);
+  return <LiveOdometer color="#000" label={elapsed.label} reduceMotion={false} seconds={elapsed.seconds} />;
+}
+
+/** `DayframeDashboard`'s clock wiring: Reports shows live seconds; the live block keeps its own clock. */
+function DashboardProbe({ route, running, sheetOpen }: { route: Route; running: boolean; sheetOpen: boolean }) {
+  const foreground = useAppForeground();
+  const [now, setNow] = useState(() => Date.now());
+  const liveTimeInFront = useLiveTimeInFront(route === "reports", setNow);
+  const needsSecondClock = running;
+  const secondsShown = (running && liveTimeInFront) || sheetOpen;
+  useDashboardClockTicks({ foreground, needsSecondClock, secondsShown, setNow });
+  const seconds = activeTimerElapsedSeconds({ durationSeconds: 0, startedAt: STARTED_AT }, now);
+  // The provider's own renders (a Profiler around it would also count the live block's own updates).
+  useLayoutEffect(() => {
+    count("provider");
+  });
+  return (
+    <Profiler id="liveBlock" onRender={() => count("liveBlock")}>
+      {running ? (
+        <LiveBlock
+          active={{
+            durationSeconds: 0,
+            elapsedLabel: formatLiveClock(seconds),
+            elapsedSeconds: seconds,
+            hasLiveActiveTimer: true,
+            startedAt: STARTED_AT,
+          }}
+        />
+      ) : null}
+    </Profiler>
+  );
+}
+
+function measure(scene: { route: Route; running?: boolean; sheetOpen?: boolean; background?: boolean }) {
+  let tree!: ReturnType<typeof create>;
+  act(() => {
+    tree = create(
+      <DashboardProbe route={scene.route} running={scene.running ?? true} sheetOpen={scene.sheetOpen ?? false} />
+    );
+  });
+  if (scene.background) {
+    act(() => {
+      appState.currentState = "background";
+      for (const listener of [...appState.listeners]) listener("background");
+    });
+  }
+  commits.clear();
+  for (let second = 0; second < WINDOW_SECONDS; second += 1) {
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+  }
+  const result = { liveBlock: commits.get("liveBlock") ?? 0, provider: commits.get("provider") ?? 0 };
+  act(() => tree.unmount());
+  return result;
+}
+
+describe("render budgets over two minutes with a block running (performance.md)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Mid-minute, so the window crosses exactly two minute boundaries.
+    vi.setSystemTime(new Date("2026-10-14T09:15:30.250Z"));
+    appState.currentState = "active";
+    appState.listeners.clear();
+    commits.clear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["Today in front", { route: "today" as const }, 2],
+    ["Calendar in front", { route: "calendar" as const }, 2],
+    ["Settings covering the tabs", { route: "settings" as const }, 2],
+    ["Today in front, nothing running", { route: "today" as const, running: false }, 2],
+  ])("%s: the Dashboard renders only at minute boundaries", (_name, scene, budget) => {
+    expect(measure(scene).provider).toBeLessThanOrEqual(budget);
+  });
+
+  it("Reports in front: the Dashboard renders once a second, never more", () => {
+    expect(measure({ route: "reports" }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  });
+
+  it("a running entry's sheet open: once a second, never more", () => {
+    expect(measure({ route: "today", sheetOpen: true }).provider).toBeLessThanOrEqual(WINDOW_SECONDS);
+  });
+
+  it("the live block renders once a second (plus the Dashboard's minute renders), never per frame", () => {
+    const { liveBlock } = measure({ route: "today" });
+    expect(liveBlock).toBeGreaterThanOrEqual(WINDOW_SECONDS - 1);
+    expect(liveBlock).toBeLessThanOrEqual(WINDOW_SECONDS + 2);
+  });
+
+  it("in the background nothing renders at all", () => {
+    expect(measure({ route: "reports", background: true })).toEqual({ liveBlock: 0, provider: 0 });
+    expect(measure({ route: "today", background: true })).toEqual({ liveBlock: 0, provider: 0 });
+  });
+});
