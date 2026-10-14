@@ -23,6 +23,23 @@ enum DayframeShortcutDirectEventClient {
 
   private struct EventResponse: Decodable {
     let eventId: String
+    let timeEntryId: String?
+    let startOutcome: String?
+  }
+
+  /// What the server made of a delivered Shortcut Start, and the checked session that delivered it.
+  struct StartDelivery {
+    let timeEntryId: String?
+    /// A late Start the server recorded as an already finished block (#403): nothing is running for it.
+    let recordedCompleted: Bool
+    let context: DayframeShortcutRuntimeContext
+  }
+
+  private struct LiveActivityRegistrationRequest: Encodable {
+    let token: String
+    let activityId: String
+    let activeEntryId: String
+    let environment: String
   }
 
   private struct LiveActivityStopRequest: Encodable {
@@ -40,12 +57,74 @@ enum DayframeShortcutDirectEventClient {
   /// Delivers a queued Shortcut event with the app's mirrored session, only when that session belongs to
   /// the event's account; otherwise the event waits in the queue for the app to deliver it.
   static func submit(_ event: DayframeShortcutEvent) async -> Bool {
+    await deliver(event) != nil
+  }
+
+  /// Delivers a Shortcut Start like `submit`, returning the block the server created for it.
+  static func submitStart(_ event: DayframeShortcutEvent) async -> StartDelivery? {
+    guard let (payload, context) = await deliver(event) else { return nil }
+    let entryId = payload.timeEntryId.flatMap { isCanonicalEntryId($0) ? $0.lowercased() : nil }
+    return StartDelivery(
+      timeEntryId: entryId,
+      recordedCompleted: payload.startOutcome == "recorded_completed",
+      context: context
+    )
+  }
+
+  /// Registers a Shortcut-started Live Activity's APNs push token for its block with the session that
+  /// delivered the Start (`POST /api/live-activities`), then shows its Stop control, as the app does for
+  /// Activities it starts. Without this a Stop or Switch made on the web or another device could not end
+  /// or update the Activity (roadmap card 10).
+  static func registerLiveActivity(
+    activityId: String,
+    entryId: String,
+    context: DayframeShortcutRuntimeContext
+  ) async -> Bool {
+    guard
+      let environment = DayframeLiveActivityController.pushEnvironment(),
+      let token = await DayframeLiveActivityController.pushToken(activityId: activityId),
+      let url = URL(string: "\(context.apiBase)/api/live-activities"),
+      let body = try? JSONEncoder.dayframe.encode(LiveActivityRegistrationRequest(
+        token: token,
+        activityId: activityId,
+        activeEntryId: entryId,
+        environment: environment
+      ))
+    else {
+      return false
+    }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.httpBody = body
+    request.timeoutInterval = 8
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(context.sessionToken)", forHTTPHeaderField: "Authorization")
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.timeoutIntervalForRequest = 8
+    configuration.timeoutIntervalForResource = 10
+    do {
+      let (_, response) = try await URLSession(configuration: configuration).data(for: request)
+      guard (response as? HTTPURLResponse)?.statusCode == 201 else { return false }
+    } catch {
+      return false
+    }
+    return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)
+  }
+
+  static func isCanonicalEntryId(_ value: String) -> Bool {
+    value.range(
+      of: "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      options: [.regularExpression, .caseInsensitive]
+    ) != nil
+  }
+
+  private static func deliver(_ event: DayframeShortcutEvent) async -> (EventResponse, DayframeShortcutRuntimeContext)? {
     DayframeShortcutDeliveryDiagnosticStore.record(.started)
     guard
       let context = DayframeShortcutRuntimeContextStore.current()
     else {
       DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)
-      return false
+      return nil
     }
     guard
       let userId = event.userId,
@@ -54,14 +133,14 @@ enum DayframeShortcutDirectEventClient {
       context.workspaceId == workspaceId
     else {
       DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
-      return false
+      return nil
     }
     guard
       let url = URL(string: "\(context.apiBase)/api/events"),
       let body = try? JSONEncoder.dayframe.encode(EventRequest(event: event))
     else {
       DayframeShortcutDeliveryDiagnosticStore.record(.requestInvalid)
-      return false
+      return nil
     }
 
     var request = URLRequest(url: url)
@@ -80,24 +159,24 @@ enum DayframeShortcutDirectEventClient {
       let (data, response) = try await session.data(for: request)
       guard let httpResponse = response as? HTTPURLResponse else {
         DayframeShortcutDeliveryDiagnosticStore.record(.responseInvalid)
-        return false
+        return nil
       }
       guard httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
         DayframeShortcutDeliveryDiagnosticStore.record(.httpFailure(statusCode: httpResponse.statusCode))
-        return false
+        return nil
       }
       guard
         let payload = try? JSONDecoder().decode(EventResponse.self, from: data),
         !payload.eventId.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty
       else {
         DayframeShortcutDeliveryDiagnosticStore.record(.responseInvalid)
-        return false
+        return nil
       }
       DayframeShortcutDeliveryDiagnosticStore.record(.delivered)
-      return true
+      return (payload, context)
     } catch {
       DayframeShortcutDeliveryDiagnosticStore.record(.transportFailure)
-      return false
+      return nil
     }
   }
 

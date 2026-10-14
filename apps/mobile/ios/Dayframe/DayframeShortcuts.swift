@@ -156,22 +156,37 @@ private enum DayframeShortcutPerformer {
       guard queued else {
         return
       }
+      // Delivered first, as Stop is: a Live Activity's block is fixed when it starts, and a Stop or
+      // Switch made elsewhere reaches it only through an APNs token registered for that block. The queued
+      // copy stays only when delivery fails (the app delivers it later; the server dedupes by its client
+      // event ID and places a late Start in its own slot).
+      let delivery = await DayframeShortcutDirectEventClient.submitStart(event)
+      if delivery != nil {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      }
+      // A late Start recorded as a finished block has nothing running to show.
+      guard delivery?.recordedCompleted != true else {
+        return
+      }
       if #available(iOS 17.0, *) {
         let category = catalog.category(named: categoryName)
-        _ = await DayframeLiveActivityController.start(
-          entryId: nil,
-          apiBase: nil,
+        let activity = await DayframeLiveActivityController.start(
+          entryId: delivery?.timeEntryId,
+          apiBase: delivery?.timeEntryId == nil ? nil : delivery?.context.apiBase,
           title: event.description ?? category?.name ?? "No activity",
           categoryName: category?.name ?? dayframeCleanText(categoryName),
           categoryColor: category?.color,
           categoryColorLight: category?.lightColor,
           startedAt: event.occurredAt
         )
-      }
-      // Delivered now, as Stop is; the queued copy stays only when this fails (the app delivers it later,
-      // and the server dedupes by its client event ID and places a late Start in its own slot).
-      if await DayframeShortcutDirectEventClient.submit(event) {
-        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+        // Offline, the Activity starts without a block; the app adopts or replaces it when it next runs.
+        if let activity, let delivery, let entryId = delivery.timeEntryId {
+          _ = await DayframeShortcutDirectEventClient.registerLiveActivity(
+            activityId: activity.activityId,
+            entryId: entryId,
+            context: delivery.context
+          )
+        }
       }
     case .stopRunning:
       guard queued else {

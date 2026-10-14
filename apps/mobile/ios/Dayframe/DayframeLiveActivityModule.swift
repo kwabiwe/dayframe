@@ -165,12 +165,6 @@ class DayframeLiveActivityModule: NSObject {
   }
 
   private static func pushEnvironment() -> String? {
-    guard
-      let value = Bundle.main.object(forInfoDictionaryKey: "DayframeAPNSEnvironment") as? String,
-      value == "development" || value == "production"
-    else {
-      return nil
-    }
-    return value
+    DayframeLiveActivityController.pushEnvironment()
   }
 }

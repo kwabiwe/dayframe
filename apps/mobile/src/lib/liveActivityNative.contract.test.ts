@@ -92,17 +92,43 @@ describe("native Live Activity presentation contract", () => {
     expect(intent).toContain("await DayframeShortcutPerformer.perform(.stopRunning)");
     expect(intent).not.toContain("currentCanonicalEntryId");
     expect(shortcuts).toMatch(/case \.stopRunning:\s+actionName = "stop"\s+nextType = "timer_stop"\s+payload = \[\s+"origin": "ios_app_shortcut",\s+"stopScope": "running_at"\s+\]/);
-    // A Start delivers at once as well; the queued copy stays only when that fails.
-    expect(shortcuts).toMatch(/if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+case \.stopRunning:/);
     // Direct delivery only with the app's session for the event's own account.
-    const submit = directClient.slice(directClient.indexOf("static func submit(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
-    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return false/);
+    const submit = directClient.slice(directClient.indexOf("private static func deliver(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
+    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return nil/);
     expect(directClient).not.toContain("/api/timer-state");
     expect(storage).not.toContain("DayframeShortcutStopBarriers");
     expect(storage).toContain("var userId: String? = nil");
     expect(storage).toContain('return "owner-unverified"');
     expect(bridge).not.toContain("shortcutStopBarriers");
     expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
+  });
+
+  it("a Shortcut Start delivers first, then starts its Live Activity for that block and registers its push token", () => {
+    const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
+    const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
+    const start = shortcuts.slice(shortcuts.indexOf("case .start(_, let categoryName, _):"), shortcuts.indexOf("case .stopRunning:\n      guard queued"));
+    const order = [
+      "let delivery = await DayframeShortcutDirectEventClient.submitStart(event)",
+      "_ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])",
+      "guard delivery?.recordedCompleted != true else {",
+      "DayframeLiveActivityController.start(",
+      "entryId: delivery?.timeEntryId,",
+      "DayframeShortcutDirectEventClient.registerLiveActivity("
+    ].map((needle) => start.indexOf(needle));
+    expect(order.every((index) => index > -1)).toBe(true);
+    expect([...order].sort((left, right) => left - right)).toEqual(order);
+    expect(start).toContain("apiBase: delivery?.timeEntryId == nil ? nil : delivery?.context.apiBase,");
+    expect(start).toMatch(/if let activity, let delivery, let entryId = delivery\.timeEntryId \{/);
+    const register = directClient.slice(directClient.indexOf("static func registerLiveActivity("), directClient.indexOf("static func isCanonicalEntryId("));
+    expect(register).toContain("/api/live-activities");
+    expect(register).toContain('forHTTPHeaderField: "Authorization"');
+    expect(register).toContain("activeEntryId: entryId");
+    expect(register).toContain("DayframeLiveActivityController.pushEnvironment()");
+    expect(register).toContain("statusCode == 201");
+    expect(register).toContain("return await DayframeLiveActivityController.enableStop(activityId: activityId, entryId: entryId)");
+    const submitStart = directClient.slice(directClient.indexOf("static func submitStart("), directClient.indexOf("static func registerLiveActivity("));
+    expect(submitStart).toContain('recordedCompleted: payload.startOutcome == "recorded_completed"');
+    expect(submitStart).toContain("isCanonicalEntryId($0) ? $0.lowercased() : nil");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {
@@ -191,7 +217,8 @@ describe("native Live Activity presentation contract", () => {
     expect(controller).toContain("for await token in activity.pushTokenUpdates");
     expect(infoPlist).toContain("<key>DayframeAPNSEnvironment</key>");
     expect(infoPlist).toContain("<string>$(APS_ENVIRONMENT)</string>");
-    expect(module).toContain('object(forInfoDictionaryKey: "DayframeAPNSEnvironment")');
+    expect(controller).toContain('object(forInfoDictionaryKey: "DayframeAPNSEnvironment")');
+    expect(module).toContain("DayframeLiveActivityController.pushEnvironment()");
     expect(module).not.toContain("#if DEBUG");
     expect(project).toContain("APS_ENVIRONMENT = development;");
     expect(project).toContain("APS_ENVIRONMENT = production;");
