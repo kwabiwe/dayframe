@@ -1,10 +1,14 @@
 // Blocks parity step 5f: clear the Review inbox in bulk from the deck card's More menu.
 // "Skip older than 7 days" keeps the last week to review; "Skip all" skips every open moment.
 // Both skip once (ignore_once / ignore_once_location), never Log, and never make a rule.
+// Since the Today · Earlier segments (14 Oct 2026) a bulk skip covers only the selected segment:
+// Earlier offers "Skip older than 7 days" and "Skip all earlier", Today offers "Skip all today".
 
 export const REVIEW_BULK_SKIP_AGE_MS = 7 * 86_400_000;
 
 export type ReviewBulkSkipScope = "older" | "all";
+/** The deck segment a bulk skip is confined to (reviewDeckSegments.ts). */
+export type ReviewBulkSkipSegment = "today" | "earlier";
 
 type BulkSkipItem = {
   id: string;
@@ -19,10 +23,22 @@ type BulkSkipItem = {
  */
 export function reviewBulkSkipCandidates<T extends BulkSkipItem>(
   items: readonly T[],
-  { now, scope, skippable }: { now: number; scope: ReviewBulkSkipScope; skippable: (item: T) => boolean }
+  {
+    inSegment,
+    now,
+    scope,
+    skippable
+  }: {
+    /** The selected segment's predicate: a bulk skip never reaches into the other segment. */
+    inSegment?: (item: T) => boolean;
+    now: number;
+    scope: ReviewBulkSkipScope;
+    skippable: (item: T) => boolean;
+  }
 ): T[] {
   const cutoff = now - REVIEW_BULK_SKIP_AGE_MS;
   return items.filter((item) => {
+    if (inSegment && !inSegment(item)) return false;
     if (!skippable(item)) return false;
     if (scope === "all") return true;
     const startedAt = item.suggestedStartedAt ? Date.parse(item.suggestedStartedAt) : Number.NaN;
@@ -41,23 +57,29 @@ function moments(count: number) {
 export function reviewBulkSkipConfirmation(
   count: number,
   scope: ReviewBulkSkipScope,
-  complete: boolean
+  complete: boolean,
+  segment: ReviewBulkSkipSegment | null = null
 ) {
   const partial = complete ? "" : " Only moments loaded on this iPhone are included.";
   if (count === 0) {
     return {
       title: scope === "older" ? "Nothing older than 7 days" : "Nothing to skip",
       message: scope === "older"
-        ? `Every moment left is from the last week.${partial}`
-        : `No moment can be skipped right now.${partial}`,
+        ? `Every earlier moment left is from the last week.${partial}`
+        : `No ${segment === "today" ? "moment from today" : segment === "earlier" ? "earlier moment" : "moment"} can be skipped right now.${partial}`,
       confirmLabel: null
     };
   }
+  const allMessage = segment === "today"
+    ? "Every moment from today waiting for review is skipped; earlier days stay to review."
+    : segment === "earlier"
+      ? "Every earlier moment waiting for review is skipped; today stays to review."
+      : "Every moment waiting for review is skipped.";
   return {
     title: `Skip ${moments(count)}?`,
     message: scope === "older"
       ? `Moments older than 7 days are skipped; the last week stays to review. You can undo for a few seconds.${partial}`
-      : `Every moment waiting for review is skipped. You can undo for a few seconds.${partial}`,
+      : `${allMessage} You can undo for a few seconds.${partial}`,
     confirmLabel: `Skip ${count}`
   };
 }

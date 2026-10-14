@@ -90,6 +90,16 @@ export function formatReviewDeckDuration(seconds: number) {
   return formatDuration(seconds);
 }
 
+/** A moment's day as the deck names it: Today, Yesterday or a short date ("Mon 6 Oct"). */
+export function reviewDeckDayWord(date: Date, now: number) {
+  const today = localDayStart(new Date(now));
+  const yesterday = localDayStart(new Date(today - 12 * 3600 * 1000));
+  const day = localDayStart(date);
+  if (day === today) return "Today";
+  if (day === yesterday) return "Yesterday";
+  return SHORT_DAY.format(date).replace(",", "");
+}
+
 /**
  * The prototype's when-line: "Today · 21:19–21:26 · 7m". The day word is Today, Yesterday or a
  * short date ("Mon 6 Oct"); a range that crosses midnight names the end's day too.
@@ -103,14 +113,7 @@ export function formatReviewDeckWhen(
   if (!startedAt) return null;
   const start = new Date(startedAt);
   if (Number.isNaN(start.getTime())) return null;
-  const today = localDayStart(new Date(now));
-  const yesterday = localDayStart(new Date(today - 12 * 3600 * 1000));
-  const dayWord = (date: Date) => {
-    const day = localDayStart(date);
-    if (day === today) return "Today";
-    if (day === yesterday) return "Yesterday";
-    return SHORT_DAY.format(date).replace(",", "");
-  };
+  const dayWord = (date: Date) => reviewDeckDayWord(date, now);
   const stop = stoppedAt ? new Date(stoppedAt) : null;
   const parts = [dayWord(start)];
   if (stop && !Number.isNaN(stop.getTime())) {

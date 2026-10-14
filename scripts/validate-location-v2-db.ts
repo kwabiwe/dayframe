@@ -65,8 +65,16 @@ async function ingestLocationEvidence(
   requestSession: RequestSession,
   processingAt = PROCESSING_AT
 ) {
+  return (await ingestAndReplayLocationEvidence(evidenceBatch, requestSession, processingAt)).ingest;
+}
+
+async function ingestAndReplayLocationEvidence(
+  evidenceBatch: ReturnType<typeof batch>,
+  requestSession: RequestSession,
+  processingAt = PROCESSING_AT
+) {
   const ingest = await storeLocationEvidence(evidenceBatch, requestSession, processingAt);
-  await replayRetainedLocationEvidence(
+  const replay = await replayRetainedLocationEvidence(
     {
       deviceId: evidenceBatch.deviceId,
       algorithmVersion: evidenceBatch.algorithmVersion,
@@ -76,7 +84,7 @@ async function ingestLocationEvidence(
     requestSession,
     processingAt
   );
-  return ingest;
+  return { ingest, replay };
 }
 
 function trustedCommuteFixture(prefix = "trusted-commute") {
@@ -268,12 +276,26 @@ async function validateSemanticIdempotencyAndRollback() {
     "v2_review",
     fixture.evidence[0].occurredAt
   );
-  await ingestLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  const first = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
   const reviewBeforeRetry = await count("review_items");
   const eventBeforeRetry = await count("activity_events");
   assert(reviewBeforeRetry > 1, "Review mode did not create review items.");
   assert.equal(await count("time_entries"), 0, "Review mode auto-confirmed a time entry.");
-  await ingestLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  // The app reloads its Dashboard only when a replay changed something it shows.
+  assert.equal(first.replay.semanticChangeCount, reviewBeforeRetry, "First Review replay did not count each new Review item.");
+  const retry = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  assert(retry.replay.semanticSegmentCount > 0, "Retry did not re-emit the finalised segments.");
+  assert.equal(retry.replay.semanticChangeCount, 0, "An identical replay reported Review changes.");
+  // A replay that changes only an open event's payload (as late Motion & Fitness evidence changes a
+  // journey's travel mode, which Review shows) still counts, though no Review column changes.
+  await pool.query(
+    `update activity_events set raw_payload = raw_payload || '{"staleSemanticField": true}'::jsonb
+     where id = (select id from activity_events where workspace_id = $1 and user_id = $2
+       and source = 'location_learning' and review_status = 'needs_review' order by occurred_at, id limit 1)`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  const payloadOnly = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  assert.equal(payloadOnly.replay.semanticChangeCount, 1, "A payload-only replay change was not counted.");
   assert.equal(await count("review_items"), reviewBeforeRetry, "Semantic retry duplicated review items.");
   assert.equal(await count("activity_events"), eventBeforeRetry, "Semantic retry duplicated activity events.");
 
@@ -916,6 +938,35 @@ async function validateCommuteReviewCategoryAndDescription() {
     ),
     /not found/i
   );
+
+  // A replay whose only effect is recreating an archived Commute activity still changes what the app shows.
+  await pool.query(
+    `update review_items set status = 'ignored', ignored_scope = 'once', resolved_at = now()
+     where workspace_id = $1 and user_id = $2 and status = 'open'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  await pool.query(
+    `update activity_events set review_status = 'ignored'
+     where workspace_id = $1 and user_id = $2 and source = 'location_learning' and review_status = 'needs_review'`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  await pool.query("update categories set is_archived = true where id = $1", [commuteCategoryId]);
+  try {
+    const recreate = await ingestAndReplayLocationEvidence(commuteBatches[0], session, PROCESSING_AT);
+    const active = await pool.query(
+      `select id from categories
+       where workspace_id = $1 and lower(name) = 'commute' and coalesce(is_archived, false) = false`,
+      [WORKSPACE_ID]
+    );
+    assert.equal(active.rowCount, 1, "Replay did not recreate the archived Commute activity.");
+    assert.equal(recreate.replay.semanticChangeCount, 1, "Recreating the Commute activity was not counted as a change.");
+  } finally {
+    await pool.query(
+      "delete from categories where workspace_id = $1 and lower(name) = 'commute' and id <> $2",
+      [WORKSPACE_ID, commuteCategoryId]
+    );
+    await pool.query("update categories set is_archived = false where id = $1", [commuteCategoryId]);
+  }
 }
 
 async function validateShadowToReviewCutover() {
@@ -1294,14 +1345,21 @@ async function validateSupersededReviewReactivation() {
     assert.deepEqual(await stayState(unknown.clientSegmentId),
       { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" }, "The edge stop was not offered in Review.");
 
-    await ingest("enter", [callback("enter", 1_100, "geofence_enter")]);
+    // Retiring the proposal is the replay's only Review effect (logging is off at this place): it still counts.
+    const entered = await ingestAndReplayLocationEvidence(
+      batch("db-flip-enter", [callback("enter", 1_100, "geofence_enter")], "v2_review", cutoverAt), session, PROCESSING_AT
+    );
+    assert.equal(entered.replay.semanticChangeCount, 1, "A retirement-only replay reported no change.");
     const [saved] = await currentStays();
     assert.equal(saved?.placeId, placeId, "A genuine entry did not make the stop the saved place.");
     assert.notEqual(saved.clientSegmentId, unknown.clientSegmentId, "The saved-place stay kept the unknown segment's ID.");
     assert.deepEqual(await stayState(unknown.clientSegmentId),
       { status: "superseded", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" }, "Replay did not retire the unknown proposal.");
 
-    await ingest("exit", [callback("exit", 1_150, "geofence_exit")]);
+    const exited = await ingestAndReplayLocationEvidence(
+      batch("db-flip-exit", [callback("exit", 1_150, "geofence_exit")], "v2_review", cutoverAt), session, PROCESSING_AT
+    );
+    assert((exited.replay.semanticChangeCount ?? 0) >= 1, "Reopening a retired proposal reported no change.");
     const [returned] = await currentStays();
     assert.equal(returned?.clientSegmentId, unknown.clientSegmentId, "Revoking the entry did not restore the unknown segment.");
     assert.deepEqual(await stayState(unknown.clientSegmentId),

@@ -51,7 +51,11 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
     expect(screen).toContain("const deckRemaining = heldInFlight ? deckSources.length - 1 : deckSources.length;");
-    expect(screen).toContain("Math.max(totalNeedsReview - locallyDecidedCount, deckRemaining)");
+    // Since the Today · Earlier segments (14 Oct 2026) each segment counts its own cards (exact once
+    // the whole backlog is loaded); "N of M" never drops below the deck itself.
+    expect(screen).toContain("backlogComplete: deckBacklogComplete");
+    expect(screen).toContain("remaining: Math.max(segmentCounts[deckSegment].value, deckRemaining),");
+    expect(screen).toContain('today: deckSegment === "today" ? deckRemaining : deckSegmentSources.today.length,');
     expect(screen).not.toMatch(/remaining: deckBacklogComplete\s*\?\s*deckSources\.length/);
   });
 
@@ -101,7 +105,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("keeps Undo in every deck state and never decides a cancelled gesture (r3 1, 2)", () => {
-    expect(screen.match(/deckToastSlot\("under"\)/g)?.length).toBe(2);
+    // Under Back to Today ("All framed"), under the waiting copy and under "Today is framed".
+    expect(screen.match(/deckToastSlot\("under"\)/g)?.length).toBe(3);
     expect(screen).toContain('deckToastSlot("actions")');
     // Investigation 2026-10-12: a branch change must hand the same toast over, never ghost it.
     expect(screen).toMatch(/function deckToastSlot[\s\S]*?<LayoutAnimationConfig skipExiting>\s*\{renderDeckToast\(placement\)\}/);
@@ -196,7 +201,8 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
   it("holds a bulk skip as one decision with one Undo, through the same hold as a throw (5f)", () => {
     const menu = source("../OverflowMenu.tsx");
     expect(menu).toContain(">Skip older than 7 days</Text>");
-    expect(menu).toContain(">Skip all</Text>");
+    // Scoped to the selected segment (14 Oct 2026): "Skip all earlier" or "Skip all today".
+    expect(menu).toContain('{bulkSkip === "earlier" ? "Skip all earlier" : "Skip all today"}</Text>');
     expect(screen).toContain("<OverflowMenu\n        bulkSkip");
     // One hold for single cards and batches: a throw saves a held batch first, leaving saves it.
     expect(screen).toContain('kind: "batch",');
@@ -227,7 +233,12 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(menu).toContain("maxHeight: windowHeight - insets.top");
     expect(menu).toContain(">Cancel</Text>");
     // One confirmation that states the count, after older pages are read.
-    expect(screen).toContain("reviewBulkSkipConfirmation(candidates.length, scope, complete)");
+    expect(screen).toContain("reviewBulkSkipConfirmation(candidates.length, scope, complete, segment)");
+    // Only the segment the bulk skip started in (14 Oct 2026), by the deck's own Today predicate;
+    // the confirmed batch is recomputed for the same segment.
+    expect(screen).toContain("const segment = deckSegmentRef.current;");
+    expect(screen).toContain("inSegment: (item) => reviewDeckSegmentFor(reviewItemMoment(item), today) === segment,");
+    expect(screen).toContain("holdBulkSkip(bulkSkipCandidates(scope, segment).filter((item) => chosen.has(item.id)));");
     expect(screen).toContain("await inFlight.done;");
   });
 

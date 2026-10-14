@@ -7,11 +7,20 @@ import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDia
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { todayReviewNudgeSplit } from "../../lib/todayReviewPresentation";
 import { useTodayReviewPresentationContext } from "./TodayReviewPresentationContext";
 
 const FOUND_TIME = "Dayframe found time you didn't track.";
 
-export type ReviewNudgeCopy = { title: string; detail: string; count: number | null };
+export type ReviewNudgeCopy = {
+  title: string;
+  detail: string;
+  /** What VoiceOver reads for the detail ("3 today, 9 earlier"). */
+  spokenDetail: string;
+  count: number | null;
+  /** The Review segment the nudge opens: Today when it has moments, Earlier otherwise; null when unknown. */
+  segment: "today" | "earlier" | null;
+};
 
 export type ReviewCount = { value: number | null; exact: boolean };
 
@@ -25,11 +34,13 @@ export type ReviewCount = { value: number | null; exact: boolean };
 export function reviewNudgeCopy(
   outstanding: ReviewCount | null,
   fallback: ReviewCount,
-  presentationReadFailed = false
+  presentationReadFailed = false,
+  /** The presentation's exact count of moments overlapping today, for the "3 today · 9 earlier" split. */
+  today: ReviewCount | null = null
 ): ReviewNudgeCopy | null {
   const fallbackOpen = (fallback.value ?? 0) > 0;
   if (outstanding && outstanding.exact) {
-    if (outstanding.value) return counted(outstanding.value);
+    if (outstanding.value) return counted(outstanding.value, todayReviewNudgeSplit(outstanding, today));
     return presentationReadFailed && fallbackOpen ? UNCOUNTED : null;
   }
   if (outstanding && outstanding.value) return UNCOUNTED;
@@ -45,10 +56,31 @@ export function readFailedOnline(errorKind: string | null | undefined) {
   return Boolean(errorKind) && errorKind !== "offline";
 }
 
-const UNCOUNTED: ReviewNudgeCopy = { count: null, detail: "Open Review for the latest items.", title: "Moments to review" };
+const UNCOUNTED: ReviewNudgeCopy = {
+  count: null,
+  detail: "Open Review for the latest items.",
+  segment: null,
+  spokenDetail: "Open Review for the latest items.",
+  title: "Moments to review"
+};
 
-function counted(value: number): ReviewNudgeCopy {
-  return { count: value, detail: FOUND_TIME, title: `${value} ${value === 1 ? "moment" : "moments"} to review` };
+/** "3 today · 9 earlier", or plain words when one side is empty. */
+export function reviewNudgeSplitCopy(split: { today: number; earlier: number }) {
+  if (split.today && split.earlier) {
+    return { detail: `${split.today} today · ${split.earlier} earlier`, spokenDetail: `${split.today} today, ${split.earlier} earlier` };
+  }
+  if (split.earlier) {
+    const detail = split.earlier === 1 ? "From an earlier day" : "All from earlier days";
+    return { detail, spokenDetail: detail };
+  }
+  const detail = split.today === 1 ? "From today" : "All from today";
+  return { detail, spokenDetail: detail };
+}
+
+function counted(value: number, split: { today: number; earlier: number; segment: "today" | "earlier" } | null = null): ReviewNudgeCopy {
+  const title = `${value} ${value === 1 ? "moment" : "moments"} to review`;
+  if (!split) return { count: value, detail: FOUND_TIME, segment: null, spokenDetail: FOUND_TIME, title };
+  return { count: value, segment: split.segment, title, ...reviewNudgeSplitCopy(split) };
 }
 
 /** "N moments to review" (Blocks prototype): one card that opens Review, replacing Today's donut and rows. */
@@ -62,7 +94,8 @@ export function TodayReviewNudge({
   diagnostic?: MobileAccessibilityDiagnostic;
   /** The bootstrap's count; exact only when it is the server's total, not a capped list's length. */
   fallback: ReviewCount;
-  onOpenReview: () => void;
+  /** Opens Review on the segment that has moments (null: the default, Today). */
+  onOpenReview: (segment: "today" | "earlier" | null) => void;
   reduceMotion: boolean;
   theme: MobileTheme;
 }) {
@@ -76,7 +109,12 @@ export function TodayReviewNudge({
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
   const context = useTodayReviewPresentationContext();
   const presentation = context?.isSummaryAvailable ? context.presentation : null;
-  const copy = reviewNudgeCopy(presentation?.globalReviewCount ?? null, fallback, readFailedOnline(context?.errorKind));
+  const copy = reviewNudgeCopy(
+    presentation?.globalReviewCount ?? null,
+    fallback,
+    readFailedOnline(context?.errorKind),
+    presentation?.todayReviewCount ?? null
+  );
   if (!copy) return null;
   const colors = (presentation?.daySections ?? [])
     .flatMap((section) => section.activities)
@@ -88,11 +126,11 @@ export function TodayReviewNudge({
   return (
     <Reanimated.View entering={painted.current ? entering : undefined} exiting={exiting}>
       <Pressable
-        accessibilityHint="Opens Review"
-        accessibilityLabel={`${copy.title}. ${copy.detail}`}
+        accessibilityHint={copy.segment === "earlier" ? "Opens Review on earlier days" : "Opens Review"}
+        accessibilityLabel={`${copy.title}. ${copy.spokenDetail}`}
         accessibilityRole="button"
         onLayout={(event) => recordMobileLayout(diagnostic, "review-nudge.card", event)}
-        onPress={onOpenReview}
+        onPress={() => onOpenReview(copy.segment)}
         style={({ pressed }) => [styles.card, { backgroundColor: theme.surface }, pressed ? styles.pressed : null]}
         testID="today-review-nudge"
       >

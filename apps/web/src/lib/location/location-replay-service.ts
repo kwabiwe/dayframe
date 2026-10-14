@@ -80,6 +80,8 @@ type LocationReplayOptions = {
   algorithmVersion: string;
   processingAt: string;
   persistenceProfile?: LocationReplayPersistenceProfile;
+  /** Counts open Review items this replay retires, for the reply's `semanticChangeCount`. */
+  semanticChanges?: { count: number };
 } & LocationObservation;
 
 function iso(value: Date | string | null) {
@@ -520,7 +522,7 @@ export function withinEngineEligibility(rebuilt: CommuteSegment, engine: Commute
 async function supersedeMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile">,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges">,
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
@@ -560,7 +562,7 @@ async function supersedeMissingSegments(
 async function retireOpenReviewsForMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile">,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges">,
   stayClientIds: string[],
   commuteClientIds: string[]
 ) {
@@ -647,13 +649,15 @@ async function retireOpenReviewsForMissingSegments(
   // `ignored_scope = 'superseded'` marks replay's own retirement, never a user
   // decision (users ignore 'once' or by 'source'): if the segment returns, its
   // row stays mutable and emission reopens this Review (reopenSupersededReviews).
-  await client.query(
+  const retired = await client.query(
     `update review_items
      set status = 'ignored', resolved_at = now(), ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}',
          notes = concat_ws(' ', nullif(notes, ''), 'Superseded by corrected location evidence replay.')
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and status = 'open'`,
     [session.workspaceId, session.userId, reviewIds]
   );
+  // A retired suggestion leaves Review (and lowers its count): the app must reload.
+  if (options.semanticChanges) options.semanticChanges.count += retired.rowCount ?? 0;
   await client.query(
     `update activity_events set review_status = 'ignored'
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
