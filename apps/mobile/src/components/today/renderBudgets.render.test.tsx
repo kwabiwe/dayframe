@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * 13 Oct a per-second provider render cost 17–19 % of a core behind Settings and 28 % with Today in
  * front. The probe below composes the real clock hooks exactly as `DayframeDashboard` does (the
  * expressions are pinned by `idleClock.contract.test.ts`) around the real live block clock and
- * odometer. Over two minutes of fake time per scene, in 100 ms steps, it counts the provider's own commits
+ * odometer. Over two minutes of fake time per scene, one timer callback per act, it counts the provider's own commits
  * and, with React's Profiler, every commit inside the live block. Scope: React commits only; the breathing
  * ring and digit springs run on the native driver, guarded by idleClock.contract.test.ts.
  */
@@ -68,9 +68,9 @@ const STARTED_AT = "2026-10-14T08:00:00.000Z";
 const WINDOW_SECONDS = 120;
 type Route = "today" | "calendar" | "reports" | "settings";
 
-/** Counts commits per Profiler id. */
-const commits = new Map<string, number>();
-const count = (id: string) => commits.set(id, (commits.get(id) ?? 0) + 1);
+/** Commit times per id (fake clock), so only commits inside the window count. */
+const commits = new Map<string, number[]>();
+const count = (id: string) => commits.set(id, [...(commits.get(id) ?? []), Date.now()]);
 
 function LiveBlock({ active }: { active: LiveBlockClockInput }) {
   const elapsed = useLiveBlockElapsed(active);
@@ -111,8 +111,6 @@ function DashboardProbe({ calendarEdit, route, running, sheetOpen }: {
   );
 }
 
-/** Fake time advances in 100 ms steps, each its own act, so a faster clock is not batched away. */
-const STEP_MS = 100;
 
 function measure(scene: {
   route: Route; running?: boolean; sheetOpen?: boolean; background?: boolean; calendarEdit?: "running" | "completed";
@@ -135,12 +133,15 @@ function measure(scene: {
     });
   }
   commits.clear();
-  for (let step = 0; step < (WINDOW_SECONDS * 1000) / STEP_MS; step += 1) {
+  // One timer callback per act, so no two updates can share a commit (Codex r2 on #405).
+  const end = Date.now() + WINDOW_SECONDS * 1000;
+  while (vi.getTimerCount() > 0 && Date.now() <= end) {
     act(() => {
-      vi.advanceTimersByTime(STEP_MS);
+      vi.advanceTimersToNextTimer();
     });
   }
-  const result = { liveBlock: commits.get("liveBlock") ?? 0, provider: commits.get("provider") ?? 0 };
+  const within = (id: string) => (commits.get(id) ?? []).filter((at) => at <= end).length;
+  const result = { liveBlock: within("liveBlock"), provider: within("provider") };
   act(() => tree.unmount());
   return result;
 }
