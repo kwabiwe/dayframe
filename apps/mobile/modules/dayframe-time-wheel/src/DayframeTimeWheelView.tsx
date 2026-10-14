@@ -21,6 +21,11 @@ export type DayframeTimeWheelModel = {
 
 export type DayframeTimeWheelChange = {
   presentationId: number;
+  /**
+   * "user": a spin. "normalized": the wheel clamped the value React sent to its bounds (or minute
+   * step) — UIKit does that silently, so the wheel reports what it now shows.
+   */
+  reason: "user" | "normalized";
   revision: number;
   valueMs: number;
 };

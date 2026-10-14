@@ -29,8 +29,9 @@ final class DayframeTimeWheelExpoView: ExpoView {
     backgroundColor = .clear
     picker.datePickerMode = .time
     picker.preferredDatePickerStyle = .wheels
-    // Dayframe shows times as 24-hour HH:MM everywhere.
-    picker.locale = Locale(identifier: "en_GB")
+    // Dayframe shows times as 24-hour HH:MM everywhere. The explicit hour cycle keeps two columns
+    // even when the person's iOS setting asks for 12-hour time (a plain en_GB would add AM/PM).
+    picker.locale = Locale(identifier: "en_GB@hours=h23")
     picker.accessibilityElementsHidden = true
     accessibilityElementsHidden = true
     picker.addTarget(self, action: #selector(valueChanged), for: .valueChanged)
@@ -64,12 +65,22 @@ final class DayframeTimeWheelExpoView: ExpoView {
       // An outside change re-aims the columns; a new presentation lands without motion.
       picker.setDate(value, animated: !isNewPresentation && !UIAccessibility.isReduceMotionEnabled)
     }
+    // UIKit clamps to the bounds (and rounds to the minute step) without a valueChanged event; say
+    // so, so React never keeps a time the wheel isn't showing.
+    if abs(picker.date.timeIntervalSince1970 * 1000 - next.valueMs) >= 1 {
+      report(reason: "normalized")
+    }
   }
 
   @objc private func valueChanged() {
+    report(reason: "user")
+  }
+
+  private func report(reason: String) {
     guard let record else { return }
     onTimeChange([
       "presentationId": record.presentationId,
+      "reason": reason,
       "revision": record.revision,
       "valueMs": picker.date.timeIntervalSince1970 * 1000
     ])
