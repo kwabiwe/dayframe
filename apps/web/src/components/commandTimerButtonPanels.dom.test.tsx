@@ -36,9 +36,23 @@ const TAGS = [
   { id: "deep-work", name: "Deep work", normalizedName: "deep-work", usageCount: 2 }
 ];
 
-function renderBar({ activeEntry = null, tagNames = [] }: { activeEntry?: TimeEntryRow | null; tagNames?: string[] } = {}) {
+function renderBar({
+  activeEntry = null,
+  categories = ACTIVITIES,
+  categoryId = "",
+  createCategory,
+  tagNames = [],
+  tags = TAGS
+}: {
+  activeEntry?: TimeEntryRow | null;
+  categories?: CategoryRow[];
+  categoryId?: string;
+  createCategory?: ReturnType<typeof vi.fn>;
+  tagNames?: string[];
+  tags?: typeof TAGS;
+} = {}) {
   const calls = {
-    createCategory: vi.fn().mockResolvedValue({
+    createCategory: createCategory ?? vi.fn().mockResolvedValue({
       ok: true,
       category: { id: "reading", name: "Reading", color: "teal", isPinned: false }
     }),
@@ -49,17 +63,17 @@ function renderBar({ activeEntry = null, tagNames = [] }: { activeEntry?: TimeEn
   };
   const data = {
     activeEntry,
-    categories: ACTIVITIES,
+    categories,
     categoryUsage: [],
     dateRange: { selectedDate: "2026-08-14" },
     entries: activeEntry ? [activeEntry] : [],
-    tags: TAGS,
+    tags,
     taskSuggestions: []
   } as unknown as BootstrapData;
 
   function Harness() {
     const [timerDraft, setDraft] = useState<TimerDraft>({
-      categoryId: activeEntry?.categoryId ?? "",
+      categoryId: activeEntry?.categoryId ?? categoryId,
       description: activeEntry?.description ?? "",
       tagNames: activeEntry?.tagNames ?? tagNames
     });
@@ -427,5 +441,112 @@ describe("on phones the buttons' lists are sheets", () => {
     expect(screen.queryByRole("listbox", { name: "Tags" })).toBeNull();
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(document.activeElement).toBe(tagsButton());
+  });
+});
+
+describe("Codex r1 on #402", () => {
+  // jsdom has no layout: record which element each scrollIntoView call was made on.
+  function recordScrolls() {
+    const scrolled: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrolled.push(this);
+    };
+    return scrolled;
+  }
+  const original = Element.prototype.scrollIntoView;
+  afterEach(() => {
+    Element.prototype.scrollIntoView = original;
+  });
+
+  const MANY_ACTIVITIES: CategoryRow[] = Array.from({ length: 32 }, (_, index) => ({
+    id: `a${index}`,
+    name: `Activity ${String(index).padStart(2, "0")}`,
+    color: "blue",
+    isPinned: false
+  }));
+  const MANY_TAGS = Array.from({ length: 32 }, (_, index) => ({
+    id: `t${index}`,
+    name: `Tag ${String(index).padStart(2, "0")}`,
+    normalizedName: `tag-${String(index).padStart(2, "0")}`,
+    usageCount: 1
+  }));
+
+  it("keeps the highlighted activity in view: the current one on open, then as ↑/↓ move", async () => {
+    const scrolled = recordScrolls();
+    renderBar({ categories: MANY_ACTIVITIES, categoryId: "a25" });
+    const { search, user } = await openActivities();
+    const current = within(listbox("Activities")).getByRole("option", { name: "Activity 25" });
+    expect(search.getAttribute("aria-activedescendant")).toBe(current.id);
+    await waitFor(() => expect(scrolled.at(-1)).toBe(current));
+    await user.keyboard("{ArrowDown}");
+    const next = within(listbox("Activities")).getByRole("option", { name: "Activity 26" });
+    await waitFor(() => expect(scrolled.at(-1)).toBe(next));
+    // Wrapping to the top brings "No activity" back into view.
+    await user.keyboard("{ArrowDown}".repeat(7));
+    await waitFor(() => expect(scrolled.at(-1)).toBe(within(listbox("Activities")).getByRole("option", { name: "No activity" })));
+  });
+
+  it("keeps the highlighted tag in view in the Tags button's list and the typed # list", async () => {
+    const scrolled = recordScrolls();
+    renderBar({ tags: MANY_TAGS });
+    const { search, user } = await openTags();
+    await user.keyboard("{ArrowUp}");
+    const last = within(listbox("Tags")).getByRole("option", { name: "#Tag 31" });
+    expect(search.getAttribute("aria-activedescendant")).toBe(last.id);
+    await waitFor(() => expect(scrolled.at(-1)).toBe(last));
+    await user.keyboard("{Escape}");
+
+    const input = screen.getByLabelText("Description") as HTMLInputElement;
+    await user.click(input);
+    await user.type(input, "#tag", { skipClick: true });
+    await user.keyboard("{ArrowUp}");
+    const typedLast = within(listbox("Tags")).getAllByRole("option").at(-1)!;
+    expect(input.getAttribute("aria-activedescendant")).toBe(typedLast.id);
+    await waitFor(() => expect(scrolled.at(-1)).toBe(typedLast));
+  });
+
+  it("holds the list open while a Create is saving: the phone Close is unavailable and a late failure shows with the name kept", async () => {
+    phone();
+    let settle: (outcome: unknown) => void = () => undefined;
+    const createCategory = vi.fn(() => new Promise((resolve) => { settle = resolve; }));
+    renderBar({ createCategory });
+    const { search, user } = await openActivities();
+    await user.type(search, "Reading");
+    await user.keyboard("{ArrowDown}{Enter}");
+    const form = screen.getByRole("dialog", { name: "Create new activity" });
+    await user.click(within(form).getByRole("button", { name: "Create" }));
+    expect(createCategory).toHaveBeenCalledWith("Reading", undefined);
+
+    const surface = form.closest<HTMLElement>(".df-flist")!;
+    const close = within(surface).getByRole("button", { name: "Close activities" }) as HTMLButtonElement;
+    expect(close.disabled).toBe(true);
+    fireEvent.click(close);
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.mouseDown(document.body);
+    expect(surface.className).toContain("is-open");
+    expect(activityButton().getAttribute("aria-expanded")).toBe("true");
+
+    await act(async () => settle({ ok: false, error: "An activity named “Reading” already exists." }));
+    expect(within(form).getByRole("alert").textContent).toBe("An activity named “Reading” already exists.");
+    expect((within(form).getByLabelText("Name") as HTMLInputElement).value).toBe("Reading");
+    expect(surface.className).toContain("is-open");
+    expect(close.disabled).toBe(false);
+  });
+
+  it("fades out where it stood: the Activities list keeps its measured position and width through dismissal", async () => {
+    renderBar();
+    const { user } = await openActivities();
+    const surface = surfaceOf(listbox("Activities"));
+    const open = { left: surface.style.left, top: surface.style.top, width: surface.style.width, maxHeight: surface.style.maxHeight };
+    expect(open.left).toMatch(/px$/);
+    expect(open.top).toMatch(/px$/);
+    expect(open.width).toMatch(/px$/);
+    expect(surface.style.visibility).toBe("");
+
+    await user.keyboard("{Escape}");
+    expect(surface.className).not.toContain("is-open");
+    // Same geometry, and no inline visibility cutting the 120 ms fade short.
+    expect({ left: surface.style.left, top: surface.style.top, width: surface.style.width, maxHeight: surface.style.maxHeight }).toEqual(open);
+    expect(surface.style.visibility).toBe("");
   });
 });

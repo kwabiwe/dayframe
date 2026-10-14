@@ -85,9 +85,11 @@ export const FLOATING_LIST_HINTS = {
  * typed query to filter by): focus sits in that field, which is the combobox for the rows.
  */
 export function FloatingList({
+  activeId,
   anchorRef,
   body,
   children,
+  closeDisabled = false,
   className = "",
   heading,
   headClassName = "",
@@ -104,10 +106,17 @@ export function FloatingList({
   search,
   style
 }: {
+  /**
+   * The highlighted option's id (the field's `aria-activedescendant`). While the list is open it
+   * is kept in view: on open (the current choice) and as ↑/↓ move it, for every list.
+   */
+  activeId?: string;
   anchorRef?: RefObject<HTMLElement | null>;
   /** Shown instead of the search, rows and hints (the Activity button's Create form). */
   body?: ReactNode;
   children: ReactNode;
+  /** The phone sheet's Close is unavailable (a Create is being saved). */
+  closeDisabled?: boolean;
   className?: string;
   heading: FloatingListHeading;
   headClassName?: string;
@@ -132,6 +141,15 @@ export function FloatingList({
 }) {
   const sheetStyle = usePhoneSheet(isOpen, anchorRef);
   const sheet = Boolean(sheetStyle);
+  // The highlighted row stays visible in a list longer than the panel, so ↑/↓ and Enter never
+  // act on a row the person cannot see. A frame later, once the panel (or sheet) has its size.
+  useEffect(() => {
+    if (!isOpen || !activeId) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeId, isOpen, sheet]);
   return (
     <div
       aria-hidden={!isOpen}
@@ -153,6 +171,7 @@ export function FloatingList({
         <button
           aria-label={`Close ${heading.toLocaleLowerCase()}`}
           className="df-flist-close"
+          disabled={closeDisabled}
           hidden={!sheet}
           // The field keeps focus (and the keyboard stays up) when Close is pressed.
           onMouseDown={(event) => event.preventDefault()}

@@ -333,7 +333,9 @@ export function CategoryPicker({
       setIsColorMenuOpen(false);
       setCreateError(null);
     }
-    setPortalPosition(null);
+    // The block's Activities list fades out where it stood (#391: opacity only, at its final
+    // position and width), so its measured geometry stays through the exit; opening measures anew.
+    if (!blockPanel) setPortalPosition(null);
     setColorMenuPosition(null);
     onOpenChange(false);
     if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -786,6 +788,7 @@ export function CategoryPicker({
       </button>
       )}
       {blockPanel ? mountMenu(<FloatingList
+        activeId={optionValues.length ? `${menuId}-option-${Math.min(activeIndex, optionValues.length - 1)}` : undefined}
         anchorRef={anchorRef}
         body={isCreating ? createForm : undefined}
         className={`df-cmd-activity-panel${portal ? " is-portalled" : ""}`}
@@ -794,7 +797,12 @@ export function CategoryPicker({
         id={menuId}
         isOpen={open}
         onBlur={closeOnFocusLeave}
-        onClose={() => closePicker(true)}
+        // A Create being saved holds the list open (as Escape, a press outside and the block do), so
+        // its outcome — the new activity or the error beside the kept name — is always seen.
+        closeDisabled={isCreateBusy}
+        onClose={() => {
+          if (!isCreateBusy) closePicker(true);
+        }}
         onKeyDown={handlePickerKeyDown}
         panelRef={menuRef}
         returnFocusRef={triggerRef}
@@ -813,10 +821,9 @@ export function CategoryPicker({
             value={query}
           />
         )}
-        style={portal ? {
-          ...portalPosition,
-          visibility: open && portalPosition ? "visible" : "hidden"
-        } : undefined}
+        // Hidden only until it is first measured; after that the surface's own open state (and
+        // its fade, with visibility held until the fade ends) rules, at the kept geometry.
+        style={portal ? portalPosition ?? { visibility: "hidden" } : undefined}
       >
         {/* Nothing matches: say so above Create. */}
         {listedCategories.length === 0 && trimmedQuery ? (

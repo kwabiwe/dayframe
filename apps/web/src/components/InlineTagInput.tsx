@@ -255,12 +255,6 @@ export function InlineTagInput({
     onHashtagPanelChange?.(shouldOpen || effectivePickerOpen || activityOpen);
   }, [activityOpen, effectivePickerOpen, onHashtagPanelChange, shouldOpen]);
 
-  // The highlighted activity stays in view while ↑/↓ walk a list longer than the panel.
-  useEffect(() => {
-    if (!activityOpen) return;
-    document.getElementById(`${name}-activity-option-${activeActivityIndex}`)?.scrollIntoView?.({ block: "nearest" });
-  }, [activeActivityIndex, activityOpen, name]);
-
   useEffect(() => {
     if (!effectivePickerOpen) return undefined;
     const frame = window.requestAnimationFrame(() => pickerInputRef.current?.focus());
@@ -638,6 +632,7 @@ export function InlineTagInput({
           <TagIcon size={15} />
         </button>
         {maybePortal(<FloatingList
+          activeId={actions.length ? `${name}-tag-option-${Math.min(highlightedIndex, actions.length - 1)}` : undefined}
           anchorRef={anchorRef}
           className={`inline-tag-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Tags"
@@ -668,6 +663,7 @@ export function InlineTagInput({
           {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
         </FloatingList>)}
         {activities ? maybePortal(<FloatingList
+          activeId={activityMatches.length ? `${name}-activity-option-${activeActivityIndex}` : undefined}
           anchorRef={anchorRef}
           className={`inline-activity-suggestions${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Activities"
@@ -698,6 +694,7 @@ export function InlineTagInput({
         {/* The Tags button opens the same Tags list as `#`, with a search field (there is no typed
             query) and several choices at once: a chosen tag is checked and removable. */}
         {maybePortal(<FloatingList
+          activeId={pickerActions.length ? `${tagPickerListId}-option-${activePickerIndex}` : undefined}
           anchorRef={anchorRef}
           className={`inline-tag-picker${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
           heading="Tags"
