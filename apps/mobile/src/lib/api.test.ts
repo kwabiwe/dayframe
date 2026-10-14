@@ -27,8 +27,6 @@ const secureStore = vi.hoisted(() => new Map<string, string>());
 const asyncStore = vi.hoisted(() => new Map<string, string>());
 const appState = vi.hoisted(() => ({ currentState: "active" }));
 const healthAcknowledgement = vi.hoisted(() => vi.fn());
-const shortcutBarrier = vi.hoisted(() => ({ stoppedAt: null as string | null }));
-vi.mock("./shortcuts", () => ({ readShortcutStopBarrier: async () => shortcutBarrier.stoppedAt }));
 const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
 vi.mock("expo-crypto",()=>({}));
@@ -790,31 +788,21 @@ describe("mobile API client", () => {
     expect(await readQueue()).toHaveLength(1);
   });
 
-  it("stops a Shortcut Start delivered after a later Shortcut Stop at that Stop's time (#403)", async () => {
-    storeBoundSession("session-token");
-    const startedEntry = "8a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  it("keeps a queued Shortcut Stop that names its own time replayable (#403)", async () => {
     asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
-      storedQueuedEvent({ source: "shortcut", type: "shortcut_action", localId: "nfc-start", occurredAt: "2026-10-14T08:00:00.000Z", rawPayload: { origin: "ios_app_shortcut" } })
+      storedQueuedEvent({
+        source: "shortcut",
+        type: "timer_stop",
+        localId: "nfc-stop",
+        occurredAt: "2026-10-14T08:20:00.000Z",
+        rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" }
+      })
     ]));
-    shortcutBarrier.stoppedAt = "2026-10-14T08:20:00.000Z";
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ eventId: "event-1", clientEventId: "nfc-start", timeEntryId: startedEntry }, 201)));
-    await syncQueue();
-    const stops = await readPendingTimerStops();
-    expect(stops).toHaveLength(1);
-    expect(stops[0]).toMatchObject({ targetEntryId: startedEntry, occurredAt: "2026-10-14T08:20:00.000Z" });
-    expect(await readQueue()).toHaveLength(0);
-  });
-
-  it("leaves a Shortcut Start alone when no later Shortcut Stop ran", async () => {
-    storeBoundSession("session-token");
-    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
-      storedQueuedEvent({ source: "shortcut", type: "shortcut_action", localId: "nfc-start-2", occurredAt: "2026-10-14T09:00:00.000Z", rawPayload: { origin: "ios_app_shortcut" } })
-    ]));
-    shortcutBarrier.stoppedAt = "2026-10-14T08:20:00.000Z";
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ eventId: "event-2", clientEventId: "nfc-start-2", timeEntryId: "9b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e" }, 201)));
-    await syncQueue();
-    expect(await readPendingTimerStops()).toHaveLength(0);
-    shortcutBarrier.stoppedAt = null;
+    const queue = await readQueue();
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).not.toHaveProperty("failureKind", "permanent");
+    expect(queue[0].lastError).toBeUndefined();
+    expect(queue[0].rawPayload).toMatchObject({ origin: "ios_app_shortcut", stopScope: "running_at" });
   });
 
   it("retains a generic event until the response includes a canonical event ID", async () => {

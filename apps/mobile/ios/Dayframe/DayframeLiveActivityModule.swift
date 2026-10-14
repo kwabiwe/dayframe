@@ -139,14 +139,6 @@ class DayframeLiveActivityModule: NSObject {
     ))
   }
 
-  @objc(shortcutStopBarriers:rejecter:)
-  func shortcutStopBarriers(
-    resolve: @escaping RCTPromiseResolveBlock,
-    reject: @escaping RCTPromiseRejectBlock
-  ) {
-    resolve(DayframeShortcutStopBarriers.all())
-  }
-
   @objc(clearRuntimeContext:rejecter:)
   func clearRuntimeContext(
     resolve: @escaping RCTPromiseResolveBlock,

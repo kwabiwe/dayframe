@@ -1316,10 +1316,6 @@ async function syncQueueItems(
           timeEntryId: payload.timeEntryId
         });
       }
-      if (item.source === "shortcut" && item.type === "shortcut_action" &&
-          typeof payload.timeEntryId === "string" && payload.timeEntryId) {
-        await closeLateShortcutStart(owner, item, payload.timeEntryId);
-      }
       if (item.source === "health_sleep" || item.source === "health_workout") {
         if (item.healthOwner && queuedEventMatchesOwner(item,owner)) {
           const { recordHealthAcknowledgement } = await import("./healthSyncStore");
@@ -2013,21 +2009,6 @@ export async function deletePlace(id: string) {
   return payload.payload;
 }
 
-/**
- * A Shortcut Start the app delivers after a later Shortcut Stop (an offline Start then Stop, or a delivery
- * that lagged) is stopped at that Stop's time through the targeted Stop outbox, so a late Start never
- * reopens recording after the user stopped, and the time between is kept as a finished block (owner
- * decision 14 Oct on #403). A failure to persist that Stop fails this delivery, which retries (the server
- * dedupes the Start by its client event ID).
- */
-async function closeLateShortcutStart(owner: MobileAccountOwner, item: QueuedEvent, timeEntryId: string) {
-  const { readShortcutStopBarrier } = await import("./shortcuts");
-  const stoppedAt = await readShortcutStopBarrier(owner).catch(() => null);
-  if (!stoppedAt || Date.parse(stoppedAt) <= item.occurredAt.getTime()) return;
-  const { persistPendingTimerStop } = await import("./timerStopSync");
-  await persistPendingTimerStop({ owner, target: { targetEntryId: timeEntryId }, occurredAt: stoppedAt });
-}
-
 export async function queueStopTimer() {
   return enqueueEvent({
     source: "mobile_app",
@@ -2106,6 +2087,8 @@ function migrateQueuedEvent(
 
 function hasCanonicalStopTarget(rawPayload: unknown) {
   if (!isRecord(rawPayload)) return false;
+  // A Shortcut Stop names its own time instead of an entry: the server stops only what was running then.
+  if (rawPayload.stopScope === "running_at") return true;
   return rawPayload.stopScope === "entry" && isCanonicalEntryId(rawPayload.targetEntryId);
 }
 

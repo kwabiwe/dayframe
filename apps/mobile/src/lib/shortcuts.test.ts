@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   enqueueEvent: vi.fn(),
   pendingShortcutEvents: vi.fn(),
   removeShortcutEvents: vi.fn(),
-  shortcutStopBarriers: vi.fn(),
   settingsStore: new Map<string, unknown>()
 }));
 
@@ -12,8 +11,7 @@ vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
       pendingShortcutEvents: mocks.pendingShortcutEvents,
-      removeShortcutEvents: mocks.removeShortcutEvents,
-      shortcutStopBarriers: mocks.shortcutStopBarriers
+      removeShortcutEvents: mocks.removeShortcutEvents
     }
   },
   Platform: { OS: "ios" },
@@ -43,7 +41,6 @@ const {
   clearActiveOwnerNativeShortcutQueue,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
-  readShortcutStopBarrier,
   syncShortcutCatalog
 } = await import("./shortcuts");
 const OWNER = { userId: "user-1", workspaceId: "workspace-1" };
@@ -57,22 +54,6 @@ describe("native Shortcut bridge", () => {
     mocks.removeShortcutEvents.mockReset();
     mocks.removeShortcutEvents.mockResolvedValue(0);
     mocks.settingsStore.clear();
-    mocks.shortcutStopBarriers.mockReset();
-    mocks.shortcutStopBarriers.mockResolvedValue([]);
-  });
-
-  
-  
-  
-  
-  it("reads the account's last Shortcut Stop time, and nothing for another account or a bad value", async () => {
-    mocks.shortcutStopBarriers.mockResolvedValue([
-      { userId: "user-2", workspaceId: "workspace-2", stoppedAt: "2026-10-14T09:00:00.000Z" },
-      { userId: "user-1", workspaceId: "workspace-1", stoppedAt: "2026-10-14T10:00:00.000Z" }
-    ]);
-    await expect(readShortcutStopBarrier(OWNER)).resolves.toBe("2026-10-14T10:00:00.000Z");
-    mocks.shortcutStopBarriers.mockResolvedValue([{ userId: "user-1", workspaceId: "workspace-1", stoppedAt: "soon" }]);
-    await expect(readShortcutStopBarrier(OWNER)).resolves.toBeNull();
   });
 
   it("mirrors non-secret native Shortcut config with the catalog", () => {

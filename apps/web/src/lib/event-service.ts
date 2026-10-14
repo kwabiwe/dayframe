@@ -512,6 +512,7 @@ async function processActivityEventWithClient(
   duplicate?: boolean;
   updatedExistingTimeEntry?: boolean;
   stopOutcome?: "stopped" | "superseded" | "ignored_unscoped";
+  startOutcome?: "recorded_completed";
 }> {
   const input = isRecord(rawInput) ? rawInput : {};
   const parsed = ActivityEventInputSchema.parse({
@@ -752,6 +753,7 @@ async function processActivityEventWithClient(
     let reviewItemId: string | undefined;
     let stopOutcome: "stopped" | "superseded" | "ignored_unscoped" | undefined =
       stopScope.mode === "ignored_unscoped" ? "ignored_unscoped" : undefined;
+    let startOutcome: "recorded_completed" | undefined;
 
     if(sourceDecision.kind==="existing_workout") {
       await client.query(`update activity_events ae set resolved_time_entry_id=te.id from time_entries te
@@ -787,6 +789,7 @@ async function processActivityEventWithClient(
                select id
                from time_entries
                where workspace_id = $2 and user_id = $3 and stopped_at is null
+                 and ($4::boolean is false or started_at < $1)
                order by started_at desc
                limit 1
                for update
@@ -796,7 +799,7 @@ async function processActivityEventWithClient(
              from current_timer
              where te.id = current_timer.id
              returning te.id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
+            [parsed.occurredAt, parsed.workspaceId, parsed.userId, stopScope.mode === "running_at"]
           );
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
@@ -805,7 +808,24 @@ async function processActivityEventWithClient(
       stopOutcome = timeEntryId ? "stopped" : "superseded";
     } else if (candidate.action === "start_timer") {
       const startedAt = suggestedStartedAtForEvent(parsed);
-      if (candidate.shouldClosePrevious) {
+      // A Shortcut Start can reach the server after later blocks or a later Shortcut Stop (it waited
+      // offline, or the app delivered it after a Stop). It then fills its own slot instead of replacing
+      // the running block: the block it interrupted ends at its start, and it ends where the next block
+      // starts or where the earliest later Stop ran (owner decision 14 Oct, #403 option c).
+      const lateStart = parsed.source === "shortcut" && isExplicitStartEvent(parsed.type)
+        ? await lateShortcutStartWindow(client, session, startedAt)
+        : null;
+      if (lateStart) {
+        if (lateStart.interruptedEntryId) {
+          await client.query(
+            `update time_entries
+             set stopped_at = $1, updated_at = now()
+             where workspace_id = $2 and user_id = $3 and id = $4 and started_at < $1`,
+            [startedAt, session.workspaceId, session.userId, lateStart.interruptedEntryId]
+          );
+        }
+        startOutcome = "recorded_completed";
+      } else if (candidate.shouldClosePrevious) {
         await closeActiveTimersForReplacement(client, session, startedAt);
       }
 
@@ -821,9 +841,10 @@ async function processActivityEventWithClient(
             review_status,
             description,
             started_at,
+            stopped_at,
             created_from_event_id
          )
-         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10)
+         values ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9, $10, $11)
          returning id`,
         [
           parsed.workspaceId,
@@ -835,6 +856,7 @@ async function processActivityEventWithClient(
           candidate.confidence,
           parsed.description ?? candidate.description ?? (isExplicitStartEvent(parsed.type) ? null : candidate.title),
           startedAt,
+          lateStart?.stoppedAt ?? null,
           eventId
         ]
       );
@@ -1012,6 +1034,7 @@ async function processActivityEventWithClient(
       timeEntryId,
       reviewItemId,
       stopOutcome,
+      ...(startOutcome ? { startOutcome } : {}),
       ...(matchingHealthSleepEntry ? { updatedExistingTimeEntry: true } : {})
     };
   } catch (error) {
@@ -1093,6 +1116,7 @@ function recordTimerMutationTiming(input: {
 type TimerStopScope =
   | { mode: "entry"; targetEntryId: string }
   | { mode: "current" }
+  | { mode: "running_at" }
   | { mode: "ignored_unscoped" };
 
 function timerStopScope(event: {
@@ -1107,6 +1131,11 @@ function timerStopScope(event: {
   }
   if (event.rawPayload.stopScope === "current") {
     return { mode: "current" };
+  }
+  // A Shortcut or NFC Stop stops whatever was running when it ran, never a block started after it,
+  // so a Stop delivered late (offline, or after a Start that was still waiting) cannot end a newer block.
+  if (event.rawPayload.stopScope === "running_at") {
+    return { mode: "running_at" };
   }
   // Older iOS App Intent builds used the same anonymous event for a Live
   // Activity button and the explicit Stop shortcut. It is impossible to tell
@@ -1123,6 +1152,55 @@ async function lockUserTimerState(client: pg.PoolClient, session: RequestSession
     "select pg_advisory_xact_lock(hashtext($1), hashtext($2))",
     [session.workspaceId, session.userId]
   );
+}
+
+/**
+ * Where a Shortcut Start that arrives late belongs, or null when it is the newest thing on the timeline
+ * (the usual case: it replaces the running block). Runs under the user's timer lock.
+ */
+// Health sleep and workout entries may overlap tracked blocks; they neither end nor bound a late Start.
+const TIMELINE_BLOCK_FILTER = `
+           and review_status = 'confirmed' and source not in ('health_sleep', 'health_workout')`;
+
+async function lateShortcutStartWindow(
+  client: pg.PoolClient,
+  session: RequestSession,
+  startedAt: string | Date
+): Promise<{ stoppedAt: Date; interruptedEntryId: string | null } | null> {
+  const startedMs = new Date(startedAt).getTime();
+  if (!Number.isFinite(startedMs)) return null;
+  const result = await client.query<{
+    interruptedEntryId: string | null;
+    interruptedStoppedAt: string | Date | null;
+    nextStartedAt: string | Date | null;
+    laterStopAt: string | Date | null;
+  }>(
+    `select
+       (select id from time_entries
+         where workspace_id = $1 and user_id = $2 and started_at < $3
+           and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
+         order by started_at desc limit 1) as "interruptedEntryId",
+       (select stopped_at from time_entries
+         where workspace_id = $1 and user_id = $2 and started_at < $3
+           and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
+         order by started_at desc limit 1) as "interruptedStoppedAt",
+       (select min(started_at) from time_entries
+         where workspace_id = $1 and user_id = $2 and started_at > $3${TIMELINE_BLOCK_FILTER}) as "nextStartedAt",
+       (select min(occurred_at) from activity_events
+         where workspace_id = $1 and user_id = $2 and occurred_at > $3
+           and event_type = 'timer_stop' and source = 'shortcut'
+           and raw_payload->>'stopScope' = 'running_at') as "laterStopAt"`,
+    [session.workspaceId, session.userId, new Date(startedMs)]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const bounds = [row.interruptedStoppedAt, row.nextStartedAt, row.laterStopAt]
+    .filter((value): value is string | Date => value !== null && value !== undefined)
+    .map((value) => new Date(value))
+    .filter((value) => Number.isFinite(value.getTime()) && value.getTime() > startedMs);
+  if (!bounds.length) return null;
+  const stoppedAt = new Date(Math.min(...bounds.map((value) => value.getTime())));
+  return { stoppedAt, interruptedEntryId: row.interruptedEntryId };
 }
 
 async function closeActiveTimersForReplacement(

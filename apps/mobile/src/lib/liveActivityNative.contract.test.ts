@@ -34,8 +34,8 @@ describe("native Live Activity presentation contract", () => {
       shortcuts.indexOf("struct DayframeShortcutEvent")
     );
     const ordinaryStop = shortcuts.slice(
-      shortcuts.indexOf("case .stopEntry"),
-      shortcuts.indexOf("case .stopLiveActivity")
+      shortcuts.indexOf("case .stopRunning:\n      guard queued"),
+      shortcuts.indexOf("case .stopLiveActivity(let activityId, let entryId, let apiBase, _)")
     );
 
     expect(shortcuts).toContain('@Parameter(title: "Activity ID")');
@@ -57,9 +57,7 @@ describe("native Live Activity presentation contract", () => {
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
     expect(shortcuts).not.toContain("DayframeLiveActivityController.stopLegacyActivities()");
-    expect(shortcuts).toContain("DayframeLiveActivityController.currentCanonicalEntryId()");
     expect(shortcuts).not.toContain('"stopScope": "current"');
-    expect(shortcuts).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.legacyUnscoped)");
     expect(directClient).toContain('clientEventId = event.localId');
     expect(directClient).toContain('/api/events');
     expect(directClient).toContain('/api/live-activities/stop');
@@ -78,53 +76,33 @@ describe("native Live Activity presentation contract", () => {
     expect(scopedSubmit).not.toContain('forHTTPHeaderField: "Authorization"');
     expect(scopedSubmit).toContain("pushToken.lowercased()");
     expect(stopCase).toContain("if delivered {");
+    // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
+    // started before the Stop whether or not delivery worked: the queued Stop names its own time.
     expect(ordinaryStop).toMatch(
-      /let delivered = await DayframeShortcutDirectEventClient\.submit\(event, context: context\)\s+if delivered \{\s+_ = await DayframeLiveActivityController\.stop/
+      /let activityIds = DayframeLiveActivityController\.activityIds\(startedAtOrBefore: event\.occurredAt\)\s+if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+_ = await DayframeLiveActivityController\.stop\(activityIds: activityIds\)/
     );
   });
 
-  it("Stop tracking names one entry: the Live Activity's, else the server's running entry, else nothing", () => {
+  it("Stop tracking stops what was running when it ran, with no Live Activity or lookup (#403)", () => {
     const shortcuts = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcuts.swift`, "utf8");
     const directClient = readFileSync(`${mobileRoot}ios/Dayframe/DayframeShortcutDirectEventClient.swift`, "utf8");
     const storage = readFileSync(`${mobileRoot}ios/Dayframe/DayframeSharedStorage.swift`, "utf8");
     const bridge = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityModuleBridge.m`, "utf8");
     const intent = shortcuts.slice(shortcuts.indexOf("struct StopTrackingIntent"), shortcuts.indexOf("struct DayframeLiveActivityStopIntent"));
-    const order = [
-      "DayframeShortcutStopBarriers.record(userId: owner.userId, workspaceId: owner.workspaceId, at: stoppedAt)",
-      "DayframeLiveActivityController.currentCanonicalEntryId()",
-      "guard let context = DayframeShortcutRuntimeContextStore.current() else {",
-      "catalog.belongs(userId: userId, workspaceId: workspaceId)",
-      "for start in DayframeNativeShortcutQueue.pendingStarts(userId: userId, workspaceId: workspaceId) {",
-      "DayframeShortcutDirectEventClient.serverRunningEntry(context: context)"
-    ].map((needle) => intent.indexOf(needle));
-    expect(order.every((index) => index > -1)).toBe(true);
-    expect([...order].sort((left, right) => left - right)).toEqual(order);
-    // Pending Starts are delivered with the checked session before the lookup; a failure stops that loop.
-    expect(intent).toMatch(/guard await DayframeShortcutDirectEventClient\.submit\(start, context: context\) else \{ break \}\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[start\.localId\]\)/);
-    const running = intent.slice(intent.indexOf("case .running(let entryId):"), intent.indexOf("case .nothingRunning:"));
-    expect(running).toContain("DayframeShortcutRuntimeContextStore.current() == context");
-    expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)");
-    expect(intent).toContain("DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)");
-    expect(intent).toMatch(/case \.nothingRunning:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.nothingRunning\)/);
-    expect(intent).toMatch(/case \.unavailable:\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.targetUnavailable\)/);
-    expect(intent).not.toContain("stopScope");
-    // A Start intent delivers at once as well; the queued copy stays only when that fails.
-    expect(shortcuts).toMatch(/if await DayframeShortcutDirectEventClient\.submit\(event, context: context\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}/);
-    expect(shortcuts).toContain("let catalog = checked ?? DayframeShortcutCatalogStore.catalog");
-    expect(storage).toContain("enum DayframeShortcutStopBarriers");
-    expect(storage).toMatch(/event\.type == "shortcut_action" &&\s+\(\(event\.userId == userId && event\.workspaceId == workspaceId\) \|\|\s+\(event\.userId == nil && event\.workspaceId == nil\)\)/);
-    expect(bridge).toContain("RCT_EXTERN_METHOD(shortcutStopBarriers:(RCTPromiseResolveBlock)resolve");
-    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
-    const lookup = directClient.slice(directClient.indexOf("static func serverRunningEntry(context:"), directClient.indexOf("static func isCanonicalEntryId("));
-    expect(lookup).toContain("/api/timer-state");
-    expect(lookup).toContain('forHTTPHeaderField: "Authorization"');
-    expect(lookup).toContain("httpResponse.statusCode == 200");
-    expect(lookup).toContain("isCanonicalEntryId(entryId) ? .running(entryId.lowercased()) : .unavailable");
-    expect(directClient).toContain("let context = pinned ?? DayframeShortcutRuntimeContextStore.current()");
+    expect(intent).toContain("await DayframeShortcutPerformer.perform(.stopRunning)");
+    expect(intent).not.toContain("currentCanonicalEntryId");
+    expect(shortcuts).toMatch(/case \.stopRunning:\s+actionName = "stop"\s+nextType = "timer_stop"\s+payload = \[\s+"origin": "ios_app_shortcut",\s+"stopScope": "running_at"\s+\]/);
+    // A Start delivers at once as well; the queued copy stays only when that fails.
+    expect(shortcuts).toMatch(/if await DayframeShortcutDirectEventClient\.submit\(event\) \{\s+_ = DayframeNativeShortcutQueue\.remove\(localIds: \[event\.localId\]\)\s+\}\s+case \.stopRunning:/);
+    // Direct delivery only with the app's session for the event's own account.
+    const submit = directClient.slice(directClient.indexOf("static func submit(_ event: DayframeShortcutEvent)"), directClient.indexOf("static func submitLiveActivityStop("));
+    expect(submit).toMatch(/context\.userId == userId,\s+context\.workspaceId == workspaceId\s+else \{\s+DayframeShortcutDeliveryDiagnosticStore\.record\(\.ownerUnverified\)\s+return false/);
+    expect(directClient).not.toContain("/api/timer-state");
+    expect(storage).not.toContain("DayframeShortcutStopBarriers");
     expect(storage).toContain("var userId: String? = nil");
-    expect(storage).toContain('return "nothing-running"');
-    expect(storage).toContain('return "target-unavailable"');
     expect(storage).toContain('return "owner-unverified"');
+    expect(bridge).not.toContain("shortcutStopBarriers");
+    expect(bridge).toContain("RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase");
   });
 
   it("limits background delivery to the staging and production Dayframe APIs", () => {

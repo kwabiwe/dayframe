@@ -73,6 +73,11 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/event-service.postgres.integration.test.ts
+      - name: Shortcut Stops and late Shortcut Starts
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_RUN_DB_INTEGRATION: "1"
+        run: npm run test -w @dayframe/web -- src/lib/shortcut-timeline.postgres.integration.test.ts
       - name: Home and Work place roles
         if: ${{ !cancelled() }}
         env:

@@ -26,7 +26,6 @@ type NativeShortcutEventType = "shortcut_action" | "timer_stop";
 type NativeShortcutQueueModule = {
   pendingShortcutEvents?: () => Promise<unknown>;
   removeShortcutEvents?: (localIds: string[]) => Promise<number>;
-  shortcutStopBarriers?: () => Promise<unknown>;
 };
 
 const nativeShortcutQueue = NativeModules.DayframeLiveActivityModule as NativeShortcutQueueModule | undefined;
@@ -130,21 +129,6 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
 
   await nativeShortcutQueue.removeShortcutEvents(transferredLocalIds);
   return { transferredCount, transferredLocalIds };
-}
-
-/**
- * When a Shortcut Stop last ran for this account (`DayframeShortcutStopBarriers`), or null. A Shortcut
- * Start older than this that the app delivers later is stopped at this time, so a late Start never undoes
- * the Stop (owner decision 14 Oct on #403).
- */
-export async function readShortcutStopBarrier(owner: MobileAccountOwner): Promise<string | null> {
-  if (Platform.OS !== "ios" || !nativeShortcutQueue?.shortcutStopBarriers) return null;
-  const raw = await nativeShortcutQueue.shortcutStopBarriers();
-  const barrier = (Array.isArray(raw) ? raw : []).filter(isRecord).find((item) =>
-    item.userId === owner.userId && item.workspaceId === owner.workspaceId
-  );
-  const stoppedAt = typeof barrier?.stoppedAt === "string" ? barrier.stoppedAt : null;
-  return stoppedAt && Number.isFinite(Date.parse(stoppedAt)) ? stoppedAt : null;
 }
 
 function parseNativeShortcutQueue(value: unknown) {

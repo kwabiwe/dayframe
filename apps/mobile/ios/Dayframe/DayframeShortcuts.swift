@@ -39,56 +39,12 @@ struct StopTrackingIntent: AppIntent {
   static var openAppWhenRun: Bool = false
 
   func perform() async throws -> some IntentResult {
-    // A replayable current/global Stop can target a different timer if the request is delayed, so the
-    // Stop always names one entry: the running Live Activity's, else the entry the server says is running
-    // now. Until 14 Oct the Live Activity was the only source, so NFC and Shortcuts Stops did nothing
-    // whenever no Live Activity carried an entry (none reached production from 13 Aug).
-    let stoppedAt = Date()
-    let catalog = DayframeShortcutCatalogStore.catalog
-    // Any Start still waiting for delivery belongs to the block being stopped: when the app later delivers
-    // one older than this, it stops that Start's own entry at this time (`DayframeShortcutStopBarriers`).
-    if let owner = catalog.owner {
-      DayframeShortcutStopBarriers.record(userId: owner.userId, workspaceId: owner.workspaceId, at: stoppedAt)
-    }
-    if let entryId = DayframeLiveActivityController.currentCanonicalEntryId() {
-      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId))
-      return .result()
-    }
-    // The lookup, the queued event and its delivery must all belong to one account and one session.
-    guard let context = DayframeShortcutRuntimeContextStore.current() else {
-      DayframeShortcutDeliveryDiagnosticStore.record(.contextUnavailable)
-      return .result()
-    }
-    guard
-      let userId = context.userId,
-      let workspaceId = context.workspaceId,
-      catalog.belongs(userId: userId, workspaceId: workspaceId)
-    else {
-      DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
-      return .result()
-    }
-    // Starts still waiting on this phone go first, oldest first, with the same session, so the block the
-    // server reports is the one the user means. One that cannot be delivered now is closed by the app later.
-    for start in DayframeNativeShortcutQueue.pendingStarts(userId: userId, workspaceId: workspaceId) {
-      guard await DayframeShortcutDirectEventClient.submit(start, context: context) else { break }
-      _ = DayframeNativeShortcutQueue.remove(localIds: [start.localId])
-    }
-    switch await DayframeShortcutDirectEventClient.serverRunningEntry(context: context) {
-    case .running(let entryId):
-      guard
-        DayframeShortcutRuntimeContextStore.current() == context,
-        DayframeShortcutCatalogStore.catalog.belongs(userId: userId, workspaceId: workspaceId)
-      else {
-        DayframeShortcutDeliveryDiagnosticStore.record(.ownerUnverified)
-        return .result()
-      }
-      // The event is built from the checked catalog and delivered with the checked session.
-      await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)
-    case .nothingRunning:
-      DayframeShortcutDeliveryDiagnosticStore.record(.nothingRunning)
-    case .unavailable:
-      DayframeShortcutDeliveryDiagnosticStore.record(.targetUnavailable)
-    }
+    // Stops whatever was running when the Stop ran (the server's `running_at` scope), never a block
+    // started after it, so the Stop needs no Live Activity and is safe to deliver late. A Shortcut Start
+    // that reaches the server after it fills its own slot there (owner decision 14 Oct, #403 option c).
+    // Until 14 Oct the Stop needed a Live Activity's entry, so NFC and Shortcuts Stops did nothing without
+    // one (none reached production from 13 Aug).
+    await DayframeShortcutPerformer.perform(.stopRunning)
     return .result()
   }
 }
@@ -173,7 +129,7 @@ struct DayframeShortcuts: AppShortcutsProvider {
 
 private enum DayframeShortcutAction {
   case start(description: String?, categoryName: String?, workspaceName: String?)
-  case stopEntry(entryId: String)
+  case stopRunning
   case stopLiveActivity(activityId: String, entryId: String, apiBase: String, clientEventId: String)
 }
 
@@ -185,12 +141,8 @@ private func dayframeCleanText(_ value: String?) -> String? {
 }
 
 private enum DayframeShortcutPerformer {
-  static func perform(
-    _ action: DayframeShortcutAction,
-    context: DayframeShortcutRuntimeContext? = nil,
-    catalog checked: DayframeShortcutCatalog? = nil
-  ) async {
-    let catalog = checked ?? DayframeShortcutCatalogStore.catalog
+  static func perform(_ action: DayframeShortcutAction) async {
+    let catalog = DayframeShortcutCatalogStore.catalog
     // App Intents can run while Dayframe is signed out. Never create an
     // ownerless event that a different account could inherit later.
     guard catalog.user != nil, catalog.workspace != nil else {
@@ -216,24 +168,24 @@ private enum DayframeShortcutPerformer {
           startedAt: event.occurredAt
         )
       }
-      // Delivered now, as Stop is, so a later Stop finds this block on the server; the queued copy stays
-      // only when this fails (the app delivers it later; the server dedupes by its client event ID).
-      if await DayframeShortcutDirectEventClient.submit(event, context: context) {
+      // Delivered now, as Stop is; the queued copy stays only when this fails (the app delivers it later,
+      // and the server dedupes by its client event ID and places a late Start in its own slot).
+      if await DayframeShortcutDirectEventClient.submit(event) {
         _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
       }
-    case .stopEntry(let entryId):
-      // Ending the Activity can terminate the background intent process on
-      // current iOS before a concurrent URLSession request completes. Finish
-      // the bounded server/APNs path first, then dismiss locally. A failed
-      // request remains queued for foreground replay.
-      let activityIds = DayframeLiveActivityController.activityIds(entryId: entryId)
-      let delivered = await DayframeShortcutDirectEventClient.submit(event, context: context)
-      if delivered {
-        _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
-        if queued {
-          _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
-        }
+    case .stopRunning:
+      guard queued else {
+        return
       }
+      // Ending the Activity can terminate the background intent process on current iOS before a
+      // concurrent URLSession request completes, so deliver first, then end the Activities of blocks that
+      // started before this Stop. They end even when delivery fails: the queued Stop names its own time,
+      // so the app's later delivery stops the same block.
+      let activityIds = DayframeLiveActivityController.activityIds(startedAtOrBefore: event.occurredAt)
+      if await DayframeShortcutDirectEventClient.submit(event) {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      }
+      _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
       // The event and local dismissal share the immutable identity archived in
       // the exact Live Activity view. The push token is the server-registered,
@@ -300,13 +252,12 @@ struct DayframeShortcutEvent: Codable {
       if let workspaceName = dayframeCleanText(workspaceName) {
         payload["workspaceName"] = workspaceName
       }
-    case .stopEntry(let entryId):
+    case .stopRunning:
       actionName = "stop"
       nextType = "timer_stop"
       payload = [
         "origin": "ios_app_shortcut",
-        "stopScope": "entry",
-        "targetEntryId": entryId
+        "stopScope": "running_at"
       ]
     case .stopLiveActivity(let activityId, let entryId, _, let clientEventId):
       actionName = "stop"
@@ -383,15 +334,6 @@ private enum DayframeShortcutCatalogStore {
 private struct DayframeShortcutCatalog: Decodable {
   let user: DayframeShortcutUser?
   let workspace: DayframeShortcutWorkspace?
-
-  func belongs(userId: String, workspaceId: String) -> Bool {
-    user?.id == userId && workspace?.id == workspaceId
-  }
-
-  var owner: (userId: String, workspaceId: String)? {
-    guard let userId = user?.id, let workspaceId = workspace?.id else { return nil }
-    return (userId, workspaceId)
-  }
   let categories: [DayframeShortcutCategory]
 
   var categoryNames: [String] {

@@ -4,8 +4,6 @@ import Security
 
 enum DayframeShortcutDeliveryDiagnostic {
   case legacyUnscoped
-  case nothingRunning
-  case targetUnavailable
   case ownerUnverified
   case started
   case contextUnavailable
@@ -20,10 +18,6 @@ enum DayframeShortcutDeliveryDiagnostic {
     switch self {
     case .legacyUnscoped:
       return "legacy-unscoped"
-    case .nothingRunning:
-      return "nothing-running"
-    case .targetUnavailable:
-      return "target-unavailable"
     case .ownerUnverified:
       return "owner-unverified"
     case .started:
@@ -262,22 +256,6 @@ enum DayframeNativeShortcutQueue {
     }
   }
 
-  /// Starts still waiting in this queue for an account (and ownerless ones from older builds, which the
-  /// app would adopt into the active account), oldest first. A Shortcut Stop delivers them before it asks
-  /// the server which block is running.
-  static func pendingStarts(userId: String, workspaceId: String) -> [DayframeShortcutEvent] {
-    processLock.withLock {
-      let events = withSharedQueueLock { queueURL in readSharedUnlocked(queueURL: queueURL) } ?? []
-      return events
-        .filter { event in
-          event.type == "shortcut_action" &&
-            ((event.userId == userId && event.workspaceId == workspaceId) ||
-              (event.userId == nil && event.workspaceId == nil))
-        }
-        .sorted { $0.occurredAt < $1.occurredAt }
-    }
-  }
-
   static func pendingDictionaries() -> [[String: Any]] {
     processLock.withLock {
       let events = withSharedQueueLock { queueURL in
@@ -418,40 +396,4 @@ enum DayframeNativeShortcutQueue {
   private static func clearLegacyEvents() {
     UserDefaults.standard.removeObject(forKey: legacyKey)
   }
-}
-
-/// When a Shortcut Stop ran, per account (Codex r1–r4 on #403, owner decision 14 Oct). A Shortcut Start
-/// that was still waiting to be delivered (offline, or an app delivery that failed) belongs to the block the
-/// user then stopped: when the app later delivers a Start older than this time, it stops that Start's own
-/// entry at this time, so the Stop is never undone by a late Start and the time between is kept.
-enum DayframeShortcutStopBarriers {
-  private static let key = "dayframe.shortcutStopBarriers.v1"
-  private static let lock = NSLock()
-
-  private static var defaults: UserDefaults? {
-    DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
-  }
-
-  static func record(userId: String, workspaceId: String, at date: Date) {
-    lock.withLock {
-      guard let defaults else { return }
-      let stoppedAt = ISO8601DateFormatter.dayframeFractional.string(from: date)
-      var barriers = (defaults.array(forKey: key) as? [[String: String]] ?? [])
-        .filter { !($0["userId"] == userId && $0["workspaceId"] == workspaceId) }
-      barriers.append(["userId": userId, "workspaceId": workspaceId, "stoppedAt": stoppedAt])
-      defaults.set(barriers, forKey: key)
-    }
-  }
-
-  static func all() -> [[String: String]] {
-    lock.withLock { defaults?.array(forKey: key) as? [[String: String]] ?? [] }
-  }
-}
-
-extension ISO8601DateFormatter {
-  static let dayframeFractional: ISO8601DateFormatter = {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter
-  }()
 }
