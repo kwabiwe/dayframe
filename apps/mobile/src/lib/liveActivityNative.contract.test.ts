@@ -105,7 +105,9 @@ describe("native Live Activity presentation contract", () => {
     expect(running).toContain("await DayframeShortcutPerformer.perform(.stopEntry(entryId: entryId), context: context, catalog: catalog)");
     // Codex r2: a Start queued while the lookup ran still wins, and the marker outlives the app's hand-off.
     expect(running).toContain("guard !startPending(userId: userId, workspaceId: workspaceId) else {");
-    expect(intent).toMatch(/DayframeNativeShortcutQueue\.hasPendingStart\(userId: userId, workspaceId: workspaceId\) \|\|\s+DayframePendingShortcutStarts\.contains\(userId: userId, workspaceId: workspaceId\)/);
+    expect(intent).toMatch(/DayframeNativeShortcutQueue\.hasPendingStart\(userId: userId, workspaceId: workspaceId\) \|\|\s+!DayframePendingShortcutStarts\.allowsServerFallback\(userId: userId, workspaceId: workspaceId\)/);
+    // Codex r3: no fallback until the app has reconciled the account's markers once (older builds' Starts).
+    expect(storage).toMatch(/return reconciled && !markers\.contains/);
     expect(shortcuts).toContain("let catalog = checked ?? DayframeShortcutCatalogStore.catalog");
     expect(shortcuts).toMatch(/guard queued else \{\s+return\s+\}\s+if let userId = event\.userId, let workspaceId = event\.workspaceId \{\s+DayframePendingShortcutStarts\.add/);
     expect(storage).toContain("enum DayframePendingShortcutStarts");

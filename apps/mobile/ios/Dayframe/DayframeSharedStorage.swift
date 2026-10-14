@@ -425,7 +425,31 @@ enum DayframeNativeShortcutQueue {
 /// it could stop a newer block and the older Start would replay afterwards (Codex r2 on #403).
 enum DayframePendingShortcutStarts {
   private static let key = "dayframe.pendingShortcutStarts.v1"
+  /// Accounts whose markers the app has reconciled at least once (Codex r3 on #403): Starts that an
+  /// older build moved into the app's queue have no marker until then, so the fallback stays off.
+  private static let reconciledKey = "dayframe.pendingShortcutStarts.reconciled.v1"
   private static let lock = NSLock()
+
+  static func markReconciled(userId: String, workspaceId: String) {
+    lock.withLock {
+      guard let defaults else { return }
+      var owners = defaults.stringArray(forKey: reconciledKey) ?? []
+      let owner = "\(workspaceId):\(userId)"
+      guard !owners.contains(owner) else { return }
+      owners.append(owner)
+      defaults.set(owners, forKey: reconciledKey)
+    }
+  }
+
+  /// Whether the Stop fallback may run for this account: reconciled once, and no Start marker left.
+  static func allowsServerFallback(userId: String, workspaceId: String) -> Bool {
+    lock.withLock {
+      guard let defaults else { return false }
+      let reconciled = (defaults.stringArray(forKey: reconciledKey) ?? []).contains("\(workspaceId):\(userId)")
+      let markers = defaults.array(forKey: key) as? [[String: String]] ?? []
+      return reconciled && !markers.contains { $0["userId"] == userId && $0["workspaceId"] == workspaceId }
+    }
+  }
 
   private static var defaults: UserDefaults? {
     DayframeSharedStorageConfiguration.appGroupIdentifier.flatMap { UserDefaults(suiteName: $0) }
@@ -441,12 +465,6 @@ enum DayframePendingShortcutStarts {
     }
   }
 
-  static func contains(userId: String, workspaceId: String) -> Bool {
-    lock.withLock {
-      let markers = defaults?.array(forKey: key) as? [[String: String]] ?? []
-      return markers.contains { $0["userId"] == userId && $0["workspaceId"] == workspaceId }
-    }
-  }
 
   static func all() -> [[String: String]] {
     lock.withLock { defaults?.array(forKey: key) as? [[String: String]] ?? [] }

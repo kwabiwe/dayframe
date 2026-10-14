@@ -50,6 +50,15 @@ RCT_EXTERN_METHOD(setRuntimeContextWithOwner:(NSString *)apiBase
 RCT_EXTERN_METHOD(pendingShortcutStartMarkers:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(addPendingShortcutStartMarkers:(NSArray *)markers
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(markPendingShortcutStartsReconciled:(NSString *)userId
+                  workspaceId:(NSString *)workspaceId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(clearPendingShortcutStartMarkers:(NSArray *)localIds
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)

@@ -93,7 +93,7 @@ struct StopTrackingIntent: AppIntent {
 
   private func startPending(userId: String, workspaceId: String) -> Bool {
     DayframeNativeShortcutQueue.hasPendingStart(userId: userId, workspaceId: workspaceId) ||
-      DayframePendingShortcutStarts.contains(userId: userId, workspaceId: workspaceId)
+      !DayframePendingShortcutStarts.allowsServerFallback(userId: userId, workspaceId: workspaceId)
   }
 }
 
