@@ -60,6 +60,17 @@ const MAX_LOCAL_EVIDENCE_ITEMS = 5_000;
 // an iPhone left overnight), so they have their own cap and never displace
 // location evidence. Seven-day expiry normally bounds them first.
 const MAX_LOCAL_MOTION_ITEMS = 10_000;
+/**
+ * Retention runs after every stored sample, so its queries must not scan the journal. On a full journal
+ * (5,000 location and 10,000 motion rows) the unindexed expiry delete and the two `json_extract` counts
+ * cost about 37 ms of SQLite work per sample on a Mac (more on the iPhone); these indexes make each a
+ * lookup. The count's WHERE must use exactly this expression for SQLite to use its index.
+ */
+export const MOTION_KIND_EXPRESSION = "(json_extract(evidence_json, '$.kind') = 'motion_activity')";
+export const RETENTION_EXPIRY_SQL = "delete from location_evidence_journal where expires_at < ?";
+export function retentionKindCountSql(motion: boolean) {
+  return `select count(*) as count from location_evidence_journal where ${MOTION_KIND_EXPRESSION} = ${motion ? 1 : 0}`;
+}
 const ACTIVE_ACCOUNT_KEY = "active_account";
 const ACTIVE_DEVICE_KEY = "active_device";
 const ACTIVE_TIME_ZONE_KEY = "active_time_zone";
@@ -241,6 +252,16 @@ async function database() {
         `);
         await transaction.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
       });
+    }
+    // Idempotent: built once on the first open after upgrade (one pass over the bounded journal). Best
+    // effort: the retention queries are correct without them, only slower, so a failure never blocks the store.
+    try {
+      await db.execAsync(`
+        create index if not exists location_evidence_expires_idx on location_evidence_journal(expires_at);
+        create index if not exists location_evidence_motion_idx on location_evidence_journal(${MOTION_KIND_EXPRESSION});
+      `);
+    } catch {
+      // The next open tries again.
     }
     // Upgrade privacy cleanup is idempotent and uses the existing bounded journal.
     // Ambiguous evidence is deleted locally, never adopted by another account.
@@ -1377,10 +1398,10 @@ export async function applyLocationRetention() {
 async function applyLocationRetentionUnsafe() {
   const db = await database();
   const now = new Date().toISOString();
-  const expired = await db.runAsync("delete from location_evidence_journal where expires_at < ?", now);
+  const expired = await db.runAsync(RETENTION_EXPIRY_SQL, now);
   for (const [motion, cap] of [[false, MAX_LOCAL_EVIDENCE_ITEMS], [true, MAX_LOCAL_MOTION_ITEMS]] as const) {
-    const kind = `(json_extract(evidence_json, '$.kind') = 'motion_activity') = ${motion ? 1 : 0}`;
-    const count = await db.getFirstAsync<{ count: number }>(`select count(*) as count from location_evidence_journal where ${kind}`);
+    const kind = `${MOTION_KIND_EXPRESSION} = ${motion ? 1 : 0}`;
+    const count = await db.getFirstAsync<{ count: number }>(retentionKindCountSql(motion));
     const overflow = (count?.count ?? 0) - cap;
     if (overflow <= 0) continue;
     const result = await db.runAsync(
