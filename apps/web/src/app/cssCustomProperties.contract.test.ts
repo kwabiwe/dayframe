@@ -11,9 +11,6 @@ import { describe, expect, it } from "vitest";
 const root = process.cwd();
 const css = readFileSync(join(root, "src/app/globals.css"), "utf8");
 
-/** Pre-existing undefined tokens (`--category-color` is only read by the unused `.report-category-marker` rule), tracked as a separate follow-up; do not add to this list. */
-const KNOWN_UNDEFINED = new Set(["--danger-soft", "--shadow-raised", "--category-color"]);
-
 const NAME = "--[A-Za-z0-9_-]+";
 
 /** CSS without comments, strings and url(...) bodies, so literal "var(--x)" text is never read as code. */
@@ -93,8 +90,9 @@ describe("custom property scanner", () => {
 
 describe("globals.css custom properties", () => {
   it("never reads an undefined custom property without a fallback", () => {
-    const missing = undefinedReads(css, appDefinitions()).filter((name) => !KNOWN_UNDEFINED.has(name));
-    expect(missing).toEqual([]);
+    // No exceptions: the last three (--danger-soft, --shadow-raised, --category-color) were fixed
+    // on 14 Oct 2026.
+    expect(undefinedReads(css, appDefinitions())).toEqual([]);
   });
 
   it("draws the Calendar drag ghost and resize tip from real tokens", () => {
