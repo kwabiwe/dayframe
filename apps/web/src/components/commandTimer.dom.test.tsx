@@ -103,7 +103,7 @@ describe("Blocks command block", () => {
 });
 
 describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
-  it("says Switched with the time logged to the block it replaced, without Undo", async () => {
+  it("says only Switched to {activity} on one line, without Undo (owner option A, 14 Oct)", async () => {
     const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
     runtime = runtimeFixture({ activeEntry: running });
     // The toast names what the Start actually replaced when it ran (here an earlier queued block),
@@ -119,7 +119,12 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     render(<PersistentTimerBar />);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Start Writing (2)" })); });
     expect(runtime.startTimer).toHaveBeenCalledWith({ categoryId: "write", description: "", tagNames: [] }, { dedupeRunning: true });
-    expect(screen.getByRole("status").textContent).toContain("Switched to Writing · 12m logged to Standup");
+    const status = screen.getByRole("status");
+    expect(status.textContent?.replace(/\s+/g, " ").trim()).toBe("Switched to Writing");
+    expect(status.textContent).not.toMatch(/logged|Standup|12m/);
+    // Only the name truncates: the lead is its own non-shrinking span.
+    expect(status.querySelector(".df-toast-lead")?.textContent).toBe("Switched to");
+    expect(status.querySelector(".df-toast-name")?.textContent).toBe("Writing");
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
   });
 

@@ -9,7 +9,7 @@ import type {
   RefObject
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { resolveActivityIcon, type DayframeGlyph } from "@dayframe/shared";
+import { previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
 import { Clock3, Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -32,7 +32,7 @@ import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
-import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
+import { alreadyRecordingToastMessage, SWITCHED_TOAST_LEAD, switchedToastMessage } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
@@ -40,7 +40,7 @@ const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 
-type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; token: number };
+type TimerNotice = { exiting: boolean; label: string; parts?: { lead: string; name: string }; swatch?: CSSProperties; token: number };
 
 /**
  * The idle description's placeholder is the example the old "Try …" line under the field gave
@@ -48,6 +48,8 @@ type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; to
  * Phones get a shorter one so it is not cut off beside the activity block and Start.
  */
 export const COMMAND_PLACEHOLDER = "Try “Write report @work #client”";
+/** The block started, but the end the chip offered is no longer the last one: it stays at now. */
+export const PREVIOUS_END_CHANGED_NOTICE = "Started now: an earlier block ends later than that, so the start wasn't moved.";
 export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
@@ -60,6 +62,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     isManualEntryOpen,
     isTimerBusy,
     openManualEntry,
+    readShellData,
     setTimerDraft,
     shellData: data,
     startTimer,
@@ -85,6 +88,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  // Idle: the minute clock for the "From 10:15 · after …" offer (a start of minute, set after
+  // hydration so the server render has no offer; no per-second work).
+  const [idleMinute, setIdleMinute] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
@@ -99,6 +105,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const timerActionsTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const active = data?.activeEntry ?? null;
+  const idle = !active;
   const selectedCategory = data?.categories.find((category) => category.id === timerDraft.categoryId) ?? null;
   const activeStartedAtMs = active ? new Date(active.startedAt).getTime() : 0;
   const lastStoppedAt = useMemo(() => {
@@ -108,6 +115,17 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       .map((entry) => entry.stoppedAt as string)
       .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
   }, [active?.id, data]);
+  // Owner idea 1 (14 Oct 2026; PRD D16): idle, with today's last block ended 1 min–4 h ago, offer
+  // to start from its end. Only the blocks already loaded, worked out once a minute (owner: no new
+  // query, field or per-second work). Not beside a trailing duration (that adds a finished block).
+  const entries = data?.entries;
+  const durationShorthand = Boolean(timerDraft.description.trim() && parseCommand(timerDraft.description).durationSeconds);
+  const previousEnd = useMemo(
+    () => (idle && idleMinute && entries && !durationShorthand
+      ? previousEndOffer(entries, { dayStartMs: localDayStartMs(idleMinute), startMs: idleMinute })
+      : null),
+    [durationShorthand, entries, idle, idleMinute]
+  );
   const durationSeconds = active
     ? Math.max(active.durationSeconds, Math.floor((now - activeStartedAtMs) / 1000))
     : 0;
@@ -167,6 +185,22 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     const interval = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, [active]);
+
+  useEffect(() => {
+    if (!idle) return undefined;
+    const tick = () => setIdleMinute(Math.floor(Date.now() / 60_000) * 60_000);
+    let interval = 0;
+    const first = window.setTimeout(tick, 0);
+    const aligned = window.setTimeout(() => {
+      tick();
+      interval = window.setInterval(tick, 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(aligned);
+      window.clearInterval(interval);
+    };
+  }, [idle]);
 
   // Autosave sends the description exactly as shown, on its usual debounce, whether or not a list
   // is open: nothing is parsed, stripped or held. A half-typed `@wri` may be saved for a moment;
@@ -359,13 +393,44 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
       } else if (outcome.replaced) {
-        announce(switchedToastMessage(action.label, outcome.replaced, Date.parse(outcome.switchedAt)), swatch);
+        announce(switchedToastMessage(action.label), swatch, { lead: SWITCHED_TOAST_LEAD, name: action.label });
       }
     });
   }
 
-  function announce(label: string, swatch?: CSSProperties) {
-    setNotice({ exiting: false, label, swatch, token: ++noticeSequence.current });
+  // "From 10:15 · after Write report": the usual Start, then the same start-time edit as the start
+  // editor's "Set to last stop time" (owner: one path). Before the edit the loaded blocks are checked
+  // again: if a newer block has ended since, or the Start did not run, the block stays at now and
+  // the bar says so. Another device's change the bar hasn't loaded yet is not seen (accepted, as
+  // for the existing button).
+  async function startFromPreviousEnd(offer: PreviousEndOffer) {
+    setCommandNotice(null);
+    setSuggestionsOpen(false);
+    const command = parseCommand(timerDraft.description);
+    const outcome = await startTimer({ categoryId: timerDraft.categoryId, description: command.description, tagNames: timerDraft.tagNames });
+    if (!outcome.ok || !outcome.own || outcome.alreadyRunning || !outcome.startedEntryId) return;
+    // The runtime's blocks now (the render's `data` predates the Start and its refresh; Codex r5).
+    const current = readShellData();
+    const running = current?.activeEntry;
+    if (!current || !running) return;
+    const runningStartMs = Date.parse(running.startedAt);
+    const still = previousEndOffer(current.entries, {
+      dayStartMs: localDayStartMs(runningStartMs),
+      excludeId: running.id,
+      startMs: runningStartMs
+    });
+    if (still?.startedAt !== offer.startedAt) {
+      setCommandNotice(PREVIOUS_END_CHANGED_NOTICE);
+      return;
+    }
+    // Only the block this Start created: never one that replaced it meanwhile (Codex r5).
+    await updateActiveStartTime(offer.startedAt, {
+      expectedEntryIds: [outcome.startedEntryId, ...(outcome.startedServerId ? [outcome.startedServerId] : [])]
+    });
+  }
+
+  function announce(label: string, swatch?: CSSProperties, parts?: { lead: string; name: string }) {
+    setNotice({ exiting: false, label, parts, swatch, token: ++noticeSequence.current });
   }
 
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
@@ -547,9 +612,23 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               <small>Started {formatTime(active.startedAt)}</small>
             </button>
           ) : (
-            <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
-              {formatClockDuration(0)}
-            </span>
+            <div className="df-cmd-idle">
+              <span className="df-cmd-clock is-idle" aria-label="Nothing is recording. Elapsed time 00:00.">
+                {formatClockDuration(0)}
+              </span>
+              {previousEnd ? (
+                <button
+                  aria-label={`Start from ${formatTime(previousEnd.startedAt)}, after ${previousEnd.previousName}`}
+                  className="df-cmd-from"
+                  disabled={isTimerBusy}
+                  onClick={() => void startFromPreviousEnd(previousEnd)}
+                  type="button"
+                >
+                  <span className="df-cmd-from-lead">From <span className="tabular">{formatTime(previousEnd.startedAt)}</span> · after</span>
+                  <span className="df-cmd-from-name">{previousEnd.previousName}</span>
+                </button>
+              ) : null}
+            </div>
           )}
 
           {active ? (
@@ -776,7 +855,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       ) : null}
 
       {notice ? (
-        <BlocksToast exiting={notice.exiting} key={notice.token} message={notice.label} swatchStyle={notice.swatch} />
+        <BlocksToast exiting={notice.exiting} key={notice.token} lead={notice.parts?.lead} message={notice.parts?.name ?? notice.label} swatchStyle={notice.swatch} />
       ) : null}
 
       {isManualEntryOpen ? (
@@ -1128,6 +1207,13 @@ function manualEntryDefaults(selectedDate: string) {
 
 function dateTimeLocal(date: Date) {
   return `${dateKey(date)}T${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+/** Midnight starting the viewer's local day containing `ms`. */
+function localDayStartMs(ms: number) {
+  const day = new Date(ms);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
 }
 
 function dateKey(date: Date) {
