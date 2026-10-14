@@ -115,7 +115,8 @@ async function displayContext(
 
 /**
  * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
- * with a changed title, place, category, time, confidence or note, and a created Commute activity. A replay re-emits every finalised segment, so the
+ * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
+ * suggestions or payload changed (Review renders the payload); and a created Commute activity. A replay re-emits every finalised segment, so the
  * emitted count is almost never zero; the app refreshes its Dashboard only when this count is.
  */
 export type SemanticChangeCounter = { count: number };
@@ -222,7 +223,16 @@ export async function emitReviewSemanticSegments(
   });
   const eventIds = new Map<string, string>();
   for (const batch of chunks(rows)) {
-    const events = await client.query<{id: string; clientEventId: string}>(`
+    // `previous` reads the rows as they were before this statement (all CTEs share one snapshot), so
+    // `changed` says whether an existing event's stored fields really changed: Review renders its payload
+    // (Motion & Fitness travel mode, for one) even when the Review item's own columns stay the same.
+    const events = await client.query<{id: string; clientEventId: string; changed: boolean}>(`
+      with previous as (
+        select client_event_id, occurred_at, confidence, raw_payload, suggested_category_id, suggested_place_id
+        from activity_events
+        where workspace_id = $1 and user_id = $2
+          and client_event_id in (select r.client_event_id from jsonb_to_recordset($3::jsonb) as r(client_event_id text))
+      ), upserted as (
       insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at,
         confidence, raw_payload, suggested_category_id, suggested_place_id, review_status)
       select $1, $2, r.client_event_id, 'location_learning', r.event_type, r.occurred_at,
@@ -252,8 +262,18 @@ export async function emitReviewSemanticSegments(
          else activity_events.suggested_place_id
        end
 
-      returning id, client_event_id as "clientEventId"`, [session.workspaceId, session.userId, JSON.stringify(batch)]);
+      returning id, client_event_id, occurred_at, confidence, raw_payload, suggested_category_id, suggested_place_id
+      )
+      select u.id, u.client_event_id as "clientEventId",
+        (p.client_event_id is not null and
+          (p.occurred_at, p.confidence, p.raw_payload, p.suggested_category_id, p.suggested_place_id)
+          is distinct from (u.occurred_at, u.confidence, u.raw_payload, u.suggested_category_id, u.suggested_place_id)
+        ) as changed
+      from upserted u left join previous p on p.client_event_id = u.client_event_id`,
+      [session.workspaceId, session.userId, JSON.stringify(batch)]);
     for (const event of events.rows) eventIds.set(event.clientEventId, event.id);
+    // New events are counted through the Review item inserted for each below.
+    changes.count += events.rows.filter((event) => event.changed).length;
   }
   const linked = rows.map(row => ({ ...row, event_id: eventIds.get(row.client_event_id)! }));
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {

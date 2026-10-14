@@ -286,6 +286,16 @@ async function validateSemanticIdempotencyAndRollback() {
   const retry = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
   assert(retry.replay.semanticSegmentCount > 0, "Retry did not re-emit the finalised segments.");
   assert.equal(retry.replay.semanticChangeCount, 0, "An identical replay reported Review changes.");
+  // A replay that changes only an open event's payload (as late Motion & Fitness evidence changes a
+  // journey's travel mode, which Review shows) still counts, though no Review column changes.
+  await pool.query(
+    `update activity_events set raw_payload = raw_payload || '{"staleSemanticField": true}'::jsonb
+     where id = (select id from activity_events where workspace_id = $1 and user_id = $2
+       and source = 'location_learning' and review_status = 'needs_review' order by occurred_at, id limit 1)`,
+    [WORKSPACE_ID, USER_ID]
+  );
+  const payloadOnly = await ingestAndReplayLocationEvidence(semanticBatch, session, PROCESSING_AT);
+  assert.equal(payloadOnly.replay.semanticChangeCount, 1, "A payload-only replay change was not counted.");
   assert.equal(await count("review_items"), reviewBeforeRetry, "Semantic retry duplicated review items.");
   assert.equal(await count("activity_events"), eventBeforeRetry, "Semantic retry duplicated activity events.");
 
