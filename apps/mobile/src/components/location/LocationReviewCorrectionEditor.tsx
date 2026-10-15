@@ -563,6 +563,8 @@ export function LocationReviewCorrectionEditor({
   async function chooseNearbyPlace(place: NearbyPointOfInterestState["places"][number]) {
     const controller = nearbyControllerRef.current;
     if (!controller) return;
+    // A pick sets and closes an open time wheel, as any other place change does (Codex r2 on #432).
+    setTimeWheel(null);
     const token = ++placePickTokenRef.current;
     setResolvingSuggestion(true);
     try {
