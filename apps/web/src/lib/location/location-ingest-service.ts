@@ -1,5 +1,5 @@
 import { emitReviewSemanticSegments, type SemanticChangeCounter, timeAwayPlaceName } from "./location-review-semantic-batch";
-import { removeUnusedAutoLogOrphans } from "./location-auto-log";
+import { autoLogReconciliation, removeUnusedAutoLogOrphans } from "./location-auto-log";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
@@ -279,7 +279,9 @@ async function replayAndEmitLocationSemantics(
   const replay = await replayLocationEvidence(client, session, {
     ...options,
     semanticChanges,
-    retireAutoLoggedVisits: emitsReview,
+    autoLogReconciliation: emitsReview
+      ? autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
+      : undefined,
     // This is deliberately derived from the server decision, never from the
     // requested rollout mode or a request-visible profile field.
     persistenceProfile: options.rollout.effectiveMode === "v2_review"
@@ -295,7 +297,11 @@ async function replayAndEmitLocationSemantics(
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
     );
     if (options.rollout.effectiveMode === "v2_review") {
-      const autoLog = { orphans: replay.autoLogOrphans, used: new Set<string>() };
+      const autoLog = {
+        orphans: replay.autoLogOrphans,
+        used: new Set<string>(),
+        reconciliation: autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
+      };
       semanticSegmentCount = await emitReviewSemanticSegments(
         client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges, autoLog
       );

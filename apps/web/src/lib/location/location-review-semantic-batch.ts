@@ -10,7 +10,9 @@ import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { reopenSupersededReviews } from "./location-review-supersession";
-import { AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan } from "./location-auto-log";
+import {
+  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
+} from "./location-auto-log";
 
 // Bounded row sets, including reads. All work uses the caller's owner-locked transaction.
 const SEMANTIC_CHUNK_SIZE = 250;
@@ -130,8 +132,9 @@ export async function emitReviewSemanticSegments(
   client: pg.PoolClient, session: RequestSession, segments: LocationSegment[],
   stayIds: Map<string, string>, commuteIds: Map<string, string>,
   changes: SemanticChangeCounter = { count: 0 },
-  // Log automatically: blocks of visits replay retired, which a replacement visit takes over.
-  autoLog: { orphans: AutoLogOrphan[]; used: Set<string> } = { orphans: [], used: new Set() }
+  // Log automatically: blocks of visits replay retired, which a replacement visit takes over, and the
+  // window in which replay keeps auto-logged visits in step (none: their blocks never move).
+  autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation } = { orphans: [], used: new Set() }
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
@@ -315,6 +318,37 @@ export async function emitReviewSemanticSegments(
   for (const row of linked.filter((candidate) => candidate.auto_log)) {
     changes.count += await writeAutoLoggedBlock(client, session, row, autoLog);
   }
+  // A visit already auto-logged whose stay kept its ID while its boundaries moved (a late fix): its
+  // unedited block follows (Codex r1 on #435). Only within the reconciliation window, where replay
+  // re-persisted the stay; elsewhere the stay is a decision and its block stays put.
+  if (autoLog.reconciliation) {
+    const since = Date.parse(autoLog.reconciliation.sinceAt);
+    const followed = linked.filter((row) => row.kind === "stay" && !row.auto_log && Date.parse(row.occurred_at) >= since);
+    for (const batch of chunks(followed)) {
+      const bounds = JSON.stringify(batch.map((row) => ({
+        event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at
+      })));
+      // Blocks are locked in entry-id order, as every multi-block lock, before they change.
+      const stale = await client.query<{ id: string }>(
+        `select te.id from time_entries te
+         join jsonb_to_recordset($3::jsonb) as r(event_id uuid, occurred_at timestamptz, stopped_at timestamptz)
+           on te.created_from_event_id = r.event_id
+         where te.workspace_id = $1 and te.user_id = $2
+           and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
+           and (te.started_at, te.stopped_at) is distinct from (r.occurred_at, r.stopped_at)
+         order by te.id
+         for update of te`,
+        [session.workspaceId, session.userId, bounds]);
+      if (stale.rows.length === 0) continue;
+      const moved = await client.query(
+        `update time_entries te set started_at = r.occurred_at, stopped_at = r.stopped_at, updated_at = now()
+         from jsonb_to_recordset($3::jsonb) as r(event_id uuid, occurred_at timestamptz, stopped_at timestamptz)
+         where te.workspace_id = $1 and te.user_id = $2 and te.id = any($4::uuid[])
+           and te.created_from_event_id = r.event_id and te.user_edited_at is null`,
+        [session.workspaceId, session.userId, bounds, stale.rows.map((row) => row.id)]);
+      changes.count += moved.rowCount ?? 0;
+    }
+  }
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {
     const parameters = [session.workspaceId, session.userId, JSON.stringify(batch)];
     const inserted = await client.query(`insert into review_items (workspace_id,user_id,event_id,location_segment_id,type,title,
@@ -365,7 +399,8 @@ type SegmentContext = (segment: LocationSegment) => { trusted: Place | null; tit
 /**
  * Log automatically (owner decision 14 Oct 2026): the stays this emission logs as blocks instead of
  * Review cards. Only a stay at a saved place (or a learned place linked to one) with logging and Log
- * automatically on, never offered in Review before, that passes the trusted-stay policy of PR #186
+ * automatically on, never offered in Review before (under any segment ID: no Review card for an
+ * overlapping visit at that place), that passes the trusted-stay policy of PR #186
  * (confidence, continuity, five-minute boundaries; the same rule `v2_enabled` uses) and overlaps no
  * tracked time at all, a running timer included. Anything else stays a Review card. Stays under
  * five minutes never get here (`hasMeaningfulKnownPlaceWindow`). One bounded read per 250 stays.
@@ -385,22 +420,36 @@ async function chooseAutoLoggedVisits(
   if (candidates.length === 0) return new Set<string>();
   // A retired visit's own block is about to move or go: it never blocks its replacement.
   const orphanIds = orphans.map((orphan) => orphan.entryId);
-  const overlapping = new Set<string>();
+  const blocked = new Set<string>();
   for (const batch of chunks(candidates)) {
     const result = await client.query<{ clientEventId: string }>(
       `select r.client_event_id as "clientEventId"
-       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, started_at timestamptz, stopped_at timestamptz)
+       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz)
        where exists (
+         -- Bounded to blocks that started within a week before the visit (Codex r1 on #435: an
+         -- unbounded started_at range would scan all history per visit); running timers below.
          select 1 from time_entries te
          where te.workspace_id = $1 and te.user_id = $2
-           and te.started_at < r.stopped_at and coalesce(te.stopped_at, now()) > r.started_at
-           and not (te.id = any($4::uuid[])))`,
+           and te.started_at < r.stopped_at and te.started_at > r.started_at - interval '7 days'
+           and coalesce(te.stopped_at, now()) > r.started_at
+           and not (te.id = any($4::uuid[])))
+         or exists (
+         select 1 from time_entries te
+         where te.workspace_id = $1 and te.user_id = $2 and te.stopped_at is null
+           and te.started_at < r.stopped_at and not (te.id = any($4::uuid[])))
+         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
+         -- whatever became of that card (Codex r1 on #435).
+         or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
+           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at)`,
       [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
-        client_event_id: clientEventId, started_at: segment.startedAt, stopped_at: segment.stoppedAt
+        client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
+        started_at: segment.startedAt, stopped_at: segment.stoppedAt
       }))), orphanIds]);
-    for (const row of result.rows) overlapping.add(row.clientEventId);
+    for (const row of result.rows) blocked.add(row.clientEventId);
   }
-  return new Set(candidates.map((candidate) => candidate.clientEventId).filter((id) => !overlapping.has(id)));
+  return new Set(candidates.map((candidate) => candidate.clientEventId).filter((id) => !blocked.has(id)));
 }
 
 /**

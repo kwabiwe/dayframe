@@ -25,7 +25,9 @@ import {
 import type pg from "pg";
 import type { RequestSession } from "../session";
 import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
-import { autoLoggedUneditedSql, retireAutoLoggedMissingStays, type AutoLogOrphan } from "./location-auto-log";
+import {
+  autoLoggedUneditedSql, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
+} from "./location-auto-log";
 
 type EvidenceRow = {
   id: string;
@@ -67,7 +69,7 @@ export type LocationReplayResult = {
   commuteIds: Map<string, string>;
   evidenceIds: Map<string, string>;
   diagnostics: ReturnType<typeof runLocationEngine>["diagnostics"];
-  /** Unedited auto-logged blocks whose visit this replay retired (only with `retireAutoLoggedVisits`). */
+  /** Unedited auto-logged blocks whose visit this replay retired (only with `autoLogReconciliation`). */
   autoLogOrphans: AutoLogOrphan[];
 };
 
@@ -86,11 +88,12 @@ type LocationReplayOptions = {
   /** Counts open Review items this replay retires, for the reply's `semanticChangeCount`. */
   semanticChanges?: { count: number };
   /**
-   * Retire auto-logged visits replay no longer finds (Log automatically). Only when this replay's
-   * Review emission runs, which moves their blocks to a replacement visit or removes them; otherwise
-   * an auto-logged stay is left as it is until such a replay.
+   * Keep auto-logged visits in step (Log automatically): within this window an unedited auto-logged
+   * stay is not a decision, and one replay no longer finds is retired for emission to move its block
+   * or for the caller to remove it. Only when this replay's Review emission runs; without it every
+   * auto-logged stay stays a decision (`autoLogReconciliation`).
    */
-  retireAutoLoggedVisits?: boolean;
+  autoLogReconciliation?: AutoLogReconciliation;
 } & LocationObservation;
 
 function iso(value: Date | string | null) {
@@ -214,7 +217,7 @@ export async function replayLocationEvidence(
   const protectedSegmentIds = new Set<string>();
   observeLocationTiming(options, "stay_persistence", "started");
   const stayIds = await persistStays(client, session, options.deviceId,
-    segments.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds);
+    segments.filter((segment): segment is StaySegment => segment.kind === "stay"), protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "stay_persistence", "completed");
   observeLocationTiming(options, "commute_persistence", "started");
   const resolvedCommutes = segments
@@ -264,7 +267,7 @@ function sharesProtectedPortion(segment: LocationSegment, link: ProtectedSourceL
 
 async function excludeProtectedReplacements(
   client: pg.PoolClient, session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount">,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount" | "autoLogReconciliation">,
   segments: LocationSegment[],
   acceptedEvidence: ClassifiedEvidence[] = [],
   places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
@@ -328,7 +331,7 @@ async function excludeProtectedReplacements(
                  : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
                  and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
                -- An unedited auto-logged visit is still replay's to move (Log automatically).
-               and not ${autoLoggedUneditedSql("s")}))
+               and not ${autoLoggedUneditedSql("s", options.autoLogReconciliation)}))
            order by s.id, le.client_evidence_id for update of s`;
         });
         // OFFSET 0 is an optimization boundary, not a result cap: look up the
@@ -434,7 +437,7 @@ type DecidedStopBounds = {
 /** Persisted boundaries of terminal/manual stays that keep a commute endpoint's or interior stop's client ID. */
 async function decidedStayBounds(
   client: pg.PoolClient, session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId">,
+  options: Pick<LocationReplayOptions, "deviceId" | "autoLogReconciliation">,
   clientSegmentIds: string[]
 ) {
   const decided = new Map<string, DecidedStopBounds>();
@@ -450,7 +453,7 @@ async function decidedStayBounds(
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
          where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
-         and not ${autoLoggedUneditedSql("s")}))
+         and not ${autoLoggedUneditedSql("s", options.autoLogReconciliation)}))
      order by s.client_segment_id`,
     [session.workspaceId, session.userId, options.deviceId, clientSegmentIds]
   );
@@ -534,14 +537,14 @@ export function withinEngineEligibility(rebuilt: CommuteSegment, engine: Commute
 async function supersedeMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges" | "retireAutoLoggedVisits">,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges" | "autoLogReconciliation">,
   stayClientIds: string[],
   commuteClientIds: string[]
 ): Promise<AutoLogOrphan[]> {
   // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
   // event and no Review) untouched.
-  const autoLogOrphans = options.retireAutoLoggedVisits
-    ? await retireAutoLoggedMissingStays(client, session, options, stayClientIds)
+  const autoLogOrphans = options.autoLogReconciliation
+    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds)
     : [];
   await retireOpenReviewsForMissingSegments(
     client,
@@ -694,7 +697,8 @@ function* segmentChunks<T>(items: T[]) {
 }
 async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
   client: pg.PoolClient, session: RequestSession, deviceId: string,
-  table: "stay_segments" | "commute_segments", segments: T[], protectedSegmentIds: Set<string>
+  table: "stay_segments" | "commute_segments", segments: T[], protectedSegmentIds: Set<string>,
+  autoLogReconciliation?: AutoLogReconciliation
 ) {
   const ordered = [...segments].sort((a, b) => a.clientSegmentId < b.clientSegmentId ? -1 : a.clientSegmentId > b.clientSegmentId ? 1 : 0);
   const ids = new Map<string, string>();
@@ -707,7 +711,7 @@ async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
                 select 1 from review_items
                 where workspace_id = $1 and user_id = $2
                   and location_segment_id = ${table}.id and ${reviewLeavesSegmentToReplay("review_items")}
-              ) and not ${autoLoggedUneditedSql(table)} as "preservesManualCorrection"
+              ) and not ${autoLoggedUneditedSql(table, autoLogReconciliation)} as "preservesManualCorrection"
        from ${table}
        where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = any($4::text[])
        order by client_segment_id
@@ -728,9 +732,10 @@ async function persistStays(
   session: RequestSession,
   deviceId: string,
   segments: StaySegment[],
-  protectedSegmentIds: Set<string>
+  protectedSegmentIds: Set<string>,
+  autoLogReconciliation?: AutoLogReconciliation
 ): Promise<Map<string, string>> {
-  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "stay_segments", segments, protectedSegmentIds);
+  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "stay_segments", segments, protectedSegmentIds, autoLogReconciliation);
   for (const chunk of segmentChunks(mutable)) {
     const parameters = chunk.flatMap(segment => [
       session.workspaceId,

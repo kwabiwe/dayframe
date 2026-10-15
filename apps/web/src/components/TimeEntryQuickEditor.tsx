@@ -35,7 +35,7 @@ import {
 } from "@/lib/calendar-entry-compact-editor";
 import { maskTimeInput } from "@/lib/calendar-grid";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { dateTimeLocal } from "@/lib/format";
+import { dateTimeLocal, formatSourceLabel } from "@/lib/format";
 import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
 import type { OverlapPeerEntry } from "@/lib/overlap-notice";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
@@ -713,6 +713,12 @@ export function TimeEntryQuickEditorPanel({
         <div>
           <p className="df-ed-eyebrow">{editorEyebrow}</p>
           <h2>{editorHeading}</h2>
+          {/* Log automatically (PRD D17): where an auto-logged visit's block came from. */}
+          {entry?.source === "location_auto_log" ? (
+            <p className="df-ed-source" data-testid="time-entry-source">
+              {formatSourceLabel(entry.source, { placeName: entry.placeName })}
+            </p>
+          ) : null}
         </div>
         {/* Start again and Delete sit in the head (not beside Save as in the prototype), so the
             footer keeps its full width for errors, overlap and the discard prompt, and both stay
