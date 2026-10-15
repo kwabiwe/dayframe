@@ -54,8 +54,9 @@ describe("Calendar compact temporal DOM", () => {
     const finish = screen.getByLabelText("End time") as HTMLInputElement;
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
 
-    fireEvent.change(start, { target: { value: "11:" } });
-    expect(start.value).toBe("11:");
+    // An hour the shared parser cannot read stays raw while typing and is an error on blur.
+    fireEvent.change(start, { target: { value: "24:" } });
+    expect(start.value).toBe("24:");
     expect(finish.value).toBe("10:30");
     expect(duration.value).toBe("00:30");
     expect(screen.queryByRole("alert")).toBeNull();
@@ -68,6 +69,66 @@ describe("Calendar compact temporal DOM", () => {
     expect(finish.getAttribute("aria-describedby")).toBeNull();
     expect(duration.getAttribute("aria-describedby")).toBeNull();
     expect(document.getElementById(alert.id)).toBe(alert);
+  });
+
+  it("waits for a partial colon time while typing, then reads its minute as tens on blur (owner, 15 Oct 2026)", async () => {
+    renderCompletedEditor();
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
+    const duration = screen.getByLabelText("Duration") as HTMLInputElement;
+
+    // While typing, `09:1` is not read yet: the block does not move before the second digit.
+    fireEvent.change(start, { target: { value: "09:1" } });
+    expect(start.value).toBe("09:1");
+    expect(finish.value).toBe("10:30");
+
+    // Leaving the field reads it as 09:10, never 00:91 or 01:09.
+    fireEvent.blur(start);
+    expect(start.value).toBe("09:10");
+    expect(duration.value).toBe("00:30");
+    expect(finish.value).toBe("09:40");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("never moves a create preview on a half-typed time, then commits it on blur (Codex r1 on #443)", async () => {
+    const onDraftChange = vi.fn();
+    const anchor = document.createElement("article");
+    anchor.getBoundingClientRect = () => ({
+      bottom: 160, height: 60, left: 100, right: 220, top: 100, width: 120, x: 100, y: 100, toJSON: () => ({})
+    });
+    document.body.append(anchor);
+    render(createElement(CalendarEntryCompactEditor, {
+      anchor,
+      capturedNow: new Date(2026, 7, 2, 12),
+      categories: [],
+      focusOnOpen: false,
+      isTimerBusy: false,
+      mode: "create" as const,
+      onDismiss: vi.fn(),
+      onDraftChange,
+      onSave: vi.fn().mockResolvedValue({ ok: true }),
+      peerEntries: [],
+      positionKey: "temporal-create",
+      scrollContainer: null,
+      source: { startedAt: localIso("2026-08-02T10:00"), stoppedAt: localIso("2026-08-02T10:30") }
+    }));
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    const lastStart = () => {
+      const plans = onDraftChange.mock.calls.map(([plan]) => plan).filter(Boolean);
+      return plans.at(-1)?.input.startedAt as string | undefined;
+    };
+    expect(lastStart()).toBe(localIso("2026-08-02T10:00"));
+
+    // Typing `09:1` on the way to `09:15`: the provisional block stays where it was.
+    fireEvent.change(start, { target: { value: "09:1" } });
+    expect(start.value).toBe("09:1");
+    expect(onDraftChange.mock.calls.some(([plan]) => plan?.input.startedAt === localIso("2026-08-02T09:10"))).toBe(false);
+    expect(lastStart()).toBe(localIso("2026-08-02T10:00"));
+
+    // Leaving the field commits it as 09:10, never 00:91 or 01:09.
+    fireEvent.blur(start);
+    expect(start.value).toBe("09:10");
+    expect(lastStart()).toBe(localIso("2026-08-02T09:10"));
   });
 
   it("links Duration to its live validation error with a stable editor-scoped id", async () => {

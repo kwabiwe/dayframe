@@ -177,6 +177,20 @@ export function isCompleteCalendarEntryCompactTimeInput(value: string) {
   return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
 }
 
+/**
+ * On commit only (leaving a time field, Save; owner, 15 Oct 2026): each typed Start/End time the
+ * shared reader understands is rewritten as `HH:MM` (`9` → 09:00, `15:1` → 15:10), so plans read
+ * it as the person meant. Live previews never call this, so a half-typed `15:1` does not move a
+ * block or a create preview before the field is left (Codex r1 on #443). Unreadable text stays as
+ * typed, for the usual error.
+ */
+export function normalizeCalendarEntryCompactTypedTimes<T extends Pick<CalendarEntryCompactDraft, "startedAtTime" | "stoppedAtTime">>(draft: T): T {
+  const startedAtTime = parseTimeInput(draft.startedAtTime) ?? draft.startedAtTime;
+  const stoppedAtTime = parseTimeInput(draft.stoppedAtTime) ?? draft.stoppedAtTime;
+  if (startedAtTime === draft.startedAtTime && stoppedAtTime === draft.stoppedAtTime) return draft;
+  return { ...draft, startedAtTime, stoppedAtTime };
+}
+
 export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
   const trimmed = value.trim();
   return /^(?:\d{1,2}:\d{2}|\d{4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));

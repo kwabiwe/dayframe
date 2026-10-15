@@ -3,6 +3,7 @@ import {
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
+  normalizeCalendarEntryCompactTypedTimes,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
   type CalendarEntryCompactDraft,
@@ -73,10 +74,12 @@ export function updateTimelineInlineDate(
 }
 
 export function buildTimelineInlineSavePlan(
-  edit: TimelineInlineEditDraft,
+  typedEdit: TimelineInlineEditDraft,
   entry: TimeEntryRow,
   now = new Date()
 ): CalendarEntryCompactSavePlan {
+  // Saving commits typed times with the shared reader (`15:1` → 15:10; owner, 15 Oct 2026).
+  const edit = { ...typedEdit, draft: normalizeCalendarEntryCompactTypedTimes(typedEdit.draft) };
   if (edit.field === "time") {
     const sourceEntry: TimeEntryRow = {
       ...entry,

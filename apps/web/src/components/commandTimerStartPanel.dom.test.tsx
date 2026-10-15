@@ -59,14 +59,12 @@ describe("command timer start panel", () => {
     fireEvent.blur(time);
     expect(time.value).toBe("00:00");
 
-    // Incomplete minutes after a colon are not read as other digits (`15:1` is never 01:51).
+    // A partial minute after a colon is its tens, never digits moved into the hour (owner, 15 Oct
+    // 2026): `00:1` is 00:10, not 01:00 or 00:01.
     await userEvent.clear(time);
     await userEvent.type(time, "00:1");
     fireEvent.blur(time);
-    expect(time.value).toBe("00:1");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByRole("alert").textContent).toBe("Use a valid start date and time.");
-    expect(runtime.updateActiveStartTime).not.toHaveBeenCalled();
+    expect(time.value).toBe("00:10");
     await userEvent.clear(time);
     await userEvent.type(time, "0:05");
     fireEvent.blur(time);

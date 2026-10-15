@@ -38,6 +38,37 @@ describe("time input", () => {
     expect(parseTimeInput("2345")).toBe("23:45");
   });
 
+  it("reads one to four digits without a colon (owner, 15 Oct 2026)", () => {
+    expect(parseTimeInput("0")).toBe("00:00");
+    expect(parseTimeInput("9")).toBe("09:00");
+    expect(parseTimeInput("09")).toBe("09:00");
+    expect(parseTimeInput("15")).toBe("15:00");
+    expect(parseTimeInput("930")).toBe("09:30");
+    expect(parseTimeInput("153")).toBe("01:53");
+    expect(parseTimeInput("0930")).toBe("09:30");
+    expect(parseTimeInput("1530")).toBe("15:30");
+    expect(parseTimeInput(" 1530 ")).toBe("15:30");
+    expect(parseTimeInput("24")).toBeNull();
+    expect(parseTimeInput("960")).toBeNull();
+    expect(parseTimeInput("12345")).toBeNull();
+  });
+
+  it("never moves digits across a colon into the hour: a partial minute is its tens (owner, 15 Oct 2026)", () => {
+    expect(parseTimeInput("15:1")).toBe("15:10");
+    expect(parseTimeInput("15:12")).toBe("15:12");
+    expect(parseTimeInput("15:")).toBe("15:00");
+    expect(parseTimeInput("9:5")).toBe("09:50");
+    expect(parseTimeInput("9:05")).toBe("09:05");
+    expect(parseTimeInput("0:1")).toBe("00:10");
+    expect(parseTimeInput("23:5")).toBe("23:50");
+    expect(parseTimeInput("15:6")).toBeNull();
+    expect(parseTimeInput("24:1")).toBeNull();
+    expect(parseTimeInput(":30")).toBeNull();
+    expect(parseTimeInput("123:4")).toBeNull();
+    expect(parseTimeInput("15:123")).toBeNull();
+    expect(parseTimeInput("9h30")).toBeNull();
+  });
+
   it("rejects times that cannot be inferred safely", () => {
     expect(parseTimeInput("2460")).toBeNull();
     expect(parseTimeInput("12:99")).toBeNull();

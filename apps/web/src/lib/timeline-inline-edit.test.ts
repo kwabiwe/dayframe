@@ -69,6 +69,23 @@ describe("Timeline inline entry editing", () => {
       .toEqual({ stoppedAt: localIso("2026-08-10T10:25") });
   });
 
+  it("waits on a partial colon time while typing and saves its minute as tens (owner, 15 Oct 2026)", () => {
+    const entry = timeEntry();
+    const partial = updateTimelineInlineTime(
+      createTimelineInlineEditDraft(entry, "time"),
+      entry,
+      "finish",
+      "09:4"
+    );
+
+    // Not synchronised while typing: Duration still reflects the saved block.
+    expect(partial.draft.stoppedAtTime).toBe("09:4");
+    expect(partial.draft.duration).toBe("01:00");
+    // Saving reads it as 09:40, never 00:94 or 09:04.
+    expect(buildTimelineInlineSavePlan(partial, entry, localDate("2026-08-11T00:00")).payload)
+      .toEqual({ stoppedAt: localIso("2026-08-10T09:40") });
+  });
+
   it("retains an incomplete picker value and rejects it at commit time", () => {
     const entry = timeEntry();
     const edit = updateTimelineInlineTime(
