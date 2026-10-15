@@ -83,7 +83,11 @@ describe("persistent timer floating surfaces", () => {
     );
     expect(timerSource).toContain('role="dialog"');
     expect(timerSource).toContain("startEditorTriggerRef.current?.focus()");
-    expect(timerSource).toContain("startDateInputRef.current?.focus()");
+    // The date field first, as the native date input was; Escape closes an open date picker
+    // before the panel, and a press inside the portalled picker is not outside.
+    expect(timerSource).toContain('querySelector<HTMLButtonElement>(".df-start-date-trigger")?.focus()');
+    expect(timerSource).toContain('if (event.key !== "Escape" || startDatePickerOpenRef.current) return;');
+    expect(timerSource).toContain('target.closest(".time-entry-quick-editor-nested-surface")');
     expect(styles).toMatch(
       /\.swiss-start-time-popover\s*\{[^}]*position:\s*absolute;/s
     );
@@ -113,6 +117,12 @@ describe("persistent timer floating surfaces", () => {
     );
     expect(styles).toMatch(
       /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*\.ui-floating-surface,[\s\S]*transform:\s*none;/s
+    );
+  });
+
+  it("keeps the phone start panel above the tab bar", () => {
+    expect(styles).toMatch(
+      /@media \(max-width: 560px\) \{\s*\.df-cmd-time \.swiss-start-time-popover \{[^}]*bottom: calc\(var\(--df-tabbar-space, 0px\) \+ 8px\);/s
     );
   });
 

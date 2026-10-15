@@ -5947,43 +5947,6 @@ dialog.ui-dialog.df-range-custom {
   margin: 2px calc(-1 * var(--web-panel-padding)) calc(-1 * var(--web-panel-padding));
 }
 
-.swiss-native-picker-control {
-  position: relative;
-  display: block;
-}
-
-.swiss-native-picker-control .ui-control {
-  padding-right: 42px;
-}
-
-.swiss-native-picker-control .ui-control::-webkit-calendar-picker-indicator {
-  width: 0;
-  margin: 0;
-  padding: 0;
-  pointer-events: none;
-  opacity: 0;
-}
-
-.swiss-native-picker-button {
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  transform: translateY(-50%);
-}
-
-.swiss-native-picker-button:hover {
-  background: var(--surface-muted);
-  color: var(--foreground);
-}
-
 .swiss-profile-section {
   border-top: 1px solid var(--line);
   padding: 16px;
@@ -14268,32 +14231,113 @@ dialog.ui-dialog.df-rf-dialog {
   overflow-y: auto;
 }
 
-/* UIA-202: the command timer's start-time popover in Blocks: a display-type head without a rule,
-   and "Set to last stop time" as a neutral 44 px pill instead of a coral link. */
+/* The command timer's start-time panel in the #391 floating-panel language (owner, 15 Oct 2026):
+   the lists' small uppercase head, inset fields without outlines and the neutral focus, the shared
+   date picker (portalled, above the bar) instead of the native date input, "Set to last stop time"
+   as a neutral 44 px row and a Blocks button pair (Cancel ghost, Save coral). */
 .df-cmd-time .swiss-start-time-popover {
-  border-radius: 20px;
+  padding: 6px;
 }
 
 .df-cmd-time .swiss-start-time-popover-header {
   min-height: 0;
   border-bottom: 0;
-  padding: 16px var(--web-panel-padding) 0;
 }
 
-.df-cmd-time .swiss-start-time-popover-header strong {
+.df-cmd-time .swiss-start-time-popover .swiss-compact-time-editor {
+  gap: 8px;
+  padding: 2px 10px 10px;
+}
+
+.df-start-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.df-start-field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.df-start-field-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 16px;
+}
+
+.df-start-date-picker {
+  min-width: 0;
+}
+
+.df-start-date-trigger.timeline-period-trigger,
+.df-start-time-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 2px transparent;
   color: var(--foreground);
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 750;
+}
+
+.df-start-date-trigger.timeline-period-trigger {
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.df-start-date-trigger.timeline-period-trigger strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-start-date-trigger.timeline-period-trigger:hover,
+.df-start-date-trigger.timeline-period-trigger[aria-expanded="true"] {
+  background: var(--surface-muted);
+}
+
+.df-start-time-input {
+  padding: 0 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.df-start-date-trigger.timeline-period-trigger:focus-visible,
+.df-start-time-input:focus,
+.df-start-time-input:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.df-start-time-input[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.df-start-time-input[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+.df-start-date-panel.timeline-date-picker-panel {
+  z-index: 120;
 }
 
 .df-cmd-time .edit-entry-last-stop {
   min-height: 44px;
   align-items: center;
-  margin-top: 4px;
-  border-radius: 999px;
+  justify-content: flex-start;
+  gap: 0.28em;
+  border-radius: 10px;
   background: var(--surface-inset);
-  padding: 0 14px;
+  padding: 0 12px;
   color: var(--text-primary);
   font-size: 13px;
 }
@@ -14302,13 +14346,26 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--text-secondary);
 }
 
-.df-cmd-time .edit-entry-last-stop:hover {
+.df-cmd-time .edit-entry-last-stop:hover:not(:disabled) {
   background: var(--surface-muted);
   text-decoration: none;
 }
 
-.df-cmd-time .swiss-start-time-popover .ui-dialog-actions {
-  border-top: 0;
+.df-start-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Phones: the panel is a bottom sheet that ends above the tab bar, so Cancel and Save are never
+   under it (mobile-safe floating surfaces). */
+@media (max-width: 560px) {
+  .df-cmd-time .swiss-start-time-popover {
+    bottom: calc(var(--df-tabbar-space, 0px) + 8px);
+    max-height: calc(100dvh - var(--df-tabbar-space, 0px) - 20px);
+    overflow-y: auto;
+  }
 }
 
 /* Calendar › List in Blocks (owner on UIA-203: like Today's blocks). Rows are fill rows with the

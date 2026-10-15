@@ -381,6 +381,13 @@ Block pull-to-refresh:
 - Differences: no date control (the day is the evidence's) and no summary line (Duration is already in the row); a fixed 180-point wheel, because the page scrolls; the wheel closes when Search or the activity field takes focus, on a save, Done or a second tap on its field.
 - Accessibility and Reduce Motion: VoiceOver gets adjustable Start and End fields (5-minute steps, activate or Type time to type) and never the wheel; Reduce Motion fades the panel (90 ms in, 70 ms out) and outside changes set the wheel without a spin.
 
+## Web command timer start panel (owner, 15 Oct 2026)
+
+- Trigger: a click on the running clock; inside it, a click on the Date field.
+- Owner: the panel keeps the shared `ui-floating-surface` presence transition (and its reduced-motion path); the date picker is the shared `DatePickerPopover` with its own presence (desktop panel, or the phone bottom sheet with its scrim). Nothing else moves.
+- Interruption: Escape closes an open date picker and returns focus to the Date field, and only a second Escape closes the panel; a press inside the portalled picker or its scrim never closes the panel. Save is disabled while the timer is busy.
+- Async outcome: unchanged — Save edits the running start (optimistic, rolled back by the runtime on failure) and closes the panel on success; an error stays inline.
+
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 
 - Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The activity block and the tag button open the same Activities and Tags lists (14 Oct 2026) with the same fade; they close on a pick (Activities), Escape, Close, a second press of the button or a press outside, and add no motion of their own (no landing, no row animation when a tag is toggled or the search filters). The portalled Activities list keeps its measured position and width through its exit fade (geometry is cleared only by the next open, which measures before paint). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.
