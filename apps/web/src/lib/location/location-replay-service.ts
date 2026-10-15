@@ -26,7 +26,7 @@ import type pg from "pg";
 import type { RequestSession } from "../session";
 import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import {
-  autoLoggedUneditedSql, lockAutoLoggedBlocks, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
+  autoLogHeldStays, autoLoggedUneditedSql, lockAutoLoggedBlocks, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
 
 type EvidenceRow = {
@@ -216,7 +216,8 @@ export async function replayLocationEvidence(
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
   observeLocationTiming(options, "obsolete_segment_handling", "started");
-  const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds, autoLogLocked);
+  const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds, autoLogLocked,
+    options.autoLogReconciliation ? autoLogHeldStays(segments, options.autoLogReconciliation) : []);
   observeLocationTiming(options, "obsolete_segment_handling", "completed");
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
@@ -549,12 +550,13 @@ async function supersedeMissingSegments(
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges" | "autoLogReconciliation">,
   stayClientIds: string[],
   commuteClientIds: string[],
-  autoLogLocked: ReadonlySet<string>
+  autoLogLocked: ReadonlySet<string>,
+  autoLogHeld: ReturnType<typeof autoLogHeldStays>
 ): Promise<AutoLogOrphan[]> {
   // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
   // event and no Review) untouched.
   const autoLog = options.autoLogReconciliation
-    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked)
+    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked, autoLogHeld)
     : [];
   await retireOpenReviewsForMissingSegments(
     client,

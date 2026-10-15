@@ -306,12 +306,8 @@ async function replayAndEmitLocationSemantics(
       semanticSegmentCount = await emitReviewSemanticSegments(
         client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges, autoLog
       );
-      // Stays replay still finds that this emission did not offer (before the cutover, not yet
-      // finalised): a retired visit overlapping one of them has not vanished and keeps its block.
-      const emitted = new Set(eligible.map((segment) => segment.clientSegmentId));
-      const unemittedStays = replay.segments.filter((segment) => segment.kind === "stay" && !emitted.has(segment.clientSegmentId));
       semanticChanges.count += await removeUnusedAutoLogOrphans(
-        client, session, autoLog.orphans, autoLog.used, autoLog.locked, unemittedStays);
+        client, session, autoLog.orphans, autoLog.used, autoLog.locked);
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(

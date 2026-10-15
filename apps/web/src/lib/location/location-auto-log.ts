@@ -24,11 +24,30 @@ export const AUTO_LOG_SUPERSEDED_PAYLOAD_KEY = "autoLogSuperseded";
  * evidence (Codex r1 on #435). Any other replay, or older stay, keeps an auto-logged visit as a
  * decision, as before Log automatically.
  */
-export type AutoLogReconciliation = { sinceAt: string };
+export type AutoLogReconciliation = { sinceAt: string; semanticCutoverAt: string };
 
 export function autoLogReconciliation(processingAt: string, semanticCutoverAt: string): AutoLogReconciliation {
   const retained = Date.parse(processingAt) - (LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays - 1) * 86_400_000;
-  return { sinceAt: new Date(Math.max(retained, Date.parse(semanticCutoverAt))).toISOString() };
+  return { sinceAt: new Date(Math.max(retained, Date.parse(semanticCutoverAt))).toISOString(), semanticCutoverAt };
+}
+
+type Interval = { startedAt: string; stoppedAt?: string | null };
+
+function overlaps(a: Interval, b: Interval) {
+  const end = (value: Interval) => value.stoppedAt ? Date.parse(value.stoppedAt) : Number.POSITIVE_INFINITY;
+  return Date.parse(a.startedAt) < end(b) && end(a) > Date.parse(b.startedAt);
+}
+
+/**
+ * Stays replay produces that Review emission does not offer yet (not finalised, or before the
+ * semantic cutover): a visit whose block overlaps one of them has not vanished, it is waiting for its
+ * replacement, so it is not retired (Codex r2/r4 on #435).
+ */
+export function autoLogHeldStays<T extends Interval & { kind: string; status: string }>(
+  segments: readonly T[], reconciliation: AutoLogReconciliation
+): Interval[] {
+  return segments.filter((segment) => segment.kind === "stay" &&
+    (segment.status !== "finalised" || Date.parse(segment.startedAt) < Date.parse(reconciliation.semanticCutoverAt)));
 }
 
 /**
@@ -93,7 +112,8 @@ export async function lockAutoLoggedBlocks(
  * cutover and young enough that none of the visit's evidence has expired, so a visit only ageing
  * evidence hides is never mistaken for one that vanished, with lineage still retained (Codex r1 on
  * #435) — every stay it no longer produces whose block `lockAutoLoggedBlocks` holds unedited. A block
- * the person deleted or edited keeps its visit a decision. A retired stay is superseded and detached
+ * the person deleted or edited keeps its visit a decision, and a block overlapping a held stay
+ * (`autoLogHeldStays`) keeps its stay live and linked until a later replay can offer the replacement. A retired stay is superseded and detached
  * from its event (so a returning stay is never mistaken for a decision) and the event is ignored with
  * the superseded marker; its block is returned for emission to move with its replacement or for the
  * caller to remove.
@@ -103,7 +123,8 @@ export async function retireAutoLoggedMissingStays(
   session: RequestSession,
   options: { deviceId: string; algorithmVersion: string; processingAt: string; reconciliation: AutoLogReconciliation },
   stayClientIds: string[],
-  locked: ReadonlySet<string>
+  locked: ReadonlySet<string>,
+  heldStays: readonly Interval[]
 ): Promise<AutoLogOrphan[]> {
   const stays = (await client.query<{ segmentId: string; eventId: string }>(
     `select st.id as "segmentId", st.created_from_event_id as "eventId"
@@ -134,7 +155,11 @@ export async function retireAutoLoggedMissingStays(
        and te.created_from_event_id = any($4::uuid[])`,
     [session.workspaceId, session.userId, [...locked], stays.map((stay) => stay.eventId)]
   )).rows;
+  const blockInterval = (entry: (typeof entries)[number]) => ({ startedAt: iso(entry.startedAt)!, stoppedAt: iso(entry.stoppedAt) });
   const eventsWithBlocks = new Set(entries.map((entry) => entry.eventId));
+  for (const entry of entries) {
+    if (heldStays.some((stay) => overlaps(stay, blockInterval(entry)))) eventsWithBlocks.delete(entry.eventId);
+  }
   const rows = stays.filter((stay) => eventsWithBlocks.has(stay.eventId));
   if (rows.length === 0) return [];
   await client.query(
@@ -159,18 +184,14 @@ export async function retireAutoLoggedMissingStays(
 
 /**
  * Removes the orphaned blocks emission did not move to a replacement visit (owner decision 15 Oct
- * 2026: a visit replay no longer finds takes its unedited block with it). Kept: edited blocks, blocks
- * not locked unedited this replay, and any block overlapping a stay replay still finds but did not
- * emit (before the cutover, not yet finalised): that visit has not vanished (Codex r2 on #435).
+ * 2026: a visit replay no longer finds takes its unedited block with it). Only blocks replay locked
+ * unedited; edited blocks are never removed.
  */
 export async function removeUnusedAutoLogOrphans(
   client: pg.PoolClient, session: RequestSession, orphans: AutoLogOrphan[], used: ReadonlySet<string>,
-  locked: ReadonlySet<string>, unemittedStays: ReadonlyArray<{ startedAt: string; stoppedAt?: string | null }>
+  locked: ReadonlySet<string>
 ) {
-  const overlapsUnemitted = (orphan: AutoLogOrphan) => unemittedStays.some((stay) =>
-    Date.parse(stay.startedAt) < (orphan.stoppedAt ? Date.parse(orphan.stoppedAt) : Number.POSITIVE_INFINITY) &&
-    (stay.stoppedAt ? Date.parse(stay.stoppedAt) : Number.POSITIVE_INFINITY) > Date.parse(orphan.startedAt));
-  const unused = orphans.filter((orphan) => locked.has(orphan.entryId) && !used.has(orphan.entryId) && !overlapsUnemitted(orphan))
+  const unused = orphans.filter((orphan) => locked.has(orphan.entryId) && !used.has(orphan.entryId))
     .map((orphan) => orphan.entryId);
   if (unused.length === 0) return 0;
   const removed = await client.query(
