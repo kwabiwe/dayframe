@@ -20,10 +20,14 @@ const hotPaths = [
 describe("idle and background clock work", () => {
   it("ticks whole seconds only for live time, never in the background", () => {
     expect(dashboard).not.toMatch(/useEffect\(\(\) => \{\s*const interval = setInterval\(\(\) => setNow\(Date\.now\(\)\), 1000\);\s*return \(\) => clearInterval\(interval\);\s*\}, \[\]\);/);
-    expect(clock).toMatch(/if \(!foreground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?const interval = setInterval\(\(\) => \{/);
-    expect(clock).toContain("}, [foreground, needsSecondClock, setNow]);");
+    expect(clock).toMatch(/if \(!foreground\) return undefined;[\s\S]*?if \(needsSecondClock\) \{[\s\S]*?const tick = \(\) => \{/);
+    // A block's clocks tick on its own whole seconds (one timer re-armed each second); others every 1 s.
+    expect(clock).toMatch(/timeout = setTimeout\(\(\) => \{\s*tick\(\);\s*scheduleSecond\(\);\s*\}, nextAnchoredSecondDelayMs\(secondAnchorMs, Date\.now\(\)\)\);/);
+    expect(clock).toContain("const interval = setInterval(tick, 1000);");
+    expect(clock).toContain("}, [foreground, needsSecondClock, secondAnchorMs, setNow]);");
     expect(dashboard).toContain("useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, secondsShown, setNow });");
-    expect(orb).toMatch(/if \(!foreground\) return undefined;[\s\S]*?setInterval\(\(\) => setNowMs\(Date\.now\(\)\), 1000\)/);
+    // The orb's ring uses the same foreground-only clock, anchored to the running block (TestFlight 121).
+    expect(orb).toContain("useDashboardClockTicks({ foreground, needsSecondClock: true, secondAnchorMs: Date.parse(startedAt), setNow: setNowMs });");
   });
   it("re-renders whole seconds only while they are on screen (iPhone 17, 13 Oct: about 150 ms of JS a second behind Settings)", () => {
     // Behind Settings, Review or Calendar a second tick that is not a new minute re-renders nothing.

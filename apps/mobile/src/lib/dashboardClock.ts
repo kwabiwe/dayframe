@@ -16,10 +16,16 @@ export function useDashboardClockTicks({
   foreground,
   needsSecondClock,
   secondsShown = true,
+  secondAnchorMs,
   setNow,
 }: {
   foreground: boolean;
   needsSecondClock: boolean;
+  /**
+   * A running block's start: second ticks land just after each of its whole elapsed seconds, so every
+   * clock anchored to the same block (the live block, the Play orb's ring) changes its second together.
+   */
+  secondAnchorMs?: number;
   /** Whether whole seconds are on screen: a running block with Today or Reports in front, or its sheet. */
   secondsShown?: boolean;
   setNow: (now: number) => void;
@@ -40,13 +46,25 @@ export function useDashboardClockTicks({
     setNow(Date.now());
     if (needsSecondClock) {
       let shownMinute = Math.floor(Date.now() / 60_000);
-      const interval = setInterval(() => {
+      const tick = () => {
         const now = Date.now();
         const minute = Math.floor(now / 60_000);
         if (!secondsShownRef.current && minute === shownMinute) return;
         shownMinute = minute;
         setNow(now);
-      }, 1000);
+      };
+      if (secondAnchorMs !== undefined && Number.isFinite(secondAnchorMs)) {
+        let timeout: ReturnType<typeof setTimeout>;
+        const scheduleSecond = () => {
+          timeout = setTimeout(() => {
+            tick();
+            scheduleSecond();
+          }, nextAnchoredSecondDelayMs(secondAnchorMs, Date.now()));
+        };
+        scheduleSecond();
+        return () => clearTimeout(timeout);
+      }
+      const interval = setInterval(tick, 1000);
       return () => clearInterval(interval);
     }
     let timeout: ReturnType<typeof setTimeout>;
@@ -58,7 +76,16 @@ export function useDashboardClockTicks({
     };
     scheduleMinute();
     return () => clearTimeout(timeout);
-  }, [foreground, needsSecondClock, setNow]);
+  }, [foreground, needsSecondClock, secondAnchorMs, setNow]);
+}
+
+/** Small enough to read as the same moment, large enough that the tick lands after the second turns. */
+const ANCHORED_TICK_LATE_MS = 15;
+
+/** Milliseconds until just after the next whole second elapsed since `anchorMs`. */
+export function nextAnchoredSecondDelayMs(anchorMs: number, nowMs: number) {
+  const intoSecond = (((nowMs - anchorMs) % 1000) + 1000) % 1000;
+  return 1000 - intoSecond + ANCHORED_TICK_LATE_MS;
 }
 
 /**

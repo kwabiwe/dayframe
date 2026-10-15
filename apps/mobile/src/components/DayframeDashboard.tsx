@@ -3402,6 +3402,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onTap={onPlayOrbTapStable}
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
+        runningDurationSeconds={hasLiveActiveTimer ? displayedActiveEntry?.durationSeconds : undefined}
+        runningStartedAt={hasLiveActiveTimer ? displayedActiveEntry?.startedAt : undefined}
         theme={theme}
       />
       <StopFlightOverlay flight={stopFlight} onFinished={finishStopFlight} theme={theme} />

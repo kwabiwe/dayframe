@@ -30,7 +30,13 @@ export function useLiveBlockElapsed(active: LiveBlockClockInput) {
   const { durationSeconds, startedAt } = active;
   const clocked = startedAt !== undefined && durationSeconds !== undefined;
   const live = clocked && active.hasLiveActiveTimer;
-  useDashboardClockTicks({ foreground: foreground && live, needsSecondClock: true, setNow });
+  // Ticks follow the block's own seconds, as the Play orb's ring does, so the two never disagree.
+  useDashboardClockTicks({
+    foreground: foreground && live,
+    needsSecondClock: true,
+    secondAnchorMs: startedAt === undefined ? undefined : Date.parse(startedAt),
+    setNow,
+  });
   // The time held since the block stopped (React's "information from previous renders" pattern).
   const [held, setHeld] = useState<{ seconds: number; startedAt: string } | null>(null);
   if (!clocked) return { label: active.elapsedLabel, seconds: active.elapsedSeconds };

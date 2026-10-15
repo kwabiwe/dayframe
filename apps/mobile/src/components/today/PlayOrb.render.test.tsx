@@ -60,7 +60,9 @@ vi.mock("../PrimaryTimerAction", () => ({ PrimaryTimerGlyph: ({ mode }: { mode: 
 vi.mock("../icons/DayframeIcon", () => ({ ActivityIcon: () => null }));
 
 import { PLAY_ORB, bloomSpots, playOrbFrame } from "../../lib/playOrb";
-import { orbRingPath, PlayOrb } from "./PlayOrb";
+import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
+import { orbRingPath, orbRingProgress, PlayOrb } from "./PlayOrb";
+import { useLiveBlockElapsed } from "./liveBlockClock";
 
 const theme = { ...DAYFRAME_THEME.dark, mode: "dark" } as never;
 const activities = ["work", "learn", "gym"].map((id) => ({ color: "blue", icon: null, id, name: id, pinned: true }));
@@ -102,6 +104,17 @@ describe("orbRingPath", () => {
   });
 });
 
+describe("orbRingProgress", () => {
+  it("is the block's elapsed seconds into its minute, over 60", () => {
+    expect(orbRingProgress(0)).toBe(0);
+    expect(orbRingProgress(45 * 60)).toBe(0);
+    expect(orbRingProgress(45 * 60 + 15)).toBe(15 / 60);
+    expect(orbRingProgress(59)).toBe(59 / 60);
+    expect(orbRingProgress(60)).toBe(0);
+    expect(orbRingProgress(125.9)).toBe(5 / 60);
+  });
+});
+
 describe("PlayOrb", () => {
   it("taps to start or stop, and shows the seconds ring only while running", () => {
     const idle = render();
@@ -111,11 +124,12 @@ describe("PlayOrb", () => {
     act(() => idle.tree.unmount());
 
     vi.useFakeTimers();
+    // The block's seconds, not the wall clock's: started at :07, it is 45:08 in at 21:00:15.
     vi.setSystemTime(new Date("2026-10-07T21:00:15"));
-    const running = render({ running: true });
+    const running = render({ running: true, runningDurationSeconds: 0, runningStartedAt: new Date("2026-10-07T20:15:07").toISOString() });
     const ring = running.tree.root.findByProps({ testID: "play-orb-ring" });
     const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
-    expect(ring.props.strokeDasharray).toBe(`${(15 / 60) * circumference} ${circumference}`);
+    expect(ring.props.strokeDasharray).toBe(`${(8 / 60) * circumference} ${circumference}`);
     // The zero point is 12 o'clock in the path itself, with no transform for the renderer to apply.
     const radius = PLAY_ORB.size / 2 + 5 - 1.5;
     const center = PLAY_ORB.size / 2 + 5;
@@ -125,6 +139,77 @@ describe("PlayOrb", () => {
     expect(ring.props.origin).toBeUndefined();
     expect(ring.props.transform).toBeUndefined();
     act(() => running.tree.unmount());
+    vi.useRealTimers();
+  });
+
+  it("is empty when the live block reads :00, whatever the wall clock's seconds (owner, TestFlight 121)", () => {
+    vi.useFakeTimers();
+    // Started 14:30:07; at 15:15:07 the live block reads 0:45:00.
+    vi.setSystemTime(new Date("2026-10-15T15:15:07.000"));
+    const startedAt = new Date("2026-10-15T14:30:07.000").toISOString();
+    const running = render({ running: true, runningDurationSeconds: 0, runningStartedAt: startedAt });
+    const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
+    expect(running.tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray).toBe(`0 ${circumference}`);
+    act(() => running.tree.unmount());
+    vi.useRealTimers();
+  });
+
+  it("steps with the block's own seconds: every tick shows (elapsed mod 60) / 60, one 1 s timer, no frame loop", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-15T15:15:07.400"));
+    const startedAt = new Date("2026-10-15T14:30:07.000").toISOString();
+    const running = render({ running: true, runningDurationSeconds: 0, runningStartedAt: startedAt });
+    const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
+    const shown = () => running.tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray as string;
+    const expected = () =>
+      `${orbRingProgress(activeTimerElapsedSeconds({ durationSeconds: 0, startedAt }, Date.now())) * circumference} ${circumference}`;
+    expect(shown()).toBe(expected());
+    // The first tick lands just after the block's next whole second (:08 elapsed), then every second.
+    act(() => {
+        vi.advanceTimersByTime(600 + 15);
+      });
+    expect(shown()).toBe(`${(1 / 60) * circumference} ${circumference}`);
+    for (let second = 0; second < 70; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(shown()).toBe(expected());
+    }
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => running.tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("agrees with the live block's seconds on every commit, whatever the step between renders", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-15T15:15:07.400"));
+    const startedAt = new Date("2026-10-15T14:30:07.000").toISOString();
+    const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
+    const live: number[] = [];
+    function LiveSeconds() {
+      const elapsed = useLiveBlockElapsed({ durationSeconds: 0, elapsedLabel: "", elapsedSeconds: 0, hasLiveActiveTimer: true, startedAt });
+      live.push(elapsed.seconds);
+      return null;
+    }
+    const props = { activities, hidden: false, onChoose: vi.fn(), onTap: vi.fn(), reduceMotion: false, running: true, runningDurationSeconds: 0, runningStartedAt: startedAt, theme };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <>
+          <LiveSeconds />
+          <PlayOrb {...props} />
+        </>
+      );
+    });
+    const ring = () => tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray as string;
+    for (const step of [333, 333, 334, 17, 983, 500, 499, 1, 2000, 250, 61_000]) {
+      act(() => {
+        vi.advanceTimersByTime(step);
+      });
+      expect(ring()).toBe(`${orbRingProgress(live.at(-1)!) * circumference} ${circumference}`);
+    }
+    act(() => tree.unmount());
     vi.useRealTimers();
   });
 
