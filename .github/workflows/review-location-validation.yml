@@ -37,7 +37,8 @@ jobs:
           # exactly what the PR changes. Pushes to main, an unreadable diff or an empty one run everything.
           files=""
           if [ "$EVENT_NAME" = pull_request ]; then
-            files=$(git diff --name-only HEAD^1 HEAD) || files=""
+            # --no-renames lists both sides of a move, so moving a build input into a skipped path still counts.
+            files=$(git diff --no-renames --name-only HEAD^1 HEAD) || files=""
           fi
           if [ -z "$files" ]; then
             echo "Running everything ($EVENT_NAME)."
@@ -191,10 +192,16 @@ jobs:
       - run: npm ci
       # The cache key is fixed here, before pod install: pod install rewrites three path-generated
       # checksums in Podfile.lock, so a key hashed after it would never match the one restored before it.
+      # It covers every native input the compiler sees from this repository (the iOS project and its
+      # sources, local native modules, the app config that autolinking reads) plus the dependency graph
+      # (Podfile.lock, package-lock.json) and the Xcode build. A warm build therefore only ever compiles
+      # byte-identical inputs: any change to native code finds no cache and builds clean, so React
+      # Native's relaxed ccache settings (modules, VFS overlays, PCH defines) cannot reuse an object a
+      # clean build would compile differently (Codex r1 on #437).
       - id: xcode
         name: Xcode version and cache key
         env:
-          DEPS_HASH: ${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}
+          DEPS_HASH: ${{ hashFiles('apps/mobile/ios/**', 'apps/mobile/modules/**', 'apps/mobile/package.json', 'apps/mobile/app.json', 'apps/mobile/app.config.js', 'package-lock.json') }}
         run: |
           xcodebuild -version
           version=$(xcodebuild -version | tr -s ' \n' '-' | tr -cd 'A-Za-z0-9.-')
@@ -203,25 +210,24 @@ jobs:
         run: |
           npm run check:ios-config
           bash scripts/validate-ios-shared-storage.sh
-      # Caches are keyed on the native dependency graph and the Xcode build. Pushes to main never restore
-      # them, so main always gets a clean build from nothing, and that build seeds the caches. A pull
-      # request restores only caches made for its exact key: a changed Podfile.lock, package-lock.json or
-      # Xcode finds none and builds clean too.
+      # Pushes to main never restore the caches, so main always gets a clean build from nothing, and that
+      # build seeds them. A pull request restores only caches made for its exact key: changed native code,
+      # dependencies or Xcode find none and build clean too.
       - id: pods-cache
         name: Restore CocoaPods (pull requests)
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
         with:
           path: apps/mobile/ios/Pods
-          key: ios-pods-v2-${{ steps.xcode.outputs.key }}
+          key: ios-pods-v3-${{ steps.xcode.outputs.key }}
       - id: ccache-cache
         name: Restore compiler cache (pull requests)
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v3-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
-          restore-keys: ios-ccache-v3-${{ steps.xcode.outputs.key }}-
+          key: ios-ccache-v4-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
+          restore-keys: ios-ccache-v4-${{ steps.xcode.outputs.key }}-
       - name: Install ccache
         env:
           MATCHED: ${{ steps.ccache-cache.outputs.cache-matched-key }}
@@ -285,13 +291,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v3-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
+          key: ios-ccache-v4-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
       - name: Save CocoaPods
         if: success() && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: apps/mobile/ios/Pods
-          key: ios-pods-v2-${{ steps.xcode.outputs.key }}
+          key: ios-pods-v3-${{ steps.xcode.outputs.key }}
 
   validation-gate:
     name: Validation gate
