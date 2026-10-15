@@ -23,7 +23,8 @@ describe("Location replay timeout configuration routing", () => {
       stayIds: new Map(),
       commuteIds: new Map(),
       evidenceIds: new Map(),
-      diagnostics: { warningCodes: [] }
+      diagnostics: { warningCodes: [] },
+      autoLogOrphans: []
     });
     withSyncTransaction.mockImplementation(async (_operation: string, work: (transaction: unknown) => Promise<unknown>) => {
       return work({

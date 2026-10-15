@@ -25,6 +25,7 @@ import {
 import type pg from "pg";
 import type { RequestSession } from "../session";
 import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+import { autoLoggedUneditedSql, retireAutoLoggedMissingStays, type AutoLogOrphan } from "./location-auto-log";
 
 type EvidenceRow = {
   id: string;
@@ -66,6 +67,8 @@ export type LocationReplayResult = {
   commuteIds: Map<string, string>;
   evidenceIds: Map<string, string>;
   diagnostics: ReturnType<typeof runLocationEngine>["diagnostics"];
+  /** Unedited auto-logged blocks whose visit this replay retired (only with `retireAutoLoggedVisits`). */
+  autoLogOrphans: AutoLogOrphan[];
 };
 
 type ExistingSegment = {
@@ -82,6 +85,12 @@ type LocationReplayOptions = {
   persistenceProfile?: LocationReplayPersistenceProfile;
   /** Counts open Review items this replay retires, for the reply's `semanticChangeCount`. */
   semanticChanges?: { count: number };
+  /**
+   * Retire auto-logged visits replay no longer finds (Log automatically). Only when this replay's
+   * Review emission runs, which moves their blocks to a replacement visit or removes them; otherwise
+   * an auto-logged stay is left as it is until such a replay.
+   */
+  retireAutoLoggedVisits?: boolean;
 } & LocationObservation;
 
 function iso(value: Date | string | null) {
@@ -198,7 +207,7 @@ export async function replayLocationEvidence(
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
   observeLocationTiming(options, "obsolete_segment_handling", "started");
-  await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
+  const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
   observeLocationTiming(options, "obsolete_segment_handling", "completed");
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
@@ -229,7 +238,7 @@ export async function replayLocationEvidence(
     protectedSegmentIds,
     options
   );
-  return { segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics };
+  return { segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics, autoLogOrphans };
 }
 
 type ProtectedSourceLink = {
@@ -317,7 +326,9 @@ async function excludeProtectedReplacements(
                and not exists (select 1 from review_items ri where ${scalabilityProfile
                  ? "ri.workspace_id = $1 and ri.user_id = $2"
                  : "ri.workspace_id = s.workspace_id and ri.user_id = s.user_id"}
-                 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+                 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
+               -- An unedited auto-logged visit is still replay's to move (Log automatically).
+               and not ${autoLoggedUneditedSql("s")}))
            order by s.id, le.client_evidence_id for update of s`;
         });
         // OFFSET 0 is an optimization boundary, not a result cap: look up the
@@ -438,7 +449,8 @@ async function decidedStayBounds(
      where s.workspace_id = $1 and s.user_id = $2 and s.device_id = $3 and s.client_segment_id = any($4::text[])
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
+         and not ${autoLoggedUneditedSql("s")}))
      order by s.client_segment_id`,
     [session.workspaceId, session.userId, options.deviceId, clientSegmentIds]
   );
@@ -522,10 +534,15 @@ export function withinEngineEligibility(rebuilt: CommuteSegment, engine: Commute
 async function supersedeMissingSegments(
   client: pg.PoolClient,
   session: RequestSession,
-  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges">,
+  options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges" | "retireAutoLoggedVisits">,
   stayClientIds: string[],
   commuteClientIds: string[]
-) {
+): Promise<AutoLogOrphan[]> {
+  // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
+  // event and no Review) untouched.
+  const autoLogOrphans = options.retireAutoLoggedVisits
+    ? await retireAutoLoggedMissingStays(client, session, options, stayClientIds)
+    : [];
   await retireOpenReviewsForMissingSegments(
     client,
     session,
@@ -557,6 +574,7 @@ async function supersedeMissingSegments(
            and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, commuteClientIds]
   );
+  return autoLogOrphans;
 }
 
 async function retireOpenReviewsForMissingSegments(
@@ -689,7 +707,7 @@ async function lockAndPartitionSegments<T extends {clientSegmentId: string}>(
                 select 1 from review_items
                 where workspace_id = $1 and user_id = $2
                   and location_segment_id = ${table}.id and ${reviewLeavesSegmentToReplay("review_items")}
-              ) as "preservesManualCorrection"
+              ) and not ${autoLoggedUneditedSql(table)} as "preservesManualCorrection"
        from ${table}
        where workspace_id = $1 and user_id = $2 and device_id = $3 and client_segment_id = any($4::text[])
        order by client_segment_id

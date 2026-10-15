@@ -75,6 +75,7 @@ export const REPORT_SOURCE_VALUES = [
   "health_sleep",
   "health_workout",
   "location_learning",
+  "location_auto_log",
   "home_assistant",
   "ha_button",
   "ha_geofence"

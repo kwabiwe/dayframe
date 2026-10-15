@@ -4,6 +4,7 @@ import {
   dateTimeLocalInputToIso,
   formatActivityEventLabel,
   durationInputValue,
+  formatSourceLabel,
   parseDurationInput
 } from "./format";
 
@@ -63,5 +64,15 @@ describe("formatExportDuration", () => {
     expect(formatExportDuration(3900)).toBe("1h 05m");
     expect(formatExportDuration(59.5)).toBe("1m");
     expect(formatExportDuration(0)).toBe("0m");
+  });
+});
+
+describe("auto-logged visit source label (Log automatically, owner decision 14 Oct 2026)", () => {
+  it("names the place for one block and stays plain without one", () => {
+    expect(formatSourceLabel("location_auto_log", { placeName: " Gym " })).toBe("Logged automatically · Gym");
+    expect(formatSourceLabel("location_auto_log")).toBe("Logged automatically");
+    expect(formatSourceLabel("location_auto_log", { placeName: "  " })).toBe("Logged automatically");
+    // Other sources never take the place.
+    expect(formatSourceLabel("location_learning", { placeName: "Gym" })).toBe("Location learning");
   });
 });

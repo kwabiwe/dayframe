@@ -1711,6 +1711,139 @@ async function validateTimeAwayReview() {
     "Confirmed time away became a Commute entry.");
 }
 
+/**
+ * Per-place "Log automatically" in v2_review (owner decisions 14–15 Oct 2026): a trusted stay at an
+ * auto_log place becomes a location_auto_log block instead of a Review card; overlaps, a running
+ * timer or the switch off keep it in Review; retries never duplicate; replay moves an unedited block
+ * with its visit and removes it with a vanished visit; edited or deleted blocks are never touched.
+ */
+async function validateReviewModeAutoLogPlaces() {
+  const fixture = locationAcceptanceFixture();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const reviewBatch = batch("db-auto-log-places", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt);
+  const autoEntries = async () => (await pool.query<{
+    id: string; placeId: string | null; eventId: string | null; startedAt: Date; stoppedAt: Date | null;
+    reviewStatus: string; eventStatus: string | null; userEditedAt: Date | null;
+  }>(
+    `select te.id, te.place_id as "placeId", te.created_from_event_id as "eventId",
+            te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.review_status as "reviewStatus",
+            ae.review_status as "eventStatus", te.user_edited_at as "userEditedAt"
+     from time_entries te left join activity_events ae on ae.id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2 and te.source = 'location_auto_log'
+     order by te.started_at`,
+    [WORKSPACE_ID, USER_ID]
+  )).rows;
+  const setAutoLog = (on: boolean, placeIds = LOCATION_ACCEPTANCE_PLACES.map((place) => place.id)) =>
+    pool.query("update places set auto_log = $3 where workspace_id = $1 and id = any($2::uuid[])", [WORKSPACE_ID, placeIds, on]);
+  const renameStay = async (entry: { eventId: string | null }, suffix: string) => {
+    // What replay sees when a later run no longer produces this stay under its ID (its boundaries
+    // moved, or it vanished): the persisted row and its event under an ID the engine never emits.
+    await pool.query(
+      `update stay_segments set client_segment_id = client_segment_id || $4
+       where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`, [WORKSPACE_ID, USER_ID, entry.eventId, suffix]);
+    await pool.query(
+      `update activity_events set client_event_id = client_event_id || $4
+       where workspace_id = $1 and user_id = $2 and id = $3`, [WORKSPACE_ID, USER_ID, entry.eventId, suffix]);
+  };
+
+  // Baseline: with the switch off, trusted stays are Review cards and nothing is auto-logged.
+  await clearDerivedLocationState();
+  await setAutoLog(false);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal((await autoEntries()).length, 0, "A place without Log automatically logged a visit.");
+  const reviewOnlyCount = await count("review_items");
+
+  // On: trusted stays become blocks, never Review cards; their events are confirmed.
+  await clearDerivedLocationState();
+  await setAutoLog(true);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const logged = await autoEntries();
+  assert(logged.length > 0, "Log automatically created no block for a trusted stay.");
+  assert(logged.every((entry) => entry.placeId && entry.reviewStatus === "confirmed" && entry.eventStatus === "confirmed"),
+    "An auto-logged block lacks its place or a confirmed event.");
+  const loggedReviews = await pool.query(
+    "select 1 from review_items where workspace_id = $1 and user_id = $2 and event_id = any($3::uuid[])",
+    [WORKSPACE_ID, USER_ID, logged.map((entry) => entry.eventId)]);
+  assert.equal(loggedReviews.rowCount, 0, "An auto-logged visit also created a Review card.");
+  assert.equal(await count("review_items"), reviewOnlyCount - logged.length,
+    "Log automatically did not replace exactly the trusted stays' Review cards.");
+  const confirmedStays = await pool.query(
+    "select 1 from stay_segments where workspace_id = $1 and user_id = $2 and review_status = 'confirmed' and created_from_event_id = any($3::uuid[])",
+    [WORKSPACE_ID, USER_ID, logged.map((entry) => entry.eventId)]);
+  assert.equal(confirmedStays.rowCount, logged.length, "An auto-logged stay was not marked confirmed.");
+
+  // Retries are idempotent.
+  const entryCount = await count("time_entries");
+  const reviewCount = await count("review_items");
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(await count("time_entries"), entryCount, "A retry duplicated an auto-logged block.");
+  assert.equal(await count("review_items"), reviewCount, "A retry added a Review card for an auto-logged visit.");
+
+  // A replay that moves an unedited visit moves the same block to the new boundaries.
+  const moved = logged[0];
+  await pool.query("update time_entries set started_at = started_at - interval '7 minutes' where id = $1", [moved.id]);
+  await renameStay(moved, ":moved");
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const afterMove = await autoEntries();
+  const followed = afterMove.find((entry) => entry.id === moved.id);
+  assert(followed, "Replay removed an unedited block instead of moving it with its visit.");
+  assert.equal(followed.startedAt.toISOString(), moved.startedAt.toISOString(), "The moved block did not take the visit's boundaries.");
+  assert.notEqual(followed.eventId, moved.eventId, "The moved block was not re-linked to the replacement visit.");
+  assert.equal(afterMove.length, logged.length, "Moving a visit changed the number of auto-logged blocks.");
+  assert.equal(await count("review_items"), reviewCount, "Moving an auto-logged visit created a Review card.");
+
+  // A replay whose visit is not logged again (here: the switch is now off) removes the unedited block.
+  const vanished = afterMove[0];
+  await setAutoLog(false, [vanished.placeId!]);
+  await renameStay(vanished, ":vanished");
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const afterVanish = await autoEntries();
+  assert(!afterVanish.some((entry) => entry.id === vanished.id), "Replay kept the unedited block of a visit it no longer logs.");
+  await setAutoLog(true, [vanished.placeId!]);
+
+  // An edited block is the person's: replay never moves or removes it.
+  await clearDerivedLocationState();
+  await setAutoLog(true);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const edited = (await autoEntries())[0];
+  await pool.query("update time_entries set user_edited_at = now(), description = 'Mine now' where id = $1", [edited.id]);
+  await renameStay(edited, ":edited");
+  const before = await count("time_entries");
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const kept = (await pool.query<{ startedAt: Date; description: string }>(
+    "select started_at as \"startedAt\", description from time_entries where id = $1", [edited.id])).rows[0];
+  assert(kept && kept.description === "Mine now" && kept.startedAt.toISOString() === edited.startedAt.toISOString(),
+    "Replay changed an edited auto-logged block.");
+  assert.equal(await count("time_entries"), before, "Replay re-logged a visit whose block the person edited.");
+
+  // A deleted block is a decision too: replay never logs that visit again.
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const deleted = (await autoEntries())[0];
+  await pool.query("delete from time_entries where id = $1", [deleted.id]);
+  const afterDelete = await count("time_entries");
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(await count("time_entries"), afterDelete, "Replay re-logged a visit whose block the person deleted.");
+
+  // Fallbacks to Review: tracked time overlapping the visit, or a timer running during it.
+  for (const [label, stoppedAt] of [["an overlapping block", "visit"], ["a running timer", null]] as const) {
+    await clearDerivedLocationState();
+    await pool.query(
+      `insert into time_entries (workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at)
+       values ($1, $2, 'manual_app', 'high', 'confirmed', 'Existing tracked time', $3, $4)`,
+      [WORKSPACE_ID, USER_ID, logged[0].startedAt, stoppedAt === "visit" ? logged[0].stoppedAt : null]);
+    await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+    const blocked = await pool.query(
+      `select 1 from review_items where workspace_id = $1 and user_id = $2 and suggested_place_id = $3
+         and suggested_started_at = $4`,
+      [WORKSPACE_ID, USER_ID, logged[0].placeId, logged[0].startedAt]);
+    assert.equal(blocked.rowCount, 1, `A visit overlapping ${label} was logged instead of going to Review.`);
+    assert(!(await autoEntries()).some((entry) => entry.startedAt.toISOString() === logged[0].startedAt.toISOString()),
+      `A visit overlapping ${label} was auto-logged.`);
+  }
+  await setAutoLog(false);
+}
+
 async function main() {
   try {
     if (process.argv.includes("--saved-place-quality-only")) {
@@ -1731,12 +1864,13 @@ async function main() {
     await validateCommuteReviewCategoryAndDescription();
     await validateRecentOwnerAuthoredSignal();
     await validateRecentTitleHistoryAcrossReplay();
+    await validateReviewModeAutoLogPlaces();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (blocks instead of Review, overlap and running-timer fallbacks, idempotency, moving and removing unedited blocks with their visit, edited and deleted blocks kept), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

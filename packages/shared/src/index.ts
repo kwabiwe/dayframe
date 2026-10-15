@@ -1353,6 +1353,8 @@ const excludedSuggestionEventTypes = new Set([
 // Intelligence stays/commutes). Health is never a location visit.
 const locationVisitSources = new Set([
   "location_learning",
+  // Log automatically: a visit logged as a block without a Review card.
+  "location_auto_log",
   "geofence_specific",
   "geofence_broad",
   "ha_geofence"
