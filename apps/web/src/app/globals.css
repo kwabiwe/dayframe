@@ -10993,6 +10993,39 @@ dialog.ui-dialog.df-palette {
   white-space: nowrap;
 }
 
+/* The switch toast's two lines (owner decision 15 Oct 2026, as iPhone #400): "Switched to …" over a
+   muted "42m logged to …", each wrapping once at most; taller than the pill, it keeps 24 px corners
+   instead of a capsule that would clip the text. */
+.df-toast.has-detail {
+  border-radius: 24px;
+  padding-block: 8px;
+}
+
+.df-toast-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+
+.df-toast-text .df-toast-message,
+.df-toast-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.df-toast-detail {
+  color: color-mix(in oklab, var(--surface) 72%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
 .df-toast-action {
   min-width: 44px;
   min-height: 44px;

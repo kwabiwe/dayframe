@@ -32,7 +32,7 @@ import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
 import { quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
-import { alreadyRecordingToastMessage, switchedToastMessage } from "@/lib/blocks-toast-copy";
+import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 
@@ -40,7 +40,7 @@ const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 
-type TimerNotice = { exiting: boolean; label: string; swatch?: CSSProperties; token: number };
+type TimerNotice = { detail?: string | null; exiting: boolean; label: string; swatch?: CSSProperties; token: number };
 
 /**
  * The idle description's placeholder is the example the old "Try …" line under the field gave
@@ -393,7 +393,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       if (outcome.alreadyRunning) {
         if (outcome.unchanged) announce(alreadyRecordingToastMessage(outcome.unchanged), swatch);
       } else if (outcome.replaced) {
-        announce(switchedToastMessage(action.label, outcome.replaced, Date.parse(outcome.switchedAt)), swatch);
+        const copy = switchedToastCopy(action.label, outcome.replaced, Date.parse(outcome.switchedAt));
+        announce(copy.message, swatch, copy.detail);
       }
     });
   }
@@ -429,8 +430,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
   }
 
-  function announce(label: string, swatch?: CSSProperties) {
-    setNotice({ exiting: false, label, swatch, token: ++noticeSequence.current });
+  function announce(label: string, swatch?: CSSProperties, detail?: string | null) {
+    setNotice({ detail, exiting: false, label, swatch, token: ++noticeSequence.current });
   }
 
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
@@ -855,7 +856,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       ) : null}
 
       {notice ? (
-        <BlocksToast exiting={notice.exiting} key={notice.token} message={notice.label} swatchStyle={notice.swatch} />
+        <BlocksToast detail={notice.detail} exiting={notice.exiting} key={notice.token} message={notice.label} swatchStyle={notice.swatch} />
       ) : null}
 
       {isManualEntryOpen ? (

@@ -1,8 +1,8 @@
 import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 /**
  * Copy for the web Blocks switch toasts (UIA-209, the same wording as the iPhone's UIA-004):
- * "Switched to Work · 42m logged to Client Work" and "Already recording Deep work". Neither has
- * Undo: there is no un-switch contract.
+ * "Switched to Work" over a muted "42m logged to Client Work", and "Already recording Deep work".
+ * Neither has Undo: there is no un-switch contract.
  */
 type ToastEntry = {
   categoryId: string | null;
@@ -22,17 +22,23 @@ function compactDuration(seconds: number) {
 }
 
 /**
- * "Switched to Work · 42m logged to Client Work": what is recording now, and where the time of
- * the block it replaced went. A previous block under a minute says "under a minute".
+ * "Switched to Work" over a muted "42m logged to Client Work" (owner decision 15 Oct 2026: back to
+ * TestFlight 120's two lines, #400, on iPhone and web): what is recording now on the first line,
+ * where the replaced block's time went on the second. The duration is the shared `formatDuration`
+ * ("<1m", "42m", "2h 5m"), as on iPhone.
  */
-export function switchedToastMessage(
+export function switchedToastCopy(
   nextName: string,
   previous: Pick<ToastEntry, "categoryName" | "description" | "startedAt">,
   nowMs: number
 ) {
-  const seconds = Math.max(0, (nowMs - Date.parse(previous.startedAt)) / 1000);
-  const logged = seconds < 60 ? "under a minute" : compactDuration(seconds);
-  return `Switched to ${nextName} · ${logged} logged to ${toastBlockName(previous)}`;
+  const startedMs = Date.parse(previous.startedAt);
+  // A block switched away from in the same second (or with a clock skew) still logged under a minute.
+  const seconds = Number.isFinite(startedMs) ? Math.max(1, (nowMs - startedMs) / 1000) : 1;
+  return {
+    message: `Switched to ${nextName}`,
+    detail: `${compactDuration(seconds)} logged to ${toastBlockName(previous)}`
+  };
 }
 
 export function alreadyRecordingToastMessage(active: Pick<ToastEntry, "categoryName" | "description">) {
