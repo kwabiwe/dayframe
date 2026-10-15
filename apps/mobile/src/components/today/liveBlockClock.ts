@@ -40,8 +40,7 @@ export function useLiveBlockElapsed(active: LiveBlockClockInput) {
   // The time held since the block stopped (React's "information from previous renders" pattern).
   const [held, setHeld] = useState<{ seconds: number; startedAt: string } | null>(null);
   if (!clocked) return { label: active.elapsedLabel, seconds: active.elapsedSeconds };
-  const elapsedAt = (nowMs: number) =>
-    Math.max(active.elapsedSeconds, activeTimerElapsedSeconds({ durationSeconds, startedAt }, nowMs));
+  const elapsedAt = (nowMs: number) => liveElapsedSecondsAt({ ...active, durationSeconds, startedAt }, nowMs);
   let seconds: number;
   if (live) {
     if (held !== null) setHeld(null);
@@ -56,13 +55,25 @@ export function useLiveBlockElapsed(active: LiveBlockClockInput) {
 }
 
 /**
+ * The running block's seconds as of `nowMs`: the fresher of the Dashboard's value and the block's own
+ * clock. The live block, the Stop flight's ghost and the Play orb's ring all read it, so none can show
+ * a different second for the same block (Codex r1 on #439).
+ */
+export function liveElapsedSecondsAt(
+  input: { durationSeconds: number; elapsedSeconds: number; startedAt: string },
+  nowMs: number
+) {
+  return Math.max(input.elapsedSeconds, activeTimerElapsedSeconds(input, nowMs));
+}
+
+/**
  * The live presentation as of `nowMs`. The Stop flight's ghost takes the block's place showing the
  * time it stopped at, not the Dashboard's last minute tick.
  */
 export function livePresentationAt<T extends LiveBlockClockInput>(presentation: T, nowMs: number): T {
   const { durationSeconds, startedAt } = presentation;
   if (startedAt === undefined || durationSeconds === undefined) return presentation;
-  const seconds = Math.max(presentation.elapsedSeconds, activeTimerElapsedSeconds({ durationSeconds, startedAt }, nowMs));
+  const seconds = liveElapsedSecondsAt({ durationSeconds, elapsedSeconds: presentation.elapsedSeconds, startedAt }, nowMs);
   if (seconds === presentation.elapsedSeconds) return presentation;
   return { ...presentation, elapsedLabel: formatLiveClock(seconds), elapsedSeconds: seconds };
 }

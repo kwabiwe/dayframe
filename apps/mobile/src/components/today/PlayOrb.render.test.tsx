@@ -181,35 +181,75 @@ describe("PlayOrb", () => {
     vi.useRealTimers();
   });
 
-  it("agrees with the live block's seconds on every commit, whatever the step between renders", () => {
+  it("agrees with the live block's seconds on every commit: uneven steps, a fresher Dashboard value, a clock set back (Codex r1 on #439)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-15T15:15:07.400"));
     const startedAt = new Date("2026-10-15T14:30:07.000").toISOString();
     const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
     const live: number[] = [];
-    function LiveSeconds() {
-      const elapsed = useLiveBlockElapsed({ durationSeconds: 0, elapsedLabel: "", elapsedSeconds: 0, hasLiveActiveTimer: true, startedAt });
+    function LiveSeconds({ floor }: { floor: number }) {
+      const elapsed = useLiveBlockElapsed({ durationSeconds: 0, elapsedLabel: "", elapsedSeconds: floor, hasLiveActiveTimer: true, startedAt });
       live.push(elapsed.seconds);
       return null;
     }
-    const props = { activities, hidden: false, onChoose: vi.fn(), onTap: vi.fn(), reduceMotion: false, running: true, runningDurationSeconds: 0, runningStartedAt: startedAt, theme };
-    let tree!: ReturnType<typeof create>;
-    act(() => {
-      tree = create(
+    // The Dashboard hands both the same presentation, as it does the live block and the orb.
+    function Pair({ floor }: { floor: number }) {
+      const props = { activities, hidden: false, onChoose: vi.fn(), onTap: vi.fn(), reduceMotion: false, running: true, runningDurationSeconds: 0, runningElapsedSeconds: floor, runningStartedAt: startedAt, theme };
+      return (
         <>
-          <LiveSeconds />
+          <LiveSeconds floor={floor} />
           <PlayOrb {...props} />
         </>
       );
+    }
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<Pair floor={0} />);
     });
     const ring = () => tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray as string;
+    const agrees = () => expect(ring()).toBe(`${orbRingProgress(live.at(-1)!) * circumference} ${circumference}`);
     for (const step of [333, 333, 334, 17, 983, 500, 499, 1, 2000, 250, 61_000]) {
       act(() => {
         vi.advanceTimersByTime(step);
       });
-      expect(ring()).toBe(`${orbRingProgress(live.at(-1)!) * circumference} ${circumference}`);
+      agrees();
     }
+    // A Dashboard refresh lands inside the 15 ms before the anchored tick, with the next second already in.
+    act(() => {
+      vi.advanceTimersByTime(1000 - (Date.now() - Date.parse(startedAt)) % 1000 + 5);
+    });
+    const fresher = Math.floor((Date.now() - Date.parse(startedAt)) / 1000);
+    act(() => tree.update(<Pair floor={fresher} />));
+    agrees();
+    expect(live.at(-1)).toBe(fresher);
+    // The clock is set back 30 s: both keep the Dashboard's later value.
+    vi.setSystemTime(Date.now() - 30_000);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    agrees();
     act(() => tree.unmount());
+    vi.useRealTimers();
+  });
+
+  it("holds the Stop flight ghost's time while Stop is saved, and counts on if the Stop is rolled back (Codex r1 on #439)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-15T15:15:07.400"));
+    const startedAt = new Date("2026-10-15T14:30:07.000").toISOString();
+    const circumference = 2 * Math.PI * (PLAY_ORB.size / 2 + 5 - 1.5);
+    const base = { running: true, runningDurationSeconds: 0, runningElapsedSeconds: 0, runningStartedAt: startedAt };
+    const orb = render({ ...base, runningHeldSeconds: 45 * 60 });
+    const ring = () => orb.tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray as string;
+    for (let second = 0; second < 3; second += 1) {
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(ring()).toBe(`0 ${circumference}`);
+    }
+    // Rolled back: the flight clears and the ring shows the block's seconds again (now 45:03).
+    act(() => orb.tree.update(<PlayOrb {...orb.props} {...base} runningHeldSeconds={undefined} />));
+    expect(ring()).toBe(`${(3 / 60) * circumference} ${circumference}`);
+    act(() => orb.tree.unmount());
     vi.useRealTimers();
   });
 

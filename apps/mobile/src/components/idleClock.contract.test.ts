@@ -27,7 +27,7 @@ describe("idle and background clock work", () => {
     expect(clock).toContain("}, [foreground, needsSecondClock, secondAnchorMs, setNow]);");
     expect(dashboard).toContain("useDashboardClockTicks({ foreground: appIsForeground, needsSecondClock, secondsShown, setNow });");
     // The orb's ring uses the same foreground-only clock, anchored to the running block (TestFlight 121).
-    expect(orb).toContain("useDashboardClockTicks({ foreground, needsSecondClock: true, secondAnchorMs: Date.parse(startedAt), setNow: setNowMs });");
+    expect(orb).toMatch(/useDashboardClockTicks\(\{\s*foreground: foreground && heldSeconds === undefined,\s*needsSecondClock: true,\s*secondAnchorMs: Date\.parse\(startedAt\),\s*setNow: setNowMs,\s*\}\);/);
   });
   it("re-renders whole seconds only while they are on screen (iPhone 17, 13 Oct: about 150 ms of JS a second behind Settings)", () => {
     // Behind Settings, Review or Calendar a second tick that is not a new minute re-renders nothing.

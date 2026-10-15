@@ -1,6 +1,6 @@
 import { useAppForeground } from "../../lib/appForeground";
 import { useDashboardClockTicks } from "../../lib/dashboardClock";
-import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
+import { liveElapsedSecondsAt } from "./liveBlockClock";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
@@ -50,8 +50,13 @@ type PlayOrbProps = {
   onTap: () => void;
   reduceMotion: boolean;
   running: boolean;
-  /** The running block's start and stored duration: the ring counts the block's own seconds. */
+  /**
+   * The running block as the live block shows it: its start, stored duration and the Dashboard's elapsed
+   * seconds (the floor both clocks take), and the seconds a Stop flight's ghost holds while Stop is saved.
+   */
   runningDurationSeconds?: number;
+  runningElapsedSeconds?: number;
+  runningHeldSeconds?: number;
   runningStartedAt?: string;
   theme: MobileTheme;
 };
@@ -64,6 +69,8 @@ export const PlayOrb = memo(PlayOrbView, (previous, next) =>
   previous.reduceMotion === next.reduceMotion &&
   previous.running === next.running &&
   previous.runningDurationSeconds === next.runningDurationSeconds &&
+  previous.runningElapsedSeconds === next.runningElapsedSeconds &&
+  previous.runningHeldSeconds === next.runningHeldSeconds &&
   previous.runningStartedAt === next.runningStartedAt &&
   previous.theme === next.theme
 );
@@ -76,6 +83,8 @@ function PlayOrbView({
   reduceMotion,
   running,
   runningDurationSeconds,
+  runningElapsedSeconds,
+  runningHeldSeconds,
   runningStartedAt,
   theme,
 }: PlayOrbProps) {
@@ -224,7 +233,13 @@ function PlayOrbView({
           testID="play-orb"
         >
           {running && runningStartedAt !== undefined ? (
-            <OrbSecondsRing color={theme.accent} durationSeconds={runningDurationSeconds ?? 0} startedAt={runningStartedAt} />
+            <OrbSecondsRing
+              color={theme.accent}
+              durationSeconds={runningDurationSeconds ?? 0}
+              elapsedSeconds={runningElapsedSeconds ?? 0}
+              heldSeconds={runningHeldSeconds}
+              startedAt={runningStartedAt}
+            />
           ) : null}
           <PrimaryTimerGlyph color={theme.onAccent} mode={running ? "stop" : "play"} />
         </Reanimated.View>
@@ -255,15 +270,36 @@ export function orbRingProgress(elapsedSeconds: number) {
 }
 
 /**
- * The running orb's coral ring, filling with the block's current minute. Its 1 s clock reads the same
- * elapsed seconds as the live block (`activeTimerElapsedSeconds`) and ticks on the same anchored seconds,
- * so both change together; it stops in the background and reads the time again on return.
+ * The running orb's coral ring, filling with the block's current elapsed minute. It reads the live block's
+ * seconds (`liveElapsedSecondsAt`, with the same Dashboard floor) on a 1 s clock anchored to the block's
+ * start, as the live block's is; while a Stop flight's ghost holds the block's time, the ring holds it
+ * too, and resumes if the Stop is refused or rolled back. It stops in the background and reads the time
+ * again on return.
  */
-function OrbSecondsRing({ color, durationSeconds, startedAt }: { color: string; durationSeconds: number; startedAt: string }) {
+function OrbSecondsRing({
+  color,
+  durationSeconds,
+  elapsedSeconds,
+  heldSeconds,
+  startedAt,
+}: {
+  color: string;
+  durationSeconds: number;
+  elapsedSeconds: number;
+  heldSeconds: number | undefined;
+  startedAt: string;
+}) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const foreground = useAppForeground();
-  useDashboardClockTicks({ foreground, needsSecondClock: true, secondAnchorMs: Date.parse(startedAt), setNow: setNowMs });
-  const progress = orbRingProgress(activeTimerElapsedSeconds({ durationSeconds, startedAt }, nowMs));
+  useDashboardClockTicks({
+    foreground: foreground && heldSeconds === undefined,
+    needsSecondClock: true,
+    secondAnchorMs: Date.parse(startedAt),
+    setNow: setNowMs,
+  });
+  const progress = orbRingProgress(
+    heldSeconds ?? liveElapsedSecondsAt({ durationSeconds, elapsedSeconds, startedAt }, nowMs)
+  );
   const ringRadius = PLAY_ORB.size / 2 + RING.inset - RING.stroke / 2;
   const circumference = 2 * Math.PI * ringRadius;
   const box = PLAY_ORB.size + RING.inset * 2;
