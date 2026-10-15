@@ -46,7 +46,10 @@ describe("entry sheet time wheel (A11b)", () => {
   });
 
   it("takes the dial's measured room while open, so the fixed sheet never grows (Codex r1/r2 on #428)", () => {
-    expect(sheet).toMatch(/\{timeWheel \? null : \(\s*<View\s*onLayout=\{\(event\) => setDialAreaHeight\(event\.nativeEvent\.layout\.height\)\}/);
+    expect(sheet).toMatch(/\{timeWheel \? null : \(\s*<View\s*onLayout=\{\(event\) => setDialAreaMeasure\(\{ height: event\.nativeEvent\.layout\.height, key: dialAreaKey \}\)\}/);
+    // A measurement taken at another density, text size or width is not used (Codex r3 on #428).
+    expect(sheet).toContain("const dialAreaHeight = dialAreaMeasure?.key === dialAreaKey ? dialAreaMeasure.height : null;");
+    expect(sheet).toContain("const dialAreaKey = `${layoutDensity}:${windowDimensions.fontScale}:${windowDimensions.width}`;");
     expect(sheet).toContain("dialAreaHeight - TIME_WHEEL_PANEL_CHROME - (timeWheelShowsSummary ? TIME_WHEEL_SUMMARY_HEIGHT : 0)");
     expect(sheet).toContain("const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;");
     expect(sheet).toContain('testID="time-entry-time-wheel-summary"');

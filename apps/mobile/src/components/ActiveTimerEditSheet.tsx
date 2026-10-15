@@ -264,8 +264,10 @@ export function ActiveTimerEditSheet({
   };
   // 5-minute rows unless the person asked for Every minute in this sheet (the prototype's stepPref).
   const [timeWheelStepPref, setTimeWheelStepPref] = useState<1 | 5>(5);
-  // The dial's measured height (with its hint row): the open wheel takes exactly that room.
-  const [dialAreaHeight, setDialAreaHeight] = useState<number | null>(null);
+  // The dial's measured height (with its hint row) and the layout it was measured at: the open
+  // wheel takes that room only while the density and text size are still the same (Codex r3 on
+  // #428: a Dynamic Type change while the wheel is open would otherwise keep a stale, larger room).
+  const [dialAreaMeasure, setDialAreaMeasure] = useState<{ height: number; key: string } | null>(null);
   // "Type time" (and VoiceOver's activate) types into the card's own field; otherwise it isn't editable.
   const [typingTarget, setTypingTarget] = useState<"start" | "end" | null>(null);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
@@ -2456,6 +2458,7 @@ export function ActiveTimerEditSheet({
     setDateSheetMonth(key);
   };
   const showDoneButton = Boolean(onSave);
+  const dialAreaKey = `${layoutDensity}:${windowDimensions.fontScale}:${windowDimensions.width}`;
   const timeWheelValueMs = timeWheel ? cardTimeMs(timeWheel.target) : Number.NaN;
   const timeWheelModel = timeWheel ? {
     colorScheme: theme.mode === "dark" ? "dark" as const : "light" as const,
@@ -2471,6 +2474,7 @@ export function ActiveTimerEditSheet({
   // The panel replaces the dial: the wheel gets the dial's room less the panel's own chrome, never
   // under TIME_WHEEL_MIN_HEIGHT (a wheel needs about three rows) nor over the prototype's 180.
   const timeWheelShowsSummary = layoutDensity !== "condensed";
+  const dialAreaHeight = dialAreaMeasure?.key === dialAreaKey ? dialAreaMeasure.height : null;
   const timeWheelHeight = dialAreaHeight === null
     ? TIME_WHEEL_HEIGHT_BY_DENSITY[layoutDensity]
     : Math.round(Math.max(TIME_WHEEL_MIN_HEIGHT, Math.min(TIME_WHEEL_MAX_HEIGHT,
@@ -3242,7 +3246,7 @@ export function ActiveTimerEditSheet({
                     at every density (Codex r1/r2 on #428; the prototype's shrinking dial does not fit). */}
                 {timeWheel ? null : (
                   <View
-                    onLayout={(event) => setDialAreaHeight(event.nativeEvent.layout.height)}
+                    onLayout={(event) => setDialAreaMeasure({ height: event.nativeEvent.layout.height, key: dialAreaKey })}
                     pointerEvents="box-none"
                     testID="time-entry-duration-dial-area"
                   >
@@ -3611,13 +3615,15 @@ const TIME_CARD_ACCESSIBILITY_ACTIONS = [
   { name: "typeTime", label: "Type time" },
   { name: "changeDate", label: "Change date" }
 ] as const;
-/** The inline wheel's height before the dial's room is measured (the first opening is after layout). */
+/** The inline wheel's height when the dial's room isn't measured at the current layout (the first
+    opening is after layout; a text-size change while the wheel is open falls back to these). */
 const TIME_WHEEL_HEIGHT_BY_DENSITY = { regular: 180, compact: 140, condensed: 100 } as const;
 const TIME_WHEEL_MIN_HEIGHT = 100;
 const TIME_WHEEL_MAX_HEIGHT = 180;
 /** The panel around the wheel: its top margin and padding, the gap and the 44-point foot. */
 const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;
-const TIME_WHEEL_SUMMARY_HEIGHT = 20;
+/** The duration line and its gap, at the metadata role's 1.3× text cap (Codex r3 on #428). */
+const TIME_WHEEL_SUMMARY_HEIGHT = 26;
 
 /** How many activity chips fit above the dial before the bottom actions would leave the screen. */
 const ACTIVITY_CHIP_LIMIT_BY_DENSITY = { regular: 7, compact: 5, condensed: 3 } as const;
