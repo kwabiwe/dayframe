@@ -14,7 +14,6 @@ export function BlocksToast({
   actionLabel,
   autoFocusAction = false,
   exiting = false,
-  lead,
   message,
   onAction,
   swatchStyle
@@ -23,8 +22,6 @@ export function BlocksToast({
   /** Move focus to the action when the toast appears (when the surface that was focused just went away). */
   autoFocusAction?: boolean;
   exiting?: boolean;
-  /** A fixed lead ("Switched to") shown before `message`; it never truncates, only `message` does. */
-  lead?: string;
   message: string;
   onAction?: () => void;
   swatchStyle?: CSSProperties;
@@ -46,14 +43,7 @@ export function BlocksToast({
         style={{ "--df-toast-pop": pop.easing, "--df-toast-pop-ms": `${pop.durationMs}ms` } as CSSProperties}
       >
         <span className="df-toast-swatch" style={swatchStyle} aria-hidden="true" />
-        {lead ? (
-          <span className="df-toast-message has-lead">
-            <span className="df-toast-lead">{lead}</span>{" "}
-            <span className="df-toast-name">{message}</span>
-          </span>
-        ) : (
-          <span className="df-toast-message">{message}</span>
-        )}
+        <span className="df-toast-message">{message}</span>
         {actionLabel && onAction ? (
           <button className="df-toast-action" disabled={exiting} onClick={onAction} ref={actionRef} type="button">
             {actionLabel}
