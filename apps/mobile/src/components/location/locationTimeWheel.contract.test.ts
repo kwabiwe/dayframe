@@ -39,6 +39,7 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).toMatch(/setTimeWheel\(null\);\s*setActivityPickerOpen\(true\);/);
     expect(editor).toMatch(/if \(isFocused \|\| !timeWheelRef\.current\) return;\s*setTimeWheel\(null\);/);
     expect(editor).toContain("onFocus={() => setTimeWheel(null)}");
+    expect(editor).toMatch(/async function chooseNearbyPlace[\s\S]*?setTimeWheel\(null\);\s*const token = \+\+placePickTokenRef\.current;/);
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(searchInputRef\.current\);/);
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(activityInputRef\.current\);/);
   });
