@@ -26,7 +26,7 @@ import type pg from "pg";
 import type { RequestSession } from "../session";
 import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 import {
-  autoLoggedUneditedSql, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
+  autoLoggedUneditedSql, lockAutoLoggedBlocks, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
 
 type EvidenceRow = {
@@ -71,6 +71,8 @@ export type LocationReplayResult = {
   diagnostics: ReturnType<typeof runLocationEngine>["diagnostics"];
   /** Unedited auto-logged blocks whose visit this replay retired (only with `autoLogReconciliation`). */
   autoLogOrphans: AutoLogOrphan[];
+  /** Every block this replay locked unedited, in entry-id order (only with `autoLogReconciliation`). */
+  autoLogLocked: Set<string>;
 };
 
 type ExistingSegment = {
@@ -198,6 +200,10 @@ export async function replayLocationEvidence(
   observeLocationStage(options, "segment_persistence");
   observeLocationCount(options, "staySegments", output.segmentUpserts.filter(segment => segment.kind === "stay").length);
   observeLocationCount(options, "commuteSegments", output.segmentUpserts.filter(segment => segment.kind === "commute").length);
+  // Before anything reads which stays are decisions (Codex r3 on #435).
+  const autoLogLocked = options.autoLogReconciliation
+    ? await lockAutoLoggedBlocks(client, session, { ...options, reconciliation: options.autoLogReconciliation })
+    : new Set<string>();
   observeLocationTiming(options, "protected_replacement_checks", "started");
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places);
   const segments = protectedReplacement.segments;
@@ -210,7 +216,7 @@ export async function replayLocationEvidence(
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
   observeLocationTiming(options, "obsolete_segment_handling", "started");
-  const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds);
+  const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds, autoLogLocked);
   observeLocationTiming(options, "obsolete_segment_handling", "completed");
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
@@ -241,7 +247,10 @@ export async function replayLocationEvidence(
     protectedSegmentIds,
     options
   );
-  return { segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics, autoLogOrphans };
+  return {
+    segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics,
+    autoLogOrphans, autoLogLocked
+  };
 }
 
 type ProtectedSourceLink = {
@@ -539,12 +548,13 @@ async function supersedeMissingSegments(
   session: RequestSession,
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "semanticChanges" | "autoLogReconciliation">,
   stayClientIds: string[],
-  commuteClientIds: string[]
+  commuteClientIds: string[],
+  autoLogLocked: ReadonlySet<string>
 ): Promise<AutoLogOrphan[]> {
   // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
   // event and no Review) untouched.
-  const autoLogOrphans = options.autoLogReconciliation
-    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds)
+  const autoLog = options.autoLogReconciliation
+    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked)
     : [];
   await retireOpenReviewsForMissingSegments(
     client,
@@ -577,7 +587,7 @@ async function supersedeMissingSegments(
            and ri.status = 'ignored' and ri.ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}'))`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, commuteClientIds]
   );
-  return autoLogOrphans;
+  return autoLog;
 }
 
 async function retireOpenReviewsForMissingSegments(

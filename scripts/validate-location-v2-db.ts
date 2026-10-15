@@ -1898,7 +1898,20 @@ async function validateReviewModeAutoLogPlaces() {
     [WORKSPACE_ID, USER_ID, enabledKept.placeId, enabledKept.startedAt, enabledKept.stoppedAt]);
   assert.equal(sameVisit.rowCount, 1, "Switching to v2_enabled added an entry beside an auto-logged block.");
 
-  // Contention (Codex r2 on #435): replay locks every block it may touch in one entry-id-ordered
+  // Waits until another session of this database is blocked on a lock (here: replay waiting for a
+  // block the holder has), so the interleavings below never depend on timing.
+  const waitForLockWait = async (what: string) => {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const waiting = await pool.query(
+        `select 1 from pg_stat_activity
+         where datname = current_database() and pid <> pg_backend_pid() and wait_event_type = 'Lock'`);
+      if (waiting.rowCount) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`Replay never waited for ${what}.`);
+  };
+
+  // Contention (Codex r2/r3 on #435): replay locks every block it may touch in one entry-id-ordered
   // step, so a grouped edit holding the lower block and then taking the higher one never deadlocks
   // with it — here with one retired visit and one same-ID boundary correction in the same replay.
   await clearDerivedLocationState();
@@ -1914,7 +1927,7 @@ async function validateReviewModeAutoLogPlaces() {
     await holder.query("begin");
     await holder.query("select id from time_entries where id = $1 for update", [low.id]);
     const replaying = ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitForLockWait("the lower block");
     // Replay waits for the lower block before taking the higher one, so this does not wait on replay.
     await holder.query("select id from time_entries where id = $1 for update", [high.id]);
     await holder.query("commit");
@@ -1923,9 +1936,39 @@ async function validateReviewModeAutoLogPlaces() {
     holder.release();
   }
   const afterContention = await autoEntries();
-  assert(afterContention.some((entry) => entry.id === high.id) && afterContention.some((entry) => entry.id === low.id &&
-    entry.stoppedAt?.toISOString() === low.stoppedAt?.toISOString()),
-    "Replay under interleaved contention did not move both blocks with their visits.");
+  const highAfter = afterContention.find((entry) => entry.id === high.id);
+  assert(highAfter && highAfter.eventId !== high.eventId && highAfter.eventStatus === "confirmed",
+    "Replay under interleaved contention did not move the retired visit's block to its replacement.");
+  assert(afterContention.some((entry) => entry.id === low.id && entry.stoppedAt?.toISOString() === low.stoppedAt?.toISOString()),
+    "Replay under interleaved contention did not correct the same-ID visit's block.");
+
+  // A deletion landing while replay runs (Codex r3 on #435): replay waits for the block, then sees
+  // its visit as the person's decision and never logs the replacement again.
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const raced = (await autoEntries())[0];
+  await renameStay(raced, ":raced");
+  const deleter = await pool.connect();
+  try {
+    await deleter.query("begin");
+    await deleter.query("delete from time_entries where id = $1", [raced.id]);
+    const replaying = ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+    await waitForLockWait("the block being deleted");
+    await deleter.query("commit");
+    await replaying;
+  } finally {
+    deleter.release();
+  }
+  const reLogged = await pool.query(
+    `select 1 from time_entries where workspace_id = $1 and user_id = $2 and place_id = $3
+       and started_at < $5 and stopped_at > $4`,
+    [WORKSPACE_ID, USER_ID, raced.placeId, raced.startedAt, raced.stoppedAt]);
+  assert.equal(reLogged.rowCount, 0, "Replay re-logged a visit whose block was deleted while it ran.");
+  const reOffered = await pool.query(
+    `select 1 from review_items where workspace_id = $1 and user_id = $2 and suggested_place_id = $3
+       and suggested_started_at < $5 and suggested_stopped_at > $4`,
+    [WORKSPACE_ID, USER_ID, raced.placeId, raced.startedAt, raced.stoppedAt]);
+  assert.equal(reOffered.rowCount, 0, "Replay offered a visit in Review again after its block was deleted while it ran.");
 
   // A newer semantic cutover that suppresses a retired visit's replacement keeps its block: the
   // visit has not vanished (Codex r2 on #435). The old row starts after the cutover; the replacement
@@ -1997,7 +2040,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held replacements and v2_enabled never removing a block, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held replacements and v2_enabled never removing a block, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

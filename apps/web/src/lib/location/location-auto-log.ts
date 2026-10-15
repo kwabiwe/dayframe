@@ -60,21 +60,50 @@ function iso(value: Date | string | null) {
 }
 
 /**
- * Stays this device's replay no longer produces whose unedited auto-logged block remains, within the
- * reconciliation window: from the current semantic cutover (so their replacement can be emitted) and
- * young enough that none of their evidence has expired (so a visit that only ageing evidence hides is
- * never mistaken for one that vanished; Codex r1 on #435), with lineage still retained. Each stay is
- * superseded and detached from its event (so a returning stay is never mistaken for a decision), the
- * event is ignored with the superseded marker, and the blocks are returned for emission to move with
- * their replacement visit or for the caller to remove. Only the stays are locked here: emission takes
- * every block lock of the replay in one entry-id-ordered step (`lockAutoLoggedBlocks`), so no other
- * multi-block lock can interleave with it (Codex r2 on #435).
+ * Every unedited auto-logged block this replay may move or remove — those of this device's live stays
+ * from the reconciliation window on — locked in one statement in entry-id order (the order grouped
+ * edits and batch deletes use), before replay reads which stays are decisions or changes anything
+ * (Codex r2/r3 on #435). A block the person deletes or edits meanwhile is waited for and then left
+ * out, so the statements after this one see its visit as a decision and never re-create it. No later
+ * step locks another block.
+ */
+export async function lockAutoLoggedBlocks(
+  client: pg.PoolClient,
+  session: RequestSession,
+  options: { deviceId: string; algorithmVersion: string; reconciliation: AutoLogReconciliation }
+): Promise<Set<string>> {
+  const rows = (await client.query<{ id: string }>(
+    `select te.id
+     from time_entries te
+     join stay_segments st
+       on st.workspace_id = te.workspace_id and st.user_id = te.user_id and st.created_from_event_id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2
+       and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
+       and st.device_id = $3 and st.algorithm_version = $4 and st.status <> 'superseded'
+       and st.started_at >= $5::timestamptz
+     order by te.id
+     for update of te`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.reconciliation.sinceAt]
+  )).rows;
+  return new Set(rows.map((row) => row.id));
+}
+
+/**
+ * The visits this replay retires: within the reconciliation window — from the current semantic
+ * cutover and young enough that none of the visit's evidence has expired, so a visit only ageing
+ * evidence hides is never mistaken for one that vanished, with lineage still retained (Codex r1 on
+ * #435) — every stay it no longer produces whose block `lockAutoLoggedBlocks` holds unedited. A block
+ * the person deleted or edited keeps its visit a decision. A retired stay is superseded and detached
+ * from its event (so a returning stay is never mistaken for a decision) and the event is ignored with
+ * the superseded marker; its block is returned for emission to move with its replacement or for the
+ * caller to remove.
  */
 export async function retireAutoLoggedMissingStays(
   client: pg.PoolClient,
   session: RequestSession,
   options: { deviceId: string; algorithmVersion: string; processingAt: string; reconciliation: AutoLogReconciliation },
-  stayClientIds: string[]
+  stayClientIds: string[],
+  locked: ReadonlySet<string>
 ): Promise<AutoLogOrphan[]> {
   const stays = (await client.query<{ segmentId: string; eventId: string }>(
     `select st.id as "segmentId", st.created_from_event_id as "eventId"
@@ -98,13 +127,12 @@ export async function retireAutoLoggedMissingStays(
   const entries = (await client.query<{
     entryId: string; eventId: string; placeId: string | null; startedAt: Date | string; stoppedAt: Date | string | null;
   }>(
-    `select id as "entryId", created_from_event_id as "eventId", place_id as "placeId",
-            started_at as "startedAt", stopped_at as "stoppedAt"
-     from time_entries
-     where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[])
-       and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
-     order by id`,
-    [session.workspaceId, session.userId, stays.map((stay) => stay.eventId)]
+    `select te.id as "entryId", te.created_from_event_id as "eventId", te.place_id as "placeId",
+            te.started_at as "startedAt", te.stopped_at as "stoppedAt"
+     from time_entries te
+     where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])
+       and te.created_from_event_id = any($4::uuid[])`,
+    [session.workspaceId, session.userId, [...locked], stays.map((stay) => stay.eventId)]
   )).rows;
   const eventsWithBlocks = new Set(entries.map((entry) => entry.eventId));
   const rows = stays.filter((stay) => eventsWithBlocks.has(stay.eventId));
@@ -114,38 +142,19 @@ export async function retireAutoLoggedMissingStays(
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])`,
     [session.workspaceId, session.userId, [...new Set(rows.map((row) => row.segmentId))]]
   );
+  const retiredEvents = new Set(rows.map((row) => row.eventId));
   await client.query(
     `update activity_events
      set review_status = 'ignored', raw_payload = raw_payload || jsonb_build_object('${AUTO_LOG_SUPERSEDED_PAYLOAD_KEY}', true)
      where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and review_status = 'confirmed'`,
-    [session.workspaceId, session.userId, [...new Set(rows.map((row) => row.eventId))]]
+    [session.workspaceId, session.userId, [...retiredEvents]]
   );
-  return entries.map((entry) => ({
+  return entries.filter((entry) => retiredEvents.has(entry.eventId)).map((entry) => ({
     entryId: entry.entryId,
     placeId: entry.placeId,
     startedAt: iso(entry.startedAt)!,
     stoppedAt: iso(entry.stoppedAt)
   }));
-}
-
-/**
- * Every block this replay may move or remove, locked in one statement in entry-id order (the order
- * grouped edits and batch deletes use): the orphans retirement found and the blocks of stays already
- * auto-logged in the window. Returns the IDs still unedited under the lock; a block edited meanwhile
- * is left alone (and, being tracked time, keeps its replacement visit in Review).
- */
-export async function lockAutoLoggedBlocks(
-  client: pg.PoolClient, session: RequestSession, entryIds: string[], eventIds: string[]
-) {
-  if (entryIds.length === 0 && eventIds.length === 0) return new Set<string>();
-  const locked = await client.query<{ id: string }>(
-    `select id from time_entries
-     where workspace_id = $1 and user_id = $2 and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
-       and (id = any($3::uuid[]) or created_from_event_id = any($4::uuid[]))
-     order by id
-     for update`,
-    [session.workspaceId, session.userId, entryIds, eventIds]);
-  return new Set(locked.rows.map((row) => row.id));
 }
 
 /**

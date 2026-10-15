@@ -300,7 +300,7 @@ async function replayAndEmitLocationSemantics(
       const autoLog = {
         orphans: replay.autoLogOrphans,
         used: new Set<string>(),
-        locked: new Set<string>(),
+        locked: replay.autoLogLocked,
         reconciliation: autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
       };
       semanticSegmentCount = await emitReviewSemanticSegments(

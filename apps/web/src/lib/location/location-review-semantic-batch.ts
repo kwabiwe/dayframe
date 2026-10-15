@@ -11,7 +11,7 @@ import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import {
-  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, lockAutoLoggedBlocks, type AutoLogOrphan, type AutoLogReconciliation
+  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
 
 // Bounded row sets, including reads. All work uses the caller's owner-locked transaction.
@@ -136,8 +136,8 @@ export async function emitReviewSemanticSegments(
   // window in which replay keeps auto-logged visits in step (none: their blocks never move).
   autoLog: {
     orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation;
-    /** Filled here: the blocks this replay locked unedited, the only ones it may move or remove. */
-    locked: Set<string>;
+    /** The blocks replay locked unedited, the only ones emission may move. */
+    locked: ReadonlySet<string>;
   } = { orphans: [], used: new Set(), locked: new Set() }
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
@@ -185,18 +185,8 @@ export async function emitReviewSemanticSegments(
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
     ? await ensureCommuteCategoryId(client, session, changes) : null;
-  // Every block this replay may touch, locked once in entry-id order before any of them changes
-  // (Codex r2 on #435): the retired visits' blocks and those of stays already auto-logged in the window.
-  if (autoLog.reconciliation) {
-    const since = Date.parse(autoLog.reconciliation.sinceAt);
-    const inWindowEvents = eligible.flatMap(({ segment, clientEventId }) => {
-      const id = segment.kind === "stay" && Date.parse(segment.startedAt) >= since ? existing.get(clientEventId)?.id : undefined;
-      return id ? [id] : [];
-    });
-    for (const id of await lockAutoLoggedBlocks(client, session, autoLog.orphans.map((orphan) => orphan.entryId), inWindowEvents)) {
-      autoLog.locked.add(id);
-    }
-  }
+  // Replay locked every block it may touch once, in entry-id order, before emission (Codex r2/r3 on
+  // #435): only those are moved or removed.
   const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
@@ -445,7 +435,16 @@ async function chooseAutoLoggedVisits(
          or exists (
          select 1 from review_items ri
          where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
-           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at)`,
+           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at)
+         -- Another visit at the place already auto-logged and still a decision (its block deleted or
+         -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
+         -- landed while this replay ran (Codex r3 on #435).
+         or exists (
+         select 1 from activity_events ae
+         where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
+           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+           and ae.client_event_id <> r.client_event_id
+           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at)`,
       [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
         client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
         started_at: segment.startedAt, stopped_at: segment.stoppedAt
