@@ -377,12 +377,17 @@ export function PlaceEditor({
         <label className={`place-suggestion-toggle${loggingEnabled ? "" : " is-disabled"}`}>
           <span>
             <strong>Log automatically</strong>
-            <small>Visits here become blocks without a Review card.</small>
+            <small id="place-auto-log-help">
+              {loggingEnabled
+                ? "Visits here become blocks without a Review card."
+                : "Visits here become blocks without a Review card. Turn on Suggest visits here first."}
+            </small>
             {shownRole === "home" ? (
-              <small className="place-auto-log-caution">Home visits can be long and broad; consider leaving this off.</small>
+              <small className="place-auto-log-caution" id="place-auto-log-caution">Home visits can be long and broad; consider leaving this off.</small>
             ) : null}
           </span>
           <input
+            aria-describedby={shownRole === "home" ? "place-auto-log-help place-auto-log-caution" : "place-auto-log-help"}
             aria-label="Log automatically"
             checked={loggingEnabled && autoLog}
             disabled={!loggingEnabled}

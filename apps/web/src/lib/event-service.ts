@@ -2061,8 +2061,14 @@ export async function updatePlace(
              auto_start = case when $17 then $18 else auto_start end,
              logging_enabled = case when $19 then $20 else logging_enabled end,
              -- Log automatically only means something while logging is on: turning logging off
-             -- turns it off too.
-             auto_log = case when $19 and not $20 then false when $21 then $22 else auto_log end
+             -- turns it off too, and it can only be turned on while logging is (or becomes) on — the
+             -- stored value counts when this request leaves logging alone (Codex r1 on #434). SET
+             -- expressions read the row as it was.
+             auto_log = case
+               when $19 and not $20 then false
+               when $21 then $22 and (case when $19 then $20 else logging_enabled end)
+               else auto_log
+             end
          where id = $1 and workspace_id = $2
          returning id,
                    name,
