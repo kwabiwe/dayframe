@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  initialReportRangeDraft,
   nextReportRangeDraft,
+  reportRangeDraftComplete,
   reportRangeDraftBounds,
   reportRangeDraftCaption,
   reportRangeDraftDayCount
@@ -22,6 +24,17 @@ describe("Reports custom range draft (date-picker audit, 14 Oct 2026)", () => {
     expect(old.max).toBe("2024-12-31");
     expect(reportRangeDraftDayCount({ start: "2024-01-01", end: old.max })).toBe(366);
     expect(reportRangeDraftDayCount({ start: old.min!, end: "2024-01-01" })).toBe(366);
+  });
+
+  it("opens on the range up to today and offers Done only for a whole range within the limits", () => {
+    expect(initialReportRangeDraft("2026-10-12", "2026-10-18", "2026-10-15")).toEqual({ start: "2026-10-12", end: "2026-10-15" });
+    expect(initialReportRangeDraft("2026-10-01", "2026-10-03", "2026-10-15")).toEqual({ start: "2026-10-01", end: "2026-10-03" });
+    expect(initialReportRangeDraft("2026-10-16", "2026-10-18", "2026-10-15")).toEqual({ start: "2026-10-15", end: null });
+    expect(reportRangeDraftComplete({ start: "2026-10-01", end: "2026-10-15" }, "2026-10-15")).toBe(true);
+    expect(reportRangeDraftComplete({ start: "2026-10-01", end: null }, "2026-10-15")).toBe(false);
+    expect(reportRangeDraftComplete({ start: "2026-10-01", end: "2026-10-16" }, "2026-10-15")).toBe(false);
+    expect(reportRangeDraftComplete({ start: "2025-10-14", end: "2026-10-14" }, "2026-10-15")).toBe(true);
+    expect(reportRangeDraftComplete({ start: "2025-10-13", end: "2026-10-14" }, "2026-10-15")).toBe(false);
   });
 
   it("counts calendar days across a clock change", () => {

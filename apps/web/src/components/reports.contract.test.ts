@@ -54,6 +54,12 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(rangeSource).toContain('className="df-rbtn df-range-done"');
     expect(rangeSource).not.toContain("df-rbtn--live");
     expect(rangeSource).not.toContain('type="date"');
+    // Phone-safe 44 px days, no colour transitions, and today's coral never on a filled circle or as
+    // faint text on the band (Codex r1 on #426).
+    const css = readFileSync(fileURLToPath(new URL("../app/globals.css", import.meta.url)), "utf8");
+    expect(css).toMatch(/\.report-range-calendar \.dayframe-calendar-grid button \{\s*min-height: 44px;\s*transition: none;/);
+    expect(css).not.toMatch(/is-in-range\.is-today\[aria-pressed="true"\] \{\s*color: var\(--accent-text\)/);
+    expect(css).toContain(".dayframe-calendar-grid button.is-in-range.is-today:not(.is-range-start, .is-range-end, .is-range-single)[aria-pressed=\"true\"] {");
     // The dialog's own ✕ ("Close Custom dates") and Escape close it; there is no Cancel.
     expect(rangeSource).not.toContain("showClose={false}");
   });

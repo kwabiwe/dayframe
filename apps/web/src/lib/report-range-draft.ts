@@ -8,6 +8,22 @@ import { REPORT_MAX_RANGE_DAYS } from "@/lib/report-filters";
  */
 export type ReportRangeDraft = { start: string; end: string | null };
 
+/**
+ * The draft the dialog opens with: the range showing, up to today (a preset such as This week
+ * runs past today, and Done must never commit a day after it). A range wholly after today starts
+ * a new one from today.
+ */
+export function initialReportRangeDraft(from: string, to: string, today: string): ReportRangeDraft {
+  if (from > today) return { start: today, end: null };
+  return { start: from, end: to > today ? today : to };
+}
+
+/** Done is offered only for a whole range within the limits: both days, none after today, at most 366. */
+export function reportRangeDraftComplete(draft: ReportRangeDraft, today: string): draft is { start: string; end: string } {
+  if (draft.end === null || draft.end > today || draft.start > draft.end) return false;
+  return (reportRangeDraftDayCount(draft) ?? Infinity) <= REPORT_MAX_RANGE_DAYS;
+}
+
 export function nextReportRangeDraft(draft: ReportRangeDraft, date: string): ReportRangeDraft {
   if (draft.end !== null) return { start: date, end: null };
   return date < draft.start ? { start: date, end: draft.start } : { start: draft.start, end: date };

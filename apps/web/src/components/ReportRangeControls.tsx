@@ -18,7 +18,9 @@ import {
   type ReportRangeMetadata
 } from "@/lib/report-filters";
 import {
+  initialReportRangeDraft,
   nextReportRangeDraft,
+  reportRangeDraftComplete,
   reportRangeDraftBounds,
   reportRangeDraftCaption,
   type ReportRangeDraft
@@ -160,10 +162,11 @@ export function ReportRangeControls({
   function openCustom() {
     closeMenu();
     const now = formatLocalDate(new Date());
-    // The range as it stands (a preset's future days included, dimmed), on the page of its last
-    // day up to today.
-    const shown = filters.to < now ? filters.to : now;
-    setDraft({ start: filters.from, end: filters.to });
+    // The range as it stands up to today, on the page of its last day (Codex r1 on #426: Done must
+    // never commit a preset's future days).
+    const initial = initialReportRangeDraft(filters.from, filters.to, now);
+    const shown = initial.end ?? initial.start;
+    setDraft(initial);
     setLastTapped(shown);
     setToday(now);
     setView({ year: Number(shown.slice(0, 4)), month: Number(shown.slice(5, 7)) });
@@ -259,9 +262,9 @@ export function ReportRangeControls({
               <span className="df-spacer" />
               <button
                 className="df-rbtn df-range-done"
-                disabled={draft.end === null}
+                disabled={!reportRangeDraftComplete(draft, today)}
                 onClick={() => {
-                  if (draft.end === null) return;
+                  if (!reportRangeDraftComplete(draft, today)) return;
                   // Focus returns to the range trigger now and, after the navigation remounts this
                   // component, on the new instance's mount.
                   const next = filtersForCustomRange(filters, draft.start, draft.end);

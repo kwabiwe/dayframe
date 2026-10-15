@@ -154,13 +154,14 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
       act(() => (document.activeElement as HTMLElement).click());
     }
 
-    it("opens on the current range, future days dimmed, Done neutral and enabled", () => {
+    it("opens on the current range up to today, Done neutral and enabled (Codex r1 on #426)", () => {
       openCustom();
-      expect(caption()).toBe("5 – 11 Oct 2026 · 7 days");
+      // This week runs to Sunday the 11th; today is the 7th, so the draft stops there.
+      expect(caption()).toBe("5 – 7 Oct 2026 · 3 days");
       expect(day("2026-10-05").className).toContain("is-range-start");
-      expect(day("2026-10-08").getAttribute("aria-pressed")).toBe("true");
+      expect(day("2026-10-07").className).toContain("is-range-end");
+      expect(day("2026-10-08").getAttribute("aria-pressed")).toBe("false");
       expect(day("2026-10-08").className).toContain("is-unavailable");
-      expect(day("2026-10-11").className).toContain("is-range-end");
       expect(day("2026-10-04").getAttribute("aria-pressed")).toBe("false");
       expect(done().className).toContain("df-range-done");
       expect(done().className).not.toContain("df-rbtn--live");
@@ -191,9 +192,17 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     it("never takes a day after today", () => {
       openCustom();
       act(() => day("2026-10-09").click());
-      expect(caption()).toBe("5 – 11 Oct 2026 · 7 days");
+      expect(caption()).toBe("5 – 7 Oct 2026 · 3 days");
       expect(trigger()).toBeTruthy();
       expect(document.querySelector<HTMLButtonElement>('button[aria-label="Next month"]')!.disabled).toBe(true);
+    });
+
+    it("starts a new range from today when the custom range showing is wholly after today", () => {
+      act(() => root.render(<></>));
+      render({ ...defaultReportFilters(NOW), range: "custom", from: "2026-10-09", to: "2026-10-10" });
+      openCustom();
+      expect(caption()).toBe("From Wed 7 Oct · tap the last day");
+      expect(done().disabled).toBe(true);
     });
 
     it("closes without loading again when Done keeps the custom range already showing", () => {
