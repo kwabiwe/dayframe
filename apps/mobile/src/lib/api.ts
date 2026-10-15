@@ -240,6 +240,7 @@ export type MobileBootstrap = {
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
     loggingEnabled?: boolean;
+    autoLog?: boolean;
   }>;
   learnedPlaces?: Array<{
     id: string;
@@ -300,6 +301,8 @@ export type PlaceMutationInput = {
   defaultCategoryId?: string | null;
   defaultActivityDescription?: string | null;
   loggingEnabled?: boolean;
+  /** "Log automatically" (owner decision 14 Oct 2026); the server keeps it off while logging is off. */
+  autoLog?: boolean;
 };
 
 export type TimeEntryUpdatePatch = {
@@ -1888,6 +1891,8 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
       defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
       autoStart: false,
       loggingEnabled: input.loggingEnabled !== false,
+      // Log automatically (owner decision 14 Oct 2026): only with logging on (Codex r1 on #434).
+      autoLog: input.loggingEnabled !== false && input.autoLog === true,
       ...(input.learnedPlaceId ? { learnedPlaceId: input.learnedPlaceId } : {}),
       // Added straight into the Home or Work slot, renaming the old holder if asked.
       ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})

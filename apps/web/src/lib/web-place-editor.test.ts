@@ -61,6 +61,13 @@ describe("web place editor state", () => {
     });
   });
 
+  it("keeps Log automatically only while visits are suggested (owner decision 14 Oct 2026)", () => {
+    const base = { name: "Gym", latitude: "51.7", longitude: "0.4", radiusMeters: "100", defaultCategoryId: "", defaultActivityDescription: "" };
+    expect(validateWebPlaceForm({ ...base, loggingEnabled: true, autoLog: true })).toMatchObject({ ok: true, value: { autoLog: true } });
+    expect(validateWebPlaceForm({ ...base, loggingEnabled: false, autoLog: true })).toMatchObject({ ok: true, value: { autoLog: false } });
+    expect(validateWebPlaceForm({ ...base, loggingEnabled: true, autoLog: false })).toMatchObject({ ok: true, value: { autoLog: false } });
+  });
+
   it("validates coordinates, radius and visit-suggestion defaults", () => {
     const valid = validateWebPlaceForm({
       name: " Synthetic School ",
@@ -68,6 +75,7 @@ describe("web place editor state", () => {
       longitude: "0.4",
       radiusMeters: "100",
       loggingEnabled: true,
+      autoLog: true,
       defaultCategoryId: "category",
       defaultActivityDescription: " Study "
     });
@@ -79,6 +87,7 @@ describe("web place editor state", () => {
         longitude: 0.4,
         radiusMeters: 100,
         loggingEnabled: true,
+        autoLog: true,
         defaultCategoryId: "category",
         defaultActivityDescription: "Study"
       }
@@ -90,6 +99,7 @@ describe("web place editor state", () => {
       longitude: "",
       radiusMeters: "100",
       loggingEnabled: false,
+      autoLog: true,
       defaultCategoryId: "category",
       defaultActivityDescription: "Hidden"
     })).toMatchObject({ ok: false, field: "latitude" });
@@ -100,6 +110,7 @@ describe("web place editor state", () => {
       longitude: "0.4",
       radiusMeters: "24",
       loggingEnabled: true,
+      autoLog: true,
       defaultCategoryId: "",
       defaultActivityDescription: ""
     })).toMatchObject({ ok: false, field: "radiusMeters" });
@@ -110,6 +121,7 @@ describe("web place editor state", () => {
       longitude: "0.4",
       radiusMeters: "2001",
       loggingEnabled: true,
+      autoLog: true,
       defaultCategoryId: "",
       defaultActivityDescription: ""
     })).toMatchObject({ ok: false, field: "radiusMeters" });
@@ -120,6 +132,7 @@ describe("web place editor state", () => {
       longitude: "0.4",
       radiusMeters: "100",
       loggingEnabled: false,
+      autoLog: true,
       defaultCategoryId: "must-clear",
       defaultActivityDescription: "must-clear"
     })).toMatchObject({

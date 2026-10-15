@@ -902,3 +902,7 @@ begin
   end if;
 end
 $$;
+
+-- Keep the clean base fixture aligned with 013_place_auto_log.sql.
+-- Per-place "Log automatically": off by default, never backfilled.
+alter table places add column if not exists auto_log boolean not null default false;

@@ -5483,6 +5483,25 @@ dialog.ui-dialog.df-range-custom {
   transform: translateX(22px);
 }
 
+/* "Log automatically" waits for Suggest visits here: shown, but not choosable. */
+.place-suggestion-toggle.is-disabled {
+  cursor: not-allowed;
+}
+
+.place-suggestion-toggle.is-disabled strong,
+.place-suggestion-toggle.is-disabled small {
+  color: var(--muted);
+}
+
+.place-suggestion-toggle input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.place-suggestion-toggle small.place-auto-log-caution {
+  color: var(--warning-text);
+}
+
 .place-editor-actions {
   display: flex;
   justify-content: flex-end;
