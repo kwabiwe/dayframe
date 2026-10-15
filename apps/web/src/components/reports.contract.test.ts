@@ -47,11 +47,15 @@ describe("Reports accessibility and responsive contracts", () => {
     expect(panelSource).toContain('summary="Exact time by activity"');
   });
 
-  it("keeps dates explicit, inclusive and cancellable", () => {
-    expect(rangeSource).toContain('label="From"');
-    expect(rangeSource).toContain('label="To (inclusive)"');
-    expect(rangeSource).toContain("Cancel");
-    expect(rangeSource).toContain("Apply");
+  it("picks custom dates on a range calendar, closable, with a neutral Done (date-picker audit)", () => {
+    expect(rangeSource).toContain("<DayframeCalendar");
+    expect(rangeSource).toContain("range={draft}");
+    expect(rangeSource).toContain("reportRangeDraftCaption(draft)");
+    expect(rangeSource).toContain('className="df-rbtn df-range-done"');
+    expect(rangeSource).not.toContain("df-rbtn--live");
+    expect(rangeSource).not.toContain('type="date"');
+    // The dialog's own ✕ ("Close Custom dates") and Escape close it; there is no Cancel.
+    expect(rangeSource).not.toContain("showClose={false}");
   });
 
   it("preserves the active URL on edit refresh", () => {

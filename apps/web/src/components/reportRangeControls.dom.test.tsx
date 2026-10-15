@@ -103,13 +103,13 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
-  it("returns focus to the trigger after Apply, across the navigation remount", async () => {
+  it("returns focus to the trigger after Done, across the navigation remount", async () => {
     const user = userEvent.setup();
     await user.click(trigger());
     key("End");
     await user.click(document.activeElement as HTMLElement);
     // The dialog starts with the week's dates; applying them as a custom range is a new range.
-    await user.click(Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Apply")!);
+    await user.click(Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Done")!);
     expect(push).toHaveBeenCalledTimes(1);
     const href = new URL(push.mock.calls[0][0], "http://x").searchParams;
     render({ ...defaultReportFilters(NOW), range: "custom", from: href.get("from")!, to: href.get("to")! });
@@ -136,11 +136,74 @@ describe("Reports range menu (W8, menu pattern and motion)", () => {
     act(() => trigger().click());
     key("End");
     act(() => (document.activeElement as HTMLElement).click());
-    const cancel = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Cancel")!;
+    const cancel = document.querySelector<HTMLButtonElement>('button[aria-label="Close Custom dates"]')!;
     await act(async () => {
       cancel.click();
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
     });
     expect(document.activeElement).toBe(trigger());
+  });
+
+  describe("custom dates range calendar (date-picker audit, 14 Oct 2026)", () => {
+    const day = (date: string) => document.querySelector<HTMLButtonElement>(`.dayframe-calendar-grid [data-date="${date}"]`)!;
+    const caption = () => document.querySelector(".report-range-caption")!.textContent;
+    const done = () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Done")!;
+    function openCustom() {
+      act(() => trigger().click());
+      key("End");
+      act(() => (document.activeElement as HTMLElement).click());
+    }
+
+    it("opens on the current range, future days dimmed, Done neutral and enabled", () => {
+      openCustom();
+      expect(caption()).toBe("5 – 11 Oct 2026 · 7 days");
+      expect(day("2026-10-05").className).toContain("is-range-start");
+      expect(day("2026-10-08").getAttribute("aria-pressed")).toBe("true");
+      expect(day("2026-10-08").className).toContain("is-unavailable");
+      expect(day("2026-10-11").className).toContain("is-range-end");
+      expect(day("2026-10-04").getAttribute("aria-pressed")).toBe("false");
+      expect(done().className).toContain("df-range-done");
+      expect(done().className).not.toContain("df-rbtn--live");
+      expect(done().disabled).toBe(false);
+    });
+
+    it("takes first then last day in either order, restarts on a third tap, and pushes once on Done", () => {
+      openCustom();
+      act(() => day("2026-10-06").click());
+      expect(caption()).toBe("From Tue 6 Oct · tap the last day");
+      expect(done().disabled).toBe(true);
+      expect(day("2026-10-08").getAttribute("aria-pressed")).toBe("false");
+      act(() => day("2026-10-02").click());
+      expect(caption()).toBe("2 – 6 Oct 2026 · 5 days");
+      expect(day("2026-10-02").getAttribute("aria-label")).toContain("first day");
+      expect(day("2026-10-06").getAttribute("aria-label")).toContain("last day");
+      act(() => day("2026-10-01").click());
+      expect(caption()).toBe("From Thu 1 Oct · tap the last day");
+      act(() => day("2026-10-01").click());
+      expect(caption()).toBe("Thu 1 Oct 2026 · 1 day");
+      expect(day("2026-10-01").className).toContain("is-range-single");
+      act(() => done().click());
+      expect(push).toHaveBeenCalledTimes(1);
+      const href = new URL(push.mock.calls[0][0], "http://x").searchParams;
+      expect([href.get("range"), href.get("from"), href.get("to")]).toEqual(["custom", "2026-10-01", "2026-10-01"]);
+    });
+
+    it("never takes a day after today", () => {
+      openCustom();
+      act(() => day("2026-10-09").click());
+      expect(caption()).toBe("5 – 11 Oct 2026 · 7 days");
+      expect(trigger()).toBeTruthy();
+      expect(document.querySelector<HTMLButtonElement>('button[aria-label="Next month"]')!.disabled).toBe(true);
+    });
+
+    it("closes without loading again when Done keeps the custom range already showing", () => {
+      act(() => root.render(<></>));
+      render({ ...defaultReportFilters(NOW), range: "custom", from: "2026-10-01", to: "2026-10-03" });
+      openCustom();
+      expect(caption()).toBe("1 – 3 Oct 2026 · 3 days");
+      act(() => done().click());
+      expect(push).not.toHaveBeenCalled();
+      expect(document.querySelector(".report-range-caption")).toBeNull();
+    });
   });
 });
