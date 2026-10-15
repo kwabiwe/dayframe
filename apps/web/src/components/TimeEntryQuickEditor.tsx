@@ -24,6 +24,7 @@ import {
   formatCalendarEntryCompactDuration,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
+  normalizeCalendarEntryCompactTypedTimes,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactCreatePlan,
@@ -254,10 +255,12 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     setActiveTemporalOwner(null);
     setDraft((current) => {
       if (current.temporalOwner !== owner) return current;
+      // Leaving a time field commits what the shared reader understands (`15:1` → 15:10).
+      const committed = owner === "duration" ? current : normalizeCalendarEntryCompactTypedTimes(current);
       try {
-        return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: current, owner });
+        return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: committed, owner });
       } catch {
-        return { ...current, temporalOwner: owner };
+        return { ...committed, temporalOwner: owner };
       }
     });
     setError(null);
@@ -464,9 +467,11 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     let plan: CalendarEntryCompactSavePlan | CalendarEntryCompactCreatePlan;
     try {
       const saveNow = new Date();
+      // Save commits typed times as leaving the field does (`15:1` → 15:10).
+      const committed = normalizeCalendarEntryCompactTypedTimes(draft);
       plan = props.mode === "entry"
-        ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry: props.entry, now: saveNow })
-        : buildCalendarEntryCompactCreatePlan({ draft, now: saveNow, source: props.source });
+        ? buildCalendarEntryCompactSavePlan({ draft: committed, dirty, entry: props.entry, now: saveNow })
+        : buildCalendarEntryCompactCreatePlan({ draft: committed, now: saveNow, source: props.source });
     } catch (planError) {
       setError(planError instanceof Error ? planError.message : "Check the time values.");
       return;
