@@ -10998,7 +10998,8 @@ dialog.ui-dialog.df-palette {
    instead of a capsule that would clip the text. */
 .df-toast.has-detail {
   border-radius: 24px;
-  padding-block: 8px;
+  /* No action on a switch toast: the text keeps 16 px from both ends, as on iPhone. */
+  padding: 8px 16px;
 }
 
 .df-toast-text {
