@@ -344,6 +344,16 @@ Block pull-to-refresh:
 - Async outcome: the Start is optimistic as always; if it fails or another Start takes over, nothing is edited. If a newer loaded block has ended since the chip appeared, the block stays at now with the bar's notice "Started now: an earlier block ends later than that, so the start wasn't moved." A rejected start edit rolls back as the start editor's does.
 - Accessibility: no motion to reduce. The chip's name is "Start from 10:15, after Write report"; it is a native button in the tab order after the description.
 
+## Entry sheet "From 10:15 · after …" (PRD D16, 14 Oct 2026)
+
+- Trigger: the running block's sheet presented with an offer (Dashboard's `previousEndOffer`); a tap on the chip.
+- Owner: none of its own. The chip is read once when the sheet hydrates and stays for that presentation, so it never appears or leaves while the sheet is up; a tap goes through the dial's `applyDialInterval`, so the start card, the dial and its arc update in the same render exactly as a dial shortcut does.
+- Entrance/update/exit: present from the sheet's first frame (part of the sheet's own entrance); a tap toggles its selected state in place (check glyph, primary text); it leaves with the sheet.
+- Surrounding layout: one 32-point row (44-point target) under the time cards; its height never changes, so the dial and actions never move after presentation.
+- Interruption: disabled while a mutation is in flight; a turn of the dial afterwards simply un-selects it. If the previous block's end has moved since the sheet opened (refresh, another device, a reconciled queued Stop), a tap or Done shows the sheet's inline error instead of moving or saving the start; nothing animates.
+- Async outcome: none — it changes the draft only; Done saves the start (a running start edit), and closing without Done keeps the block's own start.
+- Accessibility: no motion to reduce. Name "Start from 10:15, after Write report", role button, selected while applied, with a hint that Done saves it.
+
 ## Entry sheet date sheet (date pickers PR 2, owner decisions D1/D2, 14 Oct 2026)
 
 - Trigger: a date chip on the START or END card (or VoiceOver's "Edit start date" / "Edit end date"); Done, a swipe on the handle, the backdrop or escape.

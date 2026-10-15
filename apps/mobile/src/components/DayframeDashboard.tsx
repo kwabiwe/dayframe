@@ -37,6 +37,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   withGoalExclusions,
   paletteColorFor,
+  previousEndOffer,
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
   timerStatePollDelay,
@@ -1709,6 +1710,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
   );
+  // PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers to start it where
+  // today's last finished block ended, when that was 1 min–4 h before the block started.
+  const previousEndForSheet = useMemo(() => {
+    const active = retainedActiveEntryForSheet;
+    if (!active) return null;
+    const startMs = Date.parse(active.startedAt);
+    if (!Number.isFinite(startMs)) return null;
+    const day = new Date(startMs);
+    day.setHours(0, 0, 0, 0);
+    // Only the blocks already loaded (owner: no new query or field); keyed to the running block's
+    // start, so it never changes with the clock.
+    return previousEndOffer(data?.entries ?? [], { dayStartMs: day.getTime(), excludeId: active.id, startMs });
+  }, [data?.entries, retainedActiveEntryForSheet]);
   const hapticsEnabled = useHapticsPreference();
   // UIA-060: once the bootstrap's open Review list is at its cap, the Calendar also draws open
   // suggestions from Today's cached scoped Review window (60 days, its own completeness), so a
@@ -3434,6 +3448,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         historicalEntries={historySourceEntries}
         lastStoppedAt={recentStoppedAt}
         onApplySuggestion={applyRunningTimerSuggestion}
+        previousEnd={previousEndForSheet}
         onCancel={completeActiveEditorExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}

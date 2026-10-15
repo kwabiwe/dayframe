@@ -81,6 +81,7 @@ function SheetQaHarness() {
     count?: string;
     failure?: string;
     open?: string;
+    previousEnd?: string;
     run?: string;
   }>();
   const { styles, theme } = useMobileTheme();
@@ -120,6 +121,11 @@ function SheetQaHarness() {
   const runningLastStoppedAtRef = useRef(
     new Date(Date.now() - 90 * 60 * 1_000).toISOString()
   );
+  // `?previousEnd=1`: the running fixture is offered "From … · after Bauhaus research" (PRD D16),
+  // 25 minutes before it started.
+  const previousEndRef = useRef(params.previousEnd === "1"
+    ? { previousId: "history-1", previousName: "Bauhaus research", startedAt: new Date(Date.parse(runningStartedAt) - 25 * 60 * 1_000).toISOString() }
+    : null);
   const persistedIdsRef = useRef(new Map<string, string>());
   const sheetDeletionRef = useRef<{ presentationId: number; token: number } | null>(null);
   const nextPresentationIdRef = useRef(0);
@@ -485,6 +491,7 @@ function SheetQaHarness() {
           ? runningLastStoppedAtRef.current
           : "2026-08-07T16:45:00.000Z"}
         mode={mode}
+        previousEnd={mode === "running" ? previousEndRef.current : null}
         onApplySuggestion={async (_entryId, suggestion) => {
           if (mutationFailureMode === "suggestion") {
             setMutationFailureCount((count) => count + 1);
