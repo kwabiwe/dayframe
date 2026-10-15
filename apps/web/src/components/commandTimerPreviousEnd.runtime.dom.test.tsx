@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
-// "From 10:15 · after …" (PRD D16) against a real AppShellRuntimeProvider and a fake server: the
+// "← From 10:15" (PRD D16) against a real AppShellRuntimeProvider and a fake server: the
 // chip's Start, then the start editor's start-time edit, with the timings Codex r5 on #418 found
 // (a Start's refresh landing before React renders, and a block that replaces this Start's own).
 

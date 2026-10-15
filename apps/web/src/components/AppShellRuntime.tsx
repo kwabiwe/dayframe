@@ -799,7 +799,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (patch) setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), snapshot.activeEntry!.id);
       try {
         // A block shown at its optimistic id right after an accepted Start is edited at its real id
-        // ("From 10:15 · after …" edits the start straight after starting).
+        // ("← From 10:15" edits the start straight after starting).
         const response = await clientFetch(`/api/time-entries/${serverEntryId(snapshot.activeEntry!.id) ?? snapshot.activeEntry!.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

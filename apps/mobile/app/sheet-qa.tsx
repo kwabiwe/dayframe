@@ -121,7 +121,7 @@ function SheetQaHarness() {
   const runningLastStoppedAtRef = useRef(
     new Date(Date.now() - 90 * 60 * 1_000).toISOString()
   );
-  // `?previousEnd=1`: the running fixture is offered "From … · after Bauhaus research" (PRD D16),
+  // `?previousEnd=1`: the running fixture is offered "← From …" after Bauhaus research (PRD D16),
   // 25 minutes before it started.
   const previousEndRef = useRef(params.previousEnd === "1"
     ? { previousId: "history-1", previousName: "Bauhaus research", startedAt: new Date(Date.parse(runningStartedAt) - 25 * 60 * 1_000).toISOString() }

@@ -9,7 +9,8 @@ function source(relativePath: string) {
 const sheet = source("./ActiveTimerEditSheet.tsx");
 const dashboard = source("./DayframeDashboard.tsx");
 
-// PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers "From 10:15 · after …".
+// PRD D16 (owner idea 1, 14 Oct 2026): the running block's sheet offers "← From 10:15" under START
+// (compact pill, owner 15 Oct 2026; VoiceOver: "Start from 10:15, after …").
 describe("entry sheet start-at-the-previous-end chip", () => {
   it("is offered for the running block only, from today's last end before it started", () => {
     // Only the loaded blocks (owner decision: no new query, field or per-second work).
@@ -54,14 +55,25 @@ describe("entry sheet start-at-the-previous-end chip", () => {
     expect(sheet).toContain("const chipRowBudget = Math.max(1, ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity] - (presentedPreviousEnd ? 1 : 0));");
   });
 
-  it("is a filled chip with a spoken name and selected state, never coral", () => {
+  it("is a compact filled pill under the START card: back arrow + time, the name spoken only (owner, 15 Oct)", () => {
     const chip = sheet.slice(sheet.indexOf('testID="time-entry-previous-end"') - 1200, sheet.indexOf('testID="time-entry-previous-end"') + 900);
     expect(chip).toContain("accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}");
     expect(chip).toContain("accessibilityState={{ disabled: busy, selected: previousEndApplied }}");
     expect(chip).toContain("hitSlop={{ top: 6, bottom: 6 }}");
     expect(chip).toContain("{ backgroundColor: theme.surfaceMuted }");
-    expect(chip).toContain("From {formatTimeInput(new Date(previousEndMs))} · after");
-    expect(chip).toContain("sheetStyles.tagChipName");
+    // The registry's back arrow (a check once applied), then only "From HH:MM".
+    expect(chip).toContain("glyph={previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}");
+    expect(chip).toMatch(/>\s*From \{formatTimeInput\(new Date\(previousEndMs\)\)\}\s*<\/Text>/);
+    expect(chip).not.toContain("· after");
+    expect(chip).not.toMatch(/\{presentedPreviousEnd\.previousName\}\s*</);
     expect(chip).not.toMatch(/theme\.(accent|primary|coral|live)/);
+    expect(sheet).toMatch(/previousEndPill: \{[^}]*borderRadius: 999[^}]*minHeight: 32, minWidth: 44/);
+  });
+
+  it("sits in the START card's column, directly under the card", () => {
+    const column = sheet.slice(sheet.indexOf("sheetStyles.startColumn"), sheet.indexOf("{hasStoppedTime ? ("));
+    expect(column).toContain('testID="time-entry-start-card"');
+    expect(column.indexOf('testID="time-entry-start-date"')).toBeLessThan(column.indexOf('testID="time-entry-previous-end"'));
+    expect(sheet).toContain("startColumn: { flex: 1, gap: 6, minWidth: 0 },");
   });
 });
