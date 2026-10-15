@@ -61,12 +61,16 @@ final class DayframeTimeWheelExpoView: ExpoView {
 
     let value = Date(timeIntervalSince1970: next.valueMs / 1000)
     let isNewPresentation = previous?.presentationId != next.presentationId
-    if isNewPresentation || previous?.revision != next.revision || picker.date != value {
+    // Only a new presentation or an outside change (a new revision) moves the columns. React's echo
+    // of the user's own spin carries the same revision and is ignored, so a render that lands after
+    // a second spin never pulls the wheel back to the first one.
+    if isNewPresentation || previous?.revision != next.revision {
       // An outside change re-aims the columns; a new presentation lands without motion.
       picker.setDate(value, animated: !isNewPresentation && !UIAccessibility.isReduceMotionEnabled)
     }
-    // UIKit clamps to the bounds (and rounds to the minute step) without a valueChanged event; say
-    // so, so React never keeps a time the wheel isn't showing.
+    // UIKit clamps to the bounds (and rounds to the minute step) without a valueChanged event, and a
+    // stale echo may differ from what the wheel shows; say so, so React never keeps a time the wheel
+    // isn't showing.
     if abs(picker.date.timeIntervalSince1970 * 1000 - next.valueMs) >= 1 {
       report(reason: "normalized")
     }

@@ -89,6 +89,7 @@ Haptics:
 | Log or skip a Review item | Success, or a light impact |
 | Delete | Warning |
 | Undo that restores an entry | Light impact |
+| Set a time on the entry sheet's time wheel (Done, a tap outside) | Light impact |
 
 - Haptics confirm a committed action. They never fire for a background refresh, a reconciliation, an automatic failure rollback or a rejected gesture.
 - Rapid repeats fire one haptic, or one composite sequence, per committed action.
@@ -363,6 +364,16 @@ Block pull-to-refresh:
 - Interruption: each opening gets a new presentation id and a stale exit never closes a newer sheet; opening dismisses the keyboard and any open surface first; an invalid merge keeps the sheet with its reason in the notice slot.
 - Async outcome: none — it only changes the entry sheet's draft; the entry sheet's Done saves.
 - Accessibility: the layer is modal to VoiceOver with escape discarding; the title is the header and the sheet is named "Choose the start date" or "Choose the end date"; Reduce Motion fades it (the shell's existing path).
+
+## Entry sheet time wheel (A11b, date pickers PR 4, owner decisions 12 Oct 2026)
+
+- Trigger: a tap on a `START` or `END` time card; `Every minute`, `Type time`, `Done`; a tap on the same card, the other card, the form background, the sheet head or the description field; a dial turn, a date sheet Done or the "From 10:15" chip while it is open.
+- Owner: the entry sheet's `timeWheel` state owns the panel's presence (one `Reanimated.View` keyed by the wheel's presentation id, `localPresenceEntering(…, "rise")` in and `localPresenceExiting` out). The native `UIDatePicker` owns the columns' own movement, momentum and selection haptics; React owns the value. The dial keeps its own gesture.
+- Entrance/update/exit: the panel rises 12 points and fades in over 140 ms under the cards (the card tint and the other card's 0.6 opacity change in the same render); spins write the draft live, so the card text, the dial and the duration update as the wheel settles; Done, a tap outside or the same card fades the panel out over 140 ms with a light haptic (`timeSet`); Type time closes it without a haptic and the number pad rises for the card.
+- Surrounding layout: while it is open the dial takes its condensed size, so the panel, cards, dial and bottom actions stay on the non-scrolling sheet; the dial and the content below take their new places in the same commit as the panel (no layout transition), and return when it closes.
+- Interruption: the other card retargets the open wheel (an animated spin to its time; the notch moves; no new presentation); an outside change (dial, date, chip) bumps the wheel's revision and spins it there; a spin reported for an older revision or presentation is ignored, so it can't undo that change; the date sheet, a description tap, VoiceOver turning on, a new sheet presentation, Save, Stop and Delete close it.
+- Async outcome: none. The wheel only changes the entry sheet's draft; the sheet's Done saves.
+- Accessibility: VoiceOver never gets the wheel (it is hidden); each card is adjustable in 5-minute steps with Type time and Change date, and activate types the time. Reduce Motion: the panel fades in 90 ms and out 70 ms with no rise; outside changes set the columns without the animated spin; the platform's own wheel momentum stays, as for any system picker.
 
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 

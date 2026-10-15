@@ -66,7 +66,9 @@ describe("mobile tag interaction contract", () => {
   });
 
   it("dismisses the keyboard for unhandled taps in fixed-form empty space", () => {
-    expect(sheet).toMatch(/<Pressable[\s\S]*?onPress=\{dismissTransientEditingSurfaces\}[\s\S]*?testID="time-entry-sheet-form"/);
+    // A11b: the same tap also sets and closes an open time wheel before dismissing.
+    expect(sheet).toMatch(/<Pressable[\s\S]*?onPress=\{handleFormBackgroundPress\}[\s\S]*?testID="time-entry-sheet-form"/);
+    expect(sheet).toMatch(/function handleFormBackgroundPress\(\) \{[\s\S]*?closeTimeWheel\(\{ haptic: true \}\);[\s\S]*?dismissTransientEditingSurfaces\(\);/);
     expect(sheet).toContain('testID="time-entry-sheet-content"');
     expect(sheet).toContain('pointerEvents="box-none"');
     expect(sheet).not.toContain('testID="time-entry-sheet-empty-space-dismiss"');
