@@ -12,7 +12,8 @@ export type DayframeHapticMoment =
   | "reviewLog"
   | "reviewSkip"
   | "delete"
-  | "undoRestore";
+  | "undoRestore"
+  | "timeSet";
 
 export const HAPTICS_PREFERENCE_KEY = "dayframe.hapticsEnabled.v1";
 /** Stop is one composite: success now, then a soft impact as the stopped block lands. */
@@ -85,6 +86,7 @@ export function playHaptic(moment: DayframeHapticMoment, { stopLandingDelayMs = 
       return fire(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
     case "reviewSkip":
     case "undoRestore":
+    case "timeSet":
       return fire(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light));
     case "delete":
       return fire(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning));
