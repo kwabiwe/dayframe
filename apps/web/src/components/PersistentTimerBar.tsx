@@ -9,7 +9,7 @@ import type {
   RefObject
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
 import { Clock3, Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -88,7 +88,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [startTimeDraft, setStartTimeDraft] = useState("");
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  // Idle: the minute clock for the "From 10:15 · after …" offer (a start of minute, set after
+  // Idle: the minute clock for the "← From 10:15" offer (a start of minute, set after
   // hydration so the server render has no offer; no per-second work).
   const [idleMinute, setIdleMinute] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
@@ -399,7 +399,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     });
   }
 
-  // "From 10:15 · after Write report": the usual Start, then the same start-time edit as the start
+  // "← From 10:15" (after Write report): the usual Start, then the same start-time edit as the start
   // editor's "Set to last stop time" (owner: one path). Before the edit the loaded blocks are checked
   // again: if a newer block has ended since, or the Start did not run, the block stays at now and
   // the bar says so. Another device's change the bar hasn't loaded yet is not seen (accepted, as
@@ -625,8 +625,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   onClick={() => void startFromPreviousEnd(previousEnd)}
                   type="button"
                 >
-                  <span className="df-cmd-from-lead">From <span className="tabular">{formatTime(previousEnd.startedAt)}</span> · after</span>
-                  <span className="df-cmd-from-name">{previousEnd.previousName}</span>
+                  {/* The same compact pill as the iPhone sheet (owner, 15 Oct 2026): the previous
+                      block's name is in the label only. */}
+                  <DayframeIcon glyph={DAYFRAME_APP_ICONS.startFromPreviousEnd} size={12} />
+                  <span>From <span className="tabular">{formatTime(previousEnd.startedAt)}</span></span>
                 </button>
               ) : null}
             </div>
