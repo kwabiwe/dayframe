@@ -78,13 +78,44 @@ describe("PersistentTimerBar block suggestions", () => {
     expect(startTimer).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
   });
+
+  it("keeps a running block's suggestions keyboard-usable while its autosave is in flight", async () => {
+    const setTimerDraft = vi.fn();
+    runtime = runtimeFixture({
+      activeEntry: timeEntry({ description: "De" }),
+      isTimerBusy: true,
+      setTimerDraft,
+      timerDraft: { categoryId: "", description: "De", tagNames: [] }
+    });
+    render(<PersistentTimerBar />);
+
+    const description = screen.getByLabelText("Description") as HTMLInputElement;
+    await userEvent.click(description);
+    expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
+    await userEvent.keyboard("{ArrowDown}");
+
+    const first = screen.getByRole("option", { name: /Deep planning/ });
+    expect(document.activeElement).toBe(first);
+    expect((first as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("listbox", { name: "Suggestions" })).not.toBeNull();
+    expect(first.closest(".swiss-task-suggestions")?.classList.contains("is-open")).toBe(true);
+
+    await userEvent.keyboard("{Enter}");
+    expect(setTimerDraft).toHaveBeenCalledWith({
+      categoryId: "focus",
+      description: "Deep planning",
+      tagNames: ["Deep work"]
+    });
+  });
 });
 
 function runtimeFixture(overrides: {
   activeEntry?: TimeEntryRow | null;
   isManualEntryOpen?: boolean;
+  isTimerBusy?: boolean;
   setTimerDraft?: ReturnType<typeof vi.fn>;
   startTimer?: ReturnType<typeof vi.fn>;
+  timerDraft?: { categoryId: string; description: string; tagNames: string[] };
 } = {}) {
   const activeEntry = overrides.activeEntry ?? null;
   const data = {
@@ -115,13 +146,13 @@ function runtimeFixture(overrides: {
     createManualEntry: vi.fn().mockResolvedValue({ ok: true }),
     deleteActiveTimer: vi.fn().mockResolvedValue({ ok: true }),
     isManualEntryOpen: overrides.isManualEntryOpen ?? false,
-    isTimerBusy: false,
+    isTimerBusy: overrides.isTimerBusy ?? false,
     openManualEntry: vi.fn(),
     setTimerDraft: overrides.setTimerDraft ?? vi.fn(),
     shellData: data,
     startTimer: overrides.startTimer ?? vi.fn().mockResolvedValue({ ok: true }),
     stopTimer: vi.fn().mockResolvedValue({ ok: true }),
-    timerDraft: { categoryId: "", description: "", tagNames: [] },
+    timerDraft: overrides.timerDraft ?? { categoryId: "", description: "", tagNames: [] },
     timerError: null,
     updateActiveDetails: vi.fn().mockResolvedValue({ ok: true }),
     updateActiveStartTime: vi.fn().mockResolvedValue({ ok: true })

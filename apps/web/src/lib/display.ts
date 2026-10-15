@@ -23,7 +23,7 @@ export function timeEntryContextLabel(entry: TimeEntryDisplayFields) {
 
   if (description && category) return category;
   if (place) return place;
-  if (entry.source) return formatSourceLabel(entry.source);
+  if (entry.source) return formatSourceLabel(entry.source, { placeName: entry.placeName });
   return "No activity";
 }
 

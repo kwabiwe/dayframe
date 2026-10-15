@@ -1209,7 +1209,9 @@ describe("place persistence", () => {
         categoryId(),
         "Workout",
         false,
-        true
+        true,
+        // Log automatically: off unless asked for (owner decision 14 Oct 2026).
+        false
       ]
     );
   });
@@ -1390,7 +1392,10 @@ describe("place persistence", () => {
         false,
         false,
         false,
-        true
+        true,
+        // autoLog not supplied: left alone (an older app build never turns it off).
+        false,
+        false
       ]
     );
   });

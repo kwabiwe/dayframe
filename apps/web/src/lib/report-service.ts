@@ -348,7 +348,8 @@ export async function getReportFilterOptions(session: RequestSession): Promise<R
               null::text as "defaultCategoryName",
               pl.default_activity_description as "defaultActivityDescription",
               pl.auto_start as "autoStart",
-              pl.logging_enabled as "loggingEnabled"
+              pl.logging_enabled as "loggingEnabled",
+              pl.auto_log as "autoLog"
        from places pl
        where pl.workspace_id = $1
        order by pl.priority desc, lower(${placeDisplayNameSql("pl")}), pl.id`,

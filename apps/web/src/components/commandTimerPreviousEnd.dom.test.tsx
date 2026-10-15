@@ -40,7 +40,8 @@ describe("Start at the previous end (owner idea 1, 14 Oct 2026)", () => {
     await act(async () => { vi.advanceTimersByTime(0); });
 
     const chip = screen.getByRole("button", { name: "Start from 10:15, after Write report" });
-    expect(chip.textContent).toBe("From 10:15 · afterWrite report");
+    expect(chip.textContent).toBe("From 10:15");
+    expect(chip.querySelector("svg")?.getAttribute("data-glyph")).toBe("arrow-left");
     startsBlock(view, entries);
     await act(async () => { fireEvent.click(chip); });
 

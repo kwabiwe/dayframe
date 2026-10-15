@@ -79,6 +79,7 @@ export type PlaceRow = {
   defaultActivityDescription: string | null;
   autoStart: boolean;
   loggingEnabled: boolean;
+  autoLog: boolean;
 };
 
 export type LearnedPlaceRow = {
@@ -420,7 +421,8 @@ export async function getNormalizationContext(
       defaultCategoryId: place.defaultCategoryId,
       defaultActivityDescription: place.defaultActivityDescription,
       autoStart: place.autoStart,
-      loggingEnabled: place.loggingEnabled
+      loggingEnabled: place.loggingEnabled,
+      autoLog: place.autoLog
     })),
     automationRules: automationRules.map<AutomationRuleSummary>((rule) => ({
       id: rule.id,
@@ -610,7 +612,8 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
               c.name as "defaultCategoryName",
               pl.default_activity_description as "defaultActivityDescription",
               pl.auto_start as "autoStart",
-              pl.logging_enabled as "loggingEnabled"
+              pl.logging_enabled as "loggingEnabled",
+              pl.auto_log as "autoLog"
        from places pl
        left join projects p on p.id = pl.default_project_id and p.workspace_id = pl.workspace_id
        left join categories c on c.id = pl.default_category_id and c.workspace_id = pl.workspace_id
@@ -635,6 +638,9 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
         "supabase/migrations/202607140002_place_logging_enabled.sql",
         error
       );
+    }
+    if (isUndefinedColumnError(error, "auto_log")) {
+      throw missingRequiredColumnError("places", "auto_log", "supabase/migrations/202610150001_place_auto_log.sql", error);
     }
     if (isUndefinedColumnError(error, "role")) {
       throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);

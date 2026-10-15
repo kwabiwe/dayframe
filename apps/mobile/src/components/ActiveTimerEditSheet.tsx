@@ -795,7 +795,7 @@ export function ActiveTimerEditSheet({
   // The non-scrolling sheet keeps Discard/Stop on screen only if the chips stay within their rows:
   // show the most leading chips that wrap, with All activities, into the row budget (the chosen one
   // always stays). Until every candidate is measured, show them all (the sheet is still entering).
-  // The "From 10:15 · after …" row (PRD D16) takes one activity row, so Discard/Stop stay on screen.
+  // The "← From 10:15" pill under START (PRD D16) takes one activity row, so Discard/Stop stay on screen.
   const chipRowBudget = Math.max(1, ACTIVITY_CHIP_ROWS_BY_DENSITY[chipDensity] - (presentedPreviousEnd ? 1 : 0));
   const chipActivities = useMemo(() => {
     const widths = chipCandidates.map((category) => chipWidths[category.id]);
@@ -2319,7 +2319,7 @@ export function ActiveTimerEditSheet({
     dismissTransientEditingSurfaces();
   }
 
-  // PRD D16: "From 10:15 · after Write report" moves the draft start to the previous block's end
+  // PRD D16: "← From 10:15" (after Write report) moves the draft start to the previous block's end
   // (saved with Done, like any start edit); pressed again it returns to the block's own start.
   const previousEndMs = presentedPreviousEnd ? Date.parse(presentedPreviousEnd.startedAt) : Number.NaN;
   const previousEndApplied = Number.isFinite(previousEndMs) && parsedStart.date?.getTime() === previousEndMs;
@@ -2980,76 +2980,107 @@ export function ActiveTimerEditSheet({
                     styles.activeEditTimeGroups,
                     timeCardsStacked ? styles.activeEditTimeGroupsStacked : null
                   ]}>
-                    <View style={[
-                      styles.activeEditTimeGroup,
-                      timeCardsStacked ? styles.activeEditTimeGroupStacked : null,
-                      timeWheel && timeWheel.target !== "start" ? sheetStyles.timeCardStepBack : null
-                    ]}>
-                      {timeWheel?.target === "start" ? (
-                        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colorWithAlpha(theme.textPrimary, 0.08) }]} />
-                      ) : null}
-                      {/* Blocks prototype time card: eyebrow over the time; the date on the right. A tap
-                          opens the time wheel under the cards (A11b); VoiceOver adjusts the card itself. */}
-                      <Pressable
-                        accessibilityActions={TIME_CARD_ACCESSIBILITY_ACTIONS}
-                        accessibilityLabel="Start"
-                        accessibilityRole="adjustable"
-                        accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "start" }}
-                        accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
-                        accessible={typingTarget !== "start"}
-                        disabled={busy}
-                        onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
-                        onPress={() => openTimeWheel("start")}
-                        style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
-                        testID="time-entry-start-card"
-                      >
-                        <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
-                          <TextInput
-                            ref={timeInputRef}
-                            {...mobileTextProps("input")}
-                            accessibilityElementsHidden={typingTarget !== "start"}
-                            accessibilityLabel="Start time"
-                            blurOnSubmit
-                            caretHidden
-                            contextMenuHidden
-                            editable={!busy && typingTarget === "start"}
-                            importantForAccessibility={typingTarget === "start" ? "auto" : "no-hide-descendants"}
-                            keyboardType="number-pad"
-                            maxLength={5}
-                            onBlur={() => setTypingTarget((current) => (current === "start" ? null : current))}
-                            onChangeText={updateTimeText}
-                            onFocus={() => {
-                              if (beginNativeKeyboardSession() === null) {
-                                timeInputRef.current?.blur();
-                                Keyboard.dismiss();
-                                return;
-                              }
-                              setDatePickerOpen(false);
-                            }}
-                            onSubmitEditing={Keyboard.dismiss}
-                            placeholder="09:00"
-                            placeholderTextColor={theme.textSecondary}
-                            pointerEvents={typingTarget === "start" ? "auto" : "none"}
-                            returnKeyType="done"
-                            selectTextOnFocus
-                            style={[styles.textInput, styles.activeEditCompactTimeInput]}
-                            testID="time-entry-start-time"
-                            value={timeText}
+                    {/* PRD D16: the start column holds the START card and, under it, the compact
+                        "From 15:20" pill (owner, 15 Oct 2026); the end card keeps its own height. */}
+                    <View pointerEvents="box-none" style={[sheetStyles.startColumn, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                      <View style={[
+                        styles.activeEditTimeGroup,
+                        styles.activeEditTimeGroupStacked,
+                        timeWheel && timeWheel.target !== "start" ? sheetStyles.timeCardStepBack : null
+                      ]}>
+                        {timeWheel?.target === "start" ? (
+                          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colorWithAlpha(theme.textPrimary, 0.08) }]} />
+                        ) : null}
+                        {/* Blocks prototype time card: eyebrow over the time; the date on the right. A tap
+                            opens the time wheel under the cards (A11b); VoiceOver adjusts the card itself. */}
+                        <Pressable
+                          accessibilityActions={TIME_CARD_ACCESSIBILITY_ACTIONS}
+                          accessibilityLabel="Start"
+                          accessibilityRole="adjustable"
+                          accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "start" }}
+                          accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
+                          accessible={typingTarget !== "start"}
+                          disabled={busy}
+                          onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
+                          onPress={() => openTimeWheel("start")}
+                          style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}
+                          testID="time-entry-start-card"
+                        >
+                          <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
+                            <TextInput
+                              ref={timeInputRef}
+                              {...mobileTextProps("input")}
+                              accessibilityElementsHidden={typingTarget !== "start"}
+                              accessibilityLabel="Start time"
+                              blurOnSubmit
+                              caretHidden
+                              contextMenuHidden
+                              editable={!busy && typingTarget === "start"}
+                              importantForAccessibility={typingTarget === "start" ? "auto" : "no-hide-descendants"}
+                              keyboardType="number-pad"
+                              maxLength={5}
+                              onBlur={() => setTypingTarget((current) => (current === "start" ? null : current))}
+                              onChangeText={updateTimeText}
+                              onFocus={() => {
+                                if (beginNativeKeyboardSession() === null) {
+                                  timeInputRef.current?.blur();
+                                  Keyboard.dismiss();
+                                  return;
+                                }
+                                setDatePickerOpen(false);
+                              }}
+                              onSubmitEditing={Keyboard.dismiss}
+                              placeholder="09:00"
+                              placeholderTextColor={theme.textSecondary}
+                              pointerEvents={typingTarget === "start" ? "auto" : "none"}
+                              returnKeyType="done"
+                              selectTextOnFocus
+                              style={[styles.textInput, styles.activeEditCompactTimeInput]}
+                              testID="time-entry-start-time"
+                              value={timeText}
+                            />
+                        </Pressable>
+                        <Pressable
+                          accessibilityLabel="Edit start date"
+                          accessibilityValue={{ text: formatPickerDate(displayedStartAt) }}
+                          accessibilityRole="button"
+                          disabled={busy}
+                          onPress={openStartPicker}
+                          style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
+                          testID="time-entry-start-date"
+                        >
+                          <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
+                            {formatPickerDate(displayedStartAt)}
+                          </Text>
+                        </Pressable>
+                      </View>
+                      {presentedPreviousEnd ? (
+                        <Pressable
+                          accessibilityHint={previousEndApplied ? "Returns the start to when this block started" : "Moves the start back to when that block ended; Done saves it"}
+                          accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}
+                          accessibilityRole="button"
+                          accessibilityState={{ disabled: busy, selected: previousEndApplied }}
+                          disabled={busy}
+                          hitSlop={{ top: 6, bottom: 6 }}
+                          onPress={togglePreviousEnd}
+                          style={({ pressed }) => [
+                            sheetStyles.previousEndPill,
+                            { backgroundColor: theme.surfaceMuted },
+                            pressed && !busy ? styles.buttonPressed : null,
+                            busy ? styles.buttonDisabled : null
+                          ]}
+                          testID="time-entry-previous-end"
+                        >
+                          <DayframeIcon
+                            color={previousEndApplied ? theme.textPrimary : theme.textSecondary}
+                            glyph={previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}
+                            size={14}
                           />
-                      </Pressable>
-                      <Pressable
-                        accessibilityLabel="Edit start date"
-                        accessibilityValue={{ text: formatPickerDate(displayedStartAt) }}
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={openStartPicker}
-                        style={pressable(styles.activeEditCompactDate, styles.buttonPressed)}
-                        testID="time-entry-start-date"
-                      >
-                        <Text {...mobileTextProps("metadata")} style={styles.activeEditCompactDateText} numberOfLines={1}>
-                          {formatPickerDate(displayedStartAt)}
-                        </Text>
-                      </Pressable>
+                          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.previousEndPillText, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
+                            From {formatTimeInput(new Date(previousEndMs))}
+                          </Text>
+                        </Pressable>
+                      ) : null}
                     </View>
                     {hasStoppedTime ? (
                       <View style={[
@@ -3156,33 +3187,6 @@ export function ActiveTimerEditSheet({
                       theme={theme}
                       wheelHeight={timeWheelHeight}
                     />
-                  ) : null}
-                  {presentedPreviousEnd ? (
-                    <Pressable
-                      accessibilityHint={previousEndApplied ? "Returns the start to when this block started" : "Moves the start back to when that block ended; Done saves it"}
-                      accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}
-                      accessibilityRole="button"
-                      accessibilityState={{ disabled: busy, selected: previousEndApplied }}
-                      disabled={busy}
-                      hitSlop={{ top: 6, bottom: 6 }}
-                      onPress={togglePreviousEnd}
-                      style={({ pressed }) => [
-                        sheetStyles.tagChip,
-                        sheetStyles.previousEndChip,
-                        { backgroundColor: theme.surfaceMuted },
-                        pressed && !busy ? styles.buttonPressed : null,
-                        busy ? styles.buttonDisabled : null
-                      ]}
-                      testID="time-entry-previous-end"
-                    >
-                      {previousEndApplied ? <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
-                      <Text {...mobileTextProps("metadata")} style={[sheetStyles.tagChipText, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
-                        From {formatTimeInput(new Date(previousEndMs))} · after
-                      </Text>
-                      <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.tagChipText, sheetStyles.tagChipName, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
-                        {presentedPreviousEnd.previousName}
-                      </Text>
-                    </Pressable>
                   ) : null}
                   {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
@@ -3595,8 +3599,15 @@ const sheetStyles = StyleSheet.create({
   tagChipName: { flexShrink: 1, minWidth: 0 },
   // "+ Tag" is a filled chip with the add glyph, never an outline (UIA-050).
   tagAdd: { gap: 4 },
-  // PRD D16: one line under the time cards; only the previous block's name truncates.
-  previousEndChip: { alignSelf: "flex-start", gap: 4, marginTop: 8 },
+  // The START card's column (PRD D16): the card, then the "From 15:20" pill directly under it.
+  startColumn: { flex: 1, gap: 6, minWidth: 0 },
+  // PRD D16 (owner, 15 Oct 2026): a compact filled pill, back arrow + "From 15:20"; the previous
+  // block's name is spoken, not shown.
+  previousEndPill: {
+    alignItems: "center", alignSelf: "flex-start", borderRadius: 999, flexDirection: "row", gap: 5,
+    maxWidth: "100%", minHeight: 32, minWidth: 44, paddingHorizontal: 11
+  },
+  previousEndPillText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).

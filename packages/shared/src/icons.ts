@@ -97,6 +97,8 @@ export const DAYFRAME_APP_ICONS = {
   signOut: "log-out",
   start: "play",
   startAgain: "rotate-ccw",
+  // "From 15:20": start the next block at the previous block's end (PRD D16).
+  startFromPreviousEnd: "arrow-left",
   stop: "square",
   add: "plus",
   edit: "pencil",

@@ -1,4 +1,5 @@
 import { emitReviewSemanticSegments, type SemanticChangeCounter, timeAwayPlaceName } from "./location-review-semantic-batch";
+import { autoLogReconciliation, removeUnusedAutoLogOrphans } from "./location-auto-log";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { observeLocationStage, observeLocationTiming, type LocationObservation } from "./location-sync-diagnostics";
@@ -271,9 +272,16 @@ async function replayAndEmitLocationSemantics(
 ) {
   // One counter for everything this replay changes that the app shows (see `semanticChangeCount`).
   const semanticChanges: SemanticChangeCounter = { count: 0 };
+  // Log automatically: a retired auto-logged visit's block moves to its replacement or is removed,
+  // which only Review emission does; any other replay leaves auto-logged stays as they are.
+  const emitsReview = options.rollout.effectiveMode === "v2_review" &&
+    options.rollout.emitV2ReviewItems && Boolean(options.rollout.semanticCutoverAt);
   const replay = await replayLocationEvidence(client, session, {
     ...options,
     semanticChanges,
+    autoLogReconciliation: emitsReview
+      ? autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
+      : undefined,
     // This is deliberately derived from the server decision, never from the
     // requested rollout mode or a request-visible profile field.
     persistenceProfile: options.rollout.effectiveMode === "v2_review"
@@ -289,9 +297,17 @@ async function replayAndEmitLocationSemantics(
       segmentStartedAfterSemanticCutover(item.startedAt, options.rollout.semanticCutoverAt!)
     );
     if (options.rollout.effectiveMode === "v2_review") {
+      const autoLog = {
+        orphans: replay.autoLogOrphans,
+        used: new Set<string>(),
+        locked: replay.autoLogLocked,
+        reconciliation: autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
+      };
       semanticSegmentCount = await emitReviewSemanticSegments(
-        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges
+        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges, autoLog
       );
+      semanticChanges.count += await removeUnusedAutoLogOrphans(
+        client, session, autoLog.orphans, autoLog.used, autoLog.locked);
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(

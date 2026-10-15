@@ -45,7 +45,7 @@ export function TimelineRail({ entries }: { entries: TimeEntryRow[] }) {
                     <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--muted)]">
                       <span>{timeEntryCategoryLabel(entry)}</span>
                       <span>{entry.placeName ?? "No place"}</span>
-                      <span>{formatSourceLabel(entry.source)}</span>
+                      <span>{formatSourceLabel(entry.source, { placeName: entry.placeName })}</span>
                     </div>
                   </div>
                   <div className="tabular text-left text-sm md:text-right">

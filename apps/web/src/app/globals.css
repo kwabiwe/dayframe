@@ -5483,6 +5483,25 @@ dialog.ui-dialog.df-range-custom {
   transform: translateX(22px);
 }
 
+/* "Log automatically" waits for Suggest visits here: shown, but not choosable. */
+.place-suggestion-toggle.is-disabled {
+  cursor: not-allowed;
+}
+
+.place-suggestion-toggle.is-disabled strong,
+.place-suggestion-toggle.is-disabled small {
+  color: var(--muted);
+}
+
+.place-suggestion-toggle input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.place-suggestion-toggle small.place-auto-log-caution {
+  color: var(--warning-text);
+}
+
 .place-editor-actions {
   display: flex;
   justify-content: flex-end;
@@ -9815,7 +9834,7 @@ button.df-cmd-clock:hover {
   color: var(--text-muted);
 }
 
-/* Idle: the muted clock, and under it (beside it below 860 px) the "From 10:15 · after …" chip
+/* Idle: the muted clock, and under it (beside it below 860 px) the "← From 10:15" pill
    (owner idea 1, 14 Oct 2026). Only the name ellipsises; the lead stays whole. */
 .df-cmd-idle {
   display: grid;
@@ -9859,14 +9878,10 @@ button.df-cmd-clock:hover {
   opacity: 0.6;
 }
 
-.df-cmd-from-lead {
+/* "← From 15:20" (owner, 15 Oct 2026): the registry's back arrow, then the time; the previous
+   block's name is in the accessible label only, as on the iPhone. */
+.df-cmd-from svg {
   flex: none;
-}
-
-.df-cmd-from-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .df-odometer {
@@ -14112,6 +14127,13 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 650;
+}
+
+/* "Logged automatically · {place}" under an auto-logged block's heading (PRD D17). */
+.df-ed-source {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
 }
 
 .df-ed-head h2 {
