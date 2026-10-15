@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# One run per pull request: a newer push cancels the run it replaces. Pushes to main are never cancelled.
+concurrency:
+  group: unit-checks-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit-checks:
     name: Workspace unit tests, typecheck and lint
@@ -21,8 +26,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # Formerly its own workflow (documentation-alignment.yml); the same command, run first and whatever
+      # the later steps do. `npm run lint` below runs it again as part of the lint chain.
+      - name: Documentation alignment
+        run: node scripts/check-docs-alignment.mjs
       - run: npm ci
+        if: ${{ !cancelled() }}
       - name: Typecheck (mobile, web, shared)
+        if: ${{ !cancelled() }}
         run: npm run typecheck
       - name: Lint (docs alignment, iOS config, web ESLint)
         if: ${{ !cancelled() }}

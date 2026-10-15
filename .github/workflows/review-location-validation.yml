@@ -1,23 +1,90 @@
 name: Review and Location validation
 
+# Runs on every pull request. The `changes` job decides which validation jobs a PR needs, and the
+# `Validation gate` job always reports, so a docs- or web-only PR is never left waiting on a skipped job.
 on:
   pull_request:
-    paths:
-      - ".github/workflows/review-location-validation.yml"
-      - "apps/**"
-      - "packages/**"
-      - "scripts/**"
-      - "package.json"
-      - "package-lock.json"
   push:
     branches: [main]
 
 permissions:
   contents: read
 
+# One run per pull request: a newer push cancels the run it replaces. Pushes to main are never cancelled.
+concurrency:
+  group: review-location-validation-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      db: ${{ steps.filter.outputs.db }}
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - id: filter
+        name: Decide which validation this change needs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # A pull request checks out its merge commit, whose first parent is the base branch: that diff is
+          # exactly what the PR changes. Pushes to main, an unreadable diff or an empty one run everything.
+          files=""
+          if [ "$EVENT_NAME" = pull_request ]; then
+            # --no-renames lists both sides of a move, so moving a build input into a skipped path still counts.
+            files=$(git diff --no-renames --name-only HEAD^1 HEAD) || files=""
+          fi
+          if [ -z "$files" ]; then
+            echo "Running everything ($EVENT_NAME)."
+            { echo "db=true"; echo "ios=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$files"
+
+          # PostGIS always runs for server, database and shared code, workflows, the lockfile and any SQL. It
+          # is skipped only when every changed file is iPhone UI, web components or CSS, or documentation;
+          # anything else runs it. Never skip when in doubt.
+          db=false
+          while IFS= read -r file; do
+            case "$file" in
+              apps/web/src/lib/*|apps/web/src/app/api/*|packages/db/*|supabase/*|packages/shared/*) db=true ;;
+              .github/workflows/*|package-lock.json|*.sql) db=true ;;
+              apps/mobile/app/*|apps/mobile/src/components/*|apps/mobile/assets/*|apps/mobile/ios/*|apps/mobile/modules/*) continue ;;
+              apps/web/src/components/*|*.css) continue ;;
+              docs/*|.codex/*|*.md) continue ;;
+              *) db=true ;;
+            esac
+          done <<< "$files"
+
+          # The iOS build is skipped only when every changed file is known not to reach it; anything not
+          # listed here (new top-level files, tools, logos, other packages) runs it. Never skip when in doubt.
+          ios=false
+          while IFS= read -r file; do
+            case "$file" in
+              apps/web/*|packages/db/*|supabase/*|docs/*|.codex/*) continue ;;
+              .github/pull_request_template.md|.github/workflows/unit-checks.yml|.github/workflows/documentation-alignment.yml) continue ;;
+              vercel.json|.vercelignore|docker-compose.yml|.gitignore|.env.example) continue ;;
+              scripts/*ios*|scripts/*testflight*|scripts/*mobile*|scripts/*xcode*|scripts/*pod*) ios=true ;;
+              scripts/*) continue ;;
+              */*) ios=true ;;
+              *.md) continue ;;
+              *) ios=true ;;
+            esac
+          done <<< "$files"
+
+          echo "PostGIS: $db. iOS Simulator: $ios."
+          { echo "db=$db"; echo "ios=$ios"; } >> "$GITHUB_OUTPUT"
+
   disposable-postgis:
     name: Disposable PostGIS (${{ matrix.schema }})
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -96,6 +163,8 @@ jobs:
 
   clean-ios-simulator:
     name: Clean iOS Simulator
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-26
     # A cold Expo/RN build on the hosted macOS 26 image regularly exceeds
     # thirty minutes after npm and CocoaPods setup. Keep the deadline finite,
@@ -105,6 +174,13 @@ jobs:
       EXPO_PUBLIC_DAYFRAME_API_BASE: https://dayframe-staging.vercel.app
       EXPO_PUBLIC_DAYFRAME_RELEASE_CHANNEL: preview
       RCT_NO_LAUNCH_PACKAGER: "1"
+      # React Native's post-install hook wraps clang in ccache (its own ccache.conf: depend mode and
+      # content hashes, so a hit is the object the same inputs compiled to). Swift is not cached. ccache
+      # keeps its default macOS directory, ~/Library/Caches/ccache, whatever environment Xcode passes on.
+      USE_CCACHE: "1"
+      CCACHE_MAXSIZE: 2G
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -114,11 +190,59 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: xcodebuild -version
+      # The cache key is fixed here, before pod install: pod install rewrites three path-generated
+      # checksums in Podfile.lock, so a key hashed after it would never match the one restored before it.
+      # It is the Git listing (mode, blob hash and path of every tracked file) of the native inputs from
+      # this repository (the iOS project and sources, local native modules, the app config autolinking
+      # reads), package-lock.json and this workflow (its build recipe and environment), plus the Xcode
+      # build. Unlike hashFiles, which hashes contents only, a renamed or moved file changes it. Any change
+      # to those inputs finds no cache and builds clean, so React Native's relaxed ccache settings
+      # (modules, VFS overlays, PCH defines) cannot reuse an object a clean build would compile
+      # differently (Codex r1 and r2 on #437). Generated files (Pods support files, codegen output,
+      # Derived Data) are not hashed: each run regenerates them from these inputs.
+      - id: xcode
+        name: Xcode version and cache key
+        run: |
+          xcodebuild -version
+          version=$(xcodebuild -version | tr -s ' \n' '-' | tr -cd 'A-Za-z0-9.-')
+          inputs=$(git ls-tree -r --full-tree HEAD -- apps/mobile/ios apps/mobile/modules apps/mobile/package.json apps/mobile/app.json apps/mobile/app.config.js package-lock.json .github/workflows/review-location-validation.yml)
+          [ -n "$inputs" ] || { echo "No native inputs listed"; exit 1; }
+          echo "$(printf '%s\n' "$inputs" | wc -l | tr -d ' ') tracked inputs in the cache key"
+          echo "key=$version-$(printf '%s\n' "$inputs" | shasum -a 256 | cut -c1-64)" >> "$GITHUB_OUTPUT"
       - name: Validate both native shared storage identities
         run: |
           npm run check:ios-config
           bash scripts/validate-ios-shared-storage.sh
+      # Pushes to main never restore the caches, so main always gets a clean build from nothing, and that
+      # build seeds them. A pull request restores only caches made for its exact key: changed native code,
+      # dependencies or Xcode find none and build clean too.
+      - id: pods-cache
+        name: Restore CocoaPods (pull requests)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/mobile/ios/Pods
+          key: ios-pods-v4-${{ steps.xcode.outputs.key }}
+      - id: ccache-cache
+        name: Restore compiler cache (pull requests)
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ios-ccache-v5-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
+          restore-keys: ios-ccache-v5-${{ steps.xcode.outputs.key }}-
+      - name: Install ccache
+        env:
+          MATCHED: ${{ steps.ccache-cache.outputs.cache-matched-key }}
+        run: |
+          command -v ccache >/dev/null || brew install ccache
+          ccache --version | head -1
+          ccache --zero-stats
+          if [ -n "$MATCHED" ]; then
+            echo "Warm compiler cache: $MATCHED"
+          else
+            echo "Clean build: no compiler cache restored."
+          fi
       - name: Install frozen CocoaPods version
         run: gem install cocoapods -v 1.16.2 --no-document
       - run: pod _1.16.2_ install
@@ -139,14 +263,62 @@ jobs:
             puts "Pod graph matches; only permitted path-generated checksums excluded."
           '
           git diff --exit-code -- package-lock.json
+      # React Native's ccache hook sets CC to $(REACT_NATIVE_PATH)/scripts/xcode/ccache-clang.sh on every
+      # target. Only Pods defines REACT_NATIVE_PATH, so the app and Live Activity targets get the same path
+      # Pods uses (${PODS_ROOT}/../../../../node_modules/react-native) from here. The wrapper runs
+      # `$CCACHE_BINARY clang`, and Xcode does not pass build settings to compiler processes, so without
+      # CCACHE_BINARY in the environment it silently runs plain clang.
       - name: Clean unsigned Simulator build
         run: >-
+          CCACHE_BINARY="$(command -v ccache)"
           xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
           -scheme Dayframe -configuration Staging -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data"
+          REACT_NATIVE_PATH="$GITHUB_WORKSPACE/node_modules/react-native"
           CODE_SIGNING_ALLOWED=NO clean build
       - name: Verify built host and extension App Groups
         run: >-
           npm run check:ios-config -- --built-app
           "$RUNNER_TEMP/dayframe-clean-derived-data/Build/Products/Staging-iphonesimulator/Dayframe.app"
+      - name: Compiler cache statistics
+        if: ${{ !cancelled() }}
+        run: |
+          ccache --show-stats --verbose || true
+          # A build that never reached ccache would still pass; say so rather than save an empty cache.
+          calls=$(ccache --print-stats | awk '$1 ~ /^(direct_cache_hit|preprocessed_cache_hit|cache_miss)$/ { n += $2 } END { print n + 0 }')
+          echo "Compiler calls through ccache: $calls"
+          [ "$calls" -gt 0 ] || echo "::warning::No compile went through ccache; the build ran uncached."
+      - name: Save compiler cache
+        if: success() && (github.event_name == 'push' || steps.ccache-cache.outputs.cache-matched-key == '')
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ios-ccache-v5-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
+      - name: Save CocoaPods
+        if: success() && steps.pods-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: apps/mobile/ios/Pods
+          key: ios-pods-v4-${{ steps.xcode.outputs.key }}
+
+  validation-gate:
+    name: Validation gate
+    needs: [changes, disposable-postgis, clean-ios-simulator]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every needed validation job passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          DB_NEEDED: ${{ needs.changes.outputs.db }}
+          DB_RESULT: ${{ needs.disposable-postgis.result }}
+          IOS_NEEDED: ${{ needs.changes.outputs.ios }}
+          IOS_RESULT: ${{ needs.clean-ios-simulator.result }}
+        run: |
+          echo "Changed paths: $CHANGES. PostGIS needed: $DB_NEEDED ($DB_RESULT). iOS Simulator needed: $IOS_NEEDED ($IOS_RESULT)."
+          [ "$CHANGES" = success ] || { echo "The path check did not finish."; exit 1; }
+          if [ "$DB_NEEDED" = true ] && [ "$DB_RESULT" != success ]; then exit 1; fi
+          if [ "$IOS_NEEDED" = true ] && [ "$IOS_RESULT" != success ]; then exit 1; fi
+          echo "Validation passed."
