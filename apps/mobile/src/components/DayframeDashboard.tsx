@@ -1896,7 +1896,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       if (!todayNoticeOwnerStill(noticeOwner)) return;
       const nextName = description.trim() || category?.name || "No activity";
       showTodayNotice(
-        switchedToastCopy(nextName),
+        switchedToastCopy(nextName, running, Date.now()),
         category ? toastSwatchColor({ categoryColor: category.color, categoryId: category.id, categoryName: category.name }, theme.mode) : null
       );
     });
@@ -3386,9 +3386,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         <BlocksToast
           key={`notice-${todayNotice.notice.token}`}
           accessibilityLabel={todayNotice.notice.accessibilityLabel}
-          lead={todayNotice.notice.lead}
+          detail={todayNotice.notice.detail}
           message={todayNotice.notice.message}
-          name={todayNotice.notice.name}
           reduceMotion={reduceMotion}
           style={styles.todayToast}
           swatchColor={todayNotice.notice.swatchColor}

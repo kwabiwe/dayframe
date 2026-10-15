@@ -10,11 +10,16 @@ import { addCalendarDays, buildCalendarGrid, CALENDAR_WEEKDAY_LABELS } from "@/l
  * coral text, days before `min` or after `max` dimmed and not choosable, and one tab stop with the
  * arrow keys moving through the days (←/→ a day, ↑/↓ a week, Page Up/Down a month, Home/End the
  * week's Monday/Sunday; Enter or Space chooses). Moving past the month turns the page.
+ *
+ * With `range` (the Reports custom range) the grid draws the range instead of one chosen day:
+ * round first and last days on a continuous band, every day in it pressed. The caller owns which
+ * taps make the range; `value` then names the day last tapped, which keeps the tab stop.
  */
 export function DayframeCalendar({
   max,
   min,
   onChange,
+  range,
   today,
   value,
   view,
@@ -25,6 +30,8 @@ export function DayframeCalendar({
   /** The first choosable day (`YYYY-MM-DD`), inclusive. */
   min?: string | null;
   onChange: (date: string) => void;
+  /** A range to draw (inclusive `YYYY-MM-DD` days); `end` null while the last day is awaited. */
+  range?: { start: string; end: string | null } | null;
   /** The viewer's today (`YYYY-MM-DD`), marked in the grid. */
   today?: string | null;
   value: string;
@@ -110,16 +117,27 @@ export function DayframeCalendar({
         {days.map((day) => {
           const unavailable = outside(day.date);
           const isToday = day.date === today;
+          const rangeEnd = range ? range.end ?? range.start : null;
+          const isRangeStart = range ? day.date === range.start : false;
+          const isRangeEnd = range ? day.date === rangeEnd : false;
+          const inRange = range ? day.date >= range.start && day.date <= rangeEnd! : false;
+          const fullLabel = new Intl.DateTimeFormat("en-GB", { dateStyle: "full" }).format(new Date(`${day.date}T12:00:00`));
           return (
             <button
               aria-current={isToday ? "date" : undefined}
               aria-disabled={unavailable || undefined}
-              aria-label={new Intl.DateTimeFormat("en-GB", { dateStyle: "full" }).format(new Date(`${day.date}T12:00:00`))}
-              aria-pressed={value === day.date}
+              aria-label={isRangeStart && isRangeEnd && range?.end ? `${fullLabel}, first and last day`
+                : isRangeStart ? `${fullLabel}, first day`
+                  : isRangeEnd ? `${fullLabel}, last day` : fullLabel}
+              aria-pressed={range ? inRange : value === day.date}
               className={[
                 day.inCurrentMonth ? "" : "is-adjacent-month",
                 isToday ? "is-today" : "",
-                unavailable ? "is-unavailable" : ""
+                unavailable ? "is-unavailable" : "",
+                inRange ? "is-in-range" : "",
+                isRangeStart && rangeEnd !== range?.start ? "is-range-start" : "",
+                isRangeEnd && rangeEnd !== range?.start ? "is-range-end" : "",
+                isRangeStart && rangeEnd === range?.start ? "is-range-single" : ""
               ].filter(Boolean).join(" ") || undefined}
               data-date={day.date}
               key={day.date}

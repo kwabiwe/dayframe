@@ -4,7 +4,9 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { Field, ModalDialog } from "@/components/ui/Primitives";
+import { DayframeCalendar } from "@/components/DayframeCalendar";
+import { ModalDialog } from "@/components/ui/Primitives";
+import { formatLocalDate } from "@/lib/calendar-grid";
 import {
   REPORT_RANGE_PRESETS,
   filtersForCustomRange,
@@ -15,11 +17,21 @@ import {
   type ReportFilters,
   type ReportRangeMetadata
 } from "@/lib/report-filters";
+import {
+  initialReportRangeDraft,
+  nextReportRangeDraft,
+  reportRangeDraftComplete,
+  reportRangeDraftBounds,
+  reportRangeDraftCaption,
+  type ReportRangeDraft
+} from "@/lib/report-range-draft";
 
 /**
  * The Reports range subtitle (UIA-304): ‹ range › under the page title. The range itself opens a
- * menu with every preset (Today, Last 30 days…) and "Custom…", which opens a small dialog for the
- * From / To dates. Week and Month stay as the segmented control on the right of the head row.
+ * menu with every preset (Today, Last 30 days…) and "Custom…", which opens a small dialog with a
+ * range calendar (date-picker audit, 14 Oct 2026, as on iPhone): tap the first day, then the last
+ * (either order; a third tap starts again), read the range in the caption, then Done. No days after
+ * today, at most 366 days. Week and Month stay as the segmented control on the right of the head row.
  *
  * Motion contract (.codex/reference/motion.md, "Web Reports range menu"): one owner, this
  * component's `menu` state. Entrance: opacity 0 → 1 over 120ms. Exit: state "closing" keeps the
@@ -54,8 +66,10 @@ export function ReportRangeControls({
   const router = useRouter();
   const [menu, setMenu] = useState<MenuState>("closed");
   const [customOpen, setCustomOpen] = useState(false);
-  const [fromDraft, setFromDraft] = useState(filters.from);
-  const [toDraft, setToDraft] = useState(filters.to);
+  const [draft, setDraft] = useState<ReportRangeDraft>({ start: filters.from, end: filters.to });
+  const [lastTapped, setLastTapped] = useState(filters.to);
+  const [today, setToday] = useState(filters.to);
+  const [view, setView] = useState({ year: 0, month: 0 });
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -147,8 +161,15 @@ export function ReportRangeControls({
 
   function openCustom() {
     closeMenu();
-    setFromDraft(filters.from);
-    setToDraft(filters.to);
+    const now = formatLocalDate(new Date());
+    // The range as it stands up to today, on the page of its last day (Codex r1 on #426: Done must
+    // never commit a preset's future days).
+    const initial = initialReportRangeDraft(filters.from, filters.to, now);
+    const shown = initial.end ?? initial.start;
+    setDraft(initial);
+    setLastTapped(shown);
+    setToday(now);
+    setView({ year: Number(shown.slice(0, 4)), month: Number(shown.slice(5, 7)) });
     setCustomOpen(true);
   }
 
@@ -239,35 +260,44 @@ export function ReportRangeControls({
           footer={(
             <>
               <span className="df-spacer" />
-              <button className="df-rbtn df-rbtn--ghost" onClick={closeCustom} type="button">Cancel</button>
               <button
-                className="df-rbtn df-rbtn--live"
-                disabled={!fromDraft || !toDraft}
+                className="df-rbtn df-range-done"
+                disabled={!reportRangeDraftComplete(draft, today)}
                 onClick={() => {
+                  if (!reportRangeDraftComplete(draft, today)) return;
                   // Focus returns to the range trigger now and, after the navigation remounts this
                   // component, on the new instance's mount.
-                  const next = filtersForCustomRange(filters, fromDraft, toDraft);
-                  // Same range: no remount, so closeCustom's focus is the only one needed.
-                  focusTriggerAfterNavigation = rangeKey(next) === rangeKey(filters) ? null : rangeKey(next);
+                  const next = filtersForCustomRange(filters, draft.start, draft.end);
+                  const unchanged = rangeKey(next) === rangeKey(filters);
                   closeCustom();
+                  // The custom range already showing: nothing to load again.
+                  if (unchanged) return;
+                  focusTriggerAfterNavigation = rangeKey(next);
                   router.push(reportsHref(next));
                 }}
                 type="button"
               >
-                Apply
+                Done
               </button>
             </>
           )}
           onClose={closeCustom}
           title="Custom dates"
         >
-          <div className="report-custom-range" aria-label="Custom report dates">
-            <Field htmlFor="report-custom-from" label="From">
-              <input className="ui-control" id="report-custom-from" type="date" value={fromDraft} onChange={(event) => setFromDraft(event.target.value)} />
-            </Field>
-            <Field htmlFor="report-custom-to" label="To (inclusive)">
-              <input className="ui-control" id="report-custom-to" type="date" value={toDraft} onChange={(event) => setToDraft(event.target.value)} />
-            </Field>
+          <div className="report-range-calendar">
+            <p aria-live="polite" className="report-range-caption">{reportRangeDraftCaption(draft)}</p>
+            <DayframeCalendar
+              {...reportRangeDraftBounds(draft, today)}
+              onChange={(date) => {
+                setDraft((current) => nextReportRangeDraft(current, date));
+                setLastTapped(date);
+              }}
+              onViewChange={setView}
+              range={draft}
+              today={today}
+              value={lastTapped}
+              view={view}
+            />
           </div>
         </ModalDialog>
       ) : null}
