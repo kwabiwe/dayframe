@@ -26,16 +26,26 @@ describe("web Settings and running-timer follow-up", () => {
     expect(editor).toContain("event.preventDefault()");
     expect(editor).toContain("event.stopPropagation()");
     expect(editor).toContain("void saveStartTime()");
-    expect(editor).toContain('type="button" variant="primary"');
+    // A Blocks button pair (owner, 15 Oct 2026): Cancel ghost, Save coral.
+    expect(editor).toContain('className="df-rbtn df-rbtn--ghost"');
+    expect(editor).toContain('className="df-rbtn df-rbtn--live" disabled={isTimerBusy} onClick={() => void saveStartTime()}');
     expect(runtime).toContain("applyOptimisticActiveEntryPatch(snapshot, sending, startedAt)");
     expect(runtime).toContain("await refresh({ force: true })");
   });
 
-  it("keeps native picker icons mouse-available but outside keyboard order", () => {
-    expect(timer).toContain("function NativePickerControl");
-    expect(timer).toContain("inputRef.current?.showPicker()");
-    expect(timer).toContain("tabIndex={-1}");
-    expect(styles).toMatch(/\.swiss-native-picker-control \.ui-control::-webkit-calendar-picker-indicator \{[^}]*pointer-events: none;[^}]*opacity: 0;/s);
+  it("uses the shared date picker and a typed time, never the native date and time inputs (owner, 15 Oct)", () => {
+    const editor = timer.slice(
+      timer.indexOf('id="persistent-timer-start-editor"'),
+      timer.indexOf('className={`df-cmd-go')
+    );
+    expect(editor).toContain("<DatePickerPopover");
+    expect(editor).toContain("max={dateKey(new Date())}");
+    expect(editor).toContain("setStartTimeDraft(maskTimeInput(event.target.value))");
+    expect(editor).not.toMatch(/type(=|: )"(date|time)"/);
+    expect(timer).not.toContain("function NativePickerControl");
+    expect(styles).not.toContain(".swiss-native-picker-control");
+    // "Set to last stop time · 15:17" keeps its wording (owner).
+    expect(editor).toContain('Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt)}</span>');
   });
 
   it("uses a compact workspace selector with on-demand rename and create controls", () => {

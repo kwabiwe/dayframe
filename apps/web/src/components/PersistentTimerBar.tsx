@@ -3,14 +3,11 @@
 import type {
   CSSProperties,
   FormEvent,
-  InputHTMLAttributes,
-  KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
-  RefObject
+  KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
-import { Clock3, Ellipsis, Plus } from "lucide-react";
+import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -18,12 +15,14 @@ import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
+import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
-import { Button, Field, IconButton, ModalDialog } from "@/components/ui/Primitives";
+import { Button, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
+import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -86,6 +85,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [timerActionsOpen, setTimerActionsOpen] = useState(false);
   const [startDateDraft, setStartDateDraft] = useState("");
   const [startTimeDraft, setStartTimeDraft] = useState("");
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   const [startEditError, setStartEditError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   // Idle: the minute clock for the "← From 10:15" offer (a start of minute, set after
@@ -97,7 +97,8 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   // Trello 213: the Description's neutral perimeter shows for keyboard focus only, never a click.
   const descriptionFocusRing = useKeyboardFocusRing();
-  const startDateInputRef = useRef<HTMLInputElement | null>(null);
+  const startDatePickerOpenRef = useRef(false);
+  startDatePickerOpenRef.current = startDatePickerOpen;
   const startTimeInputRef = useRef<HTMLInputElement | null>(null);
   const startEditorRef = useRef<HTMLDivElement | null>(null);
   const startEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -237,12 +238,18 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   useEffect(() => {
     if (!startEditorOpen) return undefined;
-    const focusHandle = window.requestAnimationFrame(() => startDateInputRef.current?.focus());
+    // The date trigger first, as the native date input was.
+    const focusHandle = window.requestAnimationFrame(() =>
+      startEditorRef.current?.querySelector<HTMLButtonElement>(".df-start-date-trigger")?.focus());
     function closeOnOutside(event: MouseEvent) {
-      if (!startEditorRef.current?.contains(event.target as Node)) setStartEditorOpen(false);
+      const target = event.target as Node;
+      // The date picker is portalled (its panel, or its phone sheet and scrim): a press there is inside.
+      if (target instanceof Element && target.closest(".time-entry-quick-editor-nested-surface")) return;
+      if (!startEditorRef.current?.contains(target)) setStartEditorOpen(false);
     }
     function closeOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key !== "Escape") return;
+      // Escape closes the open date picker first (its own listener), never the panel with it.
+      if (event.key !== "Escape" || startDatePickerOpenRef.current) return;
       event.preventDefault();
       setStartEditorOpen(false);
       startEditorTriggerRef.current?.focus();
@@ -461,11 +468,13 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     setStartDateDraft(dateKey(startedAt));
     setStartTimeDraft(`${startedAt.getHours().toString().padStart(2, "0")}:${startedAt.getMinutes().toString().padStart(2, "0")}`);
     setStartEditError(null);
+    setStartDatePickerOpen(false);
     setStartEditorOpen(true);
   }
 
   async function saveStartTime() {
-    const startedAt = dateTimeLocalInputToIso(`${startDateDraft}T${startTimeDraft}`);
+    const time = parseStartTime(startTimeDraft);
+    const startedAt = time ? dateTimeLocalInputToIso(`${startDateDraft}T${time}`) : null;
     if (!startedAt) {
       setStartEditError("Use a valid start date and time.");
       return;
@@ -647,8 +656,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               inert={!startEditorOpen}
               role="dialog"
             >
-              <header className="swiss-start-time-popover-header">
-                <strong>Start date and time</strong>
+              {/* The #391 floating-panel language (owner, 15 Oct 2026): a small uppercase head,
+                  inset fields without outlines and neutral focus, the shared date picker instead
+                  of the native date input, and a Blocks button pair. */}
+              <header className="df-flist-head swiss-start-time-popover-header">
+                <span>Start date and time</span>
               </header>
               <div
                 className="swiss-compact-time-editor"
@@ -660,75 +672,88 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   void saveStartTime();
                 }}
               >
-                <Field htmlFor="active-start-date" label="Start date">
-                  <NativePickerControl
-                    icon={<DayframeIcon glyph="calendar-days" size={16}/>}
-                    inputRef={startDateInputRef}
-                    inputProps={{
-                      id: "active-start-date",
-                      type: "date",
-                      value: startDateDraft,
-                      onChange: (event) => {
-                        setStartDateDraft(event.target.value);
-                        setStartEditError(null);
-                      },
-                      required: true
-                    }}
-                    label="Open start date picker"
-                  />
-                </Field>
-                <Field htmlFor="active-start-time" label="Start time">
-                  <NativePickerControl
-                    icon={<Clock3 size={16} aria-hidden="true" />}
-                    inputRef={startTimeInputRef}
-                    inputProps={{
-                      id: "active-start-time",
-                      type: "time",
-                      value: startTimeDraft,
-                      onChange: (event) => {
-                        setStartTimeDraft(event.target.value);
-                        setStartEditError(null);
-                      },
-                      required: true
-                    }}
-                    label="Open start time picker"
-                  />
-                  {lastStoppedAt ? (
-                    <button
-                      className="edit-entry-last-stop"
-                      type="button"
-                      onClick={() => {
-                        const stopped = new Date(lastStoppedAt);
-                        setStartDateDraft([
-                          stopped.getFullYear(),
-                          String(stopped.getMonth() + 1).padStart(2, "0"),
-                          String(stopped.getDate()).padStart(2, "0")
-                        ].join("-"));
-                        setStartTimeDraft([
-                          String(stopped.getHours()).padStart(2, "0"),
-                          String(stopped.getMinutes()).padStart(2, "0")
-                        ].join(":"));
+                <div className="df-start-fields">
+                  <div className="df-start-field">
+                    <span className="df-start-field-label" id="active-start-date-label">Date</span>
+                    <DatePickerPopover
+                      ariaLabel={`Start date, ${formatStartDateLabel(startDateDraft)}. Choose start date`}
+                      className="df-start-date-picker"
+                      disabled={isTimerBusy}
+                      label={formatStartDateLabel(startDateDraft)}
+                      max={dateKey(new Date())}
+                      onChange={(date) => {
+                        setStartDateDraft(date);
                         setStartEditError(null);
                       }}
-                    >
-                      Set to last stop time
-                      <span className="tabular">{formatTime(lastStoppedAt)}</span>
-                    </button>
-                  ) : null}
-                </Field>
-                {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
-                <div className="ui-dialog-actions">
-                  <Button
+                      onOpenChange={setStartDatePickerOpen}
+                      open={startDatePickerOpen}
+                      panelClassName="time-entry-quick-editor-nested-surface df-start-date-panel"
+                      panelLabel="Choose start date"
+                      portal
+                      today={dateKey(new Date())}
+                      triggerClassName="df-start-date-trigger"
+                      // Before the first opening the draft is empty: the picker needs a real day.
+                      value={startDateDraft || dateKey(new Date())}
+                    />
+                  </div>
+                  <label className="df-start-field" htmlFor="active-start-time">
+                    <span className="df-start-field-label">Time</span>
+                    <input
+                      aria-invalid={startEditError ? true : undefined}
+                      autoComplete="off"
+                      className="df-start-time-input"
+                      disabled={isTimerBusy}
+                      id="active-start-time"
+                      inputMode="numeric"
+                      onBlur={() => {
+                        const parsed = parseStartTime(startTimeDraft);
+                        if (parsed) setStartTimeDraft(parsed);
+                      }}
+                      onChange={(event) => {
+                        setStartTimeDraft(maskTimeInput(event.target.value));
+                        setStartEditError(null);
+                      }}
+                      placeholder="09:00"
+                      ref={startTimeInputRef}
+                      type="text"
+                      value={startTimeDraft}
+                    />
+                  </label>
+                </div>
+                {lastStoppedAt ? (
+                  <button
+                    className="edit-entry-last-stop"
+                    disabled={isTimerBusy}
                     type="button"
+                    onClick={() => {
+                      const stopped = new Date(lastStoppedAt);
+                      setStartDateDraft(dateKey(stopped));
+                      setStartTimeDraft([
+                        String(stopped.getHours()).padStart(2, "0"),
+                        String(stopped.getMinutes()).padStart(2, "0")
+                      ].join(":"));
+                      setStartEditError(null);
+                    }}
+                  >
+                    Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt)}</span>
+                  </button>
+                ) : null}
+                {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
+                <div className="df-start-actions">
+                  <button
+                    className="df-rbtn df-rbtn--ghost"
                     disabled={isTimerBusy}
                     onClick={() => {
                       setStartEditorOpen(false);
                       startEditorTriggerRef.current?.focus();
                     }}
+                    type="button"
                   >
                     Cancel
-                  </Button>
-                  <Button type="button" variant="primary" disabled={isTimerBusy} onClick={() => void saveStartTime()}>Save</Button>
+                  </button>
+                  <button className="df-rbtn df-rbtn--live" disabled={isTimerBusy} onClick={() => void saveStartTime()} type="button">
+                    Save
+                  </button>
                 </div>
               </div>
             </section>
@@ -1143,39 +1168,33 @@ function commandRangeLabel(durationSeconds: number) {
   return `${formatTime(startedAt.toISOString())}–${formatTime(stoppedAt.toISOString())}`;
 }
 
-function NativePickerControl({
-  icon,
-  inputProps,
-  inputRef,
-  label
-}: {
-  icon: ReactNode;
-  inputProps: InputHTMLAttributes<HTMLInputElement>;
-  inputRef: RefObject<HTMLInputElement | null>;
-  label: string;
-}) {
-  return (
-    <span className="swiss-native-picker-control">
-      <input {...inputProps} className="ui-control" ref={inputRef} />
-      <button
-        aria-label={label}
-        className="swiss-native-picker-button"
-        onClick={() => {
-          try {
-            inputRef.current?.showPicker();
-          } catch {
-            inputRef.current?.focus();
-          }
-        }}
-        tabIndex={-1}
-        type="button"
-      >
-        {icon}
-      </button>
-    </span>
-  );
+/**
+ * The start panel's typed time: digits as the quick editor reads them (`930` → 09:30), or `H:MM` /
+ * `HH:MM` with both minute digits. A time with a colon and incomplete minutes (`15:1`) is not a
+ * time, rather than its digits read another way (`01:51`; Codex r1 on #442).
+ */
+function parseStartTime(raw: string) {
+  const text = raw.trim();
+  if (!text.includes(":")) return parseTimeInput(text);
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
 }
 
+/** The start panel's date field: "Thu 15 Oct" (the year only when it is not this year). */
+function formatStartDateLabel(dateText: string) {
+  const date = new Date(`${dateText}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "Choose a date";
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(date.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" })
+  }).format(date);
+}
 function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
   const usageByCategory = new Map((data.categoryUsage ?? []).map((rank) => [rank.categoryId, rank]));
   return data.categories
