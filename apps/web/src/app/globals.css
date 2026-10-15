@@ -7561,6 +7561,11 @@ dialog.ui-dialog.manual-entry-dialog {
   overflow-y: auto;
 }
 
+/* Phone sheets: every day is a 44 px target (the desktop grid stays 38 px); the sheet scrolls. */
+.timeline-date-picker-panel.is-sheet .dayframe-calendar-grid button {
+  min-height: 44px;
+}
+
 .date-sheet-grabber {
   justify-self: center;
   width: 42px;

@@ -473,7 +473,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   }
 
   async function saveStartTime() {
-    const time = parseTimeInput(startTimeDraft);
+    const time = parseStartTime(startTimeDraft);
     const startedAt = time ? dateTimeLocalInputToIso(`${startDateDraft}T${time}`) : null;
     if (!startedAt) {
       setStartEditError("Use a valid start date and time.");
@@ -700,7 +700,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                       id="active-start-time"
                       inputMode="numeric"
                       onBlur={() => {
-                        const parsed = parseTimeInput(startTimeDraft);
+                        const parsed = parseStartTime(startTimeDraft);
                         if (parsed) setStartTimeDraft(parsed);
                       }}
                       onChange={(event) => {
@@ -1160,6 +1160,22 @@ function commandRangeLabel(durationSeconds: number) {
   stoppedAt.setSeconds(0, 0);
   const startedAt = new Date(stoppedAt.getTime() - durationSeconds * 1000);
   return `${formatTime(startedAt.toISOString())}–${formatTime(stoppedAt.toISOString())}`;
+}
+
+/**
+ * The start panel's typed time: digits as the quick editor reads them (`930` → 09:30), or `H:MM` /
+ * `HH:MM` with both minute digits. A time with a colon and incomplete minutes (`15:1`) is not a
+ * time, rather than its digits read another way (`01:51`; Codex r1 on #442).
+ */
+function parseStartTime(raw: string) {
+  const text = raw.trim();
+  if (!text.includes(":")) return parseTimeInput(text);
+  const match = /^(\d{1,2}):(\d{2})$/.exec(text);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${match[2]}`;
 }
 
 /** The start panel's date field: "Thu 15 Oct" (the year only when it is not this year). */

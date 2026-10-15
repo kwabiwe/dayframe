@@ -59,6 +59,19 @@ describe("command timer start panel", () => {
     fireEvent.blur(time);
     expect(time.value).toBe("00:00");
 
+    // Incomplete minutes after a colon are not read as other digits (`15:1` is never 01:51).
+    await userEvent.clear(time);
+    await userEvent.type(time, "00:1");
+    fireEvent.blur(time);
+    expect(time.value).toBe("00:1");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("alert").textContent).toBe("Use a valid start date and time.");
+    expect(runtime.updateActiveStartTime).not.toHaveBeenCalled();
+    await userEvent.clear(time);
+    await userEvent.type(time, "0:05");
+    fireEvent.blur(time);
+    expect(time.value).toBe("00:05");
+
     const later = new Date(now.getTime() + 90 * MINUTE);
     // Only meaningful while 90 minutes from now is still today.
     if (later.getDate() === now.getDate()) {

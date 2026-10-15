@@ -120,6 +120,10 @@ describe("persistent timer floating surfaces", () => {
     );
   });
 
+  it("gives the phone date sheet 44 px days (Codex r1 on #442)", () => {
+    expect(styles).toMatch(/\.timeline-date-picker-panel\.is-sheet \.dayframe-calendar-grid button \{\s*min-height: 44px;/);
+  });
+
   it("keeps the phone start panel above the tab bar", () => {
     expect(styles).toMatch(
       /@media \(max-width: 560px\) \{\s*\.df-cmd-time \.swiss-start-time-popover \{[^}]*bottom: calc\(var\(--df-tabbar-space, 0px\) \+ 8px\);/s
