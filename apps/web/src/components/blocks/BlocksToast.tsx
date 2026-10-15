@@ -13,8 +13,8 @@ import { springTransition } from "@/lib/blocks-motion";
 export function BlocksToast({
   actionLabel,
   autoFocusAction = false,
+  detail,
   exiting = false,
-  lead,
   message,
   onAction,
   swatchStyle
@@ -22,9 +22,9 @@ export function BlocksToast({
   actionLabel?: string;
   /** Move focus to the action when the toast appears (when the surface that was focused just went away). */
   autoFocusAction?: boolean;
+  /** A muted second line under the message ("42m logged to Client Work"), as on iPhone. */
+  detail?: string | null;
   exiting?: boolean;
-  /** A fixed lead ("Switched to") shown before `message`; it never truncates, only `message` does. */
-  lead?: string;
   message: string;
   onAction?: () => void;
   swatchStyle?: CSSProperties;
@@ -39,17 +39,18 @@ export function BlocksToast({
   return (
     <div className="df-toast-host">
       <div
-        className={`df-toast${exiting ? " is-exiting" : ""}`}
+        className={`df-toast${detail ? " has-detail" : ""}${exiting ? " is-exiting" : ""}`}
         role="status"
         aria-live="polite"
         aria-atomic="true"
         style={{ "--df-toast-pop": pop.easing, "--df-toast-pop-ms": `${pop.durationMs}ms` } as CSSProperties}
       >
         <span className="df-toast-swatch" style={swatchStyle} aria-hidden="true" />
-        {lead ? (
-          <span className="df-toast-message has-lead">
-            <span className="df-toast-lead">{lead}</span>{" "}
-            <span className="df-toast-name">{message}</span>
+        {detail ? (
+          // Two lines, each wrapping once at most: the message, then the muted detail.
+          <span className="df-toast-text">
+            <span className="df-toast-message">{message}</span>
+            <span className="df-toast-detail">{detail}</span>
           </span>
         ) : (
           <span className="df-toast-message">{message}</span>

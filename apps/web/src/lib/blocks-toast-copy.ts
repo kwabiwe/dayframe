@@ -1,26 +1,48 @@
+import { formatDuration as formatSharedDuration } from "@dayframe/shared";
 /**
- * Copy for the web Blocks switch toasts, the same as the iPhone's: "Switched to Work" (owner
- * option A, 14 Oct 2026: one line, no logged-time detail) and "Already recording Deep work".
- * Neither has Undo: there is no un-switch contract (owner decision, 7 and 14 Oct 2026).
+ * Copy for the web Blocks switch toasts (UIA-209, the same wording as the iPhone's UIA-004):
+ * "Switched to Work" over a muted "42m logged to Client Work", and "Already recording Deep work".
+ * Neither has Undo: there is no un-switch contract.
  */
 type ToastEntry = {
   categoryId: string | null;
   categoryName: string | null;
   description: string | null;
+  startedAt: string;
   tagNames: readonly string[];
 };
 
-/** The block's name as its row shows it: the description, else the activity. */
+/**
+ * The block's name as its row shows it: the description, else the activity. The legacy
+ * "Start activity" placeholder is no description, as on iPhone (`displayTimerDescription`).
+ */
 export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "description">) {
-  return entry.description?.trim() || entry.categoryName || "No activity";
+  const description = entry.description?.trim();
+  return (description && description !== "Start activity" ? description : null) || entry.categoryName || "No activity";
 }
 
-/** The fixed lead of a switch toast; it never truncates, only the activity name does. */
-export const SWITCHED_TOAST_LEAD = "Switched to";
+function compactDuration(seconds: number) {
+  return formatSharedDuration(seconds);
+}
 
-/** "Switched to Work": the full sentence, as announced and as the toast's accessible text. */
-export function switchedToastMessage(nextName: string) {
-  return `${SWITCHED_TOAST_LEAD} ${nextName}`;
+/**
+ * "Switched to Work" over a muted "42m logged to Client Work" (owner decision 15 Oct 2026: back to
+ * TestFlight 120's two lines, #400, on iPhone and web): what is recording now on the first line,
+ * where the replaced block's time went on the second. The duration is the shared `formatDuration`
+ * ("<1m", "42m", "2h 5m"), as on iPhone.
+ */
+export function switchedToastCopy(
+  nextName: string,
+  previous: Pick<ToastEntry, "categoryName" | "description" | "startedAt">,
+  nowMs: number
+) {
+  const startedMs = Date.parse(previous.startedAt);
+  // A block switched away from in the same second (or with a clock skew) still logged under a minute.
+  const seconds = Number.isFinite(startedMs) ? Math.max(1, (nowMs - startedMs) / 1000) : 1;
+  return {
+    message: `Switched to ${nextName}`,
+    detail: `${compactDuration(seconds)} logged to ${toastBlockName(previous)}`
+  };
 }
 
 export function alreadyRecordingToastMessage(active: Pick<ToastEntry, "categoryName" | "description">) {

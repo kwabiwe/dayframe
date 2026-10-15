@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { alreadyRecordingToastMessage, startMatchesRunning, SWITCHED_TOAST_LEAD, switchedToastMessage } from "./blocks-toast-copy";
+import { alreadyRecordingToastMessage, startMatchesRunning, switchedToastCopy } from "./blocks-toast-copy";
 
-const previous = { categoryId: "c", categoryName: "Client Work", description: null, tagNames: [] };
+const previous = { categoryId: "c", categoryName: "Client Work", description: null, startedAt: "2026-10-10T22:52:00.000Z", tagNames: [] };
 
 describe("web switch toast copy (UIA-209)", () => {
-  it("matches the iPhone wording: one line, no logged-time detail (owner option A, 14 Oct)", () => {
-    expect(switchedToastMessage("Admin")).toBe("Switched to Admin");
-    expect(switchedToastMessage("A very long activity name that will need truncating")).toBe("Switched to A very long activity name that will need truncating");
-    expect(SWITCHED_TOAST_LEAD).toBe("Switched to");
+  it("matches the iPhone's two lines (owner decision 15 Oct 2026, #400)", () => {
+    expect(switchedToastCopy("Admin", previous, Date.parse("2026-10-10T23:34:30.000Z")))
+      .toEqual({ message: "Switched to Admin", detail: "42m logged to Client Work" });
+    expect(switchedToastCopy("Admin", { ...previous, description: "Acme onboarding" }, Date.parse("2026-10-11T00:55:00.000Z")))
+      .toEqual({ message: "Switched to Admin", detail: "2h 3m logged to Acme onboarding" });
+    expect(switchedToastCopy("Admin", previous, Date.parse("2026-10-10T22:52:40.000Z")).detail).toBe("<1m logged to Client Work");
+    expect(switchedToastCopy("Admin", previous, Date.parse("2026-10-10T22:51:00.000Z")).detail).toBe("<1m logged to Client Work");
+    // The legacy "Start activity" placeholder names the activity instead, as on iPhone (Codex r1 on #430).
+    expect(switchedToastCopy("Admin", { ...previous, description: "Start activity" }, Date.parse("2026-10-10T23:34:30.000Z")).detail)
+      .toBe("42m logged to Client Work");
     expect(alreadyRecordingToastMessage({ categoryName: null, description: null })).toBe("Already recording No activity");
   });
 
