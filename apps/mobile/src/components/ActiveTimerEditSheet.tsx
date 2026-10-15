@@ -31,6 +31,7 @@ import {
   normalizeTagName,
   DAYFRAME_APP_ICONS,
   activityControlColor,
+  formatDuration,
   type PreviousEndOffer,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
@@ -263,6 +264,8 @@ export function ActiveTimerEditSheet({
   };
   // 5-minute rows unless the person asked for Every minute in this sheet (the prototype's stepPref).
   const [timeWheelStepPref, setTimeWheelStepPref] = useState<1 | 5>(5);
+  // The dial's measured height (with its hint row): the open wheel takes exactly that room.
+  const [dialAreaHeight, setDialAreaHeight] = useState<number | null>(null);
   // "Type time" (and VoiceOver's activate) types into the card's own field; otherwise it isn't editable.
   const [typingTarget, setTypingTarget] = useState<"start" | "end" | null>(null);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
@@ -2266,7 +2269,8 @@ export function ActiveTimerEditSheet({
     if (!wheel || change.presentationId !== wheel.presentationId) return;
     if (change.revision !== timeWheelRevisionRef.current) return;
     if (mutationGateRef.current !== null || !Number.isFinite(change.valueMs)) return;
-    if (change.valueMs === cardTimeMs(wheel.target) && cardTextValid(wheel.target)) return;
+    // No "same as the card" skip: the card's value is the last render's, and a spin back to it
+    // in the same batch must still win (Codex r2 on #428). Applying the same time again is harmless.
     applyCardTime(wheel.target, change.valueMs);
   }
 
@@ -2463,6 +2467,23 @@ export function ActiveTimerEditSheet({
     revision: timeWheelRevision,
     valueMs: timeWheelValueMs
   } : null;
+
+  // The panel replaces the dial: the wheel gets the dial's room less the panel's own chrome, never
+  // under TIME_WHEEL_MIN_HEIGHT (a wheel needs about three rows) nor over the prototype's 180.
+  const timeWheelShowsSummary = layoutDensity !== "condensed";
+  const timeWheelHeight = dialAreaHeight === null
+    ? TIME_WHEEL_HEIGHT_BY_DENSITY[layoutDensity]
+    : Math.round(Math.max(TIME_WHEEL_MIN_HEIGHT, Math.min(TIME_WHEEL_MAX_HEIGHT,
+      dialAreaHeight - TIME_WHEEL_PANEL_CHROME - (timeWheelShowsSummary ? TIME_WHEEL_SUMMARY_HEIGHT : 0))));
+  // With the dial away, the duration it showed: "1h 05m · 09:30–10:35" ("…–now" while running).
+  const timeWheelSummary = (() => {
+    if (!timeWheel || !timeWheelShowsSummary) return null;
+    const startMs = parsedStart.date?.getTime();
+    const endMs = hasStoppedTime ? parsedStop.date?.getTime() : dialNowMs;
+    if (startMs === undefined || endMs === undefined || endMs <= startMs) return null;
+    const range = `${formatTimeInput(new Date(startMs))}–${hasStoppedTime ? formatTimeInput(new Date(endMs)) : "now"}`;
+    return `${formatDuration((endMs - startMs) / 1000)} · ${range}`;
+  })();
 
   function handleTimeCardAccessibilityAction(target: "start" | "end", actionName: string) {
     if (actionName === "increment") stepCardTime(target, 1);
@@ -3133,9 +3154,14 @@ export function ActiveTimerEditSheet({
                       <DayframeTimeWheelView
                         model={timeWheelModel}
                         onTimeChange={(event) => handleTimeWheelChange(event.nativeEvent)}
-                        style={{ alignSelf: "stretch", height: TIME_WHEEL_HEIGHT_BY_DENSITY[layoutDensity] }}
+                        style={{ alignSelf: "stretch", height: timeWheelHeight }}
                         testID="time-entry-time-wheel-native"
                       />
+                      {timeWheelSummary ? (
+                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.timeWheelSummary, { color: theme.textSecondary }]} testID="time-entry-time-wheel-summary">
+                          {timeWheelSummary}
+                        </Text>
+                      ) : null}
                       <View style={sheetStyles.timeWheelFoot}>
                         <Pressable
                           accessibilityRole="button"
@@ -3150,7 +3176,7 @@ export function ActiveTimerEditSheet({
                           testID="time-entry-time-wheel-every-minute"
                         >
                           {timeWheelModel.minuteInterval === 1 ? <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
-                          <Text {...mobileTextProps("control")} style={[sheetStyles.timeWheelPillText, { color: timeWheelModel.minuteInterval === 1 ? theme.textPrimary : theme.textSecondary }]}>
+                          <Text {...mobileTextProps("control")} adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: timeWheelModel.minuteInterval === 1 ? theme.textPrimary : theme.textSecondary }]}>
                             Every minute
                           </Text>
                         </Pressable>
@@ -3162,7 +3188,7 @@ export function ActiveTimerEditSheet({
                           style={({ pressed }) => [sheetStyles.timeWheelPill, pressed && !busy ? styles.buttonPressed : null]}
                           testID="time-entry-time-wheel-type"
                         >
-                          <Text {...mobileTextProps("control")} style={[sheetStyles.timeWheelPillText, { color: theme.textSecondary }]}>Type time</Text>
+                          <Text {...mobileTextProps("control")} adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: theme.textSecondary }]}>Type time</Text>
                         </Pressable>
                         <Pressable
                           accessibilityLabel={`Done, sets ${timeWheel.target === "end" ? "End" : "Start"} to ${formatTimeInput(new Date(timeWheelModel.valueMs))}`}
@@ -3176,7 +3202,7 @@ export function ActiveTimerEditSheet({
                           ]}
                           testID="time-entry-time-wheel-done"
                         >
-                          <Text {...mobileTextProps("control")} style={[sheetStyles.timeWheelPillText, { color: theme.background }]}>Done</Text>
+                          <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: theme.background }]}>Done</Text>
                         </Pressable>
                       </View>
                     </Reanimated.View>
@@ -3211,22 +3237,25 @@ export function ActiveTimerEditSheet({
                   {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
-                {/* At condensed density (small phones, large text) the dial steps aside while the
-                    wheel is open: even condensed it would push the actions off the fixed sheet
-                    (Codex r1 on #428). Elsewhere it takes its condensed size. */}
-                {timeWheel && layoutDensity === "condensed" ? null : (
-                  <TimeEntryDurationDial
+                {/* A11b: while the wheel is open it takes the dial's place (the panel is sized to the
+                    dial's measured room), so the fixed sheet never grows and its actions stay on screen
+                    at every density (Codex r1/r2 on #428; the prototype's shrinking dial does not fit). */}
+                {timeWheel ? null : (
+                  <View
+                    onLayout={(event) => setDialAreaHeight(event.nativeEvent.layout.height)}
+                    pointerEvents="box-none"
+                    testID="time-entry-duration-dial-area"
+                  >
+                    <TimeEntryDurationDial
                     activityColor={dialActivityColor}
                     disabled={busy}
                     endMs={parsedStop.date?.getTime() ?? draftEndMs}
                     lastStoppedAt={lastStoppedAt}
-                    // A11b: the dial shrinks while the wheel is open, so card, wheel and dial stay in view.
-                    layoutDensity={timeWheel ? "condensed" : layoutDensity}
+                    layoutDensity={layoutDensity}
                     mode={isRunningMode ? "running" : "stopped"}
                     nowMs={dialNowMs}
                     onChange={applyDialInterval}
-                    // The dial moves the open wheel rather than closing it (the wheel re-aims).
-                    onInteractionStart={() => dismissTransientEditingSurfaces({ keepTimeWheel: true })}
+                    onInteractionStart={dismissTransientEditingSurfaces}
                     presentationId={presentation.id}
                     reduceMotion={reduceMotion}
                     revision={draftRevision}
@@ -3235,6 +3264,7 @@ export function ActiveTimerEditSheet({
                     styles={styles}
                     theme={theme}
                   />
+                  </View>
                 )}
 
                 {showDeleteButton || canStop || canStartAgain ? (
@@ -3581,8 +3611,13 @@ const TIME_CARD_ACCESSIBILITY_ACTIONS = [
   { name: "typeTime", label: "Type time" },
   { name: "changeDate", label: "Change date" }
 ] as const;
-/** The inline wheel's height; the dial gives up its own height meanwhile (condensed). */
-const TIME_WHEEL_HEIGHT_BY_DENSITY = { regular: 180, compact: 160, condensed: 140 } as const;
+/** The inline wheel's height before the dial's room is measured (the first opening is after layout). */
+const TIME_WHEEL_HEIGHT_BY_DENSITY = { regular: 180, compact: 140, condensed: 100 } as const;
+const TIME_WHEEL_MIN_HEIGHT = 100;
+const TIME_WHEEL_MAX_HEIGHT = 180;
+/** The panel around the wheel: its top margin and padding, the gap and the 44-point foot. */
+const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;
+const TIME_WHEEL_SUMMARY_HEIGHT = 20;
 
 /** How many activity chips fit above the dial before the bottom actions would leave the screen. */
 const ACTIVITY_CHIP_LIMIT_BY_DENSITY = { regular: 7, compact: 5, condensed: 3 } as const;
@@ -3616,10 +3651,12 @@ const sheetStyles = StyleSheet.create({
   timeCardStepBack: { opacity: 0.6 },
   timeWheelPanel: { borderRadius: 18, gap: 4, marginTop: 12, padding: 8 },
   timeWheelNotch: { borderRadius: 3, height: 14, marginLeft: -7, position: "absolute", top: -7, transform: [{ rotate: "45deg" }], width: 14 },
-  timeWheelFoot: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  timeWheelPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 12 },
+  // One row at every text size (the panel's height is budgeted): the labels shrink rather than wrap.
+  timeWheelFoot: { alignItems: "center", flexDirection: "row", gap: 6 },
+  timeWheelPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", flexShrink: 1, gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 12 },
   timeWheelPillText: { fontSize: 13, fontWeight: "700" },
   timeWheelDone: { marginLeft: "auto", minWidth: 72 },
+  timeWheelSummary: { fontSize: 12.5, fontVariant: ["tabular-nums"], lineHeight: 16, textAlign: "center" },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {

@@ -45,9 +45,13 @@ describe("entry sheet time wheel (A11b)", () => {
     expect(swift).toContain("picker.accessibilityElementsHidden = true");
   });
 
-  it("keeps the dial in view and in step while the wheel is open", () => {
-    expect(sheet).toContain('layoutDensity={timeWheel ? "condensed" : layoutDensity}');
-    expect(sheet).toContain("onInteractionStart={() => dismissTransientEditingSurfaces({ keepTimeWheel: true })}");
+  it("takes the dial's measured room while open, so the fixed sheet never grows (Codex r1/r2 on #428)", () => {
+    expect(sheet).toMatch(/\{timeWheel \? null : \(\s*<View\s*onLayout=\{\(event\) => setDialAreaHeight\(event\.nativeEvent\.layout\.height\)\}/);
+    expect(sheet).toContain("dialAreaHeight - TIME_WHEEL_PANEL_CHROME - (timeWheelShowsSummary ? TIME_WHEEL_SUMMARY_HEIGHT : 0)");
+    expect(sheet).toContain("const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;");
+    expect(sheet).toContain('testID="time-entry-time-wheel-summary"');
+    // The foot stays one 44-point row: labels shrink rather than wrap.
+    expect(sheet).toMatch(/timeWheelFoot: \{ alignItems: "center", flexDirection: "row", gap: 6 \}/);
     expect(sheet).toContain('entering={localPresenceEntering(reduceMotion, "rise")}');
     expect(sheet).toContain("exiting={localPresenceExiting(reduceMotion)}");
     expect(sheet).toContain("onStartShouldSetResponder={() => true}");
@@ -56,14 +60,13 @@ describe("entry sheet time wheel (A11b)", () => {
   it("keeps the wheel honest around typing, saving, Escape and the previous-end chip (Codex r1 on #428)", () => {
     // A half-typed card takes the time the wheel shows before the wheel opens.
     expect(sheet).toContain("if (!cardTextValid(target)) applyCardTime(target, cardTimeMs(target));");
-    expect(sheet).toContain("if (change.valueMs === cardTimeMs(wheel.target) && cardTextValid(wheel.target)) return;");
+    // No "same as the card" skip: a spin back in the same batch must still win (Codex r2 on #428).
+    expect(sheet).not.toContain("change.valueMs === cardTimeMs(");
     // A save, stop or delete closes the wheel and makes its later spins stale.
     expect(sheet).toMatch(/mutationGateRef\.current = \{ presentationId: presentation\.id, token \};\s*\/\/[^\n]*\n\s*setTimeWheel\(null\);\s*bumpTimeWheelRevision\(\);/);
     // Escape closes only the wheel.
     expect(sheet).toMatch(/function handleUserRequestClose\(\) \{[\s\S]*?if \(timeWheelRef\.current\) \{\s*closeTimeWheel\(\{ haptic: true \}\);\s*return;/);
     // The chip re-aims an open wheel instead of closing it.
     expect(sheet).toMatch(/function togglePreviousEnd[\s\S]*?dismissTransientEditingSurfaces\(\{ keepTimeWheel: true \}\);\s*applyDialInterval/);
-    // At condensed density the dial steps aside while the wheel is open.
-    expect(sheet).toContain('{timeWheel && layoutDensity === "condensed" ? null : (');
   });
 });
