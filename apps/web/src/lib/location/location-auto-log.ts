@@ -66,8 +66,9 @@ function iso(value: Date | string | null) {
  * never mistaken for one that vanished; Codex r1 on #435), with lineage still retained. Each stay is
  * superseded and detached from its event (so a returning stay is never mistaken for a decision), the
  * event is ignored with the superseded marker, and the blocks are returned for emission to move with
- * their replacement visit or for the caller to remove. Stays are locked first, then the blocks in
- * entry-id order, the order every multi-block lock uses; a block edited meanwhile is left alone.
+ * their replacement visit or for the caller to remove. Only the stays are locked here: emission takes
+ * every block lock of the replay in one entry-id-ordered step (`lockAutoLoggedBlocks`), so no other
+ * multi-block lock can interleave with it (Codex r2 on #435).
  */
 export async function retireAutoLoggedMissingStays(
   client: pg.PoolClient,
@@ -102,11 +103,9 @@ export async function retireAutoLoggedMissingStays(
      from time_entries
      where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[])
        and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
-     order by id
-     for update`,
+     order by id`,
     [session.workspaceId, session.userId, stays.map((stay) => stay.eventId)]
   )).rows;
-  // A block edited between the two reads keeps its stay a decision.
   const eventsWithBlocks = new Set(entries.map((entry) => entry.eventId));
   const rows = stays.filter((stay) => eventsWithBlocks.has(stay.eventId));
   if (rows.length === 0) return [];
@@ -130,13 +129,40 @@ export async function retireAutoLoggedMissingStays(
 }
 
 /**
+ * Every block this replay may move or remove, locked in one statement in entry-id order (the order
+ * grouped edits and batch deletes use): the orphans retirement found and the blocks of stays already
+ * auto-logged in the window. Returns the IDs still unedited under the lock; a block edited meanwhile
+ * is left alone (and, being tracked time, keeps its replacement visit in Review).
+ */
+export async function lockAutoLoggedBlocks(
+  client: pg.PoolClient, session: RequestSession, entryIds: string[], eventIds: string[]
+) {
+  if (entryIds.length === 0 && eventIds.length === 0) return new Set<string>();
+  const locked = await client.query<{ id: string }>(
+    `select id from time_entries
+     where workspace_id = $1 and user_id = $2 and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
+       and (id = any($3::uuid[]) or created_from_event_id = any($4::uuid[]))
+     order by id
+     for update`,
+    [session.workspaceId, session.userId, entryIds, eventIds]);
+  return new Set(locked.rows.map((row) => row.id));
+}
+
+/**
  * Removes the orphaned blocks emission did not move to a replacement visit (owner decision 15 Oct
- * 2026: a visit replay no longer finds takes its unedited block with it). Edited blocks are kept.
+ * 2026: a visit replay no longer finds takes its unedited block with it). Kept: edited blocks, blocks
+ * not locked unedited this replay, and any block overlapping a stay replay still finds but did not
+ * emit (before the cutover, not yet finalised): that visit has not vanished (Codex r2 on #435).
  */
 export async function removeUnusedAutoLogOrphans(
-  client: pg.PoolClient, session: RequestSession, orphans: AutoLogOrphan[], used: ReadonlySet<string>
+  client: pg.PoolClient, session: RequestSession, orphans: AutoLogOrphan[], used: ReadonlySet<string>,
+  locked: ReadonlySet<string>, unemittedStays: ReadonlyArray<{ startedAt: string; stoppedAt?: string | null }>
 ) {
-  const unused = orphans.map((orphan) => orphan.entryId).filter((id) => !used.has(id));
+  const overlapsUnemitted = (orphan: AutoLogOrphan) => unemittedStays.some((stay) =>
+    Date.parse(stay.startedAt) < (orphan.stoppedAt ? Date.parse(orphan.stoppedAt) : Number.POSITIVE_INFINITY) &&
+    (stay.stoppedAt ? Date.parse(stay.stoppedAt) : Number.POSITIVE_INFINITY) > Date.parse(orphan.startedAt));
+  const unused = orphans.filter((orphan) => locked.has(orphan.entryId) && !used.has(orphan.entryId) && !overlapsUnemitted(orphan))
+    .map((orphan) => orphan.entryId);
   if (unused.length === 0) return 0;
   const removed = await client.query(
     `delete from time_entries

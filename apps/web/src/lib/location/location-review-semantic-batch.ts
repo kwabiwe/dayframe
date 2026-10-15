@@ -11,7 +11,7 @@ import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import {
-  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
+  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, lockAutoLoggedBlocks, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
 
 // Bounded row sets, including reads. All work uses the caller's owner-locked transaction.
@@ -134,7 +134,11 @@ export async function emitReviewSemanticSegments(
   changes: SemanticChangeCounter = { count: 0 },
   // Log automatically: blocks of visits replay retired, which a replacement visit takes over, and the
   // window in which replay keeps auto-logged visits in step (none: their blocks never move).
-  autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation } = { orphans: [], used: new Set() }
+  autoLog: {
+    orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation;
+    /** Filled here: the blocks this replay locked unedited, the only ones it may move or remove. */
+    locked: Set<string>;
+  } = { orphans: [], used: new Set(), locked: new Set() }
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
@@ -181,7 +185,20 @@ export async function emitReviewSemanticSegments(
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
     ? await ensureCommuteCategoryId(client, session, changes) : null;
-  const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, autoLog.orphans);
+  // Every block this replay may touch, locked once in entry-id order before any of them changes
+  // (Codex r2 on #435): the retired visits' blocks and those of stays already auto-logged in the window.
+  if (autoLog.reconciliation) {
+    const since = Date.parse(autoLog.reconciliation.sinceAt);
+    const inWindowEvents = eligible.flatMap(({ segment, clientEventId }) => {
+      const id = segment.kind === "stay" && Date.parse(segment.startedAt) >= since ? existing.get(clientEventId)?.id : undefined;
+      return id ? [id] : [];
+    });
+    for (const id of await lockAutoLoggedBlocks(client, session, autoLog.orphans.map((orphan) => orphan.entryId), inWindowEvents)) {
+      autoLog.locked.add(id);
+    }
+  }
+  const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
+  const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
     // Time away suggests no category: the user chooses what it was.
@@ -328,24 +345,15 @@ export async function emitReviewSemanticSegments(
       const bounds = JSON.stringify(batch.map((row) => ({
         event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at
       })));
-      // Blocks are locked in entry-id order, as every multi-block lock, before they change.
-      const stale = await client.query<{ id: string }>(
-        `select te.id from time_entries te
-         join jsonb_to_recordset($3::jsonb) as r(event_id uuid, occurred_at timestamptz, stopped_at timestamptz)
-           on te.created_from_event_id = r.event_id
-         where te.workspace_id = $1 and te.user_id = $2
-           and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
-           and (te.started_at, te.stopped_at) is distinct from (r.occurred_at, r.stopped_at)
-         order by te.id
-         for update of te`,
-        [session.workspaceId, session.userId, bounds]);
-      if (stale.rows.length === 0) continue;
+      // Only blocks this replay locked above (entry-id order, once).
       const moved = await client.query(
         `update time_entries te set started_at = r.occurred_at, stopped_at = r.stopped_at, updated_at = now()
          from jsonb_to_recordset($3::jsonb) as r(event_id uuid, occurred_at timestamptz, stopped_at timestamptz)
          where te.workspace_id = $1 and te.user_id = $2 and te.id = any($4::uuid[])
-           and te.created_from_event_id = r.event_id and te.user_edited_at is null`,
-        [session.workspaceId, session.userId, bounds, stale.rows.map((row) => row.id)]);
+           and te.created_from_event_id = r.event_id
+           and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
+           and (te.started_at, te.stopped_at) is distinct from (r.occurred_at, r.stopped_at)`,
+        [session.workspaceId, session.userId, bounds, [...autoLog.locked]]);
       changes.count += moved.rowCount ?? 0;
     }
   }
@@ -426,17 +434,12 @@ async function chooseAutoLoggedVisits(
       `select r.client_event_id as "clientEventId"
        from jsonb_to_recordset($3::jsonb) as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz)
        where exists (
-         -- Bounded to blocks that started within a week before the visit (Codex r1 on #435: an
-         -- unbounded started_at range would scan all history per visit); running timers below.
+         -- Any block not ignored, however long (a timer left running for days and then stopped) or still
+         -- running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started per visit.
          select 1 from time_entries te
-         where te.workspace_id = $1 and te.user_id = $2
-           and te.started_at < r.stopped_at and te.started_at > r.started_at - interval '7 days'
-           and coalesce(te.stopped_at, now()) > r.started_at
+         where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
+           and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
            and not (te.id = any($4::uuid[])))
-         or exists (
-         select 1 from time_entries te
-         where te.workspace_id = $1 and te.user_id = $2 and te.stopped_at is null
-           and te.started_at < r.stopped_at and not (te.id = any($4::uuid[])))
          -- Offered in Review before under another segment ID (its stay was replaced): stays a card
          -- whatever became of that card (Codex r1 on #435).
          or exists (
@@ -462,11 +465,11 @@ async function writeAutoLoggedBlock(
   client: pg.PoolClient, session: RequestSession,
   row: { event_id: string; place_id: string | null; category_id: string | null; description: string | null;
     occurred_at: string; stopped_at?: string | null; confidence: string },
-  autoLog: { orphans: AutoLogOrphan[]; used: Set<string> }
+  autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; locked: ReadonlySet<string> }
 ) {
   const start = Date.parse(row.occurred_at);
   const stop = row.stopped_at ? Date.parse(row.stopped_at) : Number.POSITIVE_INFINITY;
-  const orphan = autoLog.orphans.find((candidate) => !autoLog.used.has(candidate.entryId) &&
+  const orphan = autoLog.orphans.find((candidate) => autoLog.locked.has(candidate.entryId) && !autoLog.used.has(candidate.entryId) &&
     candidate.placeId === row.place_id && Date.parse(candidate.startedAt) < stop &&
     (candidate.stoppedAt ? Date.parse(candidate.stoppedAt) : Number.POSITIVE_INFINITY) > start);
   if (orphan) {
