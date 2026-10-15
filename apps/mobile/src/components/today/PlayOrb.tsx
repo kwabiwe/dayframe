@@ -290,6 +290,14 @@ function OrbSecondsRing({
   startedAt: string;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // Released from a hold (the Stop was refused or rolled back): read the time in that same render, so the
+  // first frame after it shows the block's seconds, not the time before the hold (Codex r2 on #439).
+  const held = heldSeconds !== undefined;
+  const [wasHeld, setWasHeld] = useState(held);
+  if (held !== wasHeld) {
+    setWasHeld(held);
+    if (!held) setNowMs(Date.now());
+  }
   const foreground = useAppForeground();
   useDashboardClockTicks({
     foreground: foreground && heldSeconds === undefined,

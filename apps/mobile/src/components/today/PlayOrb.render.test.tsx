@@ -63,6 +63,7 @@ import { PLAY_ORB, bloomSpots, playOrbFrame } from "../../lib/playOrb";
 import { activeTimerElapsedSeconds } from "../../lib/timerPresentation";
 import { orbRingPath, orbRingProgress, PlayOrb } from "./PlayOrb";
 import { useLiveBlockElapsed } from "./liveBlockClock";
+import { useLayoutEffect } from "react";
 
 const theme = { ...DAYFRAME_THEME.dark, mode: "dark" } as never;
 const activities = ["work", "learn", "gym"].map((id) => ({ color: "blue", icon: null, id, name: id, pinned: true }));
@@ -246,8 +247,24 @@ describe("PlayOrb", () => {
       });
       expect(ring()).toBe(`0 ${circumference}`);
     }
-    // Rolled back: the flight clears and the ring shows the block's seconds again (now 45:03).
-    act(() => orb.tree.update(<PlayOrb {...orb.props} {...base} runningHeldSeconds={undefined} />));
+    // Rolled back: the flight clears and the ring shows the block's seconds again (now 45:03), in the very
+    // commit that releases it, before any effect runs (Codex r2 on #439).
+    const commits: string[] = [];
+    function Spy() {
+      useLayoutEffect(() => {
+        commits.push(orb.tree.root.findByProps({ testID: "play-orb-ring" }).props.strokeDasharray as string);
+      });
+      return null;
+    }
+    act(() =>
+      orb.tree.update(
+        <>
+          <PlayOrb {...orb.props} {...base} runningHeldSeconds={undefined} />
+          <Spy />
+        </>
+      )
+    );
+    expect(commits[0]).toBe(`${(3 / 60) * circumference} ${circumference}`);
     expect(ring()).toBe(`${(3 / 60) * circumference} ${circumference}`);
     act(() => orb.tree.unmount());
     vi.useRealTimers();
