@@ -7,6 +7,7 @@ type ToastEntry = {
   categoryId: string | null;
   categoryName: string | null;
   description: string | null;
+  startedAt: string;
   tagNames: readonly string[];
 };
 
