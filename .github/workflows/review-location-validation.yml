@@ -189,11 +189,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The cache key is fixed here, before pod install: pod install rewrites three path-generated
+      # checksums in Podfile.lock, so a key hashed after it would never match the one restored before it.
       - id: xcode
-        name: Xcode version
+        name: Xcode version and cache key
+        env:
+          DEPS_HASH: ${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}
         run: |
           xcodebuild -version
-          echo "version=$(xcodebuild -version | tr -s ' \n' '-' | tr -cd 'A-Za-z0-9.-')" >> "$GITHUB_OUTPUT"
+          version=$(xcodebuild -version | tr -s ' \n' '-' | tr -cd 'A-Za-z0-9.-')
+          echo "key=$version-$DEPS_HASH" >> "$GITHUB_OUTPUT"
       - name: Validate both native shared storage identities
         run: |
           npm run check:ios-config
@@ -208,15 +213,15 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: apps/mobile/ios/Pods
-          key: ios-pods-v1-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}
+          key: ios-pods-v2-${{ steps.xcode.outputs.key }}
       - id: ccache-cache
         name: Restore compiler cache (pull requests)
         if: github.event_name == 'pull_request'
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
-          restore-keys: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-
+          key: ios-ccache-v3-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
+          restore-keys: ios-ccache-v3-${{ steps.xcode.outputs.key }}-
       - name: Install ccache
         env:
           MATCHED: ${{ steps.ccache-cache.outputs.cache-matched-key }}
@@ -280,13 +285,13 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
+          key: ios-ccache-v3-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
       - name: Save CocoaPods
         if: success() && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: apps/mobile/ios/Pods
-          key: ios-pods-v1-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}
+          key: ios-pods-v2-${{ steps.xcode.outputs.key }}
 
   validation-gate:
     name: Validation gate
