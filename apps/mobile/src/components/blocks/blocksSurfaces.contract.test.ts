@@ -107,9 +107,7 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     const start = between(dashboard, "function startFromToday(", "function showTodayNotice(");
     expect(start).toContain("startMatchesRunning(running, { categoryId, description, tagNames })");
     expect(start).toContain("alreadyRecordingToastMessage(running)");
-    expect(start).toContain("switchedToastCopy(nextName)");
-    // One line naming the new block only: nothing about the replaced block or its duration (owner, 14 Oct).
-    expect(start).not.toMatch(/switchedToastCopy\(nextName,/);
+    expect(start).toContain("switchedToastCopy(nextName, running, Date.now())");
     // The notice follows the accepted start only.
     expect(start.indexOf("if (!accepted) return;")).toBeLessThan(start.indexOf("switchedToastCopy("));
     const stop = between(dashboard, "function stopFromToday()", "function tapPlayOrb()");
@@ -122,11 +120,9 @@ describe("Blocks confirm sheet and toast call sites (UIA-003/004/005)", () => {
     expect(signedOut).toContain("noticeSessionGeneration.current += 1;");
     expect(signedOut).toContain("clearTodayNotice();");
     expect(dashboard).toContain('todayNotice.notice && authState === "authenticated" ? (');
-    // The switch's lead and name (only the name truncates) and its one VoiceOver sentence reach the
-    // toast, and a notice held back by the delete Undo toast is still announced as that sentence.
-    expect(dashboard).toContain("lead={todayNotice.notice.lead}");
-    expect(dashboard).toContain("name={todayNotice.notice.name}");
-    expect(dashboard).not.toContain("detail={todayNotice.notice.detail}");
+    // The switch's second line and its one VoiceOver sentence reach the toast, and a notice held
+    // back by the delete Undo toast is still announced as that sentence.
+    expect(dashboard).toContain("detail={todayNotice.notice.detail}");
     expect(dashboard).toContain("accessibilityLabel={todayNotice.notice.accessibilityLabel}");
     expect(dashboard).toContain("AccessibilityInfo.announceForAccessibility(toastAccessibilityText(copy));");
     // The delete Undo toast always holds the place.
