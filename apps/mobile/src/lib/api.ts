@@ -1891,6 +1891,8 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
       defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription?.trim() || null,
       autoStart: false,
       loggingEnabled: input.loggingEnabled !== false,
+      // Log automatically (owner decision 14 Oct 2026): only with logging on (Codex r1 on #434).
+      autoLog: input.loggingEnabled !== false && input.autoLog === true,
       ...(input.learnedPlaceId ? { learnedPlaceId: input.learnedPlaceId } : {}),
       // Added straight into the Home or Work slot, renaming the old holder if asked.
       ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})
