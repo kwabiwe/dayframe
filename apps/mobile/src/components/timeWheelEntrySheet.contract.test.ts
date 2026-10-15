@@ -20,13 +20,17 @@ describe("entry sheet time wheel (A11b)", () => {
   });
 
   it("ignores a spin from an older presentation or revision, so it can't undo an outside change", () => {
-    expect(sheet).toMatch(/function handleTimeWheelChange[\s\S]*?change\.presentationId !== timeWheel\.presentationId\) return;[\s\S]*?change\.revision !== timeWheelRevisionRef\.current\) return;/);
-    // Outside changes bump the revision: the dial (and the previous-end chip through it) and the date sheet.
-    expect(sheet).toMatch(/function applyDialInterval[\s\S]*?setTimeWheelRevision\(\(current\) => current \+ 1\);[\s\S]*?function applyCardTime/);
-    expect((sheet.match(/setTimeWheelRevision\(\(current\) => current \+ 1\);/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    // Ownership and revision live in refs changed in the same tick as the action (Codex r1 on #428).
+    expect(sheet).toMatch(/const setTimeWheel = \(next[\s\S]*?timeWheelRef\.current = next;\s*setTimeWheelState\(next\);/);
+    expect(sheet).toMatch(/const bumpTimeWheelRevision = \(\) => \{\s*timeWheelRevisionRef\.current \+= 1;/);
+    expect(sheet).not.toContain("timeWheelRevisionRef.current = timeWheelRevision;");
+    expect(sheet).toMatch(/function handleTimeWheelChange[\s\S]*?const wheel = timeWheelRef\.current;[\s\S]*?change\.presentationId !== wheel\.presentationId\) return;[\s\S]*?change\.revision !== timeWheelRevisionRef\.current\) return;[\s\S]*?mutationGateRef\.current !== null/);
+    // Outside changes bump the revision: the dial (and the previous-end chip through it), the date
+    // sheet, a VoiceOver step, Every minute's rounding, a retarget and a mutation.
+    expect(sheet).toMatch(/function applyDialInterval[\s\S]*?bumpTimeWheelRevision\(\);[\s\S]*?function applyCardTime/);
+    expect((sheet.match(/bumpTimeWheelRevision\(\);/g) ?? []).length).toBeGreaterThanOrEqual(7);
     // The wheel's own spins don't: applyCardTime leaves the revision alone.
-    expect(sheet).toMatch(/function applyCardTime[\s\S]*?setValidationError\(null\);\n  \}/);
-    expect(sheet.match(/function applyCardTime[\s\S]*?\n  \}\n/)?.[0]).not.toContain("setTimeWheelRevision");
+    expect(sheet.match(/function applyCardTime[\s\S]*?\n  \}\n/)?.[0]).not.toContain("bumpTimeWheelRevision");
     // Native side: only a new presentation or revision moves the columns.
     expect(swift).toContain("if isNewPresentation || previous?.revision != next.revision {");
     expect(swift).not.toContain("|| picker.date != value");
@@ -47,5 +51,19 @@ describe("entry sheet time wheel (A11b)", () => {
     expect(sheet).toContain('entering={localPresenceEntering(reduceMotion, "rise")}');
     expect(sheet).toContain("exiting={localPresenceExiting(reduceMotion)}");
     expect(sheet).toContain("onStartShouldSetResponder={() => true}");
+  });
+
+  it("keeps the wheel honest around typing, saving, Escape and the previous-end chip (Codex r1 on #428)", () => {
+    // A half-typed card takes the time the wheel shows before the wheel opens.
+    expect(sheet).toContain("if (!cardTextValid(target)) applyCardTime(target, cardTimeMs(target));");
+    expect(sheet).toContain("if (change.valueMs === cardTimeMs(wheel.target) && cardTextValid(wheel.target)) return;");
+    // A save, stop or delete closes the wheel and makes its later spins stale.
+    expect(sheet).toMatch(/mutationGateRef\.current = \{ presentationId: presentation\.id, token \};\s*\/\/[^\n]*\n\s*setTimeWheel\(null\);\s*bumpTimeWheelRevision\(\);/);
+    // Escape closes only the wheel.
+    expect(sheet).toMatch(/function handleUserRequestClose\(\) \{[\s\S]*?if \(timeWheelRef\.current\) \{\s*closeTimeWheel\(\{ haptic: true \}\);\s*return;/);
+    // The chip re-aims an open wheel instead of closing it.
+    expect(sheet).toMatch(/function togglePreviousEnd[\s\S]*?dismissTransientEditingSurfaces\(\{ keepTimeWheel: true \}\);\s*applyDialInterval/);
+    // At condensed density the dial steps aside while the wheel is open.
+    expect(sheet).toContain('{timeWheel && layoutDensity === "condensed" ? null : (');
   });
 });

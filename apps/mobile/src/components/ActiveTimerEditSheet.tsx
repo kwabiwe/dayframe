@@ -246,11 +246,21 @@ export function ActiveTimerEditSheet({
   // A11b time wheel (owner decisions 12 Oct 2026): one inline native wheel under the time cards,
   // aimed at one card. It writes the draft live (React owns it); `timeWheelRevision` counts outside
   // changes (the dial, a date, the previous-end chip) so the wheel re-aims only for those.
-  const [timeWheel, setTimeWheel] = useState<{ presentationId: number; target: "start" | "end" } | null>(null);
+  const [timeWheel, setTimeWheelState] = useState<{ presentationId: number; target: "start" | "end" } | null>(null);
+  // The refs change in the same tick as the action (not at the next render), so a spin queued
+  // behind a close, a retarget or an outside change is already stale when it arrives (Codex r1 on #428).
+  const timeWheelRef = useRef<{ presentationId: number; target: "start" | "end" } | null>(null);
+  const setTimeWheel = (next: { presentationId: number; target: "start" | "end" } | null) => {
+    timeWheelRef.current = next;
+    setTimeWheelState(next);
+  };
   const timeWheelPresentationRef = useRef(0);
   const [timeWheelRevision, setTimeWheelRevision] = useState(0);
   const timeWheelRevisionRef = useRef(0);
-  timeWheelRevisionRef.current = timeWheelRevision;
+  const bumpTimeWheelRevision = () => {
+    timeWheelRevisionRef.current += 1;
+    setTimeWheelRevision(timeWheelRevisionRef.current);
+  };
   // 5-minute rows unless the person asked for Every minute in this sheet (the prototype's stepPref).
   const [timeWheelStepPref, setTimeWheelStepPref] = useState<1 | 5>(5);
   // "Type time" (and VoiceOver's activate) types into the card's own field; otherwise it isn't editable.
@@ -1683,6 +1693,9 @@ export function ActiveTimerEditSheet({
     operationTokenRef.current += 1;
     const token = operationTokenRef.current;
     mutationGateRef.current = { presentationId: presentation.id, token };
+    // The draft is captured: the wheel closes and its later spins are stale (Codex r1 on #428).
+    setTimeWheel(null);
+    bumpTimeWheelRevision();
     dispatchMutationTelemetry({
       type: "mutation_started",
       operationToken: token
@@ -1774,6 +1787,11 @@ export function ActiveTimerEditSheet({
   }
 
   function handleUserRequestClose() {
+    // Escape with the wheel open sets the time and closes only the wheel (A11b).
+    if (timeWheelRef.current) {
+      closeTimeWheel({ haptic: true });
+      return;
+    }
     if (datePickerOpen) {
       setDatePickerOpen(false);
       dispatchSheetEvent({
@@ -2176,7 +2194,7 @@ export function ActiveTimerEditSheet({
     }
     if (isRunningMode) setStartTimeEdited(true);
     setDraftRevision((current) => current + 1);
-    setTimeWheelRevision((current) => current + 1);
+    bumpTimeWheelRevision();
     setValidationError(null);
   }
 
@@ -2198,6 +2216,7 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
+  const cardTextValid = (target: "start" | "end") => (target === "end" ? parsedStop.date : parsedStart.date) !== null;
   const cardTimeMs = (target: "start" | "end") => target === "end"
     ? parsedStop.date?.getTime() ?? draftEndMs
     : parsedStart.date?.getTime() ?? draftStartMs;
@@ -2214,14 +2233,18 @@ export function ActiveTimerEditSheet({
       typeCardTime(target);
       return;
     }
-    if (timeWheel?.target === target) {
+    const open = timeWheelRef.current;
+    if (open?.target === target) {
       closeTimeWheel({ haptic: true });
       return;
     }
-    if (timeWheel) {
+    // A card whose text isn't a valid time (a half-typed "09:") takes the time the wheel will show,
+    // so the wheel's selection is always the draft (Codex r1 on #428).
+    if (!cardTextValid(target)) applyCardTime(target, cardTimeMs(target));
+    if (open) {
       // The other card: the same wheel spins to its time.
-      setTimeWheel({ presentationId: timeWheel.presentationId, target });
-      setTimeWheelRevision((current) => current + 1);
+      setTimeWheel({ presentationId: open.presentationId, target });
+      bumpTimeWheelRevision();
       return;
     }
     dismissTransientEditingSurfaces({ keepTimeWheel: true });
@@ -2230,23 +2253,27 @@ export function ActiveTimerEditSheet({
   }
 
   function closeTimeWheel({ haptic }: { haptic: boolean }) {
-    if (!timeWheel) return;
+    if (!timeWheelRef.current) return;
     setTimeWheel(null);
     if (haptic) playHaptic("timeSet");
   }
 
   function handleTimeWheelChange(change: DayframeTimeWheelChange) {
     // A spin reported before an outside change re-aimed the wheel, or from an earlier opening or
-    // card, would undo that change: only the current presentation and revision count.
-    if (!timeWheel || change.presentationId !== timeWheel.presentationId) return;
+    // card, would undo that change: only the current presentation and revision count. Nothing
+    // changes the draft once a save, stop or delete has captured it.
+    const wheel = timeWheelRef.current;
+    if (!wheel || change.presentationId !== wheel.presentationId) return;
     if (change.revision !== timeWheelRevisionRef.current) return;
-    if (!Number.isFinite(change.valueMs) || change.valueMs === cardTimeMs(timeWheel.target)) return;
-    applyCardTime(timeWheel.target, change.valueMs);
+    if (mutationGateRef.current !== null || !Number.isFinite(change.valueMs)) return;
+    if (change.valueMs === cardTimeMs(wheel.target) && cardTextValid(wheel.target)) return;
+    applyCardTime(wheel.target, change.valueMs);
   }
 
   function toggleEveryMinute() {
-    if (!timeWheel || busy) return;
-    const target = timeWheel.target;
+    const wheel = timeWheelRef.current;
+    if (!wheel || busy) return;
+    const target = wheel.target;
     const valueMs = cardTimeMs(target);
     playHaptic("tick");
     if (timeWheelMinuteInterval(valueMs, timeWheelStepPref === 1) === 5) {
@@ -2263,7 +2290,7 @@ export function ActiveTimerEditSheet({
     const roundedMs = valueMs - at.getSeconds() * 1000 - at.getMilliseconds() + (rounded - minute) * 60_000;
     const maximumMs = cardMaximumMs(target);
     applyCardTime(target, maximumMs !== null && roundedMs > maximumMs ? roundedMs - 5 * 60_000 : roundedMs);
-    setTimeWheelRevision((current) => current + 1);
+    bumpTimeWheelRevision();
   }
 
   function typeCardTime(target: "start" | "end") {
@@ -2278,7 +2305,7 @@ export function ActiveTimerEditSheet({
     const next = timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) });
     if (next === null) return;
     applyCardTime(target, next);
-    setTimeWheelRevision((current) => current + 1);
+    bumpTimeWheelRevision();
   }
 
   function handleFormBackgroundPress() {
@@ -2307,7 +2334,8 @@ export function ActiveTimerEditSheet({
       setValidationError(PREVIOUS_END_CHANGED_MESSAGE);
       return;
     }
-    dismissTransientEditingSurfaces();
+    // An open wheel stays and re-aims, as for the dial.
+    dismissTransientEditingSurfaces({ keepTimeWheel: true });
     applyDialInterval({ startMs, endMs: Date.now() });
   }
 
@@ -2387,7 +2415,7 @@ export function ActiveTimerEditSheet({
       const parsedDate = new Date(merged.timestampMs);
       setDraftEndMs(merged.timestampMs);
       setDraftRevision((current) => current + 1);
-      setTimeWheelRevision((current) => current + 1);
+      bumpTimeWheelRevision();
       setStoppedDateText(formatDateInput(parsedDate));
       setValidationError(null);
       return true;
@@ -2405,7 +2433,7 @@ export function ActiveTimerEditSheet({
     const parsedDate = new Date(merged.timestampMs);
     setDraftStartMs(merged.timestampMs);
     setDraftRevision((current) => current + 1);
-    setTimeWheelRevision((current) => current + 1);
+    bumpTimeWheelRevision();
     setDateText(formatDateInput(parsedDate));
     if (isRunningMode) setStartTimeEdited(true);
     setValidationError(null);
@@ -3183,26 +3211,31 @@ export function ActiveTimerEditSheet({
                   {validationError ? <Text {...mobileTextProps("body")} style={styles.errorText}>{validationError}</Text> : null}
                 </View>
 
-                <TimeEntryDurationDial
-                  activityColor={dialActivityColor}
-                  disabled={busy}
-                  endMs={parsedStop.date?.getTime() ?? draftEndMs}
-                  lastStoppedAt={lastStoppedAt}
-                  // A11b: the dial shrinks while the wheel is open, so card, wheel and dial stay in view.
-                  layoutDensity={timeWheel ? "condensed" : layoutDensity}
-                  mode={isRunningMode ? "running" : "stopped"}
-                  nowMs={dialNowMs}
-                  onChange={applyDialInterval}
-                  // The dial moves the open wheel rather than closing it (the wheel re-aims).
-                  onInteractionStart={() => dismissTransientEditingSurfaces({ keepTimeWheel: true })}
-                  presentationId={presentation.id}
-                  reduceMotion={reduceMotion}
-                  revision={draftRevision}
-                  sheetDismissGestureRef={sheetDismissGestureRef}
-                  startMs={parsedStart.date?.getTime() ?? draftStartMs}
-                  styles={styles}
-                  theme={theme}
-                />
+                {/* At condensed density (small phones, large text) the dial steps aside while the
+                    wheel is open: even condensed it would push the actions off the fixed sheet
+                    (Codex r1 on #428). Elsewhere it takes its condensed size. */}
+                {timeWheel && layoutDensity === "condensed" ? null : (
+                  <TimeEntryDurationDial
+                    activityColor={dialActivityColor}
+                    disabled={busy}
+                    endMs={parsedStop.date?.getTime() ?? draftEndMs}
+                    lastStoppedAt={lastStoppedAt}
+                    // A11b: the dial shrinks while the wheel is open, so card, wheel and dial stay in view.
+                    layoutDensity={timeWheel ? "condensed" : layoutDensity}
+                    mode={isRunningMode ? "running" : "stopped"}
+                    nowMs={dialNowMs}
+                    onChange={applyDialInterval}
+                    // The dial moves the open wheel rather than closing it (the wheel re-aims).
+                    onInteractionStart={() => dismissTransientEditingSurfaces({ keepTimeWheel: true })}
+                    presentationId={presentation.id}
+                    reduceMotion={reduceMotion}
+                    revision={draftRevision}
+                    sheetDismissGestureRef={sheetDismissGestureRef}
+                    startMs={parsedStart.date?.getTime() ?? draftStartMs}
+                    styles={styles}
+                    theme={theme}
+                  />
+                )}
 
                 {showDeleteButton || canStop || canStartAgain ? (
                   <View style={sheetStyles.actions} testID="time-entry-sheet-actions">
@@ -3584,9 +3617,9 @@ const sheetStyles = StyleSheet.create({
   timeWheelPanel: { borderRadius: 18, gap: 4, marginTop: 12, padding: 8 },
   timeWheelNotch: { borderRadius: 3, height: 14, marginLeft: -7, position: "absolute", top: -7, transform: [{ rotate: "45deg" }], width: 14 },
   timeWheelFoot: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  timeWheelPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 14 },
+  timeWheelPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 12 },
   timeWheelPillText: { fontSize: 13, fontWeight: "700" },
-  timeWheelDone: { marginLeft: "auto", minWidth: 88 },
+  timeWheelDone: { marginLeft: "auto", minWidth: 72 },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {
