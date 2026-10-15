@@ -172,9 +172,13 @@ export function formatCalendarEntryCompactDuration(totalSeconds: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+/**
+ * On commit (leaving the field, Save) any time the shared parser reads is complete: `9` → 09:00,
+ * `15:1` → 15:10 (owner, 15 Oct 2026). While typing, `isCalendarEntryCompactTimeInputReadyToSynchronize`
+ * stays strict so a half-typed `15:1` never moves the block before its second minute digit.
+ */
 export function isCompleteCalendarEntryCompactTimeInput(value: string) {
-  const trimmed = value.trim();
-  return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+  return Boolean(parseTimeInput(value));
 }
 
 export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {

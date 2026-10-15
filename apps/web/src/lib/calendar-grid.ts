@@ -36,15 +36,29 @@ export function formatLocalDate(date: Date) {
   ].join("-");
 }
 
+/**
+ * A typed time as `HH:MM`, or null. Digits alone: one or two are the hour (`9` → 09:00, `15` →
+ * 15:00) and three or four are `H:MM` / `HH:MM` (`930` → 09:30, `1530` → 15:30). With a colon the
+ * part before it is always the hour and a partial minute is its tens (`15:1` → 15:10, `15:` →
+ * 15:00): digits never move across the colon into the hour (owner, 15 Oct 2026; `15:1` used to be
+ * read as 01:51). Every typed-time field shares this: Add time, the running start panel, and the
+ * quick editor and List edges on commit.
+ */
 export function parseTimeInput(raw: string): string | null {
-  const digits = raw.replace(/\D/g, "").slice(0, 4);
-  if (!digits) return null;
-
-  const padded = digits.length <= 2
-    ? `${digits.padStart(2, "0")}00`
-    : digits.padStart(4, "0");
-  const hour = Number(padded.slice(0, 2));
-  const minute = Number(padded.slice(2, 4));
+  const text = raw.trim();
+  let hour: number;
+  let minute: number;
+  const separated = /^(\d{1,2}):(\d{0,2})$/.exec(text);
+  if (separated) {
+    hour = Number(separated[1]);
+    minute = Number(separated[2].padEnd(2, "0"));
+  } else if (/^\d{1,4}$/.test(text)) {
+    const padded = text.length <= 2 ? `${text.padStart(2, "0")}00` : text.padStart(4, "0");
+    hour = Number(padded.slice(0, 2));
+    minute = Number(padded.slice(2, 4));
+  } else {
+    return null;
+  }
   if (hour > 23 || minute > 59) return null;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
