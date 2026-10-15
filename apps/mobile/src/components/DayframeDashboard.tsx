@@ -1706,6 +1706,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     title: activeTitle,
     titleIsPlaceholder: activeTitleIsPlaceholder,
   } : null;
+  // While a Stop flight's ghost holds the block's place (Stop being saved), the orb's ring holds the
+  // ghost's time; a refused or rolled-back Stop clears the flight and the ring counts on (Codex r1 on #439).
+  const orbHeldSeconds =
+    hasLiveActiveTimer &&
+    stopFlight &&
+    displayedActiveEntry &&
+    timerEntryIdentity(stopFlight.entryId) === timerEntryIdentity(displayedActiveEntry.id)
+      ? stopFlight.presentation.elapsedSeconds
+      : undefined;
   const recentStoppedAt = useMemo(
     () => recentStoppedEntryTime(data?.entries ?? [], data?.activeEntry ?? null),
     [data?.activeEntry, data?.entries]
@@ -3402,6 +3411,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         onTap={onPlayOrbTapStable}
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
+        runningDurationSeconds={hasLiveActiveTimer ? todayLivePresentation?.durationSeconds : undefined}
+        runningElapsedSeconds={hasLiveActiveTimer ? todayLivePresentation?.elapsedSeconds : undefined}
+        runningHeldSeconds={orbHeldSeconds}
+        runningStartedAt={hasLiveActiveTimer ? todayLivePresentation?.startedAt : undefined}
         theme={theme}
       />
       <StopFlightOverlay flight={stopFlight} onFinished={finishStopFlight} theme={theme} />
