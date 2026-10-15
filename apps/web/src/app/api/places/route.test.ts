@@ -196,10 +196,20 @@ describe("/api/places", () => {
         loggingEnabled: false,
         defaultCategoryId: null,
         defaultActivityDescription: null,
+        autoLog: false,
         autoStart: false
       },
       session
     );
+  });
+
+  it("passes Log automatically only when sent, so an older app's save never turns it off", async () => {
+    await PATCH(jsonRequest({ id: placeId(), name: "Gym", loggingEnabled: true, autoLog: true }));
+    expect(mocks.updatePlace).toHaveBeenLastCalledWith(placeId(), expect.objectContaining({ autoLog: true }), session);
+    await PATCH(jsonRequest({ id: placeId(), name: "Gym", loggingEnabled: true }));
+    expect(Object.prototype.hasOwnProperty.call(mocks.updatePlace.mock.lastCall?.[1] ?? {}, "autoLog")).toBe(false);
+    await PATCH(jsonRequest({ id: placeId(), name: "Gym", loggingEnabled: false, autoLog: true }));
+    expect(mocks.updatePlace).toHaveBeenLastCalledWith(placeId(), expect.objectContaining({ autoLog: false }), session);
   });
 
   it("deletes a place by id", async () => {

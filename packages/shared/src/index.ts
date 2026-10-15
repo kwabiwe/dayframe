@@ -1521,6 +1521,8 @@ export type PlaceSummary = {
   defaultActivityDescription?: string | null;
   autoStart: boolean;
   loggingEnabled?: boolean;
+  /** "Log automatically" (owner decision 14 Oct 2026): visits become blocks without a Review card. */
+  autoLog?: boolean;
 };
 
 export type AutomationRuleSummary = {

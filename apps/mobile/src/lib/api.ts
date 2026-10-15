@@ -240,6 +240,7 @@ export type MobileBootstrap = {
     defaultActivityDescription?: string | null;
     autoStart?: boolean;
     loggingEnabled?: boolean;
+    autoLog?: boolean;
   }>;
   learnedPlaces?: Array<{
     id: string;
@@ -300,6 +301,8 @@ export type PlaceMutationInput = {
   defaultCategoryId?: string | null;
   defaultActivityDescription?: string | null;
   loggingEnabled?: boolean;
+  /** "Log automatically" (owner decision 14 Oct 2026); the server keeps it off while logging is off. */
+  autoLog?: boolean;
 };
 
 export type TimeEntryUpdatePatch = {
