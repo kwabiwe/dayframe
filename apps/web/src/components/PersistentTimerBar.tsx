@@ -585,7 +585,11 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             <TaskSuggestionsPanel
               anchorRef={suggestionsRef}
               hints={active ? FLOATING_LIST_HINTS.suggestionsUse : FLOATING_LIST_HINTS.suggestionsStart}
-              isBusy={isTimerBusy}
+              // Recording, a pick only changes the bar's draft (saved by the usual autosave), so the
+              // rows stay usable while an autosave is in flight: disabling them then left ↓ nothing
+              // to move to and the list unusable from the keyboard (owner bug, 15 Oct). Idle, a pick
+              // starts a block, so it waits for a busy timer.
+              isBusy={isTimerBusy && !active}
               isOpen={suggestionsOpen && !hashtagSuggestionsOpen}
               onClose={() => setSuggestionsOpen(false)}
               onSelect={(suggestion) => void chooseTimerSuggestion(suggestion)}

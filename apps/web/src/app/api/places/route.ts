@@ -16,7 +16,9 @@ const placeFieldsSchema = z.object({
   defaultCategoryId: z.string().uuid().nullable().optional(),
   defaultActivityDescription: z.string().trim().max(240).nullable().optional(),
   autoStart: z.boolean().optional(),
-  loggingEnabled: z.boolean().optional()
+  loggingEnabled: z.boolean().optional(),
+  // "Log automatically" (owner decision 14 Oct 2026); off whenever logging is off.
+  autoLog: z.boolean().optional()
 });
 
 const placeCreateSchema = placeFieldsSchema.extend({
@@ -88,6 +90,7 @@ export async function PATCH(request: Request) {
 }
 
 function normalizePlaceLoggingInput<T extends {
+  autoLog?: boolean;
   autoStart?: boolean;
   defaultActivityDescription?: string | null;
   defaultCategoryId?: string | null;
@@ -97,6 +100,9 @@ function normalizePlaceLoggingInput<T extends {
     ...input,
     defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId,
     defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription,
+    // Only when the client sent it (or turned logging off): an app build that predates the switch
+    // sends no autoLog, and its saves must never turn a place's Log automatically off.
+    ...(input.loggingEnabled === false ? { autoLog: false } : input.autoLog === undefined ? {} : { autoLog: input.autoLog }),
     autoStart: false
   };
 }

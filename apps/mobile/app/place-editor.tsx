@@ -130,6 +130,8 @@ export default function PlaceEditorScreen() {
   const [longitudeText, setLongitudeText] = useState("");
   const [radiusMeters, setRadiusMeters] = useState(String(DEFAULT_PLACE_RADIUS_METERS));
   const [loggingEnabled, setLoggingEnabled] = useState(true);
+  // "Log automatically" (owner decision 14 Oct 2026): only with Suggest visits here on.
+  const [autoLog, setAutoLog] = useState(false);
   const [defaultCategoryId, setDefaultCategoryId] = useState("");
   const [defaultActivityDescription, setDefaultActivityDescription] = useState("");
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
@@ -172,6 +174,7 @@ export default function PlaceEditorScreen() {
         setLongitudeText(formatOptionalCoordinate(place.longitude));
         setRadiusMeters(String(place.radiusMeters));
         setLoggingEnabled(place.loggingEnabled !== false);
+        setAutoLog(place.loggingEnabled !== false && place.autoLog === true);
         setDefaultCategoryId(place.defaultCategoryId ?? "");
         setDefaultActivityDescription(place.defaultActivityDescription ?? "");
         existingCoordinate = coordinateFromPlace(place);
@@ -233,6 +236,8 @@ export default function PlaceEditorScreen() {
   const parsedRole = PlaceRoleSchema.safeParse(params.role);
   const newRole = mode === "create" && parsedRole.success ? parsedRole.data : null;
   const roleSlot = newRole && data ? placeRoleSlots(data.places.map(withRole)).find((slot) => slot.role === newRole) ?? null : null;
+  // The role this place holds (or takes): a Home place gets the Log automatically caution.
+  const placeRole = newRole ?? (loadedEntity as MobilePlace | null)?.role ?? null;
   const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
   const title = mode === "edit"
     ? "Edit place"
@@ -347,6 +352,7 @@ export default function PlaceEditorScreen() {
           longitude: validation.value.longitude,
           radiusMeters: validation.value.radiusMeters,
           loggingEnabled,
+          autoLog: loggingEnabled && autoLog,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
         })).place;
@@ -368,6 +374,7 @@ export default function PlaceEditorScreen() {
           radiusMeters: validation.value.radiusMeters,
           priority: 5,
           loggingEnabled,
+          autoLog: loggingEnabled && autoLog,
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
         }, newRoleRequest)).place;
@@ -791,6 +798,7 @@ export default function PlaceEditorScreen() {
                       onValueChange={(enabled) => {
                         setLoggingEnabled(enabled);
                         if (!enabled) {
+                          setAutoLog(false);
                           setDefaultCategoryId("");
                           setDefaultActivityDescription("");
                         }
@@ -804,6 +812,33 @@ export default function PlaceEditorScreen() {
                   theme={theme}
                   title="Suggest visits here"
                 />
+                {/* Shown always, choosable only with Suggest visits here on. The server still sends a
+                    visit to Review when it is short of trusted, overlaps tracked time or a timer runs. */}
+                <SettingsBlockRow
+                  control={
+                    <SettingsSwitch
+                      accessibilityHint={loggingEnabled ? undefined : "Turn on Suggest visits here first"}
+                      disabled={!loggingEnabled}
+                      label="Log automatically"
+                      onValueChange={setAutoLog}
+                      theme={theme}
+                      value={loggingEnabled && autoLog}
+                    />
+                  }
+                  subtitle="Visits here become blocks without a Review card."
+                  testID="place-editor-auto-log"
+                  theme={theme}
+                  title="Log automatically"
+                />
+                {placeRole === "home" ? (
+                  <Text
+                    {...mobileTextProps("metadata")}
+                    style={[editorStyles.autoLogCaution, { color: theme.warningText }]}
+                    testID="place-editor-auto-log-home-caution"
+                  >
+                    Home visits can be long and broad; consider leaving this off.
+                  </Text>
+                ) : null}
                 {loggingEnabled ? (
                   <Reanimated.View
                     entering={localPresenceEntering(reduceMotion)}
@@ -1032,6 +1067,7 @@ const editorStyles = StyleSheet.create({
   resultTitle: { fontSize: 15, fontWeight: "600" },
   note: { marginHorizontal: 4, marginTop: 8 },
   fieldRow: { alignItems: "center", flexDirection: "row", gap: 12, minHeight: 52, paddingHorizontal: 16, paddingVertical: 6 },
+  autoLogCaution: { fontSize: 12.5, lineHeight: 17, paddingBottom: 10, paddingHorizontal: 16 },
   fieldLabel: { flex: 1, fontSize: 15, fontWeight: "600" },
   // The label wraps above the segments when they don't fit beside it (large text, a fourth size).
   radiusRow: { alignItems: "center", columnGap: 12, flexDirection: "row", flexWrap: "wrap", minHeight: 52, paddingHorizontal: 16, paddingVertical: 6, rowGap: 6 },

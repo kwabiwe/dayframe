@@ -255,7 +255,8 @@ const options = {
     defaultCategoryName: null,
     defaultActivityDescription: null,
     autoStart: false,
-    loggingEnabled: true
+    loggingEnabled: true,
+    autoLog: false
   }],
   sources: [{ id: "manual_app", name: "Web timer" }]
 } satisfies ReportFilterOptions;

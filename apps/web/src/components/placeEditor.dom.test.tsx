@@ -61,4 +61,25 @@ describe("Place editor in Blocks (UIA-308)", () => {
     expect(new Set(sizes.getAllByRole("radio").map((radio) => (radio as HTMLInputElement).name))).toEqual(new Set(["df-pe-radius"]));
   });
 
+  it("offers Log automatically only with Suggest visits on, off by default, cautioning Home (owner decision 14 Oct 2026)", () => {
+    render(<PlaceEditor categories={categories} mode="edit" place={place()} places={[place()]} />);
+    const autoLog = screen.getByRole("switch", { name: "Log automatically" }) as HTMLInputElement;
+    expect(autoLog.checked).toBe(false);
+    expect(autoLog.disabled).toBe(false);
+    expect(screen.getByText("Visits here become blocks without a Review card.")).toBeTruthy();
+    expect(autoLog.getAttribute("aria-describedby")).toBe("place-auto-log-help");
+    expect(screen.queryByText(/Home visits can be long and broad/)).toBeNull();
+    fireEvent.click(autoLog);
+    expect(autoLog.checked).toBe(true);
+    // Turning Suggest visits off turns it off and disables it.
+    fireEvent.click(screen.getByRole("switch", { name: "Suggest visits here" }));
+    expect(autoLog.checked).toBe(false);
+    expect(autoLog.disabled).toBe(true);
+    expect(screen.getByText(/Turn on Suggest visits here first/)).toBeTruthy();
+    cleanup();
+    render(<PlaceEditor categories={categories} mode="edit" place={place({ role: "home", autoLog: true } as Partial<PlaceRow>)} places={[place()]} />);
+    expect((screen.getByRole("switch", { name: "Log automatically" }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByText("Home visits can be long and broad; consider leaving this off.")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Log automatically" }).getAttribute("aria-describedby")).toBe("place-auto-log-help place-auto-log-caution");
+  });
 });

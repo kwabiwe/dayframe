@@ -166,6 +166,7 @@ function place(overrides: Partial<PlaceRow> & Pick<PlaceRow, "id" | "name">): Pl
     defaultActivityDescription: null,
     autoStart: false,
     loggingEnabled: true,
+    autoLog: false,
     ...overrides
   };
 }

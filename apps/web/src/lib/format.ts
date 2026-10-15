@@ -192,6 +192,8 @@ const sourceLabels: Record<string, string> = {
   health_sleep: "Health sleep",
   health_workout: "Health workout",
   location_learning: "Location learning",
+  // Log automatically (owner decision 14 Oct 2026): a visit logged as a block without a Review card.
+  location_auto_log: "Logged automatically",
   home_assistant: "Home Assistant",
   ha_button: "Home Assistant button",
   ha_geofence: "Home Assistant geofence"
@@ -214,9 +216,15 @@ const eventLabels: Record<string, string> = {
   entry_delete: "Deleted entry"
 };
 
-export function formatSourceLabel(value?: string | null) {
+/**
+ * A friendly source name. For one block, pass its place: an auto-logged visit then reads
+ * "Logged automatically · {place}" (Log automatically, owner decision 14 Oct 2026).
+ */
+export function formatSourceLabel(value?: string | null, options: { placeName?: string | null } = {}) {
   if (!value) return "Unknown source";
-  return sourceLabels[value] ?? formatMachineLabel(value);
+  const label = sourceLabels[value] ?? formatMachineLabel(value);
+  const place = options.placeName?.trim();
+  return value === "location_auto_log" && place ? `${label} · ${place}` : label;
 }
 
 export function formatEventLabel(value?: string | null) {

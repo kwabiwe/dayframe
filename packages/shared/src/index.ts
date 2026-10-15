@@ -1353,6 +1353,8 @@ const excludedSuggestionEventTypes = new Set([
 // Intelligence stays/commutes). Health is never a location visit.
 const locationVisitSources = new Set([
   "location_learning",
+  // Log automatically: a visit logged as a block without a Review card.
+  "location_auto_log",
   "geofence_specific",
   "geofence_broad",
   "ha_geofence"
@@ -1521,6 +1523,8 @@ export type PlaceSummary = {
   defaultActivityDescription?: string | null;
   autoStart: boolean;
   loggingEnabled?: boolean;
+  /** "Log automatically" (owner decision 14 Oct 2026): visits become blocks without a Review card. */
+  autoLog?: boolean;
 };
 
 export type AutomationRuleSummary = {

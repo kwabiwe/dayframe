@@ -2234,7 +2234,8 @@ describe("mobile API client", () => {
           defaultCategoryId: "20000000-0000-4000-8000-000000000001",
           defaultActivityDescription: "School drop-off/pickup",
           autoStart: false,
-          loggingEnabled: true
+          loggingEnabled: true,
+          autoLog: false
         })
       })
     );
@@ -2280,6 +2281,7 @@ describe("mobile API client", () => {
           defaultActivityDescription: null,
           autoStart: false,
           loggingEnabled: true,
+          autoLog: false,
           learnedPlaceId: "40000000-0000-4000-8000-000000000001"
         })
       })
@@ -2341,6 +2343,19 @@ describe("mobile API client", () => {
         })
       })
     );
+  });
+
+  it("sends Log automatically on create only with logging on (Codex r1 on #434)", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: { id: "place-1" } }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+    const sent = () => JSON.parse(String((fetchMock.mock.lastCall as unknown as [string, RequestInit])[1].body)) as { autoLog?: boolean };
+    await createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, loggingEnabled: true, autoLog: true });
+    expect(sent().autoLog).toBe(true);
+    await createPlace({ name: "Gym", latitude: 51.5, longitude: -0.12, loggingEnabled: false, autoLog: true });
+    expect(sent().autoLog).toBe(false);
+    await updatePlace("30000000-0000-4000-8000-000000000001", { name: "Gym", loggingEnabled: true, autoLog: true });
+    expect(sent().autoLog).toBe(true);
   });
 
   it("updates places through the hosted API without project fields", async () => {

@@ -43,6 +43,15 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(runningEditor.querySelector(".calendar-compact-editor-header")?.textContent).not.toContain("Untitled entry");
   });
 
+  it("says where an auto-logged visit's block came from, and nothing for other blocks (PRD D17)", async () => {
+    const auto = renderModal({ sourceEntry: timeEntry({ source: "location_auto_log", placeName: "Gym" } as Partial<TimeEntryRow>) });
+    expect((await screen.findByTestId("time-entry-source")).textContent).toBe("Logged automatically · Gym");
+    auto.unmount();
+    renderModal({ sourceEntry: timeEntry({ source: "manual_app", placeName: "Gym" } as Partial<TimeEntryRow>) });
+    await screen.findByTestId("time-entry-quick-editor");
+    expect(screen.queryByTestId("time-entry-source")).toBeNull();
+  });
+
   it("opens and applies suggestions for empty Uncategorized completed and running entries", async () => {
     for (const stoppedAt of ["2026-08-04T10:00:00.000Z", null]) {
       const view = renderModal({

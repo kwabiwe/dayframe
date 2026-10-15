@@ -17,6 +17,8 @@ export type WebPlaceFormInput = {
   longitude: string;
   radiusMeters: string;
   loggingEnabled: boolean;
+  /** "Log automatically" (owner decision 14 Oct 2026); only kept while logging is on. */
+  autoLog: boolean;
   defaultCategoryId: string;
   defaultActivityDescription: string;
 };
@@ -27,6 +29,7 @@ export type WebPlaceFormValue = {
   longitude: number;
   radiusMeters: number;
   loggingEnabled: boolean;
+  autoLog: boolean;
   defaultCategoryId: string | null;
   defaultActivityDescription: string | null;
 };
@@ -79,6 +82,7 @@ export function validateWebPlaceForm(input: WebPlaceFormInput): WebPlaceFormVali
       longitude: longitude.value,
       radiusMeters,
       loggingEnabled: input.loggingEnabled,
+      autoLog: input.loggingEnabled && input.autoLog,
       defaultCategoryId: input.loggingEnabled ? input.defaultCategoryId.trim() || null : null,
       defaultActivityDescription: input.loggingEnabled
         ? input.defaultActivityDescription.trim() || null

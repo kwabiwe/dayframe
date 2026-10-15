@@ -1,7 +1,7 @@
 import type pg from "pg";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import {
-  AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticOverlap,
+  AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticLocation, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
 import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
@@ -10,6 +10,9 @@ import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { reopenSupersededReviews } from "./location-review-supersession";
+import {
+  AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
+} from "./location-auto-log";
 
 // Bounded row sets, including reads. All work uses the caller's owner-locked transaction.
 const SEMANTIC_CHUNK_SIZE = 250;
@@ -21,6 +24,8 @@ function* chunks<T>(rows: T[]) {
 type Place = {
   id: string; name: string; categoryId: string | null;
   description: string | null; loggingEnabled: boolean;
+  /** Log automatically (owner decision 14 Oct 2026). */
+  autoLog: boolean;
 };
 type LearnedPlace = { id: string; name: string; saved: Place | null };
 
@@ -81,7 +86,8 @@ async function displayContext(
   // Saved places belong to a workspace; learned places additionally belong to a user.
   for (const ids of chunks(placeIds)) {
     const result = await client.query<Place>(`select pl.id, ${placeDisplayNameSql("pl")} as name, pl.default_category_id as "categoryId",
-      pl.default_activity_description as description, pl.logging_enabled as "loggingEnabled"
+      pl.default_activity_description as description, pl.logging_enabled as "loggingEnabled",
+      pl.auto_log as "autoLog"
       from places pl where pl.workspace_id = $1 and pl.id = any($2::uuid[])`, [session.workspaceId, ids]);
     for (const row of result.rows) places.set(row.id, row);
   }
@@ -89,7 +95,7 @@ async function displayContext(
     const result = await client.query<LearnedPlace>(`select lp.id, coalesce(${placeRoleLabelSql("p")}, lp.name) as name,
       case when p.id is null then null else jsonb_build_object('id',p.id,'name',coalesce(${placeDisplayNameSql("p")},lp.name),
         'categoryId',p.default_category_id,'description',p.default_activity_description,
-        'loggingEnabled',p.logging_enabled) end as saved
+        'loggingEnabled',p.logging_enabled,'autoLog',p.auto_log) end as saved
       from learned_places lp left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
         and lp.status = 'accepted'
       where lp.workspace_id = $1 and lp.user_id = $2 and lp.id = any($3::uuid[])`,
@@ -125,7 +131,14 @@ export type SemanticChangeCounter = { count: number };
 export async function emitReviewSemanticSegments(
   client: pg.PoolClient, session: RequestSession, segments: LocationSegment[],
   stayIds: Map<string, string>, commuteIds: Map<string, string>,
-  changes: SemanticChangeCounter = { count: 0 }
+  changes: SemanticChangeCounter = { count: 0 },
+  // Log automatically: blocks of visits replay retired, which a replacement visit takes over, and the
+  // window in which replay keeps auto-logged visits in step (none: their blocks never move).
+  autoLog: {
+    orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation;
+    /** The blocks replay locked unedited, the only ones emission may move. */
+    locked: ReadonlySet<string>;
+  } = { orphans: [], used: new Set(), locked: new Set() }
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
@@ -139,13 +152,29 @@ export async function emitReviewSemanticSegments(
   if (!candidates.length) return 0;
   const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
   const eligible = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
-  const existing = new Map<string, { id: string; reviewStatus: string }>();
+  const existing = new Map<string, { id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>();
   for (const batch of chunks(eligible)) {
-    const result = await client.query<{ id: string; clientEventId: string; reviewStatus: string }>(
-      `select id, client_event_id as "clientEventId", review_status as "reviewStatus" from activity_events
+    const result = await client.query<{ id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>(
+      `select id, client_event_id as "clientEventId", review_status as "reviewStatus",
+              coalesce(raw_payload ? '${AUTO_LOG_SUPERSEDED_PAYLOAD_KEY}', false) as "autoLogSuperseded"
+       from activity_events
        where workspace_id = $1 and user_id = $2 and client_event_id = any($3::text[])
        order by client_event_id for update`, [session.workspaceId, session.userId, batch.map(row => row.clientEventId)]);
     for (const row of result.rows) existing.set(row.clientEventId, row);
+  }
+  // A stay whose auto-logged visit replay retired, back in the output: offered again as new (it never
+  // had a Review). Its block moved on or was removed when it was retired.
+  const freshAgain = new Set<string>();
+  const retiredAutoLog = [...existing.values()].filter((row) => row.reviewStatus === "ignored" && row.autoLogSuperseded);
+  for (const batch of chunks(retiredAutoLog)) {
+    await client.query(
+      `update activity_events set review_status = 'needs_review', raw_payload = raw_payload - '${AUTO_LOG_SUPERSEDED_PAYLOAD_KEY}'
+       where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and review_status = 'ignored'`,
+      [session.workspaceId, session.userId, batch.map((row) => row.id)]);
+    for (const row of batch) {
+      row.reviewStatus = "needs_review";
+      freshAgain.add(row.clientEventId);
+    }
   }
   // A segment back in the output after replay retired it is offered again.
   const ignored = [...existing.values()].filter((row) => row.reviewStatus === "ignored");
@@ -156,6 +185,10 @@ export async function emitReviewSemanticSegments(
   }
   const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
     ? await ensureCommuteCategoryId(client, session, changes) : null;
+  // Replay locked every block it may touch once, in entry-id order, before emission (Codex r2/r3 on
+  // #435): only those are moved or removed.
+  const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
+  const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title } = context(segment);
     // Time away suggests no category: the user chooses what it was.
@@ -211,10 +244,17 @@ export async function emitReviewSemanticSegments(
         };
     const eventType = segment.kind === "commute" ? "commute_detected" : segment.placeMatchKind === "learned"
       ? "learned_place_visit" : segment.placeMatchKind === "saved" ? "geofence_exit" : "unknown_stay";
+    // Log automatically: confirmed now, never a Review card.
+    const autoLog = autoLogged.has(clientEventId);
+    const payload: Record<string, unknown> = autoLog
+      ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: "place_auto_log" }
+      : rawPayload;
     return { client_event_id: clientEventId, segment_id: segmentId, kind: segment.kind,
       event_type: eventType, occurred_at: segment.startedAt, stopped_at: segment.stoppedAt,
-      confidence: segment.confidence, raw_payload: rawPayload, category_id: categoryId, place_id: placeId, title,
-      review_status: existing.get(clientEventId)?.reviewStatus ?? "needs_review",
+      confidence: segment.confidence, raw_payload: payload, category_id: categoryId, place_id: placeId, title,
+      auto_log: autoLog, description: autoLog ? trusted?.description?.trim() || null : null,
+      initial_review_status: autoLog ? "confirmed" : "needs_review",
+      review_status: autoLog ? "confirmed" : existing.get(clientEventId)?.reviewStatus ?? "needs_review",
       notes: overlapsConfirmedTime
         ? `Automatic logging paused because this ${segment.kind === "commute" ? "commute" : "visit"} conflicts with tracked time by more than five minutes. You can still confirm it from Review.`
         : segment.continuityStatus === "uncertain_gap"
@@ -236,11 +276,17 @@ export async function emitReviewSemanticSegments(
       insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at,
         confidence, raw_payload, suggested_category_id, suggested_place_id, review_status)
       select $1, $2, r.client_event_id, 'location_learning', r.event_type, r.occurred_at,
-        r.confidence, r.raw_payload, r.category_id, r.place_id, 'needs_review'
+        r.confidence, r.raw_payload, r.category_id, r.place_id, r.initial_review_status
       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, event_type text, occurred_at timestamptz,
-        confidence text, raw_payload jsonb, category_id uuid, place_id uuid)
+        confidence text, raw_payload jsonb, category_id uuid, place_id uuid, initial_review_status text)
      on conflict (workspace_id, user_id, client_event_id) where client_event_id is not null
      do update set
+       -- Only a stay offered again after its auto-logged visit was retired (it has no Review) is
+       -- confirmed here; every other event keeps its status.
+       review_status = case
+         when activity_events.review_status = 'needs_review' and excluded.review_status = 'confirmed' then 'confirmed'
+         else activity_events.review_status
+       end,
        occurred_at = case
          when activity_events.review_status = 'needs_review' then excluded.occurred_at
          else activity_events.occurred_at
@@ -276,6 +322,31 @@ export async function emitReviewSemanticSegments(
     changes.count += events.rows.filter((event) => event.changed).length;
   }
   const linked = rows.map(row => ({ ...row, event_id: eventIds.get(row.client_event_id)! }));
+  for (const row of linked.filter((candidate) => candidate.auto_log)) {
+    changes.count += await writeAutoLoggedBlock(client, session, row, autoLog);
+  }
+  // A visit already auto-logged whose stay kept its ID while its boundaries moved (a late fix): its
+  // unedited block follows (Codex r1 on #435). Only within the reconciliation window, where replay
+  // re-persisted the stay; elsewhere the stay is a decision and its block stays put.
+  if (autoLog.reconciliation) {
+    const since = Date.parse(autoLog.reconciliation.sinceAt);
+    const followed = linked.filter((row) => row.kind === "stay" && !row.auto_log && Date.parse(row.occurred_at) >= since);
+    for (const batch of chunks(followed)) {
+      const bounds = JSON.stringify(batch.map((row) => ({
+        event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at
+      })));
+      // Only blocks this replay locked above (entry-id order, once).
+      const moved = await client.query(
+        `update time_entries te set started_at = r.occurred_at, stopped_at = r.stopped_at, updated_at = now()
+         from jsonb_to_recordset($3::jsonb) as r(event_id uuid, occurred_at timestamptz, stopped_at timestamptz)
+         where te.workspace_id = $1 and te.user_id = $2 and te.id = any($4::uuid[])
+           and te.created_from_event_id = r.event_id
+           and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
+           and (te.started_at, te.stopped_at) is distinct from (r.occurred_at, r.stopped_at)`,
+        [session.workspaceId, session.userId, bounds, [...autoLog.locked]]);
+      changes.count += moved.rowCount ?? 0;
+    }
+  }
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {
     const parameters = [session.workspaceId, session.userId, JSON.stringify(batch)];
     const inserted = await client.query(`insert into review_items (workspace_id,user_id,event_id,location_segment_id,type,title,
@@ -318,4 +389,107 @@ export async function emitReviewSemanticSegments(
     [session.workspaceId, session.userId, JSON.stringify(batch)]);
   }
   return rows.length;
+}
+
+type SemanticCandidate = { segment: LocationSegment; segmentId: string; clientEventId: string };
+type SegmentContext = (segment: LocationSegment) => { trusted: Place | null; title: string };
+
+/**
+ * Log automatically (owner decision 14 Oct 2026): the stays this emission logs as blocks instead of
+ * Review cards. Only a stay at a saved place (or a learned place linked to one) with logging and Log
+ * automatically on, never offered in Review before (under any segment ID: no Review card for an
+ * overlapping visit at that place), that passes the trusted-stay policy of PR #186
+ * (confidence, continuity, five-minute boundaries; the same rule `v2_enabled` uses) and overlaps no
+ * tracked time at all, a running timer included. Anything else stays a Review card. Stays under
+ * five minutes never get here (`hasMeaningfulKnownPlaceWindow`). One bounded read per 250 stays.
+ */
+async function chooseAutoLoggedVisits(
+  client: pg.PoolClient, session: RequestSession, eligible: SemanticCandidate[], context: SegmentContext,
+  existing: ReadonlyMap<string, { reviewStatus: string }>, freshAgain: ReadonlySet<string>, orphans: AutoLogOrphan[]
+) {
+  const candidates = eligible.filter(({ segment, clientEventId }) => {
+    if (segment.kind !== "stay") return false;
+    const { trusted } = context(segment);
+    if (!trusted?.autoLog || trusted.loggingEnabled === false) return false;
+    // Decided once: a stay already offered in Review stays there.
+    if (existing.has(clientEventId) && !freshAgain.has(clientEventId)) return false;
+    return assessAutomaticLocation("v2_enabled", segment).action === "auto_confirm";
+  });
+  if (candidates.length === 0) return new Set<string>();
+  // A retired visit's own block is about to move or go: it never blocks its replacement.
+  const orphanIds = orphans.map((orphan) => orphan.entryId);
+  const blocked = new Set<string>();
+  for (const batch of chunks(candidates)) {
+    const result = await client.query<{ clientEventId: string }>(
+      `select r.client_event_id as "clientEventId"
+       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz)
+       where exists (
+         -- Any block not ignored, however long (a timer left running for days and then stopped) or still
+         -- running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started per visit.
+         select 1 from time_entries te
+         where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
+           and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
+           and not (te.id = any($4::uuid[])))
+         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
+         -- whatever became of that card (Codex r1 on #435).
+         or exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
+           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at)
+         -- Another visit at the place already auto-logged and still a decision (its block deleted or
+         -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
+         -- landed while this replay ran (Codex r3 on #435).
+         or exists (
+         select 1 from activity_events ae
+         where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
+           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+           and ae.client_event_id <> r.client_event_id
+           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at)`,
+      [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
+        client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
+        started_at: segment.startedAt, stopped_at: segment.stoppedAt
+      }))), orphanIds]);
+    for (const row of result.rows) blocked.add(row.clientEventId);
+  }
+  return new Set(candidates.map((candidate) => candidate.clientEventId).filter((id) => !blocked.has(id)));
+}
+
+/**
+ * Writes one auto-logged visit's block: the unedited block of a visit replay just retired at the same
+ * place and overlapping time moves to this visit (owner decision 15 Oct 2026: the block follows the
+ * visit), otherwise a new block tied to the stay's event, at most one per event. Returns the number
+ * of blocks written.
+ */
+async function writeAutoLoggedBlock(
+  client: pg.PoolClient, session: RequestSession,
+  row: { event_id: string; place_id: string | null; category_id: string | null; description: string | null;
+    occurred_at: string; stopped_at?: string | null; confidence: string },
+  autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; locked: ReadonlySet<string> }
+) {
+  const start = Date.parse(row.occurred_at);
+  const stop = row.stopped_at ? Date.parse(row.stopped_at) : Number.POSITIVE_INFINITY;
+  const orphan = autoLog.orphans.find((candidate) => autoLog.locked.has(candidate.entryId) && !autoLog.used.has(candidate.entryId) &&
+    candidate.placeId === row.place_id && Date.parse(candidate.startedAt) < stop &&
+    (candidate.stoppedAt ? Date.parse(candidate.stoppedAt) : Number.POSITIVE_INFINITY) > start);
+  if (orphan) {
+    const moved = await client.query(
+      `update time_entries
+       set started_at = $4, stopped_at = $5, created_from_event_id = $6, confidence = $7, updated_at = now()
+       where workspace_id = $1 and user_id = $2 and id = $3
+         and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null`,
+      [session.workspaceId, session.userId, orphan.entryId, row.occurred_at, row.stopped_at, row.event_id, row.confidence]);
+    if (moved.rowCount) {
+      autoLog.used.add(orphan.entryId);
+      return 1;
+    }
+  }
+  const inserted = await client.query(
+    `insert into time_entries (workspace_id, user_id, category_id, place_id, source, confidence, review_status,
+       description, started_at, stopped_at, created_from_event_id)
+     select $1, $2, $3, $4, '${LOCATION_AUTO_LOG_SOURCE}', $5, 'confirmed', $6, $7, $8, $9
+     where not exists (
+       select 1 from time_entries where workspace_id = $1 and user_id = $2 and created_from_event_id = $9)`,
+    [session.workspaceId, session.userId, row.category_id, row.place_id, row.confidence, row.description,
+      row.occurred_at, row.stopped_at, row.event_id]);
+  return inserted.rowCount ?? 0;
 }
