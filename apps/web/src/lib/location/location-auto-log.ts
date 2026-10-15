@@ -42,19 +42,32 @@ type PlacedInterval = Interval & { placeId: string | null; candidatePlaceIds: re
 
 /**
  * The stays replay produces, split by whether Review emission offers them now (finalised, from the
- * semantic cutover on) or holds them (not finalised, or before the cutover).
+ * semantic cutover on) or holds them (not finalised, or before the cutover), each with the saved
+ * place emission would log it at — its saved place, or the saved place its learned place is
+ * accepted as (`learnedToSaved`), as emission resolves it — and the saved places it may yet become
+ * (its candidates, learned ones through the same link; Codex r6 on #435).
  */
 export type AutoLogStayTiming = { offered: PlacedInterval[]; held: PlacedInterval[] };
 
 export function autoLogStayTiming(
-  segments: ReadonlyArray<{ kind: string; status: string; startedAt: string; stoppedAt?: string | null; placeId?: string | null; candidatePlaceIds?: string[] }>,
-  reconciliation: AutoLogReconciliation
+  segments: ReadonlyArray<{
+    kind: string; status: string; startedAt: string; stoppedAt?: string | null;
+    placeMatchKind?: string | null; placeId?: string | null; learnedPlaceId?: string | null; candidatePlaceIds?: string[];
+  }>,
+  reconciliation: AutoLogReconciliation,
+  learnedToSaved: ReadonlyMap<string, string>
 ): AutoLogStayTiming {
   const timing: AutoLogStayTiming = { offered: [], held: [] };
   for (const segment of segments) {
     if (segment.kind !== "stay") continue;
-    const stay = { startedAt: segment.startedAt, stoppedAt: segment.stoppedAt ?? null,
-      placeId: segment.placeId ?? null, candidatePlaceIds: segment.candidatePlaceIds ?? [] };
+    const placeId = segment.placeMatchKind === "saved" && segment.placeId ? segment.placeId
+      : segment.placeMatchKind === "learned" && segment.learnedPlaceId ? learnedToSaved.get(segment.learnedPlaceId) ?? null
+        : null;
+    const stay = {
+      startedAt: segment.startedAt, stoppedAt: segment.stoppedAt ?? null, placeId,
+      candidatePlaceIds: [segment.placeId, segment.learnedPlaceId, ...(segment.candidatePlaceIds ?? [])]
+        .flatMap((id) => id ? [learnedToSaved.get(id) ?? id] : [])
+    };
     const offered = segment.status === "finalised" && Date.parse(segment.startedAt) >= Date.parse(reconciliation.semanticCutoverAt);
     (offered ? timing.offered : timing.held).push(stay);
   }
@@ -64,7 +77,7 @@ export function autoLogStayTiming(
 /**
  * Whether a block at `placeId` waits for a replacement Review emission does not offer yet: no offered
  * stay at its place overlaps it (one that does takes the block now), and a held stay overlapping it
- * is, or may yet become, that place. Such a visit has not vanished, so its stay is not retired and
+ * is, or may yet become, that place (directly or through an accepted learned place). Such a visit has not vanished, so its stay is not retired and
  * stays live and linked until a later replay offers the replacement (Codex r2/r4/r5 on #435).
  */
 function awaitsHeldReplacement(block: Interval, placeId: string | null, timing: AutoLogStayTiming) {

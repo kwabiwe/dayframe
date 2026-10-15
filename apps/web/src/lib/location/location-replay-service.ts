@@ -153,13 +153,16 @@ export async function replayLocationEvidence(
      where workspace_id = $1 and latitude is not null and longitude is not null`,
     [session.workspaceId]
   );
-  const learnedResult = await client.query<LearnedPlaceRow>(
+  const learnedResult = await client.query<LearnedPlaceRow & { savedPlaceId: string | null }>(
     `select id, name, latitude, longitude,
-            radius_meters as "radiusMeters", 0 as priority, true as "loggingEnabled"
+            radius_meters as "radiusMeters", 0 as priority, true as "loggingEnabled",
+            place_id as "savedPlaceId"
      from learned_places
      where workspace_id = $1 and user_id = $2 and status = 'accepted'`,
     [session.workspaceId, session.userId]
   );
+  // The saved place each accepted learned place is linked to, as Review emission resolves it.
+  const learnedToSaved = new Map(learnedResult.rows.flatMap((row) => row.savedPlaceId ? [[row.id, row.savedPlaceId] as const] : []));
   observeLocationTiming(options, "catalogue_read", "completed");
   observeLocationStage(options, "engine");
   observeLocationTiming(options, "engine_computation", "started");
@@ -185,7 +188,7 @@ export async function replayLocationEvidence(
   }));
   const places = {
     savedPlaces: placesResult.rows,
-    learnedPlaces: learnedResult.rows.map((place) => ({ ...place, accepted: true as const }))
+    learnedPlaces: learnedResult.rows.map(({ savedPlaceId: _savedPlaceId, ...place }) => ({ ...place, accepted: true as const }))
   };
   const output = runLocationEngine({
     priorState: { ...EMPTY_LOCATION_ENGINE_STATE, algorithmVersion: options.algorithmVersion },
@@ -217,7 +220,7 @@ export async function replayLocationEvidence(
     .map((segment) => segment.clientSegmentId);
   observeLocationTiming(options, "obsolete_segment_handling", "started");
   const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds, autoLogLocked,
-    options.autoLogReconciliation ? autoLogStayTiming(segments, options.autoLogReconciliation) : { offered: [], held: [] });
+    options.autoLogReconciliation ? autoLogStayTiming(segments, options.autoLogReconciliation, learnedToSaved) : { offered: [], held: [] });
   observeLocationTiming(options, "obsolete_segment_handling", "completed");
 
   const evidenceIds = new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.id]));
