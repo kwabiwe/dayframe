@@ -12,9 +12,13 @@ type ToastEntry = {
   tagNames: readonly string[];
 };
 
-/** The block's name as its row shows it: the description, else the activity. */
+/**
+ * The block's name as its row shows it: the description, else the activity. The legacy
+ * "Start activity" placeholder is no description, as on iPhone (`displayTimerDescription`).
+ */
 export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "description">) {
-  return entry.description?.trim() || entry.categoryName || "No activity";
+  const description = entry.description?.trim();
+  return (description && description !== "Start activity" ? description : null) || entry.categoryName || "No activity";
 }
 
 function compactDuration(seconds: number) {
