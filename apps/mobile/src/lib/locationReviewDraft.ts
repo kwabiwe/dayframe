@@ -23,6 +23,12 @@ export type LocationReviewWindowDraft = {
   startTimeText: string;
   stopDateText: string;
   stopTimeText: string;
+  /**
+   * The exact instants the time wheel or VoiceOver chose (A11b), used while the text still shows
+   * them: the second 01:30 when the clocks go back, or a step's cleared seconds (Codex r1 on #432).
+   */
+  startDraftMs?: number | null;
+  stopDraftMs?: number | null;
 };
 
 export type ParsedLocationReviewWindow = {
@@ -82,7 +88,7 @@ export function parseLocationReviewWindow(
     return { value: null, error: "This suggestion does not have a complete time range." };
   }
 
-  const start = mergeTimeEntryDialLocalDateTime({
+  const start = ownDraftInstant(draft.startDraftMs, draft.startDateText, draft.startTimeText) ?? mergeTimeEntryDialLocalDateTime({
     baseTimestampMs: baselineStart,
     dateText: draft.startDateText,
     timeText: draft.startTimeText
@@ -91,7 +97,7 @@ export function parseLocationReviewWindow(
     return { value: null, error: start.error ?? "Enter a valid start time." };
   }
 
-  const stop = mergeTimeEntryDialLocalDateTime({
+  const stop = ownDraftInstant(draft.stopDraftMs, draft.stopDateText, draft.stopTimeText) ?? mergeTimeEntryDialLocalDateTime({
     baseTimestampMs: baselineStop,
     dateText: draft.stopDateText,
     timeText: draft.stopTimeText
@@ -110,6 +116,36 @@ export function parseLocationReviewWindow(
     },
     error: null
   };
+}
+
+/** A chosen instant while the endpoint's date and time text still show it; otherwise null. */
+function ownDraftInstant(draftMs: number | null | undefined, dateText: string, timeText: string) {
+  if (draftMs === null || draftMs === undefined || !Number.isFinite(draftMs)) return null;
+  const own = new Date(draftMs);
+  if (formatLocationReviewDateInput(own) !== dateText || formatLocationReviewTimeInput(own) !== timeText) return null;
+  return { error: null, timestampMs: draftMs };
+}
+
+/**
+ * One endpoint's instant on the evidence's own day: the chosen instant while the text still shows
+ * it, else the text merged as typing is (anchored on the detected endpoint); null while the text
+ * isn't a valid time.
+ */
+export function locationReviewEndpointMs({
+  baselineMs,
+  draftMs,
+  timeText
+}: {
+  baselineMs: number;
+  draftMs: number | null;
+  timeText: string;
+}) {
+  const dateText = formatLocationReviewDateInput(new Date(baselineMs));
+  return (ownDraftInstant(draftMs, dateText, timeText) ?? mergeTimeEntryDialLocalDateTime({
+    baseTimestampMs: baselineMs,
+    dateText,
+    timeText
+  })).timestampMs;
 }
 
 export function buildLocationReviewEdit({

@@ -12,7 +12,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true },
+  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Keyboard: { addListener: () => ({ remove() {} }), dismiss: vi.fn() },
@@ -59,6 +59,9 @@ vi.mock("../../../modules/dayframe-place-search", () => ({
   searchNearby: native.searchNearby,
   setQuery: native.setQuery
 }));
+// The A11b time wheel panel and haptics are native; these tests render the editor's text only.
+vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: () => null }));
+vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("expo-location", () => ({ getForegroundPermissionsAsync: vi.fn(), getLastKnownPositionAsync: vi.fn() }));
 vi.mock("@/lib/placeSearch", () => import("../../lib/placeSearch"));
 

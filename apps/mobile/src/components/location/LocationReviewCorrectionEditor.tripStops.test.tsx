@@ -9,7 +9,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true },
+  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Easing: { cubic: () => 0, out: (easing: unknown) => easing },
   Alert: { alert: vi.fn() },
@@ -47,6 +47,9 @@ vi.mock("@/lib/placeSearch", () => ({
 vi.mock("@/components/location/LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
 vi.mock("./LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
 // All activities is a native sheet; these tests never open it.
+// The A11b time wheel panel and haptics are native; these tests render the editor's text only.
+vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: () => null }));
+vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("../ActivityPickerSheet", () => ({ ActivityPickerSheet: () => null }));
 // The real draft and typography helpers, reached by relative path.
 vi.mock("@/lib/locationReviewDraft", () => import("../../lib/locationReviewDraft"));

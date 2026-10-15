@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 // A11b (owner decisions 12 Oct 2026), date pickers PR 4: the entry sheet's time cards open the
 // native time wheel inline; VoiceOver adjusts the cards instead.
 const sheet = readFileSync(fileURLToPath(new URL("./ActiveTimerEditSheet.tsx", import.meta.url)), "utf8");
+const panel = readFileSync(fileURLToPath(new URL("./TimeWheelPanel.tsx", import.meta.url)), "utf8");
 const swift = readFileSync(fileURLToPath(new URL("../../modules/dayframe-time-wheel/ios/DayframeTimeWheelExpoView.swift", import.meta.url)), "utf8");
 
 describe("entry sheet time wheel (A11b)", () => {
@@ -14,9 +15,11 @@ describe("entry sheet time wheel (A11b)", () => {
     expect(sheet).toContain('editable={!busy && typingTarget === "start"}');
     expect(sheet).toContain('editable={!busy && typingTarget === "end"}');
     expect(sheet).not.toContain("onPress={() => timeInputRef.current?.focus()}");
-    expect(sheet).toContain('testID="time-entry-time-wheel-type"');
-    expect(sheet).toContain('testID="time-entry-time-wheel-every-minute"');
-    expect(sheet).toContain('testID="time-entry-time-wheel-done"');
+    // The shared panel (TimeWheelPanel) draws Every minute, Type time and Done under its prefix.
+    expect(sheet).toContain('testIDPrefix="time-entry-time-wheel"');
+    expect(panel).toContain("testID={`${testIDPrefix}-type`}");
+    expect(panel).toContain("testID={`${testIDPrefix}-every-minute`}");
+    expect(panel).toContain("testID={`${testIDPrefix}-done`}");
   });
 
   it("ignores a spin from an older presentation or revision, so it can't undo an outside change", () => {
@@ -51,13 +54,13 @@ describe("entry sheet time wheel (A11b)", () => {
     expect(sheet).toContain("const dialAreaHeight = dialAreaMeasure?.key === dialAreaKey ? dialAreaMeasure.height : null;");
     expect(sheet).toContain("const dialAreaKey = `${layoutDensity}:${windowDimensions.fontScale}:${windowDimensions.width}`;");
     expect(sheet).toContain("dialAreaHeight - TIME_WHEEL_PANEL_CHROME - (timeWheelShowsSummary ? TIME_WHEEL_SUMMARY_HEIGHT : 0)");
-    expect(sheet).toContain("const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;");
-    expect(sheet).toContain('testID="time-entry-time-wheel-summary"');
+    expect(panel).toContain("export const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;");
+    expect(panel).toContain("testID={`${testIDPrefix}-summary`}");
     // The foot stays one 44-point row: labels shrink rather than wrap.
-    expect(sheet).toMatch(/timeWheelFoot: \{ alignItems: "center", flexDirection: "row", gap: 6 \}/);
-    expect(sheet).toContain('entering={localPresenceEntering(reduceMotion, "rise")}');
-    expect(sheet).toContain("exiting={localPresenceExiting(reduceMotion)}");
-    expect(sheet).toContain("onStartShouldSetResponder={() => true}");
+    expect(panel).toMatch(/foot: \{ alignItems: "center", flexDirection: "row", gap: 6 \}/);
+    expect(panel).toContain('entering={localPresenceEntering(reduceMotion, "rise")}');
+    expect(panel).toContain("exiting={localPresenceExiting(reduceMotion)}");
+    expect(panel).toContain("onStartShouldSetResponder={() => true}");
   });
 
   it("keeps the wheel honest around typing, saving, Escape and the previous-end chip (Codex r1 on #428)", () => {

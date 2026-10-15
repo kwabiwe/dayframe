@@ -20,7 +20,6 @@ import {
 import type { GestureType } from "react-native-gesture-handler";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
-import Reanimated from "react-native-reanimated";
 import {
   consumeActiveHashtag,
   buildHistoricalEntrySuggestions,
@@ -41,8 +40,8 @@ import {
   previousEndStillHolds
 } from "@/lib/previousEndChip";
 import { DateSheet } from "@/components/DateSheet";
-import { DayframeTimeWheelView, type DayframeTimeWheelChange } from "../../modules/dayframe-time-wheel";
-import { localPresenceEntering, localPresenceExiting } from "@/lib/motion";
+import type { DayframeTimeWheelChange } from "../../modules/dayframe-time-wheel";
+import { TIME_WHEEL_PANEL_CHROME, TimeWheelPanel } from "@/components/TimeWheelPanel";
 import { timeWheelAccessibilityStep, timeWheelMinuteInterval } from "@/lib/timeWheel";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
 import { addLocalDays, formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
@@ -3139,77 +3138,24 @@ export function ActiveTimerEditSheet({
                     )}
                   </View>
                   {timeWheel && timeWheelModel ? (
-                    // A11b: one inline wheel under the cards, a notch pointing at its card. The panel
-                    // takes its own touches, so a tap on it never reads as a tap outside.
-                    <Reanimated.View
-                      entering={localPresenceEntering(reduceMotion, "rise")}
-                      exiting={localPresenceExiting(reduceMotion)}
+                    // A11b: one inline wheel under the cards, a notch pointing at its card.
+                    <TimeWheelPanel
+                      busy={busy}
                       key={`time-wheel-${timeWheel.presentationId}`}
-                      onStartShouldSetResponder={() => true}
-                      style={[sheetStyles.timeWheelPanel, { backgroundColor: theme.surfaceMuted }]}
-                      testID="time-entry-time-wheel"
-                    >
-                      {timeCardsStacked ? null : (
-                        <View
-                          pointerEvents="none"
-                          style={[sheetStyles.timeWheelNotch, { backgroundColor: theme.surfaceMuted, left: timeWheel.target === "start" ? "25%" : "75%" }]}
-                        />
-                      )}
-                      <DayframeTimeWheelView
-                        model={timeWheelModel}
-                        onTimeChange={(event) => handleTimeWheelChange(event.nativeEvent)}
-                        style={{ alignSelf: "stretch", height: timeWheelHeight }}
-                        testID="time-entry-time-wheel-native"
-                      />
-                      {timeWheelSummary ? (
-                        <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.timeWheelSummary, { color: theme.textSecondary }]} testID="time-entry-time-wheel-summary">
-                          {timeWheelSummary}
-                        </Text>
-                      ) : null}
-                      <View style={sheetStyles.timeWheelFoot}>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityState={{ disabled: busy, selected: timeWheelModel.minuteInterval === 1 }}
-                          disabled={busy}
-                          onPress={toggleEveryMinute}
-                          style={({ pressed }) => [
-                            sheetStyles.timeWheelPill,
-                            { backgroundColor: timeWheelModel.minuteInterval === 1 ? theme.surface : "transparent" },
-                            pressed && !busy ? styles.buttonPressed : null
-                          ]}
-                          testID="time-entry-time-wheel-every-minute"
-                        >
-                          {timeWheelModel.minuteInterval === 1 ? <DayframeIcon color={theme.textPrimary} glyph={DAYFRAME_APP_ICONS.done} size={14} /> : null}
-                          <Text {...mobileTextProps("control")} adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: timeWheelModel.minuteInterval === 1 ? theme.textPrimary : theme.textSecondary }]}>
-                            Every minute
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityHint="Types the time with the number pad"
-                          accessibilityRole="button"
-                          disabled={busy}
-                          onPress={() => typeCardTime(timeWheel.target)}
-                          style={({ pressed }) => [sheetStyles.timeWheelPill, pressed && !busy ? styles.buttonPressed : null]}
-                          testID="time-entry-time-wheel-type"
-                        >
-                          <Text {...mobileTextProps("control")} adjustsFontSizeToFit minimumFontScale={0.75} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: theme.textSecondary }]}>Type time</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityLabel={`Done, sets ${timeWheel.target === "end" ? "End" : "Start"} to ${formatTimeInput(new Date(timeWheelModel.valueMs))}`}
-                          accessibilityRole="button"
-                          onPress={() => closeTimeWheel({ haptic: true })}
-                          style={({ pressed }) => [
-                            sheetStyles.timeWheelPill,
-                            sheetStyles.timeWheelDone,
-                            { backgroundColor: theme.textPrimary },
-                            pressed ? styles.buttonPressed : null
-                          ]}
-                          testID="time-entry-time-wheel-done"
-                        >
-                          <Text {...mobileTextProps("control")} numberOfLines={1} style={[sheetStyles.timeWheelPillText, { color: theme.background }]}>Done</Text>
-                        </Pressable>
-                      </View>
-                    </Reanimated.View>
+                      model={timeWheelModel}
+                      notch={timeCardsStacked ? null : timeWheel.target === "start" ? "25%" : "75%"}
+                      onDone={() => closeTimeWheel({ haptic: true })}
+                      onTimeChange={handleTimeWheelChange}
+                      onToggleEveryMinute={toggleEveryMinute}
+                      onTypeTime={() => typeCardTime(timeWheel.target)}
+                      pressedStyle={styles.buttonPressed}
+                      reduceMotion={reduceMotion}
+                      summary={timeWheelSummary}
+                      targetLabel={timeWheel.target === "end" ? "End" : "Start"}
+                      testIDPrefix="time-entry-time-wheel"
+                      theme={theme}
+                      wheelHeight={timeWheelHeight}
+                    />
                   ) : null}
                   {presentedPreviousEnd ? (
                     <Pressable
@@ -3620,8 +3566,6 @@ const TIME_CARD_ACCESSIBILITY_ACTIONS = [
 const TIME_WHEEL_HEIGHT_BY_DENSITY = { regular: 180, compact: 140, condensed: 100 } as const;
 const TIME_WHEEL_MIN_HEIGHT = 100;
 const TIME_WHEEL_MAX_HEIGHT = 180;
-/** The panel around the wheel: its top margin and padding, the gap and the 44-point foot. */
-const TIME_WHEEL_PANEL_CHROME = 12 + 8 + 4 + 44 + 8;
 /** The duration line and its gap, at the metadata role's 1.3× text cap (Codex r3 on #428). */
 const TIME_WHEEL_SUMMARY_HEIGHT = 26;
 
@@ -3655,14 +3599,6 @@ const sheetStyles = StyleSheet.create({
   previousEndChip: { alignSelf: "flex-start", gap: 4, marginTop: 8 },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },
-  timeWheelPanel: { borderRadius: 18, gap: 4, marginTop: 12, padding: 8 },
-  timeWheelNotch: { borderRadius: 3, height: 14, marginLeft: -7, position: "absolute", top: -7, transform: [{ rotate: "45deg" }], width: 14 },
-  // One row at every text size (the panel's height is budgeted): the labels shrink rather than wrap.
-  timeWheelFoot: { alignItems: "center", flexDirection: "row", gap: 6 },
-  timeWheelPill: { alignItems: "center", borderRadius: 999, flexDirection: "row", flexShrink: 1, gap: 6, justifyContent: "center", minHeight: 44, paddingHorizontal: 12 },
-  timeWheelPillText: { fontSize: 13, fontWeight: "700" },
-  timeWheelDone: { marginLeft: "auto", minWidth: 72 },
-  timeWheelSummary: { fontSize: 12.5, fontVariant: ["tabular-nums"], lineHeight: 16, textAlign: "center" },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {
