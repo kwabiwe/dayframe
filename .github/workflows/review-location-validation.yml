@@ -206,8 +206,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v1-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
-          restore-keys: ios-ccache-v1-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-
+          key: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
+          restore-keys: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-
       - name: Install ccache
         env:
           MATCHED: ${{ steps.ccache-cache.outputs.cache-matched-key }}
@@ -240,11 +240,14 @@ jobs:
             puts "Pod graph matches; only permitted path-generated checksums excluded."
           '
           git diff --exit-code -- package-lock.json
-      # REACT_NATIVE_PATH is the path Pods already uses (${PODS_ROOT}/../../../../node_modules/react-native).
       # React Native's ccache hook sets CC to $(REACT_NATIVE_PATH)/scripts/xcode/ccache-clang.sh on every
-      # target, and only Pods defines it, so the app and Live Activity targets need it from here.
+      # target. Only Pods defines REACT_NATIVE_PATH, so the app and Live Activity targets get the same path
+      # Pods uses (${PODS_ROOT}/../../../../node_modules/react-native) from here. The wrapper runs
+      # `$CCACHE_BINARY clang`, and Xcode does not pass build settings to compiler processes, so without
+      # CCACHE_BINARY in the environment it silently runs plain clang.
       - name: Clean unsigned Simulator build
         run: >-
+          CCACHE_BINARY="$(command -v ccache)"
           xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
           -scheme Dayframe -configuration Staging -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
@@ -257,13 +260,18 @@ jobs:
           "$RUNNER_TEMP/dayframe-clean-derived-data/Build/Products/Staging-iphonesimulator/Dayframe.app"
       - name: Compiler cache statistics
         if: ${{ !cancelled() }}
-        run: ccache --show-stats --verbose || true
+        run: |
+          ccache --show-stats --verbose || true
+          # A build that never reached ccache would still pass; say so rather than save an empty cache.
+          calls=$(ccache --print-stats | awk '$1 ~ /^(direct_cache_hit|preprocessed_cache_hit|cache_miss)$/ { n += $2 } END { print n + 0 }')
+          echo "Compiler calls through ccache: $calls"
+          [ "$calls" -gt 0 ] || echo "::warning::No compile went through ccache; the build ran uncached."
       - name: Save compiler cache
         if: success() && (github.event_name == 'push' || steps.ccache-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v4
         with:
           path: ~/Library/Caches/ccache
-          key: ios-ccache-v1-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
+          key: ios-ccache-v2-${{ steps.xcode.outputs.version }}-${{ hashFiles('apps/mobile/ios/Podfile.lock', 'package-lock.json') }}-${{ github.run_id }}
       - name: Save CocoaPods
         if: success() && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
