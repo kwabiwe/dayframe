@@ -375,6 +375,12 @@ Block pull-to-refresh:
 - Async outcome: none. The wheel only changes the entry sheet's draft; the sheet's Done saves.
 - Accessibility: VoiceOver never gets the wheel (it is hidden); each card is adjustable in 5-minute steps with Type time and Change date, and activate types the time. Reduce Motion: the panel fades in 90 ms and out 70 ms with no rise; outside changes set the columns without the animated spin; the platform's own wheel momentum stays, as for any system picker.
 
+## Location evidence time wheel (A11b, date pickers PR 5)
+
+- Trigger, owner and motion: as the entry sheet's time wheel above, through the same `TimeWheelPanel` (presence `localPresenceEntering(…, "rise")` / `localPresenceExiting`, keyed per opening; the native wheel owns its columns). The panel opens under the When? row inside the editor's scroll view, which owns any scrolling; nothing else moves on its own (the content below takes the panel's room in the same commit).
+- Differences: no date control (the day is the evidence's) and no summary line (Duration is already in the row); a fixed 180-point wheel, because the page scrolls; the wheel closes when Search or the activity field takes focus, on a save, Done or a second tap on its field.
+- Accessibility and Reduce Motion: VoiceOver gets adjustable Start and End fields (5-minute steps, activate or Type time to type) and never the wheel; Reduce Motion fades the panel (90 ms in, 70 ms out) and outside changes set the wheel without a spin.
+
 ## Web command timer panels and sticky band (owner design A/C1, 13 Oct 2026)
 
 - Trigger: Suggestions open on focus, click or typing in the Description; Tags on `#…`, Activities on a typed `@word`; each closes on a pick, Escape, Close, blur or a new block (behaviour unchanged). The activity block and the tag button open the same Activities and Tags lists (14 Oct 2026) with the same fade; they close on a pick (Activities), Escape, Close, a second press of the button or a press outside, and add no motion of their own (no landing, no row animation when a tag is toggled or the search filters). The portalled Activities list keeps its measured position and width through its exit fade (geometry is cleared only by the next open, which measures before paint). The hairline under the sticky band: any scroll or resize that moves page content under the band, or back to the top.
