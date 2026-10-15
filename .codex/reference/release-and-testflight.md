@@ -38,16 +38,16 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (120)` (2026-10-14)
+- Last repository-recorded verified build: `0.1.0 (121)` (2026-10-15)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `687b610e-f66d-4084-879e-fa04b36b5205`
-- Archived commit: `ff3dc54`
-- Performance gate reading (baseline for the next build): staging build of `ff3dc54`, Today in front with a block running on the iPhone 17, after a five-minute warm-up: 6.9 % of a core and about +1.8 MB per minute (14 Oct). Build 119: 6.8 % and +1.3 MB per minute; background 30-minute average 1.8 %.
+- Delivery/build ID: `5424fd9f-03d4-45a4-9453-f6ce2fc40c00`
+- Archived commit: `729dd41`
+- Performance gate reading (baseline for the next build): staging build of `729dd41`, Today in front with a block running on the iPhone 17, after a five-minute warm-up (7.1 %, +1.9 MiB per minute), two gate windows: 7.1 % of a core and +0.98 MiB per minute, then 5.7 % and +0.63 MiB per minute; footprint about 315 → 346 MiB over the 22 minutes (15 Oct). Build 120: 6.9 % and +1.8 MB per minute; build 119: 6.8 % and +1.3 MB per minute; background 30-minute average 1.8 % (119).
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 120 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 121 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
