@@ -3800,23 +3800,33 @@ kbd {
   padding: var(--web-gap-lg) var(--web-panel-padding);
 }
 
-.report-custom-range {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 12px;
-  margin-top: 14px;
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+/* Reports custom dates (date-picker audit): the range's caption over the month grid. The caption
+   keeps one line's height whatever it says, so tapping never moves the grid. */
+dialog.ui-dialog.df-range-custom {
+  width: min(400px, calc(100vw - 24px));
 }
 
-.report-custom-range .ui-field {
-  min-width: min(100%, 190px);
+.report-range-calendar {
+  display: grid;
+  width: min(20rem, 100%);
+  gap: 6px;
+  margin: 0 auto;
 }
 
-.report-custom-actions {
-  display: flex;
-  gap: 8px;
+/* Phone-safe day targets (44 px tall) and no colour transitions: each tap redraws the range at once. */
+.report-range-calendar .dayframe-calendar-grid button {
+  min-height: 44px;
+  transition: none;
+}
+
+.report-range-caption {
+  min-height: 21px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  line-height: 21px;
+  text-align: center;
 }
 
 .report-filter-heading,
@@ -4501,17 +4511,6 @@ kbd {
   .report-more-filter-grid,
   .report-secondary-grid {
     grid-template-columns: 1fr;
-  }
-
-  .report-custom-range,
-  .report-custom-range .ui-field,
-  .report-custom-actions,
-  .report-custom-actions .ui-button {
-    width: 100%;
-  }
-
-  .report-custom-actions .ui-button {
-    flex: 1;
   }
 
   .report-filter-heading,
@@ -7469,6 +7468,51 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .dayframe-calendar-grid button.is-unavailable:hover {
   background: transparent;
+}
+
+/* A range (Reports custom dates, as on iPhone): round first and last days on one continuous band,
+   the band's days in plain text on a soft neutral tint. The circle is the cell's own height, so the
+   band runs edge to edge between the cells. */
+.dayframe-calendar {
+  --calendar-range-band: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+
+.dayframe-calendar-grid button.is-in-range[aria-pressed="true"] {
+  border-radius: 0;
+  background: var(--calendar-range-band);
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+/* Today inside the band: coral text on the tint is too faint in Midnight (Codex r1 on #426), so it
+   keeps the band's ink and is marked by a coral underline instead. A first or last day keeps its
+   own ink on the filled circle. */
+.dayframe-calendar-grid button.is-in-range.is-today:not(.is-range-start, .is-range-end, .is-range-single)[aria-pressed="true"] {
+  text-decoration: underline 2px var(--accent);
+  text-underline-offset: 4px;
+}
+
+.dayframe-calendar-grid button.is-range-start[aria-pressed="true"],
+.dayframe-calendar-grid button.is-range-end[aria-pressed="true"],
+.dayframe-calendar-grid button.is-range-single[aria-pressed="true"] {
+  color: var(--background);
+  font-weight: 700;
+}
+
+.dayframe-calendar-grid button.is-range-start[aria-pressed="true"] {
+  background:
+    radial-gradient(circle closest-side, var(--foreground) calc(100% - 0.5px), transparent 100%),
+    linear-gradient(to right, transparent 50%, var(--calendar-range-band) 50%);
+}
+
+.dayframe-calendar-grid button.is-range-end[aria-pressed="true"] {
+  background:
+    radial-gradient(circle closest-side, var(--foreground) calc(100% - 0.5px), transparent 100%),
+    linear-gradient(to left, transparent 50%, var(--calendar-range-band) 50%);
+}
+
+.dayframe-calendar-grid button.is-range-single[aria-pressed="true"] {
+  background: radial-gradient(circle closest-side, var(--foreground) calc(100% - 0.5px), transparent 100%);
 }
 
 .dayframe-calendar header button:disabled {
@@ -11785,6 +11829,17 @@ dialog.ui-dialog.df-palette {
 
 .df-rbtn--ghost {
   background: transparent;
+}
+
+/* The custom dates dialog's Done: neutral, as every date sheet's Done (date-picker audit). */
+.df-rbtn.df-range-done {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.df-rbtn.df-range-done:disabled {
+  background: var(--surface-muted);
+  color: var(--disabled);
 }
 
 .df-kbd {
