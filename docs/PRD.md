@@ -599,3 +599,4 @@ Important assumptions:
 - Supabase email confirmation may be disabled initially for easier sideload/beta testing.
 - HealthKit summaries are sufficient for MVP; raw detailed samples should be minimized.
 - Precise location can be stored for geotracking but must be fully deletable.
+
