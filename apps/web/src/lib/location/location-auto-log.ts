@@ -38,16 +38,40 @@ function overlaps(a: Interval, b: Interval) {
   return Date.parse(a.startedAt) < end(b) && end(a) > Date.parse(b.startedAt);
 }
 
+type PlacedInterval = Interval & { placeId: string | null; candidatePlaceIds: readonly string[] };
+
 /**
- * Stays replay produces that Review emission does not offer yet (not finalised, or before the
- * semantic cutover): a visit whose block overlaps one of them has not vanished, it is waiting for its
- * replacement, so it is not retired (Codex r2/r4 on #435).
+ * The stays replay produces, split by whether Review emission offers them now (finalised, from the
+ * semantic cutover on) or holds them (not finalised, or before the cutover).
  */
-export function autoLogHeldStays<T extends Interval & { kind: string; status: string }>(
-  segments: readonly T[], reconciliation: AutoLogReconciliation
-): Interval[] {
-  return segments.filter((segment) => segment.kind === "stay" &&
-    (segment.status !== "finalised" || Date.parse(segment.startedAt) < Date.parse(reconciliation.semanticCutoverAt)));
+export type AutoLogStayTiming = { offered: PlacedInterval[]; held: PlacedInterval[] };
+
+export function autoLogStayTiming(
+  segments: ReadonlyArray<{ kind: string; status: string; startedAt: string; stoppedAt?: string | null; placeId?: string | null; candidatePlaceIds?: string[] }>,
+  reconciliation: AutoLogReconciliation
+): AutoLogStayTiming {
+  const timing: AutoLogStayTiming = { offered: [], held: [] };
+  for (const segment of segments) {
+    if (segment.kind !== "stay") continue;
+    const stay = { startedAt: segment.startedAt, stoppedAt: segment.stoppedAt ?? null,
+      placeId: segment.placeId ?? null, candidatePlaceIds: segment.candidatePlaceIds ?? [] };
+    const offered = segment.status === "finalised" && Date.parse(segment.startedAt) >= Date.parse(reconciliation.semanticCutoverAt);
+    (offered ? timing.offered : timing.held).push(stay);
+  }
+  return timing;
+}
+
+/**
+ * Whether a block at `placeId` waits for a replacement Review emission does not offer yet: no offered
+ * stay at its place overlaps it (one that does takes the block now), and a held stay overlapping it
+ * is, or may yet become, that place. Such a visit has not vanished, so its stay is not retired and
+ * stays live and linked until a later replay offers the replacement (Codex r2/r4/r5 on #435).
+ */
+function awaitsHeldReplacement(block: Interval, placeId: string | null, timing: AutoLogStayTiming) {
+  if (!placeId) return false;
+  if (timing.offered.some((stay) => stay.placeId === placeId && overlaps(stay, block))) return false;
+  return timing.held.some((stay) => overlaps(stay, block) &&
+    (stay.placeId === placeId || (!stay.placeId && stay.candidatePlaceIds.includes(placeId))));
 }
 
 /**
@@ -112,8 +136,8 @@ export async function lockAutoLoggedBlocks(
  * cutover and young enough that none of the visit's evidence has expired, so a visit only ageing
  * evidence hides is never mistaken for one that vanished, with lineage still retained (Codex r1 on
  * #435) — every stay it no longer produces whose block `lockAutoLoggedBlocks` holds unedited. A block
- * the person deleted or edited keeps its visit a decision, and a block overlapping a held stay
- * (`autoLogHeldStays`) keeps its stay live and linked until a later replay can offer the replacement. A retired stay is superseded and detached
+ * the person deleted or edited keeps its visit a decision, and a block awaiting a held replacement
+ * (`awaitsHeldReplacement`) keeps its stay live and linked until a later replay offers it. A retired stay is superseded and detached
  * from its event (so a returning stay is never mistaken for a decision) and the event is ignored with
  * the superseded marker; its block is returned for emission to move with its replacement or for the
  * caller to remove.
@@ -124,7 +148,7 @@ export async function retireAutoLoggedMissingStays(
   options: { deviceId: string; algorithmVersion: string; processingAt: string; reconciliation: AutoLogReconciliation },
   stayClientIds: string[],
   locked: ReadonlySet<string>,
-  heldStays: readonly Interval[]
+  timing: AutoLogStayTiming
 ): Promise<AutoLogOrphan[]> {
   const stays = (await client.query<{ segmentId: string; eventId: string }>(
     `select st.id as "segmentId", st.created_from_event_id as "eventId"
@@ -158,7 +182,7 @@ export async function retireAutoLoggedMissingStays(
   const blockInterval = (entry: (typeof entries)[number]) => ({ startedAt: iso(entry.startedAt)!, stoppedAt: iso(entry.stoppedAt) });
   const eventsWithBlocks = new Set(entries.map((entry) => entry.eventId));
   for (const entry of entries) {
-    if (heldStays.some((stay) => overlaps(stay, blockInterval(entry)))) eventsWithBlocks.delete(entry.eventId);
+    if (awaitsHeldReplacement(blockInterval(entry), entry.placeId, timing)) eventsWithBlocks.delete(entry.eventId);
   }
   const rows = stays.filter((stay) => eventsWithBlocks.has(stay.eventId));
   if (rows.length === 0) return [];

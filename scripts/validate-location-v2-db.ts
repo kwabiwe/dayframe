@@ -2019,6 +2019,30 @@ async function validateReviewModeAutoLogPlaces() {
     [WORKSPACE_ID, USER_ID, awaited.placeId, awaited.startedAt, awaited.stoppedAt]);
   assert.equal(heldReview.rowCount, 0, "A finalised replacement of an auto-logged visit was offered in Review.");
 
+  // A finalised replacement at the block's place takes it even while a stay elsewhere it overlaps is
+  // still unfinished (Codex r5 on #435): the fixture's 12:27–12:49 saved visit, its block stretched
+  // into the unknown stay from 12:53, replayed when only that unknown stay is still closed.
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const mixed = (await autoEntries()).find((entry) => entry.startedAt.toISOString() === "2026-07-20T12:27:00.000Z");
+  assert(mixed?.stoppedAt, "The mixed held-replacement check needs the 12:27 auto-logged visit.");
+  await renameStay(mixed, ":mixed");
+  await pool.query("update time_entries set stopped_at = '2026-07-20T13:30:00.000Z' where id = $1", [mixed.id]);
+  await replayRetainedLocationEvidence(replayRequest, session, "2026-07-20T14:23:30.000Z");
+  const unfinished = await pool.query(
+    `select 1 from stay_segments where workspace_id = $1 and user_id = $2 and started_at = '2026-07-20T12:53:00.000Z'
+       and status not in ('finalised', 'superseded')`, [WORKSPACE_ID, USER_ID]);
+  assert.equal(unfinished.rowCount, 1, "The mixed held-replacement check did not leave the overlapping stay unfinished.");
+  const taken = (await autoEntries()).find((entry) => entry.id === mixed.id);
+  assert(taken && taken.eventId !== mixed.eventId && taken.eventStatus === "confirmed" &&
+    taken.stoppedAt?.toISOString() === mixed.stoppedAt.toISOString(),
+    "A finalised replacement at the block's place did not take the block while another stay was unfinished.");
+  const mixedReview = await pool.query(
+    `select 1 from review_items where workspace_id = $1 and user_id = $2 and suggested_place_id = $3
+       and suggested_started_at < $5 and suggested_stopped_at > $4`,
+    [WORKSPACE_ID, USER_ID, mixed.placeId, mixed.startedAt, mixed.stoppedAt]);
+  assert.equal(mixedReview.rowCount, 0, "A finalised replacement was offered in Review because another stay was unfinished.");
+
   // A block that ran for over a week and then stopped still overlaps a visit inside it (Codex r2 on #435).
   await clearDerivedLocationState();
   await pool.query(
@@ -2074,7 +2098,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
