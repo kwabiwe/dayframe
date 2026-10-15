@@ -17,7 +17,9 @@ describe("Location evidence time wheel (A11b)", () => {
   });
 
   it("writes the times through the same merge as typing, and ignores stale or late spins", () => {
-    expect(editor).toMatch(/function fieldInstant[\s\S]*?mergeTimeEntryDialLocalDateTime\(\{\s*baseTimestampMs: base\.getTime\(\),\s*dateText: formatLocationReviewDateInput\(base\)/);
+    // The chosen instant while the text shows it, else the text merged as typing is (Codex r1 on #432).
+    expect(editor).toMatch(/function fieldInstant[\s\S]*?locationReviewEndpointMs\(\{\s*baselineMs: base\.getTime\(\),\s*draftMs: target === "end" \? stopDraftMs : startDraftMs,/);
+    expect((editor.match(/startDraftMs,\n\s*startTimeText,/g) ?? []).length).toBe(2);
     expect(editor).toMatch(/function handleTimeWheelChange[\s\S]*?const wheel = timeWheelRef\.current;[\s\S]*?change\.presentationId !== wheel\.presentationId\) return;[\s\S]*?change\.revision !== timeWheelRevisionRef\.current\) return;[\s\S]*?savingRef\.current/);
     // A save closes the wheel and makes its later spins stale.
     expect(editor).toMatch(/if \(!saving \|\| !timeWheelRef\.current\) return;\s*setTimeWheel\(null\);\s*bumpTimeWheelRevision\(\);/);
@@ -32,7 +34,11 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).toContain("timeWheelAccessibilityStep(fieldTimeMs(target), direction)");
   });
 
-  it("closes the wheel when another field takes focus", () => {
+  it("closes the wheel when another field takes focus, a place changes, All activities opens or the screen loses focus", () => {
+    expect(editor).toMatch(/function supersedePlacePick\(\) \{[\s\S]*?setTimeWheel\(null\);/);
+    expect(editor).toMatch(/setTimeWheel\(null\);\s*setActivityPickerOpen\(true\);/);
+    expect(editor).toMatch(/if \(isFocused \|\| !timeWheelRef\.current\) return;\s*setTimeWheel\(null\);/);
+    expect(editor).toContain("onFocus={() => setTimeWheel(null)}");
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(searchInputRef\.current\);/);
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(activityInputRef\.current\);/);
   });

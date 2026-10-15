@@ -34,6 +34,7 @@ import {
   formatLocationReviewDateInput,
   formatLocationReviewEditableTime,
   formatLocationReviewTimeInput,
+  locationReviewEndpointMs,
   initialLocationReviewDescription,
   keyboardRevealScrollOffset,
   locationReviewJourneyCopy,
@@ -68,7 +69,6 @@ import { LocationEvidenceMap } from "./LocationEvidenceMap";
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { TimeWheelPanel } from "../TimeWheelPanel";
 import { playHaptic } from "../../lib/haptics";
-import { mergeTimeEntryDialLocalDateTime } from "../../lib/timeEntryDurationDial";
 import { timeWheelAccessibilityStep, timeWheelMinuteInterval } from "../../lib/timeWheel";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
@@ -202,6 +202,9 @@ export function LocationReviewCorrectionEditor({
   // Type time (and VoiceOver's activate) types into the field; otherwise it isn't editable.
   const [typingTarget, setTypingTarget] = useState<"start" | "end" | null>(null);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
+  // The exact instants the wheel or VoiceOver chose, kept while the fields still show them.
+  const [startDraftMs, setStartDraftMs] = useState<number | null>(null);
+  const [stopDraftMs, setStopDraftMs] = useState<number | null>(null);
   const startTimeInputRef = useRef<TextInput>(null);
   const stopTimeInputRef = useRef<TextInput>(null);
   const savingRef = useRef(saving);
@@ -258,6 +261,14 @@ export function LocationReviewCorrectionEditor({
       subscription.remove();
     };
   }, []);
+
+  // Leaving the screen (another route in front) closes the wheel; a later spin is stale.
+  useEffect(() => {
+    if (isFocused || !timeWheelRef.current) return;
+    setTimeWheel(null);
+    bumpTimeWheelRevision();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFocused]);
 
   // A save captures the times: the wheel closes and its later spins are stale.
   useEffect(() => {
@@ -357,8 +368,10 @@ export function LocationReviewCorrectionEditor({
         baselineStartedAt: evidence.segment.startedAt,
         baselineStoppedAt: evidence.segment.stoppedAt ?? "",
         startDateText: formatLocationReviewDateInput(startAt),
+        startDraftMs,
         startTimeText,
         stopDateText: formatLocationReviewDateInput(stopAt),
+        stopDraftMs,
         stopTimeText
       })
     : null;
@@ -371,19 +384,24 @@ export function LocationReviewCorrectionEditor({
   function fieldInstant(target: "start" | "end") {
     const base = target === "end" ? stopAt : startAt;
     if (!base) return null;
-    return mergeTimeEntryDialLocalDateTime({
-      baseTimestampMs: base.getTime(),
-      dateText: formatLocationReviewDateInput(base),
+    return locationReviewEndpointMs({
+      baselineMs: base.getTime(),
+      draftMs: target === "end" ? stopDraftMs : startDraftMs,
       timeText: target === "end" ? stopTimeText : startTimeText
-    }).timestampMs;
+    });
   }
   const fieldTimeMs = (target: "start" | "end") =>
     fieldInstant(target) ?? (target === "end" ? stopAt?.getTime() ?? startAt.getTime() : startAt.getTime());
 
   function applyFieldTime(target: "start" | "end", valueMs: number) {
     const text = formatLocationReviewTimeInput(new Date(valueMs));
-    if (target === "end") setStopTimeText(text);
-    else setStartTimeText(text);
+    if (target === "end") {
+      setStopTimeText(text);
+      setStopDraftMs(valueMs);
+    } else {
+      setStartTimeText(text);
+      setStartDraftMs(valueMs);
+    }
     setValidationError(null);
   }
 
@@ -471,6 +489,8 @@ export function LocationReviewCorrectionEditor({
    * so a pick that lands late never overwrites newer input (Codex r1–r2 on #358).
    */
   function supersedePlacePick() {
+    // Any place or search change also sets and closes an open time wheel (Codex r1 on #432).
+    setTimeWheel(null);
     placePickTokenRef.current += 1;
     setResolvingSuggestion(false);
   }
@@ -640,8 +660,10 @@ export function LocationReviewCorrectionEditor({
       baselineStartedAt: evidence.segment.startedAt,
       baselineStoppedAt: evidence.segment.stoppedAt,
       startDateText: formatLocationReviewDateInput(startAt),
+      startDraftMs,
       startTimeText,
       stopDateText: formatLocationReviewDateInput(stopAt),
+      stopDraftMs,
       stopTimeText
     });
     if (!parsed.value) {
@@ -1037,6 +1059,7 @@ export function LocationReviewCorrectionEditor({
                   disabled={saving}
                   onPress={() => {
                     Keyboard.dismiss();
+                    setTimeWheel(null);
                     setActivityPickerOpen(true);
                   }}
                   pressedStyle={styles.buttonPressed}
@@ -1254,6 +1277,7 @@ export function LocationReviewCorrectionEditor({
                         {...mobileTextProps("input")}
                         editable={!saving}
                         onChangeText={renameMapPin}
+                        onFocus={() => setTimeWheel(null)}
                         placeholder="Place name"
                         placeholderTextColor={theme.textSecondary}
                         style={editorStyles.inlineInput}
