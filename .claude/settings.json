@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(npm run check:docs)",
+      "Bash(npm run lint)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run test)",
+      "Bash(xcrun simctl list *)",
+      "Bash(xcrun devicectl list *)",
+      "mcp__945761c3-1472-4cfc-a10f-203186afefaf__list_deployments",
+      "mcp__945761c3-1472-4cfc-a10f-203186afefaf__get_deployment",
+      "mcp__945761c3-1472-4cfc-a10f-203186afefaf__get_runtime_errors",
+      "mcp__945761c3-1472-4cfc-a10f-203186afefaf__get_runtime_logs",
+      "mcp__945761c3-1472-4cfc-a10f-203186afefaf__list_aliases",
+      "mcp__894b7dd6-2304-4b42-a03e-255207a35aad__list_deployments",
+      "mcp__894b7dd6-2304-4b42-a03e-255207a35aad__get_deployment",
+      "mcp__894b7dd6-2304-4b42-a03e-255207a35aad__get_runtime_errors",
+      "mcp__ccd_session_mgmt__list_events",
+      "mcp__ccd_session_mgmt__list_sessions",
+      "mcp__ccd_session_mgmt__search_session_transcripts",
+      "mcp__ccd_pr__get_status",
+      "mcp__Claude_Browser__read_console_messages",
+      "mcp__Claude_Browser__preview_logs",
+      "mcp__Claude_Browser__preview_list",
+      "mcp__Claude_Browser__find",
+      "mcp__64194b44-8196-42e6-9030-5bd4af27ec81__trelloSearch",
+      "mcp__64194b44-8196-42e6-9030-5bd4af27ec81__trelloReadCard"
+    ]
+  }
+}
