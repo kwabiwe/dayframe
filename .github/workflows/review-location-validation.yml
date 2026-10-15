@@ -240,12 +240,16 @@ jobs:
             puts "Pod graph matches; only permitted path-generated checksums excluded."
           '
           git diff --exit-code -- package-lock.json
+      # REACT_NATIVE_PATH is the path Pods already uses (${PODS_ROOT}/../../../../node_modules/react-native).
+      # React Native's ccache hook sets CC to $(REACT_NATIVE_PATH)/scripts/xcode/ccache-clang.sh on every
+      # target, and only Pods defines it, so the app and Live Activity targets need it from here.
       - name: Clean unsigned Simulator build
         run: >-
           xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
           -scheme Dayframe -configuration Staging -sdk iphonesimulator
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data"
+          REACT_NATIVE_PATH="$GITHUB_WORKSPACE/node_modules/react-native"
           CODE_SIGNING_ALLOWED=NO clean build
       - name: Verify built host and extension App Groups
         run: >-
