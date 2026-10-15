@@ -2350,6 +2350,8 @@ export async function deleteTimeEntries(ids: string[], session: RequestSession =
       `select id
        from time_entries
        where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3
+       -- Entry-id order, as every multi-entry lock (replay's Log automatically retirement too).
+       order by id
        for update`,
       [uniqueIds, session.workspaceId, session.userId]
     );
@@ -2387,6 +2389,8 @@ export async function updateTimeEntryDescriptions(
       `select id, stopped_at as "stoppedAt"
        from time_entries
        where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3
+       -- Entry-id order, as every multi-entry lock (replay's Log automatically retirement too).
+       order by id
        for update`,
       [uniqueIds, session.workspaceId, session.userId]
     );

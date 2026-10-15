@@ -23,7 +23,9 @@ describe("Location replay timeout configuration routing", () => {
       stayIds: new Map(),
       commuteIds: new Map(),
       evidenceIds: new Map(),
-      diagnostics: { warningCodes: [] }
+      diagnostics: { warningCodes: [] },
+      autoLogOrphans: [],
+      autoLogLocked: new Set()
     });
     withSyncTransaction.mockImplementation(async (_operation: string, work: (transaction: unknown) => Promise<unknown>) => {
       return work({
@@ -64,5 +66,24 @@ describe("Location replay timeout configuration routing", () => {
 
     const options = withSyncTransaction.mock.calls[0]?.[2] as { reuseFullCapTimeoutPair?: boolean };
     expect(options.reuseFullCapTimeoutPair).toBe(true);
+  });
+
+  it("removes a vanished visit's block even when nothing is left to emit (Codex r3 on #435)", async () => {
+    vi.stubEnv("DAYFRAME_LOCATION_ROLLOUT_MODE", "v2_review");
+    const query = vi.fn().mockResolvedValue({ rows: [], rowCount: 1 });
+    withSyncTransaction.mockImplementation(async (_operation: string, work: (transaction: unknown) => Promise<unknown>) =>
+      work({ client: { query }, phase: vi.fn(), remainingMs: () => 7_000 }));
+    replayLocationEvidence.mockResolvedValue({
+      segments: [], stayIds: new Map(), commuteIds: new Map(), evidenceIds: new Map(), diagnostics: { warningCodes: [] },
+      autoLogOrphans: [{ entryId: "vanished-block", placeId: "place", startedAt: "2026-09-17T10:05:00.000Z", stoppedAt: "2026-09-17T10:40:00.000Z" }],
+      autoLogLocked: new Set(["vanished-block"])
+    });
+    await replayRetainedLocationEvidence(
+      requestFor("v2_review"),
+      { workspaceId: "workspace", userId: "user", authMode: "token", scopes: [] },
+      "2026-09-17T11:00:00.000Z"
+    );
+    const removal = query.mock.calls.find(([statement]) => String(statement).includes("delete from time_entries"));
+    expect(removal?.[1]).toEqual(["workspace", "user", ["vanished-block"]]);
   });
 });

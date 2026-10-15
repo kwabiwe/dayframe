@@ -14165,6 +14165,13 @@ dialog.ui-dialog.df-rf-dialog {
   font-weight: 650;
 }
 
+/* "Logged automatically · {place}" under an auto-logged block's heading (PRD D17). */
+.df-ed-source {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
 .df-ed-head h2 {
   margin: 0;
   overflow: hidden;
