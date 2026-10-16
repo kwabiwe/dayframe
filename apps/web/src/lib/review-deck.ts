@@ -243,7 +243,7 @@ export function reviewLogAsEdit(item: ReviewItemRow, draft: ReviewLogAsDraft | u
   const description = nameChanged ? typed : hasV2Evidence(item) ? undefined : defaultName || undefined;
   return {
     categoryId: categoryChanged ? draft!.categoryId ?? null : item.suggestedCategoryId ?? null,
-    ...(description ? { description } : {}),
+    ...(description ? { description, ...(nameChanged ? { descriptionTyped: true as const } : {}) } : {}),
     startedAt: new Date(span.startMs).toISOString(),
     stoppedAt: new Date(span.stopMs).toISOString()
   };

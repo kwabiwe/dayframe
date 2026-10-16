@@ -51,6 +51,8 @@ describe("location review confirmation semantics", () => {
     expect(confirmedLocationDescription("commute", "Drive", { description: "Commute" }, ["Commute"])).toBeNull();
     expect(confirmedLocationDescription("time_away", "Trip", { description: "Time away from Home" }, ["Time away from Home"])).toBeNull();
     expect(confirmedLocationDescription("time_away", "Trip", { description: "Groceries" }, ["Time away from Home"])).toBe("Groceries");
+    // Typed in a current app's editor, even a word equal to the title is the person's (Codex r2 on #456).
+    expect(confirmedLocationDescription("commute", "Trip", { description: "Trip", descriptionTyped: true })).toBe("Trip");
     // A Stay keeps its title as before.
     expect(confirmedLocationDescription("stay", "Peak Gym", { description: "Peak Gym" })).toBe("Peak Gym");
   });

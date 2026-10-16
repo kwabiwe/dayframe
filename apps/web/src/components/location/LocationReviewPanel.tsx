@@ -300,6 +300,8 @@ export function LocationReviewPanel({
                   edit: {
                     categoryId: categoryId || null,
                     description,
+                    // The editor starts a Move empty, so any name here was typed (PRD D19).
+                    ...(description.trim() ? { descriptionTyped: true as const } : {}),
                     ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
                     ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
                   }

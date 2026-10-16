@@ -36,7 +36,7 @@ export function reviewLogAsEdit(input: {
   const description = nameChanged ? typed : input.isLocationV2 ? undefined : input.defaultName.trim() || undefined;
   return {
     categoryId: input.draftCategoryId ?? input.suggestedCategoryId ?? null,
-    ...(description ? { description } : {}),
+    ...(description ? { description, ...(nameChanged ? { descriptionTyped: true as const } : {}) } : {}),
     startedAt: input.startedAt,
     stoppedAt: input.stoppedAt
   };

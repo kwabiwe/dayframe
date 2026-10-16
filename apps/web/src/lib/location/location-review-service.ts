@@ -651,6 +651,9 @@ export function confirmedLocationDescription(
   // words from before, so accepting it keeps it.
   if (segmentKind === "commute" || segmentKind === "time_away") {
     const typed = edit?.description?.trim() || null;
+    // Typed in a current app's editor (it starts a Move empty): the person's words, whatever they say
+    // (Codex r2 on #456). Without the marker, equal to a Dayframe title is an older app's prefill.
+    if (typed && edit?.descriptionTyped === true) return typed;
     if (typed && isOwnerAuthoredReviewDescription(typed, [title, ...suggestedTitles])) return typed;
     if (learnedTitle && (!typed || !isOwnerAuthoredReviewDescription(typed, [learnedTitle]))) return learnedTitle;
     return null;

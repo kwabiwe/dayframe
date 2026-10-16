@@ -196,6 +196,12 @@ export const ReviewEntryEditSchema = z
     categoryId: z.string().uuid().nullable().optional(),
     placeId: z.string().uuid().nullable().optional(),
     description: z.string().trim().max(500).optional(),
+    /**
+     * The person typed this description themselves (sent by apps whose Move editors start empty,
+     * PRD D19). Without it, a Move description equal to a Dayframe title is treated as an older app's
+     * prefill and not stored.
+     */
+    descriptionTyped: z.literal(true).optional(),
     startedAt: z.string().datetime({ offset: true }).optional(),
     stoppedAt: z.string().datetime({ offset: true }).optional(),
     tags: z.array(z.string().trim().min(1).max(50)).max(20).optional()
