@@ -289,7 +289,11 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       // or the first one after it is farther than the last one before it (a
       // loop whose outbound leg went uncaptured). Otherwise it is the return:
       // iOS has dated arrival Visits up to 157 s before the car stopped, with
-      // the approach continuing after.
+      // the approach continuing after. The same holds for a sign observed as it
+      // happened (an entry, a still fix): back at the place within three minutes
+      // without moving away, it is the return, never the departure. Two
+      // overlapping circles of one home put the old circle's entry 14 s before
+      // parking, after the car crossed the new one (location v3 bug 11).
       const nextAway = nextAwayMs.get(item)!;
       const stayedBefore = Number.isFinite(nextAway) && nextAway - atMs >= config.savedPlaceMinimumDwellMs;
       const arrivedFirst = arrival.lastAway == null || atMs - arrival.lastAway.atMs > EARLY_DATED_VISIT_MAXIMUM_MS ||
@@ -298,8 +302,8 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       const movesAway = leavesAfter.get(item) === true || arrival.lastAway != null && firstAfter != null &&
         firstAfter - arrival.lastAway.metres >= LEAVING_MARGIN_METRES;
       const observedThere = kind === "geofence_enter" || kind !== "visit" && !moving(item);
-      const departs = Number.isFinite(nextAway) && (observedThere ||
-        backAfter(item, atMs) - atMs > EARLY_DATED_VISIT_MAXIMUM_MS || arrivedFirst && movesAway);
+      const backSoon = backAfter(item, atMs) - atMs <= EARLY_DATED_VISIT_MAXIMUM_MS;
+      const departs = Number.isFinite(nextAway) && (!backSoon || (observedThere || arrivedFirst) && movesAway);
       if (inGap && (!seenAway || stayedBefore || departs)) latest = item;
       if (stayedBefore || departs) excursion = seenAway = false;
       // An entry is observed as it happens; a Visit in the gap can be an
