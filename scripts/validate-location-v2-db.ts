@@ -1845,6 +1845,13 @@ async function validateReviewModeAutoLogPlaces() {
   )).rows;
   const setAutoLog = (on: boolean, placeIds = LOCATION_ACCEPTANCE_PLACES.map((place) => place.id)) =>
     pool.query("update places set auto_log = $3 where workspace_id = $1 and id = any($2::uuid[])", [WORKSPACE_ID, placeIds, on]);
+  // Why a card at a place came to Review (location v3 bug 8): its stored semanticReason.
+  const cardReasons = async (placeId: string | null, startedAt?: Date) => (await pool.query<{ reason: string | null }>(
+    `select ae.raw_payload ->> 'semanticReason' as reason
+     from review_items ri join activity_events ae on ae.id = ri.event_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ri.suggested_place_id = $3
+       and ($4::timestamptz is null or ri.suggested_started_at = $4)`,
+    [WORKSPACE_ID, USER_ID, placeId, startedAt ?? null])).rows.map((row) => row.reason);
   const renameStay = async (entry: { eventId: string | null }, suffix: string) => {
     // What replay sees when a later run no longer produces this stay under its ID (its boundaries
     // moved, or it vanished): the persisted row and its event under an ID the engine never emits.
@@ -1872,6 +1879,11 @@ async function validateReviewModeAutoLogPlaces() {
   await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
   assert.equal((await autoEntries()).length, 0, "A place without Log automatically logged a visit.");
   const reviewOnlyCount = await count("review_items");
+  for (const place of LOCATION_ACCEPTANCE_PLACES) {
+    const reasons = await cardReasons(place.id);
+    assert(reasons.every((reason) => reason === "auto_log_off"),
+      `A visit card at a place with Log automatically off said ${reasons.join(", ")}, not that the switch is off.`);
+  }
 
   // On: trusted stays become blocks, never Review cards; their events are confirmed.
   await clearDerivedLocationState();
@@ -1968,6 +1980,23 @@ async function validateReviewModeAutoLogPlaces() {
   await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
   assert(!(await autoEntries()).some((entry) => entry.startedAt.toISOString() === logged[0].startedAt.toISOString()),
     "A visit already offered in Review was auto-logged after its stay changed ID.");
+  assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_offered_before"],
+    "A visit kept in Review because it was offered before did not say so.");
+  // Reasons in order (Codex r2 on #450): an overlapping block comes before "offered before", and the
+  // card's reason follows the evidence back when the block goes.
+  const overlapping = await pool.query<{ id: string }>(
+    `insert into time_entries (workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at)
+     values ($1, $2, 'manual_app', 'high', 'confirmed', 'Tracked by hand', $3, $4) returning id`,
+    [WORKSPACE_ID, USER_ID, logged[0].startedAt, logged[0].stoppedAt]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_overlap"],
+    "An overlapping block did not come before offered-before as the card's reason.");
+  await pool.query("delete from time_entries where id = $1", [overlapping.rows[0].id]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_offered_before"],
+    "A card's reason did not follow its overlap away.");
+  const steadyOffered = await ingestAndReplayLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(steadyOffered.replay.semanticChangeCount, 0, "An identical replay of an offered-before card reported changes.");
 
   // Ageing evidence: a stay older than retention less a day is never reconciled, so a visit that
   // expiring evidence can no longer rebuild keeps its block (Codex r1 on #435).
@@ -2224,7 +2253,12 @@ async function validateReviewModeAutoLogPlaces() {
     assert.equal(blocked.rowCount, 1, `A visit overlapping ${label} was logged instead of going to Review.`);
     assert(!(await autoEntries()).some((entry) => entry.startedAt.toISOString() === logged[0].startedAt.toISOString()),
       `A visit overlapping ${label} was auto-logged.`);
+    assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_overlap"],
+      `A visit overlapping ${label} did not say it overlaps a block.`);
   }
+  // With every reason recorded, an identical replay changes nothing the app shows (Codex r1 on #450).
+  const steady = await ingestAndReplayLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(steady.replay.semanticChangeCount, 0, "An identical replay with Log automatically fallbacks reported changes.");
   await setAutoLog(false);
 }
 
@@ -2255,7 +2289,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, deleting a place with same-place journeys, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, deleting a place with same-place journeys, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

@@ -7,6 +7,7 @@ import {
   reviewMutationFor,
   reviewPicture,
   reviewProposalSignature,
+  reviewReason,
   reviewTitle,
   reviewWhen,
   stepSelection
@@ -127,5 +128,26 @@ describe("Review deck helpers", () => {
     expect(nextAfterDecision(["a", "b", "c"], "b")).toBe("c");
     expect(nextAfterDecision(["a", "b", "c"], "c")).toBe("b");
     expect(nextAfterDecision(["a"], "a")).toBeNull();
+  });
+});
+
+describe("location reason line (location v3 bug 8)", () => {
+  const location = (semanticReason: string, eventType = "geofence_exit") =>
+    reviewReason(item({ eventSource: "location_learning", eventType, rawPayload: { semanticReason } }));
+
+  it("says why a visit at a Log automatically place came to Review", () => {
+    expect(location("auto_log_uncertain")).toBe("Not logged automatically · location was less certain than usual.");
+    expect(location("auto_log_overlap")).toBe("Not logged automatically · it overlaps a block.");
+    expect(location("auto_log_logged_before")).toBe("Not logged automatically · this visit was logged once before.");
+    expect(location("auto_log_offered_before")).toBe("Not logged automatically · it was offered in Review before.");
+    expect(location("auto_log_off")).toBe("Log automatically is off for this place.");
+  });
+
+  it("never claims automatic logging is off for the whole app", () => {
+    expect(location("review_mode", "commute_detected")).toBe("Trips aren’t logged automatically yet.");
+    expect(location("review_mode")).toBe("Not logged automatically.");
+    expect(location("untrusted_place", "unknown_stay")).toBe("New place.");
+    expect(location("untrusted_place", "learned_place_visit")).toBe("This place isn’t saved.");
+    expect(location("ambiguous_place", "unknown_stay")).toBe("It’s near more than one saved place.");
   });
 });

@@ -53,6 +53,12 @@ type WorkingStay = {
   episodeVisitUntilAt: string | null;
   pendingExit?: ClassifiedEvidence;
   inferredContinuity?: boolean;
+  /**
+   * Set when a broad (inaccurate) completed Visit supplied this stay's interval. Like inferred
+   * continuity it caps confidence at medium, unless the stay's own accurate readings cover it
+   * from start to end (`accuratelyCovered`).
+   */
+  broadVisitSupport?: boolean;
   inferredBoundary?: boolean;
   lastStrongInside?: ClassifiedEvidence;
   /** Visits reused from an earlier episode as interval support; never proof of identity. */
@@ -736,6 +742,8 @@ function stayFromWorking(
       ? "medium"
     : working.inferredContinuity
       ? "medium"
+    : working.broadVisitSupport && !accuratelyCovered(working, endedAt, input)
+      ? "medium"
     : working.supportedByVisit || knownPlace
       ? highQualityCount > 0
         ? "medium_high"
@@ -786,6 +794,35 @@ function stayFromWorking(
     ...(working.approximateArrival ? { approximateArrival: true as const } : {}),
     evidenceIds
   };
+}
+
+/**
+ * Whether accurate position fixes inside the saved place's circle cover the stay from start to end
+ * with no gap over the continuity limit. A broad completed Visit (iOS has reported 73 m with about
+ * twenty 3–33 m fixes across the same 22 minutes) then adds nothing doubtful: the fixes show the
+ * device was there throughout (location v3 bug 8). Only genuine fixes with a coordinate count, inside
+ * the circle itself (no matcher tolerance: a reading in the band can lie wholly outside), within the
+ * stay's own interval (Codex r1 on #451).
+ */
+function accuratelyCovered(working: WorkingStay, endedAt: string | null, input: LocationEngineInput) {
+  const circle = working.placeMatchKind === "saved" ? savedCircle(working.placeId, input) : null;
+  if (!endedAt || !circle) return false;
+  const startMs = Date.parse(working.startedAt);
+  const endMs = Date.parse(endedAt);
+  const times = working.evidence.flatMap((item) => {
+    const { evidence } = item;
+    const point = pointFor(evidence);
+    const atMs = Date.parse(evidence.occurredAt);
+    return (evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true &&
+      point != null && accurateCoordinate(item, input) && distanceMeters(point, circle.place) <= circle.radius &&
+      atMs >= startMs && atMs <= endMs ? [atMs] : [];
+  }).sort((a, b) => a - b);
+  if (!times.length) return false;
+  const points = [startMs, ...times, endMs];
+  for (let index = 1; index < points.length; index += 1) {
+    if (points[index] - points[index - 1] > input.config.maxContinuityGapMs) return false;
+  }
+  return true;
 }
 
 function stayFromPhysicalStop(stop: PhysicalStop, accepted: ClassifiedEvidence[], input: LocationEngineInput): StaySegment {
@@ -1357,7 +1394,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     // position it always had beside the arrival, so stay identities do not
     // change; a broad one, which was never used before, follows the arrival, so
     // the stay keeps its identity when it is delivered. Support resting on a
-    // broad callback stays inferred: medium confidence, never automatic.
+    // broad callback stays medium confidence, never automatic, unless the stay's own accurate
+    // readings cover it from start to end.
     const endedAt = completion.evidence.endedAt!;
     const arrivalIndex = stay.evidence.lastIndexOf(item);
     const before = accurateCoordinate(completion, input) && acceptedOrder.get(completion)! < acceptedOrder.get(item)!;
@@ -1370,7 +1408,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     stay.stopLowerBoundAt = endedAt;
     stay.stopUpperBoundAt = endedAt;
     stay.continuityStatus = "supported_by_visit";
-    if (!accurateCoordinate(completion, input)) stay.inferredContinuity = true;
+    if (!accurateCoordinate(completion, input)) stay.broadVisitSupport = true;
   };
   // Early-dated arrivals join a stay of their place at the evidence that showed
   // the device arriving (their anchor), never at their own earlier time. If
