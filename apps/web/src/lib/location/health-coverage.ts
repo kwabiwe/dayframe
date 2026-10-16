@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { withSyncTransaction } from "../sync-transaction";
+import { isLockNotAvailableError, isStatementTimeoutError } from "../db";
 import { normalizeHealthWorkoutType, type MotionTravelMode } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
@@ -107,20 +108,24 @@ export async function healthCoveredMoves(
 /**
  * Retires every open location Move card a Health workout covers, from the cards themselves, so a
  * workout that arrives after the card is reconciled on the next replay even once the Move's evidence
- * has aged out (Codex r1 on #457). Pages through the open Move cards of the last 30 days that overlap
- * any workout, newest first, checking coverage on each page, so non-covered cards never crowd out
- * covered ones (Codex r3 on #457); `window` instead takes every open card, of any age, overlapping
- * one imported workout. Retirement is replay's own (`superseded`); user decisions are never touched.
- * Returns the number retired.
+ * has aged out (Codex r1 on #457). Pages through the open Move cards of the last 30 days, newest
+ * first, that some workout covers by time as `healthWorkoutCoversMove` measures it (inside it give or
+ * take five minutes, or, with a walk, run or ride mode, at least half covered), checking the
+ * workout's kind on each page; only a card overlapping a workout of another kind is ever read and
+ * kept, so open cards cannot crowd out covered ones (Codex r3/r4 on #457). `window` instead takes
+ * every open card, of any age, overlapping one imported workout. `continueWhile` is asked before each
+ * page, so a tight budget keeps the pages already retired (Codex r4 on #457). Retirement is replay's
+ * own (`superseded`); user decisions are never touched. Returns the number retired.
  */
 export async function retireHealthCoveredMoveCards(
   client: Pick<pg.PoolClient, "query">, session: RequestSession,
-  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string } } = {}
+  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string }; continueWhile?: () => boolean } = {}
 ) {
   const modes = new Set(["walking", "running", "cycling", "automotive"]);
   let retired = 0;
   let cursor: { startedAt: Date; id: string } | null = null;
   for (;;) {
+    if (options.continueWhile && !options.continueWhile()) break;
     const page: { rows: Array<{ reviewId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }> } = await client.query(
       `select ri.id as "reviewId", ri.suggested_started_at as "startedAt",
               ri.suggested_stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
@@ -132,8 +137,15 @@ export async function retireHealthCoveredMoveCards(
          and ($4::timestamptz is not null
            and ri.suggested_started_at < $5::timestamptz + interval '5 minutes' and ri.suggested_stopped_at > $4::timestamptz - interval '5 minutes'
            or $4::timestamptz is null and ri.suggested_started_at > $3::timestamptz - interval '30 days')
+         and coalesce(ae.raw_payload ->> 'travelMode', '') <> 'automotive'
+         and ri.suggested_stopped_at > ri.suggested_started_at
          and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
-           and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes')
+           and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes'
+           and hw.stopped_at > hw.started_at
+           and (hw.started_at - interval '5 minutes' <= ri.suggested_started_at and ri.suggested_stopped_at <= hw.stopped_at + interval '5 minutes'
+             or ae.raw_payload ->> 'travelMode' in ('walking', 'running', 'cycling')
+               and extract(epoch from least(ri.suggested_stopped_at, hw.stopped_at) - greatest(ri.suggested_started_at, hw.started_at))
+                 >= ${HEALTH_COVERAGE_MINIMUM_SHARE} * extract(epoch from ri.suggested_stopped_at - ri.suggested_started_at)))
          and ($6::timestamptz is null or (ri.suggested_started_at, ri.id) < ($6::timestamptz, $7::uuid))
        order by ri.suggested_started_at desc, ri.id desc
        limit ${PAGE}`,
@@ -195,15 +207,43 @@ async function retireReviews(client: Pick<pg.PoolClient, "query">, session: Requ
 }
 
 /**
+ * Replay's own sweep at its end: within what the replay's budget leaves (stopping at
+ * `minimumRemainingMs`), and behind a savepoint, so a sweep that runs out of time never rolls back the
+ * replay's other work (Codex r4 on #457). Returns the number retired (0 if it gave up).
+ */
+export async function retireHealthCoveredMoveCardsWithinReplay(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession,
+  options: { now: string | number; remainingMs?: () => number; minimumRemainingMs?: number }
+) {
+  const minimum = options.minimumRemainingMs ?? 2_500;
+  await client.query("savepoint location_health_sweep");
+  try {
+    const retired = await retireHealthCoveredMoveCards(client, session, {
+      now: options.now, continueWhile: () => (options.remainingMs?.() ?? Number.POSITIVE_INFINITY) > minimum });
+    await client.query("release savepoint location_health_sweep");
+    return retired;
+  } catch (error) {
+    if (!isStatementTimeoutError(error) && !isLockNotAvailableError(error)) throw error;
+    await client.query("rollback to savepoint location_health_sweep");
+    return 0;
+  }
+}
+
+/**
  * Right after an events request imported a workout: retire the open Move cards of any age that this
- * workout's window covers, in a bounded transaction of its own (`withSyncTransaction`: acquisition,
+ * workout's stored window covers (the row as kept, which an earlier revision of the same sample may
+ * have set; Codex r4 on #457), in a bounded transaction of its own (`withSyncTransaction`: acquisition,
  * work and cleanup within the request's deadline, at most two seconds), if the location owner lock is
  * free; a replay holding it sweeps at its end, and every later replay does too (Codex r2/r3 on #457).
  * Best effort; never fails the import.
  */
 export async function reconcileHealthCoveredMoveCardsNow(
   session: RequestSession,
-  options: { deadlineAt?: number; signal?: AbortSignal; now?: string | number; window?: { startedAt: string; stoppedAt: string } | null } = {}
+  options: {
+    deadlineAt?: number; signal?: AbortSignal; now?: string | number;
+    /** The imported workout, as the events request named it. */
+    workout?: { provider: string | null; externalSampleId: string | null; startedAt: string; stoppedAt: string } | null;
+  } = {}
 ) {
   const deadlineAt = Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + 2_000);
   if (deadlineAt - Date.now() < 300) return null;
@@ -212,9 +252,34 @@ export async function reconcileHealthCoveredMoveCardsNow(
       const lock = await client.query<{ acquired: boolean }>(
         "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
       if (!lock.rows[0]?.acquired) return null;
-      return retireHealthCoveredMoveCards(client, session, { now: options.now, window: options.window ?? undefined });
+      // Without a workout (maintenance), the 30-day sweep.
+      const window = options.workout ? await storedWorkoutWindow(client, session, options.workout) : undefined;
+      if (options.workout && !window) return 0;
+      // Pages stop with time to commit the ones already retired.
+      return retireHealthCoveredMoveCards(client, session, { now: options.now, window: window ?? undefined,
+        continueWhile: () => deadlineAt - Date.now() > 500 });
     }, { deadlineAt, signal: options.signal });
   } catch {
     return null;
   }
+}
+
+/**
+ * The window kept for an imported workout: its stored row when it has a sample ID (the first revision
+ * wins there), else the request's own window with ingestion's fallbacks.
+ */
+async function storedWorkoutWindow(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession,
+  workout: { provider: string | null; externalSampleId: string | null; startedAt: string; stoppedAt: string }
+) {
+  if (workout.externalSampleId) {
+    const stored = await client.query<{ startedAt: Date; stoppedAt: Date }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt" from health_workouts
+       where workspace_id = $1 and user_id = $2 and provider = coalesce($3, 'healthkit') and external_sample_id = $4
+       limit 1`,
+      [session.workspaceId, session.userId, workout.provider, workout.externalSampleId]);
+    const row = stored.rows[0];
+    return row ? { startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString() } : null;
+  }
+  return { startedAt: workout.startedAt, stoppedAt: workout.stoppedAt };
 }

@@ -1900,10 +1900,14 @@ async function validateHealthWalksWin() {
      values ($1, $2, 'db-health-aged', 'walking', timestamptz '2026-07-20T08:58:00Z' - interval '40 days',
              timestamptz '2026-07-20T09:10:00Z' - interval '40 days', '{}'::jsonb) returning id`, [WORKSPACE_ID, USER_ID])).rows[0].id;
   assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0, "The 30-day sweep reached a 40-day-old card.");
-  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, window: {
-    startedAt: new Date(Date.parse("2026-07-20T08:58:00Z") - 40 * 86_400_000).toISOString(),
-    stoppedAt: new Date(Date.parse("2026-07-20T09:10:00Z") - 40 * 86_400_000).toISOString() } }), 1,
-    "A workout import did not retire the old Move card its window covers.");
+  // The request's own window is not the stored one (an earlier revision of the sample set it, or the
+  // request named no stop): the stored row decides (Codex r4 on #457).
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, workout: {
+    provider: null, externalSampleId: "db-health-aged", startedAt: PROCESSING_AT, stoppedAt: PROCESSING_AT } }), 1,
+    "A workout import did not retire the old Move card its stored window covers.");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, workout: {
+    provider: null, externalSampleId: "db-health-missing", startedAt: PROCESSING_AT, stoppedAt: PROCESSING_AT } }), 0,
+    "A workout that was never stored retired a card.");
   await removeWorkout(aged);
 
   // No cap hides the covering workout among many others in the same window (Codex r1 on #457).

@@ -60,12 +60,18 @@ describe("POST /api/events", () => {
     }));
     await post({ type: "health_workout_import", clientEventId: "workout-1" });
     expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session,
-      { deadlineAt: expect.any(Number), signal: expect.anything(), window: null });
+      { deadlineAt: expect.any(Number), signal: expect.anything(), workout: null });
     mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
     await post({ type: "health_workout_import", clientEventId: "workout-2",
-      rawPayload: { startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } });
+      rawPayload: { externalSampleId: "sample-2", startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } });
     expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session, expect.objectContaining({
-      window: { startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } }));
+      workout: { provider: null, externalSampleId: "sample-2", startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } }));
+    mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
+    // A missing stop falls back to occurredAt, as ingestion stores it (Codex r4 on #457).
+    await post({ type: "health_workout_import", clientEventId: "workout-3", occurredAt: "2026-10-16T13:00:00.000Z",
+      rawPayload: { provider: "healthkit", startedAt: "2026-10-16T12:40:00.000Z" } });
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session, expect.objectContaining({
+      workout: { provider: "healthkit", externalSampleId: null, startedAt: "2026-10-16T12:40:00.000Z", stoppedAt: "2026-10-16T13:00:00.000Z" } }));
     mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
     mocks.processActivityEvent.mockResolvedValueOnce({ eventId: "event-1", duplicate: true, candidate: { action: "create_review_item" } });
     await post({ type: "health_workout_import", clientEventId: "workout-1" });

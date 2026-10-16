@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { healthWorkoutCoversMove, healthWorkoutKind } from "./health-coverage";
+import { describe, expect, it, vi } from "vitest";
+import { healthWorkoutCoversMove, healthWorkoutKind, retireHealthCoveredMoveCardsWithinReplay } from "./health-coverage";
+
+type QueryClient = Parameters<typeof retireHealthCoveredMoveCardsWithinReplay>[0];
+const fakeClient = (query: (sql: string) => Promise<{ rows: unknown[] }>) => {
+  const mock = vi.fn(query);
+  return { client: { query: mock } as unknown as QueryClient, mock };
+};
+const session = { workspaceId: "00000000-0000-4000-8000-000000000010", userId: "00000000-0000-4000-8000-000000000001" } as never;
 
 const at = (minute: number) => new Date(Date.parse("2026-10-16T12:00:00Z") + minute * 60_000).toISOString();
 const move = (from: number, to: number, travelMode: "walking" | "running" | "cycling" | "automotive" | null = "walking") =>
@@ -42,5 +49,32 @@ describe("Health walks win (PRD D19)", () => {
     expect(healthWorkoutKind([52])).toBe("walking");
     expect(healthWorkoutKind([null, undefined])).toBe("other");
     expect(healthWorkoutCoversMove(move(0, 30), workout(0, 30, ["other", null, "walking"]))).toBe(true);
+  });
+
+  it("keeps replay's other work when its sweep runs out of time (Codex r4 on #457)", async () => {
+    const statements: string[] = [];
+    const { client } = fakeClient(async (sql) => {
+      statements.push(sql.trim().split(/\s+/).slice(0, 3).join(" "));
+      if (/^\s*select ri\.id as "reviewId"/.test(sql)) throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+      return { rows: [] };
+    });
+    expect(await retireHealthCoveredMoveCardsWithinReplay(client, session, { now: "2026-10-16T12:00:00.000Z" })).toBe(0);
+    expect(statements).toEqual(["savepoint location_health_sweep", "select ri.id as", "rollback to savepoint"]);
+  });
+
+  it("stops before a page when the replay's budget is short, keeping what it retired", async () => {
+    const { client, mock } = fakeClient(async () => ({ rows: [] }));
+    expect(await retireHealthCoveredMoveCardsWithinReplay(client, session,
+      { now: "2026-10-16T12:00:00.000Z", remainingMs: () => 1_000 })).toBe(0);
+    expect(mock.mock.calls.map(([sql]) => String(sql).trim())).toEqual(
+      ["savepoint location_health_sweep", "release savepoint location_health_sweep"]);
+  });
+
+  it("never swallows other failures", async () => {
+    const { client } = fakeClient(async (sql) => {
+      if (sql.startsWith("select")) throw new Error("connection lost");
+      return { rows: [] };
+    });
+    await expect(retireHealthCoveredMoveCardsWithinReplay(client, session, { now: "2026-10-16T12:00:00.000Z" })).rejects.toThrow("connection lost");
   });
 });
