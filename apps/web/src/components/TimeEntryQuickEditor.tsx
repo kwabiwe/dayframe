@@ -572,6 +572,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   const finishDayOffset = isRunning ? 0 : calendarEntryLocalDayOffset(draft.startedAtDate, draft.stoppedAtDate);
 
   return {
+    activeTemporalOwner,
     attemptDismiss,
     applyTaskSuggestion,
     busyAction,
@@ -854,7 +855,9 @@ export function TimeEntryQuickEditorPanel({
                 onChange={(event) => controller.updateTemporalField("startedAtTime", maskTimeInput(event.target.value), "start")}
                 placeholder={displayTypedTime("08:30", clock)}
                 type="text"
-                value={displayTypedTime(draft.startedAtTime, clock)}
+                // While typing, the field shows exactly what was typed; it reads in the device's format
+                // once left (Codex r2 on #446: never append " AM" under the caret).
+                value={controller.activeTemporalOwner === "start" ? draft.startedAtTime : displayTypedTime(draft.startedAtTime, clock)}
               />
               <DatePickerPopover
                 ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
@@ -894,7 +897,7 @@ export function TimeEntryQuickEditorPanel({
                   onChange={(event) => controller.updateTemporalField("stoppedAtTime", maskTimeInput(event.target.value), "finish")}
                   placeholder={displayTypedTime("09:15", clock)}
                   type="text"
-                  value={displayTypedTime(draft.stoppedAtTime, clock)}
+                  value={controller.activeTemporalOwner === "finish" ? draft.stoppedAtTime : displayTypedTime(draft.stoppedAtTime, clock)}
                 />
                 {finishDayOffset > 0 ? (
                   <span className="calendar-compact-day-offset" aria-hidden="true" title={finishDescription}>+{finishDayOffset}</span>

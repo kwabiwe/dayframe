@@ -54,6 +54,8 @@ export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
   const clock = useClockFormat();
+  // While typing, the start time shows exactly what was typed (Codex r2 on #446).
+  const [startTimeTyping, setStartTimeTyping] = useState(false);
   const {
     clearTimerError,
     closeManualEntry,
@@ -708,17 +710,19 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                       id="active-start-time"
                       inputMode={clock === "12h" ? "text" : "numeric"}
                       onBlur={() => {
+                        setStartTimeTyping(false);
                         const parsed = parseTimeInput(startTimeDraft);
                         if (parsed) setStartTimeDraft(parsed);
                       }}
                       onChange={(event) => {
+                        setStartTimeTyping(true);
                         setStartTimeDraft(maskTimeInput(event.target.value));
                         setStartEditError(null);
                       }}
                       placeholder={displayTypedTime("09:00", clock)}
                       ref={startTimeInputRef}
                       type="text"
-                      value={displayTypedTime(startTimeDraft, clock)}
+                      value={startTimeTyping ? startTimeDraft : displayTypedTime(startTimeDraft, clock)}
                     />
                   </label>
                 </div>

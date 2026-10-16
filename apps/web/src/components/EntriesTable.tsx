@@ -116,6 +116,7 @@ function TimelineInlineTimeControl({
   onPickerOpenChange,
   onTimeChange,
   today,
+  typedValue,
   value,
   readOnly
 }: {
@@ -131,10 +132,15 @@ function TimelineInlineTimeControl({
   onTimeChange: (time: string) => void;
   readOnly: boolean;
   today: string;
+  /** The draft's own text while editing (null otherwise). */
+  typedValue: string | null;
   value: string;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  // From the first key until the field is left it shows exactly what was typed; formatted
+  // ("9:30 PM") only otherwise, so " AM" is never added under the caret (Codex r2 on #446).
+  const [typing, setTyping] = useState(false);
   const clock = useClockFormat();
   const edgeLabel = edge === "start" ? "Start" : "Finish";
   const panelId = `timeline-inline-date-${entryId}-${edge}`;
@@ -157,7 +163,11 @@ function TimelineInlineTimeControl({
         disabled={disabled}
         inputMode={clock === "12h" ? "text" : "numeric"}
         maxLength={8}
-        onChange={(event) => onTimeChange(event.target.value)}
+        onBlur={() => setTyping(false)}
+        onChange={(event) => {
+          setTyping(true);
+          onTimeChange(event.target.value);
+        }}
         onClick={() => {
           onBeginEdit();
           updateDatePickerOpen(true);
@@ -169,7 +179,7 @@ function TimelineInlineTimeControl({
         role="combobox"
         title={`Edit ${edgeLabel.toLowerCase()} time and choose its date`}
         type="text"
-        value={value}
+        value={typing && typedValue !== null ? typedValue : value}
       />
       <DatePickerPopover
         anchorRef={inputRef}
@@ -634,9 +644,8 @@ export function EntriesTable({
       void commitInlineEdit(entry, returnFocus);
     };
     const timeInput = (edge: TimelineInlineTimeEdge, instant: string) => {
-      const value = editor
-        ? displayTypedTime(edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime, clock)
-        : formatTime(instant, clock);
+      const typedValue = editor ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime : null;
+      const value = typedValue !== null ? displayTypedTime(typedValue, clock) : formatTime(instant, clock);
       const date = editor
         ? edge === "start" ? editor.draft.startedAtDate : editor.draft.stoppedAtDate
         : dateTimeLocal(instant).slice(0, 10);
@@ -664,6 +673,7 @@ export function EntriesTable({
           onTimeChange={(nextTime) => updateInlineTime(entry, edge, nextTime)}
           readOnly={!editor || editor.isSaving}
           today={dateTimeLocal(capturedNow).slice(0, 10)}
+          typedValue={typedValue}
           value={value}
         />
       );

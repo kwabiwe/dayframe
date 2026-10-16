@@ -42,6 +42,8 @@ export function DayframeDateTimePicker({
   const [view, setView] = useState({ year: initial.year, month: initial.month });
   const [timeDraft, setTimeDraft] = useState(initial.time);
   const [timeError, setTimeError] = useState("");
+  // While typing, the field shows exactly what was typed (Codex r2 on #446).
+  const [timeTyping, setTimeTyping] = useState(false);
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -93,6 +95,7 @@ export function DayframeDateTimePicker({
     setValue(nextValue);
     onChange?.(nextValue);
     setTimeDraft(normalized);
+    setTimeTyping(false);
     setTimeError("");
     return true;
   }
@@ -154,8 +157,12 @@ export function DayframeDateTimePicker({
             aria-invalid={Boolean(timeError)}
             id={`${id}-time`}
             inputMode={clock === "12h" ? "text" : "numeric"}
-            onBlur={commitTime}
+            onBlur={() => {
+              setTimeTyping(false);
+              commitTime();
+            }}
             onChange={(event) => {
+              setTimeTyping(true);
               setTimeDraft(maskTimeInput(event.target.value));
               setTimeError("");
             }}
@@ -166,7 +173,7 @@ export function DayframeDateTimePicker({
               }
             }}
             placeholder={clock === "12h" ? "9:30 AM" : "HH:MM"}
-            value={displayTypedTime(timeDraft, clock)}
+            value={timeTyping ? timeDraft : displayTypedTime(timeDraft, clock)}
           />
         </div>
         {timeError ? <p className="dayframe-time-error" id={`${id}-time-error`} role="alert">{timeError}</p> : null}

@@ -409,7 +409,10 @@ function editableDraftHasChanges(initial: CalendarEntryCompactDraft, draft: Cale
   return (Object.keys(emptyCalendarEntryCompactDirty) as CalendarEntryCompactEditableKey[])
     .some((key) => key === "tagNames"
       ? !sameTagNames(draft.tagNames, initial.tagNames)
-      : draft[key] !== initial[key]);
+      : key === "startedAtTime" || key === "stoppedAtTime"
+        // `9:30 PM` typed over `21:30` is no change (Codex r2 on #446).
+        ? !sameTypedTime(draft[key], initial[key])
+        : draft[key] !== initial[key]);
 }
 
 function resolveDraftWindow({
@@ -429,8 +432,8 @@ function resolveDraftWindow({
     startedAt: originalStartedAt,
     stoppedAt: originalStoppedAt
   });
-  const startChanged = draft.startedAtDate !== initial.startedAtDate || draft.startedAtTime !== initial.startedAtTime;
-  const finishChanged = draft.stoppedAtDate !== initial.stoppedAtDate || draft.stoppedAtTime !== initial.stoppedAtTime;
+  const startChanged = draft.startedAtDate !== initial.startedAtDate || !sameTypedTime(draft.startedAtTime, initial.startedAtTime);
+  const finishChanged = draft.stoppedAtDate !== initial.stoppedAtDate || !sameTypedTime(draft.stoppedAtTime, initial.stoppedAtTime);
   const durationChanged = draft.duration !== initial.duration || draft.durationSeconds !== initial.durationSeconds;
 
   if (!startChanged && !finishChanged && !durationChanged) {

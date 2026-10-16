@@ -49,9 +49,12 @@ describe("Calendar compact temporal DOM", () => {
   });
 
   it.each([
-    ["12h", "10:00 AM", "8:15 PM", "8:45 PM"],
-    ["24h", "10:00", "08:15 PM", "20:45"]
-  ] as const)("types an AM/PM time key by key in %s mode and saves that time (Codex r1 on #446)", async (clock, shown, typedShows, finishShows) => {
+    ["12h", "10:00 AM", "8:15 PM", "8:15 PM", "8:45 PM", "20:15", "20:45"],
+    ["24h", "10:00", "8:15 PM", "20:15", "20:45", "20:15", "20:45"],
+    ["12h", "10:00 AM", "10:15 PM", "10:15 PM", "10:45 PM", "22:15", "22:45"],
+    ["12h", "10:00 AM", "1015pm", "10:15 PM", "10:45 PM", "22:15", "22:45"],
+    ["24h", "10:00", "10:15 PM", "22:15", "22:45", "22:15", "22:45"]
+  ] as const)("types an AM/PM time key by key in %s mode and saves that time (Codex r1/r2 on #446): %s → %s", async (clock, shown, typed, typedShows, finishShows, savedStart, savedFinish) => {
     window.localStorage.setItem("dayframe.clockFormat", clock);
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue({ ok: true });
@@ -61,16 +64,41 @@ describe("Calendar compact temporal DOM", () => {
     expect(start.value).toBe(shown);
 
     await user.clear(start);
-    await user.type(start, "8:15 PM");
+    await user.type(start, typed);
+    await user.tab();
     expect(start.value).toBe(typedShows);
     expect(finish.value).toBe(finishShows);
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0][0].payload).toEqual({
-      startedAt: localIso("2026-08-02T20:15"),
-      stoppedAt: localIso("2026-08-02T20:45")
+      startedAt: localIso(`2026-08-02T${savedStart}`),
+      stoppedAt: localIso(`2026-08-02T${savedFinish}`)
     });
+  });
+
+  it("clears a typed 12-hour time with Backspace, never re-adding AM (Codex r2 on #446)", async () => {
+    window.localStorage.setItem("dayframe.clockFormat", "12h");
+    const user = userEvent.setup();
+    renderEditor({ capturedNow: new Date(2026, 7, 2, 23), sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30") });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    await user.clear(start);
+    await user.type(start, "8:15 pm");
+    for (let index = 0; index < 12; index += 1) await user.keyboard("{Backspace}");
+    expect(start.value).toBe("");
+  });
+
+  it("asks nothing on Escape after retyping the same time in the other format (Codex r2 on #446)", async () => {
+    window.localStorage.setItem("dayframe.clockFormat", "12h");
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    renderEditor({ capturedNow: new Date(2026, 7, 2, 23), onDismiss, sourceEntry: entry("2026-08-02T20:15", "2026-08-02T20:45") });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    await user.clear(start);
+    await user.type(start, "815p");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog", { name: "Discard changes?" })).toBeNull();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
   it("keeps incomplete time raw and delays its error until blur", async () => {
