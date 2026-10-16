@@ -47,11 +47,13 @@ describe("fixed timer-sheet layout contract", () => {
     expect(sheet).toContain('testID="time-entry-end-date"');
     expect(sheet).toContain('testID="time-entry-end-time"');
     // A four-digit time keeps its room at the largest input size; the date truncates first.
-    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil((clockFormat === \"12h\" ? 86 : 52) * Math.min(windowDimensions.fontScale, 1.35));");
+    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil((clockFormat === \"12h\" ? 64 : 52) * Math.min(windowDimensions.fontScale, 1.35));");
     expect(sheet).toContain("{ minWidth: timeCardMinWidth }");
     // The date keeps a 44-point target: the cards stack before it would get less (Codex r1 on #447).
     expect(theme).toMatch(/activeEditCompactDate:\s*\{\s*flexShrink: 1,[^}]*minWidth: 44/);
-    expect(sheet).toContain("const timeCardsStacked = windowDimensions.fontScale >= 1.6 || timeCardWidth < timeCardMinWidth + 4 + 44;");
+    // Stacking stays at 1.6× text; a 12-hour time shrinks to fit instead (Codex r2 on #447).
+    expect(sheet).toContain("const timeCardsStacked = windowDimensions.fontScale >= 1.6;");
+    expect(sheet.match(/adjustsFontSizeToFit\s+minimumFontScale=\{0\.7\}/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("keeps the stopped dial's range handle inside the view and the shortcut state per presentation", () => {

@@ -1107,7 +1107,7 @@ export function LocationReviewCorrectionEditor({
                     ]}
                     testID="location-review-start-time"
                   >
-                    <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
+                    <Text {...mobileTextProps("input")} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
                       {startTimeText ? formatClockValue(startTimeText, clockFormat) : "--:--"}
                     </Text>
                   </Pressable>
@@ -1134,7 +1134,7 @@ export function LocationReviewCorrectionEditor({
                       ]}
                       testID="location-review-end-time"
                     >
-                      <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
+                      <Text {...mobileTextProps("input")} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
                         {stopTimeText ? formatClockValue(stopTimeText, clockFormat) : "--:--"}
                       </Text>
                     </Pressable>

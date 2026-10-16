@@ -757,18 +757,13 @@ export function ActiveTimerEditSheet({
   // Activity chips (Blocks prototype): the chosen one, pinned, then recently used; at most seven,
   // fewer on short screens and large text so the sheet's bottom actions stay on screen.
   const recentActivities = useMemo(() => recentActivityIds(historicalEntries), [historicalEntries]);
-  // The cards' row, measured (the section does not change width when the cards stack); before the
-  // first layout, the window less the sheet's side padding.
-  const [timeSectionWidth, setTimeSectionWidth] = useState<number | null>(null);
-  // Room for "00:00" (about 52 pt at 18 pt), or "12:00 PM" (about 86 pt) in 12-hour mode, at the
-  // input's current, capped text size plus the card's padding, so a time is never clipped; the date
-  // beside it truncates first.
-  const timeCardMinWidth = 18 + Math.ceil((clockFormat === "12h" ? 86 : 52) * Math.min(windowDimensions.fontScale, 1.35));
-  // Side by side only while each card keeps its time and a 44-point date target beside it (Codex r1
-  // on #447: "12:00 PM" at large text left the date a few points); otherwise they stack, as they
-  // always do from 1.6× text.
-  const timeCardWidth = ((timeSectionWidth ?? windowDimensions.width - 40) - 10) / 2;
-  const timeCardsStacked = windowDimensions.fontScale >= 1.6 || timeCardWidth < timeCardMinWidth + 4 + 44;
+  // Room for "00:00" (about 52 pt at 18 pt) at the input's current, capped text size plus the card's
+  // padding, so a time is never clipped; the date beside it truncates first but keeps a 44-point
+  // target. A 12-hour time ("12:00 PM", PRD D18) gets more room and shrinks to fit the rest of the
+  // way (down to 70 %), so the cards stay side by side and the sheet's height is unchanged: stacking
+  // them earlier pushed the bottom actions off small phones (Codex r2 on #447).
+  const timeCardMinWidth = 18 + Math.ceil((clockFormat === "12h" ? 64 : 52) * Math.min(windowDimensions.fontScale, 1.35));
+  const timeCardsStacked = windowDimensions.fontScale >= 1.6;
   const chipDensity = timeEntrySheetLayoutDensity({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
@@ -2917,18 +2912,11 @@ export function ActiveTimerEditSheet({
                   </View>
                 </View>
 
-                <View
-                  onLayout={(event) => {
-                    const width = Math.round(event.nativeEvent.layout.width);
-                    setTimeSectionWidth((current) => current === width ? current : width);
-                  }}
-                  pointerEvents="box-none"
-                  style={[
-                    styles.activeEditSection,
-                    layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
-                    layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
-                  ]}
-                >
+                <View pointerEvents="box-none" style={[
+                  styles.activeEditSection,
+                  layoutDensity === "compact" ? styles.activeEditSectionCompact : null,
+                  layoutDensity === "condensed" ? styles.activeEditSectionCondensed : null
+                ]}>
                   <View pointerEvents="box-none" style={[
                     styles.activeEditTimeGroups,
                     timeCardsStacked ? styles.activeEditTimeGroupsStacked : null
@@ -2964,6 +2952,8 @@ export function ActiveTimerEditSheet({
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                           <Text
                             {...mobileTextProps("input")}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
                             numberOfLines={1}
                             style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
                             testID="time-entry-start-time"
@@ -3040,6 +3030,8 @@ export function ActiveTimerEditSheet({
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
                           <Text
                             {...mobileTextProps("input")}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
                             numberOfLines={1}
                             style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
                             testID="time-entry-end-time"
@@ -3065,7 +3057,7 @@ export function ActiveTimerEditSheet({
                       <View accessible accessibilityLabel={`Now, ${formatClockTime(dialNowMs, clockFormat)}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
                         <View style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}>
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>NOW</Text>
-                          <Text {...mobileTextProps("numeric")} style={styles.activeEditRunningEndTime}>
+                          <Text {...mobileTextProps("numeric")} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={styles.activeEditRunningEndTime}>
                             {formatClockTime(dialNowMs, clockFormat)}
                           </Text>
                         </View>
