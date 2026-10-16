@@ -123,6 +123,42 @@ describe("location v3 engine guards", () => {
         .filter((journey) => assessAutomaticLocation("v2_enabled", journey).action === "auto_confirm")).toEqual([]);
     });
 
+  // Codex r3 on #451: a large Home circle (300 m) whose stays centre 200 m south of its pin, and a
+  // second Home circle 250 m north. The return's approach readings after Home's entry are inside
+  // Home (281–293 m from its pin) but nearly 500 m from the stay's centre: still the return.
+  it("bug 11: a return inside a large circle is judged from the circle's pin, not the stay's centre", () => {
+    const base = Date.parse("2026-03-09T08:00:00Z");
+    const t = (minute: number) => new Date(base + minute * 60_000).toISOString();
+    const reading = (id: string, minute: number, north: number, speed: number): LocationEvidence => ({
+      clientEvidenceId: id, deviceId: DEVICE, algorithmVersion: config.algorithmVersion, kind: "standard_location",
+      occurredAt: t(minute), sourceTimestamp: t(minute), receivedAt: t(minute), timeZone: "UTC", endedAt: null,
+      latitude: deg(north), longitude: 0, horizontalAccuracyMeters: 4, speedMetersPerSecond: speed, savedPlaceId: null,
+      isSimulated: false, metadata: {}
+    });
+    const callback = (id: string, minute: number, placeId: string, kind: "geofence_enter" | "geofence_exit"): LocationEvidence => ({
+      ...reading(id, minute, 0, 0), kind, latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: placeId
+    });
+    const evidence = [
+      reading("h0", 0, -200, 0), reading("h1", 10, -200, 0), reading("h2", 18, -200, 0), callback("exit", 20, OLD_HOME, "geofence_exit"),
+      ...([[21, 500], [23, 1_000], [25, 1_800], [27, 2_400], [28, 1_800], [29, 1_000], [30, 500], [30.5, 329]] as const)
+        .map(([minute, north], index) => reading(`d${index}`, minute, north, 10)),
+      callback("enter", 31, OLD_HOME, "geofence_enter"),
+      reading("a0", 31 + 2 / 60, 293, 3), reading("a1", 31 + 4 / 60, 287, 3), reading("a2", 31 + 6 / 60, 281, 3),
+      callback("exit-other", 31.5, NEW_HOME, "geofence_exit"),
+      reading("b0", 32.5, -200, 0), reading("b1", 42.5, -200, 0), reading("b2", 52.5, -200, 0)
+    ];
+    const journeys = runLocationEngine({
+      priorState: { algorithmVersion: config.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+      config, processingAt: "2026-03-09T11:00:00.000Z", acceptedLearnedPlaces: [], evidence,
+      savedPlaces: [
+        { id: OLD_HOME, name: "Home", latitude: 0, longitude: 0, radiusMeters: 300, loggingEnabled: true },
+        { id: NEW_HOME, name: "Other home", latitude: deg(250), longitude: 0, radiusMeters: 100, loggingEnabled: true }
+      ]
+    }).segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+    expect(journeys.map((journey) => journey.qualificationReason)).toEqual(["same_place_meaningful_round_trip"]);
+    expect(Date.parse(journeys[0].startedAt)).toBeLessThanOrEqual(base + 20.5 * 60_000);
+  });
+
   it("bug 11: a return-side entry into an overlapping old home circle is never the departure", () => {
     const { evidence, places, parkedAt } = overlappingHomes();
     const segments = engine(evidence, places, parkedAt + 120);

@@ -87,8 +87,10 @@ Temporal invariants:
   (an entry, or a fix that is not moving) or one that
   arrived first, when it then moved away, or, for a sign observed as it
   happened, when the accurate readings before it is next back reach 100 m
-  beyond the place's radius (a quick loop out and back is a real excursion,
-  not a return; Codex reproduced 300–700 m loops). Back within three minutes
+  beyond the place's circle, measured from the place's own pin and radius
+  (the stay's centre can sit far from the pin inside a large circle; an
+  unknown place uses its stay's centre and radius): a quick loop out and back
+  is a real excursion, not a return (Codex reproduced 300–700 m loops). Back within three minutes
   without moving away or going that far, it is the return, never the
   departure: with two overlapping
   circles of one home, the car crossed the new circle and entered the old one
