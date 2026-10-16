@@ -1,6 +1,5 @@
 import type pg from "pg";
-import { withSyncTransaction } from "../sync-transaction";
-import { isLockNotAvailableError, isStatementTimeoutError } from "../db";
+import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transaction";
 import { normalizeHealthWorkoutType, type MotionTravelMode } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
@@ -113,19 +112,34 @@ export async function healthCoveredMoves(
  * take five minutes, or, with a walk, run or ride mode, at least half covered), checking the
  * workout's kind on each page; only a card overlapping a workout of another kind is ever read and
  * kept, so open cards cannot crowd out covered ones (Codex r3/r4 on #457). `window` instead takes
- * every open card, of any age, overlapping one imported workout. `continueWhile` is asked before each
- * page, so a tight budget keeps the pages already retired (Codex r4 on #457). Retirement is replay's
- * own (`superseded`); user decisions are never touched. Returns the number retired.
+ * every open card, of any age, overlapping one imported workout. Retirement is replay's own
+ * (`superseded`); user decisions are never touched. Returns the number retired. In one transaction;
+ * `reconcileHealthCoveredMoveCardsNow` commits page by page instead.
  */
 export async function retireHealthCoveredMoveCards(
   client: Pick<pg.PoolClient, "query">, session: RequestSession,
-  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string }; continueWhile?: () => boolean } = {}
+  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string } } = {}
 ) {
-  const modes = new Set(["walking", "running", "cycling", "automotive"]);
   let retired = 0;
-  let cursor: { startedAt: Date; id: string } | null = null;
+  let cursor: PageCursor | null = null;
   for (;;) {
-    if (options.continueWhile && !options.continueWhile()) break;
+    const page = await retireHealthCoveredMoveCardPage(client, session, { ...options, cursor });
+    retired += page.retired;
+    if (!page.next) return retired;
+    cursor = page.next;
+  }
+}
+
+type PageCursor = { startedAt: Date; id: string };
+
+/** One page of `retireHealthCoveredMoveCards` after `cursor`: what it retired and the next cursor. */
+async function retireHealthCoveredMoveCardPage(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession,
+  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string }; cursor: PageCursor | null }
+): Promise<{ retired: number; next: PageCursor | null }> {
+  const modes = new Set(["walking", "running", "cycling", "automotive"]);
+  const cursor = options.cursor;
+  {
     const page: { rows: Array<{ reviewId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }> } = await client.query(
       `select ri.id as "reviewId", ri.suggested_started_at as "startedAt",
               ri.suggested_stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
@@ -152,17 +166,15 @@ export async function retireHealthCoveredMoveCards(
       [session.workspaceId, session.userId, new Date(options.now ?? Date.now()).toISOString(),
         options.window?.startedAt ?? null, options.window?.stoppedAt ?? null,
         cursor?.startedAt.toISOString() ?? null, cursor?.id ?? null]);
-    if (page.rows.length === 0) break;
+    if (page.rows.length === 0) return { retired: 0, next: null };
     const covered = await coveredMoveKeys(client, session, page.rows.map((row) => ({
       key: row.reviewId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString(),
       travelMode: row.travelMode && modes.has(row.travelMode) ? row.travelMode as MotionTravelMode : null
     })));
-    retired += await retireReviews(client, session, page.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId));
-    if (page.rows.length < PAGE) break;
+    const retired = await retireReviews(client, session, page.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId));
     const last = page.rows[page.rows.length - 1];
-    cursor = { startedAt: last.startedAt, id: last.reviewId };
+    return { retired, next: page.rows.length < PAGE ? null : { startedAt: last.startedAt, id: last.reviewId } };
   }
-  return retired;
 }
 
 const PAGE = 250;
@@ -207,35 +219,13 @@ async function retireReviews(client: Pick<pg.PoolClient, "query">, session: Requ
 }
 
 /**
- * Replay's own sweep at its end: within what the replay's budget leaves (stopping at
- * `minimumRemainingMs`), and behind a savepoint, so a sweep that runs out of time never rolls back the
- * replay's other work (Codex r4 on #457). Returns the number retired (0 if it gave up).
- */
-export async function retireHealthCoveredMoveCardsWithinReplay(
-  client: Pick<pg.PoolClient, "query">, session: RequestSession,
-  options: { now: string | number; remainingMs?: () => number; minimumRemainingMs?: number }
-) {
-  const minimum = options.minimumRemainingMs ?? 2_500;
-  await client.query("savepoint location_health_sweep");
-  try {
-    const retired = await retireHealthCoveredMoveCards(client, session, {
-      now: options.now, continueWhile: () => (options.remainingMs?.() ?? Number.POSITIVE_INFINITY) > minimum });
-    await client.query("release savepoint location_health_sweep");
-    return retired;
-  } catch (error) {
-    if (!isStatementTimeoutError(error) && !isLockNotAvailableError(error)) throw error;
-    await client.query("rollback to savepoint location_health_sweep");
-    return 0;
-  }
-}
-
-/**
- * Right after an events request imported a workout: retire the open Move cards of any age that this
- * workout's stored window covers (the row as kept, which an earlier revision of the same sample may
- * have set; Codex r4 on #457), in a bounded transaction of its own (`withSyncTransaction`: acquisition,
- * work and cleanup within the request's deadline, at most two seconds), if the location owner lock is
- * free; a replay holding it sweeps at its end, and every later replay does too (Codex r2/r3 on #457).
- * Best effort; never fails the import.
+ * Retires the open Move cards Health workouts cover outside any replay: after an events request
+ * imported a workout, every card of any age its stored window covers (the row as kept, which an
+ * earlier revision of the same sample may have set; Codex r4 on #457); after a replay committed, or
+ * with no workout, the 30-day sweep. Each page is its own short transaction (`withSyncTransaction`,
+ * within the caller's deadline and at most three seconds), taken only while the location owner lock
+ * is free, so a page that runs out of time loses only itself and never anything else (Codex r5 on
+ * #457). Best effort; never fails its caller. Returns the number retired, or null when nothing ran.
  */
 export async function reconcileHealthCoveredMoveCardsNow(
   session: RequestSession,
@@ -243,25 +233,35 @@ export async function reconcileHealthCoveredMoveCardsNow(
     deadlineAt?: number; signal?: AbortSignal; now?: string | number;
     /** The imported workout, as the events request named it. */
     workout?: { provider: string | null; externalSampleId: string | null; startedAt: string; stoppedAt: string } | null;
+    databasePool?: SyncTransactionOptions["databasePool"];
   } = {}
 ) {
-  const deadlineAt = Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + 2_000);
-  if (deadlineAt - Date.now() < 300) return null;
-  try {
-    return await withSyncTransaction("location_health_reconcile", async ({ client }) => {
-      const lock = await client.query<{ acquired: boolean }>(
-        "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
-      if (!lock.rows[0]?.acquired) return null;
-      // Without a workout (maintenance), the 30-day sweep.
-      const window = options.workout ? await storedWorkoutWindow(client, session, options.workout) : undefined;
-      if (options.workout && !window) return 0;
-      // Pages stop with time to commit the ones already retired.
-      return retireHealthCoveredMoveCards(client, session, { now: options.now, window: window ?? undefined,
-        continueWhile: () => deadlineAt - Date.now() > 500 });
-    }, { deadlineAt, signal: options.signal });
-  } catch {
-    return null;
+  const deadlineAt = Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + 3_000);
+  let window: { startedAt: string; stoppedAt: string } | undefined;
+  let cursor: PageCursor | null = null;
+  let retired: number | null = null;
+  for (let first = true; deadlineAt - Date.now() >= 800; first = false) {
+    let page: { retired: number; next: PageCursor | null } | null;
+    try {
+      page = await withSyncTransaction("location_health_reconcile", async ({ client }) => {
+        const lock = await client.query<{ acquired: boolean }>(
+          "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
+        if (!lock.rows[0]?.acquired) return null;
+        if (first && options.workout) {
+          window = await storedWorkoutWindow(client, session, options.workout) ?? undefined;
+          if (!window) return { retired: 0, next: null };
+        }
+        return retireHealthCoveredMoveCardPage(client, session, { now: options.now, window, cursor });
+      }, { deadlineAt, signal: options.signal, cleanupReserveMs: 300, databasePool: options.databasePool });
+    } catch {
+      break;
+    }
+    if (!page) break;
+    retired = (retired ?? 0) + page.retired;
+    if (!page.next) break;
+    cursor = page.next;
   }
+  return retired;
 }
 
 /**

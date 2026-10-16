@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { healthWorkoutCoversMove, healthWorkoutKind, retireHealthCoveredMoveCardsWithinReplay } from "./health-coverage";
+import { healthWorkoutCoversMove, healthWorkoutKind, reconcileHealthCoveredMoveCardsNow } from "./health-coverage";
 
-type QueryClient = Parameters<typeof retireHealthCoveredMoveCardsWithinReplay>[0];
-const fakeClient = (query: (sql: string) => Promise<{ rows: unknown[] }>) => {
-  const mock = vi.fn(query);
-  return { client: { query: mock } as unknown as QueryClient, mock };
-};
 const session = { workspaceId: "00000000-0000-4000-8000-000000000010", userId: "00000000-0000-4000-8000-000000000001" } as never;
 
 const at = (minute: number) => new Date(Date.parse("2026-10-16T12:00:00Z") + minute * 60_000).toISOString();
@@ -51,30 +46,45 @@ describe("Health walks win (PRD D19)", () => {
     expect(healthWorkoutCoversMove(move(0, 30), workout(0, 30, ["other", null, "walking"]))).toBe(true);
   });
 
-  it("keeps replay's other work when its sweep runs out of time (Codex r4 on #457)", async () => {
+  it("commits each reconcile page on its own, so a later page running out of time keeps the earlier ones (Codex r5 on #457)", async () => {
     const statements: string[] = [];
-    const { client } = fakeClient(async (sql) => {
-      statements.push(sql.trim().split(/\s+/).slice(0, 3).join(" "));
-      if (/^\s*select ri\.id as "reviewId"/.test(sql)) throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
-      return { rows: [] };
-    });
-    expect(await retireHealthCoveredMoveCardsWithinReplay(client, session, { now: "2026-10-16T12:00:00.000Z" })).toBe(0);
-    expect(statements).toEqual(["savepoint location_health_sweep", "select ri.id as", "rollback to savepoint"]);
+    let pages = 0;
+    const moves = Array.from({ length: 250 }, (_, index) => ({
+      reviewId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      startedAt: new Date("2026-10-16T12:00:00.000Z"), stoppedAt: new Date("2026-10-16T12:10:00.000Z"), travelMode: "walking"
+    }));
+    const client = {
+      on: vi.fn(), removeListener: vi.fn(), release: vi.fn(),
+      query: vi.fn(async (sql: string, params?: unknown[]) => {
+        const text = sql.trim();
+        if (/^(commit|rollback)$/.test(text)) statements.push(text);
+        if (text.includes("current_setting('transaction_timeout'")) return { rows: [{ transaction_timeout: null }] };
+        if (text.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: true }] };
+        if (text.startsWith('select ri.id as "reviewId"')) {
+          pages += 1;
+          if (pages === 2) throw Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+          return { rows: moves };
+        }
+        if (text.includes("jsonb_to_recordset")) {
+          return { rows: moves.map((move) => ({ key: move.reviewId, startedAt: move.startedAt, stoppedAt: move.stoppedAt,
+            storedType: "walking", payloadType: null, label: null, activity: null })) };
+        }
+        if (text.startsWith("update review_items")) return { rows: (params?.[2] as string[]).map((id) => ({ eventId: id })) };
+        return { rows: [] };
+      })
+    };
+    const databasePool = { connect: vi.fn(async () => client) } as never;
+    expect(await reconcileHealthCoveredMoveCardsNow(session, { now: "2026-10-16T13:00:00.000Z", databasePool })).toBe(250);
+    expect(statements).toEqual(["commit", "rollback"]);
   });
 
-  it("stops before a page when the replay's budget is short, keeping what it retired", async () => {
-    const { client, mock } = fakeClient(async () => ({ rows: [] }));
-    expect(await retireHealthCoveredMoveCardsWithinReplay(client, session,
-      { now: "2026-10-16T12:00:00.000Z", remainingMs: () => 1_000 })).toBe(0);
-    expect(mock.mock.calls.map(([sql]) => String(sql).trim())).toEqual(
-      ["savepoint location_health_sweep", "release savepoint location_health_sweep"]);
-  });
-
-  it("never swallows other failures", async () => {
-    const { client } = fakeClient(async (sql) => {
-      if (sql.startsWith("select")) throw new Error("connection lost");
-      return { rows: [] };
-    });
-    await expect(retireHealthCoveredMoveCardsWithinReplay(client, session, { now: "2026-10-16T12:00:00.000Z" })).rejects.toThrow("connection lost");
+  it("does nothing while a replay holds the location owner lock", async () => {
+    const client = {
+      on: vi.fn(), removeListener: vi.fn(), release: vi.fn(),
+      query: vi.fn(async (sql: string) => sql.includes("pg_try_advisory_xact_lock") ? { rows: [{ acquired: false }] }
+        : sql.includes("current_setting") ? { rows: [{ transaction_timeout: null }] } : { rows: [] })
+    };
+    expect(await reconcileHealthCoveredMoveCardsNow(session, { databasePool: { connect: vi.fn(async () => client) } as never })).toBeNull();
+    expect(client.query.mock.calls.some(([sql]) => String(sql).startsWith('select ri.id as "reviewId"'))).toBe(false);
   });
 });
