@@ -71,7 +71,7 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*justify-content:\s*flex-end;/s);
     expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions > \.overlap-notice\.is-compact \{[^}]*flex: 1 1 auto;[^}]*margin-right: auto;/s);
-    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*?\.calendar-compact-cancel \{[^}]*width: var\(--calendar-compact-action-width\);[^}]*min-width: var\(--calendar-compact-action-width\);[^}]*max-width: var\(--calendar-compact-action-width\);/s);
+    expect(styles).toMatch(/\.calendar-compact-save,\s*\.calendar-compact-cancel \{[^}]*width: max-content;[^}]*min-width: var\(--calendar-compact-action-width\);[^}]*white-space: nowrap;/s);
     expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
   });
 

@@ -8161,14 +8161,17 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 1.3;
 }
 
+/* The #391 floating-panel eyebrow: small uppercase, as the lists' and the start panel's heads. */
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
 .calendar-compact-duration-field > span {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 .calendar-compact-editor-icons {
@@ -8354,11 +8357,29 @@ dialog.ui-dialog.manual-entry-dialog {
   gap: 8px;
 }
 
-/* 12-hour times ("11:00 PM") need more room than "23:00"; Duration ("01:30") gives some back.
-   Narrower editors keep their two- and one-column layouts below. */
-@container time-entry-editor (min-width: 381px) {
+/* 12-hour times ("11:15 PM", 64 px of text) need more room than "23:00": Duration keeps its own
+   room ("01:30" in 78 px with tighter padding) and Start and End share the rest; a 0.7fr share had
+   squeezed Duration until it clipped (owner, 16 Oct 2026). Below 412 px of editor the three no
+   longer fit side by side in 12-hour mode, so Duration takes its own row as on narrow editors. */
+@container time-entry-editor (min-width: 412px) {
   .calendar-compact-temporal-fields[data-clock="12h"] {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 0.7fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(78px, 0.5fr);
+  }
+
+  .calendar-compact-temporal-fields[data-clock="12h"] .calendar-compact-duration-input input {
+    padding-inline: 8px;
+  }
+}
+
+@container time-entry-editor (min-width: 341px) and (max-width: 411px) {
+  .calendar-compact-temporal-fields[data-clock="12h"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-compact-temporal-fields[data-clock="12h"] .calendar-compact-duration,
+  .calendar-compact-temporal-fields[data-clock="12h"] .calendar-compact-duration-field,
+  .calendar-compact-temporal-fields[data-clock="12h"] .calendar-compact-duration-input {
+    grid-column: 1 / -1;
   }
 }
 
@@ -8477,9 +8498,17 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-duration-field,
+/* The field's own width, never the input's intrinsic one: an input's minimum content width had
+   pushed it 7 px into the card's right padding (owner, 16 Oct 2026). */
 .calendar-compact-duration-input {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
+}
+
+.calendar-compact-duration-input > input {
+  min-width: 0;
 }
 
 .calendar-compact-duration {
@@ -8657,12 +8686,14 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 1.2;
 }
 
+/* At least the shared width, wider for a longer label ("Add block"), never wrapping: a footer note
+   (an overlap, an error) wraps in its own column instead (owner, 16 Oct 2026). */
 .calendar-compact-save,
 .calendar-compact-cancel {
-  width: var(--calendar-compact-action-width);
+  width: max-content;
   min-width: var(--calendar-compact-action-width);
-  max-width: var(--calendar-compact-action-width);
-  flex: 0 0 var(--calendar-compact-action-width);
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .calendar-compact-discard-back {
@@ -14181,11 +14212,15 @@ dialog.ui-dialog.df-rf-dialog {
   background: transparent;
 }
 
+/* The #391 eyebrow: small uppercase ("FRIDAY 16 OCTOBER", "RECORDING"), as the iPhone sheet's. */
 .df-ed-eyebrow {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 /* "Logged automatically · {place}" under an auto-logged block's heading (PRD D17). */
@@ -14285,9 +14320,68 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--danger-text);
 }
 
+/* The chosen chip keeps its activity's colour: a swatch of the block colour ringed in the on-block
+   colour, instead of an on-block (often black) square (owner, 16 Oct 2026). */
+.df-ed-chips .df-rchip.is-checked > i {
+  background: var(--block);
+  box-shadow: 0 0 0 2px var(--on-block);
+}
+
+/* "All activities" is one more chip at the end of the flow, the chips' height and shape, not a
+   44 px inset field on a row of its own (owner, 16 Oct 2026). */
+.df-ed-chips .calendar-compact-category-field {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.df-ed-chips .calendar-compact-category-field > .df-rchip--more {
+  display: inline-flex;
+  width: auto;
+  min-height: 32px;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* Start again reads as words, not an unlabelled arrow (owner, 16 Oct 2026). */
+.calendar-compact-start-again {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.calendar-compact-start-again:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.calendar-compact-start-again:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.calendar-compact-start-again:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 /* The editor's chips are 44 px wherever touch is the input, whatever the viewport width. */
 @media (any-pointer: coarse) {
-  .df-ed-chips .df-rchip {
+  .df-ed-chips .df-rchip,
+  .df-ed-chips .calendar-compact-category-field > .df-rchip--more {
     min-height: 44px;
   }
 }

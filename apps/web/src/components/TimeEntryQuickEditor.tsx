@@ -738,15 +738,18 @@ export function TimeEntryQuickEditorPanel({
             usable — and keep focus — while an error shows. */}
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
+            // Words, not an unlabelled arrow that could read as Undo (owner, 16 Oct 2026).
             <button
-              className="calendar-compact-icon-action"
+              className="calendar-compact-start-again"
               type="button"
-              aria-label={`Start ${title} again`}
+              // The visible words lead the name (WCAG 2.5.3), then which block.
+              aria-label={`Start again: ${title}`}
               aria-busy={busyAction === "start" || undefined}
               disabled={controlsDisabled || props.isTimerBusy}
               onClick={() => void controller.startAgain()}
+              title={`Start “${title}” again now`}
             >
-              <DayframeIcon glyph="rotate-ccw" size={17} />
+              Start again
             </button>
           ) : null}
           {props.mode === "entry" && props.onDelete ? (
@@ -820,6 +823,7 @@ export function TimeEntryQuickEditorPanel({
 
         <ActivityChipGroup
           categories={editorChipCategories(props.categories, chipAnchorId)}
+          maxRows={2}
           disabled={controlsDisabled}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
           selectedId={draft.categoryId}

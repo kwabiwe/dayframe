@@ -65,7 +65,8 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-editor-footer \{[^}]*height:\s*var\(--calendar-compact-feedback-height\);[^}]*overflow:\s*hidden;/s);
     expect(styles).toMatch(/\.calendar-compact-discard-confirmation strong \{[^}]*color:\s*var\(--danger-text\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
     expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*\.calendar-compact-discard-confirm \{[^}]*height:\s*var\(--web-control-height\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
-    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*?\.calendar-compact-cancel \{[^}]*width:\s*var\(--calendar-compact-action-width\);[^}]*flex:\s*0 0 var\(--calendar-compact-action-width\);/s);
+    // At least the shared width, wider for a longer label, never wrapping (owner, 16 Oct 2026).
+    expect(styles).toMatch(/\.calendar-compact-save,\s*\.calendar-compact-cancel \{[^}]*width: max-content;[^}]*min-width:\s*var\(--calendar-compact-action-width\);[^}]*white-space: nowrap;/s);
   });
 
   it("uses borderless inset fields, neutral focus, and three/two/one temporal columns", () => {
@@ -101,7 +102,7 @@ describe("shared web time-entry quick editor", () => {
   });
 
   it("puts Start again and Delete (danger) in the head beside Close, and neutral selection in shared controls (UIA-201, UIA-205)", () => {
-    expect(quick).toMatch(/className="calendar-compact-editor-icons"[\s\S]*?glyph="rotate-ccw"[\s\S]*?className="calendar-compact-icon-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?aria-label="Close editor"/);
+    expect(quick).toMatch(/className="calendar-compact-editor-icons"[\s\S]*?className="calendar-compact-start-again"[\s\S]*?Start again[\s\S]*?className="calendar-compact-icon-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?aria-label="Close editor"/);
     expect(quick).not.toContain("df-ed-lead");
     expect(quick).toContain('{entry ? "Save" : "Add block"}');
     expect(quick).toContain("<ActivityChipGroup");
