@@ -10,6 +10,7 @@ import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
+import { learnedNamesFor, namePatternsFor } from "./name-patterns";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import {
   AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
@@ -214,9 +215,19 @@ export async function emitReviewSemanticSegments(
   // #435): only those are moved or removed.
   const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
+  // Learned names (PRD D19, A8): a name the person gave this pattern is the card's name, and its
+  // activity the card's activity; after two uses it also names a Log automatically block.
+  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds);
+  const learnedNames = await learnedNamesFor(client, session, patterns);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
-    const { trusted, title, move } = context(segment);
-    const categoryId = segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null;
+    const { trusted, title: placeTitle, move } = context(segment);
+    const pattern = patterns.get(clientEventId);
+    const learned = learnedNames.get(clientEventId);
+    const title = learned?.name ?? placeTitle;
+    const categoryId = learned?.categoryId ?? (segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null);
+    const nameFields = pattern ? {
+      namePatternKey: pattern.key, namePatternBand: pattern.band, ...(learned?.name ? { nameSource: "learned" } : {})
+    } : {};
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
@@ -246,6 +257,7 @@ export async function emitReviewSemanticSegments(
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,
+          ...nameFields,
           semanticDisposition: "needs_review",
           semanticReason
         }
@@ -267,6 +279,7 @@ export async function emitReviewSemanticSegments(
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,
+          ...nameFields,
           semanticDisposition: "needs_review",
           semanticReason
         };
@@ -280,7 +293,8 @@ export async function emitReviewSemanticSegments(
     return { client_event_id: clientEventId, segment_id: segmentId, kind: segment.kind,
       event_type: eventType, occurred_at: segment.startedAt, stopped_at: segment.stoppedAt,
       confidence: segment.confidence, raw_payload: payload, category_id: categoryId, place_id: placeId, title,
-      auto_log: autoLog, description: autoLog ? trusted?.description?.trim() || null : null,
+      auto_log: autoLog,
+      description: autoLog ? (learned?.name && learned.uses >= 2 ? learned.name : trusted?.description?.trim() || null) : null,
       initial_review_status: autoLog ? "confirmed" : "needs_review",
       review_status: autoLog ? "confirmed" : existing.get(clientEventId)?.reviewStatus ?? "needs_review",
       notes: overlapsConfirmedTime

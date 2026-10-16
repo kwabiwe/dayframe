@@ -1,3 +1,5 @@
+import { recordLearnedName } from "./name-patterns";
+import type { NameBand } from "@dayframe/shared";
 import {
   LocationReviewActionSchema,
   stableLocationId,
@@ -55,6 +57,10 @@ type LockedReview = {
    * the items it came from. A description equal to one of them is not the owner's.
    */
   suggestedTitles: string[];
+  /** Its learned-name pattern (PRD D19, A8), when the emitter keyed it; and whether its title is a learned name. */
+  namePatternKey: string | null;
+  namePatternBand: string | null;
+  learnedName: boolean;
 };
 
 type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown; correctionEvent: boolean };
@@ -243,6 +249,9 @@ async function lockLocationReviews(
             ae.source as "eventSource",
             ae.event_type as "eventType",
             ae.raw_payload -> '${REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY}' as "reviewSuggestedTitles",
+            ae.raw_payload ->> 'namePatternKey' as "namePatternKey",
+            ae.raw_payload ->> 'namePatternBand' as "namePatternBand",
+            coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             coalesce(ae.client_event_id like 'location-correction:%', false) as "correctionEvent",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
@@ -455,7 +464,7 @@ async function locationEditMatchesExisting(
     entry.categoryId !== expectedCategory ||
     entry.placeId !== expectedPlace ||
     entry.placeLabel !== expectedPlaceLabel ||
-    (entry.description ?? "") !== (confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles) ?? "") ||
+    (entry.description ?? "") !== (confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null) ?? "") ||
     new Date(entry.startedAt).toISOString() !== new Date(edit.startedAt ?? item.suggestedStartedAt).toISOString() ||
     new Date(entry.stoppedAt).toISOString() !== new Date(edit.stoppedAt ?? item.suggestedStoppedAt).toISOString()
   ) {
@@ -561,7 +570,7 @@ async function confirmReview(
       : item.suggestedPlaceId;
   const placeLabel = placeIdentity?.placeLabel ?? null;
   await validateReferences(client, session, categoryId, placeId);
-  const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles);
+  const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
        workspace_id, user_id, category_id, place_id, place_label, source, confidence, review_status,
@@ -586,6 +595,17 @@ async function confirmReview(
   // Recent (E1) learns only words the owner typed in this decision, recorded on the block's event.
   if (entryId && isOwnerAuthoredReviewDescription(description, item.suggestedTitles)) {
     await recordOwnerAuthoredDescription(client, session, item.eventId);
+  }
+  // Learned names (PRD D19, A8): a name the person typed (or a learned name they kept) and an
+  // activity they chose (or a learned one they kept) are remembered for this pattern. Dayframe's
+  // own titles never count.
+  if (entryId && item.namePatternKey && isNameBand(item.namePatternBand)) {
+    const learnedTitle = item.learnedName ? item.title : null;
+    const name = description && (isOwnerAuthoredReviewDescription(description, item.suggestedTitles) ||
+      (learnedTitle && !isOwnerAuthoredReviewDescription(description, [learnedTitle]))) ? description : null;
+    const chose = Boolean(edit && Object.prototype.hasOwnProperty.call(edit, "categoryId"));
+    await recordLearnedName(client, session, { key: item.namePatternKey, band: item.namePatternBand },
+      { name, categoryId: chose || item.learnedName ? categoryId : null });
   }
   if (!entryId) {
     const existing = await client.query<{ id: string }>(
@@ -620,15 +640,20 @@ export function confirmedLocationDescription(
   segmentKind: LocationEntryKind,
   title: string,
   edit: ReviewEntryEdit | undefined,
-  suggestedTitles: readonly string[] = []
+  suggestedTitles: readonly string[] = [],
+  /** The card's title when it is a name the person gave this pattern before (PRD D19, A8). */
+  learnedTitle: string | null = null
 ) {
   // A Move (a journey, or time away from a place: a round-trip Move under PRD D19) keeps no
   // description of its own: its block shows its activity, and only words the person typed stay. An
   // editor that sent a title Dayframe suggested back unchanged ("Trip", "Time away from Home", from
-  // an older app's prefill) did not type it (Codex r1 on #456).
+  // an older app's prefill) did not type it (Codex r1 on #456). A learned name is the person's own
+  // words from before, so accepting it keeps it.
   if (segmentKind === "commute" || segmentKind === "time_away") {
     const typed = edit?.description?.trim() || null;
-    return typed && isOwnerAuthoredReviewDescription(typed, [title, ...suggestedTitles]) ? typed : null;
+    if (typed && isOwnerAuthoredReviewDescription(typed, [title, ...suggestedTitles])) return typed;
+    if (learnedTitle && (!typed || !isOwnerAuthoredReviewDescription(typed, [learnedTitle]))) return learnedTitle;
+    return null;
   }
   return edit?.description?.trim() || title;
 }
@@ -1185,4 +1210,9 @@ async function auditCorrection(
      values ($1, $2, $3, 'location_segment', $4, $5::jsonb)`,
     [session.workspaceId, session.userId, action, segmentId, JSON.stringify(metadata)]
   );
+}
+
+const NAME_BANDS = new Set<string>(["morning", "afternoon", "evening", "weekend"]);
+function isNameBand(value: string | null): value is NameBand {
+  return value != null && NAME_BANDS.has(value);
 }
