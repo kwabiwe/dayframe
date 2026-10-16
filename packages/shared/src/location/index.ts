@@ -16,3 +16,4 @@ export * from "./testFixtures";
 export * from "./travelModePresentation";
 export * from "./tripStopPresentation";
 export * from "./types";
+export * from "./moveNaming";

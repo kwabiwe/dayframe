@@ -235,11 +235,11 @@ describe("Location Review journey copy", () => {
     expect(locationActivityGlyphName({ categoryName: null, description: "", segmentKind: "commute" })).toBe("commute");
   });
 
-  it("never offers Commute automatically or commute wording for time away (review finding 5)", () => {
+  it("never offers Commute automatically for time away, and calls every Move a trip (review finding 5, PRD D19)", () => {
     expect(locationReviewJourneyCopy({ kind: "commute", timeAway: true })).toMatchObject({
-      journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded."
+      journey: false, primaryLabel: "Record trip", recorded: "The trip was recorded."
     });
-    expect(locationReviewJourneyCopy({ kind: "commute" })).toMatchObject({ journey: true, primaryLabel: "Record commute" });
+    expect(locationReviewJourneyCopy({ kind: "commute" })).toMatchObject({ journey: true, primaryLabel: "Record trip" });
     expect(locationReviewJourneyCopy({ kind: "stay" })).toBeNull();
   });
 });

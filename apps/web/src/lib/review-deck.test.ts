@@ -8,6 +8,7 @@ import {
   reviewPicture,
   reviewProposalSignature,
   reviewReason,
+  reviewRoute,
   reviewTitle,
   reviewWhen,
   stepSelection
@@ -56,6 +57,18 @@ describe("Review deck helpers", () => {
     expect(reviewPicture(item({ eventSource: "location_learning", eventType: "commute_detected", rawPayload: {} }))).toBe("commute");
     expect(reviewPicture(item({ eventSource: "health_sleep", eventType: "health_sleep" }))).toBe("sleep");
     expect(reviewPicture(item())).toBe("workout");
+  });
+
+  it("shows a Stay or Move by the server's title and a Move's route line (PRD D19)", () => {
+    const drive = item({ title: "Drive", eventSource: "location_learning", eventType: "commute_detected",
+      rawPayload: { routeLabel: "Home → Peak Gym" } });
+    expect(reviewTitle(drive)).toBe("Drive");
+    expect(reviewRoute(drive)).toBe("Home → Peak Gym");
+    expect(reviewTitle(item({ title: "", eventSource: "location_learning", eventType: "commute_detected", rawPayload: {} }))).toBe("Trip");
+    expect(reviewRoute(item({ title: "Morning walk" }))).toBeNull();
+    // A Stay is called by its place, never "Visit to …".
+    expect(reviewTitle(item({ ...v2, title: "Peak Gym", placeName: "Peak Gym" }))).toBe("Peak Gym");
+    expect(reviewTitle(item({ ...v2, title: "", placeName: "Peak Gym" }))).toBe("Peak Gym");
   });
 
   it("logs with the plain accept or confirm unless the name or activity changed", () => {

@@ -64,11 +64,16 @@ export function reviewConfidence(confidence: string) {
 /** The card's heading: what the moment is, never an address. */
 export function reviewTitle(item: Pick<ReviewItemRow, "title" | "eventSource" | "eventType" | "rawPayload" | "placeName">) {
   const evidenceKind = typeof item.rawPayload?.evidenceKind === "string" ? item.rawPayload.evidenceKind : null;
-  if (isTimeAway(item)) return item.title?.trim() || "Time away";
-  if (item.eventType === "commute_detected") return item.title?.trim() || "Commute";
+  // Stays and Moves carry the server's title (PRD D19): "Peak Gym", "Drive", "Commute", "Trip".
+  if (item.eventType === "commute_detected") return item.title?.trim() || "Trip";
   const visit = item.eventType === "learned_place_visit" || item.eventType === "geofence_exit" || evidenceKind === "learned_place";
-  if (visit && item.placeName) return `Visit to ${item.placeName}`;
-  return item.title?.trim() || "Suggestion";
+  return item.title?.trim() || (visit && item.placeName) || "Suggestion";
+}
+
+/** A Move's second line ("Home → Gym", "Round trip from Home"), from the server; null for anything else. */
+export function reviewRoute(item: Pick<ReviewItemRow, "eventType" | "rawPayload">) {
+  const route = item.eventType === "commute_detected" ? item.rawPayload?.routeLabel : null;
+  return typeof route === "string" && route.trim() ? route.trim() : null;
 }
 
 /** The name "Log as" starts from: the suggestion's own title. */
@@ -96,7 +101,7 @@ export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventTyp
     case "motion_review_only":
       return "Timed from Motion & Fitness.";
     case "time_away_review_only":
-      return "Time away isn’t added automatically.";
+      return "Round trips like this aren’t added automatically.";
     case "insufficient_route_evidence":
       return "Route evidence is limited.";
     case "boundary_uncertainty_exceeded":

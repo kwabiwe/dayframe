@@ -621,7 +621,9 @@ export function confirmedLocationDescription(
   title: string,
   edit: ReviewEntryEdit | undefined
 ) {
-  if (segmentKind === "commute") return edit?.description?.trim() || null;
+  // A Move (a journey, or time away from a place: a round-trip Move under PRD D19) keeps no
+  // description of its own: its block shows its activity, and only words the person typed stay.
+  if (segmentKind === "commute" || segmentKind === "time_away") return edit?.description?.trim() || null;
   return edit?.description?.trim() || title;
 }
 

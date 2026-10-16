@@ -216,9 +216,10 @@ export function isTimeAwayReviewItem(item: Pick<MobileReviewItem, "eventType"> &
 function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCategory[]) {
   if (isTimeAwayReviewItem(item)) return undefined;
   if (item.eventType === "commute_detected") {
-    return categories.find(
-      (candidate) => candidate.name.trim().toLowerCase() === "commute"
-    );
+    // Only a Commute (Home ↔ Work, or an older server's journey) falls back to Commute; every other
+    // Move to Travel (PRD D19).
+    const name = item.title?.trim() === "Commute" || !item.rawPayload?.routeLabel ? "commute" : "travel";
+    return categories.find((candidate) => candidate.name.trim().toLowerCase() === name);
   }
   return fallbackHealthCategory(item, categories);
 }
@@ -237,7 +238,7 @@ export function reviewItemCategoryLabel(
 export function reviewConfirmLabel(
   item: Pick<MobileReviewItem, "eventSource" | "eventType"> & { rawPayload?: MobileReviewItem["rawPayload"] }
 ) {
-  if (isTimeAwayReviewItem(item)) return "Confirm time away";
+  if (isTimeAwayReviewItem(item)) return "Confirm trip";
   if (item.eventType === "commute_detected") return "Confirm commute";
   if (isLocationReviewItem(item)) return "Confirm visit";
   return "Confirm activity";
@@ -478,7 +479,7 @@ export function locationReviewReasonCopy(
     case "motion_review_only":
       return "Needs review · timed from Motion & Fitness";
     case "time_away_review_only":
-      return "Needs review · time away isn’t added automatically";
+      return "Needs review · round trips like this aren’t added automatically";
     case "insufficient_route_evidence":
       return "Needs review · route evidence is limited";
     case "boundary_uncertainty_exceeded":

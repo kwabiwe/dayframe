@@ -12,8 +12,9 @@ const eventSource = source("../event-service.ts");
 
 describe("V2 location review quality contracts", () => {
   it("ensures a Commute category before V2 commute semantic emission", () => {
+    // Commute only between Home and Work; Errands with a stop; Travel for every other Move (PRD D19).
     expect(ingestSource).toMatch(
-      /const suggestedCategoryId = isTimeAway\(segment\) \? null : segment\.kind === "commute"[\s\S]*?ensureCommuteCategoryId/
+      /const suggestedCategoryId = move\s*\? move\.activity === "commute" \? await ensureCommuteCategoryId[\s\S]*?ensureTravelCategoryId/
     );
     expect(ingestSource.match(/suggestedCategoryId/g)?.length).toBeGreaterThanOrEqual(4);
   });
@@ -24,8 +25,8 @@ describe("V2 location review quality contracts", () => {
   });
 
   it("does not use a generated commute title as a confirmed description", () => {
-    // A journey is titled Commute; time away from a place is named after it.
-    expect(ingestSource).toContain('return isTimeAway(segment) ? timeAwayTitle(await timeAwayPlaceName(client, session, segment, stayIds)) : "Commute";');
+    // A Move is named from its ends and mode (PRD D19); its block keeps no generated description.
+    expect(ingestSource).toContain("return (await segmentMoveName(client, session, segment, stayIds)).title;");
     expect(ingestSource).not.toContain('return "Possible journey"');
     expect(reviewSource).toContain("confirmedLocationDescription");
     expect(reviewSource).not.toContain("edit?.description?.trim() || item.title");

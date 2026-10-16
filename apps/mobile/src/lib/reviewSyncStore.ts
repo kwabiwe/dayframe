@@ -2859,7 +2859,9 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "qualificationReason",
     "stopCount",
     // Display-only commute mode ("car", "walk"): shown on the card's time line.
-    "travelMode"
+    "travelMode",
+    // A Move's second line ("Home → Gym"; PRD D19).
+    "routeLabel"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

@@ -61,14 +61,15 @@ describe("location review confirmation semantics", () => {
     ).resolves.toBe("created-commute");
   });
 
-  it("confirms time away from a place with the user's category only, keeping its title", async () => {
+  it("confirms legacy time away with the user's category only, and like every Move keeps no generated description", async () => {
     const client = categoryClient();
     await expect(confirmedLocationCategoryId(client, session, "time_away", null, undefined)).resolves.toBeNull();
     await expect(confirmedLocationCategoryId(client, session, "time_away", null, {
       categoryId: "30000000-0000-4000-8000-000000000002"
     })).resolves.toBe("30000000-0000-4000-8000-000000000002");
     expect(vi.mocked(client.query)).not.toHaveBeenCalled();
-    expect(confirmedLocationDescription("time_away", "Time away from Home", undefined)).toBe("Time away from Home");
+    // PRD D19: time away is a round-trip Move; only words the person typed become its description.
+    expect(confirmedLocationDescription("time_away", "Trip", undefined)).toBeNull();
     expect(confirmedLocationDescription("time_away", "Time away from Home", { description: "Groceries" })).toBe("Groceries");
   });
 

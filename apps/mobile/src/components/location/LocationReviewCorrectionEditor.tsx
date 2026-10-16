@@ -18,7 +18,6 @@ import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   DAYFRAME_BLOCKS,
   placeDisplayName,
-  travelModeLabel,
   tripStopRows,
   tripStopsHeading,
   type LocationReviewAction,
@@ -1517,10 +1516,9 @@ function placeForSelection(
 }
 
 function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
+  // Moves carry the server's title ("Drive", "Commute", "Trip"; PRD D19).
   if (evidence.segment.kind !== "commute") return evidence.display.title;
-  if (evidence.segment.timeAway) return evidence.display.title || "Time away";
-  const mode = travelModeLabel(evidence.segment.travelMode);
-  return mode ? `Commute · ${mode}` : "Commute";
+  return evidence.display.title?.trim() || "Trip";
 }
 
 function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto, clockFormat: ClockFormat) {

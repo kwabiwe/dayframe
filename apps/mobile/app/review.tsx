@@ -2674,7 +2674,10 @@ export function reviewDeckCardForItem(
     : null;
   const syncCopy = reviewItemSyncStatusCopy(context.syncState);
   const title = reviewItemTitle(item);
-  const travelMode = item.eventType === "commute_detected" ? travelModeLabel(item.rawPayload?.travelMode) : null;
+  // A Move's second line from the server ("Home → Gym"; PRD D19); an older server's card shows the mode.
+  const routeLabel = item.eventType === "commute_detected" && typeof item.rawPayload?.routeLabel === "string"
+    ? item.rawPayload.routeLabel.trim() || null : null;
+  const travelMode = routeLabel ?? (item.eventType === "commute_detected" ? travelModeLabel(item.rawPayload?.travelMode) : null);
   return {
     key,
     picture: reviewDeckPicture(kind),
@@ -2793,8 +2796,8 @@ function currentPresentationTimeZone() {
 }
 
 function reviewItemTitle(item: MobileReviewItem) {
-  if (isTimeAwayReviewItem(item)) return item.title || "Time away";
-  if (item.eventType === "commute_detected") return "Commute detected";
+  // Moves carry the server's title ("Drive", "Commute", "Trip"; PRD D19).
+  if (item.eventType === "commute_detected") return item.title?.trim() || "Trip";
   if (isLocationReviewItem(item)) {
     return readableLocationNameFromParts({
       address: item.rawPayload?.address,
@@ -2809,8 +2812,8 @@ function reviewItemTitle(item: MobileReviewItem) {
 function reviewItemSummary(item: MobileReviewItem) {
   if (isTimeAwayReviewItem(item)) {
     return typeof item.rawPayload?.stopCount === "number" && item.rawPayload.stopCount > 0
-      ? "You were away from this place, with an unnamed stop nearby."
-      : "You were away from this place.";
+      ? "A round trip from this place, with an unnamed stop."
+      : "A round trip from this place.";
   }
   if (item.eventType === "commute_detected") {
     return item.rawPayload?.continuityStatus === "uncertain_gap"
