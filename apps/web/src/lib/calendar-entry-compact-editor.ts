@@ -203,6 +203,21 @@ export function normalizeCalendarEntryCompactTypedTimes<T extends Pick<CalendarE
   return { ...draft, startedAtTime, stoppedAtTime };
 }
 
+/**
+ * After a live synchronisation, the field being typed in keeps the person's AM/PM text when the
+ * synchronised `HH:MM` names the same minute, so the next key ("M" after "8:15 P") lands in what
+ * they typed, never in rewritten text (Codex r1 on #446). Plain digits are still normalised at once
+ * (`1025` → 10:25), as before.
+ */
+export function keepTypedMeridiemTime<T extends Pick<CalendarEntryCompactDraft, "startedAtTime" | "stoppedAtTime">>(
+  synchronized: T,
+  key: "startedAtTime" | "stoppedAtTime",
+  typed: string
+): T {
+  if (!/[ap]/i.test(typed)) return synchronized;
+  return synchronized[key] === parseTimeInput(typed) ? { ...synchronized, [key]: typed } : synchronized;
+}
+
 export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
   const trimmed = value.trim();
   return READY_TIME_INPUT.test(trimmed) && Boolean(parseTimeInput(trimmed));

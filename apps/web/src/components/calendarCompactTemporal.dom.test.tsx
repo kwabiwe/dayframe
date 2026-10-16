@@ -48,6 +48,31 @@ describe("Calendar compact temporal DOM", () => {
     expect(duration.getAttribute("placeholder")).toBe("00:30");
   });
 
+  it.each([
+    ["12h", "10:00 AM", "8:15 PM", "8:45 PM"],
+    ["24h", "10:00", "08:15 PM", "20:45"]
+  ] as const)("types an AM/PM time key by key in %s mode and saves that time (Codex r1 on #446)", async (clock, shown, typedShows, finishShows) => {
+    window.localStorage.setItem("dayframe.clockFormat", clock);
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    renderEditor({ capturedNow: new Date(2026, 7, 2, 23), sourceEntry: entry("2026-08-02T10:00", "2026-08-02T10:30"), onSave });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
+    expect(start.value).toBe(shown);
+
+    await user.clear(start);
+    await user.type(start, "8:15 PM");
+    expect(start.value).toBe(typedShows);
+    expect(finish.value).toBe(finishShows);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0][0].payload).toEqual({
+      startedAt: localIso("2026-08-02T20:15"),
+      stoppedAt: localIso("2026-08-02T20:45")
+    });
+  });
+
   it("keeps incomplete time raw and delays its error until blur", async () => {
     renderCompletedEditor();
     const start = await screen.findByLabelText("Start time") as HTMLInputElement;

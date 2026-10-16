@@ -156,7 +156,7 @@ function TimelineInlineTimeControl({
         data-inline-field="time"
         disabled={disabled}
         inputMode={clock === "12h" ? "text" : "numeric"}
-        maxLength={clock === "12h" ? 8 : 5}
+        maxLength={8}
         onChange={(event) => onTimeChange(event.target.value)}
         onClick={() => {
           onBeginEdit();

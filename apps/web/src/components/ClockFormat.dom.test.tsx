@@ -3,7 +3,7 @@
 import { act } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClockFormatProvider, ClockFormatSettings, setClockFormatPreference, useClockFormat } from "./ClockFormat";
 import { formatTime } from "@/lib/format";
 import {
@@ -46,6 +46,7 @@ function clearCookie() {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   document.body.innerHTML = "";
   window.localStorage.clear();
   clearCookie();
@@ -91,6 +92,22 @@ describe("12/24-hour setting on web (16 Oct 2026)", () => {
       window.dispatchEvent(new StorageEvent("storage", { key: CLOCK_FORMAT_STORAGE_KEY }));
     });
     expect(container.querySelector("time")?.textContent).toBe("9:30 PM");
+  });
+
+  it("keeps a choice for this page when the browser refuses storage (Codex r1 on #446)", async () => {
+    window.localStorage.removeItem(CLOCK_FORMAT_STORAGE_KEY);
+    const { container } = await hydrate("24h");
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("blocked"); });
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>(".ui-segmented-control button")];
+    await act(async () => buttons[1].click());
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector("time")?.textContent).toBe("9:30 PM");
+    await act(async () => buttons[2].click());
+    expect(container.querySelector("time")?.textContent).toBe("21:30");
+    vi.restoreAllMocks();
+    await act(async () => setClockFormatPreference("system"));
   });
 
   it("reads only known choices and cookie values", () => {

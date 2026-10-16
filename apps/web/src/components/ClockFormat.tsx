@@ -40,8 +40,11 @@ function subscribeToClockFormat(callback: () => void) {
   };
 }
 
+/** The choice for this page only, when the browser refuses storage (private windows). */
+let memoryPreference: ClockFormatPreference | null = null;
+
 function getClockFormatPreference(): ClockFormatPreference {
-  return readClockFormatPreference(browserStorage());
+  return memoryPreference ?? readClockFormatPreference(browserStorage());
 }
 
 function getClockFormat(): ClockFormat {
@@ -51,10 +54,13 @@ function getClockFormat(): ClockFormat {
 export function setClockFormatPreference(next: ClockFormatPreference) {
   const storage = browserStorage();
   try {
-    if (next === "system") storage?.removeItem(CLOCK_FORMAT_STORAGE_KEY);
-    else storage?.setItem(CLOCK_FORMAT_STORAGE_KEY, next);
+    if (!storage) throw new Error("No storage");
+    if (next === "system") storage.removeItem(CLOCK_FORMAT_STORAGE_KEY);
+    else storage.setItem(CLOCK_FORMAT_STORAGE_KEY, next);
+    memoryPreference = null;
   } catch {
     // Private windows can refuse storage; the choice then lasts for this page only.
+    memoryPreference = next;
   }
   window.dispatchEvent(new Event(CLOCK_FORMAT_CHANGE_EVENT));
 }

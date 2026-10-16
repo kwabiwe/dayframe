@@ -24,6 +24,7 @@ import {
   formatCalendarEntryCompactDuration,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
+  keepTypedMeridiemTime,
   normalizeCalendarEntryCompactTypedTimes,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
@@ -245,7 +246,11 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         ? isCompleteCalendarEntryCompactDurationInput(value)
         : isCalendarEntryCompactTimeInputReadyToSynchronize(value));
       if (!isComplete) return next;
-      return trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner }) ?? next;
+      const synchronized = trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner });
+      if (!synchronized) return next;
+      return !commit && (key === "startedAtTime" || key === "stoppedAtTime")
+        ? keepTypedMeridiemTime(synchronized, key, value)
+        : synchronized;
     });
     setDirty((current) => ({ ...current, [key]: true }));
     setError(null);

@@ -7,6 +7,7 @@ import {
   updateTimelineInlineDescription,
   updateTimelineInlineTime
 } from "./timeline-inline-edit";
+import { displayTypedTime } from "./calendar-grid";
 
 describe("Timeline inline entry editing", () => {
   it("builds the same trimmed description patch as the full compact editor", () => {
@@ -51,6 +52,20 @@ describe("Timeline inline entry editing", () => {
     expect(edit.draft.stoppedAtTime).toBe("10:15");
     expect(edit.draft.duration).toBe("01:15");
     expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T10:15") });
+  });
+
+  it.each(["12h", "24h"] as const)("keeps a typed PM while it is typed key by key in %s mode (Codex r1 on #446)", (clock) => {
+    const entry = timeEntry();
+    let edit = updateTimelineInlineTime(createTimelineInlineEditDraft(entry, "time"), entry, "finish", "");
+    // Each key arrives as what the field shows plus the new character, as in the browser.
+    for (const key of "9:45 PM") {
+      const shown = displayTypedTime(edit.draft.stoppedAtTime, clock);
+      expect(shown.length).toBeLessThan(8);
+      edit = updateTimelineInlineTime(edit, entry, "finish", shown + key);
+    }
+    expect(displayTypedTime(edit.draft.stoppedAtTime, clock)).toBe(clock === "12h" ? "9:45 PM" : "09:45 PM");
+    const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
+    expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T21:45") });
   });
 
   it("does not insert a colon mid-entry before four compact digits are complete", () => {
