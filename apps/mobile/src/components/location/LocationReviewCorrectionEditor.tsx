@@ -151,6 +151,8 @@ export function LocationReviewCorrectionEditor({
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
   const journeyCopy = locationReviewJourneyCopy(evidence.segment);
   const isJourney = journeyCopy?.journey === true;
+  // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
+  const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [description, setDescription] = useState(() => initialLocationReviewDescription({
     placeName: evidence.display.placeName,
     segmentKind: evidence.segment.kind,
@@ -641,6 +643,7 @@ export function LocationReviewCorrectionEditor({
     return buildLocationReviewEdit({
       categoryTouched,
       description,
+      descriptionTouched,
       selectedCategoryId,
       window: parsed.value
     });
@@ -1025,7 +1028,10 @@ export function LocationReviewCorrectionEditor({
                 accessibilityLabel="Name"
                 editable={!saving}
                 maxLength={500}
-                onChangeText={setDescription}
+                onChangeText={(value) => {
+                  setDescription(value);
+                  setDescriptionTouched(true);
+                }}
                 onBlur={() => blurRevealControl(activityInputRef.current)}
                 onFocus={() => {
                   setTimeWheel(null);
