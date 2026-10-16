@@ -88,8 +88,8 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain("createNativePlaceSearchProvider");
     expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
     expect(evidenceEditorSource).not.toContain("FloatingDatePicker");
-    expect(evidenceEditorSource).toContain('accessibilityLabel="Start time"');
-    expect(evidenceEditorSource).toContain('accessibilityLabel="End time"');
+    expect(evidenceEditorSource).toContain('accessibilityLabel="Start"');
+    expect(evidenceEditorSource).toContain('accessibilityLabel="End"');
     expect(evidenceEditorSource).toContain('const durationLabel = approximateArrival ? "Estimated duration" : "Duration"');
     expect(evidenceEditorSource).toContain("const approximateArrival = evidence.segment.approximateArrival");
     expect(evidenceEditorSource).toContain("accessibilityLabel={`${durationLabel} ${editableDuration}`}");

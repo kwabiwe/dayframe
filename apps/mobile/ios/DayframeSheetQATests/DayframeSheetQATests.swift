@@ -413,7 +413,7 @@ final class DayframeSheetQATests: XCTestCase {
     }
     var timeField = element(SheetQAIdentifiers.startTime)
     try waitForElement(timeField, description: "Add past time start-time field")
-    guard let originalTime = elementValue(timeField), !originalTime.isEmpty else {
+    guard let originalTime = cardTime(timeField), !originalTime.isEmpty else {
       throw SheetQAFailure("Add past time did not expose a readable start-time value.")
     }
 
@@ -432,14 +432,14 @@ final class DayframeSheetQATests: XCTestCase {
     try waitForElementToDisappear(picker, description: "date picker after selecting 15 July")
     timeField = element(SheetQAIdentifiers.startTime)
     try waitForElement(timeField, description: "Add past time start-time field after date selection")
-    let preservedTime = elementValue(timeField)
+    let preservedTime = cardTime(timeField)
     try require(
       preservedTime == originalTime,
       "Selecting a new Add past time date changed the time from \(originalTime) to \(preservedTime ?? "<nil>")."
     )
     var endTimeField = element(SheetQAIdentifiers.endTime)
     try waitForElement(endTimeField, description: "Add past time end-time field")
-    guard let originalEndTime = elementValue(endTimeField), !originalEndTime.isEmpty else {
+    guard let originalEndTime = cardTime(endTimeField), !originalEndTime.isEmpty else {
       throw SheetQAFailure("Add past time did not expose a readable end-time value.")
     }
     try tap(SheetQAIdentifiers.endDate, scrollIn: SheetQAIdentifiers.sheetForm)
@@ -458,21 +458,18 @@ final class DayframeSheetQATests: XCTestCase {
     endTimeField = element(SheetQAIdentifiers.endTime)
     try waitForElement(endTimeField, description: "Add past time end-time field after date selection")
     try require(
-      elementValue(endTimeField) == originalEndTime,
+      cardTime(endTimeField) == originalEndTime,
       "Selecting a new Add past time end date changed its time."
     )
 
+    // The card opens the time wheel and a second tap on it closes it (owner, 16 Oct 2026: no
+    // typed time, no Done); no keyboard ever appears for a time.
     try tap(SheetQAIdentifiers.startTime, scrollIn: SheetQAIdentifiers.sheetForm)
-    try replaceFieldValue(timeField, with: "16:30")
-    try waitForElementValue(timeField, equals: "16:30", description: "edited Add past time start time")
-    try require(
-      app.keyboards.firstMatch.exists,
-      "Add past time time editing did not present the software keyboard."
-    )
-    timeField.typeText(XCUIKeyboardKey.return.rawValue)
-    _ = try waitForSheet("Add past time keyboard dismissal") { state in
-      SheetQAValue.string(state, "keyboardPhase") == "hidden"
-    }
+    let wheel = element("time-entry-time-wheel")
+    try waitForElement(wheel, description: "Add past time time wheel")
+    try require(!app.keyboards.firstMatch.exists, "Opening the time wheel presented a keyboard.")
+    try tap(SheetQAIdentifiers.startTime, scrollIn: SheetQAIdentifiers.sheetForm)
+    try waitForElementToDisappear(wheel, description: "time wheel after a second tap on its card")
     try assertStoppedTimerLayout(state: try sheetState(), expectsDelete: true)
     let temporalBeforeSuggestion = try temporalSnapshot()
     try bringDescriptionIntoView()
@@ -1551,7 +1548,7 @@ final class DayframeSheetQATests: XCTestCase {
 
   private func assertStoppedTimerLayout(state: SheetQAJSON, expectsDelete: Bool) throws {
     let sheet = element(SheetQAIdentifiers.sheet)
-    let end = element("time-entry-end-time")
+    let end = element(SheetQAIdentifiers.endTime)
     let dial = element(SheetQAIdentifiers.durationDial)
     let shortcuts = element(SheetQAIdentifiers.dialShortcuts)
     let roundStop = element(SheetQAIdentifiers.roundStopTime)
@@ -2000,7 +1997,7 @@ final class DayframeSheetQATests: XCTestCase {
       ("startDate", SheetQAIdentifiers.startDate),
       ("startTime", SheetQAIdentifiers.startTime),
       ("endDate", "time-entry-end-date"),
-      ("endTime", "time-entry-end-time")
+      ("endTime", SheetQAIdentifiers.endTime)
     ] {
       let candidate = element(identifier)
       guard candidate.exists else { continue }
@@ -2247,6 +2244,11 @@ final class DayframeSheetQATests: XCTestCase {
     app.descendants(matching: .any)
       .matching(NSPredicate(format: "label == %@", label))
       .firstMatch
+  }
+
+  /// A time card's time: its value is "09:00, Today".
+  private func cardTime(_ candidate: XCUIElement) -> String? {
+    elementValue(candidate)?.components(separatedBy: ",").first
   }
 
   private func elementValue(_ candidate: XCUIElement) -> String? {

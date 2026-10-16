@@ -9,8 +9,8 @@ export type DayframeTimeWheelModel = {
   maximumMs?: number | null;
   /** Earliest choosable instant, inclusive. */
   minimumMs?: number | null;
-  /** 5 by default; 1 for "Every minute", or a time that isn't on a 5-minute step. */
-  minuteInterval: 1 | 5;
+  /** Always 1: every minute (owner, 16 Oct 2026). The native view still reads the field. */
+  minuteInterval: 1;
   modelVersion: 1;
   presentationId: number;
   /** Bumped by an outside change (the dial) so the wheel re-aims even to the same value. */

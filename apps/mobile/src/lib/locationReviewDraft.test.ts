@@ -6,7 +6,6 @@ import {
   buildLocationReviewResolutionAction,
   buildDurableLocationReviewCommand,
   durableReviewMutationFromLocationAction,
-  formatLocationReviewEditableTime,
   initialLocationReviewDescription,
   keyboardRevealScrollOffset,
   locationActivityGlyphName,
@@ -168,8 +167,7 @@ describe("Location Review editor draft", () => {
     });
   });
 
-  it("formats numeric time entry and derives familiar display-only glyphs", () => {
-    expect(formatLocationReviewEditableTime("930")).toBe("09:30");
+  it("derives familiar display-only glyphs", () => {
     expect(locationActivityGlyphName({
       categoryName: "Workout",
       description: "Strength session",

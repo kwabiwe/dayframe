@@ -32,7 +32,6 @@ import {
   buildLocationReviewEdit,
   buildLocationReviewResolutionAction,
   formatLocationReviewDateInput,
-  formatLocationReviewEditableTime,
   formatLocationReviewTimeInput,
   locationReviewEndpointMs,
   initialLocationReviewDescription,
@@ -69,7 +68,7 @@ import { LocationEvidenceMap } from "./LocationEvidenceMap";
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { TimeWheelPanel } from "../TimeWheelPanel";
 import { playHaptic } from "../../lib/haptics";
-import { timeWheelAccessibilityStep, timeWheelMinuteInterval } from "../../lib/timeWheel";
+import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
 
@@ -192,21 +191,22 @@ export function LocationReviewCorrectionEditor({
     setTimeWheelState(next);
   };
   const timeWheelPresentationRef = useRef(0);
+  // A tap outside the wheel closes it: where the current touch started, and whether it started on
+  // the time fields or the panel (they mark it before the screen sees it).
+  const wheelTouchRef = useRef<{ inside: boolean; moved: boolean; x: number; y: number } | null>(null);
+  const touchInsideWheelRef = useRef(false);
+  const markTouchInsideWheel = () => {
+    touchInsideWheelRef.current = true;
+  };
   const [timeWheelRevision, setTimeWheelRevision] = useState(0);
   const timeWheelRevisionRef = useRef(0);
   const bumpTimeWheelRevision = () => {
     timeWheelRevisionRef.current += 1;
     setTimeWheelRevision(timeWheelRevisionRef.current);
   };
-  const [timeWheelStepPref, setTimeWheelStepPref] = useState<1 | 5>(5);
-  // Type time (and VoiceOver's activate) types into the field; otherwise it isn't editable.
-  const [typingTarget, setTypingTarget] = useState<"start" | "end" | null>(null);
-  const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
   // The exact instants the wheel or VoiceOver chose, kept while the fields still show them.
   const [startDraftMs, setStartDraftMs] = useState<number | null>(null);
   const [stopDraftMs, setStopDraftMs] = useState<number | null>(null);
-  const startTimeInputRef = useRef<TextInput>(null);
-  const stopTimeInputRef = useRef<TextInput>(null);
   const savingRef = useRef(saving);
   savingRef.current = saving;
 
@@ -244,22 +244,13 @@ export function LocationReviewCorrectionEditor({
     revealGenerationRef.current += 1;
   }, []);
 
+  // VoiceOver turning on closes an open wheel; with VoiceOver the field itself is adjustable and
+  // activating it opens or closes the wheel (owner, 16 Oct 2026).
   useEffect(() => {
-    let mounted = true;
-    void AccessibilityInfo.isScreenReaderEnabled()
-      .then((enabled) => {
-        if (mounted) setScreenReaderEnabled(enabled);
-      })
-      .catch(() => undefined);
     const subscription = AccessibilityInfo.addEventListener("screenReaderChanged", (enabled) => {
-      setScreenReaderEnabled(enabled);
-      // VoiceOver gets the adjustable field, never the wheel.
       if (enabled) setTimeWheel(null);
     });
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, []);
 
   // Leaving the screen (another route in front) closes the wheel; a later spin is stale.
@@ -405,19 +396,15 @@ export function LocationReviewCorrectionEditor({
     setValidationError(null);
   }
 
+  // A tap on a field opens the wheel for it; a tap on the same field closes it (owner, 16 Oct
+  // 2026: no Done), and the other field retargets it. With VoiceOver, activating the field does the same.
   function openTimeWheel(target: "start" | "end") {
     if (saving) return;
-    if (screenReaderEnabled) {
-      typeFieldTime(target);
-      return;
-    }
     const open = timeWheelRef.current;
     if (open?.target === target) {
       closeTimeWheel({ haptic: true });
       return;
     }
-    // A half-typed field takes the time the wheel will show, so the wheel's selection is the draft.
-    if (fieldInstant(target) === null) applyFieldTime(target, fieldTimeMs(target));
     if (open) {
       setTimeWheel({ presentationId: open.presentationId, target });
       bumpTimeWheelRevision();
@@ -442,35 +429,10 @@ export function LocationReviewCorrectionEditor({
     applyFieldTime(wheel.target, change.valueMs);
   }
 
-  function toggleEveryMinute() {
-    const wheel = timeWheelRef.current;
-    if (!wheel || saving) return;
-    const valueMs = fieldTimeMs(wheel.target);
-    playHaptic("tick");
-    if (timeWheelMinuteInterval(valueMs, timeWheelStepPref === 1) === 5) {
-      setTimeWheelStepPref(1);
-      return;
-    }
-    setTimeWheelStepPref(5);
-    // Back to 5-minute steps is an explicit choice: an off-step time rounds visibly in its hour.
-    const at = new Date(valueMs);
-    const minute = at.getMinutes();
-    if (minute % 5 === 0) return;
-    const rounded = Math.min(55, Math.round(minute / 5) * 5);
-    applyFieldTime(wheel.target, valueMs - at.getSeconds() * 1000 - at.getMilliseconds() + (rounded - minute) * 60_000);
-    bumpTimeWheelRevision();
-  }
-
-  function typeFieldTime(target: "start" | "end") {
+  // VoiceOver: a swipe moves 5 minutes, "Plus 1 minute" / "Minus 1 minute" one (owner, 16 Oct 2026).
+  function stepFieldTime(target: "start" | "end", direction: 1 | -1, minutes: 1 | 5 = 5) {
     if (saving) return;
-    closeTimeWheel({ haptic: false });
-    setTypingTarget(target);
-    requestAnimationFrame(() => (target === "end" ? stopTimeInputRef : startTimeInputRef).current?.focus());
-  }
-
-  function stepFieldTime(target: "start" | "end", direction: 1 | -1) {
-    if (saving) return;
-    const next = timeWheelAccessibilityStep(fieldTimeMs(target), direction);
+    const next = timeWheelAccessibilityStep(fieldTimeMs(target), direction, {}, minutes);
     if (next === null) return;
     applyFieldTime(target, next);
     bumpTimeWheelRevision();
@@ -479,7 +441,9 @@ export function LocationReviewCorrectionEditor({
   function handleTimeFieldAccessibilityAction(target: "start" | "end", actionName: string) {
     if (actionName === "increment") stepFieldTime(target, 1);
     else if (actionName === "decrement") stepFieldTime(target, -1);
-    else if (actionName === "activate" || actionName === "typeTime") typeFieldTime(target);
+    else if (actionName === "plusMinute") stepFieldTime(target, 1, 1);
+    else if (actionName === "minusMinute") stepFieldTime(target, -1, 1);
+    else if (actionName === "activate") openTimeWheel(target);
   }
 
   /**
@@ -771,12 +735,40 @@ export function LocationReviewCorrectionEditor({
         }}
         onScrollBeginDrag={() => {
           revealGenerationRef.current += 1;
+          // A scroll is never a tap outside the time wheel (Codex r2 on #444).
+          wheelTouchRef.current = null;
         }}
         scrollEventThrottle={16}
         style={styles.settingsScrollView}
         contentContainerStyle={[styles.settingsScrollContent, editorStyles.scrollContent]}
       >
-        <View style={styles.contentStack}>
+        {/* A tap anywhere outside the time fields and the open wheel closes it — on the background or
+            on a control, which still does its own thing (owner, 16 Oct 2026; Codex r1 on #444). Touch
+            events bubble without taking the responder, so the screen's taps, keyboard and scrolling
+            are unchanged, and a drag (a scroll) never closes it (the panel may need scrolling into view). */}
+        <View
+          onTouchEnd={(event) => {
+            const start = wheelTouchRef.current;
+            wheelTouchRef.current = null;
+            if (!start || start.inside || start.moved || !timeWheelRef.current) return;
+            const { pageX, pageY } = event.nativeEvent;
+            if (Math.abs(pageX - start.x) > TAP_SLOP || Math.abs(pageY - start.y) > TAP_SLOP) return;
+            closeTimeWheel({ haptic: true });
+          }}
+          onTouchMove={(event) => {
+            // Any movement past the slop, even one that comes back, makes it a drag, not a tap.
+            const start = wheelTouchRef.current;
+            if (!start || start.moved) return;
+            const { pageX, pageY } = event.nativeEvent;
+            if (Math.abs(pageX - start.x) > TAP_SLOP || Math.abs(pageY - start.y) > TAP_SLOP) start.moved = true;
+          }}
+          onTouchStart={(event) => {
+            // The time fields and the panel mark their own touches first (touch events bubble up).
+            wheelTouchRef.current = { inside: touchInsideWheelRef.current, moved: false, x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+            touchInsideWheelRef.current = false;
+          }}
+          style={styles.contentStack}
+        >
           {/* Blocks 5e: one heading (the screen title says "Location evidence"), on the canvas. */}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.hero}>
             <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={editorStyles.heroTitle}>{locationActivityLabel(evidence)}</Text>
@@ -1087,7 +1079,10 @@ export function LocationReviewCorrectionEditor({
           <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <SettingsBlockGroup theme={theme} title="When?">
             <View style={editorStyles.section}>
-              <View style={[editorStyles.timeGroups, fontScale >= 1.45 ? editorStyles.timeGroupsStacked : null]}>
+              <View
+                onTouchStart={markTouchInsideWheel}
+                style={[editorStyles.timeGroups, fontScale >= 1.45 ? editorStyles.timeGroupsStacked : null]}
+              >
                 <View style={editorStyles.timeGroup}>
                   <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>Start</Text>
                   {/* A11b: a tap opens the time wheel under the row; VoiceOver adjusts the field itself. */}
@@ -1096,9 +1091,11 @@ export function LocationReviewCorrectionEditor({
                     accessibilityLabel="Start"
                     accessibilityRole="adjustable"
                     accessibilityState={{ disabled: saving, expanded: timeWheel?.target === "start" }}
+                    accessibilityHint={timeWheel?.target === "start"
+                      ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                      : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                     accessibilityValue={{ text: startTimeText || "No time" }}
-                    accessible={typingTarget !== "start"}
-                    disabled={saving}
+                                        disabled={saving}
                     onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("start", event.nativeEvent.actionName)}
                     onPress={() => openTimeWheel("start")}
                     style={[
@@ -1108,33 +1105,9 @@ export function LocationReviewCorrectionEditor({
                     ]}
                     testID="location-review-start-time"
                   >
-                    <TextInput
-                      ref={startTimeInputRef}
-                      {...mobileTextProps("input")}
-                      accessibilityElementsHidden={typingTarget !== "start"}
-                      accessibilityLabel="Start time"
-                      caretHidden
-                      contextMenuHidden
-                      editable={!saving && typingTarget === "start"}
-                      importantForAccessibility={typingTarget === "start" ? "auto" : "no-hide-descendants"}
-                      keyboardType="number-pad"
-                      maxLength={5}
-                      onBlur={() => {
-                        setTypingTarget((current) => (current === "start" ? null : current));
-                        blurRevealControl(startTimeInputRef.current);
-                      }}
-                      onChangeText={(value) => {
-                        setStartTimeText(formatLocationReviewEditableTime(value));
-                        setValidationError(null);
-                      }}
-                      onFocus={() => focusRevealControl(startTimeInputRef.current)}
-                      placeholder="09:00"
-                      placeholderTextColor={theme.textSecondary}
-                      pointerEvents={typingTarget === "start" ? "auto" : "none"}
-                      selectTextOnFocus
-                      style={editorStyles.timeInput}
-                      value={startTimeText}
-                    />
+                    <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
+                      {startTimeText || "--:--"}
+                    </Text>
                   </Pressable>
                 </View>
                 <View style={editorStyles.timeGroup}>
@@ -1145,9 +1118,11 @@ export function LocationReviewCorrectionEditor({
                       accessibilityLabel="End"
                       accessibilityRole="adjustable"
                       accessibilityState={{ disabled: saving, expanded: timeWheel?.target === "end" }}
-                      accessibilityValue={{ text: stopTimeText || "No time" }}
-                      accessible={typingTarget !== "end"}
-                      disabled={saving}
+                      accessibilityHint={timeWheel?.target === "end"
+                      ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                      : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
+                    accessibilityValue={{ text: stopTimeText || "No time" }}
+                                            disabled={saving}
                       onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("end", event.nativeEvent.actionName)}
                       onPress={() => openTimeWheel("end")}
                       style={[
@@ -1157,33 +1132,9 @@ export function LocationReviewCorrectionEditor({
                       ]}
                       testID="location-review-end-time"
                     >
-                      <TextInput
-                        ref={stopTimeInputRef}
-                        {...mobileTextProps("input")}
-                        accessibilityElementsHidden={typingTarget !== "end"}
-                        accessibilityLabel="End time"
-                        caretHidden
-                        contextMenuHidden
-                        editable={!saving && typingTarget === "end"}
-                        importantForAccessibility={typingTarget === "end" ? "auto" : "no-hide-descendants"}
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        onBlur={() => {
-                          setTypingTarget((current) => (current === "end" ? null : current));
-                          blurRevealControl(stopTimeInputRef.current);
-                        }}
-                        onChangeText={(value) => {
-                          setStopTimeText(formatLocationReviewEditableTime(value));
-                          setValidationError(null);
-                        }}
-                        onFocus={() => focusRevealControl(stopTimeInputRef.current)}
-                        placeholder="17:30"
-                        placeholderTextColor={theme.textSecondary}
-                        pointerEvents={typingTarget === "end" ? "auto" : "none"}
-                        selectTextOnFocus
-                        style={editorStyles.timeInput}
-                        value={stopTimeText}
-                      />
+                      <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
+                        {stopTimeText || "--:--"}
+                      </Text>
                     </Pressable>
                   ) : (
                     <View style={editorStyles.answerRow}>
@@ -1206,13 +1157,13 @@ export function LocationReviewCorrectionEditor({
               </View>
               {timeWheel ? (
                 <TimeWheelPanel
-                  busy={saving}
                   key={`location-time-wheel-${timeWheel.presentationId}`}
                   model={{
                     colorScheme: theme.mode === "dark" ? "dark" : "light",
                     maximumMs: null,
                     minimumMs: null,
-                    minuteInterval: timeWheelMinuteInterval(fieldTimeMs(timeWheel.target), timeWheelStepPref === 1),
+                    // Every minute, always (owner, 16 Oct 2026).
+                    minuteInterval: 1,
                     modelVersion: 1,
                     presentationId: timeWheel.presentationId,
                     revision: timeWheelRevision,
@@ -1220,13 +1171,10 @@ export function LocationReviewCorrectionEditor({
                   }}
                   // Start, End and Duration share the row in thirds; stacked at large text.
                   notch={fontScale >= 1.45 ? null : timeWheel.target === "start" ? "16.5%" : "50%"}
-                  onDone={() => closeTimeWheel({ haptic: true })}
                   onTimeChange={handleTimeWheelChange}
-                  onToggleEveryMinute={toggleEveryMinute}
-                  onTypeTime={() => typeFieldTime(timeWheel.target)}
-                  pressedStyle={styles.buttonPressed}
+                  // Its own touches are inside the wheel: they never close it.
+                  onTouchStart={markTouchInsideWheel}
                   reduceMotion={reduceMotion}
-                  targetLabel={timeWheel.target === "end" ? "End" : "Start"}
                   testIDPrefix="location-review-time-wheel"
                   theme={theme}
                   wheelHeight={180}
@@ -1682,6 +1630,8 @@ function createEditorStyles(theme: MobileTheme) {
     // A11b: the field the wheel is setting gets a soft neutral tint (never coral); the other steps back.
     timeFieldActive: { backgroundColor: colorWithAlpha(theme.textPrimary, 0.1, theme.surfaceMuted) },
     timeFieldStepBack: { opacity: 0.6 },
+    // The field's time as plain text (owner, 16 Oct 2026: no number pad), centred in the 48-point field.
+    timeValue: { lineHeight: 48 },
     timeInput: {
       width: "100%",
       minHeight: 48,
@@ -1702,12 +1652,16 @@ function createEditorStyles(theme: MobileTheme) {
   });
 }
 
-/** VoiceOver's time field (A11b): swipe up/down moves 5 minutes; activate types the time. */
+/**
+ * VoiceOver's time field (A11b): swipe up/down moves 5 minutes, the Plus 1 minute / Minus 1 minute
+ * actions one (owner, 16 Oct 2026); activate opens or closes the wheel.
+ */
 const TIME_FIELD_ACCESSIBILITY_ACTIONS = [
   { name: "increment" },
   { name: "decrement" },
   { name: "activate" },
-  { name: "typeTime", label: "Type time" }
+  { name: "plusMinute", label: "Plus 1 minute" },
+  { name: "minusMinute", label: "Minus 1 minute" }
 ] as const;
 
 /** `color` at `alpha` over the opaque `under`, as one opaque colour (both #RRGGBB). */
@@ -1734,3 +1688,6 @@ const resultRowStyles = StyleSheet.create({
   title: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
   detail: { fontSize: 12, lineHeight: 16 }
 });
+
+/** How far a touch may move and still be a tap (points); more is a scroll. */
+const TAP_SLOP = 10;
