@@ -18,6 +18,7 @@ import {
   replayRetainedLocationEvidence
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
+import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
@@ -1833,21 +1834,13 @@ async function validateHealthWalksWin() {
   const moveCards = async () => (await pool.query<{ status: string; scope: string | null }>(
     `select ri.status, ri.ignored_scope as scope from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
      where ri.workspace_id = $1 and ri.user_id = $2`, [WORKSPACE_ID, USER_ID])).rows;
-  const addWorkout = async (id: string, workoutType: string) => {
-    const event = await pool.query<{ id: string }>(
-      `insert into activity_events (workspace_id, user_id, client_event_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
-       values ($1, $2, $3, 'health_workout', 'health_workout_import', '2026-07-20T08:58:00Z', 'high', $4, 'confirmed') returning id`,
-      [WORKSPACE_ID, USER_ID, `db-health-${id}`, { workoutType, durationSeconds: 720 }]);
-    const entry = await pool.query<{ id: string }>(
-      `insert into time_entries (workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at, created_from_event_id)
-       values ($1, $2, 'health_workout', 'high', 'confirmed', 'Walk', '2026-07-20T08:58:00Z', '2026-07-20T09:10:00Z', $3) returning id`,
-      [WORKSPACE_ID, USER_ID, event.rows[0].id]);
-    return { eventId: event.rows[0].id, entryId: entry.rows[0].id };
-  };
-  const removeWorkout = async ({ eventId, entryId }: { eventId: string; entryId: string }) => {
-    await pool.query("delete from time_entries where id = $1", [entryId]);
-    await pool.query("delete from activity_events where id = $1", [eventId]);
-  };
+  // An imported Apple Health workout (`health_workouts`), whatever became of its own card or block.
+  const addWorkout = async (id: string, workoutType: string, payload: Record<string, unknown> = { workoutType }) =>
+    (await pool.query<{ id: string }>(
+      `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, duration_seconds, raw_payload)
+       values ($1, $2, $3, $4, '2026-07-20T08:58:00Z', '2026-07-20T09:10:00Z', 720, $5) returning id`,
+      [WORKSPACE_ID, USER_ID, `db-health-${id}`, workoutType, payload])).rows[0].id;
+  const removeWorkout = (id: string) => pool.query("delete from health_workouts where id = $1", [id]);
 
   // Workout first: the walk it covers is never offered.
   const first = await addWorkout("first", "walking");
@@ -1855,22 +1848,46 @@ async function validateHealthWalksWin() {
   assert.deepEqual(await moveCards(), [], "A Move a Health walk covers was offered in Review.");
   await removeWorkout(first);
 
-  // Card first: the workout's arrival retires it on the next replay; removing the workout brings it back.
+  // Card first, then the import alone (no location call) retires it.
   await clearDerivedLocationState();
   const cardFirst = batch("db-health-walk-card-first", evidence, "v2_review", "2026-06-01T07:00:00.000Z");
   await ingestLocationEvidence(cardFirst, session);
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move was not offered without a workout.");
   const late = await addWorkout("late", "walking");
-  const retired = await ingestAndReplayLocationEvidence(cardFirst, session, PROCESSING_AT);
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session), 1, "A Health import did not retire the Move it covers.");
   assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }], "A late Health walk did not retire the Move's card.");
-  assert(retired.replay.semanticChangeCount > 0, "Retiring a card for a Health walk reported no change.");
+  // Removing the workout brings it back while its evidence lasts.
   await removeWorkout(late);
   await ingestLocationEvidence(cardFirst, session);
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move did not come back when its Health walk went.");
 
+  // Its evidence gone, a later workout is still reconciled from the card itself on the next replay.
+  await pool.query("delete from location_evidence where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
+  const afterExpiry = await addWorkout("expired", "other", { workoutType: null, workoutLabel: "Walk" });
+  const replayed = { replay: await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-06-01T07:00:00.000Z" }, session, PROCESSING_AT) };
+  assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }],
+    "A workout (typed only by its label) did not retire a Move whose evidence had aged out.");
+  assert(replayed.replay.semanticChangeCount > 0, "Retiring a card for a Health walk reported no change.");
+  await removeWorkout(afterExpiry);
+
+  // No cap hides the covering workout among many others in the same window (Codex r1 on #457).
+  await clearDerivedLocationState();
+  await pool.query(
+    `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, raw_payload)
+     select $1, $2, 'db-health-crowd-' || n, 'strength_training', '2026-07-20T08:30:00Z', '2026-07-20T09:30:00Z', '{}'::jsonb
+     from generate_series(1, 600) as n`, [WORKSPACE_ID, USER_ID]);
+  const crowded = await addWorkout("crowded", "walking");
+  await ingestLocationEvidence(batch("db-health-walk-crowded", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+  assert.deepEqual(await moveCards(), [], "A covering Health walk among 600 other workouts did not hide its Move.");
+  await removeWorkout(crowded);
+  await pool.query("delete from health_workouts where workspace_id = $1 and external_sample_id like 'db-health-crowd-%'", [WORKSPACE_ID]);
+
   // A workout of another kind never hides a Move.
+  await clearDerivedLocationState();
   const strength = await addWorkout("strength", "strength_training");
   await ingestLocationEvidence(cardFirst, session);
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session), 0, "A strength workout retired a Move.");
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "A strength workout hid a Move.");
   await removeWorkout(strength);
   await clearDerivedLocationState();

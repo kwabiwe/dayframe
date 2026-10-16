@@ -7,6 +7,7 @@ import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-servic
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { reconcileHealthCoveredMoveCardsNow } from "@/lib/location/health-coverage";
 
 export async function POST(request: Request) {
   const deadlineAt = Date.now() + 8_000;
@@ -17,6 +18,8 @@ export async function POST(request: Request) {
     });
     const body = await request.json();
     const result = await processActivityEvent(body, session, { signal: request.signal, deadlineAt });
+    // Health walks win (PRD D19): a newly imported workout retires the location Move cards it covers.
+    if (body?.type === "health_workout_import" && !result.duplicate) await reconcileHealthCoveredMoveCardsNow(session);
     scheduleLiveActivityNotification(session);
     // The phone schedules its evening Review reminder from this count.
     const reviewCount = await openReviewCountFor(session);

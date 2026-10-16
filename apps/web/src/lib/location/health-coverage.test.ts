@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { healthWorkoutCoversMove } from "./health-coverage";
+import { healthWorkoutCoversMove, healthWorkoutKind } from "./health-coverage";
 
 const at = (minute: number) => new Date(Date.parse("2026-10-16T12:00:00Z") + minute * 60_000).toISOString();
 const move = (from: number, to: number, travelMode: "walking" | "running" | "cycling" | "automotive" | null = "walking") =>
@@ -34,5 +34,13 @@ describe("Health walks win (PRD D19)", () => {
   it("ignores impossible windows", () => {
     expect(healthWorkoutCoversMove(move(10, 10), workout(0, 30))).toBe(false);
     expect(healthWorkoutCoversMove({ startedAt: "nope", stoppedAt: at(1), travelMode: "walking" }, workout(0, 30))).toBe(false);
+  });
+
+  it("reads a workout's kind hint by hint, past JSON null or an unrecognised hint (Codex r1 on #457)", () => {
+    expect(healthWorkoutKind([null, "Walk"])).toBe("walking");
+    expect(healthWorkoutKind(["other", null, "running"])).toBe("running");
+    expect(healthWorkoutKind([52])).toBe("walking");
+    expect(healthWorkoutKind([null, undefined])).toBe("other");
+    expect(healthWorkoutCoversMove(move(0, 30), workout(0, 30, ["other", null, "walking"]))).toBe(true);
   });
 });

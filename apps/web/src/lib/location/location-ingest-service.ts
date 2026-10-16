@@ -31,6 +31,7 @@ import {
   segmentStartedAfterSemanticCutover
 } from "./location-rollout";
 import { locationSemanticDisposition } from "./location-semantic-policy";
+import { retireHealthCoveredMoveCards } from "./health-coverage";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
 
 export const LOCATION_EVIDENCE_BODY_LIMIT_BYTES = 512 * 1024;
@@ -308,6 +309,9 @@ async function replayAndEmitLocationSemantics(
       );
       semanticChanges.count += await removeUnusedAutoLogOrphans(
         client, session, autoLog.orphans, autoLog.used, autoLog.locked);
+      // Health walks win (PRD D19), from the cards themselves: a workout that arrived after its Move's
+      // card retires it here, even once the Move's evidence has aged out.
+      semanticChanges.count += await retireHealthCoveredMoveCards(client, session);
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(
