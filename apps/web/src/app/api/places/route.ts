@@ -2,7 +2,14 @@ import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { PlaceRoleSchema } from "@dayframe/shared";
 import { authErrorResponse } from "@/lib/api-errors";
-import { createPlace, createPlaceFromLearnedPlace, deletePlace, PlaceDeleteBlockedError, updatePlace } from "@/lib/event-service";
+import {
+  createPlace,
+  createPlaceFromLearnedPlace,
+  deletePlace,
+  PlaceDeleteBlockedError,
+  PlaceDeleteBusyError,
+  updatePlace
+} from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { PlaceRoleConflictError } from "@/lib/place-role-service";
 import { getBootstrapData } from "@/lib/queries";
@@ -119,7 +126,7 @@ export async function DELETE(request: Request) {
     const response = authErrorResponse(error);
     if (response) return response;
     if (error instanceof ZodError) return NextResponse.json({ issues: error.issues }, { status: 400 });
-    if (error instanceof PlaceDeleteBlockedError) {
+    if (error instanceof PlaceDeleteBlockedError || error instanceof PlaceDeleteBusyError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
     }
     throw error;

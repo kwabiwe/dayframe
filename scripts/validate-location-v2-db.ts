@@ -12,7 +12,7 @@ import {
 } from "@dayframe/shared";
 import { pool } from "../apps/web/src/lib/db";
 import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
-import { deletePlace, processActivityEvent, updatePlace } from "../apps/web/src/lib/event-service";
+import { deletePlace, PlaceDeleteBusyError, processActivityEvent, updatePlace } from "../apps/web/src/lib/event-service";
 import {
   ingestLocationEvidence as storeLocationEvidence,
   replayRetainedLocationEvidence
@@ -1758,7 +1758,36 @@ async function validatePlaceDeleteWithSamePlaceJourneys() {
     assert.equal(await deletePlace(home.id, otherWorkspace), null, "Another workspace deleted this place.");
     assert.deepEqual(await journeys(), before, "A refused cross-workspace delete changed journeys.");
 
-    assert.deepEqual(await deletePlace(home.id, session), { id: home.id }, "A place with a same-place journey was not deleted.");
+    // Two sessions (Codex r1 on #449): a replay holds the owner lock and a stay at the place, then
+    // locks a journey there. A delete that cleared journeys before stays without the owner lock
+    // deadlocked with it; now it waits for the replay and then succeeds.
+    const replay = await pool.connect();
+    let deleting: Promise<{ id: string } | null> | null = null;
+    try {
+      await replay.query("begin");
+      await replay.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [WORKSPACE_ID, USER_ID]);
+      await replay.query("select id from stay_segments where workspace_id = $1 and user_id = $2 and place_id = $3 for update",
+        [WORKSPACE_ID, USER_ID, home.id]);
+      // A delete that cannot get the lock within its timeout changes nothing and says so.
+      await assert.rejects(deletePlace(home.id, session, { lockTimeoutMs: 300 }), PlaceDeleteBusyError,
+        "A delete waiting past its lock timeout was not reported as busy.");
+      let settled = false;
+      deleting = deletePlace(home.id, session, { lockTimeoutMs: 20_000 });
+      deleting.then(() => { settled = true; }, () => { settled = true; });
+      // Longer than Postgres's default one-second deadlock_timeout.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      assert.equal(settled, false, "A place delete did not wait for a running replay's owner lock.");
+      await replay.query(
+        `select id from commute_segments where workspace_id = $1 and user_id = $2
+           and (from_place_id = $3 or to_place_id = $3) order by id for update`, [WORKSPACE_ID, USER_ID, home.id]);
+      await replay.query("commit");
+    } catch (error) {
+      await replay.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      replay.release();
+    }
+    assert.deepEqual(await deleting, { id: home.id }, "A place with a same-place journey was not deleted after a replay.");
     assert.equal((await pool.query("select 1 from places where id = $1", [home.id])).rowCount, 0, "The place survived its delete.");
     const after = await journeys();
     assert.deepEqual(after.map((row) => row.id), before.map((row) => row.id), "Deleting a place removed journeys.");

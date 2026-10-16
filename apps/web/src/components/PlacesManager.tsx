@@ -22,6 +22,8 @@ export function PlacesManager({
   const [isPending, startTransition] = useTransition();
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<LearnedPlaceRow | null>(null);
   const [deletingPlace, setDeletingPlace] = useState<PlaceRow | null>(null);
+  // Shown inside the open delete dialog, where focus is (Codex r1 on #449).
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -33,6 +35,7 @@ export function PlacesManager({
   async function deletePlace(place: PlaceRow) {
     if (busyId) return;
     setBusyId(place.id);
+    setDeleteError(null);
     try {
       const response = await clientFetch(`/api/places?id=${encodeURIComponent(place.id)}`, {
         method: "DELETE"
@@ -45,7 +48,7 @@ export function PlacesManager({
       setDeletingPlace(null);
       refresh("Place deleted.");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to delete this place.");
+      setDeleteError(error instanceof Error ? error.message : "Unable to delete this place.");
     } finally {
       setBusyId(null);
     }
@@ -146,7 +149,10 @@ export function PlacesManager({
                 <button
                   aria-label={`Delete ${placeDisplayName(place)}`}
                   className="df-icon-action df-icon-action--44"
-                  onClick={() => setDeletingPlace(place)}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeletingPlace(place);
+                  }}
                   type="button"
                 >
                   <DayframeIcon glyph="trash-2" size={16}/>
@@ -243,6 +249,7 @@ export function PlacesManager({
           title={`Delete ${placeDisplayName(deletingPlace)}?`}
         >
           <p className="place-dialog-copy">This cannot be undone from the Places page.</p>
+          {deleteError ? <p className="swiss-inline-error" role="alert">{deleteError}</p> : null}
         </ModalDialog>
       ) : null}
 

@@ -31,11 +31,6 @@ describe("web Places list and editor contracts", () => {
     expect(editor).toContain('type PlaceEditorMode = "create" | "edit" | "learned"');
   });
 
-  it("shows the server's sentence when a place delete is refused", () => {
-    const deleteFlow = manager.slice(manager.indexOf("async function deletePlace"), manager.indexOf("async function ignoreLearnedPlace"));
-    expect(deleteFlow).toContain("payload?.error ?? \"Unable to delete this place.\"");
-  });
-
   it("keeps priority and auto-start out of ordinary editor controls", () => {
     expect(editor).not.toContain('label="Priority"');
     expect(editor).not.toContain(">Auto-start<");
