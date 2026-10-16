@@ -1,4 +1,4 @@
-import type { LocationReviewEvidenceDto } from "@dayframe/shared";
+import { formatClockTime, type ClockFormat, type LocationReviewEvidenceDto } from "@dayframe/shared";
 
 export type LocationEvidenceMapMode =
   | "observed_route"
@@ -56,12 +56,12 @@ export function locationEvidenceCaption(
   return "No coordinate samples or anchors are attached to this item.";
 }
 
-export function locationEvidenceRetentionLabel(evidence: LocationReviewEvidenceDto) {
+export function locationEvidenceRetentionLabel(evidence: LocationReviewEvidenceDto, clock: ClockFormat) {
   if (evidence.evidenceExpired) {
     return "Raw evidence expired; the derived time window remains available.";
   }
   if (evidence.rawEvidenceAvailable && evidence.evidenceExpiresAt) {
-    return `Raw evidence is retained until ${formatDateTime(evidence.evidenceExpiresAt)}.`;
+    return `Raw evidence is retained until ${formatDateTime(evidence.evidenceExpiresAt, clock)}.`;
   }
   if (evidence.rawEvidenceAvailable) return "Raw evidence is temporarily retained.";
   return "No raw evidence is attached to this item.";
@@ -75,11 +75,7 @@ function count(value: number, label: string) {
   return `${value} ${label}${value === 1 ? "" : "s"}`;
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+function formatDateTime(value: string, clock: ClockFormat) {
+  const date = new Date(value);
+  return `${new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date)}, ${formatClockTime(date, clock)}`;
 }

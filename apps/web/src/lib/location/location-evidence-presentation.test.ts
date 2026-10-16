@@ -28,15 +28,21 @@ describe("location evidence presentation", () => {
     const absent = fixture();
     expect(locationEvidenceMapMode(absent)).toBe("no_mapped_evidence");
     expect(locationEvidenceCaption(absent)).toBe("No coordinate samples or anchors are attached to this item.");
-    expect(locationEvidenceRetentionLabel(absent)).toBe("No raw evidence is attached to this item.");
+    expect(locationEvidenceRetentionLabel(absent, "24h")).toBe("No raw evidence is attached to this item.");
 
     const retained = fixture({ rawEvidenceAvailable: true });
     expect(locationEvidenceCaption(retained)).toContain("no coordinates to plot");
-    expect(locationEvidenceRetentionLabel(retained)).toBe("Raw evidence is temporarily retained.");
+    expect(locationEvidenceRetentionLabel(retained, "24h")).toBe("Raw evidence is temporarily retained.");
 
     const expired = fixture({ evidenceExpired: true });
     expect(locationEvidenceCaption(expired)).toContain("expired");
-    expect(locationEvidenceRetentionLabel(expired)).toContain("derived time window remains available");
+    expect(locationEvidenceRetentionLabel(expired, "24h")).toContain("derived time window remains available");
+  });
+
+  it("writes the retention time in the browser's 12/24-hour format (PRD D18)", () => {
+    const retained = fixture({ rawEvidenceAvailable: true, evidenceExpiresAt: new Date(2026, 9, 20, 21, 5).toISOString() });
+    expect(locationEvidenceRetentionLabel(retained, "24h")).toMatch(/, 21:05\.$/);
+    expect(locationEvidenceRetentionLabel(retained, "12h")).toMatch(/, 9:05 PM\.$/);
   });
 
   it("uses observed route language only when route geometry exists", () => {
