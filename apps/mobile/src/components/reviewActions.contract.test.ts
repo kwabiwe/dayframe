@@ -62,7 +62,7 @@ describe("mobile Review action contracts", () => {
 
   it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {
     expect(evidenceSource).toContain("<LocationReviewCorrectionEditor");
-    expect(evidenceEditorSource).toContain("formatEvidenceTimeRange(evidence)");
+    expect(evidenceEditorSource).toContain("formatEvidenceTimeRange(evidence, clockFormat)");
     expect(evidenceEditorSource).toContain("showDetails={false}");
     // A commute is always named Commute; Motion & Fitness may add how it was travelled.
     expect(evidenceEditorSource).toContain('if (evidence.segment.kind !== "commute") return evidence.display.title;');

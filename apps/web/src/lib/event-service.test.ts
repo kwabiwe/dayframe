@@ -36,6 +36,8 @@ const {
   createEntity,
   deleteLearnedPlace,
   deletePlace,
+  PlaceDeleteBlockedError,
+  PlaceDeleteBusyError,
   deleteTimeEntry,
   deleteTimeEntries,
   ensureAutomaticLoggingCategories,
@@ -1400,15 +1402,103 @@ describe("place persistence", () => {
     );
   });
 
-  it("deletes places within the active workspace", async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ id: placeId() }] });
+  const deleteClient = (overrides: (statement: string) => unknown = () => undefined) => ({
+    query: vi.fn<(statement: string, values?: unknown[]) => Promise<{ rows: unknown[] }>>(async (statement) => {
+      const override = overrides(statement);
+      if (override instanceof Error) throw override;
+      if (override) return override as { rows: unknown[] };
+      if (statement.startsWith("select id from places") || statement.startsWith("delete from places")) return { rows: [{ id: placeId() }] };
+      if (statement.includes("from workspace_members")) return { rows: [{ userId: "b-user" }, { userId: "a-user" }].sort((x, y) => x.userId.localeCompare(y.userId)) };
+      return { rows: [] };
+    }),
+    release: vi.fn()
+  });
+  const flat = (statement: unknown) => String(statement).replace(/\s+/g, " ").trim();
 
-    await deletePlace(placeId(), session);
+  it("deletes a place under every owner's location lock, clearing both journey ends first, in one transaction", async () => {
+    const client = deleteClient();
+    mocks.pool.connect.mockResolvedValueOnce(client);
 
-    expect(mocks.query).toHaveBeenCalledWith(
-      "delete from places where id = $1 and workspace_id = $2 returning id",
-      [placeId(), session.workspaceId]
-    );
+    await expect(deletePlace(placeId(), session)).resolves.toEqual({ id: placeId() });
+
+    const calls = client.query.mock.calls.map(([statement, values]) => [flat(statement), values] as const);
+    expect(calls.map(([statement]) => statement.slice(0, 40))).toEqual([
+      "begin",
+      "set local lock_timeout = '10000ms'",
+      "select id from places where id = $1 and ",
+      "select user_id::text as \"userId\" from wo",
+      "select pg_advisory_xact_lock(hashtext($1",
+      "select pg_advisory_xact_lock(hashtext($1",
+      "update commute_segments set from_place_i",
+      "delete from places where id = $1 and wor",
+      "commit"
+    ]);
+    // The location writers' owner lock, in user-id order, before any row is touched (Codex r1 on #449).
+    expect(calls[4][1]).toEqual([session.workspaceId, "a-user"]);
+    expect(calls[5][1]).toEqual([session.workspaceId, "b-user"]);
+    // Both ends in one statement: SET NULL clears one column per update and the commute owner
+    // trigger rejects a round trip whose other end still names the deleted place.
+    expect(calls[6][0]).toContain("set from_place_id = case when from_place_id = $1 then null else from_place_id end, to_place_id = case when to_place_id = $1 then null else to_place_id end");
+    expect(calls[6][1]).toEqual([placeId(), session.workspaceId]);
+    expect(calls[7][1]).toEqual([placeId(), session.workspaceId]);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("returns null without locking or touching journeys when the place is not in the workspace", async () => {
+    const client = deleteClient((statement) => statement.startsWith("select id from places") ? { rows: [] } : undefined);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).resolves.toBeNull();
+
+    expect(client.query.mock.calls.map(([statement]) => flat(statement))).toEqual([
+      "begin", "set local lock_timeout = '10000ms'", "select id from places where id = $1 and workspace_id = $2", "rollback"
+    ]);
+  });
+
+  it("turns a database refusal into PlaceDeleteBlockedError and rolls back", async () => {
+    const refusal = Object.assign(new Error("Commute origin place must belong to its workspace"), { code: "P0001" });
+    const client = deleteClient((statement) => statement.startsWith("delete from places") ? refusal : undefined);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).rejects.toBeInstanceOf(PlaceDeleteBlockedError);
+    expect(client.query).toHaveBeenLastCalledWith("rollback");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("answers busy when location sync holds the lock past the timeout", async () => {
+    const timeout = Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+    const client = deleteClient((statement) => statement.startsWith("select pg_advisory_xact_lock") ? timeout : undefined);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session, { lockTimeoutMs: 250 })).rejects.toBeInstanceOf(PlaceDeleteBusyError);
+    expect(client.query).toHaveBeenCalledWith("set local lock_timeout = '250ms'");
+    expect(client.query).toHaveBeenLastCalledWith("rollback");
+  });
+
+  it("retries a transaction Postgres aborted as a deadlock, at most three times", async () => {
+    const deadlock = () => Object.assign(new Error("deadlock detected"), { code: "40P01" });
+    const aborted = () => deleteClient((statement) => statement.startsWith("update commute_segments") ? deadlock() : undefined);
+    const first = aborted();
+    const second = deleteClient();
+    mocks.pool.connect.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+
+    await expect(deletePlace(placeId(), session)).resolves.toEqual({ id: placeId() });
+    expect(first.query).toHaveBeenLastCalledWith("rollback");
+    expect(first.release).toHaveBeenCalled();
+    expect(second.query).toHaveBeenLastCalledWith("commit");
+
+    const stuck = [aborted(), aborted(), aborted()];
+    for (const client of stuck) mocks.pool.connect.mockResolvedValueOnce(client);
+    await expect(deletePlace(placeId(), session)).rejects.toMatchObject({ code: "40P01" });
+    expect(stuck.every((client) => client.release.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("keeps a lost connection a server error", async () => {
+    const lost = Object.assign(new Error("Connection terminated"), { code: "57P01" });
+    const client = deleteClient((statement) => statement.startsWith("select id from places") ? lost : undefined);
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).rejects.toBe(lost);
   });
 });
 

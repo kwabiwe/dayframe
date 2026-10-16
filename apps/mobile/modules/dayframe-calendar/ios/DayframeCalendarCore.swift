@@ -914,3 +914,27 @@ public struct DayframeCalendarActionTarget: Equatable {
     self.kind = kind
   }
 }
+
+/// Clock times in Dayframe's per-device 12/24-hour format (PRD D18), matching the shared
+/// `formatClockParts` / `formatClockHour` in `packages/shared`: "09:30" or "9:30 AM", and whole-hour
+/// grid labels "08:00" or "8 AM".
+enum DayframeClockText {
+  static func time(hour: Int, minute: Int, clockFormat: String) -> String {
+    guard clockFormat == "12h" else { return String(format: "%02d:%02d", hour, minute) }
+    return String(format: "%d:%02d %@", twelveHour(hour), minute, meridiem(hour))
+  }
+
+  static func hour(_ hour: Int, clockFormat: String) -> String {
+    guard clockFormat == "12h" else { return String(format: "%02d:00", hour) }
+    return "\(twelveHour(hour)) \(meridiem(hour))"
+  }
+
+  private static func twelveHour(_ hour: Int) -> Int {
+    let value = hour % 12
+    return value == 0 ? 12 : value
+  }
+
+  private static func meridiem(_ hour: Int) -> String {
+    hour % 24 < 12 ? "AM" : "PM"
+  }
+}

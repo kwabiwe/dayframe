@@ -4,6 +4,8 @@ import UIKit
 /// What React asks the wheel to show (owner decision A11b, 12 Oct 2026). React owns the draft:
 /// the wheel is a native UIDatePicker in wheel style that reports the instant the user picks.
 private struct DayframeTimeWheelRecord: Decodable {
+  /// "12h" adds the AM/PM column (PRD D18); anything else, or none, keeps 24-hour columns.
+  let clockFormat: String?
   let colorScheme: String
   let maximumMs: Double?
   let minimumMs: Double?
@@ -14,7 +16,7 @@ private struct DayframeTimeWheelRecord: Decodable {
   let valueMs: Double
 }
 
-/// One inline `UIDatePicker` (`.time`, `.wheels`, 24-hour). Its own selection haptics and momentum
+/// One inline `UIDatePicker` (`.time`, `.wheels`, in the device's 12/24-hour Dayframe format). Its own selection haptics and momentum
 /// are the platform's. VoiceOver gets no wheel: the time card itself is adjustable instead, so the
 /// picker is hidden from accessibility. A change from React (the dial moving the start) re-aims the
 /// wheel without echoing back; only the user's own spins are reported.
@@ -29,9 +31,7 @@ final class DayframeTimeWheelExpoView: ExpoView {
     backgroundColor = .clear
     picker.datePickerMode = .time
     picker.preferredDatePickerStyle = .wheels
-    // Dayframe shows times as 24-hour HH:MM everywhere. The explicit hour cycle keeps two columns
-    // even when the person's iOS setting asks for 12-hour time (a plain en_GB would add AM/PM).
-    picker.locale = Locale(identifier: "en_GB@hours=h23")
+    picker.locale = Self.locale(clockFormat: nil)
     picker.accessibilityElementsHidden = true
     accessibilityElementsHidden = true
     picker.addTarget(self, action: #selector(valueChanged), for: .valueChanged)
@@ -53,6 +53,10 @@ final class DayframeTimeWheelExpoView: ExpoView {
     record = next
 
     overrideUserInterfaceStyle = next.colorScheme == "dark" ? .dark : .light
+    // Dayframe's own time format, not the locale's: explicit hour cycles keep the columns matching
+    // every other time in the app whatever the iOS language and 24-Hour Time setting say.
+    let locale = Self.locale(clockFormat: next.clockFormat)
+    if picker.locale?.identifier != locale.identifier { picker.locale = locale }
     // The interval first, so setting the date never rounds a time React asked for exactly.
     let interval = next.minuteInterval == 5 ? 5 : 1
     if picker.minuteInterval != interval { picker.minuteInterval = interval }
@@ -74,6 +78,10 @@ final class DayframeTimeWheelExpoView: ExpoView {
     if abs(picker.date.timeIntervalSince1970 * 1000 - next.valueMs) >= 1 {
       report(reason: "normalized")
     }
+  }
+
+  private static func locale(clockFormat: String?) -> Locale {
+    clockFormat == "12h" ? Locale(identifier: "en_US@hours=h12") : Locale(identifier: "en_GB@hours=h23")
   }
 
   @objc private func valueChanged() {

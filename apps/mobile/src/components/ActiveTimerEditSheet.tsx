@@ -30,10 +30,13 @@ import {
   normalizeTagName,
   DAYFRAME_APP_ICONS,
   activityControlColor,
+  formatClockTime,
+  formatClockValue,
   formatDuration,
   type PreviousEndOffer,
   type RecentActivitySuggestion
 } from "@dayframe/shared";
+import { useClockFormat } from "@/lib/clockFormat";
 import {
   PREVIOUS_END_CHANGED_MESSAGE,
   draftInstantMs,
@@ -209,6 +212,7 @@ export function ActiveTimerEditSheet({
 }: ActiveTimerEditSheetProps) {
   const insets = useSafeAreaInsets();
   const windowDimensions = useWindowDimensions();
+  const clockFormat = useClockFormat();
   const [description, setDescription] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [activityPickerOpen, setActivityPickerOpen] = useState(false);
@@ -753,10 +757,13 @@ export function ActiveTimerEditSheet({
   // Activity chips (Blocks prototype): the chosen one, pinned, then recently used; at most seven,
   // fewer on short screens and large text so the sheet's bottom actions stay on screen.
   const recentActivities = useMemo(() => recentActivityIds(historicalEntries), [historicalEntries]);
+  // Room for "00:00" (about 52 pt at 18 pt) at the input's current, capped text size plus the card's
+  // padding, so a time is never clipped; the date beside it truncates first but keeps a 44-point
+  // target. A 12-hour time ("12:00 PM", PRD D18) gets more room and shrinks to fit the rest of the
+  // way (down to 70 %), so the cards stay side by side and the sheet's height is unchanged: stacking
+  // them earlier pushed the bottom actions off small phones (Codex r2 on #447).
+  const timeCardMinWidth = 18 + Math.ceil((clockFormat === "12h" ? 64 : 52) * Math.min(windowDimensions.fontScale, 1.35));
   const timeCardsStacked = windowDimensions.fontScale >= 1.6;
-  // Room for "00:00" (about 52 pt at 18 pt) at the input's current, capped text size plus the
-  // card's padding, so a time is never clipped; the date beside it truncates first.
-  const timeCardMinWidth = 18 + Math.ceil(52 * Math.min(windowDimensions.fontScale, 1.35));
   const chipDensity = timeEntrySheetLayoutDensity({
     fontScale: windowDimensions.fontScale,
     windowHeight: windowDimensions.height
@@ -2390,6 +2397,7 @@ export function ActiveTimerEditSheet({
   const dialAreaKey = `${layoutDensity}:${windowDimensions.fontScale}:${windowDimensions.width}`;
   const timeWheelValueMs = timeWheel ? cardTimeMs(timeWheel.target) : Number.NaN;
   const timeWheelModel = timeWheel ? {
+    clockFormat,
     colorScheme: theme.mode === "dark" ? "dark" as const : "light" as const,
     maximumMs: cardMaximumMs(timeWheel.target),
     minimumMs: null,
@@ -2415,7 +2423,7 @@ export function ActiveTimerEditSheet({
     const startMs = parsedStart.date?.getTime();
     const endMs = hasStoppedTime ? parsedStop.date?.getTime() : dialNowMs;
     if (startMs === undefined || endMs === undefined || endMs <= startMs) return null;
-    const range = `${formatTimeInput(new Date(startMs))}–${hasStoppedTime ? formatTimeInput(new Date(endMs)) : "now"}`;
+    const range = `${formatClockTime(startMs, clockFormat)}–${hasStoppedTime ? formatClockTime(endMs, clockFormat) : "now"}`;
     return `${formatDuration((endMs - startMs) / 1000)} · ${range}`;
   })();
 
@@ -2934,7 +2942,7 @@ export function ActiveTimerEditSheet({
                           accessibilityHint={timeWheel?.target === "start"
                             ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
                             : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
-                          accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
+                          accessibilityValue={{ text: `${timeText ? formatClockValue(timeText, clockFormat) : "No time"}, ${formatPickerDate(displayedStartAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
                           onPress={() => openTimeWheel("start")}
@@ -2944,11 +2952,13 @@ export function ActiveTimerEditSheet({
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
                           <Text
                             {...mobileTextProps("input")}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
                             numberOfLines={1}
                             style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
                             testID="time-entry-start-time"
                           >
-                            {timeText || "--:--"}
+                            {timeText ? formatClockValue(timeText, clockFormat) : "--:--"}
                           </Text>
                         </Pressable>
                         <Pressable
@@ -2968,7 +2978,7 @@ export function ActiveTimerEditSheet({
                       {presentedPreviousEnd ? (
                         <Pressable
                           accessibilityHint={previousEndApplied ? "Returns the start to when this block started" : "Moves the start back to when that block ended; Done saves it"}
-                          accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}
+                          accessibilityLabel={`Start from ${formatClockTime(previousEndMs, clockFormat)}, after ${presentedPreviousEnd.previousName}`}
                           accessibilityRole="button"
                           accessibilityState={{ disabled: busy, selected: previousEndApplied }}
                           disabled={busy}
@@ -2988,7 +2998,7 @@ export function ActiveTimerEditSheet({
                             size={14}
                           />
                           <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[sheetStyles.previousEndPillText, { color: previousEndApplied ? theme.textPrimary : theme.textSecondary }]}>
-                            From {formatTimeInput(new Date(previousEndMs))}
+                            From {formatClockTime(previousEndMs, clockFormat)}
                           </Text>
                         </Pressable>
                       ) : null}
@@ -3010,7 +3020,7 @@ export function ActiveTimerEditSheet({
                           accessibilityHint={timeWheel?.target === "end"
                             ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
                             : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
-                          accessibilityValue={{ text: `${stoppedTimeText || "No time"}, ${formatPickerDate(displayedEndAt)}` }}
+                          accessibilityValue={{ text: `${stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "No time"}, ${formatPickerDate(displayedEndAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
                           onPress={() => openTimeWheel("end")}
@@ -3020,11 +3030,13 @@ export function ActiveTimerEditSheet({
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
                           <Text
                             {...mobileTextProps("input")}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
                             numberOfLines={1}
                             style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
                             testID="time-entry-end-time"
                           >
-                            {stoppedTimeText || "--:--"}
+                            {stoppedTimeText ? formatClockValue(stoppedTimeText, clockFormat) : "--:--"}
                           </Text>
                         </Pressable>
                         <Pressable
@@ -3042,11 +3054,11 @@ export function ActiveTimerEditSheet({
                         </Pressable>
                       </View>
                     ) : (
-                      <View accessible accessibilityLabel={`Now, ${formatTimeInput(new Date(dialNowMs))}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
+                      <View accessible accessibilityLabel={`Now, ${formatClockTime(dialNowMs, clockFormat)}`} style={[styles.activeEditTimeGroup, timeCardsStacked ? styles.activeEditTimeGroupStacked : null]}>
                         <View style={[styles.activeEditTimeCardMain, { minWidth: timeCardMinWidth }]}>
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>NOW</Text>
-                          <Text {...mobileTextProps("numeric")} style={styles.activeEditRunningEndTime}>
-                            {formatTimeInput(new Date(dialNowMs))}
+                          <Text {...mobileTextProps("numeric")} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={styles.activeEditRunningEndTime}>
+                            {formatClockTime(dialNowMs, clockFormat)}
                           </Text>
                         </View>
                         <View style={styles.activeEditCompactDate}>

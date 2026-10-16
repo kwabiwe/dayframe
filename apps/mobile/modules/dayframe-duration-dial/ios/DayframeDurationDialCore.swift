@@ -119,4 +119,58 @@ enum DayframeDurationDialCore {
     let first = Int(ceil(Double(lower) / Double(multiple))) * multiple
     return first <= upper && first != 0
   }
+
+  // MARK: Clock detail (PRD D18)
+
+  private static func formatter(_ pattern: String) -> DateFormatter {
+    let formatter = DateFormatter()
+    // A fixed locale, so iOS's own 12/24-hour override never rewrites Dayframe's chosen pattern.
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = pattern
+    return formatter
+  }
+
+  private static let twentyFourHour = formatter("HH:mm")
+  private static let twelveHour = formatter("h:mm a")
+  private static let twelveHourBare = formatter("h:mm")
+  private static let meridiem = formatter("a")
+
+  /// One clock time as the shared `formatClockTime` writes it: "21:30" or "9:30 PM".
+  static func clock(milliseconds: Double, clockFormat: String?, timeZone: TimeZone = .current) -> String {
+    let date = Date(timeIntervalSince1970: milliseconds / 1_000)
+    let formatter = clockFormat == "12h" ? twelveHour : twentyFourHour
+    formatter.timeZone = timeZone
+    return formatter.string(from: date)
+  }
+
+  /**
+   The dial's clock subtitle, longest first, so the drawing can take the first that fits inside the
+   ring: "since 9:30 PM" / "9:30 PM–10:35 PM", then in 12-hour mode the shared meridiem once
+   ("9:30–10:35 PM") and finally the bare times ("since 9:30", "9:30–10:35"), which are never
+   longer than the 24-hour text that always fitted before (Codex r1 on #447).
+   */
+  static func clockDetailCandidates(
+    startMs: Double,
+    endMs: Double,
+    running: Bool,
+    clockFormat: String?,
+    timeZone: TimeZone = .current
+  ) -> [String] {
+    let start = clock(milliseconds: startMs, clockFormat: clockFormat, timeZone: timeZone)
+    let end = clock(milliseconds: endMs, clockFormat: clockFormat, timeZone: timeZone)
+    guard clockFormat == "12h" else { return [running ? "since \(start)" : "\(start)–\(end)"] }
+    twelveHourBare.timeZone = timeZone
+    meridiem.timeZone = timeZone
+    let startDate = Date(timeIntervalSince1970: startMs / 1_000)
+    let endDate = Date(timeIntervalSince1970: endMs / 1_000)
+    let bareStart = twelveHourBare.string(from: startDate)
+    let bareEnd = twelveHourBare.string(from: endDate)
+    if running { return ["since \(start)", "since \(bareStart)"] }
+    var candidates = ["\(start)–\(end)"]
+    if meridiem.string(from: startDate) == meridiem.string(from: endDate) {
+      candidates.append("\(bareStart)–\(end)")
+    }
+    candidates.append("\(bareStart)–\(bareEnd)")
+    return candidates
+  }
 }

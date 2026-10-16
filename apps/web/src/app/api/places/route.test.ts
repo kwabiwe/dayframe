@@ -24,7 +24,9 @@ vi.mock("@/lib/queries", () => ({
   getBootstrapData: mocks.getBootstrapData
 }));
 
-vi.mock("@/lib/event-service", () => ({
+vi.mock("@/lib/event-service", async (importOriginal) => ({
+  PlaceDeleteBlockedError: (await importOriginal<typeof import("@/lib/event-service")>()).PlaceDeleteBlockedError,
+  PlaceDeleteBusyError: (await importOriginal<typeof import("@/lib/event-service")>()).PlaceDeleteBusyError,
   createPlace: mocks.createPlace,
   createPlaceFromLearnedPlace: mocks.createPlaceFromLearnedPlace,
   updatePlace: mocks.updatePlace,
@@ -217,6 +219,32 @@ describe("/api/places", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.deletePlace).toHaveBeenCalledWith(placeId(), session);
+  });
+
+  it("answers a refused delete with 409 and a sentence the phone and web show", async () => {
+    const { PlaceDeleteBlockedError } = await import("@/lib/event-service");
+    mocks.deletePlace.mockRejectedValueOnce(new PlaceDeleteBlockedError(new Error("trigger")));
+
+    const response = await DELETE(new Request(`https://dayframe.test/api/places?id=${placeId()}`, { method: "DELETE" }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This place couldn't be deleted because some of its location history couldn't be cleared. Nothing was changed.",
+      code: "place_delete_blocked"
+    });
+  });
+
+  it("answers a delete that waited too long for location sync with 409 and a sentence", async () => {
+    const { PlaceDeleteBusyError } = await import("@/lib/event-service");
+    mocks.deletePlace.mockRejectedValueOnce(new PlaceDeleteBusyError(new Error("lock timeout")));
+
+    const response = await DELETE(new Request(`https://dayframe.test/api/places?id=${placeId()}`, { method: "DELETE" }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This place is busy right now, so it wasn't deleted. Try again in a moment.",
+      code: "place_delete_busy"
+    });
   });
 });
 

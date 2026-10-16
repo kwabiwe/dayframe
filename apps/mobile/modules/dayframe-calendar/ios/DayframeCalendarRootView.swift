@@ -194,6 +194,7 @@ private struct DayframeCalendarTimelineCanvas: View {
     GeometryReader { geometry in
       ZStack(alignment: .topLeading) {
         DayframeCalendarHourGrid(
+          clockFormat: presentation.clockFormat,
           hourHeight: hourHeight,
           hourLabelWidth: hourLabelWidth,
           theme: theme,
@@ -236,6 +237,7 @@ private struct DayframeCalendarTimelineCanvas: View {
         {
           DayframeCalendarCreationPreviewLayer(
             availableWidth: geometry.size.width,
+            clockFormat: presentation.clockFormat,
             hourHeight: hourHeight,
             hourLabelWidth: hourLabelWidth,
             preview: preview,
@@ -291,7 +293,11 @@ private struct DayframeCalendarTimelineCanvas: View {
   private func clockLabel(milliseconds: Double) -> String {
     let date = Date(timeIntervalSince1970: milliseconds / 1000)
     let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-    return String(format: "%02d:%02d", components.hour ?? 0, components.minute ?? 0)
+    return DayframeClockText.time(
+      hour: components.hour ?? 0,
+      minute: components.minute ?? 0,
+      clockFormat: model.presentation.clockFormat
+    )
   }
 
   private func minuteOfDay(milliseconds: Double) -> Double {
@@ -338,6 +344,7 @@ private struct DayframeCalendarNowMarker: View {
 
 private struct DayframeCalendarCreationPreviewLayer: View {
   let availableWidth: CGFloat
+  let clockFormat: String
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
   let preview: DayframeCalendarCreationPreview
@@ -408,11 +415,12 @@ private struct DayframeCalendarCreationPreviewLayer: View {
 
   private func clock(_ minute: Int) -> String {
     let normalized = ((minute % 1_440) + 1_440) % 1_440
-    return String(format: "%02d:%02d", normalized / 60, normalized % 60)
+    return DayframeClockText.time(hour: normalized / 60, minute: normalized % 60, clockFormat: clockFormat)
   }
 }
 
 private struct DayframeCalendarHourGrid: View {
+  let clockFormat: String
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
   let theme: DayframeCalendarTheme
@@ -424,7 +432,7 @@ private struct DayframeCalendarHourGrid: View {
       let lineTop = CGFloat(hour) * hourHeight
       let labelTop = min(timelineHeight - 11, max(11, lineTop))
 
-      Text(String(format: "%02d:00", hour % 24))
+      Text(DayframeClockText.hour(hour % 24, clockFormat: clockFormat))
         .font(.caption2.weight(.semibold))
         .monospacedDigit()
         .foregroundStyle(Color(dayframeCSS: theme.textMuted))

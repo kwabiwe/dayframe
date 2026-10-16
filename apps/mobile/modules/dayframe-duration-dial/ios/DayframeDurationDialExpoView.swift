@@ -17,6 +17,8 @@ private struct DayframeDurationDialTheme: Decodable {
 }
 
 private struct DayframeDurationDialRecord: Decodable {
+  /// "12h" or "24h" (PRD D18) for the "since 09:30" / "09:30–10:35" detail.
+  let clockFormat: String?
   let endMs: Double
   let mode: String
   let modelVersion: Int
@@ -454,16 +456,20 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       .font: displayFont(displaySize),
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
     ]
-    let clockDetail = record.mode == "running"
-      ? "since \(DayframeDurationDialStyle.clock(record.startMs))"
-      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))"
-    let candidates = [DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs), clockDetail]
+    let clockDetails = DayframeDurationDialCore.clockDetailCandidates(
+      startMs: record.startMs,
+      endMs: record.endMs,
+      running: record.mode == "running",
+      clockFormat: record.clockFormat
+    )
+    let clockDetail = clockDetails.last ?? ""
+    let candidates = ([DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs)] + clockDetails.map { Optional($0) })
       .compactMap { $0 }
     let size = text.size(withAttributes: attributes)
     let lift: CGFloat = displaySize >= 30 ? 14 : 8
     let innerRadius = Double(radius - DayframeDurationDialStyle.ringWidth / 2)
     // The subtitle must fit inside the ring where it is drawn: the lap text first, smaller if it
-    // must (down to 9 points), else the clock text, which is shorter.
+    // must (down to 9 points), else the clock texts from longest to shortest.
     func detailFont(_ size: CGFloat) -> UIFont { UIFont.systemFont(ofSize: size, weight: .semibold) }
     func layout(_ detail: String, _ fontSize: CGFloat) -> (top: CGFloat, detailSize: CGSize, fits: Bool) {
       let detailSize = detail.size(withAttributes: [.font: detailFont(fontSize)])
@@ -555,16 +561,6 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
 private enum DayframeDurationDialStyle {
   static let ringWidth: CGFloat = 16
   static let knobRadius: CGFloat = 13
-
-  private static let clockFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "HH:mm"
-    return formatter
-  }()
-
-  static func clock(_ milliseconds: Double) -> String {
-    clockFormatter.string(from: Date(timeIntervalSince1970: milliseconds / 1_000))
-  }
 }
 
 private extension UIColor {

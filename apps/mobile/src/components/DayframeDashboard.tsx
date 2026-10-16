@@ -41,6 +41,8 @@ import {
   TIMER_STATE_RECONCILE_INTERVAL_MS,
   timerStateChanged,
   timerStatePollDelay,
+  formatClockTime,
+  type ClockFormat,
   type RecentActivitySuggestion,
   type TimerStateFingerprint
 } from "@dayframe/shared";
@@ -53,6 +55,7 @@ import { TodayTimerSurface, type TodayActiveTimerPresentation } from "@/componen
 import type { LandingRequest } from "@/lib/blocksMotion";
 import { minuteClock, newestShownTimestamp } from "@/lib/frameClock";
 import { loadHapticsPreference, playHaptic, useHapticsPreference } from "@/lib/haptics";
+import { useClockFormat } from "@/lib/clockFormat";
 import { subscribeSavedTimeGoals } from "@/lib/settingsGoals";
 import { applySavedActivity, subscribeSavedActivity } from "@/lib/settingsActivities";
 import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivity } from "@/lib/quickStartMosaic";
@@ -1689,6 +1692,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     hasLiveActiveTimer,
     resolveEntryId: timerEntryIdentity,
   });
+  const clockFormat = useClockFormat();
   const todayLivePresentation: TodayActiveTimerPresentation | null = displayedActiveEntry ? {
     categoryColor: displayedActiveEntry.categoryName
       ? displayedActiveEntry.categoryColor ?? displayedActiveEntry.categoryId ?? null
@@ -1702,7 +1706,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     durationSeconds: displayedActiveEntry.durationSeconds,
     hasLiveActiveTimer,
     startedAt: displayedActiveEntry.startedAt,
-    startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt))}`,
+    startedLabel: `Started ${formatTimeOfDay(new Date(displayedActiveEntry.startedAt), clockFormat)}`,
     title: activeTitle,
     titleIsPlaceholder: activeTitleIsPlaceholder,
   } : null;
@@ -1788,6 +1792,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
+      clockFormat,
       data: calendarData,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
@@ -1802,6 +1807,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     [
       calendarTransitionDirection,
       calendarData,
+      clockFormat,
       hapticsEnabled,
       minuteNow,
       reduceMotion,
@@ -3674,9 +3680,9 @@ function formatEyebrowDay(date: Date) {
   });
 }
 
-function formatTimeOfDay(date: Date) {
+function formatTimeOfDay(date: Date, clockFormat: ClockFormat) {
   if (Number.isNaN(date.getTime())) return "--:--";
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  return formatClockTime(date, clockFormat);
 }
 
 function dateFromKey(dayKey: string) {

@@ -76,11 +76,14 @@ describe("today ribbon", () => {
       pending: [pending("p", at(12), at(12, 40))],
       nowMs: at(15),
     });
-    expect(ribbonTip(ribbonHitAt(model, 9 / 24))).toEqual({ title: "Deep work", detail: "08:13–10:00 · 1h 47m" });
-    expect(ribbonTip(ribbonHitAt(model, 12.5 / 24))).toEqual({ title: "Walk", detail: "12:00–12:40 · 40m · needs review" });
-    expect(ribbonTip(ribbonHitAt(model, 14.5 / 24))).toEqual({ title: "Deep work", detail: "14:00–now · 1h" });
-    expect(ribbonTip(ribbonHitAt(model, 11 / 24))).toEqual({ title: "11:00", detail: "Untracked" });
-    expect(ribbonSpokenBlock(model.blocks[0])).toBe("Walk, 12:00 to 12:40, 40 minutes, needs review");
-    expect(ribbonSpokenBlock(model.blocks[1])).toBe("Deep work, 08:13 to 10:00, 1 hour 47 minutes");
+    expect(ribbonTip(ribbonHitAt(model, 9 / 24), "24h")).toEqual({ title: "Deep work", detail: "08:13–10:00 · 1h 47m" });
+    expect(ribbonTip(ribbonHitAt(model, 12.5 / 24), "24h")).toEqual({ title: "Walk", detail: "12:00–12:40 · 40m · needs review" });
+    expect(ribbonTip(ribbonHitAt(model, 14.5 / 24), "24h")).toEqual({ title: "Deep work", detail: "14:00–now · 1h" });
+    expect(ribbonTip(ribbonHitAt(model, 11 / 24), "24h")).toEqual({ title: "11:00", detail: "Untracked" });
+    expect(ribbonSpokenBlock(model.blocks[0], "24h")).toBe("Walk, 12:00 to 12:40, 40 minutes, needs review");
+    expect(ribbonSpokenBlock(model.blocks[1], "24h")).toBe("Deep work, 08:13 to 10:00, 1 hour 47 minutes");
+    expect(ribbonTip(ribbonHitAt(model, 9 / 24), "12h")).toEqual({ title: "Deep work", detail: "8:13 AM–10:00 AM · 1h 47m" });
+    expect(ribbonTip(ribbonHitAt(model, 11 / 24), "12h")).toEqual({ title: "11:00 AM", detail: "Untracked" });
+    expect(ribbonSpokenBlock(model.blocks[0], "12h")).toBe("Walk, 12:00 PM to 12:40 PM, 40 minutes, needs review");
   });
 });

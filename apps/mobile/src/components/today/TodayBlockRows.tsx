@@ -39,6 +39,7 @@ import { DayframeIcon } from "../icons/DayframeIcon";
 import { recordMobileLayout, recordMobileTextLayout, type MobileAccessibilityDiagnostic } from "../accessibility/diagnostics";
 import { ActivityBlockMark } from "./ActivityBlockMark";
 import { spokenDuration } from "./todayBlocksLayout";
+import { useClockFormat } from "../../lib/clockFormat";
 
 type Entry = MobileTimeEntry;
 
@@ -83,6 +84,7 @@ export function TodayBlockRows({
   theme: MobileTheme;
 }) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const clockFormat = useClockFormat();
   const layout = useMemo(() => localLayoutTransition(reduceMotion), [reduceMotion]);
   const entering = useMemo(() => localPresenceEntering(reduceMotion), [reduceMotion]);
   const exiting = useMemo(() => localPresenceExiting(reduceMotion), [reduceMotion]);
@@ -142,9 +144,9 @@ export function TodayBlockRows({
                 entry={group.representative.entry}
                 expanded={grouped ? isExpanded : undefined}
                 icon={activityIconFor(group.representative.entry.categoryId)}
-                meta={rowMeta(group, nowMs)}
+                meta={rowMeta(group, nowMs, clockFormat)}
                 // The Expand/Collapse prefix already says how many entries the group holds.
-                spokenLabel={rowSpokenLabel(group, nowMs, { omitCount: grouped })}
+                spokenLabel={rowSpokenLabel(group, nowMs, clockFormat, { omitCount: grouped })}
                 onDelete={() => onDeleteEntries(group.entries.map(({ entry }) => entry))}
                 onOpen={() => (grouped ? toggle(group.key) : onOpenEntry(group.representative.entry))}
                 onReplay={() => onReplayEntry(group.representative.entry)}
@@ -167,8 +169,8 @@ export function TodayBlockRows({
                         durationSeconds={overlapSeconds}
                         entry={entry}
                         icon={activityIconFor(entry.categoryId)}
-                        meta={rowTimeRange(entry, nowMs)}
-                        spokenLabel={rowSpokenLabel({ entries: [{ entry, overlapSeconds }], key: entry.id, representative: { entry, overlapSeconds }, totalSeconds: overlapSeconds }, nowMs)}
+                        meta={rowTimeRange(entry, nowMs, clockFormat)}
+                        spokenLabel={rowSpokenLabel({ entries: [{ entry, overlapSeconds }], key: entry.id, representative: { entry, overlapSeconds }, totalSeconds: overlapSeconds }, nowMs, clockFormat)}
                         onDelete={() => onDeleteEntries([entry])}
                         onOpen={() => onOpenEntry(entry)}
                         onReplay={() => onReplayEntry(entry)}

@@ -62,6 +62,7 @@ import {
 } from "@/lib/activitiesPage";
 import { healthSyncNote, mergeHealthStatuses } from "@/lib/healthSyncNote";
 import { setHapticsEnabled, useHapticsPreference } from "@/lib/haptics";
+import { setClockFormatPreference, useClockFormat, useClockFormatPreference } from "@/lib/clockFormat";
 import {
   DAYFRAME_PALETTE,
   DAYFRAME_APP_ICONS,
@@ -75,7 +76,10 @@ import {
   type HealthAutoLogMapping,
   type HealthAutoLogMappings,
   type HealthImportPreferenceKey,
-  type HealthImportPreferences
+  type HealthImportPreferences,
+  formatClockTime,
+  type ClockFormat,
+  type ClockFormatPreference
 } from "@dayframe/shared";
 import {
   AuthRequiredError,
@@ -224,6 +228,12 @@ const SETTINGS_THEME_OPTIONS = [
   { label: "Daylight", value: "light" },
   { label: "System", value: "system" }
 ] as const;
+// PRD D18: a per-device 12/24-hour format, the same choices as on the web.
+const SETTINGS_CLOCK_FORMAT_OPTIONS: readonly { label: string; value: ClockFormatPreference }[] = [
+  { label: "System", value: "system" },
+  { label: "12-hour", value: "12h" },
+  { label: "24-hour", value: "24h" }
+];
 
 type SettingsSection = "index" | "profile" | "categories" | "automations" | "health" | "sync";
 
@@ -368,6 +378,8 @@ export default function SettingsScreen() {
     themePreference
   } = useMobileTheme();
   const hapticsEnabled = useHapticsPreference();
+  const clockFormat = useClockFormat();
+  const clockFormatPreference = useClockFormatPreference();
   // UIA-005/003: destructive confirmations use the Blocks confirm sheet; notices are toasts.
   const confirmSheet = useBlocksConfirm();
   const settingsNotice = useBlocksNotice();
@@ -2231,13 +2243,13 @@ export default function SettingsScreen() {
                         <SettingsStepper
                           canDecrease={!nudgeBusy && shownReviewNudge.minutes > REVIEW_NUDGE_MINUTES.min}
                           canIncrease={!nudgeBusy && shownReviewNudge.minutes < REVIEW_NUDGE_MINUTES.max}
-                          hint={`From ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.min)} to ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.max)}, in half hours`}
+                          hint={`From ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.min, clockFormat)} to ${formatReviewNudgeTime(REVIEW_NUDGE_MINUTES.max, clockFormat)}, in half hours`}
                           label="reminder time"
                           // Steps from the live time only; before it is read a tap does nothing.
                           onDecrease={() => { if (reviewNudge) void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes - REVIEW_NUDGE_MINUTES.step)); }}
                           onIncrease={() => { if (reviewNudge) void changeReviewNudge((owner) => setReviewNudgeMinutes(owner, reviewNudge.minutes + REVIEW_NUDGE_MINUTES.step)); }}
                           theme={theme}
-                          value={formatReviewNudgeTime(shownReviewNudge.minutes)}
+                          value={formatReviewNudgeTime(shownReviewNudge.minutes, clockFormat)}
                         />
                       }
                       testID="settings-review-nudge-time"
@@ -2295,6 +2307,22 @@ export default function SettingsScreen() {
                   testID="settings-theme"
                   theme={theme}
                   title="Theme"
+                />
+                <SettingsBlockRow
+                  control={
+                    <SettingsSegmented
+                      label="Time format"
+                      onChange={(next) => {
+                        void setClockFormatPreference(next).catch(() => undefined);
+                      }}
+                      options={SETTINGS_CLOCK_FORMAT_OPTIONS}
+                      theme={theme}
+                      value={clockFormatPreference}
+                    />
+                  }
+                  testID="settings-clock-format"
+                  theme={theme}
+                  title="Time format"
                 />
                 <SettingsBlockRow
                   control={
@@ -2546,7 +2574,7 @@ export default function SettingsScreen() {
                 >
                   {timerStopSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
+                      detail={`Stopped ${formatQueueTime(issue.failedAt ?? issue.queuedAt, clockFormat)}. Dayframe couldn't save the Stop, so your account still shows the block running.`}
                       divider={index > 0}
                       key={issue.clientEventId}
                       theme={theme}
@@ -2558,7 +2586,7 @@ export default function SettingsScreen() {
                   ))}
                   {timeEntrySyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`From ${formatQueueTime(issue.updatedAt)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
+                      detail={`From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
@@ -2571,8 +2599,8 @@ export default function SettingsScreen() {
                   {reviewSyncIssues.map((issue, index) => (
                     <SettingsIssueRow
                       detail={issue.resolutionStatus === "resolution_unknown"
-                        ? `Saved ${formatQueueTime(issue.createdAt)}. Dayframe is still checking whether it reached your account; your choice is kept.`
-                        : `From ${formatQueueTime(issue.createdAt)}. Dayframe couldn't save it.`}
+                        ? `Saved ${formatQueueTime(issue.createdAt, clockFormat)}. Dayframe is still checking whether it reached your account; your choice is kept.`
+                        : `From ${formatQueueTime(issue.createdAt, clockFormat)}. Dayframe couldn't save it.`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + index > 0}
                       key={issue.clientMutationId}
                       theme={theme}
@@ -3272,14 +3300,9 @@ function formatReviewMutationAction(value: string) {
   }
 }
 
-function formatQueueTime(value?: Date | string) {
+function formatQueueTime(value: Date | string | undefined, clockFormat: ClockFormat) {
   if (!value) return "unknown time";
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "unknown time";
-  return formatLocaleDate(date, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
+  return `${formatLocaleDate(date, { month: "short", day: "numeric" })}, ${formatClockTime(date, clockFormat)}`;
 }
