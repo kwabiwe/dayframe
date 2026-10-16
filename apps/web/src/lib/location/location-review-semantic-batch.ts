@@ -10,7 +10,8 @@ import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
-import { reopenSupersededReviews } from "./location-review-supersession";
+import { reopenSupersededReviews, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+import { HEALTH_COVERAGE_TOLERANCE_MS, healthWorkoutCoversMove } from "./health-coverage";
 import {
   AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
@@ -121,6 +122,66 @@ async function displayContext(
 }
 
 /**
+ * The Moves among the candidates that an Apple Health walk, run or ride covers
+ * (`healthWorkoutCoversMove`): the user's workout blocks (not skipped) and open workout cards in the
+ * candidates' overall window, one bounded read. Returns their client event IDs.
+ */
+async function healthCoveredMoves(client: Pick<pg.PoolClient, "query">, session: RequestSession, candidates: SemanticCandidate[]) {
+  const moves = candidates.flatMap(({ segment, clientEventId }) =>
+    segment.kind === "commute" && segment.stoppedAt ? [{ segment, clientEventId }] : []);
+  const covered = new Set<string>();
+  if (moves.length === 0) return covered;
+  const fromMs = Math.min(...moves.map(({ segment }) => Date.parse(segment.startedAt))) - HEALTH_COVERAGE_TOLERANCE_MS;
+  const toMs = Math.max(...moves.map(({ segment }) => Date.parse(segment.stoppedAt!))) + HEALTH_COVERAGE_TOLERANCE_MS;
+  const workouts = await client.query<{ startedAt: Date; stoppedAt: Date; workoutType: unknown }>(
+    `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
+            coalesce(ae.raw_payload -> 'workoutType', ae.raw_payload -> 'workoutLabel', to_jsonb(te.description)) as "workoutType"
+     from time_entries te
+     left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id
+     where te.workspace_id = $1 and te.user_id = $2 and te.source = 'health_workout' and te.review_status <> 'ignored'
+       and te.stopped_at is not null and te.started_at < $4 and te.stopped_at > $3
+     union all
+     select ri.suggested_started_at, ri.suggested_stopped_at,
+            coalesce(ae.raw_payload -> 'workoutType', ae.raw_payload -> 'workoutLabel', to_jsonb(ri.title))
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ae.event_type = 'health_workout_import'
+       and ri.suggested_stopped_at is not null and ri.suggested_started_at < $4 and ri.suggested_stopped_at > $3
+     limit 500`,
+    [session.workspaceId, session.userId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()]);
+  for (const { segment, clientEventId } of moves) {
+    if (workouts.rows.some((workout) => healthWorkoutCoversMove(
+      { startedAt: segment.startedAt, stoppedAt: segment.stoppedAt!, travelMode: segment.kind === "commute" ? segment.travelMode : null },
+      { startedAt: workout.startedAt.toISOString(), stoppedAt: workout.stoppedAt.toISOString(), workoutType: workout.workoutType }
+    ))) covered.add(clientEventId);
+  }
+  return covered;
+}
+
+/** Retires the open cards of Moves a Health workout now covers, as replay retires a vanished segment's. */
+async function retireHealthCoveredReviews(client: Pick<pg.PoolClient, "query">, session: RequestSession, clientEventIds: string[]) {
+  let retired = 0;
+  for (const batch of chunks(clientEventIds)) {
+    const result = await client.query<{ eventId: string }>(
+      `update review_items ri set status = 'ignored', ignored_scope = '${SUPERSEDED_REVIEW_SCOPE}', resolved_at = now()
+       from activity_events ae
+       where ae.id = ri.event_id and ae.workspace_id = $1 and ae.user_id = $2 and ae.client_event_id = any($3::text[])
+         and ae.review_status = 'needs_review' and ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+       returning ri.event_id as "eventId"`,
+      [session.workspaceId, session.userId, batch]);
+    const ids = [...new Set(result.rows.map((row) => row.eventId))];
+    if (ids.length) {
+      await client.query(
+        `update activity_events set review_status = 'ignored'
+         where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and review_status = 'needs_review'`,
+        [session.workspaceId, session.userId, ids]);
+    }
+    retired += ids.length;
+  }
+  return retired;
+}
+
+/**
  * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
  * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
  * suggestions or payload changed (Review renders the payload); and a created Commute activity. A replay re-emits every finalised segment, so the
@@ -152,7 +213,13 @@ export async function emitReviewSemanticSegments(
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
   const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
-  const eligible = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
+  const offerable = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
+  // Health walks win (PRD D19): a Move an Apple Health workout of its kind covers is the workout.
+  // It is not offered (its open card, if any, is retired like a vanished segment's, and comes back
+  // if the workout goes) and never logged.
+  const healthCovered = await healthCoveredMoves(client, session, offerable);
+  changes.count += await retireHealthCoveredReviews(client, session, [...healthCovered]);
+  const eligible = offerable.filter((row) => !healthCovered.has(row.clientEventId));
   const existing = new Map<string, { id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>();
   for (const batch of chunks(eligible)) {
     const result = await client.query<{ id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>(

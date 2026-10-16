@@ -91,6 +91,8 @@ Sleep:
 - User mapping defaults can override category and description for supported sleep/workout imports and for Health Review reprocess.
 - Implausible, too short, too long, malformed or unsafe logical-session Sleep collisions stay in Review. Ordinary activity overlap is not a blocker.
 
+Health walks win over location (PRD D19, design §9; `apps/web/src/lib/location/health-coverage.ts`): a location Move whose travel mode matches a walking, running or cycling workout (a block not skipped, or an open card) is not offered when the workout covers at least half of it or it lies inside the workout give or take five minutes; a Move without a mode only in the second case. The location emitter reads the workouts in its window once per replay; a card already open when the workout arrives is retired on the next replay (`ignored_scope = 'superseded'`, as a vanished segment's) and comes back if the workout is removed. Health data is never written by location; the workout keeps its own block or card. Not yet: showing the Move's route on the workout (design §9 bullet 2), and Moves logged automatically (PR 11) are covered when that lands.
+
 Strength training, swimming and other/unknown remain disabled by default. An explicitly enabled supported type, including swimming, may auto-log with a complete valid window, normal confidence and existing duration thresholds. Disabled preferences retain their existing ignore/review behaviour.
 
 ## Manual Review Rules
