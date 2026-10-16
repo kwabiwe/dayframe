@@ -2838,9 +2838,10 @@ function reviewItemSummary(item: MobileReviewItem) {
   return "Review this suggested time before it is added.";
 }
 
-/** A Location V2 journey (not time away): the server stores it with only a typed name. */
+/** A Location V2 Move: the server stores it with only a typed name (a legacy time-away card kept its title). */
 function isLocationV2Commute(item: MobileReviewItem) {
-  return hasV2LocationEvidence(item) && item.eventType === "commute_detected" && !isTimeAwayReviewItem(item);
+  return hasV2LocationEvidence(item) && item.eventType === "commute_detected" &&
+    (!isTimeAwayReviewItem(item) || Boolean(item.rawPayload?.routeLabel));
 }
 
 function reviewItemCategoryName(item: MobileReviewItem) {

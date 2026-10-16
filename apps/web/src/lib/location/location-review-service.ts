@@ -455,7 +455,7 @@ async function locationEditMatchesExisting(
     entry.categoryId !== expectedCategory ||
     entry.placeId !== expectedPlace ||
     entry.placeLabel !== expectedPlaceLabel ||
-    (entry.description ?? "") !== (confirmedLocationDescription(entryKind(item), item.title, edit) ?? "") ||
+    (entry.description ?? "") !== (confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles) ?? "") ||
     new Date(entry.startedAt).toISOString() !== new Date(edit.startedAt ?? item.suggestedStartedAt).toISOString() ||
     new Date(entry.stoppedAt).toISOString() !== new Date(edit.stoppedAt ?? item.suggestedStoppedAt).toISOString()
   ) {
@@ -561,7 +561,7 @@ async function confirmReview(
       : item.suggestedPlaceId;
   const placeLabel = placeIdentity?.placeLabel ?? null;
   await validateReferences(client, session, categoryId, placeId);
-  const description = confirmedLocationDescription(entryKind(item), item.title, edit);
+  const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
        workspace_id, user_id, category_id, place_id, place_label, source, confidence, review_status,
@@ -619,11 +619,17 @@ function entryKind(item: Pick<LockedReview, "segmentKind" | "timeAway">): Locati
 export function confirmedLocationDescription(
   segmentKind: LocationEntryKind,
   title: string,
-  edit: ReviewEntryEdit | undefined
+  edit: ReviewEntryEdit | undefined,
+  suggestedTitles: readonly string[] = []
 ) {
   // A Move (a journey, or time away from a place: a round-trip Move under PRD D19) keeps no
-  // description of its own: its block shows its activity, and only words the person typed stay.
-  if (segmentKind === "commute" || segmentKind === "time_away") return edit?.description?.trim() || null;
+  // description of its own: its block shows its activity, and only words the person typed stay. An
+  // editor that sent a title Dayframe suggested back unchanged ("Trip", "Time away from Home", from
+  // an older app's prefill) did not type it (Codex r1 on #456).
+  if (segmentKind === "commute" || segmentKind === "time_away") {
+    const typed = edit?.description?.trim() || null;
+    return typed && isOwnerAuthoredReviewDescription(typed, [title, ...suggestedTitles]) ? typed : null;
+  }
   return edit?.description?.trim() || title;
 }
 

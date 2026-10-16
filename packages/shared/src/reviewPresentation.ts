@@ -15,6 +15,8 @@ export const REVIEW_PRESENTATION_VERSION = 1 as const;
 export const REVIEW_PRESENTATION_FEATURES_HEADER = "x-dayframe-review-features";
 /** Feature: Location Review items for time away from a saved place carry `timeAway`. */
 export const REVIEW_PRESENTATION_TIME_AWAY_FEATURE = "time-away";
+/** Feature: a Move's Review item carries its second line, `routeLabel` ("Home → Gym"; PRD D19). */
+export const REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE = "move-route";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -181,7 +183,9 @@ export const ReviewProposalPresentationSchema = z
     canonicalEntryIds: z.array(uuid).max(25),
     semanticRevision: z.string().max(100).nullable(),
     /** Time away from a saved place (only for clients sending the time-away feature). */
-    timeAway: z.object({ stopCount: z.number().int().nonnegative().max(100) }).strict().optional()
+    timeAway: z.object({ stopCount: z.number().int().nonnegative().max(100) }).strict().optional(),
+    /** A Move's second line (only for clients sending the move-route feature). */
+    routeLabel: z.string().trim().min(1).max(200).optional()
   })
   .strict();
 

@@ -48,7 +48,9 @@ clients that list it in the `x-dayframe-review-features` request header
 shape; a new phone talking to an older server simply receives no field. The
 `time-away` feature adds `timeAway: { stopCount }` to Location Review records
 for time away from a saved place, so cached and backlog items keep their
-"Time away" labels and never fall back to the Commute category.
+round-trip labels and never fall back to the Commute category. The `move-route`
+feature adds `routeLabel` (a Move's second line, "Home → Gym", PRD D19) to
+Location Review records for Moves, so cards beyond the bootstrap's page keep it.
 
 `accept` and Location `confirm` may carry the optional 64-lower-hex
 `expectedProposalHash`. New Quick Confirm envelopes (Today offered the shortcut until Blocks parity

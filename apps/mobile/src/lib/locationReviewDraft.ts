@@ -47,6 +47,8 @@ export function locationReviewJourneyCopy(segment: { kind: "stay" | "commute"; t
     : { journey: true, primaryLabel: "Record trip", recorded: "The trip was recorded.", placeholder: "Add trip details (optional)" };
 }
 
+const GENERATED_UNNAMED_STAY_TITLES = new Set(["unknown place", "near saved places", "visit at an unknown place", "visit near saved places"]);
+
 export function initialLocationReviewDescription({
   placeName,
   segmentKind,
@@ -58,7 +60,8 @@ export function initialLocationReviewDescription({
 }) {
   if (segmentKind === "commute") return "";
   const normalizedTitle = title.trim().replace(/\s+/g, " ").toLowerCase();
-  if (!placeName?.trim() && normalizedTitle === "visit at an unknown place") return "";
+  // Dayframe's own titles for a stay it cannot name (PRD D19, and the older wording) are not a name.
+  if (!placeName?.trim() && GENERATED_UNNAMED_STAY_TITLES.has(normalizedTitle)) return "";
   return title;
 }
 

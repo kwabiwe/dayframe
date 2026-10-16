@@ -61,7 +61,8 @@ async function moveEndpoints(
     for (const row of result.rows) saved.set(row.id, { name: row.name, role: role(row.role) });
   }
   for (const ids of chunks(stayDbIds)) {
-    const result = await client.query<{ id: string; name: string; role: string | null }>(`select ss.id, coalesce(${placeRoleLabelSql("p")}, lp.name) as name,
+    // A learned place linked to a saved place goes by the saved place's display name, as its Stay does.
+    const result = await client.query<{ id: string; name: string; role: string | null }>(`select ss.id, coalesce(${placeDisplayNameSql("p")}, lp.name) as name,
       p.role
       from stay_segments ss
       join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id

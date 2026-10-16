@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   REVIEW_PRESENTATION_FEATURES_HEADER,
+  REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE,
   REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
   ReviewPresentationRequestSchema
 } from "@dayframe/shared";
@@ -44,7 +45,10 @@ export async function POST(request: Request) {
     const presentation = await getReviewPresentation(session, parsed.data, {
       signal: request.signal,
       deadlineAt: startedAt + 8_000
-    }, { timeAway: features.includes(REVIEW_PRESENTATION_TIME_AWAY_FEATURE) });
+    }, {
+      timeAway: features.includes(REVIEW_PRESENTATION_TIME_AWAY_FEATURE),
+      moveRoute: features.includes(REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE)
+    });
     return privateJson(presentation);
   } catch (error) {
     const readiness = databaseReadinessResponse(error);

@@ -225,7 +225,9 @@ describe("mobile review helpers", () => {
     expect(reviewConfirmLabel(away)).toBe("Confirm trip");
     const draft = buildReviewItemDraftEntry({ ...away, title: "Time away from Home", suggestedCategoryId: null, categoryName: null,
       suggestedStartedAt: "2026-03-10T12:00:00.000Z", suggestedStoppedAt: "2026-03-10T12:10:00.000Z" }, [], Date.now());
-    expect(draft).toMatchObject({ description: "Time away from Home", categoryId: null });
+    // Every Move starts with no name, time away included (PRD D19, Codex r1 on #456).
+    expect(draft).toMatchObject({ categoryId: null });
+    expect(draft?.description ?? "").toBe("");
     expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
   });
 

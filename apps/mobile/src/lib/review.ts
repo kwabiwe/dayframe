@@ -214,7 +214,8 @@ export function isTimeAwayReviewItem(item: Pick<MobileReviewItem, "eventType"> &
 }
 
 function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCategory[]) {
-  if (isTimeAwayReviewItem(item)) return undefined;
+  // A legacy time-away card (no route line) suggested no activity; a Location v3 one is a Move.
+  if (isTimeAwayReviewItem(item) && !item.rawPayload?.routeLabel) return undefined;
   if (item.eventType === "commute_detected") {
     // Only a Commute (Home ↔ Work, or an older server's journey) falls back to Commute; every other
     // Move to Travel (PRD D19).
@@ -408,8 +409,8 @@ export function hideTombstonedReviewItems(
 }
 
 function reviewItemDraftDescription(item: MobileReviewItem) {
-  // Time away has no category to show, so its title names it (as on confirm).
-  if (isTimeAwayReviewItem(item)) return item.title.trim() || null;
+  // Every Move, time away included, starts with no name: its block shows its activity (PRD D19).
+  if (isTimeAwayReviewItem(item)) return null;
   if (
     item.eventType === "commute_detected" ||
     item.eventType === "learned_place_visit" ||

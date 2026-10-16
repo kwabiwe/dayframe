@@ -51,7 +51,7 @@ describe("POST /api/review/presentation", () => {
       session,
       expect.objectContaining({ mode: "lookup", limit: 100 }),
       expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }),
-      { timeAway: false }
+      { timeAway: false, moveRoute: false }
     );
   });
 
@@ -61,7 +61,12 @@ describe("POST /api/review/presentation", () => {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "other, time-away" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: false });
+    await POST(new Request("https://dayframe.test/api/review/presentation", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "time-away,move-route" },
+      body: JSON.stringify(body)
+    }));
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true });
   });
 
   it("rejects a chunked body larger than the fixed 64 KiB bound", async () => {

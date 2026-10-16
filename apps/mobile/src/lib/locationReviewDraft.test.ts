@@ -32,6 +32,11 @@ describe("Location Review editor draft", () => {
       segmentKind: "stay",
       title: "Visit at an unknown place"
     })).toBe("");
+    // Location v3 titles (PRD D19, Codex r1 on #456).
+    for (const title of ["Unknown place", "Near saved places"]) {
+      expect(initialLocationReviewDescription({ placeName: null, segmentKind: "stay", title })).toBe("");
+    }
+    expect(initialLocationReviewDescription({ placeName: "Peak Gym", segmentKind: "stay", title: "Peak Gym" })).toBe("Peak Gym");
     expect(initialLocationReviewDescription({
       placeName: null,
       segmentKind: "commute",

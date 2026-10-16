@@ -75,7 +75,7 @@ export function LocationReviewPanel({
       .then((next) => {
         if (cancelled) return;
         setEvidence(next);
-        setDescription(initialDescription ?? next.display.title);
+        setDescription(initialDescription ?? initialEvidenceDescription(next));
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
         if (next.map.centre) {
@@ -361,4 +361,15 @@ function toLocalDateTimeInput(value: string) {
   const date = new Date(value);
   const offsetMs = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+/**
+ * The editor's starting name: a Move starts empty (its block shows its activity, PRD D19), and so does
+ * a stay Dayframe could not name; otherwise the suggestion's title (Codex r1 on #456).
+ */
+export function initialEvidenceDescription(evidence: Pick<LocationReviewEvidenceDto, "segment" | "display">) {
+  if (evidence.segment.kind === "commute") return "";
+  const title = evidence.display.title?.trim() ?? "";
+  return ["unknown place", "near saved places", "visit at an unknown place", "visit near saved places"]
+    .includes(title.replace(/\s+/g, " ").toLowerCase()) ? "" : title;
 }
