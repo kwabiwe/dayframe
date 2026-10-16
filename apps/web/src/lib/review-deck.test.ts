@@ -148,5 +148,6 @@ describe("location reason line (location v3 bug 8)", () => {
     expect(location("review_mode")).toBe("Not logged automatically.");
     expect(location("untrusted_place", "unknown_stay")).toBe("New place.");
     expect(location("untrusted_place", "learned_place_visit")).toBe("This place isn’t saved.");
+    expect(location("ambiguous_place", "unknown_stay")).toBe("It’s near more than one saved place.");
   });
 });

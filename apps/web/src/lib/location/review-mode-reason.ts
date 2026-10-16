@@ -18,6 +18,9 @@ export type AutoLogFallbackReason =
 /** Log automatically is off for this saved place. */
 export const AUTO_LOG_OFF_REASON = "auto_log_off";
 
+/** The stay matched more than one saved place, so none is suggested. */
+export const AMBIGUOUS_PLACE_REASON = "ambiguous_place";
+
 /** A policy rejection of a stay at a Log automatically place, as the reason its card shows. */
 export function autoLogPolicyFallback(reason: LocationAutomaticLoggingReason): AutoLogFallbackReason | LocationAutomaticLoggingReason {
   // Evidence still arriving says so in its own words; everything else the trusted-stay checks reject
@@ -29,7 +32,7 @@ export function autoLogPolicyFallback(reason: LocationAutomaticLoggingReason): A
  * The reason a production `v2_review` card stores, replacing the blanket "review_mode" (which every
  * client worded as "automatic location logging is not enabled", untrue for a place with Log
  * automatically on). Stays: the Log automatically fallback, else "Log automatically is off for this
- * place", else the place isn't saved. Journeys: why the automatic journey rules would not log it,
+ * place", else near more than one saved place, else the place isn't saved. Journeys: why the automatic journey rules would not log it,
  * else "review_mode" (journeys are not logged automatically in Review mode).
  */
 export function reviewModeSemanticReason(
@@ -38,7 +41,11 @@ export function reviewModeSemanticReason(
   fallback: AutoLogFallbackReason | LocationAutomaticLoggingReason | undefined
 ): string {
   if (fallback) return fallback;
-  if (segment.kind === "stay") return trusted ? trusted.autoLog ? "review_mode" : AUTO_LOG_OFF_REASON : "untrusted_place";
+  if (segment.kind === "stay") {
+    if (trusted) return trusted.autoLog ? "review_mode" : AUTO_LOG_OFF_REASON;
+    // Near more than one saved place is not a new place (Codex r1 on #450).
+    return segment.placeMatchKind === "ambiguous" ? AMBIGUOUS_PLACE_REASON : "untrusted_place";
+  }
   const automatic = assessAutomaticLocation("v2_enabled", segment);
   return automatic.action === "auto_confirm" ? "review_mode" : automatic.reason;
 }

@@ -2131,6 +2131,9 @@ async function validateReviewModeAutoLogPlaces() {
     assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_overlap"],
       `A visit overlapping ${label} did not say it overlaps a block.`);
   }
+  // With every reason recorded, an identical replay changes nothing the app shows (Codex r1 on #450).
+  const steady = await ingestAndReplayLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(steady.replay.semanticChangeCount, 0, "An identical replay with Log automatically fallbacks reported changes.");
   await setAutoLog(false);
 }
 

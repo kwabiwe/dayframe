@@ -87,6 +87,8 @@ export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventTyp
       return "The start or end place isn’t saved.";
     case "untrusted_place":
       return item.eventType === "unknown_stay" ? "New place." : "This place isn’t saved.";
+    case "ambiguous_place":
+      return "It’s near more than one saved place.";
     case "short_journey_review_only":
       return "Short journeys aren’t added automatically.";
     case "journey_contains_stop":

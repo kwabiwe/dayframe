@@ -418,6 +418,10 @@ async function chooseAutoLoggedVisits(
     if (segment.kind !== "stay") return false;
     const { trusted } = context(segment);
     if (!trusted?.autoLog || trusted.loggingEnabled === false) return false;
+    // Decided (logged, confirmed or skipped) and not offered again: its payload is kept as it is, so
+    // neither the decision nor a reason is needed, and replay spends no read on it (Codex r1 on #450).
+    const prior = existing.get(clientEventId);
+    if (prior && prior.reviewStatus !== "needs_review" && !freshAgain.has(clientEventId)) return false;
     const policy = assessAutomaticLocation("v2_enabled", segment);
     if (policy.action !== "auto_confirm") {
       fallback.set(clientEventId, autoLogPolicyFallback(policy.reason));
@@ -430,34 +434,39 @@ async function chooseAutoLoggedVisits(
   const orphanIds = orphans.map((orphan) => orphan.entryId);
   const blocked = new Map<string, { overlap: boolean; offered: boolean; logged: boolean }>();
   for (const batch of chunks(candidates)) {
+    // Each check runs only when it can still change the answer (CASE evaluates lazily): an overlap
+    // decides at once, and a card already offered here needs only the overlap check, so the two
+    // history reads below cost what they cost before #450, for new visits only.
     const result = await client.query<{ clientEventId: string; overlap: boolean; offered: boolean; logged: boolean }>(
-      `select r.client_event_id as "clientEventId", f.overlap, f.offered, f.logged
-       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz)
+      `select r.client_event_id as "clientEventId", o.overlap, f.offered, l.logged
+       from jsonb_to_recordset($3::jsonb)
+         as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz, offered_here boolean)
        cross join lateral (select exists (
          -- Any block not ignored, however long (a timer left running for days and then stopped) or still
          -- running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started per visit.
          select 1 from time_entries te
          where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
            and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
-           and not (te.id = any($4::uuid[]))) as overlap,
-         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
-         -- whatever became of that card (Codex r1 on #435).
-         exists (
-         select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
-           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) as offered,
-         -- Another visit at the place already auto-logged and still a decision (its block deleted or
-         -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
-         -- landed while this replay ran (Codex r3 on #435).
-         exists (
+           and not (te.id = any($4::uuid[]))) as overlap) o
+       -- Another visit at the place already auto-logged and still a decision (its block deleted or
+       -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
+       -- landed while this replay ran (Codex r3 on #435).
+       cross join lateral (select case when o.overlap or r.offered_here then false else exists (
          select 1 from activity_events ae
          where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
            and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
            and ae.client_event_id <> r.client_event_id
-           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) as logged) f`,
+           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) end as logged) l
+       -- Offered in Review before under another segment ID (its stay was replaced): stays a card
+       -- whatever became of that card (Codex r1 on #435).
+       cross join lateral (select case when o.overlap or r.offered_here or l.logged then false else exists (
+         select 1 from review_items ri
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
+           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) end as offered) f`,
       [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
         client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
-        started_at: segment.startedAt, stopped_at: segment.stoppedAt
+        started_at: segment.startedAt, stopped_at: segment.stoppedAt,
+        offered_here: existing.has(clientEventId) && !freshAgain.has(clientEventId)
       }))), orphanIds]);
     for (const row of result.rows) blocked.set(row.clientEventId, row);
   }

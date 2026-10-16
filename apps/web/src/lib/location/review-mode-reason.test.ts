@@ -11,10 +11,12 @@ describe("review-mode card reasons (location v3 bug 8)", () => {
     }
   });
 
-  it("says when the place's switch is off, and when the place isn't saved", () => {
+  it("says when the place's switch is off, when the stay is near several saved places, and when the place isn't saved", () => {
     expect(reviewModeSemanticReason(stay, { autoLog: false }, undefined)).toBe("auto_log_off");
     expect(reviewModeSemanticReason(stay, { autoLog: null }, undefined)).toBe("auto_log_off");
     expect(reviewModeSemanticReason(stay, null, undefined)).toBe("untrusted_place");
+    expect(reviewModeSemanticReason({ ...stay, placeMatchKind: "ambiguous" }, null, undefined)).toBe("ambiguous_place");
+    expect(reviewModeSemanticReason({ ...stay, placeMatchKind: "unknown" }, null, undefined)).toBe("untrusted_place");
   });
 
   it("words policy rejections of a Log automatically stay as less certain, except evidence still arriving", () => {

@@ -258,6 +258,7 @@ describe("mobile review helpers", () => {
     expect(reason("review_mode")).toBe("Not logged automatically");
     expect(reason("untrusted_place", "unknown_stay")).toBe("New place");
     expect(reason("untrusted_place", "learned_place_visit")).toBe("Needs review · place isn’t saved");
+    expect(reason("ambiguous_place", "unknown_stay")).toBe("Needs review · near more than one saved place");
   });
 
   it("explains why location suggestions still need Review", () => {

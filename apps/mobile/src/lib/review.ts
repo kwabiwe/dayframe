@@ -469,6 +469,8 @@ export function locationReviewReasonCopy(
       return "Needs review · start or end place isn’t saved";
     case "untrusted_place":
       return item.eventType === "unknown_stay" ? "New place" : "Needs review · place isn’t saved";
+    case "ambiguous_place":
+      return "Needs review · near more than one saved place";
     case "short_journey_review_only":
       return "Needs review · short journeys aren’t added automatically";
     case "journey_contains_stop":
