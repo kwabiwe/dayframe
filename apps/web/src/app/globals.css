@@ -1059,6 +1059,19 @@ textarea.ui-control {
   grid-template-columns: 5ch 16px 5.75ch;
 }
 
+/* 12-hour times ("11:15 AM") are wider than "11:15". */
+.timeline-inline-time[data-clock="12h"] {
+  grid-template-columns: 8.6ch 16px 8.6ch;
+}
+
+.timeline-inline-time[data-clock="12h"].is-running {
+  grid-template-columns: 8.6ch 16px 5.75ch;
+}
+
+.timeline-inline-time[data-clock="12h"] .timeline-inline-time-control {
+  width: 8.6ch;
+}
+
 .timeline-inline-time:hover,
 .timeline-inline-time.is-editing,
 .timeline-inline-time:focus-within {
@@ -8341,6 +8354,14 @@ dialog.ui-dialog.manual-entry-dialog {
   gap: 8px;
 }
 
+/* 12-hour times ("11:00 PM") need more room than "23:00"; Duration ("01:30") gives some back.
+   Narrower editors keep their two- and one-column layouts below. */
+@container time-entry-editor (min-width: 381px) {
+  .calendar-compact-temporal-fields[data-clock="12h"] {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 0.7fr);
+  }
+}
+
 .calendar-compact-moment-field {
   display: grid;
   min-width: 0;
@@ -9069,6 +9090,11 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .timeline-list-table col.timeline-list-col-duration {
   width: 13%;
+}
+
+/* Two 12-hour times ("9:45 AM – 11:15 AM") need a wider Time column. */
+.timeline-list-table[data-clock="12h"] col.timeline-list-col-time {
+  width: 27%;
 }
 
 .timeline-list-table col.timeline-list-col-actions {
@@ -10583,6 +10609,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-muted);
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   transform: translateX(-50%);
 }
 

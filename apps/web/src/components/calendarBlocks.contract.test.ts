@@ -22,7 +22,7 @@ describe("Calendar in Blocks contract", () => {
     // lanes start at z-index 2, so the line sits under all of them; its time shows in the axis pill.
     expect(now).toBeLessThan(2);
     expect(styles).toMatch(/\.calendar-now-pill \{[^}]*position: absolute;/);
-    expect(timeline).toMatch(/className="calendar-now-pill"[\s\S]{0,500}?\{formatTime\(capturedNow\)\}/);
+    expect(timeline).toMatch(/className="calendar-now-pill"[\s\S]{0,500}?\{formatTime\(capturedNow, clock\)\}/);
     // The pill's clock time is the browser's, so it only renders after hydration, and it is clamped
     // inside the axis at midnight and at the day's end.
     expect(timeline).toContain("localTimeReady && visibleDays.some(isToday)");

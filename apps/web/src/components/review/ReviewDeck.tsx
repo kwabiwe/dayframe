@@ -1,7 +1,8 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import type { DayframeGlyph } from "@dayframe/shared";
+import { formatClockTime, type DayframeGlyph } from "@dayframe/shared";
+import { useClockFormat } from "@/components/ClockFormat";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -58,6 +59,7 @@ const DONE_BLOCKS_MAX = 12;
  * "Edit before logging".
  */
 export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
+  const clock = useClockFormat();
   const data = useRuntimePageData(initialData);
   const hydrated = useIsHydrated();
   const { refresh } = useAppShellRuntime();
@@ -503,7 +505,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                 />
                 <span className="df-qrow-text">
                   <b>{reviewTitle(item)}</b>
-                  <span className="df-tnum">{reviewWhen(item, nowMs) ?? "No times"}</span>
+                  <span className="df-tnum">{reviewWhen(item, nowMs, clock) ?? "No times"}</span>
                 </span>
                 {itemWindow ? <small className="df-tnum">{formatReviewDuration(itemWindow.stopMs - itemWindow.startMs)}</small> : null}
               </button>
@@ -664,11 +666,6 @@ const SOURCE_GLYPH: Record<ReviewPicture, DayframeGlyph> = {
   suggestion: "circle-dot"
 };
 
-function clock(ms: number) {
-  const date = new Date(ms);
-  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-}
-
 /** The card's content: picture, pills, title, when, "Log as" and the reason. */
 function CardFace({
   categories,
@@ -697,10 +694,11 @@ function CardFace({
   overlap?: React.ReactNode;
   titleId?: string;
 }) {
+  const clock = useClockFormat();
   const picture = reviewPicture(item);
   const confidence = reviewConfidence(item.confidence);
   const span = reviewWindow(item);
-  const when = reviewWhen(item, nowMs);
+  const when = reviewWhen(item, nowMs, clock);
   const selectedCategoryId = draft?.categoryId !== undefined ? draft.categoryId : item.suggestedCategoryId;
   const checkedIndex = Math.max(0, categories.findIndex((category) => category.id === selectedCategoryId));
   const reason = reviewReason(item);
@@ -721,8 +719,8 @@ function CardFace({
       <div className="df-rvis">
         <ReviewVisual
           picture={picture}
-          startLabel={span ? clock(span.startMs) : undefined}
-          stopLabel={span ? clock(span.stopMs) : undefined}
+          startLabel={span ? formatClockTime(span.startMs, clock) : undefined}
+          stopLabel={span ? formatClockTime(span.stopMs, clock) : undefined}
         />
         <div className="df-rsrc">
           <span className="df-rpill">

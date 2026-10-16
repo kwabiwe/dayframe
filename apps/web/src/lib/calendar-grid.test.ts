@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCalendarDays, buildCalendarGrid, CALENDAR_WEEKDAY_LABELS, maskTimeInput, parseTimeInput } from "./calendar-grid";
+import { addCalendarDays, buildCalendarGrid, CALENDAR_WEEKDAY_LABELS, displayTypedTime, maskTimeInput, parseTimeInput } from "./calendar-grid";
 
 describe("calendar grid", () => {
   it("always returns six complete Monday-first weeks with selectable adjacent-month dates (D4)", () => {
@@ -73,5 +73,37 @@ describe("time input", () => {
     expect(parseTimeInput("2460")).toBeNull();
     expect(parseTimeInput("12:99")).toBeNull();
     expect(parseTimeInput("")).toBeNull();
+  });
+
+  it("reads AM/PM whatever the clock setting, with a 1–12 hour (16 Oct 2026)", () => {
+    expect(parseTimeInput("9:30 PM")).toBe("21:30");
+    expect(parseTimeInput("9:30pm")).toBe("21:30");
+    expect(parseTimeInput("930p")).toBe("21:30");
+    expect(parseTimeInput("9 p.m.")).toBe("21:00");
+    expect(parseTimeInput("9 AM")).toBe("09:00");
+    expect(parseTimeInput("12 AM")).toBe("00:00");
+    expect(parseTimeInput("12:05 am")).toBe("00:05");
+    expect(parseTimeInput("12 PM")).toBe("12:00");
+    expect(parseTimeInput("12:30 P")).toBe("12:30");
+    expect(parseTimeInput("11:1 pm")).toBe("23:10");
+    expect(parseTimeInput("0:30 AM")).toBeNull();
+    expect(parseTimeInput("13:00 PM")).toBeNull();
+    expect(parseTimeInput("PM")).toBeNull();
+    expect(parseTimeInput("9:30 xm")).toBeNull();
+  });
+
+  it("keeps a typed AM/PM through the mask and shows stored times in the browser's format", () => {
+    expect(maskTimeInput("9:30 PM")).toBe("9:30 PM");
+    expect(maskTimeInput("9:30p")).toBe("9:30 P");
+    expect(maskTimeInput("930 am")).toBe("930 AM");
+    expect(maskTimeInput("9:30 A")).toBe("9:30 A");
+    expect(maskTimeInput("10:15 AM pm")).toBe("10:15 PM");
+    expect(maskTimeInput("a")).toBe("");
+    expect(displayTypedTime("21:30", "12h")).toBe("9:30 PM");
+    expect(displayTypedTime("21:30", "24h")).toBe("21:30");
+    expect(displayTypedTime("00:05", "12h")).toBe("12:05 AM");
+    // Anything half-typed is shown exactly as typed, never rewritten under the caret.
+    expect(displayTypedTime("9:3", "12h")).toBe("9:3");
+    expect(displayTypedTime("9:30 P", "12h")).toBe("9:30 P");
   });
 });

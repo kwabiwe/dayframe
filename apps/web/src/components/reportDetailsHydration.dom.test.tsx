@@ -54,7 +54,7 @@ describe("Reports block row hydration (React #418)", () => {
       hydrateRoot(container, row(), { onRecoverableError: (error) => errors.push(error) });
     });
     expect(errors).toEqual([]);
-    const when = `${formatTime(entry.startedAt)}–${formatTime(entry.stoppedAt!)}`;
+    const when = `${formatTime(entry.startedAt, "24h")}–${formatTime(entry.stoppedAt!, "24h")}`;
     expect(container.textContent).toContain(when);
     expect(container.textContent).toContain(formatDate(entry.startedAt));
     expect(container.querySelector(".df-erow-main")?.getAttribute("aria-label")).toContain(when);

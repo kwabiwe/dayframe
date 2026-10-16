@@ -45,7 +45,7 @@ describe("web Settings and running-timer follow-up", () => {
     expect(timer).not.toContain("function NativePickerControl");
     expect(styles).not.toContain(".swiss-native-picker-control");
     // "Set to last stop time · 15:17" keeps its wording (owner).
-    expect(editor).toContain('Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt)}</span>');
+    expect(editor).toContain('Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt, clock)}</span>');
   });
 
   it("uses a compact workspace selector with on-demand rename and create controls", () => {

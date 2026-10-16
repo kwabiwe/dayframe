@@ -3,6 +3,7 @@ import {
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
+  keepTypedMeridiemTime,
   normalizeCalendarEntryCompactTypedTimes,
   trySynchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
@@ -149,7 +150,9 @@ function updateTimelineInlineTemporalEdge(
   for (const key of Object.keys(patch) as Array<keyof typeof patch>) {
     if (key in dirty) dirty[key] = true;
   }
-  return { ...edit, draft: synchronized ?? nextDraft, dirty };
+  const edgeKey = edge === "start" ? "startedAtTime" : "stoppedAtTime";
+  const draft = synchronized && edgeKey in patch ? keepTypedMeridiemTime(synchronized, edgeKey, edgeTime) : synchronized;
+  return { ...edit, draft: draft ?? nextDraft, dirty };
 }
 
 function unchangedTimelineInlineSavePlan(entry: TimeEntryRow, now: Date): CalendarEntryCompactSavePlan {

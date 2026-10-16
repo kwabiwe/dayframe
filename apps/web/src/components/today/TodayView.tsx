@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDuration as formatSharedDuration } from "@dayframe/shared";
+import { formatClockHour, formatDuration as formatSharedDuration } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
 import { dedupeDashboardEntries } from "@/lib/dashboard-intelligence";
 import { timeEntryTitle } from "@/lib/display";
 import { formatDuration as formatFullDuration, formatTime } from "@/lib/format";
+import { useClockFormat } from "@/components/ClockFormat";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
 import {
@@ -459,6 +460,7 @@ function TodayRibbon({
   onSelect: (entry: TimeEntryRow) => void;
   pending: ReturnType<typeof pendingReviewSpans>;
 }) {
+  const clock = useClockFormat();
   const span = dayEnd - dayStart;
   const pct = (ms: number) => ((ms - dayStart) / span) * 100;
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -540,7 +542,7 @@ function TodayRibbon({
       </div>
       <div className="df-ribbon-hours" aria-hidden="true">
         {[0, 6, 12, 18, 24].map((hour) => (
-          <span key={hour} style={{ left: `${hourPercent(dayStart, dayEnd, hour)}%` }}>{String(hour).padStart(2, "0")}:00</span>
+          <span key={hour} style={{ left: `${hourPercent(dayStart, dayEnd, hour)}%` }}>{formatClockHour(hour, clock)}</span>
         ))}
       </div>
       {tip ? (
@@ -572,25 +574,26 @@ function RibbonTip({
   trackWidth: number;
   x: number;
 }) {
+  const clock = useClockFormat();
   const ref = useRef<HTMLDivElement | null>(null);
   const [left, setLeft] = useState(x);
   useEffect(() => {
     const width = ref.current?.offsetWidth ?? 0;
     setLeft(Math.min(Math.max(x - width / 2, 0), Math.max(0, trackWidth - width)));
-  }, [trackWidth, x, entry?.entry.id, pending?.id]);
+  }, [clock, trackWidth, x, entry?.entry.id, pending?.id]);
 
   let title: string;
   let detail: string;
   if (entry) {
     title = timeEntryTitle(entry.entry);
-    const end = entry.entry.stoppedAt ? formatTime(entry.entry.stoppedAt) : "now";
+    const end = entry.entry.stoppedAt ? formatTime(entry.entry.stoppedAt, clock) : "now";
     const stopped = entry.entry.stoppedAt ? Date.parse(entry.entry.stoppedAt) : nowMs;
-    detail = `${formatTime(entry.entry.startedAt)}–${end} · ${formatDuration((stopped - Date.parse(entry.entry.startedAt)) / 1000)}`;
+    detail = `${formatTime(entry.entry.startedAt, clock)}–${end} · ${formatDuration((stopped - Date.parse(entry.entry.startedAt)) / 1000)}`;
   } else if (pending) {
     title = pending.title;
-    detail = `${formatTime(new Date(pending.fromMs))}–${formatTime(new Date(pending.toMs))} · needs review`;
+    detail = `${formatTime(new Date(pending.fromMs), clock)}–${formatTime(new Date(pending.toMs), clock)} · needs review`;
   } else {
-    title = formatTime(new Date(atMs));
+    title = formatTime(new Date(atMs), clock);
     detail = "Untracked";
   }
   return (
@@ -657,12 +660,13 @@ function TodayBlockRow({
   registerMain: (element: HTMLButtonElement | null) => void;
   startDisabled: boolean;
 }) {
+  const clock = useClockFormat();
   const title = timeEntryTitle(entry);
   const live = !entry.stoppedAt;
   const activity = entry.categoryId ? entry.categoryName?.trim() || "No activity" : "No activity";
   const tags = entry.tagNames.map((tag) => `#${tag}`).join(" ");
-  const start = formatTime(entry.startedAt);
-  const end = entry.stoppedAt ? formatTime(entry.stoppedAt) : "now";
+  const start = formatTime(entry.startedAt, clock);
+  const end = entry.stoppedAt ? formatTime(entry.stoppedAt, clock) : "now";
   // A row is the whole block: its times and duration include any part before midnight.
   const elapsedSeconds = durationMs / 1000;
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;

@@ -4,7 +4,9 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { Clock3, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
-import { formatLocalDate, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { formatClockValue } from "@dayframe/shared";
+import { useClockFormat } from "@/components/ClockFormat";
+import { displayTypedTime, formatLocalDate, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 
 function parseLocal(value: string) {
   const [date = "", time = "09:00"] = value.split("T");
@@ -40,17 +42,18 @@ export function DayframeDateTimePicker({
   const [view, setView] = useState({ year: initial.year, month: initial.month });
   const [timeDraft, setTimeDraft] = useState(initial.time);
   const [timeError, setTimeError] = useState("");
+  // While typing, the field shows exactly what was typed (Codex r2 on #446).
+  const [timeTyping, setTimeTyping] = useState(false);
   const panelId = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const clock = useClockFormat();
   const current = parseLocal(value);
-  const displayLabel = new Intl.DateTimeFormat("en-GB", {
+  const displayLabel = `${new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+    year: "numeric"
+  }).format(new Date(value))}, ${formatClockValue(current.time, clock)}`;
   const dayOffsetLabel = dayOffset === 1
     ? "one day after Start"
     : dayOffset > 1
@@ -85,13 +88,14 @@ export function DayframeDateTimePicker({
   function commitTime() {
     const normalized = parseTimeInput(timeDraft);
     if (!normalized) {
-      setTimeError("Enter a valid time from 00:00 to 23:59.");
+      setTimeError(clock === "12h" ? "Enter a valid time, like 9:30 AM." : "Enter a valid time from 00:00 to 23:59.");
       return false;
     }
     const nextValue = `${current.date}T${normalized}`;
     setValue(nextValue);
     onChange?.(nextValue);
     setTimeDraft(normalized);
+    setTimeTyping(false);
     setTimeError("");
     return true;
   }
@@ -114,7 +118,7 @@ export function DayframeDateTimePicker({
         type="button"
       >
         <span className={compact ? "dayframe-date-time-compact-value" : undefined}>
-          {compact ? current.time : displayLabel}
+          {compact ? formatClockValue(current.time, clock) : displayLabel}
         </span>
         {dayOffset > 0 ? (
           <span aria-hidden="true" className="dayframe-date-time-day-offset">+{dayOffset}</span>
@@ -152,9 +156,13 @@ export function DayframeDateTimePicker({
             aria-describedby={timeError ? `${id}-time-error` : undefined}
             aria-invalid={Boolean(timeError)}
             id={`${id}-time`}
-            inputMode="numeric"
-            onBlur={commitTime}
+            inputMode={clock === "12h" ? "text" : "numeric"}
+            onBlur={() => {
+              setTimeTyping(false);
+              commitTime();
+            }}
             onChange={(event) => {
+              setTimeTyping(true);
               setTimeDraft(maskTimeInput(event.target.value));
               setTimeError("");
             }}
@@ -164,8 +172,8 @@ export function DayframeDateTimePicker({
                 commitTime();
               }
             }}
-            placeholder="HH:MM"
-            value={timeDraft}
+            placeholder={clock === "12h" ? "9:30 AM" : "HH:MM"}
+            value={timeTyping ? timeDraft : displayTypedTime(timeDraft, clock)}
           />
         </div>
         {timeError ? <p className="dayframe-time-error" id={`${id}-time-error`} role="alert">{timeError}</p> : null}

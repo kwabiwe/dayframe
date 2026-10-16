@@ -1,5 +1,6 @@
 import type { TimeIntervalInput } from "@dayframe/shared";
 import { AlertTriangle } from "lucide-react";
+import { useClockFormat } from "@/components/ClockFormat";
 import { formatDuration, formatTime } from "@/lib/format";
 import {
   overlapNoticeForCandidate,
@@ -19,6 +20,7 @@ export function OverlapNotice({
   entries: ReadonlyArray<OverlapPeerEntry>;
   excludeEntryId?: string | null;
 }) {
+  const clock = useClockFormat();
   const overlap = overlapNoticeForCandidate({ candidate, entries, excludeEntryId });
   if (!overlap?.overlapCount) return null;
   if (compact) {
@@ -54,7 +56,7 @@ export function OverlapNotice({
             {visiblePeers.map((entry) => (
               <li key={entry.id}>
                 {entry.description?.trim() || entry.categoryName?.trim() || "Untitled block"}
-                {" · "}{formatTime(entry.startedAt)}–{entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}
+                {" · "}{formatTime(entry.startedAt, clock)}–{entry.stoppedAt ? formatTime(entry.stoppedAt, clock) : "now"}
               </li>
             ))}
           </ul>

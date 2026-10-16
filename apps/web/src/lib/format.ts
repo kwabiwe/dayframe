@@ -1,4 +1,4 @@
-import { formatDuration as formatSharedDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration as formatSharedDuration, type ClockFormat } from "@dayframe/shared";
 /**
  * Every web duration ("6h 25m", "35m", "<1m", "0m") is the shared `formatDuration` (audit
  * UIA-207, the same as iPhone's UIA-042); only running clocks use `formatClockDuration`.
@@ -36,11 +36,12 @@ export function formatClockDuration(seconds: number) {
     .padStart(2, "0")}`;
 }
 
-export function formatTime(value: string | Date) {
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+/**
+ * A clock time of day in this device's 12/24-hour format ("09:30" or "9:30 AM"); components read
+ * the format with `useClockFormat()`. Durations never use this.
+ */
+export function formatTime(value: string | Date, clock: ClockFormat) {
+  return formatClockTime(value, clock);
 }
 
 export function formatDate(value: string | Date) {

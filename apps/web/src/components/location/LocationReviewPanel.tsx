@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration, type ClockFormat } from "@dayframe/shared";
 import { useEffect, useState, useTransition } from "react";
 import { Check, X } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -9,6 +9,7 @@ import { tripStopRows, tripStopsHeading, type LocationReviewAction, type Locatio
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
+import { useClockFormat } from "@/components/ClockFormat";
 import { dateTimeLocalInputToIso } from "@/lib/format";
 import { locationEvidenceRetentionLabel } from "@/lib/location/location-evidence-presentation";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
@@ -46,6 +47,7 @@ export function LocationReviewPanel({
   /** A saved action (confirm, split, merge…): the suggestion as shown is no longer current. */
   onResolved?: () => void;
 }) {
+  const clock = useClockFormat();
   const router = useRouter();
   const [evidence, setEvidence] = useState<LocationReviewEvidenceDto | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -155,7 +157,7 @@ export function LocationReviewPanel({
             <h5 className="font-semibold">Time and uncertainty</h5>
             <p className="mt-1 text-sm text-[var(--muted)]">
               {evidence.segment.approximateArrival ? "Approximate arrival · " : ""}
-              {formatDateTime(evidence.segment.startedAt)}–{evidence.segment.stoppedAt ? formatDateTime(evidence.segment.stoppedAt) : "ongoing"}
+              {formatDateTime(evidence.segment.startedAt, clock)}–{evidence.segment.stoppedAt ? formatDateTime(evidence.segment.stoppedAt, clock) : "ongoing"}
             </p>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               {evidence.segment.approximateArrival
@@ -168,7 +170,7 @@ export function LocationReviewPanel({
               <div className="location-trip-stops mt-3">
                 <p className="text-sm font-semibold">{tripStopsHeading(evidence.stops, evidence.segment.timeAway)}</p>
                 <ul className="mt-1 divide-y divide-[var(--border)]">
-                  {tripStopRows(evidence.stops, formatTime).map((row) => (
+                  {tripStopRows(evidence.stops, (value) => formatClockTime(value, clock)).map((row) => (
                     <li key={row.key} className="py-1.5 text-sm" aria-label={row.accessibilityLabel}>{row.label}</li>
                   ))}
                 </ul>
@@ -321,7 +323,7 @@ export function LocationReviewPanel({
                   type="button"
                   onClick={() => void act({ action: "split", splitAt: split.at })}
                 >
-                  Split near {formatTime(split.at)}
+                  Split near {formatClockTime(split.at, clock)}
                 </button>
               ))}
               {adjacentReviewItemId && evidence.segment.kind === "stay" ? (
@@ -341,7 +343,7 @@ export function LocationReviewPanel({
             </div>
           </section>
           <p className="text-xs leading-5 text-[var(--muted)]">
-            {locationEvidenceRetentionLabel(evidence)}
+            {locationEvidenceRetentionLabel(evidence, clock)}
           </p>
         </div>
       ) : null}
@@ -349,12 +351,10 @@ export function LocationReviewPanel({
   );
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
-}
-
-function formatTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+/** "12 Oct, 09:00" or "12 Oct, 9:00 AM": the day in the browser's language, the time in Dayframe's format (PRD D18). */
+function formatDateTime(value: string, clock: ClockFormat) {
+  const date = new Date(value);
+  return `${new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(date)}, ${formatClockTime(date, clock)}`;
 }
 
 function toLocalDateTimeInput(value: string) {

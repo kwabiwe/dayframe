@@ -1,7 +1,8 @@
 import {
   layoutTimeIntervals,
   type TimeIntervalLayoutMode,
-  type TimeIntervalTextDensity
+  type TimeIntervalTextDensity,
+  type ClockFormat
 } from "@dayframe/shared";
 import { timeEntryCategoryLabel } from "@/lib/display";
 import { dateTimeLocal, formatDuration, formatTime } from "@/lib/format";
@@ -158,15 +159,16 @@ export function calendarBlockPrimaryLine(entry: CalendarBlockDisplayEntry) {
 
 export function calendarBlockSecondaryLine(
   entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">,
-  capturedNow: Date
+  capturedNow: Date,
+  clock: ClockFormat
 ) {
   const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
   const durationSeconds = Math.max(0, Math.floor(
     (new Date(stoppedAt).getTime() - new Date(entry.startedAt).getTime()) / 1_000
   ));
   const dayOffset = localDayOffset(entry.startedAt, stoppedAt);
-  const finish = entry.stoppedAt ? `${formatTime(stoppedAt)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
-  return `${formatDuration(durationSeconds)} (${formatTime(entry.startedAt)} – ${finish})`;
+  const finish = entry.stoppedAt ? `${formatTime(stoppedAt, clock)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
+  return `${formatDuration(durationSeconds)} (${formatTime(entry.startedAt, clock)} – ${finish})`;
 }
 
 function localDayOffset(startedAt: string, stoppedAt: string) {

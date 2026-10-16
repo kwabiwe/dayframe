@@ -156,14 +156,14 @@ describe("time block display helpers", () => {
     expect(calendarBlockPrimaryLine({ ...entry, description: "", categoryName: null })).toBe(
       "No activity · #Family duties +2"
     );
-    expect(calendarBlockSecondaryLine(entry, new Date("2026-08-02T12:00:00.000Z"))).toMatch(
+    expect(calendarBlockSecondaryLine(entry, new Date("2026-08-02T12:00:00.000Z"), "24h")).toMatch(
       /^1h 15m \(.+ – .+\)$/
     );
     expect(calendarBlockSecondaryLine({
       startedAt: "2026-01-02T23:30:00.000Z",
       stoppedAt: "2026-01-03T00:30:00.000Z"
-    }, new Date("2026-01-03T12:00:00.000Z"))).toContain("+1)");
-    expect(calendarBlockSecondaryLine({ ...entry, stoppedAt: null }, new Date("2026-08-02T10:00:00.000Z")))
+    }, new Date("2026-01-03T12:00:00.000Z"), "24h")).toContain("+1)");
+    expect(calendarBlockSecondaryLine({ ...entry, stoppedAt: null }, new Date("2026-08-02T10:00:00.000Z"), "12h"))
       .toContain("– now)");
   });
 

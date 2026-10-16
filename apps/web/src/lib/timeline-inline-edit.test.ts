@@ -53,6 +53,35 @@ describe("Timeline inline entry editing", () => {
     expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T10:15") });
   });
 
+  it.each([
+    ["12h", "9:45 PM", "21:45"],
+    ["24h", "9:45 PM", "21:45"],
+    ["12h", "10:15 PM", "22:15"],
+    ["12h", "1015pm", "22:15"],
+    ["24h", "10:15 PM", "22:15"]
+  ] as const)("keeps a typed PM while it is typed key by key in %s mode: %s (Codex r1/r2 on #446)", (_clock, typed, saved) => {
+    const entry = timeEntry({ stoppedAt: localIso("2026-08-10T23:00") });
+    let edit = updateTimelineInlineTime(createTimelineInlineEditDraft(entry, "time"), entry, "finish", "");
+    // While typing, the field shows the draft's own text (EntriesTable): each key is that text plus
+    // the new character, and the field holds at most 8 characters.
+    for (const key of typed) {
+      const shown = edit.draft.stoppedAtTime;
+      expect(shown.length).toBeLessThan(8);
+      edit = updateTimelineInlineTime(edit, entry, "finish", shown + key);
+    }
+    const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
+    expect(plan.payload).toEqual({ stoppedAt: localIso(`2026-08-10T${saved}`) });
+  });
+
+  it("clears a typed 12-hour time key by key with Backspace (Codex r2 on #446)", () => {
+    const entry = timeEntry();
+    let edit = updateTimelineInlineTime(createTimelineInlineEditDraft(entry, "time"), entry, "finish", "8:15 pm");
+    for (let index = 0; index < 12; index += 1) {
+      edit = updateTimelineInlineTime(edit, entry, "finish", edit.draft.stoppedAtTime.slice(0, -1));
+    }
+    expect(edit.draft.stoppedAtTime).toBe("");
+  });
+
   it("does not insert a colon mid-entry before four compact digits are complete", () => {
     const entry = timeEntry();
     const partial = updateTimelineInlineTime(
