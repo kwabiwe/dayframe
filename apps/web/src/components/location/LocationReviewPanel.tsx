@@ -315,9 +315,10 @@ export function LocationReviewPanel({
                     onChange={(event) => setPlaceAutoLog(event.target.checked)}
                   />
                 </label>
-                <div className="flex flex-col gap-2 sm:flex-row">
+                {/* The panel can be narrow (beside Review's queue): whole buttons wrap, never their labels. */}
+                <div className="flex flex-wrap gap-2">
                   <button
-                    className="industrial-button focus-ring min-h-11 px-4 text-sm"
+                    className="industrial-button focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
                     disabled={actionsDisabled || !placeName.trim()}
                     type="button"
                     onClick={() => void savePlace()}
@@ -325,7 +326,7 @@ export function LocationReviewPanel({
                     Save place
                   </button>
                   <button
-                    className="industrial-button-primary focus-ring min-h-11 px-4 text-sm"
+                    className="industrial-button-primary focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
                     disabled={actionsDisabled || !placeName.trim()}
                     type="button"
                     onClick={() => void act({
