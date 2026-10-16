@@ -105,7 +105,7 @@ export function PlaceRoleSlots({
       <header>
         <div>
           <h2 id="place-roles-heading">Home and Work</h2>
-          <p>Trips and time away are named after these.</p>
+          <p>Trips are named after these.</p>
         </div>
       </header>
       <div className="places-list">

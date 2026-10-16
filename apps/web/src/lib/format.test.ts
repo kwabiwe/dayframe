@@ -52,9 +52,9 @@ describe("duration form helpers", () => {
 
 
 describe("activity event labels", () => {
-  it("labels time away as itself, never as a detected commute (round 3 finding 3)", () => {
-    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: true })).toBe("Time away");
-    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: false })).toBe("Commute detected");
+  it("labels every Move a trip, never a detected commute (round 3 finding 3, PRD D19)", () => {
+    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: true })).toBe("Trip");
+    expect(formatActivityEventLabel({ eventType: "commute_detected", timeAway: false })).toBe("Trip");
   });
 });
 

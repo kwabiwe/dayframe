@@ -1705,8 +1705,12 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     confidence: record.confidence,
     status: record.status,
     notes: null,
-    // Coordinate-free subtype only, so time away keeps its labels and no Commute fallback.
-    rawPayload: record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : null,
+    // Coordinate-free subtype and a Move's route line only, so time away keeps its labels and no
+    // Commute fallback, and a Move keeps its second line (PRD D19).
+    rawPayload: record.timeAway || record.routeLabel ? {
+      ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
+      ...(record.routeLabel ? { routeLabel: record.routeLabel } : {})
+    } : null,
     createdAt: record.createdAt
   };
 }
@@ -2859,7 +2863,9 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "qualificationReason",
     "stopCount",
     // Display-only commute mode ("car", "walk"): shown on the card's time line.
-    "travelMode"
+    "travelMode",
+    // A Move's second line ("Home → Gym"; PRD D19).
+    "routeLabel"
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

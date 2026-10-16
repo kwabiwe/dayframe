@@ -58,6 +58,8 @@ export function LocationReviewPanel({
   const [placeName, setPlaceName] = useState("");
   const [selectedPoint, setSelectedPoint] = useState<{ latitude: number; longitude: number } | null>(null);
   const [description, setDescription] = useState("");
+  // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
+  const [descriptionEdited, setDescriptionEdited] = useState(false);
   const [categoryId, setCategoryId] = useState(initialCategoryId ?? "");
   const [startedAt, setStartedAt] = useState("");
   const [stoppedAt, setStoppedAt] = useState("");
@@ -75,7 +77,9 @@ export function LocationReviewPanel({
       .then((next) => {
         if (cancelled) return;
         setEvidence(next);
-        setDescription(initialDescription ?? next.display.title);
+        setDescription(initialDescription ?? initialEvidenceDescription(next));
+        // A name carried in from the card's "Log as" field is one the person typed there (Codex r4 on #456).
+        setDescriptionEdited(Boolean(initialDescription?.trim()));
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
         if (next.map.centre) {
@@ -243,7 +247,10 @@ export function LocationReviewPanel({
                   className="location-resolve-control"
                   maxLength={500}
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={(event) => {
+                    setDescription(event.target.value);
+                    setDescriptionEdited(true);
+                  }}
                 />
               </label>
               <CategoryPicker
@@ -300,6 +307,7 @@ export function LocationReviewPanel({
                   edit: {
                     categoryId: categoryId || null,
                     description,
+                    ...typedMarker(description, descriptionEdited),
                     ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
                     ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
                   }
@@ -311,7 +319,7 @@ export function LocationReviewPanel({
                 className="industrial-button focus-ring min-h-11 px-4 text-sm"
                 disabled={actionsDisabled}
                 type="button"
-                onClick={() => void act({ action: "record_once", edit: { description } })}
+                onClick={() => void act({ action: "record_once", edit: { description, ...typedMarker(description, descriptionEdited) } })}
               >
                 Record once
               </button>
@@ -361,4 +369,20 @@ function toLocalDateTimeInput(value: string) {
   const date = new Date(value);
   const offsetMs = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+/**
+ * The editor's starting name: a Move starts empty (its block shows its activity, PRD D19), and so does
+ * a stay Dayframe could not name; otherwise the suggestion's title (Codex r1 on #456).
+ */
+export function initialEvidenceDescription(evidence: Pick<LocationReviewEvidenceDto, "segment" | "display">) {
+  if (evidence.segment.kind === "commute") return "";
+  const title = evidence.display.title?.trim() ?? "";
+  return ["unknown place", "near saved places", "visit at an unknown place", "visit near saved places"]
+    .includes(title.replace(/\s+/g, " ").toLowerCase()) ? "" : title;
+}
+
+/** The marker for a name the person typed in this editor (PRD D19): only when they changed the field. */
+export function typedMarker(description: string, edited: boolean) {
+  return edited && description.trim() ? { descriptionTyped: true as const } : {};
 }

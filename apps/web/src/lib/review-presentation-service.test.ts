@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ReviewPresentationResponseSchema } from "@dayframe/shared";
 
 const mocks = vi.hoisted(() => ({ connect: vi.fn() }));
 
@@ -51,6 +52,28 @@ describe("getReviewPresentation", () => {
       })
     });
   });
+  it("gives a Move's route line only to clients that ask for it (PRD D19, Codex r1 on #456)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Drive",
+      eventType: "commute_detected", timeAwayStopCount: null, routeLabel: "Home → Peak Gym" };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain(`ae.raw_payload ->> 'routeLabel'`);
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { timeAway: true, moveRoute: true });
+    expect(asked.records[0]).toMatchObject({ title: "Drive", routeLabel: "Home → Peak Gym" });
+    expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
+    const older = await getReviewPresentation(session, request, {}, { timeAway: true });
+    expect(older.records[0]).not.toHaveProperty("routeLabel");
+  });
+
   it("marks time away only for clients that ask for it (review finding 3)", async () => {
     const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Time away from Home",
       eventType: "commute_detected", timeAwayStopCount: 1 };

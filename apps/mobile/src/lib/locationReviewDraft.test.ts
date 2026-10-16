@@ -32,6 +32,11 @@ describe("Location Review editor draft", () => {
       segmentKind: "stay",
       title: "Visit at an unknown place"
     })).toBe("");
+    // Location v3 titles (PRD D19, Codex r1 on #456).
+    for (const title of ["Unknown place", "Near saved places"]) {
+      expect(initialLocationReviewDescription({ placeName: null, segmentKind: "stay", title })).toBe("");
+    }
+    expect(initialLocationReviewDescription({ placeName: "Peak Gym", segmentKind: "stay", title: "Peak Gym" })).toBe("Peak Gym");
     expect(initialLocationReviewDescription({
       placeName: null,
       segmentKind: "commute",
@@ -105,10 +110,18 @@ describe("Location Review editor draft", () => {
     });
   });
 
+  it("marks a name as typed only when the person changed the field (Codex r3 on #456)", () => {
+    const edit = (descriptionTouched: boolean) => buildLocationReviewEdit({ categoryTouched: false, description: "Peak Gym",
+      descriptionTouched, selectedCategoryId: null, window: { startedAt: window.baselineStartedAt, stoppedAt: window.baselineStoppedAt } });
+    expect(edit(false)).not.toHaveProperty("descriptionTyped");
+    expect(edit(true)).toMatchObject({ descriptionTyped: true });
+  });
+
   it("keeps an untouched category implicit so commute self-healing remains available", () => {
     expect(buildLocationReviewEdit({
       categoryTouched: false,
       description: " Train home ",
+      descriptionTouched: true,
       selectedCategoryId: null,
       window: {
         startedAt: window.baselineStartedAt,
@@ -116,6 +129,7 @@ describe("Location Review editor draft", () => {
       }
     })).toEqual({
       description: "Train home",
+      descriptionTyped: true,
       startedAt: window.baselineStartedAt,
       stoppedAt: window.baselineStoppedAt
     });
@@ -235,11 +249,11 @@ describe("Location Review journey copy", () => {
     expect(locationActivityGlyphName({ categoryName: null, description: "", segmentKind: "commute" })).toBe("commute");
   });
 
-  it("never offers Commute automatically or commute wording for time away (review finding 5)", () => {
+  it("never offers Commute automatically for time away, and calls every Move a trip (review finding 5, PRD D19)", () => {
     expect(locationReviewJourneyCopy({ kind: "commute", timeAway: true })).toMatchObject({
-      journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded."
+      journey: false, primaryLabel: "Record trip", recorded: "The trip was recorded."
     });
-    expect(locationReviewJourneyCopy({ kind: "commute" })).toMatchObject({ journey: true, primaryLabel: "Record commute" });
+    expect(locationReviewJourneyCopy({ kind: "commute" })).toMatchObject({ journey: true, primaryLabel: "Record trip" });
     expect(locationReviewJourneyCopy({ kind: "stay" })).toBeNull();
   });
 });

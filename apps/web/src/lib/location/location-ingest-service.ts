@@ -1,4 +1,4 @@
-import { emitReviewSemanticSegments, type SemanticChangeCounter, timeAwayPlaceName } from "./location-review-semantic-batch";
+import { emitReviewSemanticSegments, type SemanticChangeCounter, segmentMoveName } from "./location-review-semantic-batch";
 import { autoLogReconciliation, removeUnusedAutoLogOrphans } from "./location-auto-log";
 import { PRESERVE_REVIEW_TITLE_HISTORY_SQL, recordReviewTitleHistory } from "./review-title-history";
 import { reopenSupersededReviews } from "./location-review-supersession";
@@ -19,10 +19,10 @@ import {
   type LocationSegment,
   type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow, isTimeAway, stayName } from "@dayframe/shared";
 import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transaction";
 import type { RequestSession } from "../session";
-import { ensureCommuteCategoryId } from "../automatic-category-service";
+import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { replayLocationEvidence } from "./location-replay-service";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import {
@@ -457,8 +457,12 @@ async function emitSemanticSegment(
   const trustedPlace = segment.kind === "stay"
     ? await trustedPlaceContext(client, session, segment)
     : null;
-  const suggestedCategoryId = isTimeAway(segment) ? null : segment.kind === "commute"
-    ? await ensureCommuteCategoryId(client, session)
+  // Moves are named from their ends and mode; Commute only between Home and Work, Errands (if the
+  // workspace has it) with a stop, Travel otherwise (PRD D19, as in the Review batch emitter).
+  const move = segment.kind === "commute" ? await segmentMoveName(client, session, segment, stayIds) : null;
+  const suggestedCategoryId = move
+    ? move.activity === "commute" ? await ensureCommuteCategoryId(client, session)
+      : (move.activity === "errand" ? await findErrandsCategoryId(client, session) : null) ?? await ensureTravelCategoryId(client, session)
     : trustedPlace?.categoryId ?? null;
   const placeId = trustedPlace?.placeId ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
   if (segment.kind === "stay" && segment.placeMatchKind === "unknown") {
@@ -538,6 +542,7 @@ async function emitSemanticSegment(
         ...(segment.motionSupported ? { motionSupported: true } : {}),
         // Time away only: how many unnamed stops it included.
         ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
+        ...(move ? { routeLabel: move.route } : {}),
         continuityStatus: segment.continuityStatus,
         startedAt: segment.startedAt,
         stoppedAt: segment.stoppedAt,
@@ -755,7 +760,7 @@ async function trustedPlaceContext(
     return place ? {
       placeId: place.placeId,
       categoryId: place.categoryId,
-      description: place.description?.trim() || `Visit ${place.name}`,
+      description: place.description?.trim() || stayName({ name: place.name }),
       loggingEnabled: place.loggingEnabled
     } : null;
   }
@@ -779,7 +784,7 @@ async function trustedPlaceContext(
     return place ? {
       placeId: place.placeId,
       categoryId: place.categoryId,
-      description: place.description?.trim() || `Visit ${place.name}`,
+      description: place.description?.trim() || stayName({ name: place.name }),
       loggingEnabled: place.loggingEnabled
     } : null;
   }
@@ -826,7 +831,7 @@ async function segmentTitle(
   stayIds: ReadonlyMap<string, string>
 ) {
   if (segment.kind === "commute") {
-    return isTimeAway(segment) ? timeAwayTitle(await timeAwayPlaceName(client, session, segment, stayIds)) : "Commute";
+    return (await segmentMoveName(client, session, segment, stayIds)).title;
   }
   if (segment.learnedPlaceId) {
     // A learned place accepted into a Home or Work place takes that role's label.
@@ -837,12 +842,12 @@ async function segmentTitle(
        where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3`,
       [segment.learnedPlaceId, session.workspaceId, session.userId]
     );
-    if (learned.rows[0]) return `Visit ${learned.rows[0].name}`;
+    if (learned.rows[0]) return stayName({ name: learned.rows[0].name });
   }
-  if (!segment.placeId) return segment.placeMatchKind === "ambiguous" ? "Visit near saved places" : "Visit at an unknown place";
+  if (!segment.placeId) return stayName({ name: null, ambiguous: segment.placeMatchKind === "ambiguous" });
   const place = await client.query<{ name: string }>(
     `select ${placeDisplayNameSql("pl")} as name from places pl where pl.id = $1 and pl.workspace_id = $2`,
     [segment.placeId, session.workspaceId]
   );
-  return place.rows[0] ? `Visit ${place.rows[0].name}` : "Visit at a saved place";
+  return stayName({ name: place.rows[0]?.name ?? "Saved place" });
 }

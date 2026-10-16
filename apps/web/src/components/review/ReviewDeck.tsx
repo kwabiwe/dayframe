@@ -38,6 +38,7 @@ import {
   reviewPicture,
   reviewProposalSignature,
   reviewReason,
+  reviewRoute,
   reviewSourceLabel,
   reviewTitle,
   reviewWhen,
@@ -702,6 +703,7 @@ function CardFace({
   const selectedCategoryId = draft?.categoryId !== undefined ? draft.categoryId : item.suggestedCategoryId;
   const checkedIndex = Math.max(0, categories.findIndex((category) => category.id === selectedCategoryId));
   const reason = reviewReason(item);
+  const route = reviewRoute(item);
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const onChipKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -742,6 +744,7 @@ function CardFace({
           <p className="df-rwhen df-tnum">
             {when}
             {span ? ` · ${formatReviewDuration(span.stopMs - span.startMs)}` : ""}
+            {route ? ` · ${route}` : ""}
           </p>
         ) : null}
         {overlap}

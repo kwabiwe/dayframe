@@ -86,11 +86,11 @@ export async function verifyReviewSemantics(db: pg.Pool, owner: () => Promise<Re
     assert.equal(reviewFor(name).suggested_place_id,place);assert.equal(reviewFor(name).location_segment_id,stayIds.get(name));
   }
   assert.equal(eventFor("learned").event_type,"learned_place_visit");assert.equal(eventFor("saved").event_type,"geofence_exit");
-  assert.equal(reviewFor("foreign-learned").title,"Visit at an unknown place");assert.equal(reviewFor("foreign-learned").suggested_place_id,null);
-  assert.equal(reviewFor("unknown").title,"Visit at an unknown place");
+  assert.equal(reviewFor("foreign-learned").title,"Unknown place");assert.equal(reviewFor("foreign-learned").suggested_place_id,null);
+  assert.equal(reviewFor("unknown").title,"Unknown place");
   for(const name of ["short","short-saved","short-learned","disabled","unpersisted"]) assert.equal(eventFor(name),undefined);
   for(const name of ["commute-a","commute-b"]) {
-    assert.equal(reviewFor(name).title,"Commute");assert.equal(reviewFor(name).location_segment_id,commuteIds.get(name));
+    assert.equal(reviewFor(name).title,"Trip");assert.equal(reviewFor(name).location_segment_id,commuteIds.get(name));
     assert.equal(reviewFor(name).suggested_place_id,null);
   }
   assert.equal(reviewFor("commute-a").suggested_category_id,reviewFor("commute-b").suggested_category_id);
@@ -142,9 +142,9 @@ export async function verifyReviewSemantics(db: pg.Pool, owner: () => Promise<Re
   await db.query("update learned_places set status='candidate' where id=$1",[learned]);
   await emit(segments.filter(row=>["saved","learned"].includes(row.clientSegmentId)));
   const display=await snapshot();
-  assert.equal(display.review_items.find(row=>row.event_id===eventFor("saved").id)!.title,"Visit Saved display");
+  assert.equal(display.review_items.find(row=>row.event_id===eventFor("saved").id)!.title,"Saved display");
   const candidate=display.review_items.find(row=>row.event_id===eventFor("learned").id)!;
-  assert.equal(candidate.title,"Visit Learned display");assert.equal(candidate.suggested_category_id,null);assert.equal(candidate.suggested_place_id,null);
+  assert.equal(candidate.title,"Learned display");assert.equal(candidate.suggested_category_id,null);assert.equal(candidate.suggested_place_id,null);
   // Exercise an actual second chunk, including locking reads, events, Review, and links.
   const many=Array.from({length:251},(_,i)=>makeStay(`bounded-${String(i).padStart(3,"0")}`));
   await persistFixtures(many);queries.length=0;assert.equal(await emit(many),251);
