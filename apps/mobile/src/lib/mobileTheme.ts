@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { loadClockFormatPreference } from "./clockFormat";
 import { MOBILE_DISPLAY_FONT } from "./mobileTypography";
 import * as SystemUI from "expo-system-ui";
 import {
@@ -67,7 +68,8 @@ export function MobileThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void reloadThemePreference().finally(() => setHydrated(true));
+    // The 12/24-hour choice loads behind the same gate, so first paint already uses it.
+    void Promise.all([reloadThemePreference(), loadClockFormatPreference()]).finally(() => setHydrated(true));
   }, [reloadThemePreference]);
 
   const setThemePreference = useCallback(async (nextPreference: ThemePreference) => {
@@ -1193,7 +1195,8 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditCompactDate: {
       flexShrink: 1,
-      minWidth: 0,
+      // Always a 44-point target; the sheet stacks the cards before it would get less.
+      minWidth: 44,
       maxWidth: "55%",
       minHeight: 44,
       paddingHorizontal: 12,

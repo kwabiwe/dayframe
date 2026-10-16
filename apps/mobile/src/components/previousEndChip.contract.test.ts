@@ -57,13 +57,13 @@ describe("entry sheet start-at-the-previous-end chip", () => {
 
   it("is a compact filled pill under the START card: back arrow + time, the name spoken only (owner, 15 Oct)", () => {
     const chip = sheet.slice(sheet.indexOf('testID="time-entry-previous-end"') - 1200, sheet.indexOf('testID="time-entry-previous-end"') + 900);
-    expect(chip).toContain("accessibilityLabel={`Start from ${formatTimeInput(new Date(previousEndMs))}, after ${presentedPreviousEnd.previousName}`}");
+    expect(chip).toContain("accessibilityLabel={`Start from ${formatClockTime(previousEndMs, clockFormat)}, after ${presentedPreviousEnd.previousName}`}");
     expect(chip).toContain("accessibilityState={{ disabled: busy, selected: previousEndApplied }}");
     expect(chip).toContain("hitSlop={{ top: 6, bottom: 6 }}");
     expect(chip).toContain("{ backgroundColor: theme.surfaceMuted }");
     // The registry's back arrow (a check once applied), then only "From HH:MM".
     expect(chip).toContain("glyph={previousEndApplied ? DAYFRAME_APP_ICONS.done : DAYFRAME_APP_ICONS.startFromPreviousEnd}");
-    expect(chip).toMatch(/>\s*From \{formatTimeInput\(new Date\(previousEndMs\)\)\}\s*<\/Text>/);
+    expect(chip).toMatch(/>\s*From \{formatClockTime\(previousEndMs, clockFormat\)\}\s*<\/Text>/);
     expect(chip).not.toContain("· after");
     expect(chip).not.toMatch(/\{presentedPreviousEnd\.previousName\}\s*</);
     expect(chip).not.toMatch(/theme\.(accent|primary|coral|live)/);

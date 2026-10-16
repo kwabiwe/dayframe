@@ -1035,6 +1035,32 @@ describe("native Calendar Blocks presentation", () => {
     expect(buildNativeCalendarBridgeState(base).model.hapticsEnabled).toBe(true);
     expect(buildNativeCalendarBridgeState({ ...base, hapticsEnabled: false }).model.hapticsEnabled).toBe(false);
   });
+
+  it("passes the phone's 12/24-hour format and writes block times in it (PRD D18)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const finished = entry({
+      id: "evening",
+      startedAt: iso(localTime(2026, 7, 10, 21, 5)),
+      stoppedAt: iso(localTime(2026, 7, 10, 22, 0)),
+      durationSeconds: 55 * 60
+    });
+    const base = {
+      data: bootstrap([finished]),
+      now,
+      reduceMotion: false,
+      reduceTransparency: false,
+      refreshing: false,
+      selectedDayKey: "2026-07-10",
+      theme: darkTheme(),
+      transitionDirection: 1
+    };
+    const twentyFour = buildNativeCalendarBridgeState(base).model;
+    expect(twentyFour.clockFormat).toBe("24h");
+    expect(twentyFour.entries[0].meta).toContain("21:05-22:00");
+    const twelve = buildNativeCalendarBridgeState({ ...base, clockFormat: "12h" }).model;
+    expect(twelve.clockFormat).toBe("12h");
+    expect(twelve.entries[0].meta).toContain("9:05 PM-10:00 PM");
+  });
 });
 
 describe("native Calendar update cadence", () => {

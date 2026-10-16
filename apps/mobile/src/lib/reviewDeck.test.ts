@@ -40,19 +40,22 @@ describe("formatReviewDeckWhen", () => {
       new Date(2026, 9, 8, 9, 5).toISOString(),
       new Date(2026, 9, 8, 10, 40).toISOString(),
       95 * 60,
-      now
+      now,
+      "24h"
     )).toBe("Today · 09:05–10:40 · 1h 35m");
     expect(formatReviewDeckWhen(
       new Date(2026, 9, 7, 21, 19).toISOString(),
       new Date(2026, 9, 7, 21, 26).toISOString(),
       7 * 60,
-      now
+      now,
+      "24h"
     )).toBe("Yesterday · 21:19–21:26 · 7m");
     expect(formatReviewDeckWhen(
       new Date(2026, 9, 5, 9, 0).toISOString(),
       new Date(2026, 9, 5, 11, 0).toISOString(),
       2 * 3600,
-      now
+      now,
+      "24h"
     )).toBe("Mon 5 Oct · 09:00–11:00 · 2h");
   });
 
@@ -61,13 +64,24 @@ describe("formatReviewDeckWhen", () => {
       new Date(2026, 9, 7, 23, 18).toISOString(),
       new Date(2026, 9, 8, 6, 30).toISOString(),
       (7 * 60 + 12) * 60,
-      now
+      now,
+      "24h"
     )).toBe("Yesterday · 23:18–Today 06:30 · 7h 12m");
   });
 
+  it("follows the 12-hour format (PRD D18)", () => {
+    expect(formatReviewDeckWhen(
+      new Date(2026, 9, 7, 23, 18).toISOString(),
+      new Date(2026, 9, 8, 6, 30).toISOString(),
+      (7 * 60 + 12) * 60,
+      now,
+      "12h"
+    )).toBe("Yesterday · 11:18 PM–Today 6:30 AM · 7h 12m");
+  });
+
   it("returns null without a usable start", () => {
-    expect(formatReviewDeckWhen(null, null, 0, now)).toBeNull();
-    expect(formatReviewDeckWhen("nope", null, 0, now)).toBeNull();
+    expect(formatReviewDeckWhen(null, null, 0, now, "24h")).toBeNull();
+    expect(formatReviewDeckWhen("nope", null, 0, now, "24h")).toBeNull();
   });
 });
 

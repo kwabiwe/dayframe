@@ -994,16 +994,32 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(later.framedLabel, "Nothing framed on Sunday")
     XCTAssertFalse(later.hapticsEnabled)
     XCTAssertEqual(later.theme.textMuted, "#707B91")
+    XCTAssertNil(later.clockFormat)
+    let twelveHour = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000, entriesJSON: "[]", clockFormat: "12h")
+    XCTAssertEqual(twelveHour.clockFormat, "12h")
+  }
+
+  func testClockTextMatchesTheSharedFormatters() {
+    XCTAssertEqual(DayframeClockText.time(hour: 9, minute: 5, clockFormat: "24h"), "09:05")
+    XCTAssertEqual(DayframeClockText.time(hour: 0, minute: 0, clockFormat: "12h"), "12:00 AM")
+    XCTAssertEqual(DayframeClockText.time(hour: 12, minute: 30, clockFormat: "12h"), "12:30 PM")
+    XCTAssertEqual(DayframeClockText.time(hour: 21, minute: 7, clockFormat: "12h"), "9:07 PM")
+    XCTAssertEqual(DayframeClockText.hour(8, clockFormat: "24h"), "08:00")
+    XCTAssertEqual(DayframeClockText.hour(0, clockFormat: "12h"), "12 AM")
+    XCTAssertEqual(DayframeClockText.hour(12, clockFormat: "12h"), "12 PM")
+    XCTAssertEqual(DayframeClockText.hour(18, clockFormat: "12h"), "6 PM")
   }
 
   private func decodePresentation(
     selectedDayKey: String,
     nowMs: Double,
-    entriesJSON: String
+    entriesJSON: String,
+    clockFormat: String? = nil
   ) throws -> DayframeCalendarPresentationRecord {
+    let clockField = clockFormat.map { "\"clockFormat\":\"\($0)\"," } ?? ""
     let json = """
     {
-      "dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
+      \(clockField)"dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
       "entries":\(entriesJSON),"framedLabel":"Nothing framed on Sunday","hapticsEnabled":false,
       "modelVersion":4,"monthTitle":"July","nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",

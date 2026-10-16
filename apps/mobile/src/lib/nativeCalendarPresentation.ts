@@ -3,7 +3,9 @@ import {
   analyzeTimeIntervals,
   blockColorsFor,
   calendarBlockContinuationEdges,
+  formatClockTime,
   layoutTimeIntervals,
+  type ClockFormat,
   type TimeIntervalLayout
 } from "@dayframe/shared";
 import type { MobileBootstrap, MobileTimeEntry } from "./api";
@@ -94,6 +96,8 @@ export type NativeCalendarPresentation = {
   /** "5h 20m framed on Friday": confirmed time on the selected day (Review suggestions excluded). */
   framedLabel: string;
   hapticsEnabled: boolean;
+  /** The phone's 12/24-hour format (PRD D18) for the hour grid, now marker and drag preview. */
+  clockFormat: ClockFormat;
   modelVersion: 4;
   /** The selected day's month; the year is added outside the current year. */
   monthTitle: string;
@@ -293,6 +297,7 @@ function layoutDayEntries(
 }
 
 export function buildNativeCalendarBridgeState({
+  clockFormat = "24h",
   data,
   hapticsEnabled = true,
   now,
@@ -303,6 +308,7 @@ export function buildNativeCalendarBridgeState({
   theme,
   transitionDirection
 }: {
+  clockFormat?: ClockFormat;
   data: MobileBootstrap | null;
   hapticsEnabled?: boolean;
   now: number;
@@ -397,12 +403,14 @@ export function buildNativeCalendarBridgeState({
       emptyState: "Nothing framed yet.",
       framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds, selectedDate),
       hapticsEnabled,
+      clockFormat,
       entries: entries.map((entry) => serializeCalendarEntry(
         entry,
         dayStart,
         dayEnd,
         now,
         theme,
+        clockFormat,
         layoutById.get(entry.id),
         // Review-lane items never share a target (their lanes and crowds already use the target
         // envelope), so iOS gives each its full 44-point height even when the times overlap.
@@ -472,6 +480,7 @@ function serializeCalendarEntry(
   dayEnd: Date,
   now: number,
   theme: MobileTheme,
+  clockFormat: ClockFormat,
   layout?: TimeIntervalLayout,
   analysis?: { overlapCount: number; overlapSeconds: number },
   warningOverlapCount = 0
@@ -507,7 +516,7 @@ function serializeCalendarEntry(
     actionId,
     actionKind,
     accessibilityLabel: entry.reviewCrowd
-      ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs)
+      ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs, clockFormat)
       : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
@@ -518,7 +527,7 @@ function serializeCalendarEntry(
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
     layoutMode: layout?.mode ?? "full",
-    meta: calendarBlockMeta(entry, now, reviewNeeded, continuation.continuesIntoNextDay),
+    meta: calendarBlockMeta(entry, now, reviewNeeded, continuation.continuesIntoNextDay, clockFormat),
     offsetFraction: layout?.offsetFraction ?? 0,
     overlapCount: analysis?.overlapCount ?? 0,
     overlapSeconds: analysis?.overlapSeconds ?? 0,
@@ -700,16 +709,13 @@ function momentAtWallClock(afterMs: number, wallOffsetMs: number, dayStartMs: nu
 function reviewCrowdAccessibilityLabel(
   crowd: NonNullable<NativeCalendarEntry["reviewCrowd"]>,
   startMs: number,
-  endMs: number
+  endMs: number,
+  clockFormat: ClockFormat
 ) {
   const opens = crowd.opensTitle ? `Opens ${crowd.opensTitle} first.` : "Opens the Review list.";
-  return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${clockText(startMs)} to ${clockText(endMs)}. ${opens}`;
+  return `${REVIEW_COPY.needsReview}: ${crowd.count} suggestions, ${formatClockTime(startMs, clockFormat)} to ${formatClockTime(endMs, clockFormat)}. ${opens}`;
 }
 
-function clockText(ms: number) {
-  const date = new Date(ms);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
 
 function maxConcurrent(items: { start: number; end: number }[]) {
   const edges = items.flatMap((item) => [
@@ -815,11 +821,12 @@ function calendarBlockMeta(
   entry: NativeCalendarEntry,
   now: number,
   reviewNeeded: boolean,
-  continuesIntoNextDay: boolean
+  continuesIntoNextDay: boolean,
+  clockFormat: ClockFormat
 ) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  const timeLabel = `${formatTimeOfDay(startedAt)}-${entry.stoppedAt ? formatTimeOfDay(stoppedAt) : "now"}`;
+  const timeLabel = `${formatClockTime(startedAt, clockFormat)}-${entry.stoppedAt ? formatClockTime(stoppedAt, clockFormat) : "now"}`;
   const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
   return [
     reviewNeeded ? REVIEW_COPY.needsReview : null,
@@ -918,10 +925,6 @@ function formatMonthTitle(date: Date, today: Date) {
 function formatFramedLabel(seconds: number, date: Date) {
   const weekday = formatLocaleDate(date, { weekday: "long" });
   return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed on ${weekday}` : `Nothing framed on ${weekday}`;
-}
-
-function formatTimeOfDay(date: Date) {
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 function formatDuration(seconds: number) {

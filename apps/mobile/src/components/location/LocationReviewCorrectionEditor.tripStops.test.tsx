@@ -1,3 +1,4 @@
+import { formatClockTime } from "@dayframe/shared";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
@@ -123,7 +124,8 @@ describe("trip stops in mobile Location Evidence", () => {
     act(() => tree!.update(editor(evidence, true)));
     const newYork = text(stopRows()[0]);
     expect(newYork).not.toBe(london);
-    const expected = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.startedAt));
+    // Dayframe's own 24-hour clock here (no native 24-Hour Time reader in tests; PRD D18).
+    const expected = formatClockTime(stop.startedAt, "24h");
     expect(newYork).toContain(expected);
   });
 

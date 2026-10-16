@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
-import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, formatClockTime } from "@dayframe/shared";
+import { useClockFormat } from "@/lib/clockFormat";
 import {
   Gesture,
   GestureDetector,
@@ -90,7 +91,9 @@ export function TimeEntryDurationDial({
   );
 
   const effectiveEndMs = mode === "running" ? nowMs : endMs;
+  const clockFormat = useClockFormat();
   const model = useMemo(() => ({
+    clockFormat,
     endMs,
     mode,
     modelVersion: 1 as const,
@@ -113,6 +116,7 @@ export function TimeEntryDurationDial({
     }
   }), [
     activityColor,
+    clockFormat,
     endMs,
     mode,
     nowMs,
@@ -163,9 +167,9 @@ export function TimeEntryDurationDial({
   const shortcuts: { accessibilityLabel: string; apply: () => TimeEntryDialInterval; label: string; testID: string }[] = [];
   if (lastStopAllowed) {
     shortcuts.push({
-      accessibilityLabel: `Set start to the last stop time, ${clockText(lastStopMs)}`,
+      accessibilityLabel: `Set start to the last stop time, ${formatClockTime(lastStopMs, clockFormat)}`,
       apply: () => ({ startMs: lastStopMs, endMs: effectiveEndMs }),
-      label: `Last stop ${clockText(lastStopMs)}`,
+      label: `Last stop ${formatClockTime(lastStopMs, clockFormat)}`,
       testID: "time-entry-set-last-stop-time"
     });
   }
@@ -295,11 +299,6 @@ export function TimeEntryDurationDial({
       </View>
     </View>
   );
-}
-
-function clockText(ms: number) {
-  const date = new Date(ms);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 function DialShortcut({

@@ -96,8 +96,9 @@ describe("planReviewNudge", () => {
     expect(clampReviewNudgeMinutes(12 * 60)).toBe(17 * 60);
     expect(clampReviewNudgeMinutes(24 * 60)).toBe(23 * 60 + 30);
     expect(clampReviewNudgeMinutes(20 * 60 + 10)).toBe(20 * 60);
-    expect(formatReviewNudgeTime(20 * 60)).toBe("8:00 pm");
-    expect(formatReviewNudgeTime(17 * 60 + 30)).toBe("5:30 pm");
+    expect(formatReviewNudgeTime(20 * 60, "12h")).toBe("8:00 PM");
+    expect(formatReviewNudgeTime(17 * 60 + 30, "12h")).toBe("5:30 PM");
+    expect(formatReviewNudgeTime(20 * 60, "24h")).toBe("20:00");
   });
 });
 

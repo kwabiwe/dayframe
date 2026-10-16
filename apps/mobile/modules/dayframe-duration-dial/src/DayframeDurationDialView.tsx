@@ -13,6 +13,8 @@ export type DayframeDurationDialInteraction = {
 };
 
 export type DayframeDurationDialModel = {
+  /** "12h" or "24h" (PRD D18) for the "since 09:30" / "09:30–10:35" detail. */
+  clockFormat: "12h" | "24h";
   endMs: number;
   mode: "running" | "stopped";
   modelVersion: 1;
