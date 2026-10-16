@@ -119,6 +119,24 @@ describe("location v3 engine guards", () => {
     expect(assessAutomaticLocation("v2_enabled", stay)).toMatchObject({ action: "auto_confirm" });
   });
 
+  it("bug 8: only coordinate fixes inside the circle count as coverage (Codex r1 on #451)", () => {
+    const covered = (patch: Partial<LocationEvidence>) => {
+      const input = schoolVisitFixture();
+      const template = input.evidence.find((item) => item.clientEvidenceId === "stop-0")!;
+      for (let minute = 57; minute <= 77; minute += 2) {
+        const time = `${minute < 60 ? "06" : "07"}:${String(minute % 60).padStart(2, "0")}:10`;
+        input.evidence.push({ ...template, clientEvidenceId: `probe-${minute}`, occurredAt: schoolVisitAt(time),
+          sourceTimestamp: schoolVisitAt(time), receivedAt: schoolVisitAt(time), horizontalAccuracyMeters: 5, speedMetersPerSecond: 0, ...patch });
+      }
+      return runLocationEngine(input).segmentUpserts
+        .filter((segment): segment is StaySegment => segment.kind === "stay" && segment.placeId === SCHOOL_VISIT_SCHOOL_ID)[0];
+    };
+    // No coordinate, only the place's ID.
+    expect(covered({ latitude: null, longitude: null, savedPlaceId: SCHOOL_VISIT_SCHOOL_ID })?.confidence).not.toBe("medium_high");
+    // 124 m from the 100 m circle's centre: matched by tolerance, wholly outside the circle.
+    expect(covered({ latitude: (916 + 124) / 111_195 })?.confidence).not.toBe("medium_high");
+  });
+
   it("bug 8: a broad Visit still caps the stay at medium when accurate readings leave a gap over the continuity limit", () => {
     const [stay] = accuratelyCoveredSchoolStop("06:59:00", "07:13:00");
     expect(stay).toMatchObject({ confidence: "medium" });

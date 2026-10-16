@@ -797,21 +797,28 @@ function stayFromWorking(
 }
 
 /**
- * Whether accurate position readings at the stay cover it from start to end with no gap over the
- * continuity limit. A broad completed Visit (iOS has reported 73 m with about twenty 3–33 m fixes
- * across the same 22 minutes) then adds nothing doubtful: the readings show the device was there
- * throughout (location v3 bug 8).
+ * Whether accurate position fixes inside the saved place's circle cover the stay from start to end
+ * with no gap over the continuity limit. A broad completed Visit (iOS has reported 73 m with about
+ * twenty 3–33 m fixes across the same 22 minutes) then adds nothing doubtful: the fixes show the
+ * device was there throughout (location v3 bug 8). Only genuine fixes with a coordinate count, inside
+ * the circle itself (no matcher tolerance: a reading in the band can lie wholly outside), within the
+ * stay's own interval (Codex r1 on #451).
  */
 function accuratelyCovered(working: WorkingStay, endedAt: string | null, input: LocationEngineInput) {
-  if (!endedAt) return false;
-  const times = working.evidence
-    .filter(({ evidence }) => (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
-      evidence.horizontalAccuracyMeters != null &&
-      evidence.horizontalAccuracyMeters <= input.config.highQualityHorizontalAccuracyMeters)
-    .map(({ evidence }) => Date.parse(evidence.occurredAt))
-    .sort((a, b) => a - b);
+  const circle = working.placeMatchKind === "saved" ? savedCircle(working.placeId, input) : null;
+  if (!endedAt || !circle) return false;
+  const startMs = Date.parse(working.startedAt);
+  const endMs = Date.parse(endedAt);
+  const times = working.evidence.flatMap((item) => {
+    const { evidence } = item;
+    const point = pointFor(evidence);
+    const atMs = Date.parse(evidence.occurredAt);
+    return (evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true &&
+      point != null && accurateCoordinate(item, input) && distanceMeters(point, circle.place) <= circle.radius &&
+      atMs >= startMs && atMs <= endMs ? [atMs] : [];
+  }).sort((a, b) => a - b);
   if (!times.length) return false;
-  const points = [Date.parse(working.startedAt), ...times, Date.parse(endedAt)];
+  const points = [startMs, ...times, endMs];
   for (let index = 1; index < points.length; index += 1) {
     if (points[index] - points[index - 1] > input.config.maxContinuityGapMs) return false;
   }

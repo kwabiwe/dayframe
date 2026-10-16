@@ -206,6 +206,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   const nextBackMs = new Map<ClassifiedEvidence, number>();
   const leavesAfter = new Map<ClassifiedEvidence, boolean>();
   const firstAwayAfter = new Map<ClassifiedEvidence, number | null>();
+  const farthestAwayAfter = new Map<ClassifiedEvidence, number>();
   let upcomingAwayMs = returnsThere ? Number.POSITIVE_INFINITY : destinationStartMs;
   let upcomingBackMs = returnsThere ? destinationStartMs : Number.POSITIVE_INFINITY;
   let firstAheadMetres: number | null = null;
@@ -217,6 +218,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
     nextBackMs.set(item, upcomingBackMs);
     leavesAfter.set(item, firstAheadMetres != null && farthestAheadMetres - firstAheadMetres >= LEAVING_MARGIN_METRES);
     firstAwayAfter.set(item, firstAheadMetres);
+    farthestAwayAfter.set(item, farthestAheadMetres);
     if (leftPlace(item)) upcomingAwayMs = atMs;
     if (snapshots.has(item)) continue;
     if (evidenceMatchesStay(item, stay)) {
@@ -291,9 +293,13 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       // iOS has dated arrival Visits up to 157 s before the car stopped, with
       // the approach continuing after. The same holds for a sign observed as it
       // happened (an entry, a still fix): back at the place within three minutes
-      // without moving away, it is the return, never the departure. Two
-      // overlapping circles of one home put the old circle's entry 14 s before
-      // parking, after the car crossed the new one (location v3 bug 11).
+      // without moving away or going the excursion minimum away
+      // (`commuteSamePlaceMinimumExcursionMeters`) before it, it is the
+      // return, never the departure. Two overlapping circles of one home put
+      // the old circle's entry 14 s before parking, after the car crossed the
+      // new one, with readings within 100 m in between (location v3 bug 11);
+      // a quick loop 700 m out and back after an entry is a real excursion
+      // (Codex r1 on #451).
       const nextAway = nextAwayMs.get(item)!;
       const stayedBefore = Number.isFinite(nextAway) && nextAway - atMs >= config.savedPlaceMinimumDwellMs;
       const arrivedFirst = arrival.lastAway == null || atMs - arrival.lastAway.atMs > EARLY_DATED_VISIT_MAXIMUM_MS ||
@@ -303,7 +309,9 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
         firstAfter - arrival.lastAway.metres >= LEAVING_MARGIN_METRES;
       const observedThere = kind === "geofence_enter" || kind !== "visit" && !moving(item);
       const backSoon = backAfter(item, atMs) - atMs <= EARLY_DATED_VISIT_MAXIMUM_MS;
-      const departs = Number.isFinite(nextAway) && (!backSoon || (observedThere || arrivedFirst) && movesAway);
+      const wentFar = farthestAwayAfter.get(item)! >= config.commuteSamePlaceMinimumExcursionMeters;
+      const departs = Number.isFinite(nextAway) &&
+        (!backSoon || (observedThere || arrivedFirst) && movesAway || observedThere && wentFar);
       if (inGap && (!seenAway || stayedBefore || departs)) latest = item;
       if (stayedBefore || departs) excursion = seenAway = false;
       // An entry is observed as it happens; a Visit in the gap can be an
