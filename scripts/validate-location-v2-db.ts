@@ -1872,6 +1872,21 @@ async function validateReviewModeAutoLogPlaces() {
     "A visit already offered in Review was auto-logged after its stay changed ID.");
   assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_offered_before"],
     "A visit kept in Review because it was offered before did not say so.");
+  // Reasons in order (Codex r2 on #450): an overlapping block comes before "offered before", and the
+  // card's reason follows the evidence back when the block goes.
+  const overlapping = await pool.query<{ id: string }>(
+    `insert into time_entries (workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at)
+     values ($1, $2, 'manual_app', 'high', 'confirmed', 'Tracked by hand', $3, $4) returning id`,
+    [WORKSPACE_ID, USER_ID, logged[0].startedAt, logged[0].stoppedAt]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_overlap"],
+    "An overlapping block did not come before offered-before as the card's reason.");
+  await pool.query("delete from time_entries where id = $1", [overlapping.rows[0].id]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.deepEqual(await cardReasons(logged[0].placeId, logged[0].startedAt), ["auto_log_offered_before"],
+    "A card's reason did not follow its overlap away.");
+  const steadyOffered = await ingestAndReplayLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.equal(steadyOffered.replay.semanticChangeCount, 0, "An identical replay of an offered-before card reported changes.");
 
   // Ageing evidence: a stay older than retention less a day is never reconciled, so a visit that
   // expiring evidence can no longer rebuild keeps its block (Codex r1 on #435).

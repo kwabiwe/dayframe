@@ -432,37 +432,40 @@ async function chooseAutoLoggedVisits(
   if (candidates.length === 0) return { logged, fallback };
   // A retired visit's own block is about to move or go: it never blocks its replacement.
   const orphanIds = orphans.map((orphan) => orphan.entryId);
-  const blocked = new Map<string, { overlap: boolean; offered: boolean; logged: boolean }>();
+  const blocked = new Map<string, { reason: "overlap" | "logged" | "offered" | null }>();
   for (const batch of chunks(candidates)) {
-    // Each check runs only when it can still change the answer (CASE evaluates lazily): an overlap
-    // decides at once, and a card already offered here needs only the overlap check, so the two
-    // history reads below cost what they cost before #450, for new visits only.
-    const result = await client.query<{ clientEventId: string; overlap: boolean; offered: boolean; logged: boolean }>(
-      `select r.client_event_id as "clientEventId", o.overlap, f.offered, l.logged
+    // One ordered CASE gives the first reason that holds, so each check runs at most once and only
+    // when the ones before it failed (Codex r2 on #450). A card already offered here skips the last
+    // check (it was offered, whatever that read says) but keeps the order before it, so an identical
+    // replay gives it the same reason.
+    const result = await client.query<{ clientEventId: string; reason: "overlap" | "logged" | "offered" | null }>(
+      `select r.client_event_id as "clientEventId", case
+         -- Any block not ignored, however long (a timer left running for days and then stopped) or
+         -- still running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started.
+         when exists (
+           select 1 from time_entries te
+           where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
+             and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
+             and not (te.id = any($4::uuid[]))) then 'overlap'
+         -- Another visit at the place already auto-logged and still a decision (its block deleted or
+         -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
+         -- landed while this replay ran (Codex r3 on #435).
+         when exists (
+           select 1 from activity_events ae
+           where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
+             and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+             and ae.client_event_id <> r.client_event_id
+             and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) then 'logged'
+         when r.offered_here then 'offered'
+         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
+         -- whatever became of that card (Codex r1 on #435).
+         when exists (
+           select 1 from review_items ri
+           where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
+             and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) then 'offered'
+       end as reason
        from jsonb_to_recordset($3::jsonb)
-         as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz, offered_here boolean)
-       cross join lateral (select exists (
-         -- Any block not ignored, however long (a timer left running for days and then stopped) or still
-         -- running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started per visit.
-         select 1 from time_entries te
-         where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
-           and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
-           and not (te.id = any($4::uuid[]))) as overlap) o
-       -- Another visit at the place already auto-logged and still a decision (its block deleted or
-       -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
-       -- landed while this replay ran (Codex r3 on #435).
-       cross join lateral (select case when o.overlap or r.offered_here then false else exists (
-         select 1 from activity_events ae
-         where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
-           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
-           and ae.client_event_id <> r.client_event_id
-           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) end as logged) l
-       -- Offered in Review before under another segment ID (its stay was replaced): stays a card
-       -- whatever became of that card (Codex r1 on #435).
-       cross join lateral (select case when o.overlap or r.offered_here or l.logged then false else exists (
-         select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
-           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) end as offered) f`,
+         as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz, offered_here boolean)`,
       [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
         client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
         started_at: segment.startedAt, stopped_at: segment.stoppedAt,
@@ -471,12 +474,11 @@ async function chooseAutoLoggedVisits(
     for (const row of result.rows) blocked.set(row.clientEventId, row);
   }
   for (const { clientEventId } of candidates) {
-    const flags = blocked.get(clientEventId);
-    // Decided once: a stay already offered in Review stays there.
-    const offeredHere = existing.has(clientEventId) && !freshAgain.has(clientEventId);
-    const reason: AutoLogFallbackReason | null = flags?.overlap ? "auto_log_overlap"
-      : flags?.logged ? "auto_log_logged_before"
-        : flags?.offered || offeredHere ? "auto_log_offered_before" : null;
+    // Decided once: a stay already offered in Review stays there (the read says "offered").
+    const found = blocked.get(clientEventId)?.reason ?? null;
+    const reason: AutoLogFallbackReason | null = found === "overlap" ? "auto_log_overlap"
+      : found === "logged" ? "auto_log_logged_before"
+        : found === "offered" ? "auto_log_offered_before" : null;
     if (reason) fallback.set(clientEventId, reason);
     else logged.add(clientEventId);
   }
