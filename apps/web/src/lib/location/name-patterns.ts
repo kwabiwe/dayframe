@@ -87,11 +87,25 @@ export async function namePatternsFor(
     }
     return best ? locationCellKey(best.latitude, best.longitude) : null;
   };
+  // A Stay the person corrected keeps its stored identity through replay (Codex r3 on #458).
+  const manualKeys = new Map<string, string | null>();
+  const candidateStayIds = [...new Set(candidates.flatMap(({ segment }) =>
+    segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? [] : []))].sort();
+  for (const ids of chunks(candidateStayIds)) {
+    const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; placeMatchKind: string | null;
+      latitude: number | null; longitude: number | null }>(
+      `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as "placeMatchKind",
+              st_y(centre::geometry) as latitude, st_x(centre::geometry) as longitude
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+      [session.workspaceId, session.userId, ids]);
+    for (const row of result.rows) manualKeys.set(row.id, persistedStayKey(row));
+  }
   for (const { clientEventId, segment } of candidates) {
     const band = nameBand(segment.startedAt, timeZoneOf(segment));
     let key: string | null;
     if (segment.kind === "stay") {
-      key = stayKey(segment);
+      const persistedId = stayIds.get(segment.clientSegmentId) ?? "";
+      key = manualKeys.has(persistedId) ? manualKeys.get(persistedId) ?? null : stayKey(segment);
     } else {
       const from = endKeys.get(stayIds.get(segment.fromStaySegmentId) ?? "") ?? null;
       const to = endKeys.get(stayIds.get(segment.toStaySegmentId) ?? "") ?? null;
@@ -112,6 +126,21 @@ export async function namePatternsFor(
  */
 export function hashedPatternKey(session: Pick<RequestSession, "workspaceId">, key: string) {
   return createHash("sha256").update(`${session.workspaceId}:${key}`).digest("hex");
+}
+
+/**
+ * A persisted Stay's pattern key from its stored identity, as its person corrected it: a saved place,
+ * else a learned one, else its cell. A correction part keeps both identities of the Stay it came from
+ * (the learned place first, as the emitter keys a learned visit) unless its place was changed.
+ */
+export function persistedStayKey(row: {
+  placeId: string | null; learnedPlaceId: string | null; placeMatchKind: string | null;
+  latitude: number | null; longitude: number | null;
+}) {
+  const centre = { centreLatitude: row.latitude, centreLongitude: row.longitude };
+  if (row.placeMatchKind === "saved") return stayPatternKey({ placeId: row.placeId, ...centre });
+  if (row.placeMatchKind === "learned") return stayPatternKey({ learnedPlaceId: row.learnedPlaceId, ...centre });
+  return stayPatternKey({ placeId: row.learnedPlaceId ? null : row.placeId, learnedPlaceId: row.learnedPlaceId, ...centre });
 }
 
 function isRoundTrip(segment: CommuteSegment) {

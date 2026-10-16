@@ -1,5 +1,5 @@
-import { hashedPatternKey, recordLearnedName } from "./name-patterns";
-import type { NameBand } from "@dayframe/shared";
+import { hashedPatternKey, persistedStayKey, recordLearnedName } from "./name-patterns";
+import { nameBand, type NameBand } from "@dayframe/shared";
 import {
   LocationReviewActionSchema,
   stableLocationId,
@@ -10,8 +10,7 @@ import {
 import type pg from "pg";
 import {
   isLockNotAvailableError,
-  isStatementTimeoutError,
-  query
+  isStatementTimeoutError
 } from "../db";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "../sync-transaction";
 import { ReviewResolutionError } from "../event-service";
@@ -65,6 +64,9 @@ type LockedReview = {
   learnedName: boolean;
   /** Its suggested activity is one the person chose for this pattern before. */
   learnedActivity: boolean;
+  /** A merge's learned names and activities, from both cards it joined (Codex r3 on #458). */
+  learnedTitles?: string[];
+  learnedCategoryIds?: string[];
 };
 
 type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown; correctionEvent: boolean };
@@ -85,13 +87,16 @@ export const LOCATION_REVIEW_LOCK_TIMEOUT_MS = 1_500;
  * Whether a Review item is a location Stay's or Move's, whose plain "accept" (older clients) is a
  * Confirm, so it keeps the same name and learning semantics (Codex r2 on #458).
  */
-export async function isLocationSegmentReview(reviewItemId: string, session: RequestSession) {
+export async function isLocationSegmentReview(reviewItemId: string, session: RequestSession, options: SyncTransactionOptions = {}) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reviewItemId)) return false;
-  const result = await query<{ located: boolean }>(
-    `select location_segment_id is not null as located
-     from review_items where id = $1 and workspace_id = $2 and user_id = $3`,
-    [reviewItemId, session.workspaceId, session.userId]);
-  return Boolean(result.rows[0]?.located);
+  // Within the request's own budget (Codex r3 on #458).
+  return withSyncTransaction("location_review_classify", async ({ client }) => {
+    const result = await client.query<{ located: boolean }>(
+      `select location_segment_id is not null as located
+       from review_items where id = $1 and workspace_id = $2 and user_id = $3`,
+      [reviewItemId, session.workspaceId, session.userId]);
+    return Boolean(result.rows[0]?.located);
+  }, { ...options, readOnly: true });
 }
 
 export async function resolveLocationReviewAction(
@@ -620,7 +625,8 @@ async function confirmReview(
   }
   if (entryId) {
     await learnFromDecision(client, session, item, item.eventId,
-      correctedPattern(session, item, placeIdentity ? placeIdentity.patternPlace : editedPatternPlace(item, edit)),
+      await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: window.startedAt,
+        place: placeIdentity ? placeIdentity.patternPlace : editedPatternPlace(item, edit) }),
       { description, categoryId, edit });
   }
   if (!entryId) {
@@ -755,7 +761,8 @@ async function changePlace(
   }
   // A Stay corrected to another place teaches that place's pattern when it is confirmed later (Codex
   // r2 on #458).
-  await persistPattern(client, session, item, item.eventId, correctedPattern(session, item, patternPlace));
+  await persistPattern(client, session, item, item.eventId,
+    await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: new Date(item.suggestedStartedAt).toISOString(), place: patternPlace }));
   return { ok: true, action: action.action, status: "open" };
 }
 
@@ -1033,7 +1040,7 @@ async function mergeReviews(
     const entryId = await createChildEntry(
       client,
       session,
-      { ...item, suggestedTitles: [...new Set([...item.suggestedTitles, ...adjacent.suggestedTitles])] },
+      mergedLearning(item, adjacent),
       mergedId,
       new Date(ordered[0].suggestedStartedAt).toISOString(),
       new Date(ordered[1].suggestedStoppedAt).toISOString(),
@@ -1045,7 +1052,7 @@ async function mergeReviews(
   await createChildReview(
     client,
     session,
-    { ...item, suggestedTitles: [...new Set([...item.suggestedTitles, ...adjacent.suggestedTitles])] },
+    mergedLearning(item, adjacent),
     mergedId,
     new Date(ordered[0].suggestedStartedAt).toISOString(),
     new Date(ordered[1].suggestedStoppedAt).toISOString(),
@@ -1111,7 +1118,7 @@ async function createChildEntry(
   const placeId = editedPlaceId(item, edit);
   await validateReferences(client, session, categoryId, placeId);
   const description = edit?.description ?? item.title;
-  const event = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit, {
+  const { id: event, pattern } = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit, {
     ownerAuthoredDescription: isOwnerAuthoredReviewDescription(description, item.suggestedTitles)
   });
   const entry = await client.query<{ id: string }>(
@@ -1133,8 +1140,7 @@ async function createChildEntry(
     ]
   );
   await syncTimeEntryTags(client, entry.rows[0].id, edit?.tags ?? [], session);
-  await learnFromDecision(client, session, item, event, correctedPattern(session, item, editedPatternPlace(item, edit)),
-    { description, categoryId, edit });
+  await learnFromDecision(client, session, item, event, pattern, { description, categoryId, edit });
   return entry.rows[0].id;
 }
 
@@ -1148,7 +1154,7 @@ async function createChildReview(
   edit?: ReviewEntryEdit
 ) {
   await validateReferences(client, session, editedCategoryId(item, edit), editedPlaceId(item, edit));
-  const eventId = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit);
+  const { id: eventId } = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit);
   await client.query(
     `insert into review_items (
        workspace_id, user_id, event_id, location_segment_id, type, title,
@@ -1180,7 +1186,8 @@ async function createChildEvent(
   edit?: ReviewEntryEdit,
   decision: { ownerAuthoredDescription: boolean } = { ownerAuthoredDescription: false }
 ) {
-  const pattern = correctedPattern(session, item, editedPatternPlace(item, edit));
+  // The part's own segment holds its identity: the Stay's, or the place it was corrected to.
+  const pattern = await resultPattern(client, session, item, { segmentId, startedAt });
   const event = await client.query<{ id: string }>(
     `insert into activity_events (
        workspace_id, user_id, client_event_id, source, event_type, occurred_at,
@@ -1216,7 +1223,7 @@ async function createChildEvent(
     `update stay_segments set created_from_event_id = $1 where id = $2 and workspace_id = $3 and user_id = $4`,
     [event.rows[0].id, segmentId, session.workspaceId, session.userId]
   );
-  return event.rows[0].id;
+  return { id: event.rows[0].id, pattern };
 }
 
 /** Marks the block's source event: the owner typed its description in this Review decision. */
@@ -1270,30 +1277,78 @@ function editedPatternPlace(item: LockedReview, edit?: ReviewEntryEdit): Pattern
 }
 
 /**
- * The pattern a decision teaches: the item's, unless it corrected a Stay's place (a change of place in
- * the editor or on its own, saving a new one, a learned place, or none), which teaches the pattern of
- * that place, or of the Stay's cell when it has none (Codex r1/r2 on #458).
+ * The pattern a decision teaches (Codex r1–r3 on #458). Its key: a Stay corrected to another place in
+ * this decision (the editor, Change place, saving one, a learned place, or none: the Stay's cell)
+ * teaches that place; a Stay its person corrected before (Change place on its own, a split or merge
+ * part) teaches its stored identity; otherwise the item's own. Its band: that of the result's start in
+ * the time zone of the result's first reading (a split part, a merge, a new start), else the item's.
  */
-function correctedPattern(session: RequestSession, item: LockedReview, place?: PatternPlace) {
+async function resultPattern(
+  client: pg.PoolClient, session: RequestSession, item: LockedReview,
+  result: { segmentId: string; startedAt: string; place?: PatternPlace }
+) {
   if (!isNameBand(item.namePatternBand)) return null;
-  if (item.segmentKind === "stay" && place) {
-    const key = stayPatternKey({ placeId: place.placeId, learnedPlaceId: place.learnedPlaceId,
+  const evidence = await client.query<{ timeZone: string }>(
+    `select le.time_zone as "timeZone"
+     from location_segment_evidence lse
+     join location_evidence le on le.id = lse.evidence_id and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
+     where lse.workspace_id = $1 and lse.user_id = $2 and (lse.stay_segment_id = $3 or lse.commute_segment_id = $3)
+     order by le.occurred_at, le.client_evidence_id limit 1`,
+    [session.workspaceId, session.userId, result.segmentId]);
+  const timeZone = evidence.rows[0]?.timeZone;
+  const band = timeZone ? nameBand(result.startedAt, timeZone) : item.namePatternBand;
+  if (item.segmentKind !== "stay") return item.namePatternKey ? { key: item.namePatternKey, band } : null;
+  let key: string | null;
+  if (result.place) {
+    key = stayPatternKey({ placeId: result.place.placeId, learnedPlaceId: result.place.learnedPlaceId,
       centreLatitude: item.centreLatitude, centreLongitude: item.centreLongitude });
-    return key ? { key: hashedPatternKey(session, key), band: item.namePatternBand } : null;
+  } else {
+    const stored = await client.query<{ placeId: string | null; learnedPlaceId: string | null; placeMatchKind: string | null;
+      latitude: number | null; longitude: number | null }>(
+      `select place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as "placeMatchKind",
+              st_y(centre::geometry) as latitude, st_x(centre::geometry) as longitude
+       from stay_segments where id = $1 and workspace_id = $2 and user_id = $3 and continuity_status = 'manual'`,
+      [result.segmentId, session.workspaceId, session.userId]);
+    if (!stored.rows[0]) return item.namePatternKey ? { key: item.namePatternKey, band } : null;
+    key = persistedStayKey(stored.rows[0]);
   }
-  return item.namePatternKey ? { key: item.namePatternKey, band: item.namePatternBand } : null;
+  return key ? { key: hashedPatternKey(session, key), band } : null;
+}
+
+/** The learned names a decision on this item can keep: its own, or a merge's from both cards. */
+function learnedTitlesOf(item: LockedReview) {
+  return item.learnedTitles ?? (item.learnedName ? [item.title] : []);
+}
+
+function learnedCategoryIdsOf(item: LockedReview) {
+  return item.learnedCategoryIds ?? (item.learnedActivity && item.suggestedCategoryId ? [item.suggestedCategoryId] : []);
+}
+
+/** Whether a name is one of these titles, case and spacing aside. */
+function keepsTitle(name: string | null | undefined, titles: readonly string[]) {
+  return Boolean(name?.trim()) && titles.some((title) => !isOwnerAuthoredReviewDescription(name, [title]));
+}
+
+/** A merge of two cards: both cards' suggested titles, and both cards' learned names and activities. */
+function mergedLearning(item: LockedReview, adjacent: LockedReview): LockedReview {
+  return {
+    ...item,
+    suggestedTitles: [...new Set([...item.suggestedTitles, ...adjacent.suggestedTitles])],
+    learnedTitles: [...new Set([...learnedTitlesOf(item), ...learnedTitlesOf(adjacent)])],
+    learnedCategoryIds: [...new Set([...learnedCategoryIdsOf(item), ...learnedCategoryIdsOf(adjacent)])]
+  };
 }
 
 /**
  * Where a correction part's name and activity came from, so confirming it later still teaches them:
  * a learned name it kept, and a learned activity it kept or one the person chose in the correction
- * (which becomes the part's suggestion and so no longer looks changed; Codex r2 on #458).
+ * (which becomes the part's suggestion and so no longer looks changed; Codex r2/r3 on #458).
  */
 function childProvenance(item: LockedReview, edit?: ReviewEntryEdit) {
-  const keptName = item.learnedName && (edit?.description == null || edit.description.trim() === item.title.trim());
+  const keptName = keepsTitle(edit?.description ?? item.title, learnedTitlesOf(item));
   const categoryId = editedCategoryId(item, edit);
   const chose = edits(edit, "categoryId") && categoryId !== item.suggestedCategoryId && categoryId !== null;
-  const keptActivity = item.learnedActivity && categoryId === item.suggestedCategoryId;
+  const keptActivity = categoryId !== null && learnedCategoryIdsOf(item).includes(categoryId);
   return { ...(keptName ? { nameSource: "learned" } : {}), ...(chose || keptActivity ? { activitySource: "learned" } : {}) };
 }
 
@@ -1320,12 +1375,11 @@ async function learnFromDecision(
   decision: { description: string | null; categoryId: string | null; edit?: ReviewEntryEdit }
 ) {
   if (!pattern) return;
-  const learnedTitle = item.learnedName ? item.title : null;
   const description = decision.description?.trim() || null;
   const name = description && (isOwnerAuthoredReviewDescription(description, item.suggestedTitles) ||
-    (learnedTitle && !isOwnerAuthoredReviewDescription(description, [learnedTitle]))) ? description : null;
+    keepsTitle(description, learnedTitlesOf(item))) ? description : null;
   const changedActivity = decision.edit?.categoryId !== undefined && decision.edit.categoryId !== item.suggestedCategoryId;
-  const keptActivity = item.learnedActivity && decision.categoryId === item.suggestedCategoryId;
+  const keptActivity = !changedActivity && decision.categoryId !== null && learnedCategoryIdsOf(item).includes(decision.categoryId);
   await recordLearnedName(client, session, pattern,
     { name, categoryId: (changedActivity || keptActivity) ? decision.categoryId : null });
   await persistPattern(client, session, item, eventId, pattern);

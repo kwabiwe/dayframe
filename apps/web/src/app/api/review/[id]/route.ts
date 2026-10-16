@@ -70,7 +70,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       return NextResponse.json(result);
     }
     // An older client's plain accept of a location Stay or Move confirms it like Confirm does.
-    if (action === "accept" && await isLocationSegmentReview(id, session)) {
+    if (action === "accept" && await isLocationSegmentReview(id, session, operation)) {
       const result = await resolveLocationReviewAction(id, { action: "confirm" }, session, operation);
       return NextResponse.json(result);
     }

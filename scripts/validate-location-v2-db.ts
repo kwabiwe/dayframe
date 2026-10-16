@@ -5,6 +5,7 @@ import {
   LOCATION_ACCEPTANCE_PLACES,
   LOCATION_ENGINE_V2_CONFIG,
   locationAcceptanceFixture,
+  nameBand,
   runLocationEngine,
   type CommuteSegment,
   type LocationEvidence,
@@ -2031,6 +2032,33 @@ async function validateLearnedNameCorrections() {
     await resolveLocationReviewAction(changed.id, { action: "change_place", placeId: placeB.id }, session);
     await resolveLocationReviewAction(changed.id, { action: "edit_and_confirm", edit: { description: "Corrected visit" } }, session);
     assert.deepEqual((await rows()).map((row) => row.key), [keyOf(placeB.id)], "A standalone change of place still taught the original place.");
+    await forgetAll();
+
+    // Replay keeps a standalone correction's place in the card's pattern (Codex r3 on #458).
+    const replayed = await offer();
+    await resolveLocationReviewAction(replayed.id, { action: "change_place", placeId: placeB.id }, session);
+    await ingestLocationEvidence(batch("db-learned-name-corrections", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt), session);
+    const replayedKey = await pool.query<{ key: string | null }>(
+      `select ae.raw_payload ->> 'namePatternKey' as key from review_items ri join activity_events ae on ae.id = ri.event_id where ri.id = $1`,
+      [replayed.id]);
+    assert.equal(replayedKey.rows[0]?.key, keyOf(placeB.id), "Replay put back the uncorrected place's pattern.");
+    await resolveLocationReviewAction(replayed.id, { action: "edit_and_confirm", edit: { description: "Corrected visit" } }, session);
+    assert.deepEqual((await rows()).map((row) => row.key), [keyOf(placeB.id)], "A replayed correction taught the original place.");
+    await forgetAll();
+
+    // Split parts learn in their own time-of-day bands.
+    const banded = await offer();
+    const bandedSplit = await resolveLocationReviewAction(banded.id, { action: "split_and_confirm", splitAt: midpoint(banded),
+      left: { description: "First part" }, right: { description: "Second part" } }, session);
+    assert("entryIds" in bandedSplit);
+    const expectedBands = [
+      { name: "First part", band: nameBand(new Date(banded.startedAt).toISOString(), "Europe/London") },
+      { name: "Second part", band: nameBand(midpoint(banded), "Europe/London") }
+    ];
+    // Each band keeps the last name given in it.
+    const lastPerBand = [...new Map(expectedBands.map((part) => [part.band, part])).values()];
+    assert.deepEqual((await rows()).map(({ name, band }) => ({ name, band })).sort((a, b) => a.band.localeCompare(b.band)),
+      lastPerBand.sort((a, b) => a.band.localeCompare(b.band)), "Split parts did not learn in their own bands.");
     await forgetAll();
 
     // A correction to an accepted learned place teaches that learned place.
