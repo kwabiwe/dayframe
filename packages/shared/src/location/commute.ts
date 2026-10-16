@@ -1109,7 +1109,9 @@ export function deriveCommutes(
       const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
       const travelMode = motionTravelMode(motion, beganMs, endedMs, config) ??
         speedTravelMode(routeEvidence, config, { straightLineMeters: summary.straightLineDistanceMeters, durationMs: endedMs - beganMs,
-          fasterMotion: motionShowsFasterThanWalking(motion, beganMs, endedMs) });
+          fasterMotion: motionShowsFasterThanWalking(motion, beganMs, endedMs),
+          windowReadings: acceptedEvidence.filter((_, evidenceIndex) =>
+            occurredAtMs[evidenceIndex] >= beganMs && occurredAtMs[evidenceIndex] <= endedMs) });
       const uncertainBoundary =
         summary.routeSampleCount < 2 ||
         summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||

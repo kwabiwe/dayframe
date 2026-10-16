@@ -314,25 +314,32 @@ export function motionShowsFasterThanWalking(timeline: MotionTimeline | null, st
  *   speed, and a straight line cannot be lengthened by GPS noise).
  * - Walk: that many independent fixes at walking pace, and no sign of anything faster: no accurate
  *   reading of any kind (mirrors and native callbacks without simulation provenance included) faster
- *   than `speedTravelModeWalkMaximumMps`, and no faster Core Motion record of any confidence
- *   (`fasterMotion`) — Codex r1 on #453.
+ *   than `speedTravelModeWalkMaximumMps` anywhere in the journey's window (endpoint matches
+ *   included), and no faster Core Motion record of any confidence (`fasterMotion`) — Codex r1/r2
+ *   on #453.
  */
 export function speedTravelMode(
   route: readonly ClassifiedEvidence[],
   config: LocationEngineConfig,
-  journey: { straightLineMeters: number | null; durationMs: number; fasterMotion?: boolean } | null = null
+  journey: {
+    straightLineMeters: number | null; durationMs: number; fasterMotion?: boolean;
+    /** Every reading inside the journey's window, endpoint matches included: any of them vetoes a walk. */
+    windowReadings?: readonly ClassifiedEvidence[];
+  } | null = null
 ): MotionTravelMode | null {
   if (journey?.straightLineMeters != null && journey.straightLineMeters >= config.speedTravelModeMinimumDistanceMeters &&
     journey.durationMs > 0 && journey.straightLineMeters / (journey.durationMs / 1_000) > config.speedTravelModeDriveMps) return "automotive";
-  const accurate = route.filter(({ evidence }) => (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
+  const accurateOf = (items: readonly ClassifiedEvidence[]) => items.filter(({ evidence }) =>
+    (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
     evidence.isSimulated !== true && evidence.latitude != null && evidence.longitude != null &&
     evidence.horizontalAccuracyMeters != null && evidence.horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters &&
     evidence.speedMetersPerSecond != null && Number.isFinite(evidence.speedMetersPerSecond) && evidence.speedMetersPerSecond >= 0);
-  const independent = (minimumMps: number, maximumMps: number) => {
+  const accurate = accurateOf(route);
+  const independent = (counts: (speed: number) => boolean) => {
     const counted: Array<{ atMs: number; coordinate: string }> = [];
     for (const { evidence } of accurate) {
       const speed = evidence.speedMetersPerSecond!;
-      if (evidence.kind !== "standard_location" || evidence.isSimulated !== false || speed < minimumMps || speed > maximumMps) continue;
+      if (evidence.kind !== "standard_location" || evidence.isSimulated !== false || !counts(speed)) continue;
       const atMs = Date.parse(evidence.occurredAt);
       const coordinate = `${evidence.latitude},${evidence.longitude}`;
       if (counted.some((other) => Math.abs(atMs - other.atMs) < SPEED_MODE_MIRROR_WINDOW_MS || other.coordinate === coordinate)) continue;
@@ -340,13 +347,12 @@ export function speedTravelMode(
     }
     return counted.length;
   };
-  if (independent(config.speedTravelModeDriveMps + Number.EPSILON, Number.POSITIVE_INFINITY) >= config.speedTravelModeMinimumFixes) {
-    return "automotive";
-  }
+  if (independent((speed) => speed > config.speedTravelModeDriveMps) >= config.speedTravelModeMinimumFixes) return "automotive";
   const fasterThanWalking = journey?.fasterMotion === true ||
-    accurate.some(({ evidence }) => evidence.speedMetersPerSecond! > config.speedTravelModeWalkMaximumMps);
-  if (!fasterThanWalking && independent(config.speedTravelModeWalkMinimumMps, config.speedTravelModeWalkMaximumMps) >=
-    config.speedTravelModeMinimumFixes) return "walking";
+    [...accurate, ...accurateOf(journey?.windowReadings ?? [])]
+      .some(({ evidence }) => evidence.speedMetersPerSecond! > config.speedTravelModeWalkMaximumMps);
+  if (!fasterThanWalking && independent((speed) => speed >= config.speedTravelModeWalkMinimumMps &&
+    speed <= config.speedTravelModeWalkMaximumMps) >= config.speedTravelModeMinimumFixes) return "walking";
   return null;
 }
 

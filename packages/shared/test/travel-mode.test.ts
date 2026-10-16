@@ -133,15 +133,26 @@ describe("travel mode from route speed when Motion & Fitness gives none (locatio
 
 describe("a wrong walking label never wins (Codex r1 on #453)", () => {
   it("keeps a drive between two walks a drive in the capture simulator (seed 187)", () => {
+    // Codex r2 on #453: both ends saved and a 90-minute final stay reproduce main automotive →
+    // round 1 walking.
     const home = { id: HOME_ID, name: "Home", at: { x: 0, y: 0 }, radius: 100, loggingEnabled: true };
-    const scenario = { start: "2026-03-09T12:00:00Z", origin: home.at, places: [home], legs: [
+    const school = { id: SCHOOL_ID, name: "School", at: { x: 0, y: 3_000 }, radius: 100, loggingEnabled: true };
+    const scenario = { start: "2026-03-09T12:00:00Z", origin: home.at, places: [home, school], legs: [
       { kind: "stay" as const, minutes: 60 }, { kind: "walk" as const, to: { x: 0, y: 200 } },
       { kind: "drive" as const, to: { x: 0, y: 2_800 } }, { kind: "walk" as const, to: { x: 0, y: 3_000 } },
-      { kind: "stay" as const, minutes: 60 }] };
+      { kind: "stay" as const, minutes: 90 }] };
     const trips = runLocationEngine(simulate(scenario, 187, { motion: true }).input()).segmentUpserts
       .filter((segment): segment is CommuteSegment => segment.kind === "commute");
-    expect(trips.length).toBeGreaterThan(0);
-    expect(trips.map((trip) => trip.travelMode)).not.toContain("walking");
+    expect(trips.map((trip) => trip.travelMode)).toEqual(["automotive"]);
+  });
+
+  it("vetoes a walk with a fast reading that matched an endpoint, and needs strictly more than 8 m/s to drive", () => {
+    // An accurate fast native reading inside the destination's match, within the journey's window.
+    const atEnd = journey(36, 1.4, [fix("slc-end", 90.5, 2_900, { kind: "significant_change", speedMetersPerSecond: 12,
+      isSimulated: undefined as unknown as null })]);
+    expect(atEnd.travelMode).not.toBe("walking");
+    const exactly8 = [61, 63, 65].map((minute, index) => fix(`eight-${index}`, minute, 600 + index * 400, { speedMetersPerSecond: 8 }));
+    expect(journey(20, null, exactly8).travelMode).toBeUndefined();
   });
 
   it("never carries a walk across unknown records (an unrecognised drive between two walks)", () => {
