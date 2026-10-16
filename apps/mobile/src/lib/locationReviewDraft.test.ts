@@ -121,6 +121,7 @@ describe("Location Review editor draft", () => {
       }
     })).toEqual({
       description: "Train home",
+      descriptionTyped: true,
       startedAt: window.baselineStartedAt,
       stoppedAt: window.baselineStoppedAt
     });

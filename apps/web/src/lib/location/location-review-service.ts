@@ -628,6 +628,9 @@ export function confirmedLocationDescription(
   // an older app's prefill) did not type it (Codex r1 on #456).
   if (segmentKind === "commute" || segmentKind === "time_away") {
     const typed = edit?.description?.trim() || null;
+    // Typed in a current app's editor (it starts a Move empty): the person's words, whatever they say
+    // (Codex r2 on #456). Without the marker, equal to a Dayframe title is an older app's prefill.
+    if (typed && edit?.descriptionTyped === true) return typed;
     return typed && isOwnerAuthoredReviewDescription(typed, [title, ...suggestedTitles]) ? typed : null;
   }
   return edit?.description?.trim() || title;

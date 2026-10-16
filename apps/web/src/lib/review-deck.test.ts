@@ -84,7 +84,7 @@ describe("Review deck helpers", () => {
     const base = item();
     expect(reviewMutationFor(base, "log", { name: "Park run" })).toEqual({
       action: "edit_and_confirm",
-      edit: { categoryId: CAT, description: "Park run", startedAt: base.suggestedStartedAt, stoppedAt: base.suggestedStoppedAt }
+      edit: { categoryId: CAT, description: "Park run", descriptionTyped: true, startedAt: base.suggestedStartedAt, stoppedAt: base.suggestedStoppedAt }
     });
     // An activity-only change keeps the card's name for a generic moment…
     expect(reviewMutationFor(base, "log", { categoryId: OTHER })).toMatchObject({

@@ -52,6 +52,11 @@ round-trip labels and never fall back to the Commute category. The `move-route`
 feature adds `routeLabel` (a Move's second line, "Home → Gym", PRD D19) to
 Location Review records for Moves, so cards beyond the bootstrap's page keep it.
 
+A Review edit may carry `descriptionTyped: true` (PRD D19): current iPhone and web editors start a
+Move's name empty and send it with any name the person typed. A Move description without it that
+equals a title Dayframe suggested (current or earlier) is treated as an older app's prefill and not
+stored; with it, the typed words are stored as they are.
+
 `accept` and Location `confirm` may carry the optional 64-lower-hex
 `expectedProposalHash`. New Quick Confirm envelopes (Today offered the shortcut until Blocks parity
 moved confirming to Review) require it and the
