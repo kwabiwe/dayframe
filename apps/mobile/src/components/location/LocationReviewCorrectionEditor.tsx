@@ -193,7 +193,7 @@ export function LocationReviewCorrectionEditor({
   const timeWheelPresentationRef = useRef(0);
   // A tap outside the wheel closes it: where the current touch started, and whether it started on
   // the time fields or the panel (they mark it before the screen sees it).
-  const wheelTouchRef = useRef<{ inside: boolean; x: number; y: number } | null>(null);
+  const wheelTouchRef = useRef<{ inside: boolean; moved: boolean; x: number; y: number } | null>(null);
   const touchInsideWheelRef = useRef(false);
   const markTouchInsideWheel = () => {
     touchInsideWheelRef.current = true;
@@ -732,6 +732,8 @@ export function LocationReviewCorrectionEditor({
         }}
         onScrollBeginDrag={() => {
           revealGenerationRef.current += 1;
+          // A scroll is never a tap outside the time wheel (Codex r2 on #444).
+          wheelTouchRef.current = null;
         }}
         scrollEventThrottle={16}
         style={styles.settingsScrollView}
@@ -745,14 +747,21 @@ export function LocationReviewCorrectionEditor({
           onTouchEnd={(event) => {
             const start = wheelTouchRef.current;
             wheelTouchRef.current = null;
-            if (!start || start.inside || !timeWheelRef.current) return;
+            if (!start || start.inside || start.moved || !timeWheelRef.current) return;
             const { pageX, pageY } = event.nativeEvent;
             if (Math.abs(pageX - start.x) > TAP_SLOP || Math.abs(pageY - start.y) > TAP_SLOP) return;
             closeTimeWheel({ haptic: true });
           }}
+          onTouchMove={(event) => {
+            // Any movement past the slop, even one that comes back, makes it a drag, not a tap.
+            const start = wheelTouchRef.current;
+            if (!start || start.moved) return;
+            const { pageX, pageY } = event.nativeEvent;
+            if (Math.abs(pageX - start.x) > TAP_SLOP || Math.abs(pageY - start.y) > TAP_SLOP) start.moved = true;
+          }}
           onTouchStart={(event) => {
             // The time fields and the panel mark their own touches first (touch events bubble up).
-            wheelTouchRef.current = { inside: touchInsideWheelRef.current, x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+            wheelTouchRef.current = { inside: touchInsideWheelRef.current, moved: false, x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
             touchInsideWheelRef.current = false;
           }}
           style={styles.contentStack}

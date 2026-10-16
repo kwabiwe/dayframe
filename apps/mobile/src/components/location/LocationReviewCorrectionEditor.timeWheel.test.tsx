@@ -178,11 +178,14 @@ const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && 
 const field = (label: "Start" | "End") => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityLabel === label)[0];
 const screen = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onTouchStart === "function" && typeof node.props.onTouchEnd === "function")[0];
 const timeRow = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onTouchStart === "function" && !node.props.onTouchEnd)[0];
-// A touch bubbling up to the screen: from the time row when `inside`, ending `moved` points away.
-async function touch({ inside = false, moved = 0 }: { inside?: boolean; moved?: number } = {}) {
+// A touch bubbling up to the screen: from the time row when `inside`, passing through `via` points
+// away (a drag), optionally scrolling the page, and ending `moved` points away.
+async function touch({ inside = false, moved = 0, via, scroll = false }: { inside?: boolean; moved?: number; via?: number; scroll?: boolean } = {}) {
   await act(async () => {
     if (inside) timeRow().props.onTouchStart();
     screen().props.onTouchStart({ nativeEvent: { pageX: 100, pageY: 300 } });
+    if (via !== undefined) screen().props.onTouchMove({ nativeEvent: { pageX: 100, pageY: 300 + via } });
+    if (scroll) tree!.root.findAll((node) => isHost(node, "ScrollView"))[0].props.onScrollBeginDrag();
     screen().props.onTouchEnd({ nativeEvent: { pageX: 100, pageY: 300 + moved } });
   });
 }
@@ -222,6 +225,11 @@ describe("Location evidence time wheel (owner, 16 Oct 2026)", () => {
     await touch({ inside: true });
     expect(await wheelShown()).not.toBeNull();
     await touch({ moved: 40 });
+    expect(await wheelShown()).not.toBeNull();
+    // A drag that comes back near where it started is still a scroll (Codex r2 on #444).
+    await touch({ via: 40, moved: 3 });
+    expect(await wheelShown()).not.toBeNull();
+    await touch({ scroll: true, moved: 2 });
     expect(await wheelShown()).not.toBeNull();
     // A tap on the background closes it.
     await touch();

@@ -16,7 +16,10 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).toMatch(/function openTimeWheel\(target: "start" \| "end"\) \{\s*if \(saving\) return;\s*const open = timeWheelRef\.current;\s*if \(open\?\.target === target\) \{\s*closeTimeWheel\(\{ haptic: true \}\);\s*return;/);
     // A tap outside (background or control) closes it through bubbling touch events, never the
     // responder; the time fields and the panel mark their own touches; a drag is a scroll.
-    expect(editor).toMatch(/onTouchEnd=\{\(event\) => \{[\s\S]*?if \(!start \|\| start\.inside \|\| !timeWheelRef\.current\) return;[\s\S]*?> TAP_SLOP[\s\S]*?closeTimeWheel\(\{ haptic: true \}\);/);
+    expect(editor).toMatch(/onTouchEnd=\{\(event\) => \{[\s\S]*?if \(!start \|\| start\.inside \|\| start\.moved \|\| !timeWheelRef\.current\) return;[\s\S]*?> TAP_SLOP[\s\S]*?closeTimeWheel\(\{ haptic: true \}\);/);
+    // Any movement past the slop, or a scroll beginning, cancels the tap (Codex r2 on #444).
+    expect(editor).toMatch(/onTouchMove=\{\(event\) => \{[\s\S]*?start\.moved = true;/);
+    expect(editor).toMatch(/onScrollBeginDrag=\{\(\) => \{[\s\S]*?wheelTouchRef\.current = null;/);
     expect((editor.match(/onTouchStart=\{markTouchInsideWheel\}/g) ?? []).length).toBe(2);
     expect(editor).not.toContain("onStartShouldSetResponder={() => timeWheelRef.current !== null}");
     // Every minute, and no typing path.
