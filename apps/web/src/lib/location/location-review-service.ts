@@ -10,7 +10,8 @@ import {
   isStatementTimeoutError
 } from "../db";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "../sync-transaction";
-import { ReviewResolutionError } from "../event-service";
+import { insertPlaceWith, ReviewResolutionError } from "../event-service";
+import { placeDisplayNameSql } from "../place-display";
 import type { RequestSession } from "../session";
 import { syncTimeEntryTags } from "../tag-service";
 import {
@@ -145,7 +146,7 @@ function logDirectLocationMutation(input: {
   if (
     input.durationMs < 750 &&
     input.lockOutcome !== "contended" &&
-    ["accepted", "ignored", "completed"].includes(input.outcome)
+    ["accepted", "ignored", "completed", "open"].includes(input.outcome)
   ) {
     return;
   }
@@ -511,6 +512,8 @@ async function performAction(
       );
     case "save_place_and_confirm":
       return savePlaceAndConfirm(client, item, action, session);
+    case "save_place":
+      return savePlace(client, item, action, session);
     case "split":
     case "split_and_confirm":
       return splitReview(client, item, action, session);
@@ -749,6 +752,77 @@ async function savePlaceAndConfirm(
     "save_place_and_confirm",
     { placeId: place.rows[0].id, placeLabel: null }
   );
+}
+
+/** How far back "Save this place" re-matches other open unsaved Stays (design §7). */
+export const SAVE_PLACE_REMATCH_DAYS = 7;
+
+/**
+ * "Save this place" (PRD D19, design §7): a place centred on where the Stay was, with the size the
+ * person chose, its "Logs as" activity as the place's default, applied to this visit without logging
+ * it; then every other open unsaved Stay card of the last seven days whose centre lies inside the new
+ * circle takes it too. Each corrected Stay is the person's (`manual`), as with Change place, so replay
+ * keeps it. Under the owner lock; other cards a different writer holds are left for replay to match.
+ */
+async function savePlace(
+  client: pg.PoolClient,
+  item: LockedReview,
+  action: Extract<LocationReviewAction, { action: "save_place" }>,
+  session: RequestSession
+) {
+  if (item.segmentKind !== "stay") {
+    throw new ReviewResolutionError("invalid_action", "Only a visit can be saved as a place.", { status: 422 });
+  }
+  if (item.suggestedPlaceId) {
+    throw new ReviewResolutionError("invalid_action", "This visit already has a saved place.", { status: 422 });
+  }
+  if (item.centreLatitude == null || item.centreLongitude == null) {
+    throw new ReviewResolutionError("invalid_action", "This visit has no location to save.", { status: 422 });
+  }
+  const categoryId = action.categoryId ?? null;
+  await validateReferences(client, session, categoryId, null);
+  const place = await insertPlaceWith(client, {
+    name: action.name, latitude: item.centreLatitude, longitude: item.centreLongitude, radiusMeters: action.radiusMeters,
+    defaultCategoryId: categoryId, loggingEnabled: action.suggestVisits, autoLog: action.suggestVisits && action.autoLog
+  }, session);
+  // Other open unsaved Stays there, newest first; a card another writer holds is skipped.
+  const others = await client.query<{ reviewId: string; segmentId: string; eventId: string }>(
+    `select ri.id as "reviewId", st.id as "segmentId", ri.event_id as "eventId"
+     from review_items ri
+     join stay_segments st on st.id = ri.location_segment_id and st.workspace_id = ri.workspace_id and st.user_id = ri.user_id
+     join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.id <> $3 and ri.status = 'open'
+       and ri.suggested_place_id is null and st.place_id is null and st.status = 'finalised'
+       and ri.suggested_started_at > now() - make_interval(days => $4)
+       and st.centre is not null
+       and ST_DWithin(st.centre, ST_SetSRID(ST_MakePoint($5, $6), 4326)::geography, $7)
+     order by ri.suggested_started_at desc, ri.id
+     for update of ri, st, ae skip locked`,
+    [session.workspaceId, session.userId, item.id, SAVE_PLACE_REMATCH_DAYS, item.centreLongitude, item.centreLatitude, action.radiusMeters]);
+  for (const target of [{ reviewId: item.id, segmentId: item.segmentId, eventId: item.eventId, own: true }, ...others.rows.map((row) => ({ ...row, own: false }))]) {
+    await client.query(
+      `update review_items ri set suggested_place_id = $1,
+         title = (select ${placeDisplayNameSql("p")} from places p where p.id = $1),
+         suggested_category_id = case when $5 then coalesce($6::uuid, ri.suggested_category_id) else coalesce(ri.suggested_category_id, $6::uuid) end
+       where ri.id = $2 and ri.workspace_id = $3 and ri.user_id = $4`,
+      [place.id, target.reviewId, session.workspaceId, session.userId, target.own, categoryId]);
+    await client.query(
+      `update activity_events set suggested_place_id = $1
+       where id = $2 and workspace_id = $3 and user_id = $4`,
+      [place.id, target.eventId, session.workspaceId, session.userId]);
+    await client.query(
+      `update stay_segments set place_id = $1, learned_place_id = null,
+         continuity_status = 'manual', metadata = metadata || '{"placeMatchKind":"saved"}'::jsonb, updated_at = now()
+       where id = $2 and workspace_id = $3 and user_id = $4`,
+      [place.id, target.segmentId, session.workspaceId, session.userId]);
+  }
+  await client.query(
+    `insert into place_match_feedback (
+       workspace_id, user_id, place_id, anchor, radius_m, correction_count, status
+     ) values ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, 1, 'active')`,
+    [session.workspaceId, session.userId, place.id, item.centreLongitude, item.centreLatitude, Math.min(160, action.radiusMeters)]);
+  await auditCorrection(client, session, "save_place", item.segmentId, { rematchedCount: others.rows.length });
+  return { ok: true, action: action.action, status: "open" as const, placeId: place.id, rematchedCount: others.rows.length };
 }
 
 async function splitReview(
