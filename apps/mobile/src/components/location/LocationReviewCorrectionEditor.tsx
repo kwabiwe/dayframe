@@ -1,4 +1,4 @@
-import { formatDuration } from "@dayframe/shared";
+import { formatClockTime, formatClockValue, formatDuration, type ClockFormat } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -67,6 +67,7 @@ import {
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { TimeWheelPanel } from "../TimeWheelPanel";
+import { useClockFormat } from "../../lib/clockFormat";
 import { playHaptic } from "../../lib/haptics";
 import { timeWheelAccessibilityStep } from "../../lib/timeWheel";
 import { DayframeIcon } from "../icons/DayframeIcon";
@@ -120,6 +121,7 @@ export function LocationReviewCorrectionEditor({
   const { fontScale } = useWindowDimensions();
   const reduceMotion = useReduceMotionPreference();
   const { styles, theme } = useMobileTheme();
+  const clockFormat = useClockFormat();
   const editorStyles = useMemo(() => createEditorStyles(theme), [theme]);
   const provider = useMemo(() => createNativePlaceSearchProvider(), []);
   const nearbyProvider = useMemo(() => createNativeNearbyPointOfInterestProvider(), []);
@@ -139,7 +141,7 @@ export function LocationReviewCorrectionEditor({
   const stopsHeading = evidence.segment.kind === "commute" ? tripStopsHeading(evidence.stops, evidence.segment.timeAway) : null;
   // Formatted on every render, like the trip's own time range, so a locale or
   // time-zone change never leaves a stop outside its trip.
-  const stopRows = tripStopRows(evidence.stops, formatTime);
+  const stopRows = tripStopRows(evidence.stops, (value) => formatTime(value, clockFormat));
   const stopAt = useMemo(
     () => evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null,
     [evidence.segment.stoppedAt]
@@ -772,7 +774,7 @@ export function LocationReviewCorrectionEditor({
           {/* Blocks 5e: one heading (the screen title says "Location evidence"), on the canvas. */}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.hero}>
             <Text {...mobileTextProps("screenHeading")} accessibilityRole="header" style={editorStyles.heroTitle}>{locationActivityLabel(evidence)}</Text>
-            <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence)}</Text>
+            <Text {...mobileTextProps("metadata")} style={styles.reviewMetaLine}>{formatEvidenceTimeRange(evidence, clockFormat)}</Text>
             {stopsHeading ? (
               // Refreshed evidence can add or remove stops after the screen
               // settles: they enter, leave and reflow with the screen's local motion.
@@ -1094,7 +1096,7 @@ export function LocationReviewCorrectionEditor({
                     accessibilityHint={timeWheel?.target === "start"
                       ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
                       : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
-                    accessibilityValue={{ text: startTimeText || "No time" }}
+                    accessibilityValue={{ text: startTimeText ? formatClockValue(startTimeText, clockFormat) : "No time" }}
                                         disabled={saving}
                     onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("start", event.nativeEvent.actionName)}
                     onPress={() => openTimeWheel("start")}
@@ -1106,7 +1108,7 @@ export function LocationReviewCorrectionEditor({
                     testID="location-review-start-time"
                   >
                     <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
-                      {startTimeText || "--:--"}
+                      {startTimeText ? formatClockValue(startTimeText, clockFormat) : "--:--"}
                     </Text>
                   </Pressable>
                 </View>
@@ -1121,7 +1123,7 @@ export function LocationReviewCorrectionEditor({
                       accessibilityHint={timeWheel?.target === "end"
                       ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
                       : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
-                    accessibilityValue={{ text: stopTimeText || "No time" }}
+                    accessibilityValue={{ text: stopTimeText ? formatClockValue(stopTimeText, clockFormat) : "No time" }}
                                             disabled={saving}
                       onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("end", event.nativeEvent.actionName)}
                       onPress={() => openTimeWheel("end")}
@@ -1133,7 +1135,7 @@ export function LocationReviewCorrectionEditor({
                       testID="location-review-end-time"
                     >
                       <Text {...mobileTextProps("input")} numberOfLines={1} style={[editorStyles.timeInput, editorStyles.timeValue]}>
-                        {stopTimeText || "--:--"}
+                        {stopTimeText ? formatClockValue(stopTimeText, clockFormat) : "--:--"}
                       </Text>
                     </Pressable>
                   ) : (
@@ -1159,6 +1161,7 @@ export function LocationReviewCorrectionEditor({
                 <TimeWheelPanel
                   key={`location-time-wheel-${timeWheel.presentationId}`}
                   model={{
+                    clockFormat,
                     colorScheme: theme.mode === "dark" ? "dark" : "light",
                     maximumMs: null,
                     minimumMs: null,
@@ -1253,7 +1256,7 @@ export function LocationReviewCorrectionEditor({
                   onPress={() => setSelectedSplitAt(split.at)}
                   subtitle="Makes two moments to review"
                   theme={theme}
-                  title={`Split near ${formatTime(split.at)}`}
+                  title={`Split near ${formatTime(split.at, clockFormat)}`}
                 />
                 </Reanimated.View>
               ))}
@@ -1266,7 +1269,7 @@ export function LocationReviewCorrectionEditor({
                   <SettingsBlockRow
                     control={
                       <SettingsPillButton
-                        accessibilityLabel={`Confirm split near ${formatTime(selectedSplitAt)}`}
+                        accessibilityLabel={`Confirm split near ${formatTime(selectedSplitAt, clockFormat)}`}
                         disabled={saving}
                         label="Confirm split"
                         onPress={() => void onResolve(
@@ -1276,9 +1279,9 @@ export function LocationReviewCorrectionEditor({
                         theme={theme}
                       />
                     }
-                    subtitle={`After: ${formatTime(selectedSplitAt)}–${evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing"}`}
+                    subtitle={`After: ${formatTime(selectedSplitAt, clockFormat)}–${evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt, clockFormat) : "ongoing"}`}
                     theme={theme}
-                    title={`Before: ${formatTime(evidence.segment.startedAt)}–${formatTime(selectedSplitAt)}`}
+                    title={`Before: ${formatTime(evidence.segment.startedAt, clockFormat)}–${formatTime(selectedSplitAt, clockFormat)}`}
                   />
                 </Reanimated.View>
               ) : null}
@@ -1520,12 +1523,12 @@ function locationActivityLabel(evidence: LocationReviewEvidenceDto) {
   return mode ? `Commute · ${mode}` : "Commute";
 }
 
-function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
+function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto, clockFormat: ClockFormat) {
   const startedAt = new Date(evidence.segment.startedAt);
   const stoppedAt = evidence.segment.stoppedAt ? new Date(evidence.segment.stoppedAt) : null;
   const date = formatLocaleDate(startedAt, { day: "numeric", month: "short" });
-  const start = formatTime(evidence.segment.startedAt);
-  const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt) : "ongoing";
+  const start = formatTime(evidence.segment.startedAt, clockFormat);
+  const stop = stoppedAt && evidence.segment.stoppedAt ? formatTime(evidence.segment.stoppedAt, clockFormat) : "ongoing";
   const durationSeconds = stoppedAt ? Math.max(0, (stoppedAt.getTime() - startedAt.getTime()) / 1000) : null;
   const approximateArrival = evidence.segment.approximateArrival;
   const prefix = approximateArrival ? "Approximate arrival · " : "";
@@ -1533,8 +1536,9 @@ function formatEvidenceTimeRange(evidence: LocationReviewEvidenceDto) {
   return `${prefix}${date} · ${start}–${stop}${duration}`;
 }
 
-function formatTime(value: string) {
-  return formatLocaleDate(new Date(value), { hour: "2-digit", minute: "2-digit" });
+/** A clock time in this phone's 12/24-hour format (PRD D18). */
+function formatTime(value: string, clockFormat: ClockFormat) {
+  return formatClockTime(value, clockFormat);
 }
 
 function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {

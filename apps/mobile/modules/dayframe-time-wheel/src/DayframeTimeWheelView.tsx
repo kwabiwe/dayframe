@@ -4,8 +4,8 @@ import type { NativeSyntheticEvent, ViewProps } from "react-native";
 
 /** What React shows in the wheel. React owns the draft; the wheel reports the user's spins. */
 export type DayframeTimeWheelModel = {
-  /** "12h" adds an AM/PM column (PRD D18); without it the wheel is 24-hour. */
-  clockFormat?: "12h" | "24h";
+  /** "12h" adds an AM/PM column (PRD D18). */
+  clockFormat: "12h" | "24h";
   colorScheme: "light" | "dark";
   /** Latest choosable instant, inclusive (a running start can't pass now). */
   maximumMs?: number | null;
