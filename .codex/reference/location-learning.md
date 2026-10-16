@@ -86,10 +86,11 @@ Temporal invariants:
   stay when the trip returns there), or, for a sign observed as it happened
   (an entry, or a fix that is not moving) or one that
   arrived first, when it then moved away, or, for a sign observed as it
-  happened, when the accurate readings before it is next back reach
-  `commuteSamePlaceMinimumExcursionMeters` (a quick loop far away is a real
-  excursion). Back within three minutes without moving away or going that
-  far, it is the return, never the departure: with two overlapping
+  happened, when the accurate readings before it is next back reach 100 m
+  beyond the place's radius (a quick loop out and back is a real excursion,
+  not a return; Codex reproduced 300–700 m loops). Back within three minutes
+  without moving away or going that far, it is the return, never the
+  departure: with two overlapping
   circles of one home, the car crossed the new circle and entered the old one
   14 s before parking, with readings nearer the new pin in between, and that
   entry used to start a 14-second "journey" (location v3 bug 11, staging

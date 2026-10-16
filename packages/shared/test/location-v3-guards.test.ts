@@ -80,6 +80,49 @@ function overlappingHomes() {
 }
 
 describe("location v3 engine guards", () => {
+  // Codex r1/r2 on #451: Home, a walk out from 08:20, a sign at Home at 08:45 (its entry, or a broad still
+  // fix), then a three-minute loop at a constant distance R and back at 08:48. The loop is its own
+  // excursion; it must never borrow the 08:20 walk to qualify as one automatic journey.
+  const quickLoop = (radius: number, sign: "entry" | "still") => {
+    const base = Date.parse("2026-03-09T08:00:00Z");
+    const t = (clock: string) => new Date(base + (Number(clock.slice(0, 2)) - 8) * 3_600_000 + Number(clock.slice(3, 5)) * 60_000 +
+      Number(clock.slice(6) || 0) * 1_000).toISOString();
+    const point = (id: string, clock: string, east: number, north: number, accuracy: number, speed: number): LocationEvidence => ({
+      clientEvidenceId: id, deviceId: DEVICE, algorithmVersion: config.algorithmVersion, kind: "standard_location",
+      occurredAt: t(clock), sourceTimestamp: t(clock), receivedAt: t(clock), timeZone: "UTC", endedAt: null,
+      latitude: deg(north), longitude: deg(east), horizontalAccuracyMeters: accuracy, speedMetersPerSecond: speed,
+      savedPlaceId: null, isSimulated: false, metadata: {}
+    });
+    const callback = (id: string, clock: string, kind: "geofence_enter" | "geofence_exit"): LocationEvidence => ({
+      ...point(id, clock, 0, 0, 0, 0), kind, latitude: null, longitude: null, horizontalAccuracyMeters: null,
+      speedMetersPerSecond: null, savedPlaceId: OLD_HOME
+    });
+    const evidence = [
+      point("h0", "08:00", 0, 0, 4, 0), point("h1", "08:10", 0, 0, 4, 0), point("h2", "08:18", 0, 0, 4, 0),
+      callback("exit", "08:20", "geofence_exit"),
+      point("w0", "08:25", 0, 500, 4, 1.35), point("w1", "08:30", 0, 900, 4, 1.35), point("w2", "08:35", 0, 800, 4, 1.35),
+      sign === "entry" ? callback("sign", "08:45", "geofence_enter") : point("sign", "08:45", 0, 0, 100, 0),
+      point("l0", "08:45:24", 0, radius, 4, 30), point("l1", "08:46:03", radius, 0, 4, 30),
+      point("l2", "08:46:42", 0, -radius, 4, 30), point("l3", "08:47:21", -radius, 0, 4, 30),
+      callback("back", "08:48", "geofence_enter"),
+      point("b0", "08:48:30", 0, 0, 4, 0), point("b1", "08:58:30", 0, 0, 4, 0), point("b2", "09:08:30", 0, 0, 4, 0)
+    ];
+    const segments = runLocationEngine({
+      priorState: { algorithmVersion: config.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null },
+      config, processingAt: "2026-03-09T11:00:00.000Z", acceptedLearnedPlaces: [], evidence,
+      savedPlaces: [{ id: OLD_HOME, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: true }]
+    }).segmentUpserts;
+    return { journeys: segments.filter((segment): segment is CommuteSegment => segment.kind === "commute"), start: t("08:40") };
+  };
+
+  it.each([[700, "entry"], [640, "entry"], [640, "still"], [300, "entry"]] as const)(
+    "bug 11 guard: a sign at the place followed by a loop %i m out is never the return (%s)", (radius, sign) => {
+      const { journeys, start } = quickLoop(radius, sign);
+      // No journey from the 08:20 walk across the 08:45 sign, and nothing here is automatic.
+      expect(journeys.filter((journey) => journey.startedAt < start && journey.stoppedAt > start)
+        .filter((journey) => assessAutomaticLocation("v2_enabled", journey).action === "auto_confirm")).toEqual([]);
+    });
+
   it("bug 11: a return-side entry into an overlapping old home circle is never the departure", () => {
     const { evidence, places, parkedAt } = overlappingHomes();
     const segments = engine(evidence, places, parkedAt + 120);

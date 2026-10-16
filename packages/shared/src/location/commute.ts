@@ -293,13 +293,12 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       // iOS has dated arrival Visits up to 157 s before the car stopped, with
       // the approach continuing after. The same holds for a sign observed as it
       // happened (an entry, a still fix): back at the place within three minutes
-      // without moving away or going the excursion minimum away
-      // (`commuteSamePlaceMinimumExcursionMeters`) before it, it is the
-      // return, never the departure. Two overlapping circles of one home put
-      // the old circle's entry 14 s before parking, after the car crossed the
-      // new one, with readings within 100 m in between (location v3 bug 11);
-      // a quick loop 700 m out and back after an entry is a real excursion
-      // (Codex r1 on #451).
+      // without moving away or reaching `LEAVING_MARGIN_METRES` beyond the
+      // place's radius before it, it is the return, never the departure. Two
+      // overlapping circles of one home put the old circle's entry 14 s before
+      // parking, after the car crossed the new one, with readings within 100 m
+      // in between (location v3 bug 11); a quick loop 300–700 m out and back
+      // after an entry is a real excursion (Codex r1/r2 on #451).
       const nextAway = nextAwayMs.get(item)!;
       const stayedBefore = Number.isFinite(nextAway) && nextAway - atMs >= config.savedPlaceMinimumDwellMs;
       const arrivedFirst = arrival.lastAway == null || atMs - arrival.lastAway.atMs > EARLY_DATED_VISIT_MAXIMUM_MS ||
@@ -309,7 +308,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
         firstAfter - arrival.lastAway.metres >= LEAVING_MARGIN_METRES;
       const observedThere = kind === "geofence_enter" || kind !== "visit" && !moving(item);
       const backSoon = backAfter(item, atMs) - atMs <= EARLY_DATED_VISIT_MAXIMUM_MS;
-      const wentFar = farthestAwayAfter.get(item)! >= config.commuteSamePlaceMinimumExcursionMeters;
+      const wentFar = farthestAwayAfter.get(item)! >= (stay.radiusMeters ?? config.unknownStayBaseRadiusMeters) + LEAVING_MARGIN_METRES;
       const departs = Number.isFinite(nextAway) &&
         (!backSoon || (observedThere || arrivedFirst) && movesAway || observedThere && wentFar);
       if (inGap && (!seenAway || stayedBefore || departs)) latest = item;
