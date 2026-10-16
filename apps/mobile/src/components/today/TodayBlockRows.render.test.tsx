@@ -268,14 +268,18 @@ describe("TodayBlockRows", () => {
     const { tree, props } = render([group(entry("a", at(9), at(10)))], { theme: light });
     const surface = () => tree.root.findAll((node) => node.props.testID === "today-block-surface-a")[0];
     const background = () => [surface().props.style].flat(Infinity).find((style: any) => style?.backgroundColor)?.backgroundColor;
+    const layerBackground = () => {
+      const layer = surface().findAll((node) => node.props.pointerEvents === "none")[0];
+      return [layer.props.style].flat(Infinity).find((style: any) => style?.backgroundColor)?.backgroundColor;
+    };
     expect(background()).toBe("#FFFFFF");
+    expect(layerBackground()).toBe("#EEF1F5");
     // The system turns dark while the app is open (or in the background): the next render repaints it.
     act(() => {
       tree.update(<TodayBlockRows {...(props as any)} theme={theme} />);
     });
     expect(background()).toBe("#151B26");
     // The highlight is a surfaceMuted layer whose opacity alone animates.
-    const layer = surface().findAll((node) => node.props.pointerEvents === "none")[0];
-    expect([layer.props.style].flat(Infinity).find((style: any) => style?.backgroundColor)?.backgroundColor).toBe("#202838");
+    expect(layerBackground()).toBe("#202838");
   });
 });
