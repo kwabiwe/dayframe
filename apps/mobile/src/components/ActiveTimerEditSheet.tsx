@@ -2236,9 +2236,10 @@ export function ActiveTimerEditSheet({
     applyCardTime(wheel.target, change.valueMs);
   }
 
-  function stepCardTime(target: "start" | "end", direction: 1 | -1) {
+  // VoiceOver: a swipe moves 5 minutes, "Plus 1 minute" / "Minus 1 minute" one (owner, 16 Oct 2026).
+  function stepCardTime(target: "start" | "end", direction: 1 | -1, minutes: 1 | 5 = 5) {
     if (busy) return;
-    const next = timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) });
+    const next = timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) }, minutes);
     if (next === null) return;
     applyCardTime(target, next);
     bumpTimeWheelRevision();
@@ -2421,6 +2422,8 @@ export function ActiveTimerEditSheet({
   function handleTimeCardAccessibilityAction(target: "start" | "end", actionName: string) {
     if (actionName === "increment") stepCardTime(target, 1);
     else if (actionName === "decrement") stepCardTime(target, -1);
+    else if (actionName === "plusMinute") stepCardTime(target, 1, 1);
+    else if (actionName === "minusMinute") stepCardTime(target, -1, 1);
     else if (actionName === "activate") openTimeWheel(target);
     else if (actionName === "changeDate") {
       if (target === "end") openEndPicker();
@@ -2929,8 +2932,8 @@ export function ActiveTimerEditSheet({
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "start" }}
                           accessibilityHint={timeWheel?.target === "start"
-                            ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
-                            : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
+                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
@@ -3005,8 +3008,8 @@ export function ActiveTimerEditSheet({
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "end" }}
                           accessibilityHint={timeWheel?.target === "end"
-                            ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
-                            : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
+                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${stoppedTimeText || "No time"}, ${formatPickerDate(displayedEndAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
@@ -3418,11 +3421,16 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-/** VoiceOver's time card (A11b): swipe up/down moves one minute; activate opens or closes the wheel. */
+/**
+ * VoiceOver's time card (A11b): swipe up/down moves 5 minutes, the Plus 1 minute / Minus 1 minute
+ * actions one (owner, 16 Oct 2026); activate opens or closes the wheel.
+ */
 const TIME_CARD_ACCESSIBILITY_ACTIONS = [
   { name: "increment" },
   { name: "decrement" },
   { name: "activate" },
+  { name: "plusMinute", label: "Plus 1 minute" },
+  { name: "minusMinute", label: "Minus 1 minute" },
   { name: "changeDate", label: "Change date" }
 ] as const;
 /** The inline wheel's height when the dial's room isn't measured at the current layout (the first

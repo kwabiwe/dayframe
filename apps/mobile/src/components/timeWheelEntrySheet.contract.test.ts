@@ -52,14 +52,19 @@ describe("entry sheet time wheel (A11b)", () => {
   it("gives VoiceOver adjustable cards that open and close the wheel, with Change date (owner, 16 Oct 2026)", () => {
     expect((sheet.match(/accessibilityRole="adjustable"/g) ?? []).length).toBe(2);
     expect(sheet).toContain('{ name: "changeDate", label: "Change date" }');
+    // Swipes stay at 5 minutes; exact minutes through the Plus / Minus 1 minute actions (owner, 16 Oct 2026).
+    expect(sheet).toContain('{ name: "plusMinute", label: "Plus 1 minute" }');
+    expect(sheet).toContain('{ name: "minusMinute", label: "Minus 1 minute" }');
+    expect(sheet).toContain('else if (actionName === "plusMinute") stepCardTime(target, 1, 1);');
+    expect(sheet).toContain('else if (actionName === "minusMinute") stepCardTime(target, -1, 1);');
     expect(sheet).not.toContain('name: "typeTime"');
     // Activating the card opens the wheel, or closes it when it is this card's; the hint says which.
     expect(sheet).toContain('else if (actionName === "activate") openTimeWheel(target);');
-    expect(sheet).toContain('"Swipe up or down to adjust by one minute. Double-tap to close the time wheel."');
-    expect(sheet).toContain('"Swipe up or down to adjust by one minute. Double-tap to open the time wheel."');
+    expect(sheet).toContain('"Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."');
+    expect(sheet).toContain('"Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."');
     expect(sheet).toContain("expanded: timeWheel?.target === \"start\"");
     expect(sheet).not.toContain("screenReaderEnabled");
-    expect(sheet).toContain("timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) })");
+    expect(sheet).toContain("timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) }, minutes)");
     expect(swift).toContain("picker.accessibilityElementsHidden = true");
   });
 

@@ -429,9 +429,10 @@ export function LocationReviewCorrectionEditor({
     applyFieldTime(wheel.target, change.valueMs);
   }
 
-  function stepFieldTime(target: "start" | "end", direction: 1 | -1) {
+  // VoiceOver: a swipe moves 5 minutes, "Plus 1 minute" / "Minus 1 minute" one (owner, 16 Oct 2026).
+  function stepFieldTime(target: "start" | "end", direction: 1 | -1, minutes: 1 | 5 = 5) {
     if (saving) return;
-    const next = timeWheelAccessibilityStep(fieldTimeMs(target), direction);
+    const next = timeWheelAccessibilityStep(fieldTimeMs(target), direction, {}, minutes);
     if (next === null) return;
     applyFieldTime(target, next);
     bumpTimeWheelRevision();
@@ -440,6 +441,8 @@ export function LocationReviewCorrectionEditor({
   function handleTimeFieldAccessibilityAction(target: "start" | "end", actionName: string) {
     if (actionName === "increment") stepFieldTime(target, 1);
     else if (actionName === "decrement") stepFieldTime(target, -1);
+    else if (actionName === "plusMinute") stepFieldTime(target, 1, 1);
+    else if (actionName === "minusMinute") stepFieldTime(target, -1, 1);
     else if (actionName === "activate") openTimeWheel(target);
   }
 
@@ -1089,8 +1092,8 @@ export function LocationReviewCorrectionEditor({
                     accessibilityRole="adjustable"
                     accessibilityState={{ disabled: saving, expanded: timeWheel?.target === "start" }}
                     accessibilityHint={timeWheel?.target === "start"
-                      ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
-                      : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
+                      ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                      : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                     accessibilityValue={{ text: startTimeText || "No time" }}
                                         disabled={saving}
                     onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("start", event.nativeEvent.actionName)}
@@ -1116,8 +1119,8 @@ export function LocationReviewCorrectionEditor({
                       accessibilityRole="adjustable"
                       accessibilityState={{ disabled: saving, expanded: timeWheel?.target === "end" }}
                       accessibilityHint={timeWheel?.target === "end"
-                      ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
-                      : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
+                      ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                      : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                     accessibilityValue={{ text: stopTimeText || "No time" }}
                                             disabled={saving}
                       onAccessibilityAction={(event) => handleTimeFieldAccessibilityAction("end", event.nativeEvent.actionName)}
@@ -1649,11 +1652,16 @@ function createEditorStyles(theme: MobileTheme) {
   });
 }
 
-/** VoiceOver's time field (A11b): swipe up/down moves one minute; activate opens or closes the wheel. */
+/**
+ * VoiceOver's time field (A11b): swipe up/down moves 5 minutes, the Plus 1 minute / Minus 1 minute
+ * actions one (owner, 16 Oct 2026); activate opens or closes the wheel.
+ */
 const TIME_FIELD_ACCESSIBILITY_ACTIONS = [
   { name: "increment" },
   { name: "decrement" },
-  { name: "activate" }
+  { name: "activate" },
+  { name: "plusMinute", label: "Plus 1 minute" },
+  { name: "minusMinute", label: "Minus 1 minute" }
 ] as const;
 
 /** `color` at `alpha` over the opaque `under`, as one opaque colour (both #RRGGBB). */

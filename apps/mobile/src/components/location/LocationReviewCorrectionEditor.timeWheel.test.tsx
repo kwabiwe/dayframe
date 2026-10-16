@@ -247,14 +247,19 @@ describe("Location evidence time wheel (owner, 16 Oct 2026)", () => {
   it("lets VoiceOver open and close the wheel by activating the field, with a hint that says which", async () => {
     await render(stay({ matched: true }));
     expect(field("Start").props.accessibilityRole).toBe("adjustable");
-    expect(field("Start").props.accessibilityActions.map((action: { name: string }) => action.name)).toEqual(["increment", "decrement", "activate"]);
+    expect(field("Start").props.accessibilityActions.map((action: { name: string }) => action.name)).toEqual(["increment", "decrement", "activate", "plusMinute", "minusMinute"]);
     expect(field("Start").props.accessibilityHint).toContain("Double-tap to open the time wheel.");
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "activate" } }); });
     expect(await wheelShown()).not.toBeNull();
     expect(field("Start").props.accessibilityHint).toContain("Double-tap to close the time wheel.");
-    // Swiping still adjusts the field one minute at a time, and the open wheel follows.
+    // A swipe moves 5 minutes; Plus / Minus 1 minute reach any minute; the open wheel follows.
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
-    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:01:00Z"));
+    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:05:00Z"));
+    await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "plusMinute" } }); });
+    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:06:00Z"));
+    await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "minusMinute" } }); });
+    await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "minusMinute" } }); });
+    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:04:00Z"));
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "activate" } }); });
     expect(await wheelShown()).toBeNull();
   });

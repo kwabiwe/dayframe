@@ -41,9 +41,11 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).not.toContain('name: "typeTime"');
     expect(editor).toContain('else if (actionName === "activate") openTimeWheel(target);');
     expect((editor.match(/Double-tap to close the time wheel\./g) ?? []).length).toBe(2);
-    expect((editor.match(/Swipe up or down to adjust by one minute\./g) ?? []).length).toBe(4);
+    expect((editor.match(/Swipe up or down to adjust by 5 minutes\./g) ?? []).length).toBe(4);
+    expect(editor).toContain('{ name: "plusMinute", label: "Plus 1 minute" }');
+    expect(editor).toContain('{ name: "minusMinute", label: "Minus 1 minute" }');
     expect(editor).not.toContain("screenReaderEnabled");
-    expect(editor).toContain("timeWheelAccessibilityStep(fieldTimeMs(target), direction)");
+    expect(editor).toContain("timeWheelAccessibilityStep(fieldTimeMs(target), direction, {}, minutes)");
   });
 
   it("closes the wheel when another field takes focus, a place changes, All activities opens or the screen loses focus", () => {

@@ -61,9 +61,8 @@ describe.sequential("Location evidence time wheel instants", () => {
       text = formatLocationReviewTimeInput(new Date(next));
       seen.push(text);
     }
-    // One minute per step (owner, 16 Oct 2026): the first drops the seconds.
-    expect(seen).toEqual(["09:32", "09:31", "09:30"]);
+    expect(seen).toEqual(["09:30", "09:25", "09:20"]);
     expect(parseLocationReviewWindow(windowDraft(startedAt, stoppedAt, { text, draftMs }, { text: "11:00" })).value?.startedAt)
-      .toBe("2026-10-14T08:30:00.000Z");
+      .toBe("2026-10-14T08:20:00.000Z");
   });
 });
