@@ -36,6 +36,7 @@ const {
   createEntity,
   deleteLearnedPlace,
   deletePlace,
+  PlaceDeleteBlockedError,
   deleteTimeEntry,
   deleteTimeEntries,
   ensureAutomaticLoggingCategories,
@@ -1400,15 +1401,75 @@ describe("place persistence", () => {
     );
   });
 
-  it("deletes places within the active workspace", async () => {
-    mocks.query.mockResolvedValueOnce({ rows: [{ id: placeId() }] });
+  it("deletes places within the active workspace, clearing both journey ends first in one transaction", async () => {
+    const client = {
+      query: vi.fn<(statement: string, values?: unknown[]) => Promise<{ rows: Array<{ id: string }> }>>(async (statement) => (
+        statement.startsWith("select id from places") || statement.startsWith("delete from places")
+          ? { rows: [{ id: placeId() }] }
+          : { rows: [] }
+      )),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
 
-    await deletePlace(placeId(), session);
+    await expect(deletePlace(placeId(), session)).resolves.toEqual({ id: placeId() });
 
-    expect(mocks.query).toHaveBeenCalledWith(
-      "delete from places where id = $1 and workspace_id = $2 returning id",
-      [placeId(), session.workspaceId]
-    );
+    const statements = client.query.mock.calls.map(([statement]) => String(statement).replace(/\s+/g, " ").trim());
+    expect(statements[0]).toBe("begin");
+    expect(statements[1]).toBe("select id from places where id = $1 and workspace_id = $2 for update");
+    // Both ends in one statement: SET NULL clears one column per update and the commute owner
+    // trigger rejects a round trip whose other end still names the deleted place.
+    expect(statements[2]).toContain("set from_place_id = case when from_place_id = $1 then null else from_place_id end,");
+    expect(statements[2]).toContain("to_place_id = case when to_place_id = $1 then null else to_place_id end");
+    expect(statements[3]).toBe("delete from places where id = $1 and workspace_id = $2 returning id");
+    expect(statements[4]).toBe("commit");
+    for (const [, values] of client.query.mock.calls.slice(1, 4)) expect(values).toEqual([placeId(), session.workspaceId]);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("returns null without touching journeys when the place is not in the workspace", async () => {
+    const client = {
+      query: vi.fn<(statement: string, values?: unknown[]) => Promise<{ rows: never[] }>>(async () => ({ rows: [] })),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).resolves.toBeNull();
+
+    expect(client.query.mock.calls.map(([statement]) => statement)).toEqual([
+      "begin", "select id from places where id = $1 and workspace_id = $2 for update", "rollback"
+    ]);
+  });
+
+  it("turns a database refusal into PlaceDeleteBlockedError and rolls back", async () => {
+    const refusal = Object.assign(new Error("Commute origin place must belong to its workspace"), { code: "P0001" });
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.startsWith("select id from places")) return { rows: [{ id: placeId() }] };
+        if (statement.startsWith("delete from places")) throw refusal;
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).rejects.toBeInstanceOf(PlaceDeleteBlockedError);
+    expect(client.query).toHaveBeenLastCalledWith("rollback");
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("keeps a lost connection a server error", async () => {
+    const lost = Object.assign(new Error("Connection terminated"), { code: "57P01" });
+    const client = {
+      query: vi.fn(async (statement: string) => {
+        if (statement.startsWith("select id from places")) throw lost;
+        return { rows: [] };
+      }),
+      release: vi.fn()
+    };
+    mocks.pool.connect.mockResolvedValueOnce(client);
+
+    await expect(deletePlace(placeId(), session)).rejects.toBe(lost);
   });
 });
 

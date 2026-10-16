@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MobileBootstrap, QueuedEvent } from "./api";
+import { friendlyMobileErrorMessage } from "./friendlyError";
 import {
   createOptimisticTimerStartReconciler,
   requireQueuedTimerStartRemoval,
@@ -2432,6 +2433,17 @@ describe("mobile API client", () => {
       "https://dayframe.test/api/places?id=30000000-0000-4000-8000-000000000001",
       expect.objectContaining({ method: "DELETE" })
     );
+  });
+
+  it("shows the server's sentence when a place delete is refused", async () => {
+    storeBoundSession("session-token");
+    const sentence = "This place couldn't be deleted because some of its location history couldn't be cleared. Nothing was changed.";
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(jsonResponse({ error: sentence, code: "place_delete_blocked" }, 409))));
+
+    const failure = await deletePlace("30000000-0000-4000-8000-000000000001").catch((error: unknown) => error);
+
+    // place-editor.tsx shows friendlyMobileErrorMessage(error, "Couldn't delete this place. Try again.").
+    expect(friendlyMobileErrorMessage(failure, "Couldn't delete this place. Try again.")).toBe(sentence);
   });
 
   it("deletes running time entries through the hosted API without queueing", async () => {

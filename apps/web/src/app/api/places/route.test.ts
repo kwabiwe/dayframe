@@ -24,7 +24,8 @@ vi.mock("@/lib/queries", () => ({
   getBootstrapData: mocks.getBootstrapData
 }));
 
-vi.mock("@/lib/event-service", () => ({
+vi.mock("@/lib/event-service", async (importOriginal) => ({
+  PlaceDeleteBlockedError: (await importOriginal<typeof import("@/lib/event-service")>()).PlaceDeleteBlockedError,
   createPlace: mocks.createPlace,
   createPlaceFromLearnedPlace: mocks.createPlaceFromLearnedPlace,
   updatePlace: mocks.updatePlace,
@@ -217,6 +218,19 @@ describe("/api/places", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.deletePlace).toHaveBeenCalledWith(placeId(), session);
+  });
+
+  it("answers a refused delete with 409 and a sentence the phone and web show", async () => {
+    const { PlaceDeleteBlockedError } = await import("@/lib/event-service");
+    mocks.deletePlace.mockRejectedValueOnce(new PlaceDeleteBlockedError(new Error("trigger")));
+
+    const response = await DELETE(new Request(`https://dayframe.test/api/places?id=${placeId()}`, { method: "DELETE" }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "This place couldn't be deleted because some of its location history couldn't be cleared. Nothing was changed.",
+      code: "place_delete_blocked"
+    });
   });
 });
 

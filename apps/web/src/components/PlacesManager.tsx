@@ -37,7 +37,11 @@ export function PlacesManager({
       const response = await clientFetch(`/api/places?id=${encodeURIComponent(place.id)}`, {
         method: "DELETE"
       });
-      if (!response.ok) throw new Error("Unable to delete this place.");
+      if (!response.ok) {
+        // The server's own sentence (a 409 says why the delete was refused) beats a generic line.
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Unable to delete this place.");
+      }
       setDeletingPlace(null);
       refresh("Place deleted.");
     } catch (error) {

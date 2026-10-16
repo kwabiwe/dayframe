@@ -2146,12 +2146,58 @@ export async function updatePlace(
   }
 }
 
+/** A place delete the database refused; nothing was changed. The route answers 409 with this sentence. */
+export class PlaceDeleteBlockedError extends Error {
+  readonly code = "place_delete_blocked";
+  constructor(cause: unknown) {
+    super("This place couldn't be deleted because some of its location history couldn't be cleared. Nothing was changed.", { cause });
+  }
+}
+
+/**
+ * Deletes a saved place. Past blocks, stays and journeys keep their times and lose the link
+ * (every foreign key to places is ON DELETE SET NULL). Postgres applies SET NULL one column per
+ * update, and the commute owner trigger then checks the journey's other end: a round trip or
+ * "time away" row names this place at both ends, so clearing one end alone is rejected and the
+ * whole delete rolled back (location v3 bug 6). Both ends are cleared in one update first.
+ */
 export async function deletePlace(id: string, session: RequestSession = getDevSession()) {
-  const result = await query<{ id: string }>(
-    "delete from places where id = $1 and workspace_id = $2 returning id",
-    [id, session.workspaceId]
-  );
-  return result.rows[0] ?? null;
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // Locking the place first makes a replay that is writing a journey to it finish before the
+    // update below reads, and makes one that starts later wait and then fail its own FK check.
+    const place = await client.query<{ id: string }>(
+      "select id from places where id = $1 and workspace_id = $2 for update",
+      [id, session.workspaceId]
+    );
+    if (!place.rows[0]) {
+      await client.query("rollback");
+      return null;
+    }
+    await client.query(
+      `update commute_segments
+       set from_place_id = case when from_place_id = $1 then null else from_place_id end,
+           to_place_id = case when to_place_id = $1 then null else to_place_id end
+       where workspace_id = $2 and (from_place_id = $1 or to_place_id = $1)`,
+      [id, session.workspaceId]
+    );
+    const result = await client.query<{ id: string }>(
+      "delete from places where id = $1 and workspace_id = $2 returning id",
+      [id, session.workspaceId]
+    );
+    await client.query("commit");
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    // A trigger's raise (P0001) or an integrity violation (class 23) is the database refusing
+    // this delete; anything else (a lost connection) stays a server error.
+    const code = (error as { code?: unknown } | null)?.code;
+    if (typeof code === "string" && (code === "P0001" || code.startsWith("23"))) throw new PlaceDeleteBlockedError(error);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateTimeEntry(
