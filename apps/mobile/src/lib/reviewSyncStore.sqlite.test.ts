@@ -766,7 +766,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -774,7 +774,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
   });
@@ -783,9 +783,64 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_source_open_observation; pragma user_version=7;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_source_open_observation")).toBe(0);
     expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("upgrades a v8 database to v9 Save this place indexes without touching queued work", async () => {
+    await store.enqueueReviewMutation(mergeInput());
+    db.exec(`drop index review_mutation_item_active_idx; drop index review_mutation_save_place_idx;
+      create unique index review_mutation_item_active_idx on review_mutation_outbox(account_key, review_item_id); pragma user_version=8;`);
+    await reopen();
+    await store.loadCachedReviewBootstrap();
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    const indexes = db.prepare("select name, sql from sqlite_master where type = 'index' and name like 'review_mutation_%_idx'").all() as Array<{ name: string; sql: string }>;
+    expect(indexes.find((index) => index.name === "review_mutation_item_active_idx")?.sql).toContain("action_kind <> 'save_place'");
+    expect(indexes.find((index) => index.name === "review_mutation_save_place_idx")?.sql).toContain("action_kind = 'save_place'");
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(count("review_mutation_effects")).toBe(2);
+  });
+  it("keeps a card shown under the place being saved, then sends its own decision after the save (PRD D19)", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[0];
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(140),
+      mutation: { action: "save_place", name: "Synthetic pool", radiusMeters: 110, categoryId: null, suggestVisits: true, autoLog: false } });
+    expect(count("review_mutation_effects")).toBe(0);
+    const shown = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id);
+    expect(shown).toMatchObject({ title: "Synthetic pool", placeName: "Synthetic pool" });
+    // The card's own decision, made while the save waits: saved without the proposal it was shown with.
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(141),
+      mutation: { action: "confirm", expectedProposalHash: "a".repeat(64) }, presentation: { backendId: "dayframe-staging", scope: { kind: "today" } as never } });
+    const confirm = JSON.parse(String(db.prepare("select request_json from review_mutation_outbox where action_kind = 'confirm'").get()!.request_json));
+    expect(confirm.mutation).toEqual({ action: "confirm" });
+    expect(count("review_mutation_effects")).toBe(1);
+    mocks.fetch
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(150), rematchedCount: 0 }) })
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "confirm", status: "accepted", entryId: syntheticId(151) }) });
+    await store.synchroniseReviewMutations();
+    // One action per card per pass: the save went first and its row is gone; the decision waits.
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String((mocks.fetch.mock.calls[0][1] as RequestInit).body)).mutation.action).toBe("save_place");
+    expect(db.prepare("select action_kind, state from review_mutation_outbox").all()).toEqual([{ action_kind: "confirm", state: "pending" }]);
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String((mocks.fetch.mock.calls[1][1] as RequestInit).body)).mutation).toEqual({ action: "confirm" });
+  });
+  it("keeps one Save this place per card, retries it idempotently, and discards a rejected one without hiding the card", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[1];
+    const save = { action: "save_place" as const, name: "Synthetic pool", radiusMeters: 110, categoryId: null, suggestVisits: true, autoLog: false };
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(160), mutation: save });
+    await expect(store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(161), mutation: save })).resolves.toMatchObject({ idempotent: true });
+    await expect(store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(162), mutation: { ...save, name: "Other" } }))
+      .rejects.toThrow("already being saved");
+    mocks.fetch.mockResolvedValueOnce({ status: 422, json: async () => ({ ok: false, code: "invalid_action", message: "This visit already has a saved place." }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
+    const afterRejection = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id);
+    expect(afterRejection?.title).toBe(item.title);
+    expect(await store.discardReviewSyncIssue(syntheticId(160))).toBe(true);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.some((candidate) => candidate.id === item.id)).toBe(true);
   });
   it("rejects cross-account effects and clears sensitive intent on account replacement", async () => {
     await store.enqueueReviewMutation(mergeInput());

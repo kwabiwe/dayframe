@@ -71,6 +71,18 @@ export const REVIEW_PRESENTATION_V7_SQL = `
   );
 `;
 
+// v8→v9 "Save this place" (PRD D19, design §7): a `save_place` row keeps its card open, so it owns
+// no source effect and must not block the card's own later decision. The one-row-per-card index
+// becomes partial (every action but `save_place`), and a second partial index keeps one pending
+// `save_place` per card. Indexes only: no row, column or table changes.
+export const REVIEW_SAVE_PLACE_V9_SQL = `
+  drop index if exists review_mutation_item_active_idx;
+  create unique index review_mutation_item_active_idx
+    on review_mutation_outbox(account_key, review_item_id) where action_kind <> 'save_place';
+  create unique index if not exists review_mutation_save_place_idx
+    on review_mutation_outbox(account_key, review_item_id) where action_kind = 'save_place';
+`;
+
 // Additive v7→v8 open observations (investigation 2026-10-12). The latest server time at which a
 // presentation read listed a Review source open, per account, source and backend. Terminal
 // evidence is in force only while no strictly newer open observation exists, so the order in
