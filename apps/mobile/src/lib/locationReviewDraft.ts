@@ -154,19 +154,21 @@ export function locationReviewEndpointMs({
 export function buildLocationReviewEdit({
   categoryTouched,
   description,
+  descriptionTouched = false,
   selectedCategoryId,
   window
 }: {
   categoryTouched: boolean;
   description: string;
+  /** The person changed the name field: only then is the name "typed" (Codex r3 on #456). */
+  descriptionTouched?: boolean;
   selectedCategoryId: string | null;
   window: ParsedLocationReviewWindow;
 }): ReviewEntryEdit {
   const typed = description.trim();
   return {
     description: typed,
-    // The editor starts a Move (and an unnamed stay) empty, so any name here was typed (PRD D19).
-    ...(typed ? { descriptionTyped: true as const } : {}),
+    ...(typed && descriptionTouched ? { descriptionTyped: true as const } : {}),
     startedAt: window.startedAt,
     stoppedAt: window.stoppedAt,
     ...(categoryTouched ? { categoryId: selectedCategoryId } : {})

@@ -110,10 +110,18 @@ describe("Location Review editor draft", () => {
     });
   });
 
+  it("marks a name as typed only when the person changed the field (Codex r3 on #456)", () => {
+    const edit = (descriptionTouched: boolean) => buildLocationReviewEdit({ categoryTouched: false, description: "Peak Gym",
+      descriptionTouched, selectedCategoryId: null, window: { startedAt: window.baselineStartedAt, stoppedAt: window.baselineStoppedAt } });
+    expect(edit(false)).not.toHaveProperty("descriptionTyped");
+    expect(edit(true)).toMatchObject({ descriptionTyped: true });
+  });
+
   it("keeps an untouched category implicit so commute self-healing remains available", () => {
     expect(buildLocationReviewEdit({
       categoryTouched: false,
       description: " Train home ",
+      descriptionTouched: true,
       selectedCategoryId: null,
       window: {
         startedAt: window.baselineStartedAt,
