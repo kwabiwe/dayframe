@@ -244,6 +244,23 @@ describe("mobile review helpers", () => {
     });
   });
 
+  it("says why a visit at a Log automatically place came to Review (location v3 bug 8)", () => {
+    const reason = (semanticReason: string, eventType = "geofence_exit") => locationReviewReasonCopy(reviewItem({
+      eventSource: "location_learning", eventType, rawPayload: { semanticReason }
+    }));
+    expect(reason("auto_log_uncertain")).toBe("Not logged automatically · location was less certain than usual");
+    expect(reason("auto_log_overlap")).toBe("Not logged automatically · it overlaps a block");
+    expect(reason("auto_log_logged_before")).toBe("Not logged automatically · this visit was logged once before");
+    expect(reason("auto_log_offered_before")).toBe("Not logged automatically · it was offered in Review before");
+    expect(reason("auto_log_off")).toBe("Log automatically is off for this place");
+    // Never "automatic location logging is not enabled".
+    expect(reason("review_mode", "commute_detected")).toBe("Trips aren’t logged automatically yet");
+    expect(reason("review_mode")).toBe("Not logged automatically");
+    expect(reason("untrusted_place", "unknown_stay")).toBe("New place");
+    expect(reason("untrusted_place", "learned_place_visit")).toBe("Needs review · place isn’t saved");
+    expect(reason("ambiguous_place", "unknown_stay")).toBe("Needs review · near more than one saved place");
+  });
+
   it("explains why location suggestions still need Review", () => {
     const commute = reviewItem({
       eventSource: "location_learning",

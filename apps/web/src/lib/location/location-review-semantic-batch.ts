@@ -9,6 +9,7 @@ import type { RequestSession } from "../session";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
+import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import {
   AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
@@ -199,7 +200,9 @@ export async function emitReviewSemanticSegments(
     const overlapDecision = assessAutomaticOverlap({kind: segment.kind === "commute" ? "location_commute" : "location_stay",
       startedAt: segment.startedAt, stoppedAt: segment.stoppedAt!, placeId, clientEventId}, []);
     const overlapsConfirmedTime = !overlapDecision.allowed;
-    const semanticReason = overlapsConfirmedTime ? overlapDecision.reason : disposition.reason;
+    const semanticReason = overlapsConfirmedTime
+      ? overlapDecision.reason
+      : reviewModeSemanticReason(segment, trusted, autoLogged.fallback.get(clientEventId));
     const policyEvidence = {
       policyVersion: AUTOMATIC_LOCATION_POLICY_VERSION,
       confidenceTier: disposition.confidenceTier,
@@ -245,7 +248,7 @@ export async function emitReviewSemanticSegments(
     const eventType = segment.kind === "commute" ? "commute_detected" : segment.placeMatchKind === "learned"
       ? "learned_place_visit" : segment.placeMatchKind === "saved" ? "geofence_exit" : "unknown_stay";
     // Log automatically: confirmed now, never a Review card.
-    const autoLog = autoLogged.has(clientEventId);
+    const autoLog = autoLogged.logged.has(clientEventId);
     const payload: Record<string, unknown> = autoLog
       ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: "place_auto_log" }
       : rawPayload;
@@ -400,58 +403,86 @@ type SegmentContext = (segment: LocationSegment) => { trusted: Place | null; tit
  * automatically on, never offered in Review before (under any segment ID: no Review card for an
  * overlapping visit at that place), that passes the trusted-stay policy of PR #186
  * (confidence, continuity, five-minute boundaries; the same rule `v2_enabled` uses) and overlaps no
- * tracked time at all, a running timer included. Anything else stays a Review card. Stays under
- * five minutes never get here (`hasMeaningfulKnownPlaceWindow`). One bounded read per 250 stays.
+ * tracked time at all, a running timer included. Anything else stays a Review card, and `fallback`
+ * says why (location v3 bug 8), checked in this order: the policy, an overlapping block, a visit
+ * here logged before, offered in Review before. Stays under five minutes never get here
+ * (`hasMeaningfulKnownPlaceWindow`). One bounded read per 250 stays.
  */
 async function chooseAutoLoggedVisits(
   client: pg.PoolClient, session: RequestSession, eligible: SemanticCandidate[], context: SegmentContext,
   existing: ReadonlyMap<string, { reviewStatus: string }>, freshAgain: ReadonlySet<string>, orphans: AutoLogOrphan[]
 ) {
+  const logged = new Set<string>();
+  const fallback = new Map<string, AutoLogFallbackReason | ReturnType<typeof autoLogPolicyFallback>>();
   const candidates = eligible.filter(({ segment, clientEventId }) => {
     if (segment.kind !== "stay") return false;
     const { trusted } = context(segment);
     if (!trusted?.autoLog || trusted.loggingEnabled === false) return false;
-    // Decided once: a stay already offered in Review stays there.
-    if (existing.has(clientEventId) && !freshAgain.has(clientEventId)) return false;
-    return assessAutomaticLocation("v2_enabled", segment).action === "auto_confirm";
+    // Decided (logged, confirmed or skipped) and not offered again: its payload is kept as it is, so
+    // neither the decision nor a reason is needed, and replay spends no read on it (Codex r1 on #450).
+    const prior = existing.get(clientEventId);
+    if (prior && prior.reviewStatus !== "needs_review" && !freshAgain.has(clientEventId)) return false;
+    const policy = assessAutomaticLocation("v2_enabled", segment);
+    if (policy.action !== "auto_confirm") {
+      fallback.set(clientEventId, autoLogPolicyFallback(policy.reason));
+      return false;
+    }
+    return true;
   });
-  if (candidates.length === 0) return new Set<string>();
+  if (candidates.length === 0) return { logged, fallback };
   // A retired visit's own block is about to move or go: it never blocks its replacement.
   const orphanIds = orphans.map((orphan) => orphan.entryId);
-  const blocked = new Set<string>();
+  const blocked = new Map<string, { reason: "overlap" | "logged" | "offered" | null }>();
   for (const batch of chunks(candidates)) {
-    const result = await client.query<{ clientEventId: string }>(
-      `select r.client_event_id as "clientEventId"
-       from jsonb_to_recordset($3::jsonb) as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz)
-       where exists (
-         -- Any block not ignored, however long (a timer left running for days and then stopped) or still
-         -- running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started per visit.
-         select 1 from time_entries te
-         where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
-           and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
-           and not (te.id = any($4::uuid[])))
-         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
-         -- whatever became of that card (Codex r1 on #435).
-         or exists (
-         select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
-           and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at)
+    // One ordered CASE gives the first reason that holds, so each check runs at most once and only
+    // when the ones before it failed (Codex r2 on #450). A card already offered here skips the last
+    // check (it was offered, whatever that read says) but keeps the order before it, so an identical
+    // replay gives it the same reason.
+    const result = await client.query<{ clientEventId: string; reason: "overlap" | "logged" | "offered" | null }>(
+      `select r.client_event_id as "clientEventId", case
+         -- Any block not ignored, however long (a timer left running for days and then stopped) or
+         -- still running (Codex r2 on #435); a range scan of idx_time_entries_workspace_started.
+         when exists (
+           select 1 from time_entries te
+           where te.workspace_id = $1 and te.user_id = $2 and te.review_status <> 'ignored'
+             and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
+             and not (te.id = any($4::uuid[]))) then 'overlap'
          -- Another visit at the place already auto-logged and still a decision (its block deleted or
          -- edited; a retired one is no longer confirmed): never logged twice, even when the deletion
          -- landed while this replay ran (Codex r3 on #435).
-         or exists (
-         select 1 from activity_events ae
-         where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
-           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
-           and ae.client_event_id <> r.client_event_id
-           and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at)`,
+         when exists (
+           select 1 from activity_events ae
+           where ae.workspace_id = $1 and ae.user_id = $2 and ae.suggested_place_id = r.place_id
+             and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+             and ae.client_event_id <> r.client_event_id
+             and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) then 'logged'
+         when r.offered_here then 'offered'
+         -- Offered in Review before under another segment ID (its stay was replaced): stays a card
+         -- whatever became of that card (Codex r1 on #435).
+         when exists (
+           select 1 from review_items ri
+           where ri.workspace_id = $1 and ri.user_id = $2 and ri.suggested_place_id = r.place_id
+             and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) then 'offered'
+       end as reason
+       from jsonb_to_recordset($3::jsonb)
+         as r(client_event_id text, place_id uuid, started_at timestamptz, stopped_at timestamptz, offered_here boolean)`,
       [session.workspaceId, session.userId, JSON.stringify(batch.map(({ segment, clientEventId }) => ({
         client_event_id: clientEventId, place_id: context(segment).trusted?.id ?? null,
-        started_at: segment.startedAt, stopped_at: segment.stoppedAt
+        started_at: segment.startedAt, stopped_at: segment.stoppedAt,
+        offered_here: existing.has(clientEventId) && !freshAgain.has(clientEventId)
       }))), orphanIds]);
-    for (const row of result.rows) blocked.add(row.clientEventId);
+    for (const row of result.rows) blocked.set(row.clientEventId, row);
   }
-  return new Set(candidates.map((candidate) => candidate.clientEventId).filter((id) => !blocked.has(id)));
+  for (const { clientEventId } of candidates) {
+    // Decided once: a stay already offered in Review stays there (the read says "offered").
+    const found = blocked.get(clientEventId)?.reason ?? null;
+    const reason: AutoLogFallbackReason | null = found === "overlap" ? "auto_log_overlap"
+      : found === "logged" ? "auto_log_logged_before"
+        : found === "offered" ? "auto_log_offered_before" : null;
+    if (reason) fallback.set(clientEventId, reason);
+    else logged.add(clientEventId);
+  }
+  return { logged, fallback };
 }
 
 /**
