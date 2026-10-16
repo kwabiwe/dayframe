@@ -7,6 +7,7 @@ import {
   motionArrivalMs,
   motionDepartureMs,
   motionJourneyBlock,
+  motionShowsFasterThanWalking,
   motionTravelMode,
   speedTravelMode
 } from "./motionActivity";
@@ -1107,7 +1108,8 @@ export function deriveCommutes(
       const stopLowerBoundAt = to.startLowerBoundAt ?? to.startedAt;
       const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
       const travelMode = motionTravelMode(motion, beganMs, endedMs, config) ??
-        speedTravelMode(routeEvidence, config, { straightLineMeters: summary.straightLineDistanceMeters, durationMs: endedMs - beganMs });
+        speedTravelMode(routeEvidence, config, { straightLineMeters: summary.straightLineDistanceMeters, durationMs: endedMs - beganMs,
+          fasterMotion: motionShowsFasterThanWalking(motion, beganMs, endedMs) });
       const uncertainBoundary =
         summary.routeSampleCount < 2 ||
         summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||
