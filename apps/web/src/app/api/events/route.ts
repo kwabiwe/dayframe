@@ -7,6 +7,7 @@ import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-servic
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { reconcileHealthCoveredMoveCardsNow } from "@/lib/location/health-coverage";
 
 export async function POST(request: Request) {
   const deadlineAt = Date.now() + 8_000;
@@ -17,6 +18,10 @@ export async function POST(request: Request) {
     });
     const body = await request.json();
     const result = await processActivityEvent(body, session, { signal: request.signal, deadlineAt });
+    // Health walks win (PRD D19): a newly imported workout retires the location Move cards it covers.
+    if (body?.type === "health_workout_import" && !result.duplicate) {
+      await reconcileHealthCoveredMoveCardsNow(session, { deadlineAt, signal: request.signal, workout: importedWorkout(body) });
+    }
     scheduleLiveActivityNotification(session);
     // The phone schedules its evening Review reminder from this count.
     const reviewCount = await openReviewCountFor(session);
@@ -57,4 +62,17 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * The imported workout as ingestion keeps it: its sample, and its window with the same fallbacks
+ * (`occurredAt` for a missing start or stop; Codex r4 on #457).
+ */
+function importedWorkout(body: { occurredAt?: unknown; rawPayload?: Record<string, unknown> } | null) {
+  const text = (value: unknown) => typeof value === "string" && value.length > 0 ? value : null;
+  const occurredAt = text(body?.occurredAt);
+  const startedAt = text(body?.rawPayload?.startedAt) ?? occurredAt;
+  const stoppedAt = text(body?.rawPayload?.stoppedAt) ?? occurredAt;
+  if (!startedAt || !stoppedAt || !Number.isFinite(Date.parse(startedAt)) || !Number.isFinite(Date.parse(stoppedAt))) return null;
+  return { provider: text(body?.rawPayload?.provider), externalSampleId: text(body?.rawPayload?.externalSampleId), startedAt, stoppedAt };
 }

@@ -11,7 +11,12 @@ const reviewCountMock = vi.hoisted(() => vi.fn());
 const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   processActivityEvent: vi.fn(),
-  scheduleLiveActivityNotification: vi.fn()
+  scheduleLiveActivityNotification: vi.fn(),
+  reconcileHealthCoveredMoveCardsNow: vi.fn()
+}));
+
+vi.mock("@/lib/location/health-coverage", () => ({
+  reconcileHealthCoveredMoveCardsNow: mocks.reconcileHealthCoveredMoveCardsNow
 }));
 
 vi.mock("@/lib/review-count", () => ({
@@ -47,6 +52,31 @@ describe("POST /api/events", () => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.processActivityEvent.mockResolvedValue({ eventId: "event-1", candidate: { action: "create_review_item" } });
+  });
+
+  it("retires location Move cards a newly imported Health workout covers, never for a duplicate (PRD D19)", async () => {
+    const post = (body: object) => POST(new Request("https://dayframe.test/api/events", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }));
+    await post({ type: "health_workout_import", clientEventId: "workout-1" });
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session,
+      { deadlineAt: expect.any(Number), signal: expect.anything(), workout: null });
+    mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
+    await post({ type: "health_workout_import", clientEventId: "workout-2",
+      rawPayload: { externalSampleId: "sample-2", startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } });
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session, expect.objectContaining({
+      workout: { provider: null, externalSampleId: "sample-2", startedAt: "2026-10-16T12:00:00.000Z", stoppedAt: "2026-10-16T12:30:00.000Z" } }));
+    mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
+    // A missing stop falls back to occurredAt, as ingestion stores it (Codex r4 on #457).
+    await post({ type: "health_workout_import", clientEventId: "workout-3", occurredAt: "2026-10-16T13:00:00.000Z",
+      rawPayload: { provider: "healthkit", startedAt: "2026-10-16T12:40:00.000Z" } });
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session, expect.objectContaining({
+      workout: { provider: "healthkit", externalSampleId: null, startedAt: "2026-10-16T12:40:00.000Z", stoppedAt: "2026-10-16T13:00:00.000Z" } }));
+    mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
+    mocks.processActivityEvent.mockResolvedValueOnce({ eventId: "event-1", duplicate: true, candidate: { action: "create_review_item" } });
+    await post({ type: "health_workout_import", clientEventId: "workout-1" });
+    await post({ type: "timer_start", clientEventId: "start-1" });
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).not.toHaveBeenCalled();
   });
 
   it("processes an activity event for the resolved session", async () => {
