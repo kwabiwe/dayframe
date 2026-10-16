@@ -468,7 +468,7 @@ export function locationReviewReasonCopy(
     case "untrusted_commute_endpoints":
       return "Needs review · start or end place isn’t saved";
     case "untrusted_place":
-      return "Needs review · place isn’t saved";
+      return item.eventType === "unknown_stay" ? "New place" : "Needs review · place isn’t saved";
     case "short_journey_review_only":
       return "Needs review · short journeys aren’t added automatically";
     case "journey_contains_stop":
@@ -494,8 +494,20 @@ export function locationReviewReasonCopy(
       return "Needs review · time range is uncertain";
     case "insufficient_confidence":
       return "Needs review · confidence is below the automatic threshold";
+    // Log automatically fallbacks (location v3 bug 8): why a visit at a place with it on came here.
+    case "auto_log_uncertain":
+      return "Not logged automatically · location was less certain than usual";
+    case "auto_log_overlap":
+      return "Not logged automatically · it overlaps a block";
+    case "auto_log_logged_before":
+      return "Not logged automatically · this visit was logged once before";
+    case "auto_log_offered_before":
+      return "Not logged automatically · it was offered in Review before";
+    case "auto_log_off":
+      return "Log automatically is off for this place";
     case "review_mode":
-      return "Needs review · automatic location logging is not enabled";
+      // Journeys are never logged automatically in Review mode; an older visit card says only that.
+      return item.eventType === "commute_detected" ? "Trips aren’t logged automatically yet" : "Not logged automatically";
     case "segment_not_finalised":
       return "Needs review · location evidence is incomplete";
     case "confirmed_time_overlap":
