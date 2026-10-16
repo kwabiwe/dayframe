@@ -2146,12 +2146,98 @@ export async function updatePlace(
   }
 }
 
-export async function deletePlace(id: string, session: RequestSession = getDevSession()) {
-  const result = await query<{ id: string }>(
-    "delete from places where id = $1 and workspace_id = $2 returning id",
-    [id, session.workspaceId]
-  );
-  return result.rows[0] ?? null;
+/** A place delete the database refused; nothing was changed. The route answers 409 with this sentence. */
+export class PlaceDeleteBlockedError extends Error {
+  readonly code = "place_delete_blocked";
+  constructor(cause: unknown) {
+    super("This place couldn't be deleted because some of its location history couldn't be cleared. Nothing was changed.", { cause });
+  }
+}
+
+/** A lock the delete needs (usually location sync's) was held longer than it waits. The route answers 409. */
+export class PlaceDeleteBusyError extends Error {
+  readonly code = "place_delete_busy";
+  constructor(cause: unknown) {
+    super("This place is busy right now, so it wasn't deleted. Try again in a moment.", { cause });
+  }
+}
+
+const PLACE_DELETE_ATTEMPTS = 3;
+
+/**
+ * Deletes a saved place. Past blocks, stays and journeys keep their times and lose the link (the
+ * place's references are ON DELETE SET NULL; its geofence and match feedback rows cascade). Postgres
+ * applies SET NULL one column per update, and the commute owner trigger then checks the journey's
+ * other end: a round trip or "time away" row names this place at both ends, so clearing one end
+ * alone is rejected and the whole delete rolled back (location v3 bug 6). Both ends are cleared in
+ * one update first.
+ *
+ * Location writers (evidence ingest, replay, Review actions) take the per-user owner advisory lock
+ * and then lock stays before journeys; clearing journeys and then stays without it could deadlock
+ * with a replay (Codex r1 on #449). The delete takes the same owner lock for every user whose
+ * location history can name the place, in user-id order, before touching any row, waits at most
+ * `lockTimeoutMs` for each lock, and retries a transaction Postgres aborted as a deadlock or
+ * serialization failure. The wait limit applies to each lock it takes (Postgres `lock_timeout`), so
+ * a delete behind several busy locks can take longer in all.
+ */
+export async function deletePlace(
+  id: string,
+  session: RequestSession = getDevSession(),
+  options: { lockTimeoutMs?: number } = {}
+) {
+  const lockTimeoutMs = Math.max(1, Math.round(options.lockTimeoutMs ?? 10_000));
+  for (let attempt = 1; ; attempt += 1) {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(`set local lock_timeout = '${lockTimeoutMs}ms'`);
+      const place = await client.query<{ id: string }>(
+        "select id from places where id = $1 and workspace_id = $2",
+        [id, session.workspaceId]
+      );
+      if (!place.rows[0]) {
+        await client.query("rollback");
+        return null;
+      }
+      // Members, plus anyone whose stays or journeys still name the place (a former member).
+      const owners = await client.query<{ userId: string }>(
+        `select user_id::text as "userId" from workspace_members where workspace_id = $2
+         union select user_id::text from stay_segments where workspace_id = $2 and place_id = $1
+         union select user_id::text from commute_segments
+           where workspace_id = $2 and (from_place_id = $1 or to_place_id = $1)
+         order by 1`,
+        [id, session.workspaceId]
+      );
+      for (const { userId } of owners.rows) {
+        await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [session.workspaceId, userId]);
+      }
+      await client.query(
+        `update commute_segments
+         set from_place_id = case when from_place_id = $1 then null else from_place_id end,
+             to_place_id = case when to_place_id = $1 then null else to_place_id end
+         where workspace_id = $2 and (from_place_id = $1 or to_place_id = $1)`,
+        [id, session.workspaceId]
+      );
+      const result = await client.query<{ id: string }>(
+        "delete from places where id = $1 and workspace_id = $2 returning id",
+        [id, session.workspaceId]
+      );
+      await client.query("commit");
+      return result.rows[0] ?? null;
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      const code = (error as { code?: unknown } | null)?.code;
+      // A deadlock or serialization failure aborted the whole transaction: nothing was written.
+      if ((code === "40P01" || code === "40001") && attempt < PLACE_DELETE_ATTEMPTS) continue;
+      if (code === "55P03") throw new PlaceDeleteBusyError(error);
+      // A trigger's raise (P0001) or an integrity violation (class 23) is the database refusing
+      // this delete; anything else (a lost connection) stays a server error.
+      if (typeof code === "string" && (code === "P0001" || code.startsWith("23"))) throw new PlaceDeleteBlockedError(error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export async function updateTimeEntry(

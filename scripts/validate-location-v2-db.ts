@@ -12,7 +12,7 @@ import {
 } from "@dayframe/shared";
 import { pool } from "../apps/web/src/lib/db";
 import { ensureCommuteCategoryId } from "../apps/web/src/lib/automatic-category-service";
-import { processActivityEvent, updatePlace } from "../apps/web/src/lib/event-service";
+import { deletePlace, PlaceDeleteBusyError, processActivityEvent, updatePlace } from "../apps/web/src/lib/event-service";
 import {
   ingestLocationEvidence as storeLocationEvidence,
   replayRetainedLocationEvidence
@@ -1675,9 +1675,7 @@ async function validateMotionOnlyReviewRetirement() {
     "An enabled-mode motion-only drive lost its motion fields or was logged automatically.");
 }
 
-async function validateTimeAwayReview() {
-  await clearDerivedLocationState();
-  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+function timeAwayEvidence() {
   const home = LOCATION_ACCEPTANCE_PLACES[0];
   const point = (id: string, time: string, eastMetres: number, speed = 0): LocationEvidence => ({
     clientEvidenceId: id, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
@@ -1693,7 +1691,14 @@ async function validateTimeAwayReview() {
     point("away-back-0", "09:07:30", 230, 10), point("away-back-1", "09:07:40", 150, 10),
     ...["09:08:00", "09:20:00", "09:35:00", "09:50:00"].map((time, index) => point(`away-home-pm-${index}`, time, 0))
   ];
-  await ingestLocationEvidence(batch("db-time-away", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+  return evidence;
+}
+
+async function validateTimeAwayReview() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  await ingestLocationEvidence(batch("db-time-away", timeAwayEvidence(), "v2_review", "2026-06-01T07:00:00.000Z"), session);
   const reviews = await pool.query<{ id: string; title: string; suggestedCategoryId: string | null; reason: string | null }>(
     `select ri.id, ri.title, ri.suggested_category_id as "suggestedCategoryId", ae.raw_payload->>'qualificationReason' as reason
      from review_items ri join activity_events ae on ae.id = ri.event_id
@@ -1709,6 +1714,111 @@ async function validateTimeAwayReview() {
     [WORKSPACE_ID, USER_ID]);
   assert.deepEqual(entry.rows, [{ categoryId: null, description: `Time away from ${home.name}` }],
     "Confirmed time away became a Commute entry.");
+}
+
+/**
+ * Location v3 bug 6: a place with a same-place journey (time away, a round trip) could not be
+ * deleted. ON DELETE SET NULL clears one end per update and the commute owner trigger rejected the
+ * row whose other end still named the place, so the delete rolled back. deletePlace clears both
+ * ends first; history keeps its times and loses the link.
+ */
+async function validatePlaceDeleteWithSamePlaceJourneys() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const home = LOCATION_ACCEPTANCE_PLACES[0];
+  const homeRow = await pool.query("select * from places where id = $1 and workspace_id = $2", [home.id, WORKSPACE_ID]);
+  assert.equal(homeRow.rowCount, 1, "The delete fixture's place is missing.");
+  try {
+    await ingestLocationEvidence(batch("db-place-delete", timeAwayEvidence(), "v2_review", "2026-06-01T07:00:00.000Z"), session);
+    const [card] = (await pool.query<{ id: string }>(
+      `select ri.id from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'`, [WORKSPACE_ID, USER_ID])).rows;
+    assert(card, "The delete fixture produced no time-away card.");
+    await resolveLocationReviewAction(card.id, { action: "confirm" }, session);
+    const journeys = async () => (await pool.query<{ id: string; fromPlaceId: string | null; toPlaceId: string | null }>(
+      `select id, from_place_id as "fromPlaceId", to_place_id as "toPlaceId" from commute_segments
+       where workspace_id = $1 and user_id = $2 order by id`, [WORKSPACE_ID, USER_ID])).rows;
+    const before = await journeys();
+    assert(before.some((row) => row.fromPlaceId === home.id && row.toPlaceId === home.id),
+      "The delete fixture has no journey with the place at both ends.");
+    const staysAtPlace = Number((await pool.query<{ count: string }>(
+      "select count(*) from stay_segments where workspace_id = $1 and user_id = $2 and place_id = $3",
+      [WORKSPACE_ID, USER_ID, home.id])).rows[0].count);
+    assert(staysAtPlace > 0, "The delete fixture has no stays at the place.");
+    const entriesBefore = await count("time_entries");
+
+    // The root cause, kept visible: a plain delete is refused by the commute owner trigger.
+    await assert.rejects(
+      pool.query("delete from places where id = $1 and workspace_id = $2", [home.id, WORKSPACE_ID]),
+      /Commute (origin|destination) place must belong to its workspace/,
+      "A plain delete of a place with a same-place journey no longer hits the commute trigger; revisit deletePlace."
+    );
+
+    const otherWorkspace = { ...session, workspaceId: "30000000-0000-4000-8000-0000000000ff" };
+    assert.equal(await deletePlace(home.id, otherWorkspace), null, "Another workspace deleted this place.");
+    assert.deepEqual(await journeys(), before, "A refused cross-workspace delete changed journeys.");
+
+    // Two sessions (Codex r1 on #449): a replay holds the owner lock and a stay at the place, then
+    // locks a journey there. A delete that cleared journeys before stays without the owner lock
+    // deadlocked with it; now it waits for the replay and then succeeds.
+    const replay = await pool.connect();
+    let deleting: Promise<{ id: string } | null> | null = null;
+    try {
+      await replay.query("begin");
+      await replay.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [WORKSPACE_ID, USER_ID]);
+      await replay.query("select id from stay_segments where workspace_id = $1 and user_id = $2 and place_id = $3 for update",
+        [WORKSPACE_ID, USER_ID, home.id]);
+      // A delete that cannot get the lock within its timeout changes nothing and says so.
+      await assert.rejects(deletePlace(home.id, session, { lockTimeoutMs: 300 }), PlaceDeleteBusyError,
+        "A delete waiting past its lock timeout was not reported as busy.");
+      let settled = false;
+      deleting = deletePlace(home.id, session, { lockTimeoutMs: 20_000 });
+      deleting.then(() => { settled = true; }, () => { settled = true; });
+      // Longer than Postgres's default one-second deadlock_timeout.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      assert.equal(settled, false, "A place delete did not wait for a running replay's owner lock.");
+      // It waits on the owner advisory lock (Codex r2 on #449), not on a row, and has locked no journey yet.
+      const waiting = await replay.query<{ count: number }>(
+        `select count(*)::integer as count from pg_locks
+         where locktype = 'advisory' and not granted and pid <> pg_backend_pid()`);
+      assert.equal(waiting.rows[0].count, 1, "A place delete was not waiting on the location owner lock.");
+      const journeyLocks = await pool.query(
+        `select id from commute_segments where workspace_id = $1 and user_id = $2
+           and (from_place_id = $3 or to_place_id = $3) for update skip locked`, [WORKSPACE_ID, USER_ID, home.id]);
+      assert.equal(journeyLocks.rowCount, before.filter((row) => row.fromPlaceId === home.id || row.toPlaceId === home.id).length,
+        "A place delete locked journeys before it held the location owner lock.");
+      await replay.query(
+        `select id from commute_segments where workspace_id = $1 and user_id = $2
+           and (from_place_id = $3 or to_place_id = $3) order by id for update`, [WORKSPACE_ID, USER_ID, home.id]);
+      await replay.query("commit");
+    } catch (error) {
+      await replay.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      replay.release();
+    }
+    assert.deepEqual(await deleting, { id: home.id }, "A place with a same-place journey was not deleted after a replay.");
+    assert.equal((await pool.query("select 1 from places where id = $1", [home.id])).rowCount, 0, "The place survived its delete.");
+    const after = await journeys();
+    assert.deepEqual(after.map((row) => row.id), before.map((row) => row.id), "Deleting a place removed journeys.");
+    assert(after.every((row) => row.fromPlaceId !== home.id && row.toPlaceId !== home.id), "A journey still names the deleted place.");
+    assert.equal(Number((await pool.query<{ count: string }>(
+      "select count(*) from stay_segments where workspace_id = $1 and user_id = $2 and place_id is null",
+      [WORKSPACE_ID, USER_ID])).rows[0].count) >= staysAtPlace, true, "Stays at the deleted place were not kept unlinked.");
+    assert.equal(await count("time_entries"), entriesBefore, "Deleting a place removed blocks.");
+    assert.equal(await deletePlace(home.id, session), null, "Deleting an already deleted place did not answer not found.");
+  } finally {
+    await clearDerivedLocationState();
+    if ((await pool.query("select 1 from places where id = $1", [home.id])).rowCount === 0) {
+      const row = homeRow.rows[0] as Record<string, unknown>;
+      const columns = Object.keys(row);
+      assert(columns.every((column) => /^[a-z_]+$/.test(column)));
+      await pool.query(
+        `insert into places (${columns.join(", ")}) values (${columns.map((_, index) => `$${index + 1}`).join(", ")})`,
+        columns.map((column) => row[column])
+      );
+    }
+  }
 }
 
 /**
@@ -2133,6 +2243,7 @@ async function main() {
     await validateMotionActivityEvidence();
     await validateMotionOnlyReviewRetirement();
     await validateTimeAwayReview();
+    await validatePlaceDeleteWithSamePlaceJourneys();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
@@ -2144,7 +2255,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, deleting a place with same-place journeys, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

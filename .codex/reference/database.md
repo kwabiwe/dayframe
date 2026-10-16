@@ -54,6 +54,7 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Prefer additive migrations for repair work.
 - Keep legacy nullable fields until data migration is explicitly approved.
 - Do not drop historical data or integration tables without an export/safety decision.
+- `ON DELETE SET NULL` runs as one update per referencing column, and each update fires that table's `before update` triggers. An owner-link trigger that checks several place columns (`dayframe_commute_owner_links` on `commute_segments.from_place_id` / `to_place_id`) rejects a row whose other column still names the row being deleted, so the whole delete rolls back. Deleting a parent such rows can point at twice must clear every reference in one update first, inside the delete's transaction (`deletePlace`), and the delete needs a Postgres validator on the real schema: a mocked query cannot see triggers (location v3 bug 6, `validatePlaceDeleteWithSamePlaceJourneys`). A delete or update that touches location rows outside the location services must take the same per-user owner advisory lock first (`pg_advisory_xact_lock(hashtext(workspace), hashtext(user))`): replay locks stays before journeys, and the reverse order deadlocks with it.
 
 ## Review automation storage
 
