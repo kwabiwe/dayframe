@@ -113,4 +113,33 @@ final class DayframeDurationDialCoreTests: XCTestCase {
     // A running dial keeps the natural ring.
     XCTAssertEqual(DayframeDurationDialCore.baseRadius(width: 358, height: 128, includesRangeHandle: false), 128 * 0.34, accuracy: 0.001)
   }
+
+  func testClockDetailFollowsTheChosenFormatWithShorterFallbacks() {
+    let utc = TimeZone(identifier: "UTC")!
+    let start = 21 * 3_600_000.0 + 30 * 60_000
+    let end = 22 * 3_600_000.0 + 35 * 60_000
+    XCTAssertEqual(
+      DayframeDurationDialCore.clockDetailCandidates(startMs: start, endMs: end, running: false, clockFormat: "24h", timeZone: utc),
+      ["21:30–22:35"]
+    )
+    XCTAssertEqual(
+      DayframeDurationDialCore.clockDetailCandidates(startMs: start, endMs: end, running: false, clockFormat: nil, timeZone: utc),
+      ["21:30–22:35"]
+    )
+    XCTAssertEqual(
+      DayframeDurationDialCore.clockDetailCandidates(startMs: start, endMs: end, running: false, clockFormat: "12h", timeZone: utc),
+      ["9:30 PM–10:35 PM", "9:30–10:35 PM", "9:30–10:35"]
+    )
+    XCTAssertEqual(
+      DayframeDurationDialCore.clockDetailCandidates(startMs: 11 * 3_600_000.0, endMs: end, running: false, clockFormat: "12h", timeZone: utc),
+      ["11:00 AM–10:35 PM", "11:00–10:35"]
+    )
+    XCTAssertEqual(
+      DayframeDurationDialCore.clockDetailCandidates(startMs: 0, endMs: end, running: true, clockFormat: "12h", timeZone: utc),
+      ["since 12:00 AM", "since 12:00"]
+    )
+    // The last fallback is never longer than the 24-hour text that always fitted.
+    let bare = DayframeDurationDialCore.clockDetailCandidates(startMs: start, endMs: end, running: false, clockFormat: "12h", timeZone: utc).last!
+    XCTAssertLessThanOrEqual(bare.count, "21:30–22:35".count)
+  }
 }

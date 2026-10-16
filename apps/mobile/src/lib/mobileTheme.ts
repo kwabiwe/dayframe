@@ -1195,7 +1195,8 @@ function createStyles(theme: MobileTheme) {
     },
     activeEditCompactDate: {
       flexShrink: 1,
-      minWidth: 0,
+      // Always a 44-point target; the sheet stacks the cards before it would get less.
+      minWidth: 44,
       maxWidth: "55%",
       minHeight: 44,
       paddingHorizontal: 12,

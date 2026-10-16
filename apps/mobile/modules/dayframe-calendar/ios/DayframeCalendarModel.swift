@@ -162,7 +162,7 @@ struct DayframeCalendarPresentation: Equatable {
     entries = record.entries.map(DayframeCalendarEntry.init)
     framedLabel = record.framedLabel
     hapticsEnabled = record.hapticsEnabled
-    clockFormat = record.clockFormat
+    clockFormat = record.clockFormat == "12h" ? "12h" : "24h"
     modelVersion = record.modelVersion
     monthTitle = record.monthTitle
     nowMs = record.nowMs
