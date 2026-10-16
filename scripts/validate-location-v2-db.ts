@@ -169,7 +169,12 @@ async function seedOwner() {
   }
 }
 
-async function clearDerivedLocationState() {
+async function clearDerivedLocationState(options: { keepNamePatterns?: boolean } = {}) {
+  // Learned names (PRD D19, A8) come from decisions, so one validator's typed names would name the
+  // next validator's cards.
+  if (!options.keepNamePatterns) {
+    await pool.query("delete from location_name_patterns where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
+  }
   await pool.query("delete from review_items where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
   await pool.query("delete from commute_segments where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
   await pool.query("delete from location_evidence where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
@@ -1866,9 +1871,9 @@ async function validateLearnedNames() {
   await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
   const evidence = timeAwayEvidence();
-  const patterns = async () => (await pool.query<{ name: string | null; uses: number; categoryId: string | null; key: string }>(
-    `select name, uses, category_id as "categoryId", pattern_key as key from location_name_patterns
-     where workspace_id = $1 and user_id = $2`, [WORKSPACE_ID, USER_ID])).rows;
+  const patterns = async () => (await pool.query<{ name: string | null; uses: number; categoryId: string | null; categoryUses: number; key: string; band: string }>(
+    `select name, uses, category_id as "categoryId", category_uses as "categoryUses", pattern_key as key, band from location_name_patterns
+     where workspace_id = $1 and user_id = $2 order by band`, [WORKSPACE_ID, USER_ID])).rows;
   const card = async () => (await pool.query<{ id: string; title: string; categoryId: string | null; source: string | null; key: string | null }>(
     `select ri.id, ri.title, ri.suggested_category_id as "categoryId", ae.raw_payload ->> 'nameSource' as source,
             ae.raw_payload ->> 'namePatternKey' as key
@@ -1877,18 +1882,22 @@ async function validateLearnedNames() {
      where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
      order by ri.suggested_started_at, ri.id`, [WORKSPACE_ID, USER_ID])).rows;
   const offer = async () => {
-    await clearDerivedLocationState();
+    await clearDerivedLocationState({ keepNamePatterns: true });
     await ingestLocationEvidence(batch("db-learned-names", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
     const [only] = await card();
     assert(only, "The learned-name fixture offered no card.");
     return only;
   };
+  const travelId = () => travelCategory!;
+  let travelCategory: string | null = null;
   const errands = await pool.query<{ id: string }>(
     `insert into categories (workspace_id, name, color) values ($1, 'Shopping', 'amber') returning id`, [WORKSPACE_ID]);
   const shoppingId = errands.rows[0].id;
   try {
     // Dayframe's own title never counts.
     const first = await offer();
+    travelCategory = first.categoryId;
+    assert(travelCategory, "The fixture's Move suggested no activity.");
     assert.equal(first.title, "Trip", "The fixture's Move was not titled Trip.");
     assert(first.key && /^[0-9a-f]{64}$/.test(first.key), "The Move's pattern key was not a hash.");
     await resolveLocationReviewAction(first.id, { action: "confirm" }, session);
@@ -1897,8 +1906,8 @@ async function validateLearnedNames() {
     // A name and activity the person gives are learned once…
     const second = await offer();
     await resolveLocationReviewAction(second.id, { action: "edit_and_confirm", edit: { description: "Shop run", categoryId: shoppingId } }, session);
-    assert.deepEqual((await patterns()).map(({ name, uses, categoryId }) => ({ name, uses, categoryId })),
-      [{ name: "Shop run", uses: 1, categoryId: shoppingId }], "A typed name and chosen activity were not learned.");
+    assert.deepEqual((await patterns()).map(({ name, uses, categoryId, categoryUses }) => ({ name, uses, categoryId, categoryUses })),
+      [{ name: "Shop run", uses: 1, categoryId: shoppingId, categoryUses: 1 }], "A typed name and chosen activity were not learned.");
 
     // …and are the next card's name and activity; keeping them counts another use.
     const third = await offer();
@@ -1908,10 +1917,24 @@ async function validateLearnedNames() {
     assert("entryId" in kept && kept.entryId);
     const keptEntry = await pool.query<{ description: string | null }>("select description from time_entries where id = $1", [kept.entryId]);
     assert.equal(keptEntry.rows[0].description, "Shop run", "Accepting a learned name did not keep it on the block.");
-    assert.equal((await patterns())[0]?.uses, 2, "Keeping a learned name did not count a use.");
+    assert.deepEqual((await patterns()).map(({ uses, categoryUses }) => ({ uses, categoryUses })), [{ uses: 2, categoryUses: 2 }],
+      "Keeping a learned name and activity did not count a use of each.");
+    // An activity changed on its own never adds a use to the name (Codex r1 on #458).
+    const fourth = await offer();
+    await resolveLocationReviewAction(fourth.id, { action: "edit_and_confirm", edit: { categoryId: travelId() } }, session);
+    assert.deepEqual((await patterns()).map(({ name, uses, categoryUses }) => ({ name, uses, categoryUses })),
+      [{ name: "Shop run", uses: 3, categoryUses: 1 }], "A kept learned name with a new activity was counted wrongly.");
+    const reset = await offer();
+    const resetDecision = await resolveLocationReviewAction(reset.id, { action: "edit_and_confirm", edit: { categoryId: shoppingId } }, session);
+    assert("entryId" in resetDecision && resetDecision.entryId);
+    // A name in another band is a fallback; forgetting must remove it too.
+    await pool.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses)
+       select workspace_id, user_id, pattern_key, 'weekend', 'Weekend shop', 1 from location_name_patterns
+       where workspace_id = $1 and band <> 'weekend' limit 1`, [WORKSPACE_ID]);
 
     // "Stop suggesting this" forgets it.
-    assert.equal(await forgetLearnedNameForEntry(pool, session, kept.entryId), 1, "Stop suggesting this forgot nothing.");
+    assert.equal(await forgetLearnedNameForEntry(pool, session, resetDecision.entryId), 2, "Stop suggesting this did not forget every band.");
     assert.deepEqual(await patterns(), [], "Stop suggesting this left the learned name.");
     assert.equal((await offer()).title, "Trip", "A forgotten name still named the card.");
 
@@ -1925,7 +1948,7 @@ async function validateLearnedNames() {
     }
     await pool.query("update places set auto_log = true where workspace_id = $1", [WORKSPACE_ID]);
     const autoBlocks = async () => {
-      await clearDerivedLocationState();
+      await clearDerivedLocationState({ keepNamePatterns: true });
       await ingestLocationEvidence(batch("db-learned-names-autolog", acceptance.evidence, "v2_review", acceptance.evidence[0].occurredAt), session);
       return (await pool.query<{ description: string | null }>(
         `select description from time_entries where workspace_id = $1 and user_id = $2 and source = 'location_auto_log'

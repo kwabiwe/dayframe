@@ -11,6 +11,7 @@ create table if not exists public.location_name_patterns (
   name text check (name is null or length(btrim(name)) between 1 and 500),
   category_id uuid references public.categories(id) on delete set null,
   uses integer not null default 0 check (uses >= 0),
+  category_uses integer not null default 0 check (category_uses >= 0),
   auto_log_opt_out boolean not null default false,
   last_used_at timestamptz,
   created_at timestamptz not null default now(),
@@ -19,6 +20,10 @@ create table if not exists public.location_name_patterns (
 );
 create index if not exists idx_location_name_patterns_key
   on public.location_name_patterns(workspace_id, user_id, pattern_key);
+-- A round trip's pattern reads its route links by commute (the existing indexes lead with evidence).
+create index if not exists idx_segment_evidence_commute_lookup
+  on public.location_segment_evidence(commute_segment_id, role)
+  where commute_segment_id is not null;
 
 alter table public.location_name_patterns enable row level security;
 drop policy if exists "users can read own location data" on public.location_name_patterns;

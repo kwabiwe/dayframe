@@ -1,4 +1,4 @@
-import { recordLearnedName } from "./name-patterns";
+import { hashedPatternKey, recordLearnedName } from "./name-patterns";
 import type { NameBand } from "@dayframe/shared";
 import {
   LocationReviewActionSchema,
@@ -61,6 +61,8 @@ type LockedReview = {
   namePatternKey: string | null;
   namePatternBand: string | null;
   learnedName: boolean;
+  /** Its suggested activity is one the person chose for this pattern before. */
+  learnedActivity: boolean;
 };
 
 type LockedReviewRow = Omit<LockedReview, "suggestedTitles"> & { reviewSuggestedTitles: unknown; correctionEvent: boolean };
@@ -252,6 +254,7 @@ async function lockLocationReviews(
             ae.raw_payload ->> 'namePatternKey' as "namePatternKey",
             ae.raw_payload ->> 'namePatternBand' as "namePatternBand",
             coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
+            coalesce(ae.raw_payload ->> 'activitySource' = 'learned', false) as "learnedActivity",
             coalesce(ae.client_event_id like 'location-correction:%', false) as "correctionEvent",
             coalesce(st.updated_at, cs.updated_at, ri.resolved_at, ri.created_at) as "semanticRevision"
      from review_items ri
@@ -596,17 +599,7 @@ async function confirmReview(
   if (entryId && isOwnerAuthoredReviewDescription(description, item.suggestedTitles)) {
     await recordOwnerAuthoredDescription(client, session, item.eventId);
   }
-  // Learned names (PRD D19, A8): a name the person typed (or a learned name they kept) and an
-  // activity they chose (or a learned one they kept) are remembered for this pattern. Dayframe's
-  // own titles never count.
-  if (entryId && item.namePatternKey && isNameBand(item.namePatternBand)) {
-    const learnedTitle = item.learnedName ? item.title : null;
-    const name = description && (isOwnerAuthoredReviewDescription(description, item.suggestedTitles) ||
-      (learnedTitle && !isOwnerAuthoredReviewDescription(description, [learnedTitle]))) ? description : null;
-    const chose = Boolean(edit && Object.prototype.hasOwnProperty.call(edit, "categoryId"));
-    await recordLearnedName(client, session, { key: item.namePatternKey, band: item.namePatternBand },
-      { name, categoryId: chose || item.learnedName ? categoryId : null });
-  }
+  if (entryId) await learnFromDecision(client, session, item, effectivePattern(session, item, placeIdentity), { description, categoryId, edit });
   if (!entryId) {
     const existing = await client.query<{ id: string }>(
       `select id from time_entries
@@ -1111,6 +1104,8 @@ async function createChildEntry(
     ]
   );
   await syncTimeEntryTags(client, entry.rows[0].id, edit?.tags ?? [], session);
+  await learnFromDecision(client, session, item, effectivePattern(session, item),
+    { description, categoryId: edit?.categoryId ?? item.suggestedCategoryId, edit });
   return entry.rows[0].id;
 }
 
@@ -1175,6 +1170,9 @@ async function createChildEvent(
         correction: true,
         // The titles Dayframe suggested along this correction chain, never the owner's own.
         [REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY]: item.suggestedTitles,
+        // A part of the same Stay keeps its learned-name pattern (PRD D19, A8; Codex r1 on #458).
+        ...(item.namePatternKey && isNameBand(item.namePatternBand)
+          ? { namePatternKey: item.namePatternKey, namePatternBand: item.namePatternBand } : {}),
         ...(decision.ownerAuthoredDescription
           ? { [REVIEW_DECISION_PAYLOAD_KEY]: { ownerAuthoredDescription: true } satisfies ReviewDecisionPayload }
           : {})
@@ -1218,4 +1216,44 @@ async function auditCorrection(
 const NAME_BANDS = new Set<string>(["morning", "afternoon", "evening", "weekend"]);
 function isNameBand(value: string | null): value is NameBand {
   return value != null && NAME_BANDS.has(value);
+}
+
+/**
+ * The pattern a decision teaches: the emitter's, unless the decision corrected a Stay's place (a
+ * change of place, or saving a new one), which teaches that place instead (Codex r1 on #458).
+ */
+function effectivePattern(session: RequestSession, item: LockedReview, placeIdentity?: ConfirmedPlaceIdentity) {
+  if (!isNameBand(item.namePatternBand)) return null;
+  if (item.segmentKind === "stay" && placeIdentity?.placeId) {
+    return { key: hashedPatternKey(session, `p:${placeIdentity.placeId}`), band: item.namePatternBand };
+  }
+  return item.namePatternKey ? { key: item.namePatternKey, band: item.namePatternBand } : null;
+}
+
+/**
+ * Learned names (PRD D19, A8): what this decision teaches its pattern. A name only when it is the
+ * person's (it differs from every title Dayframe suggested, or it is the learned name they kept); an
+ * activity only when they changed it from the suggestion, or kept a learned one (Codex r1 on #458).
+ * The event keeps the pattern it taught, for "Stop suggesting this".
+ */
+async function learnFromDecision(
+  client: pg.PoolClient, session: RequestSession, item: LockedReview,
+  pattern: { key: string; band: NameBand } | null,
+  decision: { description: string | null; categoryId: string | null; edit?: ReviewEntryEdit }
+) {
+  if (!pattern) return;
+  const learnedTitle = item.learnedName ? item.title : null;
+  const description = decision.description?.trim() || null;
+  const name = description && (isOwnerAuthoredReviewDescription(description, item.suggestedTitles) ||
+    (learnedTitle && !isOwnerAuthoredReviewDescription(description, [learnedTitle]))) ? description : null;
+  const changedActivity = decision.edit?.categoryId !== undefined && decision.edit.categoryId !== item.suggestedCategoryId;
+  const keptActivity = item.learnedActivity && decision.categoryId === item.suggestedCategoryId;
+  await recordLearnedName(client, session, pattern,
+    { name, categoryId: (changedActivity || keptActivity) ? decision.categoryId : null });
+  if (pattern.key !== item.namePatternKey) {
+    await client.query(
+      `update activity_events set raw_payload = raw_payload || jsonb_build_object('namePatternKey', $4::text)
+       where workspace_id = $1 and user_id = $2 and id = $3`,
+      [session.workspaceId, session.userId, item.eventId, pattern.key]);
+  }
 }

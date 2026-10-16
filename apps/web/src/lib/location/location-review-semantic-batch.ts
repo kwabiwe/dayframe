@@ -226,7 +226,9 @@ export async function emitReviewSemanticSegments(
     const title = learned?.name ?? placeTitle;
     const categoryId = learned?.categoryId ?? (segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null);
     const nameFields = pattern ? {
-      namePatternKey: pattern.key, namePatternBand: pattern.band, ...(learned?.name ? { nameSource: "learned" } : {})
+      namePatternKey: pattern.key, namePatternBand: pattern.band,
+      ...(learned?.name ? { nameSource: "learned" } : {}),
+      ...(learned?.categoryId ? { activitySource: "learned" } : {})
     } : {};
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
