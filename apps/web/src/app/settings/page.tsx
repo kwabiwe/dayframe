@@ -14,6 +14,7 @@ import {
   SettingsSignOut
 } from "@/components/SettingsForms";
 import { ThemeSettings } from "@/components/ThemeSettings";
+import { ClockFormatSettings } from "@/components/ClockFormat";
 import { blockStyle } from "@/lib/block-style";
 import type { CategoryRow } from "@/lib/queries";
 
@@ -64,6 +65,7 @@ export default function SettingsPage() {
           </SetCard>
           <SetCard glyph="sun" id="appearance" title="Appearance">
             <ThemeSettings />
+            <ClockFormatSettings />
           </SetCard>
         </div>
         <div className="df-set-col">

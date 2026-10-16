@@ -11,6 +11,7 @@ import { blockStyle } from "@/lib/block-style";
 import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
 import { formatDate, formatDuration, formatTime } from "@/lib/format";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
+import { useClockFormat } from "@/components/ClockFormat";
 import { reportsHref, type ReportSort } from "@/lib/report-filters";
 import type { ReportResult } from "@/lib/report-service";
 
@@ -128,8 +129,9 @@ export function ReportBlockRow({
   // Date and clock time are the browser's local ones, so they wait for hydration: the server's
   // UTC copy would mismatch (React #418).
   const hydrated = useIsHydrated();
+  const clock = useClockFormat();
   const day = hydrated ? formatDate(entry.startedAt) : "";
-  const when = hydrated ? `${formatTime(entry.startedAt)}–${entry.stoppedAt ? formatTime(entry.stoppedAt) : "now"}` : "";
+  const when = hydrated ? `${formatTime(entry.startedAt, clock)}–${entry.stoppedAt ? formatTime(entry.stoppedAt, clock) : "now"}` : "";
   const duration = reportRowDuration(entry);
   const glyph = resolveActivityIcon({ icon, name: entry.categoryName }).glyph;
   const overlap = entry.overlapCount > 0

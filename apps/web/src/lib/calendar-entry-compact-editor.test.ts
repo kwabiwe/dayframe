@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { formatClockValue } from "@dayframe/shared";
 import { dateTimeLocalInputToIso } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
 import {
@@ -13,7 +14,9 @@ import {
   calendarEntryCompactInitialDraft,
   calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
+  isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
+  isCompleteCalendarEntryCompactTimeInput,
   normalizeCalendarEntryCompactDuration,
   synchronizeCalendarEntryCompactDraft,
   type CalendarEntryCompactDirty,
@@ -126,6 +129,30 @@ describe("Calendar compact editor temporal model", () => {
     ["27:01", "27:01", 97_260]
   ])("normalizes duration shorthand %s without a 24-hour cap", (raw, normalized, seconds) => {
     expect(normalizeCalendarEntryCompactDuration(raw)).toEqual({ seconds, value: normalized });
+  });
+
+  it("reads a typed 12-hour time, and keeps exact instants when it names the same minute (16 Oct 2026)", () => {
+    const source = timeEntry();
+    const initial = calendarEntryCompactInitialDraft(source);
+    const sameIn12h = { ...initial, startedAtTime: formatClockValue(initial.startedAtTime, "12h") };
+    const same = savePlan(source, sameIn12h);
+    expect(same.resolved.startedAt).toBe(source.startedAt);
+    expect(same.payload.startedAt).toBeUndefined();
+
+    const typed = savePlan(source, { ...initial, startedAtTime: "7:30 am", stoppedAtDate: initial.startedAtDate, stoppedAtTime: "12:00 PM" });
+    expect(typed.resolved.startedAt).toBe(dateTimeLocalInputToIso(`${initial.startedAtDate}T07:30`));
+    expect(typed.resolved.stoppedAt).toBe(dateTimeLocalInputToIso(`${initial.startedAtDate}T12:00`));
+  });
+
+  it("treats AM/PM times as complete only when they are unambiguous", () => {
+    expect(isCompleteCalendarEntryCompactTimeInput("9 PM")).toBe(true);
+    expect(isCompleteCalendarEntryCompactTimeInput("9:30 pm")).toBe(true);
+    expect(isCompleteCalendarEntryCompactTimeInput("930p")).toBe(true);
+    expect(isCompleteCalendarEntryCompactTimeInput("13 PM")).toBe(false);
+    expect(isCalendarEntryCompactTimeInputReadyToSynchronize("9:30 P")).toBe(true);
+    expect(isCalendarEntryCompactTimeInputReadyToSynchronize("9 PM")).toBe(true);
+    expect(isCalendarEntryCompactTimeInputReadyToSynchronize("930")).toBe(false);
+    expect(isCalendarEntryCompactTimeInputReadyToSynchronize("9:3")).toBe(false);
   });
 
   it("waits for both clock-minute digits before live Duration synchronization", () => {

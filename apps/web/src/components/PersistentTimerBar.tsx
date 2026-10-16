@@ -6,7 +6,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, previousEndOffer, resolveActivityIcon, type ClockFormat, type DayframeGlyph, type PreviousEndOffer } from "@dayframe/shared";
 import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -22,7 +22,8 @@ import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
 import { Button, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { useClockFormat } from "@/components/ClockFormat";
 import { timeEntryAccentColor } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
@@ -52,6 +53,7 @@ export const PREVIOUS_END_CHANGED_NOTICE = "Started now: an earlier block ends l
 export const COMMAND_PLACEHOLDER_NARROW = "Try “Call @work”";
 
 export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: boolean }) {
+  const clock = useClockFormat();
   const {
     clearTimerError,
     closeManualEntry,
@@ -615,7 +617,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               aria-haspopup="dialog"
               className="df-cmd-clock"
               type="button"
-              aria-label={`Edit start date and time. Started ${formatTime(active.startedAt)}. Elapsed ${formatClockDuration(durationSeconds)}`}
+              aria-label={`Edit start date and time. Started ${formatTime(active.startedAt, clock)}. Elapsed ${formatClockDuration(durationSeconds)}`}
               onClick={() => {
                 if (startEditorOpen) setStartEditorOpen(false);
                 else openStartEditor();
@@ -623,7 +625,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               ref={startEditorTriggerRef}
             >
               <Odometer value={formatClockDuration(durationSeconds)} />
-              <small>Started {formatTime(active.startedAt)}</small>
+              <small>Started {formatTime(active.startedAt, clock)}</small>
             </button>
           ) : (
             <div className="df-cmd-idle">
@@ -632,7 +634,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               </span>
               {previousEnd ? (
                 <button
-                  aria-label={`Start from ${formatTime(previousEnd.startedAt)}, after ${previousEnd.previousName}`}
+                  aria-label={`Start from ${formatTime(previousEnd.startedAt, clock)}, after ${previousEnd.previousName}`}
                   className="df-cmd-from"
                   disabled={isTimerBusy}
                   onClick={() => void startFromPreviousEnd(previousEnd)}
@@ -641,7 +643,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   {/* The same compact pill as the iPhone sheet (owner, 15 Oct 2026): the previous
                       block's name is in the label only. */}
                   <DayframeIcon glyph={DAYFRAME_APP_ICONS.startFromPreviousEnd} size={12} />
-                  <span>From <span className="tabular">{formatTime(previousEnd.startedAt)}</span></span>
+                  <span>From <span className="tabular">{formatTime(previousEnd.startedAt, clock)}</span></span>
                 </button>
               ) : null}
             </div>
@@ -704,7 +706,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                       className="df-start-time-input"
                       disabled={isTimerBusy}
                       id="active-start-time"
-                      inputMode="numeric"
+                      inputMode={clock === "12h" ? "text" : "numeric"}
                       onBlur={() => {
                         const parsed = parseTimeInput(startTimeDraft);
                         if (parsed) setStartTimeDraft(parsed);
@@ -713,10 +715,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                         setStartTimeDraft(maskTimeInput(event.target.value));
                         setStartEditError(null);
                       }}
-                      placeholder="09:00"
+                      placeholder={displayTypedTime("09:00", clock)}
                       ref={startTimeInputRef}
                       type="text"
-                      value={startTimeDraft}
+                      value={displayTypedTime(startTimeDraft, clock)}
                     />
                   </label>
                 </div>
@@ -735,7 +737,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                       setStartEditError(null);
                     }}
                   >
-                    Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt)}</span>
+                    Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt, clock)}</span>
                   </button>
                 ) : null}
                 {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
@@ -847,7 +849,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             ) : null}
             {parsedCommand.durationSeconds ? (
               <>
-                <span className="df-cmd-chip">{commandRangeLabel(parsedCommand.durationSeconds)}</span>
+                <span className="df-cmd-chip">{commandRangeLabel(parsedCommand.durationSeconds, clock)}</span>
                 <span className="df-cmd-hint">logs a finished block ending now</span>
               </>
             ) : (
@@ -1161,11 +1163,11 @@ type QuickAction = {
   label: string;
 };
 
-function commandRangeLabel(durationSeconds: number) {
+function commandRangeLabel(durationSeconds: number, clock: ClockFormat) {
   const stoppedAt = new Date();
   stoppedAt.setSeconds(0, 0);
   const startedAt = new Date(stoppedAt.getTime() - durationSeconds * 1000);
-  return `${formatTime(startedAt.toISOString())}–${formatTime(stoppedAt.toISOString())}`;
+  return `${formatTime(startedAt.toISOString(), clock)}–${formatTime(stoppedAt.toISOString(), clock)}`;
 }
 
 /** The start panel's date field: "Thu 15 Oct" (the year only when it is not this year). */

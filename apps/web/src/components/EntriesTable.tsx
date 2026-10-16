@@ -14,7 +14,7 @@ import {
 import { flushSync } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Minus } from "lucide-react";
-import { analyzeTimeIntervals, resolveActivityIcon, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
+import { analyzeTimeIntervals, resolveActivityIcon, type ClockFormat, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { blockStyle } from "@/lib/block-style";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
@@ -31,6 +31,8 @@ import {
   formatDuration,
   formatTime
 } from "@/lib/format";
+import { useClockFormat } from "@/components/ClockFormat";
+import { displayTypedTime } from "@/lib/calendar-grid";
 import { timelineEntryDisplayInterval } from "@/lib/timeline-calculations";
 import { groupTimelineEntriesByDay, timelineEntryGroupKey } from "@/lib/timeline-entry-groups";
 import {
@@ -133,6 +135,7 @@ function TimelineInlineTimeControl({
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const clock = useClockFormat();
   const edgeLabel = edge === "start" ? "Start" : "Finish";
   const panelId = `timeline-inline-date-${entryId}-${edge}`;
 
@@ -152,8 +155,8 @@ function TimelineInlineTimeControl({
         data-inline-entry-id={entryId}
         data-inline-field="time"
         disabled={disabled}
-        inputMode="numeric"
-        maxLength={5}
+        inputMode={clock === "12h" ? "text" : "numeric"}
+        maxLength={clock === "12h" ? 8 : 5}
         onChange={(event) => onTimeChange(event.target.value)}
         onClick={() => {
           onBeginEdit();
@@ -214,6 +217,7 @@ export function EntriesTable({
   capturedNow?: Date;
 }) {
   const router = useRouter();
+  const clock = useClockFormat();
   const searchParams = useSearchParams();
   const {
     clearTimerError,
@@ -631,8 +635,8 @@ export function EntriesTable({
     };
     const timeInput = (edge: TimelineInlineTimeEdge, instant: string) => {
       const value = editor
-        ? edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime
-        : formatTime(instant);
+        ? displayTypedTime(edge === "start" ? editor.draft.startedAtTime : editor.draft.stoppedAtTime, clock)
+        : formatTime(instant, clock);
       const date = editor
         ? edge === "start" ? editor.draft.startedAtDate : editor.draft.stoppedAtDate
         : dateTimeLocal(instant).slice(0, 10);
@@ -667,6 +671,7 @@ export function EntriesTable({
     return (
       <span
         className={`timeline-inline-time${editor ? " is-editing" : ""}${interval.stoppedAt ? "" : " is-running"}`}
+        data-clock={clock}
         onBlur={handleBlur}
         onDoubleClick={(event) => {
           event.preventDefault();
@@ -720,7 +725,7 @@ export function EntriesTable({
           scrollContainerRef(element);
         }}
       >
-        <table className="timeline-list-table">
+        <table className="timeline-list-table" data-clock={clock}>
           {/* Column names stay for screen readers; the rows read as Blocks rows (as on Today). */}
           {/* Column widths live here: the header row is visually hidden, so it can't size the columns. */}
           <colgroup>
@@ -815,10 +820,10 @@ export function EntriesTable({
                             className="overlap-marker"
                             aria-label={isGrouped
                               ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
-                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries, clock)}
                             title={isGrouped
                               ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
-                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries)}
+                              : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries, clock)}
                           >
                             {isGrouped
                               ? `${overlappingOccurrences.length} overlapping`
@@ -910,12 +915,14 @@ export function EntriesTable({
                                 aria-label={overlapMarkerDescription(
                                   occurrence,
                                   overlapById.get(occurrence.id),
-                                  displayedEntries
+                                  displayedEntries,
+                                  clock
                                 )}
                                 title={overlapMarkerDescription(
                                   occurrence,
                                   overlapById.get(occurrence.id),
-                                  displayedEntries
+                                  displayedEntries,
+                                  clock
                                 )}
                               >
                                 Overlap · {formatDuration(overlapById.get(occurrence.id)?.overlapSeconds ?? 0)}
@@ -1005,13 +1012,14 @@ export function EntriesTable({
 function overlapMarkerDescription(
   entry: TimeEntryRow,
   overlap: TimeIntervalAnalysisEntry | undefined,
-  entries: ReadonlyArray<TimeEntryRow>
+  entries: ReadonlyArray<TimeEntryRow>,
+  clock: ClockFormat
 ) {
   if (!overlap?.overlapCount) return "No overlap";
   const firstPeer = entries.find((candidate) => overlap.overlappingEntryIds.includes(candidate.id));
   const peerDetail = firstPeer
-    ? `, including ${timeEntryTitle(firstPeer)} from ${formatTime(firstPeer.startedAt)} to ${
-        firstPeer.stoppedAt ? formatTime(firstPeer.stoppedAt) : "now"
+    ? `, including ${timeEntryTitle(firstPeer)} from ${formatTime(firstPeer.startedAt, clock)} to ${
+        firstPeer.stoppedAt ? formatTime(firstPeer.stoppedAt, clock) : "now"
       }`
     : "";
   return `Overlap: ${formatDuration(overlap.uniqueOverlapSeconds)} shared with ${overlap.overlapCount} other ${

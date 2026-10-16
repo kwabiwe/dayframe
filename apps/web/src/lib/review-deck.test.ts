@@ -115,8 +115,10 @@ describe("Review deck helpers", () => {
 
   it("writes the when-line in local days", () => {
     const now = new Date(2026, 9, 10, 12).getTime();
-    expect(reviewWhen(item(), now)).toBe("Today · 07:00–07:45");
-    expect(reviewWhen(item({ suggestedStartedAt: local(9, 23), suggestedStoppedAt: local(10, 6) }), now)).toBe("Yesterday · 23:00–Today 06:00");
+    expect(reviewWhen(item(), now, "24h")).toBe("Today · 07:00–07:45");
+    expect(reviewWhen(item(), now, "12h")).toBe("Today · 7:00 AM–7:45 AM");
+    expect(reviewWhen(item({ suggestedStartedAt: local(9, 23), suggestedStoppedAt: local(10, 6) }), now, "24h")).toBe("Yesterday · 23:00–Today 06:00");
+    expect(reviewWhen(item({ suggestedStartedAt: local(9, 23), suggestedStoppedAt: local(10, 6) }), now, "12h")).toBe("Yesterday · 11:00 PM–Today 6:00 AM");
   });
 
   it("steps through the queue and picks the next card after a decision", () => {

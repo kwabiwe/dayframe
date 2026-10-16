@@ -34,7 +34,8 @@ import {
   type CalendarEntryCompactEditableKey,
   type CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput } from "@/lib/calendar-grid";
+import { displayTypedTime, maskTimeInput } from "@/lib/calendar-grid";
+import { useClockFormat } from "@/components/ClockFormat";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { dateTimeLocal, formatSourceLabel } from "@/lib/format";
 import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
@@ -629,6 +630,7 @@ export function TimeEntryQuickEditorPanel({
   showCancel?: boolean;
   surface: "anchored" | "modal";
 }) {
+  const clock = useClockFormat();
   const entry = props.mode === "entry" ? props.entry : null;
   const {
     busyAction,
@@ -833,7 +835,7 @@ export function TimeEntryQuickEditorPanel({
           }
         />
 
-        <div className="calendar-compact-temporal-fields">
+        <div className="calendar-compact-temporal-fields" data-clock={clock}>
           <div className="calendar-compact-moment-field">
             <span className="calendar-compact-field-label">Start</span>
             <div className="calendar-compact-date-time-controls">
@@ -842,12 +844,12 @@ export function TimeEntryQuickEditorPanel({
                 aria-invalid={startIsInvalid || undefined}
                 aria-label="Start time"
                 disabled={controlsDisabled}
-                inputMode="numeric"
+                inputMode={clock === "12h" ? "text" : "numeric"}
                 onBlur={() => commitTemporalField("start")}
                 onChange={(event) => controller.updateTemporalField("startedAtTime", maskTimeInput(event.target.value), "start")}
-                placeholder="08:30"
+                placeholder={displayTypedTime("08:30", clock)}
                 type="text"
-                value={draft.startedAtTime}
+                value={displayTypedTime(draft.startedAtTime, clock)}
               />
               <DatePickerPopover
                 ariaLabel={`Choose Start date, currently ${formatAccessibleDate(draft.startedAtDate)}`}
@@ -882,12 +884,12 @@ export function TimeEntryQuickEditorPanel({
                   aria-invalid={finishIsInvalid || undefined}
                   aria-label={finishDescription}
                   disabled={controlsDisabled}
-                  inputMode="numeric"
+                  inputMode={clock === "12h" ? "text" : "numeric"}
                   onBlur={() => commitTemporalField("finish")}
                   onChange={(event) => controller.updateTemporalField("stoppedAtTime", maskTimeInput(event.target.value), "finish")}
-                  placeholder="09:15"
+                  placeholder={displayTypedTime("09:15", clock)}
                   type="text"
-                  value={draft.stoppedAtTime}
+                  value={displayTypedTime(draft.stoppedAtTime, clock)}
                 />
                 {finishDayOffset > 0 ? (
                   <span className="calendar-compact-day-offset" aria-hidden="true" title={finishDescription}>+{finishDayOffset}</span>

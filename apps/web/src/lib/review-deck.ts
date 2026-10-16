@@ -1,4 +1,4 @@
-import { formatDuration as formatSharedDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration as formatSharedDuration, type ClockFormat } from "@dayframe/shared";
 import type { ReviewMutation, ReviewMutationEdit } from "@dayframe/shared";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 
@@ -150,14 +150,6 @@ export function reviewWindow(item: Pick<ReviewItemRow, "suggestedStartedAt" | "s
   return { startMs: start, stopMs: stop };
 }
 
-function pad2(value: number) {
-  return value.toString().padStart(2, "0");
-}
-
-function clock(ms: number) {
-  const date = new Date(ms);
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
 
 function localDayStart(ms: number) {
   const date = new Date(ms);
@@ -178,8 +170,12 @@ export function formatReviewDuration(ms: number) {
   return formatSharedDuration(ms / 1000);
 }
 
-/** "Today · 21:19–21:26"; a range over midnight names the end's day too. Null without a window. */
-export function reviewWhen(item: Pick<ReviewItemRow, "suggestedStartedAt" | "suggestedStoppedAt">, nowMs: number) {
+/**
+ * "Today · 21:19–21:26" ("Today · 9:19 PM–9:26 PM" in 12-hour mode); a range over midnight names
+ * the end's day too. Null without a window.
+ */
+export function reviewWhen(item: Pick<ReviewItemRow, "suggestedStartedAt" | "suggestedStoppedAt">, nowMs: number, clockFormat: ClockFormat) {
+  const clock = (ms: number) => formatClockTime(ms, clockFormat);
   const window = reviewWindow(item);
   if (!window) {
     const start = timeMs(item.suggestedStartedAt);

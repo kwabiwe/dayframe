@@ -6,7 +6,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, List } from "lucide-react";
-import { analyzeTimeIntervals, calendarBlockContinuationEdges } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, formatClockParts, type ClockFormat } from "@dayframe/shared";
+import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -624,6 +625,7 @@ export function CalendarReview({
   undoToastVisible?: boolean;
   visibleDays: Date[];
 }) {
+  const clock = useClockFormat();
   const router = useRouter();
   const {
     clearTimerError,
@@ -755,13 +757,13 @@ export function CalendarReview({
       const top = ((minutes - startMinutes) / 60) * rowHeight;
       return {
         key: `${minutes}`,
-        label: formatCalendarAxisMinutes(minutes),
+        label: formatCalendarAxisMinutes(minutes, clock),
         labelTop: clampAxisLabelTop(top, calendarHeight),
         major: minutes % 60 === 0,
         top
       };
     });
-  }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, rowHeight, zoom.intervalMinutes]);
+  }, [calendarHeight, calendarHours.endHour, calendarHours.startHour, clock, rowHeight, zoom.intervalMinutes]);
   const visibleDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
   const selectionScopeKey = `${calendarHoursMode}:${visibleDaysKey}`;
   const visibleSelectedTarget = selectedTarget?.scopeKey === selectionScopeKey ? selectedTarget : null;
@@ -1028,7 +1030,7 @@ export function CalendarReview({
         Math.round((new Date(finalDraft.stoppedAt).getTime() - new Date(finalDraft.startedAt).getTime()) / 1_000)
       );
       setResizeTip({
-        label: `${formatCalendarAxisMinutes(edgeMinutes)} · ${formatDuration(durationSeconds)}`,
+        label: `${formatCalendarAxisMinutes(edgeMinutes, clock, true)} · ${formatDuration(durationSeconds)}`,
         // Near the right edge (a phone, a narrow window) the tip flips to the pointer's left.
         flip: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth,
         x: lastClientX + 14 + RESIZE_TIP_ROOM > window.innerWidth ? lastClientX - 14 : lastClientX + 14,
@@ -1382,7 +1384,7 @@ export function CalendarReview({
                 // line keeps the exact time.
                 style={{ top: Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT, Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight))) }}
               >
-                {formatTime(capturedNow)}
+                {formatTime(capturedNow, clock)}
               </span>
             ) : null}
             {axisMarks.map((mark) => (
@@ -1463,7 +1465,7 @@ export function CalendarReview({
                   capturedNow
                 );
                 if (!geometry) return null;
-                const range = `${formatTime(new Date(item.fromMs))} to ${formatTime(new Date(item.toMs))}`;
+                const range = `${formatTime(new Date(item.fromMs), clock)} to ${formatTime(new Date(item.toMs), clock)}`;
                 return (
                   <Link
                     aria-label={`${item.title}, needs review, ${range}. Open Review.`}
@@ -1523,7 +1525,7 @@ export function CalendarReview({
                     data-calendar-create-ghost
                     style={geometry}
                   >
-                    {`${formatCalendarAxisMinutes(createGhost.startMinutes)}–${formatCalendarAxisMinutes(createGhost.endMinutes)} · ${formatDuration(seconds)}`}
+                    {`${formatCalendarAxisMinutes(createGhost.startMinutes, clock, true)}–${formatCalendarAxisMinutes(createGhost.endMinutes, clock, true)} · ${formatDuration(seconds)}`}
                   </div>
                 );
               })() : null}
@@ -1615,7 +1617,7 @@ export function CalendarReview({
                     entry,
                     startsBeforeDay
                   } = block;
-                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow);
+                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock);
                   const lane = lanes.get(blockKey) ?? {
                     laneCount: 1,
                     laneIndex: 0,
@@ -1712,7 +1714,7 @@ export function CalendarReview({
                         ) : null}
                         {density.showSecondary && lane.textDensity !== "none" ? (
                           <span className="calendar-entry-secondary-line tabular">
-                            {calendarBlockSecondaryLine(displayEntry, capturedNow)}
+                            {calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}
                           </span>
                         ) : null}
                       </button>
@@ -1977,7 +1979,8 @@ function calendarBlockDetailsLabel(
   draft: CalendarResizeDraft | null,
   _durationSeconds: number,
   day: Date,
-  capturedNow: Date
+  capturedNow: Date,
+  clock: ClockFormat
 ) {
   const details = calendarEntrySliceDetails(entry, draft, day, capturedNow);
   const displayEntry = {
@@ -1986,7 +1989,7 @@ function calendarBlockDetailsLabel(
     stoppedAt: draft?.stoppedAt ?? entry.stoppedAt
   };
   const tags = entry.tagNames.length ? ` All tags: ${entry.tagNames.join(", ")}.` : "";
-  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow)}.${tags}${details.continuation ? ` ${details.continuation}` : ""}`;
+  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}.${tags}${details.continuation ? ` ${details.continuation}` : ""}`;
 }
 
 function calendarEntrySliceDetails(
@@ -2003,7 +2006,6 @@ function calendarEntrySliceDetails(
       : capturedNow;
   const dayStart = startOfDay(day);
   const dayEnd = addDays(dayStart, 1);
-  const visibleStart = new Date(Math.max(entryStart.getTime(), dayStart.getTime()));
   const visibleEnd = new Date(Math.min(entryEnd.getTime(), dayEnd.getTime()));
   const isLiveSlice = !entry.stoppedAt && visibleEnd.getTime() >= capturedNow.getTime();
   return {
@@ -2015,8 +2017,7 @@ function calendarEntrySliceDetails(
       startedAt: entryStart.toISOString(),
       stoppedAt: entryEnd.toISOString()
     }, { start: dayStart, end: dayEnd }, capturedNow),
-    isLiveSlice,
-    timeRange: `${formatTime(visibleStart)} - ${isLiveSlice ? "now" : formatTime(visibleEnd)}`
+    isLiveSlice
   };
 }
 
@@ -2065,10 +2066,16 @@ function clampMinutes(value: number, minimum: number, maximum: number) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function formatCalendarAxisMinutes(minutes: number) {
+/**
+ * An axis mark or a dragged edge in this browser's clock format. In 12-hour mode a whole-hour axis
+ * mark is "9 AM" (the day's end reads "12 AM"); `exact` (resize tips, the create ghost) always keeps
+ * the minutes.
+ */
+function formatCalendarAxisMinutes(minutes: number, clock: ClockFormat, exact = false) {
   const hour = Math.floor(minutes / 60) % 24;
   const minute = minutes % 60;
-  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+  if (clock === "12h" && minute === 0 && !exact) return formatClockHour(hour, clock);
+  return formatClockParts(hour, minute, clock);
 }
 
 function clampAxisLabelTop(top: number, height: number) {

@@ -172,9 +172,21 @@ export function formatCalendarEntryCompactDuration(totalSeconds: number) {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+/** An optional AM/PM at the end of a typed time (`9:30 pm`, `930p`, `9 AM`). */
+const TYPED_MERIDIEM = String.raw`(?:\s*[ap]\.?(?:\s*m\.?)?)`;
+const COMPLETE_TIME_INPUT = new RegExp(String.raw`^(?:(?:\d{1,2}:\d{2}|\d{3,4})${TYPED_MERIDIEM}?|\d{1,2}${TYPED_MERIDIEM})$`, "i");
+const READY_TIME_INPUT = new RegExp(String.raw`^(?:(?:\d{1,2}:\d{2}|\d{4})${TYPED_MERIDIEM}?|\d{1,3}${TYPED_MERIDIEM})$`, "i");
+
 export function isCompleteCalendarEntryCompactTimeInput(value: string) {
   const trimmed = value.trim();
-  return /^(?:\d{1,2}:\d{2}|\d{3,4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+  return COMPLETE_TIME_INPUT.test(trimmed) && Boolean(parseTimeInput(trimmed));
+}
+
+/** Two typed times that read as the same clock time (`21:30`, `9:30 PM`, `2130`). */
+function sameTypedTime(left: string, right: string) {
+  if (left === right) return true;
+  const parsed = parseTimeInput(left);
+  return parsed !== null && parsed === parseTimeInput(right);
 }
 
 /**
@@ -193,7 +205,7 @@ export function normalizeCalendarEntryCompactTypedTimes<T extends Pick<CalendarE
 
 export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
   const trimmed = value.trim();
-  return /^(?:\d{1,2}:\d{2}|\d{4})$/.test(trimmed) && Boolean(parseTimeInput(trimmed));
+  return READY_TIME_INPUT.test(trimmed) && Boolean(parseTimeInput(trimmed));
 }
 
 export function isCompleteCalendarEntryCompactDurationInput(value: string) {
@@ -527,7 +539,7 @@ function draftEdgeCandidates({
   original: string;
   time: string;
 }) {
-  if (date === initialDate && time === initialTime) return [original];
+  if (date === initialDate && sameTypedTime(time, initialTime)) return [original];
   const parsedTime = isCompleteCalendarEntryCompactTimeInput(time) ? parseTimeInput(time) : null;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !parsedTime) {
     throw new Error(`Enter a valid ${label} date and time.`);
