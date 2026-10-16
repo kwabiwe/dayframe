@@ -311,7 +311,7 @@ async function replayAndEmitLocationSemantics(
         client, session, autoLog.orphans, autoLog.used, autoLog.locked);
       // Health walks win (PRD D19), from the cards themselves: a workout that arrived after its Move's
       // card retires it here, even once the Move's evidence has aged out.
-      semanticChanges.count += await retireHealthCoveredMoveCards(client, session);
+      semanticChanges.count += await retireHealthCoveredMoveCards(client, session, { now: options.processingAt });
     } else {
       for (const segment of eligible) {
         const emitted = await emitSemanticSegment(

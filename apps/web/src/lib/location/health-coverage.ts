@@ -110,7 +110,11 @@ export async function healthCoveredMoves(
  * has aged out (Codex r1 on #457). Retirement is replay's own (`superseded`); user decisions are never
  * touched. Returns the number retired.
  */
-export async function retireHealthCoveredMoveCards(client: Pick<pg.PoolClient, "query">, session: RequestSession) {
+export async function retireHealthCoveredMoveCards(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, options: { limit?: number; now?: string | number } = {}
+) {
+  // Open Move cards from the last 30 days (Location evidence lasts seven), newest first; a caller with
+  // a tight budget takes only the newest few.
   const open = await client.query<{ reviewId: string; eventId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }>(
     `select ri.id as "reviewId", ri.event_id as "eventId", ri.suggested_started_at as "startedAt",
             ri.suggested_stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
@@ -118,17 +122,41 @@ export async function retireHealthCoveredMoveCards(client: Pick<pg.PoolClient, "
      join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
      where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
        and ae.source = 'location_learning' and ae.event_type = 'commute_detected' and ae.review_status = 'needs_review'
-       and ri.suggested_started_at is not null and ri.suggested_stopped_at is not null
+       and ri.suggested_started_at > $4::timestamptz - interval '30 days' and ri.suggested_stopped_at is not null
        and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
-         and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes')`,
-    [session.workspaceId, session.userId]);
+         and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes')
+     order by ri.suggested_started_at desc
+     limit $3`,
+    [session.workspaceId, session.userId, options.limit ?? 5_000, new Date(options.now ?? Date.now()).toISOString()]);
   if (open.rows.length === 0) return 0;
   const modes = new Set(["walking", "running", "cycling", "automotive"]);
   const covered = await coveredMoveKeys(client, session, open.rows.map((row) => ({
     key: row.reviewId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString(),
     travelMode: row.travelMode && modes.has(row.travelMode) ? row.travelMode as MotionTravelMode : null
   })));
-  const reviewIds = open.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId);
+  return retireReviews(client, session, open.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId));
+}
+
+/**
+ * Retires the open cards of these candidate Moves (client event IDs) a Health workout covers by
+ * their current window and mode, which can differ from what an open card still holds (late Motion
+ * evidence giving a mode; Codex r2 on #457).
+ */
+export async function retireCoveredCandidateCards(client: Pick<pg.PoolClient, "query">, session: RequestSession, clientEventIds: readonly string[]) {
+  const reviewIds: string[] = [];
+  for (const batch of chunks(clientEventIds)) {
+    const result = await client.query<{ id: string }>(
+      `select ri.id from review_items ri
+       join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+         and ae.client_event_id = any($3::text[]) and ae.review_status = 'needs_review'`,
+      [session.workspaceId, session.userId, batch]);
+    reviewIds.push(...result.rows.map((row) => row.id));
+  }
+  return retireReviews(client, session, reviewIds);
+}
+
+async function retireReviews(client: Pick<pg.PoolClient, "query">, session: RequestSession, reviewIds: readonly string[]) {
   let retired = 0;
   for (const batch of chunks(reviewIds)) {
     const result = await client.query<{ eventId: string }>(
@@ -153,19 +181,30 @@ export async function retireHealthCoveredMoveCards(client: Pick<pg.PoolClient, "
  * transaction of its own, if the location owner lock is free (a replay holding it runs the same sweep
  * at its end, and every later replay does too). Best effort; never fails the import.
  */
-export async function reconcileHealthCoveredMoveCardsNow(session: RequestSession) {
+export async function reconcileHealthCoveredMoveCardsNow(session: RequestSession, options: { deadlineAt?: number; now?: string | number } = {}) {
+  // One budget for the whole transaction, within the request's own deadline (Codex r2 on #457).
+  const budgetMs = Math.min(2_000, (options.deadlineAt ?? Number.POSITIVE_INFINITY) - Date.now() - 250);
+  if (!(budgetMs >= 200)) return null;
+  const until = Date.now() + budgetMs;
   let client: pg.PoolClient | null = null;
   try {
     client = await pool.connect();
+    if (Date.now() >= until) return null;
     await client.query("begin");
-    await client.query("set local statement_timeout = '2000ms'");
+    await client.query(`set local statement_timeout = '${Math.max(100, Math.round(until - Date.now()))}ms'`);
+    await client.query(`set local idle_in_transaction_session_timeout = '${Math.round(budgetMs)}ms'`);
     const lock = await client.query<{ acquired: boolean }>(
       "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
     if (!lock.rows[0]?.acquired) {
       await client.query("rollback");
       return null;
     }
-    const retired = await retireHealthCoveredMoveCards(client, session);
+    // The newest few cards only; every later replay sweeps the rest.
+    const retired = await retireHealthCoveredMoveCards(client, session, { limit: 25, now: options.now });
+    if (Date.now() >= until) {
+      await client.query("rollback");
+      return null;
+    }
     await client.query("commit");
     return retired;
   } catch {

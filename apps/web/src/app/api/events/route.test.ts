@@ -59,7 +59,7 @@ describe("POST /api/events", () => {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
     }));
     await post({ type: "health_workout_import", clientEventId: "workout-1" });
-    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session);
+    expect(mocks.reconcileHealthCoveredMoveCardsNow).toHaveBeenCalledWith(session, { deadlineAt: expect.any(Number) });
     mocks.reconcileHealthCoveredMoveCardsNow.mockClear();
     mocks.processActivityEvent.mockResolvedValueOnce({ eventId: "event-1", duplicate: true, candidate: { action: "create_review_item" } });
     await post({ type: "health_workout_import", clientEventId: "workout-1" });

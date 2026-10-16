@@ -1854,12 +1854,28 @@ async function validateHealthWalksWin() {
   await ingestLocationEvidence(cardFirst, session);
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move was not offered without a workout.");
   const late = await addWorkout("late", "walking");
-  assert.equal(await reconcileHealthCoveredMoveCardsNow(session), 1, "A Health import did not retire the Move it covers.");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 1, "A Health import did not retire the Move it covers.");
   assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }], "A late Health walk did not retire the Move's card.");
   // Removing the workout brings it back while its evidence lasts.
   await removeWorkout(late);
   await ingestLocationEvidence(cardFirst, session);
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move did not come back when its Health walk went.");
+
+  // The card's stored window can be stale (later evidence moved the Move): emission retires it by the
+  // Move's current window, not the card's (Codex r2 on #457).
+  await pool.query(
+    `update review_items set suggested_started_at = suggested_started_at - interval '3 hours',
+            suggested_stopped_at = suggested_stopped_at - interval '3 hours'
+     where workspace_id = $1 and user_id = $2 and status = 'open'`, [WORKSPACE_ID, USER_ID]);
+  const stale = await addWorkout("stale", "walking");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0,
+    "The stored-card sweep matched a card whose stored window the workout does not cover.");
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }],
+    "A Move covered by its current window kept its stale open card.");
+  await removeWorkout(stale);
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move did not come back after the stale-window case.");
 
   // Its evidence gone, a later workout is still reconciled from the card itself on the next replay.
   await pool.query("delete from location_evidence where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
@@ -1887,7 +1903,7 @@ async function validateHealthWalksWin() {
   await clearDerivedLocationState();
   const strength = await addWorkout("strength", "strength_training");
   await ingestLocationEvidence(cardFirst, session);
-  assert.equal(await reconcileHealthCoveredMoveCardsNow(session), 0, "A strength workout retired a Move.");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0, "A strength workout retired a Move.");
   assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "A strength workout hid a Move.");
   await removeWorkout(strength);
   await clearDerivedLocationState();

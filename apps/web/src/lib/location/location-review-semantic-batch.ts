@@ -11,7 +11,7 @@ import { ensureCommuteCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { reopenSupersededReviews } from "./location-review-supersession";
-import { healthCoveredMoves } from "./health-coverage";
+import { healthCoveredMoves, retireCoveredCandidateCards } from "./health-coverage";
 import {
   AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
@@ -158,6 +158,7 @@ export async function emitReviewSemanticSegments(
   // It is not offered (nor reopened) here; replay retires any open card for it afterwards
   // (retireHealthCoveredMoveCards), and it comes back if the workout goes while its evidence lasts.
   const healthCovered = await healthCoveredMoves(client, session, offerable);
+  changes.count += await retireCoveredCandidateCards(client, session, [...healthCovered]);
   const eligible = offerable.filter((row) => !healthCovered.has(row.clientEventId));
   const existing = new Map<string, { id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>();
   for (const batch of chunks(eligible)) {
