@@ -69,7 +69,7 @@ npm run export:workspace -- ./dayframe-backup.json
 
 - Preserve the event-first model. Do not bypass `activity_events` for new signal sources.
 - Preserve category/task-first UX. Users track a title/description with an optional category and user-facing tags; projects/clients are legacy/internal compatibility until explicitly reintroduced.
-- Keep automatic behavior conservative. Trusted places may auto-start; broad/unknown/Home-like signals should go to review unless the user has configured a rule.
+- Log automatically when the evidence is clear (Stays at places with Log automatically on; Moves between known places with a clear mode — PRD D19, being built). Unknown places, unclear trips and trips with a stop go to Review. Names the user types become suggestions, never rules. Until a D19 step lands, the shipped policy in `docs/PRD.md` › Automatic logging decisions applies.
 - Keep web and mobile API contracts compatible. Mobile relies on `/api/bootstrap`, `/api/time-entries`, `/api/events`, and bearer app sessions.
 - Maintain workspace/user scoping on all data access. API routes must resolve a `RequestSession` before reading or writing workspace data.
 - Provider auth uses Supabase Auth for identity and Dayframe app sessions for web/mobile API access. Do not replace the app session token flow without updating mobile.
