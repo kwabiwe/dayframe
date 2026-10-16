@@ -43,9 +43,11 @@ export type ParsedLocationReviewWindow = {
 export function locationReviewJourneyCopy(segment: { kind: "stay" | "commute"; timeAway?: boolean }) {
   if (segment.kind !== "commute") return null;
   return segment.timeAway
-    ? { journey: false, primaryLabel: "Record time away", recorded: "The time away was recorded.", placeholder: "Add a name (optional)" }
-    : { journey: true, primaryLabel: "Record commute", recorded: "The commute was recorded.", placeholder: "Add commute details (optional)" };
+    ? { journey: false, primaryLabel: "Record trip", recorded: "The trip was recorded.", placeholder: "Add a name (optional)" }
+    : { journey: true, primaryLabel: "Record trip", recorded: "The trip was recorded.", placeholder: "Add trip details (optional)" };
 }
+
+const GENERATED_UNNAMED_STAY_TITLES = new Set(["unknown place", "near saved places", "visit at an unknown place", "visit near saved places"]);
 
 export function initialLocationReviewDescription({
   placeName,
@@ -58,7 +60,8 @@ export function initialLocationReviewDescription({
 }) {
   if (segmentKind === "commute") return "";
   const normalizedTitle = title.trim().replace(/\s+/g, " ").toLowerCase();
-  if (!placeName?.trim() && normalizedTitle === "visit at an unknown place") return "";
+  // Dayframe's own titles for a stay it cannot name (PRD D19, and the older wording) are not a name.
+  if (!placeName?.trim() && GENERATED_UNNAMED_STAY_TITLES.has(normalizedTitle)) return "";
   return title;
 }
 
@@ -151,16 +154,21 @@ export function locationReviewEndpointMs({
 export function buildLocationReviewEdit({
   categoryTouched,
   description,
+  descriptionTouched = false,
   selectedCategoryId,
   window
 }: {
   categoryTouched: boolean;
   description: string;
+  /** The person changed the name field: only then is the name "typed" (Codex r3 on #456). */
+  descriptionTouched?: boolean;
   selectedCategoryId: string | null;
   window: ParsedLocationReviewWindow;
 }): ReviewEntryEdit {
+  const typed = description.trim();
   return {
-    description: description.trim(),
+    description: typed,
+    ...(typed && descriptionTouched ? { descriptionTyped: true as const } : {}),
     startedAt: window.startedAt,
     stoppedAt: window.stoppedAt,
     ...(categoryTouched ? { categoryId: selectedCategoryId } : {})

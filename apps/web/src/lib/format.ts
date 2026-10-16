@@ -208,7 +208,7 @@ const eventLabels: Record<string, string> = {
   manual_entry: "Manual entry",
   geofence_enter: "Entered place",
   geofence_exit: "Left place",
-  commute_detected: "Commute detected",
+  commute_detected: "Trip",
   learned_place_visit: "Learned place visit",
   review_accept: "Accepted review",
   review_ignore: "Ignored review",
@@ -233,9 +233,9 @@ export function formatEventLabel(value?: string | null) {
   return eventLabels[value] ?? formatMachineLabel(value);
 }
 
-/** Activity label; time away is a commute row but never a commute. */
+/** Activity label: every Move, time away from a place included, is a trip (PRD D19). */
 export function formatActivityEventLabel(event: { eventType?: string | null; timeAway?: boolean }) {
-  return event.timeAway ? "Time away" : formatEventLabel(event.eventType);
+  return event.timeAway ? "Trip" : formatEventLabel(event.eventType);
 }
 
 export function formatMachineLabel(value: string) {

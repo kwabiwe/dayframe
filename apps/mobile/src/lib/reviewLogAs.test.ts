@@ -40,6 +40,7 @@ describe("reviewLogAsEdit", () => {
     expect(reviewLogAsEdit({ ...base, draftName: "  Lunch walk " })).toEqual({
       categoryId: "walking",
       description: "Lunch walk",
+      descriptionTyped: true,
       startedAt: base.startedAt,
       stoppedAt: base.stoppedAt
     });

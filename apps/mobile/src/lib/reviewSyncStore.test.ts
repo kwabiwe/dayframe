@@ -117,6 +117,11 @@ describe("Review sync store contracts", () => {
     expect(isTimeAwayReviewItem(sanitiseReviewItemForCache(backlog))).toBe(true);
     // A server without the feature: an ordinary commute as before.
     expect(isTimeAwayReviewItem(mobileReviewItemFromPresentation(record))).toBe(false);
+    // A Move's route line survives presentation-only cards and the cache (PRD D19, Codex r1 on #456).
+    const routed = mobileReviewItemFromPresentation({ ...record, title: "Trip", timeAway: { stopCount: 0 }, routeLabel: "Round trip from Home" });
+    expect(routed.rawPayload).toEqual({ qualificationReason: "same_place_outing", stopCount: 0, routeLabel: "Round trip from Home" });
+    expect(sanitiseReviewItemForCache(routed).rawPayload).toMatchObject({ routeLabel: "Round trip from Home" });
+    expect(mobileReviewItemFromPresentation({ ...record, title: "Drive", routeLabel: "Home → Gym" }).rawPayload).toEqual({ routeLabel: "Home → Gym" });
   });
 
   it("caches dashboard presentation without location coordinates or raw evidence", () => {

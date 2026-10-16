@@ -180,7 +180,7 @@ describe("Review", () => {
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
     expect(sent[0].body.mutation).toEqual({
       action: "edit_and_confirm",
-      edit: { categoryId: "admin", description: "Park run", startedAt: local(7), stoppedAt: local(8) }
+      edit: { categoryId: "admin", description: "Park run", descriptionTyped: true, startedAt: local(7), stoppedAt: local(8) }
     });
     await act(async () => root.unmount());
   });

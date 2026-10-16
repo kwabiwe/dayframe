@@ -515,7 +515,7 @@ function textualEvidenceSummary(
   review: ReviewSegmentRow,
   stops: TripStopDto[] = []
 ) {
-  const subject = kind === "stay" ? "visit" : review.timeAway ? "time away" : "journey";
+  const subject = kind === "stay" ? "visit" : review.timeAway ? "round trip" : "journey";
   const place = review.placeName ? ` near ${review.placeName}` : "";
   const window = `${iso(review.startedAt)} to ${iso(review.stoppedAt) ?? "ongoing"}`;
   const candidates = placeCandidates.length ? placeCandidates.join(", ") : "none within 500 metres";

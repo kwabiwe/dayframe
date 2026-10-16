@@ -145,7 +145,7 @@ describe("Location Review evidence query", () => {
     expect(dto.map.route).toBeNull();
     expect(dto.map.straightLineFallback).toBeNull();
     expect(dto.map.acceptedSamples).toHaveLength(2);
-    expect(dto.textualSummary).toContain("This time away");
+    expect(dto.textualSummary).toContain("This round trip");
     expect(dto.textualSummary).not.toContain("journey");
     expect(locationEvidenceMapMode(dto)).toBe("mapped_evidence");
     expect(locationEvidenceCaption(dto)).not.toContain("route");

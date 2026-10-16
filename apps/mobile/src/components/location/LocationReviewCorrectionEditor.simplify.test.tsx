@@ -166,7 +166,7 @@ const byTestId = (id: string) => tree!.root.findAll((node) => node.props.testID 
 const byLabel = (label: string) => tree!.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.type === "string");
 const press = async (node: ReactTestInstance) => { await act(async () => { await node.props.onPress(); }); };
 const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityRole === "button" && node.props.onPress)
-  .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute"].includes(text(node)))!;
+  .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
 
 describe("Where were you? (D2, D3)", () => {
   it("lists the matched place once, in plain words, with nearby places under the empty search field", async () => {

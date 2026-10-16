@@ -222,10 +222,12 @@ describe("mobile review helpers", () => {
     expect(isTimeAwayReviewItem(away)).toBe(true);
     expect(isTimeAwayReviewItem(commute)).toBe(false);
     expect(reviewItemCategoryLabel(away)).toBe("No activity");
-    expect(reviewConfirmLabel(away)).toBe("Confirm time away");
+    expect(reviewConfirmLabel(away)).toBe("Confirm trip");
     const draft = buildReviewItemDraftEntry({ ...away, title: "Time away from Home", suggestedCategoryId: null, categoryName: null,
       suggestedStartedAt: "2026-03-10T12:00:00.000Z", suggestedStoppedAt: "2026-03-10T12:10:00.000Z" }, [], Date.now());
-    expect(draft).toMatchObject({ description: "Time away from Home", categoryId: null });
+    // Every Move starts with no name, time away included (PRD D19, Codex r1 on #456).
+    expect(draft).toMatchObject({ categoryId: null });
+    expect(draft?.description ?? "").toBe("");
     expect(reviewConfirmLabel(reviewItem())).toBe("Confirm activity");
   });
 
@@ -289,7 +291,7 @@ describe("mobile review helpers", () => {
     expect(locationReviewReasonCopy({
       ...commute,
       rawPayload: { semanticReason: "time_away_review_only", qualificationReason: "same_place_outing" }
-    })).toBe("Needs review · time away isn’t added automatically");
+    })).toBe("Needs review · round trips like this aren’t added automatically");
     expect(locationReviewReasonCopy({
       ...commute,
       rawPayload: { semanticReason: "insufficient_route_evidence" }

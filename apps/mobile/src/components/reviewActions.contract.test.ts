@@ -60,13 +60,19 @@ describe("mobile Review action contracts", () => {
     expect(deckSource).toContain('pointerEvents={top ? "box-none" : "none"}');
   });
 
+  it("shows a Move by the server's title with its route on the time line (PRD D19)", () => {
+    expect(reviewSource).not.toContain('"Commute detected"');
+    expect(reviewSource).toContain('if (item.eventType === "commute_detected") return item.title?.trim() || "Trip";');
+    expect(reviewSource).toContain("const travelMode = routeLabel ?? (item.eventType === \"commute_detected\" ? travelModeLabel(item.rawPayload?.travelMode) : null);");
+  });
+
   it("presents Location Evidence as activity, time and map while retaining resolution actions", () => {
     expect(evidenceSource).toContain("<LocationReviewCorrectionEditor");
     expect(evidenceEditorSource).toContain("formatEvidenceTimeRange(evidence, clockFormat)");
     expect(evidenceEditorSource).toContain("showDetails={false}");
-    // A commute is always named Commute; Motion & Fitness may add how it was travelled.
+    // A Move carries the server's title ("Drive", "Commute", "Trip"; PRD D19).
     expect(evidenceEditorSource).toContain('if (evidence.segment.kind !== "commute") return evidence.display.title;');
-    expect(evidenceEditorSource).toContain('return mode ? `Commute · ${mode}` : "Commute";');
+    expect(evidenceEditorSource).toContain('return evidence.display.title?.trim() || "Trip";');
     expect(evidenceEditorSource).toContain('action: "split"');
     expect(evidenceEditorSource).toContain('action: "merge"');
     expect(evidenceEditorSource).toContain('action: "record_once"');

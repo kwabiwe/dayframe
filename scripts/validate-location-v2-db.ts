@@ -643,7 +643,8 @@ async function validateRecentTitleHistoryAcrossReplay() {
      ) order by suggested_started_at, id`,
     [WORKSPACE_ID, USER_ID]
   );
-  const savedNames = new Set(LOCATION_ACCEPTANCE_PLACES.map((place) => `Visit ${place.name}`));
+  // A Stay is called by its place (PRD D19).
+  const savedNames = new Set(LOCATION_ACCEPTANCE_PLACES.map((place) => place.name));
   const before = (await openStays()).rows.filter((row) => savedNames.has(row.title));
   assert(before.length >= 3, "Three saved-place visit suggestions are required for title-history validation.");
 
@@ -722,6 +723,13 @@ async function validateCommuteReviewCategoryAndDescription() {
   );
   assert(existingCategory.rows[0], "Commute category concurrency fixture is missing.");
   const commuteCategoryId = existingCategory.rows[0].id;
+  // PRD D19: Commute is only between Home and Work. The fixture's Review journeys run from its home
+  // to its short-stop place and on to its round-trip place, so the first two hold those roles here;
+  // the other Moves suggest Travel.
+  const [homePlace, , , workPlace] = LOCATION_ACCEPTANCE_PLACES;
+  await pool.query("update places set role = case id when $2 then 'home' when $3 then 'work' end where workspace_id = $1 and id in ($2, $3)",
+    [WORKSPACE_ID, homePlace.id, workPlace.id]);
+  try {
   const fixture = locationAcceptanceFixture();
   const commuteBatches = Array.from({ length: 3 }, (_, index) => {
     const suffix = index + 1;
@@ -766,12 +774,29 @@ async function validateCommuteReviewCategoryAndDescription() {
      from review_items ri
      join activity_events ae
        on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+     join commute_segments cs on cs.id = ri.location_segment_id
      where ri.workspace_id = $1 and ri.user_id = $2
        and ri.status = 'open' and ae.event_type = 'commute_detected'
+       and array[cs.from_place_id, cs.to_place_id] @> array[$3::uuid, $4::uuid]
      order by ri.created_at, ri.id`,
-    [WORKSPACE_ID, USER_ID]
+    [WORKSPACE_ID, USER_ID, homePlace.id, workPlace.id]
   );
-  assert(commuteReviews.rows.length >= 6, "Commute review quality fixture needs six commute rows.");
+  assert(commuteReviews.rows.length >= 3, "Commute review quality fixture needs three Home ↔ Work rows.");
+  const otherMoves = await pool.query<{ id: string; categoryId: string | null; categoryKey: string | null; title: string }>(
+    `select ri.id, ri.suggested_category_id as "categoryId", c.starter_key as "categoryKey", ri.title
+     from review_items ri
+     join activity_events ae on ae.id = ri.event_id
+     join commute_segments cs on cs.id = ri.location_segment_id
+     left join categories c on c.id = ri.suggested_category_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ae.event_type = 'commute_detected'
+       and not coalesce(array[cs.from_place_id, cs.to_place_id] @> array[$3::uuid, $4::uuid], false)`,
+    [WORKSPACE_ID, USER_ID, homePlace.id, workPlace.id]);
+  assert(otherMoves.rows.length > 0, "The fixture has no Move outside Home ↔ Work.");
+  assert(otherMoves.rows.every((row) => row.categoryKey === "travel" && row.title !== "Commute"),
+    `A Move outside Home ↔ Work suggested Commute: ${JSON.stringify(otherMoves.rows.map((row) => [row.title, row.categoryKey]))}`);
+  // Description semantics below hold for every Move.
+  const moveReviewIds = [...commuteReviews.rows.map((row) => row.id), ...otherMoves.rows.map((row) => row.id)];
+  assert(moveReviewIds.length >= 6, "The fixture needs six Move Review rows.");
   assert(
     commuteReviews.rows.every(
       (row) =>
@@ -908,7 +933,7 @@ async function validateCommuteReviewCategoryAndDescription() {
   assert.equal(await count("time_entries"), timeEntryCount, "Repeated commute confirmation duplicated an entry.");
 
   const explicit = await resolveLocationReviewAction(
-    commuteReviews.rows[3].id,
+    moveReviewIds[3],
     { action: "edit_and_confirm", edit: { description: "  Train home  " } },
     session
   );
@@ -920,7 +945,7 @@ async function validateCommuteReviewCategoryAndDescription() {
   assert.equal(explicitEntry.rows[0].description, "Train home", "Explicit commute description was lost.");
 
   const blank = await resolveLocationReviewAction(
-    commuteReviews.rows[4].id,
+    moveReviewIds[4],
     { action: "edit_and_confirm", edit: { description: "   " } },
     session
   );
@@ -933,7 +958,7 @@ async function validateCommuteReviewCategoryAndDescription() {
 
   await assert.rejects(
     () => resolveLocationReviewAction(
-      commuteReviews.rows[5].id,
+      moveReviewIds[5],
       { action: "confirm" },
       { ...session, workspaceId: "30000000-0000-4000-8000-000000000099" }
     ),
@@ -967,6 +992,9 @@ async function validateCommuteReviewCategoryAndDescription() {
       [WORKSPACE_ID, commuteCategoryId]
     );
     await pool.query("update categories set is_archived = false where id = $1", [commuteCategoryId]);
+  }
+  } finally {
+    await pool.query("update places set role = null where workspace_id = $1 and id in ($2, $3)", [WORKSPACE_ID, homePlace.id, workPlace.id]);
   }
 }
 
@@ -1149,7 +1177,8 @@ async function validateEnabledTrustedCommuteAutomation() {
       semanticReason: automaticCommute.semanticReason
     },
     {
-      categoryName: "commute",
+      // A Move between two places that are not Home and Work suggests Travel (PRD D19).
+      categoryName: "travel",
       placeId: null,
       description: null,
       confidence: "medium_high",
@@ -1700,21 +1729,26 @@ async function validateTimeAwayReview() {
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
   const home = LOCATION_ACCEPTANCE_PLACES[0];
   await ingestLocationEvidence(batch("db-time-away", timeAwayEvidence(), "v2_review", "2026-06-01T07:00:00.000Z"), session);
-  const reviews = await pool.query<{ id: string; title: string; suggestedCategoryId: string | null; reason: string | null }>(
-    `select ri.id, ri.title, ri.suggested_category_id as "suggestedCategoryId", ae.raw_payload->>'qualificationReason' as reason
+  const reviews = await pool.query<{ id: string; title: string; suggestedCategoryId: string | null; reason: string | null; route: string | null }>(
+    `select ri.id, ri.title, ri.suggested_category_id as "suggestedCategoryId", ae.raw_payload->>'qualificationReason' as reason,
+            ae.raw_payload->>'routeLabel' as route
      from review_items ri join activity_events ae on ae.id = ri.event_id
      join commute_segments cs on cs.id = ri.location_segment_id
      where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'`,
     [WORKSPACE_ID, USER_ID]);
-  assert.deepEqual(reviews.rows.map(({ title, suggestedCategoryId, reason }) => ({ title, suggestedCategoryId, reason })),
-    [{ title: `Time away from ${home.name}`, suggestedCategoryId: null, reason: "same_place_outing" }],
-    "A short drive to a shop and back was not offered as time away from Home.");
+  // PRD D19: time away is a round-trip Move named from its place; its activity is Travel.
+  const travel = await pool.query<{ id: string }>(
+    "select id from categories where workspace_id = $1 and starter_key = 'travel'", [WORKSPACE_ID]);
+  assert.equal(travel.rowCount, 1, "Offering a Move did not create the Travel activity.");
+  assert.deepEqual(reviews.rows.map(({ title, suggestedCategoryId, reason, route }) => ({ title, suggestedCategoryId, reason, route })),
+    [{ title: "Trip", suggestedCategoryId: travel.rows[0].id, reason: "same_place_outing", route: `Round trip from ${home.name}` }],
+    "A short drive to a shop and back was not offered as a round trip from Home.");
   await resolveLocationReviewAction(reviews.rows[0].id, { action: "confirm" }, session);
   const entry = await pool.query<{ categoryId: string | null; description: string | null }>(
     `select category_id as "categoryId", description from time_entries where workspace_id = $1 and user_id = $2`,
     [WORKSPACE_ID, USER_ID]);
-  assert.deepEqual(entry.rows, [{ categoryId: null, description: `Time away from ${home.name}` }],
-    "Confirmed time away became a Commute entry.");
+  assert.deepEqual(entry.rows, [{ categoryId: travel.rows[0].id, description: null }],
+    "Confirmed time away did not become a Travel block without a generated description.");
 }
 
 /**

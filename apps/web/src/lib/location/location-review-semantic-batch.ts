@@ -4,10 +4,10 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticLocation, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow, isTimeAway, timeAwayTitle } from "@dayframe/shared";
+import { hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
-import { ensureCommuteCategoryId } from "../automatic-category-service";
+import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { reopenSupersededReviews } from "./location-review-supersession";
@@ -32,46 +32,58 @@ type Place = {
 type LearnedPlace = { id: string; name: string; saved: Place | null };
 
 /**
- * Name of the place time away was from: its saved place, else the accepted
- * learned place its persisted origin stay matched (learned endpoints have no
- * place ID on the commute).
+ * Both ends of every Move (PRD D19): the saved place's display name and role, else the accepted
+ * learned place its persisted endpoint stay matched (learned endpoints have no place ID on the
+ * commute), else unknown.
  */
-export async function timeAwayPlaceName(
+/** One Move's name (title, route line, activity) from its ends and mode; see `moveEndpoints`. */
+export async function segmentMoveName(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, segment: CommuteSegment, stayIds: ReadonlyMap<string, string>
 ) {
-  return (await timeAwayPlaceNames(client, session, [segment], stayIds)).get(segment.clientSegmentId) ?? null;
+  return (await moveEndpoints(client, session, [segment], stayIds)).get(segment.clientSegmentId)!;
 }
 
-/** Batched `timeAwayPlaceName` for every time-away commute among the segments, keyed by client segment ID. */
-async function timeAwayPlaceNames(
+async function moveEndpoints(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
 ) {
-  const timeAway = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute" && isTimeAway(segment));
-  const savedNames = new Map<string, string>();
-  const originNames = new Map<string, string>();
-  const placeIds = [...new Set(timeAway.flatMap((segment) => segment.fromPlaceId ? [segment.fromPlaceId] : []))].sort();
-  const originIds = [...new Set(timeAway.flatMap((segment) => {
-    const originId = segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId);
-    return originId ? [originId] : [];
-  }))].sort();
+  const moves = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  const saved = new Map<string, MoveEndpoint>();
+  const learned = new Map<string, MoveEndpoint>();
+  const placeIds = [...new Set(moves.flatMap((segment) => [segment.fromPlaceId, segment.toPlaceId].filter((id): id is string => Boolean(id))))].sort();
+  const stayDbIds = [...new Set(moves.flatMap((segment) => [
+    segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId),
+    segment.toPlaceId ? undefined : stayIds.get(segment.toStaySegmentId)
+  ].filter((id): id is string => Boolean(id))))].sort();
+  const role = (value: string | null) => value === "home" || value === "work" ? value : null;
   for (const ids of chunks(placeIds)) {
-    const result = await client.query<{ id: string; name: string }>(
-      `select pl.id, ${placeDisplayNameSql("pl")} as name from places pl where pl.workspace_id = $1 and pl.id = any($2::uuid[])`,
+    const result = await client.query<{ id: string; name: string; role: string | null }>(
+      `select pl.id, ${placeDisplayNameSql("pl")} as name, pl.role from places pl where pl.workspace_id = $1 and pl.id = any($2::uuid[])`,
       [session.workspaceId, ids]);
-    for (const row of result.rows) savedNames.set(row.id, row.name);
+    for (const row of result.rows) saved.set(row.id, { name: row.name, role: role(row.role) });
   }
-  for (const ids of chunks(originIds)) {
-    const result = await client.query<{ id: string; name: string }>(`select ss.id, coalesce(${placeRoleLabelSql("p")}, lp.name) as name
+  for (const ids of chunks(stayDbIds)) {
+    // A learned place linked to a saved place goes by the saved place's display name, as its Stay does.
+    const result = await client.query<{ id: string; name: string; role: string | null }>(`select ss.id, coalesce(${placeDisplayNameSql("p")}, lp.name) as name,
+      p.role
       from stay_segments ss
       join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
       left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and lp.status = 'accepted'
       where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
-    for (const row of result.rows) originNames.set(row.id, row.name);
+    for (const row of result.rows) learned.set(row.id, { name: row.name, role: role(row.role) });
   }
-  return new Map(timeAway.map((segment) => {
-    const originId = stayIds.get(segment.fromStaySegmentId);
-    const name = segment.fromPlaceId ? savedNames.get(segment.fromPlaceId) : originId ? originNames.get(originId) : undefined;
-    return [segment.clientSegmentId, name ?? null] as const;
+  const unknown: MoveEndpoint = { name: null, role: null };
+  const end = (placeId: string | null | undefined, staySegmentId: string) => {
+    if (placeId) return saved.get(placeId) ?? unknown;
+    const dbId = stayIds.get(staySegmentId);
+    return (dbId && learned.get(dbId)) || unknown;
+  };
+  return new Map(moves.map((segment) => {
+    const from = end(segment.fromPlaceId, segment.fromStaySegmentId);
+    const to = end(segment.toPlaceId, segment.toStaySegmentId);
+    const sameEndpoint = isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
+      Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
+    return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,
+      stopCount: segment.stops?.length ?? 0 })] as const;
   }));
 }
 
@@ -81,8 +93,8 @@ async function displayContext(
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
-  // Time away is named after the place it was away from.
-  const timeAwayNames = await timeAwayPlaceNames(client, session, segments, stayIds);
+  // Moves are named from their ends and mode (PRD D19).
+  const moves = await moveEndpoints(client, session, segments, stayIds);
   const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
@@ -105,19 +117,24 @@ async function displayContext(
     for (const row of result.rows) learned.set(row.id, row);
   }
   return (segment: LocationSegment) => {
-    if (segment.kind === "commute") return { trusted: null, title: isTimeAway(segment)
-      ? timeAwayTitle(timeAwayNames.get(segment.clientSegmentId)) : "Commute" };
+    if (segment.kind === "commute") {
+      const move = moves.get(segment.clientSegmentId) ?? moveName({ from: { name: null, role: null }, to: { name: null, role: null },
+        travelMode: segment.travelMode, sameEndpoint: isTimeAway(segment), stopCount: segment.stops?.length ?? 0 });
+      return { trusted: null, title: move.title, move };
+    }
     const trusted = segment.placeMatchKind === "saved" && segment.placeId
       ? places.get(segment.placeId) ?? null
       : segment.placeMatchKind === "learned" && segment.learnedPlaceId
         ? learned.get(segment.learnedPlaceId)?.saved ?? null : null;
     const learnedName = segment.learnedPlaceId ? learned.get(segment.learnedPlaceId) : null;
     const saved = segment.placeId ? places.get(segment.placeId) : null;
-    const title = trusted ? trusted.description?.trim() || `Visit ${trusted.name}`
-      : learnedName ? `Visit ${learnedName.name}`
-        : !segment.placeId ? segment.placeMatchKind === "ambiguous" ? "Visit near saved places" : "Visit at an unknown place"
-          : saved ? `Visit ${saved.name}` : "Visit at a saved place";
-    return { trusted, title };
+    // A Stay is called by its place (PRD D19); the place's own default description, the user's
+    // words, still wins.
+    const title = trusted ? trusted.description?.trim() || stayName({ name: trusted.name })
+      : learnedName ? stayName({ name: learnedName.name })
+        : !segment.placeId ? stayName({ name: null, ambiguous: segment.placeMatchKind === "ambiguous" })
+          : stayName({ name: saved?.name ?? "Saved place" });
+    return { trusted, title, move: null };
   };
 }
 
@@ -191,16 +208,22 @@ export async function emitReviewSemanticSegments(
     for (const row of batch) if (reopened.has(row.id)) row.reviewStatus = "needs_review";
     changes.count += reopened.size;
   }
-  const commuteCategoryId = eligible.some(row => row.segment.kind === "commute" && !isTimeAway(row.segment))
-    ? await ensureCommuteCategoryId(client, session, changes) : null;
+  // Commute only between Home and Work, Errands (if the workspace has it) for a Move with a stop,
+  // Travel for every other Move (PRD D19, A5). Commute's lock comes before Travel's.
+  const moveActivities = new Set(eligible.flatMap((row) => row.segment.kind === "commute" ? [context(row.segment).move?.activity] : []));
+  const commuteCategoryId = moveActivities.has("commute") ? await ensureCommuteCategoryId(client, session, changes) : null;
+  const errandsCategoryId = moveActivities.has("errand") ? await findErrandsCategoryId(client, session) : null;
+  const travelCategoryId = moveActivities.has("travel") || (moveActivities.has("errand") && !errandsCategoryId)
+    ? await ensureTravelCategoryId(client, session, changes) : null;
+  const moveCategoryId = (move: MoveName | null | undefined) => move?.activity === "commute" ? commuteCategoryId
+    : move?.activity === "errand" ? errandsCategoryId ?? travelCategoryId : travelCategoryId;
   // Replay locked every block it may touch once, in entry-id order, before emission (Codex r2/r3 on
   // #435): only those are moved or removed.
   const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
-    const { trusted, title } = context(segment);
-    // Time away suggests no category: the user chooses what it was.
-    const categoryId = isTimeAway(segment) ? null : segment.kind === "commute" ? commuteCategoryId : trusted?.categoryId ?? null;
+    const { trusted, title, move } = context(segment);
+    const categoryId = segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null;
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
@@ -246,6 +269,8 @@ export async function emitReviewSemanticSegments(
           ...(segment.motionSupported ? { motionSupported: true } : {}),
           // Time away only: how many unnamed stops it included.
           ...(isTimeAway(segment) && segment.stops?.length ? { stopCount: segment.stops.length } : {}),
+          // The Move's second line ("Home → Gym", "Round trip from Home"; PRD D19).
+          ...(move ? { routeLabel: move.route } : {}),
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,
@@ -402,7 +427,7 @@ export async function emitReviewSemanticSegments(
 }
 
 type SemanticCandidate = { segment: LocationSegment; segmentId: string; clientEventId: string };
-type SegmentContext = (segment: LocationSegment) => { trusted: Place | null; title: string };
+type SegmentContext = (segment: LocationSegment) => { trusted: Place | null; title: string; move: MoveName | null };
 
 /**
  * Log automatically (owner decision 14 Oct 2026): the stays this emission logs as blocks instead of

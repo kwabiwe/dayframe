@@ -440,7 +440,7 @@ export default function PlacesScreen() {
             />
           ) : (
           <>
-          <SettingsBlockGroup foot="Trips and time away are named after these." theme={theme} title="Home and Work">
+          <SettingsBlockGroup foot="Trips are named after these." theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
               <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
                 <View style={styles.placesRowMain}>

@@ -43,6 +43,7 @@ type ReviewRow = {
   canonicalEntryIds: string[] | null;
   /** Stops on a time-away journey; null for every other Review item. */
   timeAwayStopCount: number | null;
+  routeLabel: string | null;
 };
 
 type LegacyRow = {
@@ -128,7 +129,7 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean };
+export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean };
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -311,6 +312,7 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             case when cs.metadata ->> 'qualificationReason' = 'same_place_outing'
               then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
             end as "timeAwayStopCount",
+            case when ae.event_type = 'commute_detected' then nullif(btrim(ae.raw_payload ->> 'routeLabel'), '') end as "routeLabel",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -462,6 +464,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
             case when cs.metadata ->> 'qualificationReason' = 'same_place_outing'
               then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
             end as "timeAwayStopCount",
+            case when ae.event_type = 'commute_detected' then nullif(btrim(ae.raw_payload ->> 'routeLabel'), '') end as "routeLabel",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -591,7 +594,8 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
       : null,
     canonicalEntryIds: row.canonicalEntryIds ?? [],
     semanticRevision: isoOrNull(row.semanticRevision),
-    ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } })
+    ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } }),
+    ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {})
   };
   return {
     record,
@@ -603,9 +607,10 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
-  if (features.timeAway || !record || typeof record !== "object" || !("timeAway" in record)) return record;
-  const rest = { ...record } as T & { timeAway?: unknown };
-  delete rest.timeAway;
+  if (!record || typeof record !== "object") return record;
+  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown };
+  if (!features.timeAway) delete rest.timeAway;
+  if (!features.moveRoute) delete rest.routeLabel;
   return rest as T;
 }
 
