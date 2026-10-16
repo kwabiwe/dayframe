@@ -157,7 +157,9 @@ export async function emitReviewSemanticSegments(
     orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation;
     /** The blocks replay locked unedited, the only ones emission may move. */
     locked: ReadonlySet<string>;
-  } = { orphans: [], used: new Set(), locked: new Set() }
+  } = { orphans: [], used: new Set(), locked: new Set() },
+  /** The replayed device's readings' time zones, for learned names' time-of-day bands. */
+  evidenceTimeZones: ReadonlyMap<string, string> = new Map()
 ): Promise<number> {
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
@@ -217,7 +219,7 @@ export async function emitReviewSemanticSegments(
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   // Learned names (PRD D19, A8): a name the person gave this pattern is the card's name, and its
   // activity the card's activity; after two uses it also names a Log automatically block.
-  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds);
+  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones);
   const learnedNames = await learnedNamesFor(client, session, patterns);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title: placeTitle, move } = context(segment);

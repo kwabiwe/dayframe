@@ -21,6 +21,10 @@ create table if not exists public.location_name_patterns (
 create index if not exists idx_location_name_patterns_key
   on public.location_name_patterns(workspace_id, user_id, pattern_key);
 -- A round trip's pattern reads its route links by commute (the existing indexes lead with evidence).
+-- A plain build blocks writes to location_segment_evidence while it runs. Before applying, read the
+-- table's size (pg_total_relation_size) on each project; if the build would take more than a few
+-- seconds, create this one index first with CREATE INDEX CONCURRENTLY outside a transaction, after
+-- which this statement is a no-op (Codex r2 on #458).
 create index if not exists idx_segment_evidence_commute_lookup
   on public.location_segment_evidence(commute_segment_id, role)
   where commute_segment_id is not null;

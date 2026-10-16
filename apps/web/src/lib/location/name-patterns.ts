@@ -20,25 +20,6 @@ const CHUNK = 250;
 const chunks = <T,>(items: readonly T[]) => Array.from({ length: Math.ceil(items.length / CHUNK) }, (_, index) => items.slice(index * CHUNK, (index + 1) * CHUNK));
 
 /**
- * Each candidate's own time zone: that of its first evidence reading, so a replay after travel or a
- * second device never moves a past item to another band (Codex r1 on #458); UTC when it is gone.
- */
-async function itemTimeZones(
-  client: Pick<pg.PoolClient, "query">, session: RequestSession, candidates: ReadonlyArray<{ clientEventId: string; segment: LocationSegment }>
-) {
-  const firstIds = new Map(candidates.flatMap(({ clientEventId, segment }) => segment.evidenceIds[0] ? [[clientEventId, segment.evidenceIds[0]] as const] : []));
-  const zones = new Map<string, string>();
-  for (const batch of chunks([...new Set(firstIds.values())].sort())) {
-    const result = await client.query<{ id: string; timeZone: string }>(
-      `select distinct on (client_evidence_id) client_evidence_id as id, time_zone as "timeZone"
-       from location_evidence where workspace_id = $1 and user_id = $2 and client_evidence_id = any($3::text[])
-       order by client_evidence_id, occurred_at`, [session.workspaceId, session.userId, batch]);
-    for (const row of result.rows) zones.set(row.id, row.timeZone);
-  }
-  return (clientEventId: string) => zones.get(firstIds.get(clientEventId) ?? "") || "UTC";
-}
-
-/**
  * Each candidate's pattern (client event ID → key and band). A Stay by its place, learned place or
  * cell; a Move by its persisted end stays and mode; a round trip by its origin, the cell of its
  * farthest route reading from the origin, and mode.
@@ -46,11 +27,15 @@ async function itemTimeZones(
 export async function namePatternsFor(
   client: Pick<pg.PoolClient, "query">, session: RequestSession,
   candidates: ReadonlyArray<{ clientEventId: string; segment: LocationSegment }>,
-  stayIds: ReadonlyMap<string, string>, commuteIds: ReadonlyMap<string, string>
+  stayIds: ReadonlyMap<string, string>, commuteIds: ReadonlyMap<string, string>,
+  evidenceTimeZones: ReadonlyMap<string, string>
 ) {
   const patterns = new Map<string, NamePattern>();
   if (candidates.length === 0) return patterns;
-  const timeZoneOf = await itemTimeZones(client, session, candidates);
+  // Each item's own time zone, that of its first reading as replay loaded it for this device, so a
+  // replay after travel or a second device never moves a past item to another band (Codex r1/r2 on
+  // #458); UTC when that reading is gone.
+  const timeZoneOf = (segment: LocationSegment) => evidenceTimeZones.get(segment.evidenceIds[0] ?? "") || "UTC";
   const moves = candidates.filter((row): row is { clientEventId: string; segment: CommuteSegment } => row.segment.kind === "commute");
   // Both ends of every Move, and every stop of a round trip (its turnaround can be a stop).
   const endStayIds = [...new Set(moves.flatMap(({ segment }) =>
@@ -103,7 +88,7 @@ export async function namePatternsFor(
     return best ? locationCellKey(best.latitude, best.longitude) : null;
   };
   for (const { clientEventId, segment } of candidates) {
-    const band = nameBand(segment.startedAt, timeZoneOf(clientEventId));
+    const band = nameBand(segment.startedAt, timeZoneOf(segment));
     let key: string | null;
     if (segment.kind === "stay") {
       key = stayKey(segment);
@@ -143,8 +128,8 @@ function stayKey(stay: StaySegment) {
 }
 
 /**
- * The learned name for each pattern: its own band's, else the most used one of another band (a name
- * given in the morning still helps at noon); only names used at least once. Archived activities are
+ * The learned name and activity for each pattern: its own band's, else the most used one of another
+ * band (a name given in the morning still helps at noon); only those used at least once. Archived activities are
  * never suggested.
  */
 export async function learnedNamesFor(client: Pick<pg.PoolClient, "query">, session: RequestSession, patterns: ReadonlyMap<string, NamePattern>) {
@@ -163,13 +148,19 @@ export async function learnedNamesFor(client: Pick<pg.PoolClient, "query">, sess
     for (const row of result.rows) byKey.set(row.key, [...(byKey.get(row.key) ?? []), row]);
   }
   const learned = new Map<string, LearnedName>();
+  // The name and the activity are chosen independently, each from its own band first, else the other
+  // band where it was used most, so a band holding only an activity never hides another band's name
+  // (Codex r2 on #458).
+  const pick = <K extends "name" | "categoryId">(rows: Array<LearnedName & { band: NameBand }>, band: NameBand, field: K,
+    count: (row: LearnedName) => number) => rows.find((row) => row.band === band && row[field])
+    ?? rows.filter((row) => row.band !== band && row[field]).sort((a, b) => count(b) - count(a) || (a.band < b.band ? -1 : 1))[0];
   for (const [clientEventId, pattern] of patterns) {
     const rows = byKey.get(pattern.key) ?? [];
-    const own = rows.find((row) => row.band === pattern.band);
-    const other = [...rows].filter((row) => row.band !== pattern.band).sort((a, b) => b.uses - a.uses)[0];
-    const chosen = own ?? other;
-    if (chosen && (chosen.name || chosen.categoryId)) {
-      learned.set(clientEventId, { name: chosen.name, categoryId: chosen.categoryId, uses: chosen.uses, categoryUses: chosen.categoryUses });
+    const name = pick(rows, pattern.band, "name", (row) => row.uses);
+    const activity = pick(rows, pattern.band, "categoryId", (row) => row.categoryUses);
+    if (name || activity) {
+      learned.set(clientEventId, { name: name?.name ?? null, categoryId: activity?.categoryId ?? null,
+        uses: name?.uses ?? 0, categoryUses: activity?.categoryUses ?? 0 });
     }
   }
   return learned;

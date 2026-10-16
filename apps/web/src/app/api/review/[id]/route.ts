@@ -6,7 +6,7 @@ import {
   LocationReviewActionSchema,
   ReviewMutationEnvelopeSchema
 } from "@dayframe/shared";
-import { resolveLocationReviewAction } from "@/lib/location/location-review-service";
+import { isLocationSegmentReview, resolveLocationReviewAction } from "@/lib/location/location-review-service";
 import { resolveIdempotentReviewMutation } from "@/lib/review-mutation-service";
 
 export const maxDuration = 15;
@@ -67,6 +67,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ].includes(locationAction.data.action)
     ) {
       const result = await resolveLocationReviewAction(id, locationAction.data, session, operation);
+      return NextResponse.json(result);
+    }
+    // An older client's plain accept of a location Stay or Move confirms it like Confirm does.
+    if (action === "accept" && await isLocationSegmentReview(id, session)) {
+      const result = await resolveLocationReviewAction(id, { action: "confirm" }, session, operation);
       return NextResponse.json(result);
     }
     const result = await resolveReviewItem(id, action, session, operation);
