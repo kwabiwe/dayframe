@@ -19,7 +19,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     const result = await processActivityEvent(body, session, { signal: request.signal, deadlineAt });
     // Health walks win (PRD D19): a newly imported workout retires the location Move cards it covers.
-    if (body?.type === "health_workout_import" && !result.duplicate) await reconcileHealthCoveredMoveCardsNow(session, { deadlineAt });
+    if (body?.type === "health_workout_import" && !result.duplicate) {
+      await reconcileHealthCoveredMoveCardsNow(session, { deadlineAt, signal: request.signal, window: workoutWindow(body) });
+    }
     scheduleLiveActivityNotification(session);
     // The phone schedules its evening Review reminder from this count.
     const reviewCount = await openReviewCountFor(session);
@@ -60,4 +62,13 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+/** The imported workout's own window, when its payload names one. */
+function workoutWindow(body: { occurredAt?: unknown; rawPayload?: { startedAt?: unknown; stoppedAt?: unknown } } | null) {
+  const startedAt = typeof body?.rawPayload?.startedAt === "string" ? body.rawPayload.startedAt
+    : typeof body?.occurredAt === "string" ? body.occurredAt : null;
+  const stoppedAt = typeof body?.rawPayload?.stoppedAt === "string" ? body.rawPayload.stoppedAt : null;
+  return startedAt && stoppedAt && Number.isFinite(Date.parse(startedAt)) && Number.isFinite(Date.parse(stoppedAt)) &&
+    Date.parse(stoppedAt) > Date.parse(startedAt) ? { startedAt, stoppedAt } : null;
 }

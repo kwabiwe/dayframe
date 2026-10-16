@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { pool } from "../db";
+import { withSyncTransaction } from "../sync-transaction";
 import { normalizeHealthWorkoutType, type MotionTravelMode } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
@@ -107,35 +107,53 @@ export async function healthCoveredMoves(
 /**
  * Retires every open location Move card a Health workout covers, from the cards themselves, so a
  * workout that arrives after the card is reconciled on the next replay even once the Move's evidence
- * has aged out (Codex r1 on #457). Retirement is replay's own (`superseded`); user decisions are never
- * touched. Returns the number retired.
+ * has aged out (Codex r1 on #457). Pages through the open Move cards of the last 30 days that overlap
+ * any workout, newest first, checking coverage on each page, so non-covered cards never crowd out
+ * covered ones (Codex r3 on #457); `window` instead takes every open card, of any age, overlapping
+ * one imported workout. Retirement is replay's own (`superseded`); user decisions are never touched.
+ * Returns the number retired.
  */
 export async function retireHealthCoveredMoveCards(
-  client: Pick<pg.PoolClient, "query">, session: RequestSession, options: { limit?: number; now?: string | number } = {}
+  client: Pick<pg.PoolClient, "query">, session: RequestSession,
+  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string } } = {}
 ) {
-  // Open Move cards from the last 30 days (Location evidence lasts seven), newest first; a caller with
-  // a tight budget takes only the newest few.
-  const open = await client.query<{ reviewId: string; eventId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }>(
-    `select ri.id as "reviewId", ri.event_id as "eventId", ri.suggested_started_at as "startedAt",
-            ri.suggested_stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
-     from review_items ri
-     join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
-     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
-       and ae.source = 'location_learning' and ae.event_type = 'commute_detected' and ae.review_status = 'needs_review'
-       and ri.suggested_started_at > $4::timestamptz - interval '30 days' and ri.suggested_stopped_at is not null
-       and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
-         and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes')
-     order by ri.suggested_started_at desc
-     limit $3`,
-    [session.workspaceId, session.userId, options.limit ?? 5_000, new Date(options.now ?? Date.now()).toISOString()]);
-  if (open.rows.length === 0) return 0;
   const modes = new Set(["walking", "running", "cycling", "automotive"]);
-  const covered = await coveredMoveKeys(client, session, open.rows.map((row) => ({
-    key: row.reviewId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString(),
-    travelMode: row.travelMode && modes.has(row.travelMode) ? row.travelMode as MotionTravelMode : null
-  })));
-  return retireReviews(client, session, open.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId));
+  let retired = 0;
+  let cursor: { startedAt: Date; id: string } | null = null;
+  for (;;) {
+    const page: { rows: Array<{ reviewId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }> } = await client.query(
+      `select ri.id as "reviewId", ri.suggested_started_at as "startedAt",
+              ri.suggested_stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
+       from review_items ri
+       join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+         and ae.source = 'location_learning' and ae.event_type = 'commute_detected' and ae.review_status = 'needs_review'
+         and ri.suggested_started_at is not null and ri.suggested_stopped_at is not null
+         and ($4::timestamptz is not null
+           and ri.suggested_started_at < $5::timestamptz + interval '5 minutes' and ri.suggested_stopped_at > $4::timestamptz - interval '5 minutes'
+           or $4::timestamptz is null and ri.suggested_started_at > $3::timestamptz - interval '30 days')
+         and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
+           and hw.started_at < ri.suggested_stopped_at + interval '5 minutes' and hw.stopped_at > ri.suggested_started_at - interval '5 minutes')
+         and ($6::timestamptz is null or (ri.suggested_started_at, ri.id) < ($6::timestamptz, $7::uuid))
+       order by ri.suggested_started_at desc, ri.id desc
+       limit ${PAGE}`,
+      [session.workspaceId, session.userId, new Date(options.now ?? Date.now()).toISOString(),
+        options.window?.startedAt ?? null, options.window?.stoppedAt ?? null,
+        cursor?.startedAt.toISOString() ?? null, cursor?.id ?? null]);
+    if (page.rows.length === 0) break;
+    const covered = await coveredMoveKeys(client, session, page.rows.map((row) => ({
+      key: row.reviewId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString(),
+      travelMode: row.travelMode && modes.has(row.travelMode) ? row.travelMode as MotionTravelMode : null
+    })));
+    retired += await retireReviews(client, session, page.rows.filter((row) => covered.has(row.reviewId)).map((row) => row.reviewId));
+    if (page.rows.length < PAGE) break;
+    const last = page.rows[page.rows.length - 1];
+    cursor = { startedAt: last.startedAt, id: last.reviewId };
+  }
+  return retired;
 }
+
+const PAGE = 250;
 
 /**
  * Retires the open cards of these candidate Moves (client event IDs) a Health workout covers by
@@ -177,40 +195,26 @@ async function retireReviews(client: Pick<pg.PoolClient, "query">, session: Requ
 }
 
 /**
- * Right after an events request imported a workout: retire the open Move cards it covers in a short
- * transaction of its own, if the location owner lock is free (a replay holding it runs the same sweep
- * at its end, and every later replay does too). Best effort; never fails the import.
+ * Right after an events request imported a workout: retire the open Move cards of any age that this
+ * workout's window covers, in a bounded transaction of its own (`withSyncTransaction`: acquisition,
+ * work and cleanup within the request's deadline, at most two seconds), if the location owner lock is
+ * free; a replay holding it sweeps at its end, and every later replay does too (Codex r2/r3 on #457).
+ * Best effort; never fails the import.
  */
-export async function reconcileHealthCoveredMoveCardsNow(session: RequestSession, options: { deadlineAt?: number; now?: string | number } = {}) {
-  // One budget for the whole transaction, within the request's own deadline (Codex r2 on #457).
-  const budgetMs = Math.min(2_000, (options.deadlineAt ?? Number.POSITIVE_INFINITY) - Date.now() - 250);
-  if (!(budgetMs >= 200)) return null;
-  const until = Date.now() + budgetMs;
-  let client: pg.PoolClient | null = null;
+export async function reconcileHealthCoveredMoveCardsNow(
+  session: RequestSession,
+  options: { deadlineAt?: number; signal?: AbortSignal; now?: string | number; window?: { startedAt: string; stoppedAt: string } | null } = {}
+) {
+  const deadlineAt = Math.min(options.deadlineAt ?? Number.POSITIVE_INFINITY, Date.now() + 2_000);
+  if (deadlineAt - Date.now() < 300) return null;
   try {
-    client = await pool.connect();
-    if (Date.now() >= until) return null;
-    await client.query("begin");
-    await client.query(`set local statement_timeout = '${Math.max(100, Math.round(until - Date.now()))}ms'`);
-    await client.query(`set local idle_in_transaction_session_timeout = '${Math.round(budgetMs)}ms'`);
-    const lock = await client.query<{ acquired: boolean }>(
-      "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
-    if (!lock.rows[0]?.acquired) {
-      await client.query("rollback");
-      return null;
-    }
-    // The newest few cards only; every later replay sweeps the rest.
-    const retired = await retireHealthCoveredMoveCards(client, session, { limit: 25, now: options.now });
-    if (Date.now() >= until) {
-      await client.query("rollback");
-      return null;
-    }
-    await client.query("commit");
-    return retired;
+    return await withSyncTransaction("location_health_reconcile", async ({ client }) => {
+      const lock = await client.query<{ acquired: boolean }>(
+        "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
+      if (!lock.rows[0]?.acquired) return null;
+      return retireHealthCoveredMoveCards(client, session, { now: options.now, window: options.window ?? undefined });
+    }, { deadlineAt, signal: options.signal });
   } catch {
-    await client?.query("rollback").catch(() => undefined);
     return null;
-  } finally {
-    client?.release();
   }
 }

@@ -1887,6 +1887,25 @@ async function validateHealthWalksWin() {
   assert(replayed.replay.semanticChangeCount > 0, "Retiring a card for a Health walk reported no change.");
   await removeWorkout(afterExpiry);
 
+  // A card older than the replay sweep's 30 days is still reached through the imported workout's own
+  // window (Codex r3 on #457).
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(cardFirst, session);
+  await pool.query(
+    `update review_items set suggested_started_at = suggested_started_at - interval '40 days',
+            suggested_stopped_at = suggested_stopped_at - interval '40 days'
+     where workspace_id = $1 and user_id = $2 and status = 'open'`, [WORKSPACE_ID, USER_ID]);
+  const aged = (await pool.query<{ id: string }>(
+    `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, raw_payload)
+     values ($1, $2, 'db-health-aged', 'walking', timestamptz '2026-07-20T08:58:00Z' - interval '40 days',
+             timestamptz '2026-07-20T09:10:00Z' - interval '40 days', '{}'::jsonb) returning id`, [WORKSPACE_ID, USER_ID])).rows[0].id;
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0, "The 30-day sweep reached a 40-day-old card.");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, window: {
+    startedAt: new Date(Date.parse("2026-07-20T08:58:00Z") - 40 * 86_400_000).toISOString(),
+    stoppedAt: new Date(Date.parse("2026-07-20T09:10:00Z") - 40 * 86_400_000).toISOString() } }), 1,
+    "A workout import did not retire the old Move card its window covers.");
+  await removeWorkout(aged);
+
   // No cap hides the covering workout among many others in the same window (Codex r1 on #457).
   await clearDerivedLocationState();
   await pool.query(
