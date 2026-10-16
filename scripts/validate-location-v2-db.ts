@@ -1777,6 +1777,16 @@ async function validatePlaceDeleteWithSamePlaceJourneys() {
       // Longer than Postgres's default one-second deadlock_timeout.
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       assert.equal(settled, false, "A place delete did not wait for a running replay's owner lock.");
+      // It waits on the owner advisory lock (Codex r2 on #449), not on a row, and has locked no journey yet.
+      const waiting = await replay.query<{ count: number }>(
+        `select count(*)::integer as count from pg_locks
+         where locktype = 'advisory' and not granted and pid <> pg_backend_pid()`);
+      assert.equal(waiting.rows[0].count, 1, "A place delete was not waiting on the location owner lock.");
+      const journeyLocks = await pool.query(
+        `select id from commute_segments where workspace_id = $1 and user_id = $2
+           and (from_place_id = $3 or to_place_id = $3) for update skip locked`, [WORKSPACE_ID, USER_ID, home.id]);
+      assert.equal(journeyLocks.rowCount, before.filter((row) => row.fromPlaceId === home.id || row.toPlaceId === home.id).length,
+        "A place delete locked journeys before it held the location owner lock.");
       await replay.query(
         `select id from commute_segments where workspace_id = $1 and user_id = $2
            and (from_place_id = $3 or to_place_id = $3) order by id for update`, [WORKSPACE_ID, USER_ID, home.id]);

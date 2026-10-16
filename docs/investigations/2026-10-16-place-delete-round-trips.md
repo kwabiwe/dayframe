@@ -16,7 +16,7 @@ On iPhone, Places › a place › Delete showed "Couldn't delete this place. Try
 ## Fix (#449)
 
 - `deletePlace` clears both journey ends in one update and then deletes, in one transaction. Past blocks, stays and journeys keep their times and lose the link.
-- Location writers take the per-user owner advisory lock and lock stays before journeys; the delete takes the same lock for every user whose history can name the place (user-id order) before touching rows, so it waits for a running replay instead of deadlocking with it. It waits at most 10 s (then a "busy" 409) and retries a deadlock or serialization abort.
+- Location writers take the per-user owner advisory lock and lock stays before journeys; the delete takes the same lock for every user whose history can name the place (user-id order) before touching rows, so it waits for a running replay instead of deadlocking with it. It waits up to 10 s for each lock (then a "busy" 409) and retries a deadlock or serialization abort.
 - A database refusal answers 409 with a sentence; the iPhone and web Places show it (web: inside the open dialog).
 
 ## Coverage and limits

@@ -2154,11 +2154,11 @@ export class PlaceDeleteBlockedError extends Error {
   }
 }
 
-/** Location sync held this place's history for longer than a delete waits. The route answers 409. */
+/** A lock the delete needs (usually location sync's) was held longer than it waits. The route answers 409. */
 export class PlaceDeleteBusyError extends Error {
   readonly code = "place_delete_busy";
   constructor(cause: unknown) {
-    super("Dayframe is syncing your location history right now, so this place wasn't deleted. Try again in a moment.", { cause });
+    super("This place is busy right now, so it wasn't deleted. Try again in a moment.", { cause });
   }
 }
 
@@ -2176,8 +2176,9 @@ const PLACE_DELETE_ATTEMPTS = 3;
  * and then lock stays before journeys; clearing journeys and then stays without it could deadlock
  * with a replay (Codex r1 on #449). The delete takes the same owner lock for every user whose
  * location history can name the place, in user-id order, before touching any row, waits at most
- * `lockTimeoutMs` for it, and retries a transaction Postgres aborted as a deadlock or
- * serialization failure.
+ * `lockTimeoutMs` for each lock, and retries a transaction Postgres aborted as a deadlock or
+ * serialization failure. The wait limit applies to each lock it takes (Postgres `lock_timeout`), so
+ * a delete behind several busy locks can take longer in all.
  */
 export async function deletePlace(
   id: string,

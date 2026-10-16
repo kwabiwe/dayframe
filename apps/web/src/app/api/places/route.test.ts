@@ -242,7 +242,7 @@ describe("/api/places", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: "Dayframe is syncing your location history right now, so this place wasn't deleted. Try again in a moment.",
+      error: "This place is busy right now, so it wasn't deleted. Try again in a moment.",
       code: "place_delete_busy"
     });
   });
