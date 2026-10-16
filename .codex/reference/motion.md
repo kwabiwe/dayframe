@@ -165,6 +165,7 @@ reduced motion; a source contract or still frame is not physical gesture evidenc
 - Combining native navigation, a JavaScript transform, and a local layout animation for one transition.
 - Rewriting a smooth native route or sheet in Swift to repair an unrelated local React Native state change.
 - Declaring motion complete from unit tests or still screenshots alone.
+- Reading theme colours (`theme.*`) or calling `interpolateColor` inside a Reanimated `useAnimatedStyle` mapper. The UI-thread worklet can keep the colours it first captured after a system appearance change (production TF121, 16 Oct 2026: Today's blocks stayed light in dark mode until the app was relaunched). Put the theme colour in the plain React style and animate only opacity or transforms, for example an absolutely filled highlight layer whose opacity animates. `animatedThemeColors.contract.test.ts` enforces it.
 
 ## Location Review status and durable actions
 
@@ -188,6 +189,7 @@ Optional detail status enters below the stable activity/time summary with the ex
 - Interruption: a new pan on the same row takes over from the current offset. If the list still holds a deleted row 900 ms after its fly-out (for example the deletion was refused), it springs back home.
 - Async outcome: deletion and Start are the Dashboard's existing optimistic owners; the row never waits for the network.
 - Accessibility: Reduce Motion keeps the finger tracking (direct manipulation) but replaces the fly-out with an immediate hand-off and the spring with a 120 ms return; VoiceOver uses the row's "Start again"/"Switch to …" and "Delete" actions instead of swiping.
+- Theme: the row's `surface` background is a plain React style; the Stop-flight highlight is a `surfaceMuted` layer under the row content whose opacity animates, so an appearance change repaints the rows at once (TF121 dark-mode fix, 16 Oct 2026).
 
 "Earlier this week" (2a-2b) moves with the rows above it under the shared layout transition (it is the list footer, not a cell, so it owns that transition) and adds no other animation: a tap plays the selection haptic and hands off to the native tab switch; its rows rebuild on the per-minute clock, never the 1 s tick, and change in place.
 
