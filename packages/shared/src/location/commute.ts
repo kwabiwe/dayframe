@@ -169,8 +169,13 @@ function nativeSpeedResolver(items: ClassifiedEvidence[]) {
  */
 function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvidence[], evidence: ClassifiedEvidence[],
   config: LocationEngineConfig, farFrom: ReturnType<typeof positionIndex>, snapshots: ReadonlySet<ClassifiedEvidence>,
-  destinationStartMs: number, returnsThere: boolean) {
+  destinationStartMs: number, returnsThere: boolean, place: SavedPlaceForMatching | null = null) {
   const centre = segmentPoint(stay);
+  // A quick loop out and back is judged against the place's own circle: its pin and radius, never the
+  // stay's centre, which can sit far from the pin inside a large circle (Codex r3 on #451). An
+  // unknown place's stay uses its own centre and radius.
+  const loopCentre = place ? { latitude: place.latitude, longitude: place.longitude } : centre;
+  const loopRadius = place ? place.radiusMeters : stay.radiusMeters ?? config.unknownStayBaseRadiusMeters;
   let latest: ClassifiedEvidence | undefined;
   let excursion = false;
   let seenAway = false;
@@ -206,10 +211,12 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   const nextBackMs = new Map<ClassifiedEvidence, number>();
   const leavesAfter = new Map<ClassifiedEvidence, boolean>();
   const firstAwayAfter = new Map<ClassifiedEvidence, number | null>();
+  const farthestAwayAfter = new Map<ClassifiedEvidence, number>();
   let upcomingAwayMs = returnsThere ? Number.POSITIVE_INFINITY : destinationStartMs;
   let upcomingBackMs = returnsThere ? destinationStartMs : Number.POSITIVE_INFINITY;
   let firstAheadMetres: number | null = null;
   let farthestAheadMetres = Number.NEGATIVE_INFINITY;
+  let farthestFromPlaceMetres = Number.NEGATIVE_INFINITY;
   for (let index = evidence.length - 1; index >= 0; index -= 1) {
     const item = evidence[index];
     const atMs = Date.parse(item.evidence.occurredAt);
@@ -217,6 +224,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
     nextBackMs.set(item, upcomingBackMs);
     leavesAfter.set(item, firstAheadMetres != null && farthestAheadMetres - firstAheadMetres >= LEAVING_MARGIN_METRES);
     firstAwayAfter.set(item, firstAheadMetres);
+    farthestAwayAfter.set(item, farthestFromPlaceMetres);
     if (leftPlace(item)) upcomingAwayMs = atMs;
     if (snapshots.has(item)) continue;
     if (evidenceMatchesStay(item, stay)) {
@@ -224,6 +232,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
         upcomingBackMs = atMs;
         firstAheadMetres = null;
         farthestAheadMetres = Number.NEGATIVE_INFINITY;
+        farthestFromPlaceMetres = Number.NEGATIVE_INFINITY;
       }
       continue;
     }
@@ -231,6 +240,7 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
     if (point == null || centre == null || !accurateFix(item, config)) continue;
     firstAheadMetres = distanceMeters(centre, point);
     farthestAheadMetres = Math.max(farthestAheadMetres, firstAheadMetres);
+    if (loopCentre) farthestFromPlaceMetres = Math.max(farthestFromPlaceMetres, distanceMeters(loopCentre, point));
   }
   // nextBackMs must skip a callback sharing the item's own arrival time.
   const backAfter = (item: ClassifiedEvidence, atMs: number) => {
@@ -289,7 +299,14 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       // or the first one after it is farther than the last one before it (a
       // loop whose outbound leg went uncaptured). Otherwise it is the return:
       // iOS has dated arrival Visits up to 157 s before the car stopped, with
-      // the approach continuing after.
+      // the approach continuing after. The same holds for a sign observed as it
+      // happened (an entry, a still fix): back at the place within three minutes
+      // without moving away or reaching `LEAVING_MARGIN_METRES` beyond the
+      // place's radius before it, it is the return, never the departure. Two
+      // overlapping circles of one home put the old circle's entry 14 s before
+      // parking, after the car crossed the new one, with readings within 100 m
+      // in between (location v3 bug 11); a quick loop 300–700 m out and back
+      // after an entry is a real excursion (Codex r1/r2 on #451).
       const nextAway = nextAwayMs.get(item)!;
       const stayedBefore = Number.isFinite(nextAway) && nextAway - atMs >= config.savedPlaceMinimumDwellMs;
       const arrivedFirst = arrival.lastAway == null || atMs - arrival.lastAway.atMs > EARLY_DATED_VISIT_MAXIMUM_MS ||
@@ -298,8 +315,10 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
       const movesAway = leavesAfter.get(item) === true || arrival.lastAway != null && firstAfter != null &&
         firstAfter - arrival.lastAway.metres >= LEAVING_MARGIN_METRES;
       const observedThere = kind === "geofence_enter" || kind !== "visit" && !moving(item);
-      const departs = Number.isFinite(nextAway) && (observedThere ||
-        backAfter(item, atMs) - atMs > EARLY_DATED_VISIT_MAXIMUM_MS || arrivedFirst && movesAway);
+      const backSoon = backAfter(item, atMs) - atMs <= EARLY_DATED_VISIT_MAXIMUM_MS;
+      const wentFar = farthestAwayAfter.get(item)! >= loopRadius + LEAVING_MARGIN_METRES;
+      const departs = Number.isFinite(nextAway) &&
+        (!backSoon || (observedThere || arrivedFirst) && movesAway || observedThere && wentFar);
       if (inGap && (!seenAway || stayedBefore || departs)) latest = item;
       if (stayedBefore || departs) excursion = seenAway = false;
       // An entry is observed as it happens; a Visit in the gap can be an
@@ -784,7 +803,7 @@ export function deriveCommutes(
       return item && Date.parse(item.evidence.occurredAt) <= originalStartedAtMs ? [item] : [];
     }).sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt));
     const latestFromSupport = latestDepartureSupport(from, fromEvidence, gapEvidence, config, farFrom, snapshots,
-      stoppedAtMs, sameKnownEndpoint(from, to));
+      stoppedAtMs, sameKnownEndpoint(from, to), knownPlaceOf(from, options));
     let startedAtMs = latestFromSupport
       ? Date.parse(latestFromSupport.evidence.occurredAt)
       : originalStartedAtMs;
