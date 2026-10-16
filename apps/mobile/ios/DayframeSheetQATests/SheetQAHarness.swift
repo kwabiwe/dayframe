@@ -16,9 +16,10 @@ enum SheetQAIdentifiers {
   static let description = "time-entry-description"
   static let categoryAll = "time-entry-category-all"
   static let startDate = "time-entry-start-date"
-  static let startTime = "time-entry-start-time"
+  // The adjustable time cards (owner, 16 Oct 2026: no typed time; the value reads "09:00, Today").
+  static let startTime = "time-entry-start-card"
   static let endDate = "time-entry-end-date"
-  static let endTime = "time-entry-end-time"
+  static let endTime = "time-entry-end-card"
   static let done = "time-entry-sheet-done"
   static let stop = "time-entry-sheet-stop"
   static let delete = "time-entry-sheet-delete"

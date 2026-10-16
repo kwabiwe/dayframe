@@ -41,8 +41,8 @@ import {
 } from "@/lib/previousEndChip";
 import { DateSheet } from "@/components/DateSheet";
 import type { DayframeTimeWheelChange } from "../../modules/dayframe-time-wheel";
-import { TIME_WHEEL_PANEL_CHROME, TimeWheelPanel } from "@/components/TimeWheelPanel";
-import { timeWheelAccessibilityStep, timeWheelMinuteInterval } from "@/lib/timeWheel";
+import { TIME_WHEEL_PANEL_CHROME, TIME_WHEEL_PANEL_MARGIN_TOP, TimeWheelPanel } from "@/components/TimeWheelPanel";
+import { timeWheelAccessibilityStep } from "@/lib/timeWheel";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
 import { addLocalDays, formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
 import {
@@ -261,31 +261,17 @@ export function ActiveTimerEditSheet({
     timeWheelRevisionRef.current += 1;
     setTimeWheelRevision(timeWheelRevisionRef.current);
   };
-  // 5-minute rows unless the person asked for Every minute in this sheet (the prototype's stepPref).
-  const [timeWheelStepPref, setTimeWheelStepPref] = useState<1 | 5>(5);
   // The dial's measured height (with its hint row) and the layout it was measured at: the open
   // wheel takes that room only while the density and text size are still the same (Codex r3 on
   // #428: a Dynamic Type change while the wheel is open would otherwise keep a stale, larger room).
   const [dialAreaMeasure, setDialAreaMeasure] = useState<{ height: number; key: string } | null>(null);
-  // "Type time" (and VoiceOver's activate) types into the card's own field; otherwise it isn't editable.
-  const [typingTarget, setTypingTarget] = useState<"start" | "end" | null>(null);
-  const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
+  // VoiceOver turning on closes an open wheel; with VoiceOver the card itself is adjustable and
+  // activating it opens or closes the wheel (owner, 16 Oct 2026).
   useEffect(() => {
-    let mounted = true;
-    void AccessibilityInfo.isScreenReaderEnabled()
-      .then((enabled) => {
-        if (mounted) setScreenReaderEnabled(enabled);
-      })
-      .catch(() => undefined);
     const subscription = AccessibilityInfo.addEventListener("screenReaderChanged", (enabled) => {
-      setScreenReaderEnabled(enabled);
-      // VoiceOver gets the adjustable card, never the wheel.
       if (enabled) setTimeWheel(null);
     });
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, []);
   const [descriptionSelection, setDescriptionSelection] = useState({ start: 0, end: 0 });
   const [descriptionSelectionOverride, setDescriptionSelectionOverride] =
@@ -347,8 +333,6 @@ export function ActiveTimerEditSheet({
   const descriptionSectionLayoutRef = useRef<MeasuredRect | null>(null);
   const descriptionAnchorLayoutRef = useRef<MeasuredRect | null>(null);
   const contentScrollOffsetRef = useRef({ x: 0, y: 0 });
-  const timeInputRef = useRef<TextInput>(null);
-  const endTimeInputRef = useRef<TextInput>(null);
   const focusFrameRef = useRef<number | null>(null);
   const tagFocusFrameRef = useRef<number | null>(null);
   const geometryFrameRef = useRef<number | null>(null);
@@ -639,7 +623,6 @@ export function ActiveTimerEditSheet({
     // new presentation. Reset the native first responder before that generation
     // is allowed to honor its own explicit focus intent.
     descriptionInputRef.current?.blur();
-    timeInputRef.current?.blur();
     Keyboard.dismiss();
     contentScrollOffsetRef.current = { x: 0, y: 0 };
     pendingKeyboardUpdate.current = null;
@@ -756,8 +739,6 @@ export function ActiveTimerEditSheet({
     setPresentedPreviousEndEntryStart(previousEndRef.current ? previousEndEntryStartRef.current : null);
     setDatePickerOpen(false);
     setTimeWheel(null);
-    setTimeWheelStepPref(5);
-    setTypingTarget(null);
     setValidationError(null);
     hashtagPanelProgress.setValue(0);
   }, [hashtagPanelProgress, presentation.id, visible]);
@@ -1014,8 +995,6 @@ export function ActiveTimerEditSheet({
       dispatchSheetEvent({ type, presentationId: presentation.id });
       if (type === "app_backgrounded") {
         descriptionInputRef.current?.blur();
-        timeInputRef.current?.blur();
-        endTimeInputRef.current?.blur();
         Keyboard.dismiss();
       } else {
         scheduleGeometryMeasurement();
@@ -1970,12 +1949,6 @@ export function ActiveTimerEditSheet({
     if (accepted && ok) requestCoordinatedDismiss({ bypassDiscardConfirmation: true });
   }
 
-  function updateTimeText(value: string) {
-    if (!hasStoppedTime) setStartTimeEdited(true);
-    setTimeText(formatEditableTime(value));
-    setValidationError(null);
-  }
-
   function commitDescriptionEditorState(
     nextText: string,
     nextSelection: DescriptionSelection,
@@ -2180,11 +2153,6 @@ export function ActiveTimerEditSheet({
     };
   }
 
-  function updateStoppedTimeText(value: string) {
-    setStoppedTimeText(formatEditableTime(value));
-    setValidationError(null);
-  }
-
   function applyDialInterval(interval: TimeEntryDialInterval) {
     const start = new Date(interval.startMs);
     const end = new Date(interval.endMs);
@@ -2220,7 +2188,6 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
-  const cardTextValid = (target: "start" | "end") => (target === "end" ? parsedStop.date : parsedStart.date) !== null;
   const cardTimeMs = (target: "start" | "end") => target === "end"
     ? parsedStop.date?.getTime() ?? draftEndMs
     : parsedStart.date?.getTime() ?? draftStartMs;
@@ -2230,21 +2197,15 @@ export function ActiveTimerEditSheet({
     ? Math.floor(dialNowMs / 60_000) * 60_000 + 59_999
     : null;
 
+  // A tap on a card opens the wheel for it; a tap on the same card closes it (owner, 16 Oct 2026:
+  // no Done), and the other card retargets it. With VoiceOver, activating the card does the same.
   function openTimeWheel(target: "start" | "end") {
     if (busy) return;
-    // VoiceOver never gets the wheel: activating the card types the time instead.
-    if (screenReaderEnabled) {
-      typeCardTime(target);
-      return;
-    }
     const open = timeWheelRef.current;
     if (open?.target === target) {
       closeTimeWheel({ haptic: true });
       return;
     }
-    // A card whose text isn't a valid time (a half-typed "09:") takes the time the wheel will show,
-    // so the wheel's selection is always the draft (Codex r1 on #428).
-    if (!cardTextValid(target)) applyCardTime(target, cardTimeMs(target));
     if (open) {
       // The other card: the same wheel spins to its time.
       setTimeWheel({ presentationId: open.presentationId, target });
@@ -2273,36 +2234,6 @@ export function ActiveTimerEditSheet({
     // No "same as the card" skip: the card's value is the last render's, and a spin back to it
     // in the same batch must still win (Codex r2 on #428). Applying the same time again is harmless.
     applyCardTime(wheel.target, change.valueMs);
-  }
-
-  function toggleEveryMinute() {
-    const wheel = timeWheelRef.current;
-    if (!wheel || busy) return;
-    const target = wheel.target;
-    const valueMs = cardTimeMs(target);
-    playHaptic("tick");
-    if (timeWheelMinuteInterval(valueMs, timeWheelStepPref === 1) === 5) {
-      setTimeWheelStepPref(1);
-      return;
-    }
-    setTimeWheelStepPref(5);
-    // Back to 5-minute steps is an explicit choice, so an off-step time rounds visibly to the
-    // nearest step in its hour (as in the prototype).
-    const at = new Date(valueMs);
-    const minute = at.getMinutes();
-    if (minute % 5 === 0) return;
-    const rounded = Math.min(55, Math.round(minute / 5) * 5);
-    const roundedMs = valueMs - at.getSeconds() * 1000 - at.getMilliseconds() + (rounded - minute) * 60_000;
-    const maximumMs = cardMaximumMs(target);
-    applyCardTime(target, maximumMs !== null && roundedMs > maximumMs ? roundedMs - 5 * 60_000 : roundedMs);
-    bumpTimeWheelRevision();
-  }
-
-  function typeCardTime(target: "start" | "end") {
-    if (busy) return;
-    closeTimeWheel({ haptic: false });
-    setTypingTarget(target);
-    requestAnimationFrame(() => (target === "end" ? endTimeInputRef : timeInputRef).current?.focus());
   }
 
   function stepCardTime(target: "start" | "end", direction: 1 | -1) {
@@ -2348,8 +2279,6 @@ export function ActiveTimerEditSheet({
     if (!keepTimeWheel) setTimeWheel(null);
     cancelPendingTagFocus();
     descriptionInputRef.current?.blur();
-    timeInputRef.current?.blur();
-    endTimeInputRef.current?.blur();
     setDatePickerOpen(false);
     dispatchSheetEvent({
       type: "background_interaction",
@@ -2463,7 +2392,8 @@ export function ActiveTimerEditSheet({
     colorScheme: theme.mode === "dark" ? "dark" as const : "light" as const,
     maximumMs: cardMaximumMs(timeWheel.target),
     minimumMs: null,
-    minuteInterval: timeWheelMinuteInterval(timeWheelValueMs, timeWheelStepPref === 1),
+    // Every minute, always (owner, 16 Oct 2026).
+    minuteInterval: 1 as const,
     modelVersion: 1 as const,
     presentationId: timeWheel.presentationId,
     revision: timeWheelRevision,
@@ -2491,7 +2421,7 @@ export function ActiveTimerEditSheet({
   function handleTimeCardAccessibilityAction(target: "start" | "end", actionName: string) {
     if (actionName === "increment") stepCardTime(target, 1);
     else if (actionName === "decrement") stepCardTime(target, -1);
-    else if (actionName === "activate" || actionName === "typeTime") typeCardTime(target);
+    else if (actionName === "activate") openTimeWheel(target);
     else if (actionName === "changeDate") {
       if (target === "end") openEndPicker();
       else openStartPicker();
@@ -2998,8 +2928,10 @@ export function ActiveTimerEditSheet({
                           accessibilityLabel="Start"
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "start" }}
+                          accessibilityHint={timeWheel?.target === "start"
+                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
-                          accessible={typingTarget !== "start"}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
                           onPress={() => openTimeWheel("start")}
@@ -3007,38 +2939,14 @@ export function ActiveTimerEditSheet({
                           testID="time-entry-start-card"
                         >
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>START</Text>
-                            <TextInput
-                              ref={timeInputRef}
-                              {...mobileTextProps("input")}
-                              accessibilityElementsHidden={typingTarget !== "start"}
-                              accessibilityLabel="Start time"
-                              blurOnSubmit
-                              caretHidden
-                              contextMenuHidden
-                              editable={!busy && typingTarget === "start"}
-                              importantForAccessibility={typingTarget === "start" ? "auto" : "no-hide-descendants"}
-                              keyboardType="number-pad"
-                              maxLength={5}
-                              onBlur={() => setTypingTarget((current) => (current === "start" ? null : current))}
-                              onChangeText={updateTimeText}
-                              onFocus={() => {
-                                if (beginNativeKeyboardSession() === null) {
-                                  timeInputRef.current?.blur();
-                                  Keyboard.dismiss();
-                                  return;
-                                }
-                                setDatePickerOpen(false);
-                              }}
-                              onSubmitEditing={Keyboard.dismiss}
-                              placeholder="09:00"
-                              placeholderTextColor={theme.textSecondary}
-                              pointerEvents={typingTarget === "start" ? "auto" : "none"}
-                              returnKeyType="done"
-                              selectTextOnFocus
-                              style={[styles.textInput, styles.activeEditCompactTimeInput]}
-                              testID="time-entry-start-time"
-                              value={timeText}
-                            />
+                          <Text
+                            {...mobileTextProps("input")}
+                            numberOfLines={1}
+                            style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
+                            testID="time-entry-start-time"
+                          >
+                            {timeText || "--:--"}
+                          </Text>
                         </Pressable>
                         <Pressable
                           accessibilityLabel="Edit start date"
@@ -3096,8 +3004,10 @@ export function ActiveTimerEditSheet({
                           accessibilityLabel="End"
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "end" }}
+                          accessibilityHint={timeWheel?.target === "end"
+                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${stoppedTimeText || "No time"}, ${formatPickerDate(displayedEndAt)}` }}
-                          accessible={typingTarget !== "end"}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
                           onPress={() => openTimeWheel("end")}
@@ -3105,38 +3015,14 @@ export function ActiveTimerEditSheet({
                           testID="time-entry-end-card"
                         >
                           <Text {...mobileTextProps("counter")} style={[sheetStyles.sectionEyebrow, { color: theme.textMuted }]}>END</Text>
-                            <TextInput
-                              ref={endTimeInputRef}
-                              {...mobileTextProps("input")}
-                              accessibilityElementsHidden={typingTarget !== "end"}
-                              accessibilityLabel="End time"
-                              blurOnSubmit
-                              caretHidden
-                              contextMenuHidden
-                              editable={!busy && typingTarget === "end"}
-                              importantForAccessibility={typingTarget === "end" ? "auto" : "no-hide-descendants"}
-                              keyboardType="number-pad"
-                              maxLength={5}
-                              onBlur={() => setTypingTarget((current) => (current === "end" ? null : current))}
-                              onChangeText={updateStoppedTimeText}
-                              onFocus={() => {
-                                if (beginNativeKeyboardSession() === null) {
-                                  endTimeInputRef.current?.blur();
-                                  Keyboard.dismiss();
-                                  return;
-                                }
-                                setDatePickerOpen(false);
-                              }}
-                              onSubmitEditing={Keyboard.dismiss}
-                              placeholder="17:30"
-                              placeholderTextColor={theme.textSecondary}
-                              pointerEvents={typingTarget === "end" ? "auto" : "none"}
-                              returnKeyType="done"
-                              selectTextOnFocus
-                              style={[styles.textInput, styles.activeEditCompactTimeInput]}
-                              testID="time-entry-end-time"
-                              value={stoppedTimeText}
-                            />
+                          <Text
+                            {...mobileTextProps("input")}
+                            numberOfLines={1}
+                            style={[styles.textInput, styles.activeEditCompactTimeInput, sheetStyles.timeCardValue]}
+                            testID="time-entry-end-time"
+                          >
+                            {stoppedTimeText || "--:--"}
+                          </Text>
                         </Pressable>
                         <Pressable
                           accessibilityLabel="Edit end date"
@@ -3171,18 +3057,15 @@ export function ActiveTimerEditSheet({
                   {timeWheel && timeWheelModel ? (
                     // A11b: one inline wheel under the cards, a notch pointing at its card.
                     <TimeWheelPanel
-                      busy={busy}
                       key={`time-wheel-${timeWheel.presentationId}`}
+                      // The dial's whole room, so Discard/Stop stay put while the wheel is open (owner, 16
+                      // Oct 2026: with no foot the panel would otherwise be shorter than the dial).
+                      minHeight={dialAreaHeight === null ? null : dialAreaHeight - TIME_WHEEL_PANEL_MARGIN_TOP}
                       model={timeWheelModel}
                       notch={timeCardsStacked ? null : timeWheel.target === "start" ? "25%" : "75%"}
-                      onDone={() => closeTimeWheel({ haptic: true })}
                       onTimeChange={handleTimeWheelChange}
-                      onToggleEveryMinute={toggleEveryMinute}
-                      onTypeTime={() => typeCardTime(timeWheel.target)}
-                      pressedStyle={styles.buttonPressed}
                       reduceMotion={reduceMotion}
                       summary={timeWheelSummary}
-                      targetLabel={timeWheel.target === "end" ? "End" : "Start"}
                       testIDPrefix="time-entry-time-wheel"
                       theme={theme}
                       wheelHeight={timeWheelHeight}
@@ -3520,28 +3403,6 @@ function formatTimeInput(date: Date) {
   return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
-function formatEditableTime(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 4);
-  if (digits.length === 0) return "";
-  if (digits.length === 1) {
-    const hour = Number(digits);
-    return hour > 2 ? `0${hour}:` : digits;
-  }
-  if (digits.length === 2) {
-    const hour = Number(digits);
-    if (hour > 23) return `0${digits[0]}:${digits[1]}`;
-    return value.includes(":") ? `${digits}:` : digits;
-  }
-  if (digits.length === 3) {
-    const hour = Number(digits.slice(0, 2));
-    return hour > 23 ? `0${digits[0]}:${digits.slice(1)}` : `${digits.slice(0, 2)}:${digits[2]}`;
-  }
-
-  const hour = Math.min(Number(digits.slice(0, 2)), 23);
-  const minute = Math.min(Number(digits.slice(2)), 59);
-  return `${pad2(hour)}:${pad2(minute)}`;
-}
-
 function pad2(value: number) {
   return value.toString().padStart(2, "0");
 }
@@ -3557,12 +3418,11 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-/** VoiceOver's time card (A11b): swipe up/down moves 5 minutes; activate types the time. */
+/** VoiceOver's time card (A11b): swipe up/down moves 5 minutes; activate opens or closes the wheel. */
 const TIME_CARD_ACCESSIBILITY_ACTIONS = [
   { name: "increment" },
   { name: "decrement" },
   { name: "activate" },
-  { name: "typeTime", label: "Type time" },
   { name: "changeDate", label: "Change date" }
 ] as const;
 /** The inline wheel's height when the dial's room isn't measured at the current layout (the first
@@ -3610,6 +3470,8 @@ const sheetStyles = StyleSheet.create({
   previousEndPillText: { flexShrink: 1, fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "600" },
   // A11b time wheel (prototype .tw-*): the other card steps back while one is being set.
   timeCardStepBack: { opacity: 0.6 },
+  // The card's time as plain text (owner, 16 Oct 2026: no number pad), centred on the old field's line.
+  timeCardValue: { lineHeight: 28 },
   // The chips themselves are the shared ActivityChip / AllActivitiesChip (ActivityChips.tsx).
   actions: { flexDirection: "row", gap: 8, marginTop: 4 },
   actionPill: {

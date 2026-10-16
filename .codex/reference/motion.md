@@ -89,7 +89,7 @@ Haptics:
 | Log or skip a Review item | Success, or a light impact |
 | Delete | Warning |
 | Undo that restores an entry | Light impact |
-| Set a time on the entry sheet's time wheel (Done, a tap outside) | Light impact |
+| Set a time on the entry sheet's time wheel (a second tap on its card, a tap outside) | Light impact |
 
 - Haptics confirm a committed action. They never fire for a background refresh, a reconciliation, an automatic failure rollback or a rejected gesture.
 - Rapid repeats fire one haptic, or one composite sequence, per committed action.
@@ -367,19 +367,19 @@ Block pull-to-refresh:
 
 ## Entry sheet time wheel (A11b, date pickers PR 4, owner decisions 12 Oct 2026)
 
-- Trigger: a tap on a `START` or `END` time card; `Every minute`, `Type time`, `Done`; a tap on the same card, the other card, the form background, the sheet head or the description field; Escape; a date sheet Done or the "From 10:15" chip while it is open.
+- Trigger: a tap on a `START` or `END` time card (VoiceOver: activating it); a tap on the same card, the other card, the form background, the sheet head or the description field (owner, 16 Oct 2026: the panel has no Every minute, Type time or Done); Escape; a date sheet Done or the "From 10:15" chip while it is open.
 - Owner: the entry sheet's `timeWheel` state owns the panel's presence (one `Reanimated.View` keyed by the wheel's presentation id, `localPresenceEntering(…, "rise")` in and `localPresenceExiting` out). The native `UIDatePicker` owns the columns' own movement, momentum and selection haptics; React owns the value.
-- Entrance/update/exit: the panel rises 12 points and fades in over 140 ms under the cards (the card tint and the other card's 0.6 opacity change in the same render); spins write the draft live, so the card text and the panel's duration line update as the wheel settles; Done, a tap outside or the same card fades the panel out over 140 ms with a light haptic (`timeSet`); Type time closes it without a haptic and the number pad rises for the card.
+- Entrance/update/exit: the panel rises 12 points and fades in over 140 ms under the cards (the card tint and the other card's 0.6 opacity change in the same render); spins write the draft live, so the card text and the panel's duration line update as the wheel settles; a tap outside or on the same card fades the panel out over 140 ms with a light haptic (`timeSet`).
 - Surrounding layout: while it is open the panel takes the duration dial's place (the dial and its hint step aside; the panel is sized to the dial's room measured at the current layout), so the non-scrolling sheet grows by at most a few points; the dial leaves and returns in the same commit as the panel (no layout transition of its own), and the content below stays within a few points of its place.
 - Interruption: the other card retargets the open wheel (an animated spin to its time; the notch moves; no new presentation); an outside change (date, chip) bumps the wheel's revision and spins it there; a spin reported for an older revision or presentation is ignored, so it can't undo that change; Escape, the date sheet, a description tap, VoiceOver turning on, a new sheet presentation, Save, Stop and Delete close it (a mutation also makes any spin still in flight stale).
 - Async outcome: none. The wheel only changes the entry sheet's draft; the sheet's Done saves.
-- Accessibility: VoiceOver never gets the wheel (it is hidden); each card is adjustable in 5-minute steps with Type time and Change date, and activate types the time. Reduce Motion: the panel fades in 90 ms and out 70 ms with no rise; outside changes set the columns without the animated spin; the platform's own wheel momentum stays, as for any system picker.
+- Accessibility: VoiceOver never gets the wheel itself (it is hidden); each card is adjustable in 5-minute steps with Change date, and activate opens or closes the wheel (the hint says which; the card reports expanded). Reduce Motion: the panel fades in 90 ms and out 70 ms with no rise; outside changes set the columns without the animated spin; the platform's own wheel momentum stays, as for any system picker.
 
 ## Location evidence time wheel (A11b, date pickers PR 5)
 
 - Trigger, owner and motion: as the entry sheet's time wheel above, through the same `TimeWheelPanel` (presence `localPresenceEntering(…, "rise")` / `localPresenceExiting`, keyed per opening; the native wheel owns its columns). The panel opens under the When? row inside the editor's scroll view, which owns any scrolling; nothing else moves on its own (the content below takes the panel's room in the same commit).
-- Differences: no date control (the day is the evidence's) and no summary line (Duration is already in the row); a fixed 180-point wheel, because the page scrolls; the wheel closes when Search or the activity field takes focus, on a save, Done or a second tap on its field.
-- Accessibility and Reduce Motion: VoiceOver gets adjustable Start and End fields (5-minute steps, activate or Type time to type) and never the wheel; Reduce Motion fades the panel (90 ms in, 70 ms out) and outside changes set the wheel without a spin.
+- Differences: no date control (the day is the evidence's) and no summary line (Duration is already in the row); a fixed 180-point wheel, because the page scrolls; the wheel closes when Search or the activity field takes focus, on a save, a second tap on its field or a tap outside it on the screen (owner, 16 Oct 2026). Scrolling does not close it: the scroll view owns scrolling, the panel may need scrolling into view, and a drag on the background is the scroll view's, not a tap.
+- Accessibility and Reduce Motion: VoiceOver gets adjustable Start and End fields (5-minute steps; activate opens or closes the wheel) and never the wheel itself; Reduce Motion fades the panel (90 ms in, 70 ms out) and outside changes set the wheel without a spin.
 
 ## Web command timer start panel (owner, 15 Oct 2026)
 
