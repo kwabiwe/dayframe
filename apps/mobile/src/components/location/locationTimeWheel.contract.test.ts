@@ -14,8 +14,11 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).toContain("<TimeWheelPanel");
     expect(editor).toContain('testIDPrefix="location-review-time-wheel"');
     expect(editor).toMatch(/function openTimeWheel\(target: "start" \| "end"\) \{\s*if \(saving\) return;\s*const open = timeWheelRef\.current;\s*if \(open\?\.target === target\) \{\s*closeTimeWheel\(\{ haptic: true \}\);\s*return;/);
-    // A tap outside closes it only while it is open; a drag is the scroll view's.
-    expect(editor).toMatch(/onResponderRelease=\{\(\) => closeTimeWheel\(\{ haptic: true \}\)\}\s*onStartShouldSetResponder=\{\(\) => timeWheelRef\.current !== null\}\s*style=\{styles\.contentStack\}/);
+    // A tap outside (background or control) closes it through bubbling touch events, never the
+    // responder; the time fields and the panel mark their own touches; a drag is a scroll.
+    expect(editor).toMatch(/onTouchEnd=\{\(event\) => \{[\s\S]*?if \(!start \|\| start\.inside \|\| !timeWheelRef\.current\) return;[\s\S]*?> TAP_SLOP[\s\S]*?closeTimeWheel\(\{ haptic: true \}\);/);
+    expect((editor.match(/onTouchStart=\{markTouchInsideWheel\}/g) ?? []).length).toBe(2);
+    expect(editor).not.toContain("onStartShouldSetResponder={() => timeWheelRef.current !== null}");
     // Every minute, and no typing path.
     expect(editor).toMatch(/\/\/ Every minute, always \(owner, 16 Oct 2026\)\.\s*minuteInterval: 1,/);
     expect(editor).not.toMatch(/keyboardType="number-pad"|typingTarget|typeFieldTime|toggleEveryMinute|timeWheelStepPref|formatLocationReviewEditableTime/);
@@ -35,6 +38,7 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).not.toContain('name: "typeTime"');
     expect(editor).toContain('else if (actionName === "activate") openTimeWheel(target);');
     expect((editor.match(/Double-tap to close the time wheel\./g) ?? []).length).toBe(2);
+    expect((editor.match(/Swipe up or down to adjust by one minute\./g) ?? []).length).toBe(4);
     expect(editor).not.toContain("screenReaderEnabled");
     expect(editor).toContain("timeWheelAccessibilityStep(fieldTimeMs(target), direction)");
   });

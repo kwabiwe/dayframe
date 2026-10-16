@@ -20,6 +20,7 @@ export function TimeWheelPanel({
   model,
   notch,
   onTimeChange,
+  onTouchStart,
   reduceMotion,
   summary,
   testIDPrefix,
@@ -36,6 +37,8 @@ export function TimeWheelPanel({
   /** Where the notch points along the panel (its card's centre, e.g. "25%"); null when the cards are stacked. */
   notch: `${number}%` | null;
   onTimeChange: (change: DayframeTimeWheelChange) => void;
+  /** A touch starting on the panel (the Location editor marks it as inside the wheel). */
+  onTouchStart?: () => void;
   reduceMotion: boolean;
   summary?: string | null;
   testIDPrefix: string;
@@ -47,6 +50,7 @@ export function TimeWheelPanel({
       entering={localPresenceEntering(reduceMotion, "rise")}
       exiting={localPresenceExiting(reduceMotion)}
       onStartShouldSetResponder={() => true}
+      onTouchStart={onTouchStart}
       style={[panelStyles.panel, { backgroundColor: theme.surfaceMuted }, minHeight ? { minHeight } : null]}
       testID={testIDPrefix}
     >

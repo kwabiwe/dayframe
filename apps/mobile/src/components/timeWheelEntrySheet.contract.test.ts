@@ -55,8 +55,8 @@ describe("entry sheet time wheel (A11b)", () => {
     expect(sheet).not.toContain('name: "typeTime"');
     // Activating the card opens the wheel, or closes it when it is this card's; the hint says which.
     expect(sheet).toContain('else if (actionName === "activate") openTimeWheel(target);');
-    expect(sheet).toContain('"Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."');
-    expect(sheet).toContain('"Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."');
+    expect(sheet).toContain('"Swipe up or down to adjust by one minute. Double-tap to close the time wheel."');
+    expect(sheet).toContain('"Swipe up or down to adjust by one minute. Double-tap to open the time wheel."');
     expect(sheet).toContain("expanded: timeWheel?.target === \"start\"");
     expect(sheet).not.toContain("screenReaderEnabled");
     expect(sheet).toContain("timeWheelAccessibilityStep(cardTimeMs(target), direction, { maximumMs: cardMaximumMs(target) })");

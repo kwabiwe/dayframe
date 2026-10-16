@@ -2929,8 +2929,8 @@ export function ActiveTimerEditSheet({
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "start" }}
                           accessibilityHint={timeWheel?.target === "start"
-                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
-                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
+                            ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${timeText || "No time"}, ${formatPickerDate(displayedStartAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("start", event.nativeEvent.actionName)}
@@ -3005,8 +3005,8 @@ export function ActiveTimerEditSheet({
                           accessibilityRole="adjustable"
                           accessibilityState={{ disabled: busy, expanded: timeWheel?.target === "end" }}
                           accessibilityHint={timeWheel?.target === "end"
-                            ? "Swipe up or down to adjust by 5 minutes. Double-tap to close the time wheel."
-                            : "Swipe up or down to adjust by 5 minutes. Double-tap to open the time wheel."}
+                            ? "Swipe up or down to adjust by one minute. Double-tap to close the time wheel."
+                            : "Swipe up or down to adjust by one minute. Double-tap to open the time wheel."}
                           accessibilityValue={{ text: `${stoppedTimeText || "No time"}, ${formatPickerDate(displayedEndAt)}` }}
                           disabled={busy}
                           onAccessibilityAction={(event) => handleTimeCardAccessibilityAction("end", event.nativeEvent.actionName)}
@@ -3418,7 +3418,7 @@ function colorWithAlpha(hex: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-/** VoiceOver's time card (A11b): swipe up/down moves 5 minutes; activate opens or closes the wheel. */
+/** VoiceOver's time card (A11b): swipe up/down moves one minute; activate opens or closes the wheel. */
 const TIME_CARD_ACCESSIBILITY_ACTIONS = [
   { name: "increment" },
   { name: "decrement" },

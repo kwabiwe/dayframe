@@ -176,7 +176,16 @@ const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && 
   .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute"].includes(text(node)))!;
 
 const field = (label: "Start" | "End") => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityLabel === label)[0];
-const background = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onStartShouldSetResponder === "function" && typeof node.props.onResponderRelease === "function")[0];
+const screen = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onTouchStart === "function" && typeof node.props.onTouchEnd === "function")[0];
+const timeRow = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onTouchStart === "function" && !node.props.onTouchEnd)[0];
+// A touch bubbling up to the screen: from the time row when `inside`, ending `moved` points away.
+async function touch({ inside = false, moved = 0 }: { inside?: boolean; moved?: number } = {}) {
+  await act(async () => {
+    if (inside) timeRow().props.onTouchStart();
+    screen().props.onTouchStart({ nativeEvent: { pageX: 100, pageY: 300 } });
+    screen().props.onTouchEnd({ nativeEvent: { pageX: 100, pageY: 300 + moved } });
+  });
+}
 // The panel mock records its last props; clear them, re-render, and see whether it rendered again.
 async function wheelShown() {
   wheel.props = null;
@@ -206,14 +215,25 @@ describe("Location evidence time wheel (owner, 16 Oct 2026)", () => {
     expect(text(field("Start"))).toMatch(/^\d{2}:\d{2}$/);
   });
 
-  it("closes on a tap outside only while open, so the screen's own touches are unchanged", async () => {
+  it("closes on a tap outside, on the background or a control, but not on its own touches or a scroll (Codex r1 on #444)", async () => {
     await render(stay({ matched: true }));
-    expect(background().props.onStartShouldSetResponder()).toBe(false);
     await press(field("Start"));
-    expect(background().props.onStartShouldSetResponder()).toBe(true);
-    await act(async () => { background().props.onResponderRelease(); });
+    // Touches on the time fields (or the panel) and a drag keep it open.
+    await touch({ inside: true });
+    expect(await wheelShown()).not.toBeNull();
+    await touch({ moved: 40 });
+    expect(await wheelShown()).not.toBeNull();
+    // A tap on the background closes it.
+    await touch();
     expect(await wheelShown()).toBeNull();
-    expect(background().props.onStartShouldSetResponder()).toBe(false);
+
+    // A tap on a control does its own thing and closes it too.
+    await press(field("Start"));
+    const chip = () => byTestId("location-evidence-activity-cat-desk")[0];
+    await press(chip());
+    await touch();
+    expect(await wheelShown()).toBeNull();
+    expect(chip().props.accessibilityState).toEqual({ selected: true });
   });
 
   it("lets VoiceOver open and close the wheel by activating the field, with a hint that says which", async () => {
@@ -224,9 +244,9 @@ describe("Location evidence time wheel (owner, 16 Oct 2026)", () => {
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "activate" } }); });
     expect(await wheelShown()).not.toBeNull();
     expect(field("Start").props.accessibilityHint).toContain("Double-tap to close the time wheel.");
-    // Swiping still adjusts the field (5-minute steps), and the open wheel follows.
+    // Swiping still adjusts the field one minute at a time, and the open wheel follows.
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }); });
-    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:05:00Z"));
+    expect((await wheelShown())?.model.valueMs).toBe(Date.parse("2026-08-14T09:01:00Z"));
     await act(async () => { field("Start").props.onAccessibilityAction({ nativeEvent: { actionName: "activate" } }); });
     expect(await wheelShown()).toBeNull();
   });
