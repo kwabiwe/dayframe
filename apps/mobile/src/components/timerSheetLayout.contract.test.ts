@@ -47,7 +47,7 @@ describe("fixed timer-sheet layout contract", () => {
     expect(sheet).toContain('testID="time-entry-end-date"');
     expect(sheet).toContain('testID="time-entry-end-time"');
     // A four-digit time keeps its room at the largest input size; the date truncates first.
-    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil(52 * Math.min(windowDimensions.fontScale, 1.35));");
+    expect(sheet).toContain("const timeCardMinWidth = 18 + Math.ceil((clockFormat === \"12h\" ? 86 : 52) * Math.min(windowDimensions.fontScale, 1.35));");
     expect(sheet).toContain("{ minWidth: timeCardMinWidth }");
     expect(theme).toMatch(/activeEditCompactDate:\s*\{\s*flexShrink: 1,\s*minWidth: 0/);
   });

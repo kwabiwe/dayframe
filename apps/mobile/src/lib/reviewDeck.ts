@@ -1,4 +1,4 @@
-import { formatDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration, type ClockFormat } from "@dayframe/shared";
 // Blocks parity step 5a: the pure presentation model behind the iPhone Review deck.
 // The deck shows one Review card at a time over at most two cards beneath it.
 
@@ -72,13 +72,6 @@ export function reviewDeckSource(input: ReviewKindInput & { isLocation: boolean;
   return { icon: "spark", label: "Suggestion" };
 }
 
-function pad2(value: number) {
-  return value.toString().padStart(2, "0");
-}
-
-function clock(date: Date) {
-  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
-}
 
 function localDayStart(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -101,16 +94,19 @@ export function reviewDeckDayWord(date: Date, now: number) {
 }
 
 /**
- * The prototype's when-line: "Today · 21:19–21:26 · 7m". The day word is Today, Yesterday or a
+ * The prototype's when-line: "Today · 21:19–21:26 · 7m" ("Today · 9:19 PM–9:26 PM · 7m" in
+ * 12-hour mode). The day word is Today, Yesterday or a
  * short date ("Mon 6 Oct"); a range that crosses midnight names the end's day too.
  */
 export function formatReviewDeckWhen(
   startedAt: string | null,
   stoppedAt: string | null,
   durationSeconds: number,
-  now: number
+  now: number,
+  clockFormat: ClockFormat
 ): string | null {
   if (!startedAt) return null;
+  const clock = (date: Date) => formatClockTime(date, clockFormat);
   const start = new Date(startedAt);
   if (Number.isNaN(start.getTime())) return null;
   const dayWord = (date: Date) => reviewDeckDayWord(date, now);

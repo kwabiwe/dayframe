@@ -133,6 +133,8 @@ struct DayframeCalendarPresentation: Equatable {
   let entries: [DayframeCalendarEntry]
   let framedLabel: String
   let hapticsEnabled: Bool
+  /// "12h" or "24h" (PRD D18): the hour grid, now marker and drag preview follow it.
+  let clockFormat: String
   let modelVersion: Int
   let monthTitle: String
   let nowMs: Double
@@ -160,6 +162,7 @@ struct DayframeCalendarPresentation: Equatable {
     entries = record.entries.map(DayframeCalendarEntry.init)
     framedLabel = record.framedLabel
     hapticsEnabled = record.hapticsEnabled
+    clockFormat = record.clockFormat
     modelVersion = record.modelVersion
     monthTitle = record.monthTitle
     nowMs = record.nowMs

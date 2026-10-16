@@ -17,6 +17,8 @@ private struct DayframeDurationDialTheme: Decodable {
 }
 
 private struct DayframeDurationDialRecord: Decodable {
+  /// "12h" or "24h" (PRD D18) for the "since 09:30" / "09:30–10:35" detail.
+  let clockFormat: String?
   let endMs: Double
   let mode: String
   let modelVersion: Int
@@ -455,8 +457,8 @@ final class DayframeDurationDialExpoView: ExpoView, UIGestureRecognizerDelegate 
       .foregroundColor: UIColor(dayframeHex: record.theme.textPrimary)
     ]
     let clockDetail = record.mode == "running"
-      ? "since \(DayframeDurationDialStyle.clock(record.startMs))"
-      : "\(DayframeDurationDialStyle.clock(record.startMs))–\(DayframeDurationDialStyle.clock(record.endMs))"
+      ? "since \(DayframeDurationDialStyle.clock(record.startMs, clockFormat: record.clockFormat))"
+      : "\(DayframeDurationDialStyle.clock(record.startMs, clockFormat: record.clockFormat))–\(DayframeDurationDialStyle.clock(record.endMs, clockFormat: record.clockFormat))"
     let candidates = [DayframeDurationDialCore.lapDetail(milliseconds: effectiveEnd - record.startMs), clockDetail]
       .compactMap { $0 }
     let size = text.size(withAttributes: attributes)
@@ -562,8 +564,17 @@ private enum DayframeDurationDialStyle {
     return formatter
   }()
 
-  static func clock(_ milliseconds: Double) -> String {
-    clockFormatter.string(from: Date(timeIntervalSince1970: milliseconds / 1_000))
+  /// "9:30 AM", as the shared `formatClockTime` writes it whatever the iOS language.
+  private static let twelveHourFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "h:mm a"
+    return formatter
+  }()
+
+  static func clock(_ milliseconds: Double, clockFormat: String?) -> String {
+    let date = Date(timeIntervalSince1970: milliseconds / 1_000)
+    return clockFormat == "12h" ? twelveHourFormatter.string(from: date) : clockFormatter.string(from: date)
   }
 }
 

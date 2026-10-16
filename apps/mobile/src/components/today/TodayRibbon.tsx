@@ -4,8 +4,9 @@ import { router } from "expo-router";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { runOnJS } from "react-native-reanimated";
 import Svg, { Circle, Defs, G, Line, Path, Pattern, Rect } from "react-native-svg";
-import { blockColorsFor, DAYFRAME_BLOCKS } from "@dayframe/shared";
+import { blockColorsFor, DAYFRAME_BLOCKS, formatClockHour } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
+import { useClockFormat } from "../../lib/clockFormat";
 import { playHaptic } from "../../lib/haptics";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
@@ -67,6 +68,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   whereWent?: TodayWhereWentModel | null;
   whereWentQuiet?: boolean;
 }) {
+  const clockFormat = useClockFormat();
   const [width, setWidth] = useState(0);
   const [hit, setHit] = useState<RibbonHit | null>(null);
   // The tooltip's measured width, tied to the text it was measured with.
@@ -123,7 +125,7 @@ export const TodayRibbon = memo(function TodayRibbon({
   }, [endScrub, scrubTo, tapAt]);
 
   const hotKey = hit?.kind === "block" ? hit.block.key : null;
-  const tip = hit ? ribbonTip(hit) : null;
+  const tip = hit ? ribbonTip(hit, clockFormat) : null;
   const tipText = tip ? `${tip.title}\n${tip.detail}` : null;
   // Placed only once measured for the current text, so a new title never shows a frame off-centre.
   const tipWidth = tipMeasure && tipMeasure.text === tipText ? tipMeasure.width : 0;
@@ -151,7 +153,7 @@ export const TodayRibbon = memo(function TodayRibbon({
           accessibilityActions={[{ name: "increment" }, { name: "decrement" }, { name: "activate" }]}
           accessibilityLabel="Today, hour by hour"
           accessibilityRole="adjustable"
-          accessibilityValue={{ text: voiceBlock ? ribbonSpokenBlock(voiceBlock) : summary }}
+          accessibilityValue={{ text: voiceBlock ? ribbonSpokenBlock(voiceBlock, clockFormat) : summary }}
           onAccessibilityAction={(event) => {
             const name = event.nativeEvent.actionName;
             if (!ordered.length) return;
@@ -290,7 +292,7 @@ export const TodayRibbon = memo(function TodayRibbon({
               index === 0 ? null : index === RIBBON_LABEL_HOURS.length - 1 ? styles.hourLast : styles.hourMid,
             ]}
           >
-            {`${String(hour).padStart(2, "0")}:00`}
+            {formatClockHour(hour, clockFormat)}
           </Text>
         ))}
       </View>
@@ -363,6 +365,8 @@ function patternId(block: RibbonBlock) {
   return `hatch-${block.key.replace(/[^a-zA-Z0-9_-]/g, "")}`;
 }
 
+const HOUR_LABEL_WIDTH = 48;
+
 const styles = StyleSheet.create({
   card: { borderRadius: DAYFRAME_BLOCKS.radius.phoneCard, paddingBottom: 10, paddingHorizontal: CARD_PADDING, paddingTop: 14 },
   head: { alignItems: "baseline", flexDirection: "row", gap: 12, justifyContent: "space-between", marginBottom: 12 - BLEED },
@@ -372,9 +376,10 @@ const styles = StyleSheet.create({
   track: { height: TRACK_HEIGHT + BLEED * 2 },
   svg: { overflow: "visible" },
   hours: { height: 16, marginTop: 6 - BLEED },
-  hour: { fontSize: 10.5, fontVariant: ["tabular-nums"], position: "absolute", top: 0 },
-  hourMid: { transform: [{ translateX: -14 }] },
-  hourLast: { transform: [{ translateX: -28 }] },
+  // A fixed box centred on (or ending at) its hour, so "06:00" and "6 AM" (PRD D18) sit alike.
+  hour: { fontSize: 10.5, fontVariant: ["tabular-nums"], position: "absolute", top: 0, width: HOUR_LABEL_WIDTH },
+  hourMid: { textAlign: "center", transform: [{ translateX: -HOUR_LABEL_WIDTH / 2 }] },
+  hourLast: { textAlign: "right", transform: [{ translateX: -HOUR_LABEL_WIDTH }] },
   tip: { alignSelf: "flex-start", borderRadius: 12, gap: 1, paddingHorizontal: 11, paddingVertical: 8, position: "absolute", zIndex: 5 },
   tipTitle: { fontSize: 12, fontWeight: "700" },
   tipDetail: { fontSize: 12, fontVariant: ["tabular-nums"], opacity: 0.72 },

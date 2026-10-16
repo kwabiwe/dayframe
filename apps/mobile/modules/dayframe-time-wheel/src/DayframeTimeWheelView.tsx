@@ -1,9 +1,11 @@
-import { requireNativeViewManager } from "expo-modules-core";
+import { requireNativeViewManager, requireOptionalNativeModule } from "expo-modules-core";
 import { useMemo, type ComponentType } from "react";
 import type { NativeSyntheticEvent, ViewProps } from "react-native";
 
 /** What React shows in the wheel. React owns the draft; the wheel reports the user's spins. */
 export type DayframeTimeWheelModel = {
+  /** "12h" adds an AM/PM column (PRD D18); without it the wheel is 24-hour. */
+  clockFormat?: "12h" | "24h";
   colorScheme: "light" | "dark";
   /** Latest choosable instant, inclusive (a running start can't pass now). */
   maximumMs?: number | null;
@@ -42,4 +44,19 @@ const NativeDayframeTimeWheel: ComponentType<NativeProps> = requireNativeViewMan
 export function DayframeTimeWheelView({ model, ...props }: DayframeTimeWheelViewProps) {
   const modelJSON = useMemo(() => JSON.stringify(model), [model]);
   return <NativeDayframeTimeWheel {...props} modelJSON={modelJSON} />;
+}
+
+const nativeModule = requireOptionalNativeModule<{ systemUses24HourClock?: () => boolean }>("DayframeTimeWheel");
+
+/**
+ * Whether the iPhone's own 24-Hour Time setting is on, or null where the native module (or an older
+ * build of it) can't say.
+ */
+export function systemUses24HourClock(): boolean | null {
+  try {
+    const value = nativeModule?.systemUses24HourClock?.();
+    return typeof value === "boolean" ? value : null;
+  } catch {
+    return null;
+  }
 }

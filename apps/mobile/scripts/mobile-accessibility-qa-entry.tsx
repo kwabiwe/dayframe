@@ -408,6 +408,7 @@ function Probe() {
             <View style={{ height: 520 }}>
               <ReviewDeckStack
                 cards={[reviewDeckCardForItem("review:qa", reviewFixture, {
+                  clockFormat: "24h",
                   menuOpen: false,
                   mode: theme.mode,
                   neutral: theme.textSecondary,

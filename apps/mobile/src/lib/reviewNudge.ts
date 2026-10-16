@@ -3,6 +3,7 @@
 // places. The phone schedules it itself from the Review count it last heard from Dayframe
 // (bootstrap, and the counts the event and location replies carry).
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { formatClockMinutes, type ClockFormat } from "@dayframe/shared";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "./mobileAccount";
 
 export const REVIEW_NUDGE_DEFAULT_MINUTES = 20 * 60;
@@ -79,11 +80,9 @@ export function planReviewNudge(state: ReviewNudgeState, now: Date): ReviewNudge
   return { fireAt, body: reviewNudgeBody(state.knownCount) };
 }
 
-export function formatReviewNudgeTime(minutes: number) {
-  const hours24 = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
-  return `${hours12}:${String(mins).padStart(2, "0")} ${hours24 < 12 ? "am" : "pm"}`;
+/** The reminder time in this phone's 12/24-hour format (PRD D18): "8:00 PM" or "20:00". */
+export function formatReviewNudgeTime(minutes: number, clockFormat: ClockFormat) {
+  return formatClockMinutes(minutes, clockFormat);
 }
 
 const storageKeyFor = (accountKey: string) => `dayframe:review-nudge:v1:${accountKey}`;

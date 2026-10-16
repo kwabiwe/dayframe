@@ -33,20 +33,25 @@ describe("today block rows", () => {
   });
 
   it("writes the prototype's time range, with now for a running entry", () => {
-    expect(rowTimeRange(entry("a", at(8, 13), at(10)), day)).toBe("08:13–10:00");
-    expect(rowTimeRange(entry("b", at(9), null), day + 10 * 3_600_000)).toBe("09:00–now");
+    expect(rowTimeRange(entry("a", at(8, 13), at(10)), day, "24h")).toBe("08:13–10:00");
+    expect(rowTimeRange(entry("b", at(9), null), day + 10 * 3_600_000, "24h")).toBe("09:00–now");
+  });
+
+  it("writes 12-hour times when the phone uses them (PRD D18)", () => {
+    expect(rowTimeRange(entry("a", at(8, 13), at(13)), day, "12h")).toBe("8:13 AM–1:00 PM");
+    expect(rowSpokenLabel(group(entry("a", at(0, 5), at(12))), day, "12h")).toBe("Deep work, 12:05 AM to 12:00 PM, Focus");
   });
 
   it("puts time, repeat count and activity on one line", () => {
-    expect(rowMeta(group(entry("a", at(8), at(9))), day)).toBe("08:00–09:00 · Focus");
-    expect(rowMeta(group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), day)).toBe("08:00–09:00 · 2 blocks · Focus");
-    expect(rowMeta(group(entry("a", at(8), at(9), { categoryName: null, categoryId: null })), day)).toBe("08:00–09:00");
+    expect(rowMeta(group(entry("a", at(8), at(9))), day, "24h")).toBe("08:00–09:00 · Focus");
+    expect(rowMeta(group(entry("a", at(8), at(9)), entry("b", at(10), at(11))), day, "24h")).toBe("08:00–09:00 · 2 blocks · Focus");
+    expect(rowMeta(group(entry("a", at(8), at(9), { categoryName: null, categoryId: null })), day, "24h")).toBe("08:00–09:00");
   });
 
   it("drops the activity from the meta line when the title already is the activity (UIA-041)", () => {
-    expect(rowMeta(group(entry("a", at(8), at(9), { description: null })), day)).toBe("08:00–09:00");
-    expect(rowMeta(group(entry("a", at(8), at(9), { description: "  " })), day)).toBe("08:00–09:00");
-    expect(rowSpokenLabel(group(entry("a", at(8), at(9), { description: null })), day)).not.toMatch(/Focus.*Focus/);
+    expect(rowMeta(group(entry("a", at(8), at(9), { description: null })), day, "24h")).toBe("08:00–09:00");
+    expect(rowMeta(group(entry("a", at(8), at(9), { description: "  " })), day, "24h")).toBe("08:00–09:00");
+    expect(rowSpokenLabel(group(entry("a", at(8), at(9), { description: null })), day, "24h")).not.toMatch(/Focus.*Focus/);
   });
 
   it("titles a row by description, else activity, else No activity", () => {
@@ -66,10 +71,10 @@ describe("today block rows", () => {
   it("tells same-looking rows apart for VoiceOver by place and tags, reading times with 'to'", () => {
     const a = group(entry("a", at(9), at(10), { placeName: "Place A", tagNames: ["legs"] }));
     const b = group(entry("b", at(9), at(10), { placeName: "Place B" }));
-    expect(rowSpokenLabel(a, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place A, tags: legs");
-    expect(rowSpokenLabel(b, day)).toBe("Deep work, 09:00 to 10:00, Focus, at Place B");
-    expect(rowSpokenLabel(group(entry("c", at(9), null)), day + 11 * 3_600_000)).toBe("Deep work, 09:00 to now, Focus");
-    expect(rowSpokenLabel(group(entry("d", at(8), at(9)), entry("e", at(10), at(11))), day)).toBe("Deep work, 08:00 to 09:00, 2 blocks, Focus");
+    expect(rowSpokenLabel(a, day, "24h")).toBe("Deep work, 09:00 to 10:00, Focus, at Place A, tags: legs");
+    expect(rowSpokenLabel(b, day, "24h")).toBe("Deep work, 09:00 to 10:00, Focus, at Place B");
+    expect(rowSpokenLabel(group(entry("c", at(9), null)), day + 11 * 3_600_000, "24h")).toBe("Deep work, 09:00 to now, Focus");
+    expect(rowSpokenLabel(group(entry("d", at(8), at(9)), entry("e", at(10), at(11))), day, "24h")).toBe("Deep work, 08:00 to 09:00, 2 blocks, Focus");
   });
 
   it("does not start again a legacy placeholder description with no activity", () => {

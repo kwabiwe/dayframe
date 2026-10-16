@@ -1,4 +1,4 @@
-export { DayframeTimeWheelView } from "./src/DayframeTimeWheelView";
+export { DayframeTimeWheelView, systemUses24HourClock } from "./src/DayframeTimeWheelView";
 export type {
   DayframeTimeWheelChange,
   DayframeTimeWheelModel,

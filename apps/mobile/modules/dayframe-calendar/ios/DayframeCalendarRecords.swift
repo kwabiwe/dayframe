@@ -67,6 +67,7 @@ struct DayframeCalendarPresentationRecord: Codable {
   var entries: [DayframeCalendarEntryRecord] = []
   var framedLabel = ""
   var hapticsEnabled = true
+  var clockFormat = "24h"
   var modelVersion = 4
   var monthTitle = ""
   var nowMs: Double = 0

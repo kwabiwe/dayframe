@@ -1,4 +1,4 @@
-import { formatDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration, type ClockFormat } from "@dayframe/shared";
 import type { HistoryEntryGroup } from "./historyPresentation";
 import { displayTimerDescription } from "./timerPresentation";
 
@@ -23,15 +23,15 @@ export function rowTitle(entry: Pick<RowEntry, "description" | "categoryName">) 
   return displayTimerDescription(entry)?.trim() || entry.categoryName || "No activity";
 }
 
-function clock(iso: string | null, nowMs: number) {
+function clock(iso: string | null, nowMs: number, clockFormat: ClockFormat) {
   const date = new Date(iso ?? nowMs);
   if (Number.isNaN(date.getTime())) return "--:--";
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return formatClockTime(date, clockFormat);
 }
 
-/** "08:13–10:00", or "09:00–now" while the entry runs. */
-export function rowTimeRange(entry: RowEntry, nowMs: number) {
-  return `${clock(entry.startedAt, nowMs)}–${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`;
+/** "08:13–10:00" ("8:13 AM–10:00 AM"), or "09:00–now" while the entry runs. */
+export function rowTimeRange(entry: RowEntry, nowMs: number, clockFormat: ClockFormat) {
+  return `${clock(entry.startedAt, nowMs, clockFormat)}–${entry.stoppedAt ? clock(entry.stoppedAt, nowMs, clockFormat) : "now"}`;
 }
 
 /**
@@ -44,10 +44,10 @@ function metaActivity(entry: RowEntry) {
 }
 
 /** The row's second line: time, how many repeats a group holds, then the activity. */
-export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
+export function rowMeta(group: HistoryEntryGroup, nowMs: number, clockFormat: ClockFormat) {
   const { entry } = group.representative;
   return [
-    rowTimeRange(entry, nowMs),
+    rowTimeRange(entry, nowMs, clockFormat),
     group.entries.length > 1 ? `${group.entries.length} blocks` : null,
     metaActivity(entry),
   ].filter(Boolean).join(" · ");
@@ -57,12 +57,12 @@ export function rowMeta(group: HistoryEntryGroup, nowMs: number) {
  * What VoiceOver reads for a row: the visible title and meta, with times read "09:00 to 10:00" and
  * the place and tags that the row does not show, so rows that look alike still sound different.
  */
-export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, { omitCount = false } = {}) {
+export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, clockFormat: ClockFormat, { omitCount = false } = {}) {
   const { entry } = group.representative;
   const tags = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
   return [
     rowTitle(entry),
-    `${clock(entry.startedAt, nowMs)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs) : "now"}`,
+    `${clock(entry.startedAt, nowMs, clockFormat)} to ${entry.stoppedAt ? clock(entry.stoppedAt, nowMs, clockFormat) : "now"}`,
     group.entries.length > 1 && !omitCount ? `${group.entries.length} blocks` : null,
     metaActivity(entry),
     entry.placeName ? `at ${entry.placeName}` : null,

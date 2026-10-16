@@ -1,4 +1,4 @@
-import { formatDuration } from "@dayframe/shared";
+import { formatClockTime, formatDuration, type ClockFormat } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import type { TodayActivity } from "./todayReviewPresentation";
 import { displayTimerDescription } from "./timerPresentation";
@@ -164,9 +164,8 @@ export function ribbonHitAt(model: RibbonModel, fraction: number, minFraction = 
   return hit ? { kind: "block", block: hit, atMs } : { kind: "gap", atMs };
 }
 
-function clock(ms: number) {
-  const date = new Date(ms);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+function clock(ms: number, clockFormat: ClockFormat) {
+  return formatClockTime(ms, clockFormat);
 }
 
 function duration(ms: number) {
@@ -174,11 +173,11 @@ function duration(ms: number) {
 }
 
 /** The scrub tooltip: the block's title and "08:13–10:00 · 1h 47m", or the time and "Untracked". */
-export function ribbonTip(hit: RibbonHit): { title: string; detail: string } {
-  if (hit.kind === "gap") return { title: clock(hit.atMs), detail: "Untracked" };
+export function ribbonTip(hit: RibbonHit, clockFormat: ClockFormat): { title: string; detail: string } {
+  if (hit.kind === "gap") return { title: clock(hit.atMs, clockFormat), detail: "Untracked" };
   const { block } = hit;
   const detail = [
-    `${clock(block.startMs)}–${block.live ? "now" : clock(block.endMs)}`,
+    `${clock(block.startMs, clockFormat)}–${block.live ? "now" : clock(block.endMs, clockFormat)}`,
     duration(block.endMs - block.startMs),
     block.kind === "pending" ? "needs review" : null,
   ].filter(Boolean).join(" · ");
@@ -186,12 +185,12 @@ export function ribbonTip(hit: RibbonHit): { title: string; detail: string } {
 }
 
 /** What VoiceOver reads for a block when stepping through the ribbon. */
-export function ribbonSpokenBlock(block: RibbonBlock) {
+export function ribbonSpokenBlock(block: RibbonBlock, clockFormat: ClockFormat) {
   const minutes = Math.floor((block.endMs - block.startMs) / 60_000);
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   const spoken = [hours ? `${hours} ${hours === 1 ? "hour" : "hours"}` : null, rest || !hours ? `${rest} ${rest === 1 ? "minute" : "minutes"}` : null]
     .filter(Boolean)
     .join(" ");
-  return `${block.title}, ${clock(block.startMs)} to ${block.live ? "now" : clock(block.endMs)}, ${spoken}${block.kind === "pending" ? ", needs review" : ""}`;
+  return `${block.title}, ${clock(block.startMs, clockFormat)} to ${block.live ? "now" : clock(block.endMs, clockFormat)}, ${spoken}${block.kind === "pending" ? ", needs review" : ""}`;
 }

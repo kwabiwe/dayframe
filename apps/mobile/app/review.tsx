@@ -58,6 +58,7 @@ import { recentActivityIds } from "@/lib/activityChoice";
 import { activeLogAsCategoryId, reviewDeckDecisionName, reviewLogAsEdit, reviewLogAsEditorName } from "@/lib/reviewLogAs";
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import { playHaptic } from "@/lib/haptics";
+import { useClockFormat } from "@/lib/clockFormat";
 import {
   OverflowMenu,
   type OverflowMenuAction
@@ -135,7 +136,7 @@ import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
-import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, formatClockTime, type ClockFormat } from "@dayframe/shared";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -357,6 +358,7 @@ export default function ReviewScreen() {
     createLocationReviewEvidencePrefetcher()
   ).current;
   const now = Date.now();
+  const clockFormat = useClockFormat();
   const navigation = useNavigation<NativeStackNavigationProp<ReactNavigation.RootParamList>>();
   // Review opens from Today and from Calendar; the back button names the screen it returns to.
   const backLabel = usePreviousScreenLabel() ?? "Today";
@@ -724,7 +726,7 @@ export default function ReviewScreen() {
         setReviewAvailabilityMessage(
           connectivityRef.current.isOffline
             ? cached?.cachedAt
-              ? `Showing Review data saved ${formatCachedAt(cached.cachedAt)}`
+              ? `Showing Review data saved ${formatCachedAt(cached.cachedAt, clockFormat)}`
               : "Showing Review data saved on this iPhone"
             : "Couldn’t refresh Review · showing saved data"
         );
@@ -1107,6 +1109,7 @@ export default function ReviewScreen() {
     const card = source.kind === "review"
       ? reviewDeckCardForItem(source.key, source.item, {
           categories: data?.categories,
+          clockFormat,
           draft: {
             categoryId: logAsDrafts.get(source.item.id)?.categoryId,
             description: logAsNames.current.get(source.item.id)
@@ -1118,7 +1121,7 @@ export default function ReviewScreen() {
           overlapCount: overlapCounts.get(source.item.id) ?? 0,
           syncState: reviewItemSyncStates.get(source.item.id) ?? null
         })
-      : reviewDeckCardForEntry(source.key, source.entry, { mode: theme.mode, neutral: theme.textSecondary, now });
+      : reviewDeckCardForEntry(source.key, source.entry, { clockFormat, mode: theme.mode, neutral: theme.textSecondary, now });
     const start = reviewDeckMomentStartMs(source.moment);
     return {
       ...card,
@@ -1138,13 +1141,13 @@ export default function ReviewScreen() {
     })),
     // deferredDeckKeys changes whenever a defer generation does; deckCardForSource reads the rest.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.categories, deckSources, deferredDeckKeys, flyingDeckKey, logAsDrafts, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
+    [clockFormat, data?.categories, deckSources, deferredDeckKeys, flyingDeckKey, logAsDrafts, now, overlapCounts, reviewItemSyncStates, reviewMenuState.openItemId, theme.mode, theme.textSecondary]
   );
   const standbyDeckCard = useMemo(
     () => standbyDeckSource ? deckCardForSource(standbyDeckSource) : null,
     // deckCardForSource reads the same inputs as deckCards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.categories, logAsDrafts, now, overlapCounts, reviewItemSyncStates, standbyDeckSource, theme.mode, theme.textSecondary]
+    [clockFormat, data?.categories, logAsDrafts, now, overlapCounts, reviewItemSyncStates, standbyDeckSource, theme.mode, theme.textSecondary]
   );
   const topDeckSource = deckSources[0] ?? null;
   // The top card is the held card still flying out: the round actions wait for the next card.
@@ -2639,6 +2642,7 @@ export function reviewDeckCardForItem(
   item: MobileReviewItem,
   context: {
     categories?: MobileBootstrap["categories"];
+    clockFormat: ClockFormat;
     draft?: ReviewLogAsDraft;
     menuOpen: boolean;
     mode: ReturnType<typeof useMobileTheme>["theme"]["mode"];
@@ -2680,7 +2684,7 @@ export function reviewDeckCardForItem(
     confidence: { score: confidence.score, label: confidence.label },
     title,
     when: [
-      formatReviewDeckWhen(item.suggestedStartedAt, item.suggestedStoppedAt, reviewItemDurationSeconds(item, context.now), context.now),
+      formatReviewDeckWhen(item.suggestedStartedAt, item.suggestedStoppedAt, reviewItemDurationSeconds(item, context.now), context.now, context.clockFormat),
       travelMode
     ].filter(Boolean).join(" · ") || null,
     // A cleared field logs the default name, so the card says so too.
@@ -2706,7 +2710,7 @@ export function reviewDeckCardForItem(
 function reviewDeckCardForEntry(
   key: string,
   entry: MobileTimeEntry,
-  context: { mode: ReturnType<typeof useMobileTheme>["theme"]["mode"]; neutral: string; now: number }
+  context: { clockFormat: ClockFormat; mode: ReturnType<typeof useMobileTheme>["theme"]["mode"]; neutral: string; now: number }
 ): ReviewDeckCardModel {
   const health = isHealthSource(entry.source);
   const activityName = entry.categoryName ?? (health ? "Health" : "No activity");
@@ -2728,7 +2732,7 @@ function reviewDeckCardForEntry(
     source: reviewDeckSource(kind),
     confidence: null,
     title: displayEntryTitle(entry),
-    when: formatReviewDeckWhen(entry.startedAt, entry.stoppedAt, entryDurationSeconds(entry, context.now), context.now),
+    when: formatReviewDeckWhen(entry.startedAt, entry.stoppedAt, entryDurationSeconds(entry, context.now), context.now, context.clockFormat),
     logAsName: displayEntryTitle(entry),
     logAsEditable: false,
     activityName,
@@ -2880,15 +2884,10 @@ function displayEntryTitle(entry: MobileTimeEntry) {
   return entry.description?.trim() || entry.categoryName || REVIEW_COPY.suggestedActivity;
 }
 
-function formatCachedAt(value: string) {
+function formatCachedAt(value: string, clockFormat: ClockFormat) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "earlier";
-  return formatLocaleDate(date, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  return `${formatLocaleDate(date, { month: "short", day: "numeric" })}, ${formatClockTime(date, clockFormat)}`;
 }
 
 function reviewItemSyncStatusCopy(syncState: ReviewItemSyncState | null) {

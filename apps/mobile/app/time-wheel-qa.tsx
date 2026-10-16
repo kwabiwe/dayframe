@@ -3,6 +3,8 @@ import { useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeTimeWheelView } from "../modules/dayframe-time-wheel";
+import { formatClockTime } from "@dayframe/shared";
+import { useClockFormat } from "@/lib/clockFormat";
 import { useMobileTheme } from "@/lib/mobileTheme";
 
 // Development-only harness for the native time wheel (A11b): the wheel under one time (every
@@ -13,7 +15,9 @@ export default function TimeWheelQaRoute() {
   const [revision, setRevision] = useState(0);
   const [bounded, setBounded] = useState(false);
   const [lastReason, setLastReason] = useState("");
+  const clockFormat = useClockFormat();
   const model = useMemo(() => ({
+    clockFormat,
     colorScheme: theme.mode === "dark" ? "dark" as const : "light" as const,
     minuteInterval: 1 as const,
     // A 10:00–18:00 window on the value's day, to see clamping reported as "normalized".
@@ -23,10 +27,10 @@ export default function TimeWheelQaRoute() {
     presentationId: 1,
     revision,
     valueMs
-  }), [bounded, revision, theme.mode, valueMs]);
+  }), [bounded, clockFormat, revision, theme.mode, valueMs]);
   if (!__DEV__) return <Redirect href="/" />;
   const time = new Date(valueMs);
-  const label = `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`;
+  const label = formatClockTime(time, clockFormat);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, padding: 16, gap: 12 }} testID="time-wheel-qa">
       <Text style={{ color: theme.textPrimary, fontSize: 28, fontWeight: "700" }} testID="time-wheel-qa-value">{label}</Text>
