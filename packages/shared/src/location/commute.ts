@@ -7,7 +7,8 @@ import {
   motionArrivalMs,
   motionDepartureMs,
   motionJourneyBlock,
-  motionTravelMode
+  motionTravelMode,
+  speedTravelMode
 } from "./motionActivity";
 import {
   crossesUnsupportedSavedPlaceArrivalWitness,
@@ -1105,7 +1106,8 @@ export function deriveCommutes(
         (from.locationOnlyStoppedAt != null && from.locationOnlyStoppedAt !== from.stoppedAt && beganMs === Date.parse(from.stoppedAt));
       const stopLowerBoundAt = to.startLowerBoundAt ?? to.startedAt;
       const startUpperBoundAt = from.stopUpperBoundAt ?? routeEvidence[0]?.evidence.occurredAt ?? from.stoppedAt;
-      const travelMode = motionTravelMode(motion, beganMs, endedMs, config);
+      const travelMode = motionTravelMode(motion, beganMs, endedMs, config) ??
+        speedTravelMode(routeEvidence, config, { straightLineMeters: summary.straightLineDistanceMeters, durationMs: endedMs - beganMs });
       const uncertainBoundary =
         summary.routeSampleCount < 2 ||
         summary.maximumObservationGapSeconds * 1_000 > config.maxContinuityGapMs ||
