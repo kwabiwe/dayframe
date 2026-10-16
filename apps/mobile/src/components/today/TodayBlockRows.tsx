@@ -4,7 +4,6 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
   ReduceMotion,
-  interpolateColor,
   type SharedValue,
   runOnJS,
   useAnimatedStyle,
@@ -321,10 +320,14 @@ export const TodayBlockRow = memo(function TodayBlockRow({
     }), [armed, base, commitDelete, commitReplay, deletable, flyOut, live, offset, reduceMotion, replayable, tick]);
 
   const highlight = useRowHighlight({ entryId: entry.id, request: rowPop });
+  // Theme colours stay out of the UI-thread styles (production TF121, 16 Oct 2026: after the system
+  // appearance changed in the background the row kept its light surface under dark text until the
+  // app restarted). The surface is a plain style, which always follows the theme; the highlight is
+  // a `surfaceMuted` layer whose opacity alone is animated.
   const mainStyle = useAnimatedStyle(() => ({
-    backgroundColor: interpolateColor(highlight.value, [0, 1], [theme.surface, theme.surfaceMuted]),
     transform: [{ translateX: offset.value }],
   }));
+  const highlightStyle = useAnimatedStyle(() => ({ opacity: highlight.value }));
   const leftStyle = useAnimatedStyle(() => ({ opacity: offset.value > 0 ? 1 : 0 }));
   const rightStyle = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
 
@@ -362,7 +365,11 @@ export const TodayBlockRow = memo(function TodayBlockRow({
         </Reanimated.View>
       ) : null}
       <GestureDetector gesture={pan}>
-        <Reanimated.View style={mainStyle}>
+        <Reanimated.View style={[{ backgroundColor: theme.surface }, mainStyle]} testID={`today-block-surface-${entry.id}`}>
+          <Reanimated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { backgroundColor: theme.surfaceMuted }, highlightStyle]}
+          />
           <Pressable
             accessibilityActions={actions.length ? actions : undefined}
             accessibilityLabel={label}
