@@ -78,7 +78,8 @@ export function LocationReviewPanel({
         if (cancelled) return;
         setEvidence(next);
         setDescription(initialDescription ?? initialEvidenceDescription(next));
-        setDescriptionEdited(false);
+        // A name carried in from the card's "Log as" field is one the person typed there (Codex r4 on #456).
+        setDescriptionEdited(Boolean(initialDescription?.trim()));
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
         if (next.map.centre) {
