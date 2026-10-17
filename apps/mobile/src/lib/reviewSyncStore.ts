@@ -2977,7 +2977,9 @@ function saveBlockedSql(alias: string) {
   return `not (${alias}.action_kind <> 'save_place' and (
     exists (${unresolvedSave(`${alias}.review_item_id`)}) or
     exists (select 1 from review_mutation_effects e
-      where e.client_mutation_id = ${alias}.client_mutation_id and e.account_key = ${alias}.account_key
+      -- By mutation ID alone (unique, the effects primary key's lead): an account filter here makes the
+      -- planner scan the account's effects instead (Codex r4 on #460). The probe below keeps the account.
+      where e.client_mutation_id = ${alias}.client_mutation_id
         and exists (${unresolvedSave("e.review_item_id")}))))`;
 }
 
@@ -3016,6 +3018,7 @@ async function writeSavedPlaceIntoPresentations(
 /** Ends acknowledged saves' overlays for cards the server now shows with a place or decided. */
 async function retireSavedPlaceOverlays(transaction: SQLite.SQLiteDatabase, accountKeyValue: string, reviewItemIds: readonly string[]) {
   if (!reviewItemIds.length) return;
+  let rewrote = false;
   const saved = await pendingSavedPlaceNames(accountKeyValue, transaction);
   for (const id of reviewItemIds) {
     const place = saved.get(id);
@@ -3023,10 +3026,13 @@ async function retireSavedPlaceOverlays(transaction: SQLite.SQLiteDatabase, acco
       "select state from review_mutation_outbox where account_key = ? and review_item_id = ? and action_kind = 'save_place'", accountKeyValue, id);
     if (!place || row?.state !== "acknowledged") continue;
     await writeSavedPlaceIntoPresentations(transaction, accountKeyValue, id, place);
+    rewrote = true;
     await transaction.runAsync(
       `delete from review_mutation_outbox where account_key = ? and review_item_id = ?
          and action_kind = 'save_place' and state = 'acknowledged'`, accountKeyValue, id);
   }
+  // Rewritten contexts stay within the account's display-cache budget (Codex r4 on #460).
+  if (rewrote) await pruneReviewPresentationContexts(transaction, accountKeyValue, "");
 }
 
 /**

@@ -886,17 +886,19 @@ describe("Review real SQLite transactions", () => {
   });
   it("finds blocked decisions through the save index, staying quick at hundreds of them (Codex r3 on #460)", async () => {
     const data = bootstrap();
-    const items = Array.from({ length: 400 }, (_, index) => ({ id: syntheticId(7000 + index) }));
+    // Each decision holds two cards (like a merge); its card's save sits on the second (Codex r4 on #460).
+    const pairs = Array.from({ length: 2_400 }, (_, index) => ({ own: syntheticId(40000 + index), second: syntheticId(50000 + index) }));
     db.exec("BEGIN");
     const insert = db.prepare(`insert into review_mutation_outbox (client_mutation_id, account_key, workspace_id, user_id, review_item_id,
       action_kind, request_json, original_snapshot_json, original_position, preceding_ids_json, following_ids_json, state, local_effect, created_at, updated_at)
       select ?, account_key, ?, ?, ?, ?, '{}', '{}', 0, '[]', '[]', ?, ?, ?, ? from review_account_context limit 1`);
     const effect = db.prepare(`insert into review_mutation_effects (client_mutation_id, account_key, review_item_id, snapshot_json, original_position,
       preceding_ids_json, following_ids_json, local_effect) select ?, account_key, ?, '{}', 0, '[]', '[]', 'hidden' from review_account_context limit 1`);
-    items.forEach((item, index) => {
-      insert.run(syntheticId(5000 + index), data.workspace.id, data.user.id, item.id, "save_place", "needs_attention", "restore", "2026-08-28T10:00:00.000Z", "2026-08-28T10:00:00.000Z");
-      insert.run(syntheticId(6000 + index), data.workspace.id, data.user.id, item.id, "confirm", "pending", "hidden", "2026-08-28T10:00:01.000Z", "2026-08-28T10:00:01.000Z");
-      effect.run(syntheticId(6000 + index), item.id);
+    pairs.forEach(({ own, second }, index) => {
+      insert.run(syntheticId(20000 + index), data.workspace.id, data.user.id, second, "save_place", "needs_attention", "restore", "2026-08-28T10:00:00.000Z", "2026-08-28T10:00:00.000Z");
+      insert.run(syntheticId(30000 + index), data.workspace.id, data.user.id, own, "merge", "pending", "hidden", "2026-08-28T10:00:01.000Z", "2026-08-28T10:00:01.000Z");
+      effect.run(syntheticId(30000 + index), own);
+      effect.run(syntheticId(30000 + index), second);
     });
     db.exec("COMMIT");
     const started = performance.now();
@@ -906,6 +908,9 @@ describe("Review real SQLite transactions", () => {
     const plan = (db.prepare(`explain query plan select 1 from review_mutation_outbox s where s.account_key = ? and s.review_item_id = ?
       and s.action_kind = 'save_place' and s.state <> 'acknowledged'`).all("k", "i") as Array<{ detail: string }>).map((row) => row.detail).join(" ");
     expect(plan).toContain("review_mutation_save_place_idx");
+    const effectsPlan = (db.prepare("explain query plan select 1 from review_mutation_effects e where e.client_mutation_id = ?").all("m") as Array<{ detail: string }>)
+      .map((row) => row.detail).join(" ");
+    expect(effectsPlan).not.toMatch(/SCAN/);
   });
   it("leaves decisions held behind rejected saves out of a pass, so later work still goes (Codex r2 on #460)", async () => {
     const data = syntheticReviewBootstrap(40);
