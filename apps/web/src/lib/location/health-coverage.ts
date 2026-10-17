@@ -308,6 +308,7 @@ export async function reconcileHealthCoveredMoveCardsNow(
   let window: { startedAt: string; stoppedAt: string } | undefined;
   let cursor: PageCursor | null = null;
   let retired: number | null = null;
+  let cardsDone = false;
   for (let first = true; deadlineAt - Date.now() >= 800; first = false) {
     let page: { retired: number; next: PageCursor | null } | null;
     try {
@@ -326,12 +327,16 @@ export async function reconcileHealthCoveredMoveCardsNow(
     }
     if (!page) break;
     retired = (retired ?? 0) + page.retired;
-    if (!page.next) break;
+    if (!page.next) {
+      cardsDone = true;
+      break;
+    }
     cursor = page.next;
   }
-  // Then the blocks of Moves that logged themselves before the workout arrived (Codex r2 on #462).
+  // Then, once every card page is done, the blocks of Moves that logged themselves before the workout
+  // arrived (Codex r2 on #462). A failed, busy or out-of-time card phase leaves them to the next run.
   cursor = null;
-  for (; window !== undefined || !options.workout; ) {
+  for (; cardsDone && (window !== undefined || !options.workout); ) {
     if (deadlineAt - Date.now() < 800) break;
     let page: { retired: number; next: PageCursor | null } | null;
     try {
