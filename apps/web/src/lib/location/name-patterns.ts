@@ -300,10 +300,10 @@ export const STOPPED_TRIP_LABEL_LOOKBACK_DAYS = 90;
 
 /**
  * The trip patterns the person stopped logging, newest first (at most 200), each labelled by the name
- * they gave it, else its latest Move's route ("Home → Gym") or title from the last
+ * they gave it, else its latest Move's route ("Home → Gym") from the last
  * `STOPPED_TRIP_LABEL_LOOKBACK_DAYS` days, else "A trip". The label lookup is one range scan of the
- * owner's Move events in that window (idx_activity_events_workspace_occurred), whatever the history
- * (Codex r1 on #463).
+ * owner's Move events in that window (idx_activity_events_workspace_occurred), whatever the history,
+ * and reads nothing else (Codex r1/r2 on #463).
  */
 export async function stoppedTripPatterns(client: Pick<pg.PoolClient, "query">, session: RequestSession) {
   const stopped = (await client.query<{ patternKey: string; name: string | null; stoppedAt: Date }>(
@@ -315,20 +315,19 @@ export async function stoppedTripPatterns(client: Pick<pg.PoolClient, "query">, 
      limit 200`,
     [session.workspaceId, session.userId])).rows;
   if (stopped.length === 0) return [];
-  const latest = new Map((await client.query<{ patternKey: string; route: string | null; title: string | null }>(
+  const latest = new Map((await client.query<{ patternKey: string; route: string | null }>(
     `select distinct on (ae.raw_payload ->> 'namePatternKey')
-            ae.raw_payload ->> 'namePatternKey' as "patternKey", ae.raw_payload ->> 'routeLabel' as route, ri.title
+            ae.raw_payload ->> 'namePatternKey' as "patternKey", ae.raw_payload ->> 'routeLabel' as route
      from activity_events ae
-     left join review_items ri on ri.event_id = ae.id and ri.workspace_id = ae.workspace_id and ri.user_id = ae.user_id
      where ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected'
        and ae.occurred_at > now() - make_interval(days => $4)
-       and ae.raw_payload ->> 'namePatternKey' = any($3::text[])
+       and ae.raw_payload ->> 'namePatternKey' = any($3::text[]) and ae.raw_payload ? 'routeLabel'
      order by ae.raw_payload ->> 'namePatternKey', ae.occurred_at desc`,
     [session.workspaceId, session.userId, stopped.map((row) => row.patternKey), STOPPED_TRIP_LABEL_LOOKBACK_DAYS])).rows
     .map((row) => [row.patternKey, row] as const));
   return stopped.map((row) => ({
     patternKey: row.patternKey,
-    label: row.name ?? latest.get(row.patternKey)?.route ?? latest.get(row.patternKey)?.title ?? "A trip",
+    label: row.name ?? latest.get(row.patternKey)?.route ?? "A trip",
     stoppedAt: row.stoppedAt instanceof Date ? row.stoppedAt.toISOString() : String(row.stoppedAt)
   }));
 }
