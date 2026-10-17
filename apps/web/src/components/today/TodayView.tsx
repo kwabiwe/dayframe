@@ -12,6 +12,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
+import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { blockStyle } from "@/lib/block-style";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
 import { dedupeDashboardEntries } from "@/lib/dashboard-intelligence";
@@ -131,7 +132,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         return next;
       });
       setToastEntry(entry);
-      requestDelete({ entries: [entry], label: `“${timeEntryTitle(entry)}” deleted` });
+      requestDelete({ entries: [entry], label: deletedToastLabel(1, timeEntryTitle(entry)) });
       if (focusNextId) window.requestAnimationFrame(() => rowRefs.current.get(focusNextId)?.focus());
     };
     if (prefersReducedMotion()) {

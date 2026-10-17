@@ -167,6 +167,56 @@ describe("TimelineDeleteUndoController", () => {
     expect(controller.getState().error).toBe("Delete service unavailable");
   });
 
+  it("offers Try again for a refused delete and lets the error be put away (web UI audit WUI-027)", async () => {
+    vi.useFakeTimers();
+    let refuse = true;
+    const commit = vi.fn(() => (refuse ? Promise.reject(new Error("Delete service unavailable")) : Promise.resolve()));
+    const controller = new TimelineDeleteUndoController(commit, () => undefined);
+
+    controller.requestDelete(request([entry("block")]));
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().error).toBe("Delete service unavailable");
+    expect(controller.getState().hiddenEntryIds).toEqual(new Set());
+
+    // Try again deletes the same block once more, with its own Undo window and no error.
+    refuse = false;
+    controller.retryFailedDelete();
+    expect(controller.getState().error).toBeNull();
+    expect(controller.getState().pending?.ids).toEqual(["block"]);
+    expect(controller.getState().hiddenEntryIds).toEqual(new Set(["block"]));
+
+    // Dismiss puts a later error away; nothing is left to retry.
+    refuse = true;
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().error).toBe("Delete service unavailable");
+    controller.dismissError();
+    expect(controller.getState().error).toBeNull();
+    controller.retryFailedDelete();
+    expect(controller.getState().pending).toBeNull();
+  });
+
+  it("drops refused blocks a refresh no longer shows, and offers nothing once none are left (Codex r1 on #491)", async () => {
+    vi.useFakeTimers();
+    const commit = vi.fn(() => Promise.reject(new Error("Group delete failed")));
+    const controller = new TimelineDeleteUndoController(commit, () => undefined);
+
+    controller.requestDelete(request([entry("a"), entry("b")]));
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().failed?.entries.map((item) => item.id)).toEqual(["a", "b"]);
+
+    controller.reconcileEntryIds(new Set(["b"]));
+    expect(controller.getState().failed?.entries.map((item) => item.id)).toEqual(["b"]);
+    controller.reconcileEntryIds(new Set());
+    expect(controller.getState().failed).toBeNull();
+    expect(controller.getState().error).toBe("Group delete failed");
+  });
+
   it("ignores a stale timeout after a replacement", async () => {
     vi.useFakeTimers();
     const commit = successfulCommit();
