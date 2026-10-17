@@ -60,6 +60,12 @@ export type BlocksToastProps = {
    * branch): it appears at rest with no entrance, settled, so its later exit starts from rest.
    */
   appearSettled?: boolean;
+  /**
+   * A second, less common action on its own row under the message ("Don't log trips like this",
+   * PRD D19), replaced in the same 44-point row by its outcome (`done`), so the toast never changes
+   * height and the main action never moves.
+   */
+  secondary?: { label: string; onAction: () => void; done?: string | null; busy?: boolean; testID?: string } | null;
 };
 
 /**
@@ -82,6 +88,7 @@ export function BlocksToast({
   message,
   onAction,
   reduceMotion,
+  secondary,
   style,
   swatchColor,
   testID,
@@ -91,19 +98,8 @@ export function BlocksToast({
   const phase = useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering");
   const hasAction = Boolean(actionLabel && onAction);
   const label = toastAccessibilityText({ accessibilityLabel, detail, message });
-  return (
-    <Reanimated.View
-      accessibilityLiveRegion="polite"
-      entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
-      exiting={blocksToastExiting(reduceMotion, phase)}
-      style={[
-        toastStyles.toast,
-        hasAction ? toastStyles.toastWithAction : toastStyles.toastWithoutAction,
-        { backgroundColor: theme.textPrimary, shadowColor: theme.shadow },
-        style
-      ]}
-      testID={testID}
-    >
+  const main = (
+    <>
       {/* The swatch and both lines are one VoiceOver element reading one sentence. */}
       <View accessibilityLabel={label} accessible style={toastStyles.label} testID={testID ? `${testID}-label` : undefined}>
         <View
@@ -148,6 +144,51 @@ export function BlocksToast({
             {actionLabel}
           </Text>
         </Pressable>
+      ) : null}
+    </>
+  );
+  return (
+    <Reanimated.View
+      accessibilityLiveRegion="polite"
+      entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
+      exiting={blocksToastExiting(reduceMotion, phase)}
+      style={[
+        toastStyles.toast,
+        hasAction ? toastStyles.toastWithAction : toastStyles.toastWithoutAction,
+        secondary ? toastStyles.toastWithSecondary : null,
+        { backgroundColor: theme.textPrimary, shadowColor: theme.shadow },
+        style
+      ]}
+      testID={testID}
+    >
+      {secondary ? <View style={toastStyles.mainRow}>{main}</View> : main}
+      {secondary ? (
+        <View style={toastStyles.secondaryRow}>
+          {secondary.done ? (
+            <Text
+              {...mobileTextProps("control")}
+              numberOfLines={2}
+              style={[toastStyles.detail, toastStyles.secondaryDone, { color: colorWithAlpha(theme.background, 0.72) }]}
+              testID={secondary.testID ? `${secondary.testID}-done` : undefined}
+            >
+              {secondary.done}
+            </Text>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: Boolean(secondary.busy) }}
+              disabled={secondary.busy}
+              hitSlop={4}
+              onPress={secondary.onAction}
+              style={toastStyles.secondaryAction}
+              testID={secondary.testID}
+            >
+              <Text {...mobileTextProps("control")} style={[toastStyles.secondaryText, { color: theme.background }]}>
+                {secondary.label}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       ) : null}
     </Reanimated.View>
   );
@@ -224,6 +265,36 @@ const toastStyles = StyleSheet.create({
   },
   toastWithoutAction: {
     paddingRight: BLOCKS_TOAST_METRICS.paddingRightWithoutAction
+  },
+  // With a second action the toast is two rows: the message and its action, then the second action.
+  toastWithSecondary: {
+    alignItems: "stretch",
+    flexDirection: "column",
+    gap: 0
+  },
+  mainRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 44
+  },
+  secondaryRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    minHeight: 44,
+    paddingLeft: BLOCKS_TOAST_METRICS.swatchSize + BLOCKS_TOAST_METRICS.swatchGap
+  },
+  secondaryAction: {
+    justifyContent: "center",
+    minHeight: 44
+  },
+  secondaryText: {
+    fontSize: BLOCKS_TOAST_METRICS.messageFontSize,
+    fontWeight: "600",
+    textDecorationLine: "underline"
+  },
+  secondaryDone: {
+    paddingRight: 12
   },
   label: {
     alignItems: "center",

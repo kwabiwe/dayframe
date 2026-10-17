@@ -232,4 +232,38 @@ describe("useBlocksNotice", () => {
     act(() => { vi.advanceTimersByTime(BLOCKS_TOAST_DURATION_MS - 1); });
     expect(notice.notice).not.toBeNull();
   });
+
+  it("adds a second action on its own 44-point row and replaces it with its outcome in place (PRD D19)", () => {
+    const onSecondary = vi.fn();
+    const render = (done: string | null) => (
+      <BlocksToast
+        actionLabel="Undo"
+        message="Deleted Commute"
+        onAction={vi.fn()}
+        reduceMotion={false}
+        secondary={{ label: "Don’t log trips like this", onAction: onSecondary, done, testID: "toast-trip" }}
+        testID="toast"
+        theme={theme}
+      />
+    );
+    act(() => { tree = create(render(null)); });
+    expect(flatStyle(host()).flexDirection).toBe("column");
+    const button = byTestId("toast-trip");
+    expect(flatStyle(button).minHeight).toBe(44);
+    act(() => button.props.onPress());
+    expect(onSecondary).toHaveBeenCalledTimes(1);
+    act(() => tree!.update(render("Trips like this will wait in Review.")));
+    expect(texts()).toContain("Trips like this will wait in Review.");
+    expect(tree!.root.findAll((node: ReactTestInstance) => node.props.testID === "toast-trip" && typeof node.type === "string")).toHaveLength(0);
+    // Undo is still there.
+    expect(texts()).toContain("Undo");
+  });
+
+  it("keeps a toast without a second action exactly as before", () => {
+    act(() => {
+      tree = create(<BlocksToast actionLabel="Undo" message="Deleted Deep work" onAction={vi.fn()} reduceMotion={false} testID="toast" theme={theme} />);
+    });
+    expect(flatStyle(host()).flexDirection).toBe("row");
+    expect(host().children.filter((child) => typeof child !== "string")).toHaveLength(2);
+  });
 });
