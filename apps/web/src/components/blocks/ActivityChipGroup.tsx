@@ -1,12 +1,45 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH, resolveActivityIcon } from "@dayframe/shared";
+import { Check } from "lucide-react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { blockStyle } from "@/lib/block-style";
 import type { CategoryRow } from "@/lib/queries";
 
 /**
+ * One activity chip's face (web UI audit WUI-002, owner option a, 17 Oct 2026), shared by the
+ * block editors, the Review deck's "Log as" and the Reports filter: the activity's coloured tile
+ * with its icon (the #391 lists' lead), the name, and — when chosen — a neutral check. The chosen
+ * chip takes a neutral fill and ring (`.df-rchip.is-checked`), so its colour stays on the tile
+ * instead of flooding the chip and turning the swatch black.
+ */
+export function ActivityChipFace({
+  activity,
+  checked
+}: {
+  /** null is "No activity". */
+  activity: { color?: string | null; icon?: string | null; name: string } | null;
+  checked: boolean;
+}) {
+  const glyph = activity?.color
+    ? resolveActivityIcon({ icon: activity.icon ?? null, name: activity.name }).glyph
+    : DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH;
+  return (
+    <>
+      <span aria-hidden="true" className={`df-rchip-block${activity?.color ? " df-block" : " is-none"}`}>
+        <DayframeIcon glyph={glyph} size={12} />
+      </span>
+      <span className="df-rchip-name">{activity?.name ?? "No activity"}</span>
+      {checked ? <Check aria-hidden="true" className="df-rchip-check" size={14} strokeWidth={2.5} /> : null}
+    </>
+  );
+}
+
+/**
  * Activity chips (Blocks; as on the Review card and in the prototype's block editor): a radio group
- * where the chosen activity is a solid block. Arrow keys move and choose; choosing the chosen chip
+ * of `ActivityChipFace` chips; the chosen one takes a neutral fill, ring and check. Arrow keys move
+ * and choose; choosing the chosen chip
  * again clears it (no activity). `trailing` holds an "All activities" control after the chips.
  * With `maxRows`, chips are dropped from the end (never the chosen one) until the chips and the
  * trailing control fit in that many rows, so "All activities" never sits alone on a row of its own
@@ -87,7 +120,7 @@ export function ActivityChipGroup({
           return (
             <button
               aria-checked={checked}
-              className={`df-rchip${checked ? " is-checked df-block" : ""}`}
+              className={`df-rchip${checked ? " is-checked" : ""}`}
               disabled={disabled}
               key={category.id}
               onClick={() => onSelect(checked ? "" : category.id)}
@@ -100,8 +133,7 @@ export function ActivityChipGroup({
               tabIndex={index === tabStop ? 0 : -1}
               type="button"
             >
-              <i aria-hidden="true" />
-              {category.name}
+              <ActivityChipFace activity={category} checked={checked} />
             </button>
           );
         })}

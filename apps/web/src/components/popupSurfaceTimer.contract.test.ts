@@ -42,7 +42,9 @@ describe("persistent timer floating surfaces", () => {
     );
     // The Activity block's and the Tags button's lists are that FloatingList too (owner, 14 Oct 2026).
     expect(categorySource).toContain("<FloatingList");
-    expect(categorySource).toContain("className={`df-cmd-activity-panel");
+    expect(categorySource).toContain("`df-cmd-activity-panel");
+    // The editors' "All activities" chip opens the same FloatingList (WUI-024).
+    expect(categorySource).toContain('"df-more-activity-panel is-portalled time-entry-quick-editor-nested-surface"');
     expect(tagSource).toContain("className={`inline-tag-picker");
     expect(tagSource).not.toContain("ui-floating-surface inline-tag-picker");
   });
@@ -64,7 +66,7 @@ describe("persistent timer floating surfaces", () => {
       /\.df-flist-rows\s*\{[^}]*overflow-y:\s*auto;/s
     );
     expect(styles).toMatch(
-      /\.df-cmd-activity-panel\.is-portalled\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*min\(22\.5rem, calc\(100dvh - 24px\)\);[^}]*overflow:\s*hidden;/s
+      /\.df-cmd-activity-panel\.is-portalled,[\s\S]*?\.df-more-activity-panel\.is-portalled\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*min\(22\.5rem, calc\(100dvh - 24px\)\);[^}]*overflow:\s*hidden;/s
     );
     expect(styles).toMatch(
       /\.swiss-category-menu\s*\{[^}]*overflow-y:\s*auto;/s

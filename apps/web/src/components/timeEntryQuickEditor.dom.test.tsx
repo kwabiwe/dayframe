@@ -364,11 +364,12 @@ describe("TimeEntryQuickEditorModal", () => {
     renderModal({ categories: names.map((name) => ({ id: name.toLowerCase(), name, color: "mint", isPinned: false })) });
     await screen.findByTestId("time-entry-quick-editor");
     const menu = document.getElementById("time-entry-quick-category-menu") as HTMLElement;
-    expect(menu.hidden).toBe(true);
+    // The same FloatingList as the timer's Activities list (WUI-024): mounted, hidden and inert while closed.
+    expect(menu.closest("[inert]")).not.toBeNull();
     expect(screen.queryByRole("radio", { name: "Ninth" })).toBeNull();
 
     await userEvent.click(screen.getByRole("button", { name: /All activities/ }));
-    const search = await screen.findByRole("searchbox", { name: "Search activities" });
+    const search = await screen.findByRole("combobox", { name: "Search activities" });
     await userEvent.type(search, "nin{Enter}");
     const ninth = await screen.findByRole("radio", { name: "Ninth" });
     expect(ninth.getAttribute("aria-checked")).toBe("true");
@@ -388,19 +389,24 @@ describe("TimeEntryQuickEditorModal", () => {
     await screen.findByTestId("time-entry-quick-editor");
     const trigger = screen.getByRole("button", { name: /All activities/ });
     await userEvent.click(trigger);
-    const search = await screen.findByRole("searchbox", { name: "Search activities" });
+    const search = await screen.findByRole("combobox", { name: "Search activities" });
     search.focus();
     fireEvent.keyDown(search, { key: "ArrowDown", keyCode: 229, isComposing: true });
     expect(document.activeElement).toBe(search);
     fireEvent.keyDown(search, { key: "Escape", keyCode: 229, isComposing: true });
     expect(document.activeElement).toBe(search);
-    expect(screen.getByRole("searchbox", { name: "Search activities" })).not.toBeNull();
+    expect(screen.getByRole("combobox", { name: "Search activities" })).not.toBeNull();
 
     await userEvent.type(search, "nin{Enter}");
     await screen.findByRole("radio", { name: "Ninth" });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    await waitFor(() => expect(document.activeElement?.textContent).toContain("Ninth"));
+    // Focus stays in the list's search field; the chosen activity is the highlighted option.
+    await waitFor(() => {
+      const field = screen.getByRole("combobox", { name: "Search activities" });
+      expect(document.activeElement).toBe(field);
+      expect(document.getElementById(field.getAttribute("aria-activedescendant") ?? "")?.textContent).toContain("Ninth");
+    });
   });
 });
 
