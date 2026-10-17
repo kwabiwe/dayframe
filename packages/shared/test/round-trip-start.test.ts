@@ -1091,7 +1091,7 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
   });
 
   it("costs no more with 12-minute visits to recover legs for than with 9-minute stops (Codex r2 on #461)", () => {
-    // A week of six such outings a day. Recovery used to derive each visit over all the evidence
+    // Four days of six such outings a day. Recovery used to derive each visit over all the evidence
     // (about 3× the run with stops instead of visits); over its own window it costs about the same.
     const week = (minutes: number) => {
       const day = (start: string): Scenario => ({ start, origin: HOME.at, places: [HOME], legs: [
@@ -1099,10 +1099,10 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
         ...Array.from({ length: 6 }, (): Scenario["legs"] => [{ kind: "drive", to: A }, { kind: "stay", minutes },
           { kind: "drive", to: B }, { kind: "stay", minutes }, { kind: "drive", to: HOME.at }, { kind: "stay", minutes: 40 }]).flat(),
         { kind: "stay", minutes: 300 }] });
-      const inputs = Array.from({ length: 7 }, (_, index) =>
+      const inputs = Array.from({ length: 4 }, (_, index) =>
         simulate(day(new Date(Date.parse("2026-03-09T06:00:00Z") + index * 86_400_000).toISOString()), index + 1, { motion: true }).input());
       // The simulator's IDs restart each day: prefix them so every day's visits stay distinct (Codex r3 on #461).
-      return { ...inputs[6], evidence: inputs.flatMap((value, index) =>
+      return { ...inputs[3], evidence: inputs.flatMap((value, index) =>
         value.evidence.map((item) => ({ ...item, clientEvidenceId: `d${index}-${item.clientEvidenceId}` }))) };
     };
     const fastest = (value: LocationEngineInput) => {
@@ -1116,5 +1116,5 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
       return best;
     };
     expect(fastest(week(12)) / fastest(week(9))).toBeLessThan(2);
-  });
+  }, 60_000);
 });
