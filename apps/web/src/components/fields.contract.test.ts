@@ -22,9 +22,12 @@ describe("fields (web UI audit P4)", () => {
       expect(body, selector).toMatch(/border: var\(--web-control-border-width\) solid var\(--control-border\);/);
     }
     // Composites draw the same line as an inset shadow.
-    for (const selector of [".df-palette-input", ".df-flist-search"]) {
-      expect(rule(selector), selector).toMatch(/box-shadow: inset 0 0 0 1px var\(--control-border\);/);
-    }
+    expect(rule(".df-palette-input")).toMatch(/box-shadow: inset 0 0 0 1px var\(--control-border\);/);
+    // The activity-list search is a compound control: its border is the line (no doubled shadow).
+    expect(rule(".df-flist-search")).not.toMatch(/box-shadow/);
+    // No field hides its idle line: the Places editor and the activity-create field included.
+    expect(styles).not.toMatch(/\.df-pe \.(ui-control|place-search-control)[^{]*\{[^}]*border-color: transparent/);
+    expect(styles).not.toMatch(/\.category-picker-create-name-control \{[^}]*border: 2px solid transparent/);
     // No field hides its line at rest any more (the sign-in card included).
     expect(styles).not.toMatch(/\.auth-card \.(ui-control|auth-password-field) \{[^}]*border-color: transparent/);
     expect(rule(".df-ce-field input")).toMatch(/background: var\(--surface-inset\);/);
@@ -39,7 +42,10 @@ describe("fields (web UI audit P4)", () => {
   it("rings the palette search and List inline edits on focus instead of an underline or nothing", () => {
     expect(rule(".df-palette-input")).toMatch(/background: var\(--surface-inset\);/);
     expect(rule(".df-palette-input")).not.toMatch(/inset 0 -1px/);
-    expect(rule(".df-flist-search:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
+    // Inputs whose wrapper owns the ring never draw their own (Codex r2 on #472).
+    expect(styles).toMatch(/:is\(\s*\.ui-compound-control > input,[\s\S]*?\):focus \{\s*box-shadow: none;/);
+    // The timer's Description draws nothing on pointer focus (Trello 213).
+    expect(rule(".swiss-timer-description-control .ui-compound-control:focus-within")).toMatch(/box-shadow: none;/);
     expect(rule(".df-palette-input:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
     expect(rule(".timeline-inline-time:has(.timeline-inline-time-input:focus-visible)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
     expect(rule(".timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
