@@ -7,10 +7,10 @@ import {
 
 const resolved = {
   suggestionId: "opaque-id",
-  title: "Riverside Sports Centre",
-  subtitle: "Victoria Road, Exampleton",
-  name: "Riverside Sports Centre",
-  formattedAddress: "Victoria Road, Exampleton, ZZ5 5EE",
+  title: "Synthetic Sports Centre",
+  subtitle: "Example Lane, Exampleton",
+  name: "Synthetic Sports Centre",
+  formattedAddress: "Example Lane, Exampleton, ZZ5 5EE",
   latitude: 10.73123449,
   longitude: 20.47123449
 };
@@ -31,8 +31,8 @@ describe("place editor selection state", () => {
   });
 
   it("clears a stale resolved selection only after the query materially changes", () => {
-    expect(shouldClearResolvedPlace(" Riverside Sports Centre ", resolved)).toBe(false);
-    expect(shouldClearResolvedPlace("Riverside Leisure Centre", resolved)).toBe(true);
+    expect(shouldClearResolvedPlace(" Synthetic Sports Centre ", resolved)).toBe(false);
+    expect(shouldClearResolvedPlace("Sample Leisure Centre", resolved)).toBe(true);
     expect(shouldClearResolvedPlace("anything", null)).toBe(false);
   });
 

@@ -51,7 +51,7 @@ describe("Location Review editor draft", () => {
       title: "Visit library"
     })).toBe("Visit library");
     expect(initialLocationReviewDescription({
-      placeName: "Riverside Leisure Centre",
+      placeName: "Sample Leisure Centre",
       segmentKind: "stay",
       title: "Workout"
     })).toBe("Workout");
@@ -168,15 +168,15 @@ describe("Location Review editor draft", () => {
       baselinePlaceId: null,
       edit,
       newPlace: {
-        name: "Melbourne Sports Centre",
-        formattedAddress: "Salerno Way",
+        name: "Example Sports Centre",
+        formattedAddress: "Example Way",
         latitude: 10.735,
         longitude: 20.45
       },
       selectedSavedPlaceId: null
     })).toMatchObject({
       action: "save_place_and_confirm",
-      name: "Melbourne Sports Centre",
+      name: "Example Sports Centre",
       edit
     });
   });

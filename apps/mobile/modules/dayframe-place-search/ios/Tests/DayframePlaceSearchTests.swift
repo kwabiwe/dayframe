@@ -395,7 +395,7 @@ final class DayframePlaceSearchTests: XCTestCase {
       received.append(requestId)
     }
 
-    harness.coordinator.setQuery(requestId: "old", query: "Elm", bias: nil)
+    harness.coordinator.setQuery(requestId: "old", query: "Exa", bias: nil)
     harness.coordinator.setQuery(requestId: "new", query: "Home", bias: nil)
     harness.source.emit(requestId: "old", completions: [completion("Old")])
     harness.source.emit(requestId: "new", completions: [completion("New")])
@@ -483,14 +483,14 @@ final class DayframePlaceSearchTests: XCTestCase {
       latitude: 51,
       longitude: 0
     )
-    let harness = Harness(ids: ["elm-id", "home-id"], resolution: .success(resolved))
-    harness.coordinator.setQuery(requestId: "elm", query: "Elm", bias: nil)
-    harness.source.emit(requestId: "elm", completions: [completion("Elmwood")])
+    let harness = Harness(ids: ["exa-id", "home-id"], resolution: .success(resolved))
+    harness.coordinator.setQuery(requestId: "exa", query: "Exa", bias: nil)
+    harness.source.emit(requestId: "exa", completions: [completion("Exampleford")])
     harness.coordinator.setQuery(requestId: "home", query: "Home", bias: nil)
     harness.source.emit(requestId: "home", completions: [completion("Home")])
 
     await XCTAssertThrowsErrorAsync(
-      try await harness.coordinator.resolve(suggestionId: "elm-id", requestId: "elm")
+      try await harness.coordinator.resolve(suggestionId: "exa-id", requestId: "exa")
     ) { error in
       XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
     }

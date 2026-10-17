@@ -443,23 +443,23 @@ describe("owner-authored Review signal through the Review service (E1, Codex r4)
   }
 
   it.each([
-    ["sharp s and SS", "Visit Weißensee", "VISIT WEISSENSEE"],
+    ["sharp s and SS", "Visit Großpark", "VISIT GROSSPARK"],
     ["capital sharp s", "Visit ẞtraße", "visit sstrasse"],
     ["NFC and NFD accents", "Visit Café Exemple".normalize("NFC"), "visit café exemple".normalize("NFD")],
     ["fullwidth letters", "Visit Example", "Ｖｉｓｉｔ　Ｅｘａｍｐｌｅ"],
     ["the fi ligature", "Visit Sample Field", "visit sample ﬁeld"],
-    ["the dotted capital I", "Visit İzmir Park", "visit izmir park"],
-    ["the dotless i", "Visit Izmir Park", "VISIT ızmir park"]
+    ["the dotted capital I", "Visit İnlet Park", "visit inlet park"],
+    ["the dotless i", "Visit Inlet Park", "VISIT ınlet park"]
   ])("never marks a suggested title edited only by %s", async (_label, title, description) => {
     expect(await marked(title, description)).toBe(false);
   });
 
   it("folds the replay title history the same way", async () => {
     // Replay retitled the item; the stale editor submits a case variant of the older title.
-    expect(await marked("Visit New Park", "VISIT WEISSENSEE", ["Visit Weißensee", "Visit New Park"])).toBe(false);
+    expect(await marked("Visit New Park", "VISIT GROSSPARK", ["Visit Großpark", "Visit New Park"])).toBe(false);
   });
 
   it("marks the owner's own words, non-ASCII included", async () => {
-    expect(await marked("Visit Weißensee", "Schwimmen im Weißensee")).toBe(true);
+    expect(await marked("Visit Großpark", "Schwimmen im Großpark")).toBe(true);
   });
 });
