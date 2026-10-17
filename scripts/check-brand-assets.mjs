@@ -19,15 +19,24 @@ function assert(condition, message) {
 
 const paths = {
   symbol: "logos/dayframe-colour-logo-transparent.svg",
+  mark: "logos/dayframe-colour-mark.svg",
   outlined: "logos/dayframe-wordmark-outlined.svg",
   light: "logos/dayframe-wordmark-light.svg",
   dark: "logos/dayframe-wordmark-dark.svg"
 };
 
-const [symbol, outlined, light, dark] = await Promise.all(Object.values(paths).map(read));
+const [symbol, mark, outlined, light, dark] = await Promise.all(Object.values(paths).map(read));
 const mobileBrand = await read("apps/mobile/src/components/brand/DayframeBrand.tsx");
 
 assert(symbol.includes('viewBox="0 0 1024 1024"'), "Symbol viewBox changed");
+// The header mark: the same artwork with its viewBox cropped to the blocks (170,145 → 825,830), so it
+// centres beside the wordmark. Only the viewBox and title may differ.
+assert(
+  mark === symbol
+    .replace('viewBox="0 0 1024 1024"', 'viewBox="170 145 655 685"')
+    .replace("<title id=\"title\">Dayframe colourful logo</title>", "<title id=\"title\">Dayframe colourful logo mark</title>"),
+  "Cropped mark must differ from the canonical symbol only by its viewBox and title"
+);
 assert((symbol.match(/<linearGradient\b/g) ?? []).length === 6, "Symbol must contain six gradients");
 assert((symbol.match(/<stop\b/g) ?? []).length === 12, "Symbol must contain twelve gradient stops");
 assert((symbol.match(/<rect\b/g) ?? []).length === 6, "Symbol must contain six geometric blocks");
@@ -56,9 +65,9 @@ assert(
   "Dark wordmark must differ from the canonical wordmark only by its #111827 fill"
 );
 
-for (const [name, canonical] of Object.entries({ symbol, outlined, light, dark })) {
+for (const [name, canonical] of Object.entries({ symbol, mark, outlined, light, dark })) {
   const publicAsset = await read(`apps/web/public/logos/dayframe-${
-    name === "symbol" ? "colour-logo-transparent" : `wordmark-${name}`
+    name === "symbol" ? "colour-logo-transparent" : name === "mark" ? "colour-mark" : `wordmark-${name}`
   }.svg`);
   assert(publicAsset === canonical, `Public ${name} asset does not match its root source`);
 }
@@ -73,7 +82,8 @@ assert(
   JSON.stringify(mobilePaths) === JSON.stringify(canonicalPaths),
   "Mobile wordmark paths or transforms drifted from the canonical SVG"
 );
-assert(mobileBrand.includes('viewBox="0 0 1024 1024"'), "Mobile symbol viewBox changed");
+assert(mobileBrand.includes('"0 0 1024 1024"'), "Mobile symbol viewBox changed");
+assert(mobileBrand.includes('"170 145 655 685"'), "Mobile cropped mark viewBox changed");
 assert(mobileBrand.includes('viewBox="0 0 1091 243"'), "Mobile wordmark viewBox changed");
 assert((mobileBrand.match(/<LinearGradient\b/g) ?? []).length === 6, "Mobile symbol must contain six gradients");
 assert(

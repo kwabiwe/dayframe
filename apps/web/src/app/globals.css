@@ -1588,11 +1588,18 @@ dialog.ui-popover-panel.bottom-left {
   }
 }
 
+/* The mark is cropped to its blocks (655 × 685 of the 1024 canvas, logos/dayframe-colour-mark.svg) so
+   it centres beside the wordmark. --brand-mark-canvas is the canvas size the blocks are drawn at (their
+   size is unchanged). The canvas's left margin (170 / 1024) and an even share of its height stay as the
+   mark's margin, and the gap gains its right margin (199 / 1024), so the blocks keep their place beside
+   the navigation and their distance from the wordmark, and the lockup keeps its size. */
 .dayframe-brand {
+  --brand-mark-canvas: 34px;
+  --brand-gap: 10px;
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: calc(var(--brand-gap) + var(--brand-mark-canvas) * 199 / 1024);
   line-height: 0;
 }
 
@@ -1604,7 +1611,9 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-mark {
-  width: 34px;
+  width: calc(var(--brand-mark-canvas) * 655 / 1024);
+  margin: calc(var(--brand-mark-canvas) * 339 / 2048) 0 calc(var(--brand-mark-canvas) * 339 / 2048)
+    calc(var(--brand-mark-canvas) * 170 / 1024);
 }
 
 .dayframe-brand-wordmark-wrap {
@@ -1624,11 +1633,8 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-sm {
-  gap: 8px;
-}
-
-.dayframe-brand-sm .dayframe-brand-mark {
-  width: 28px;
+  --brand-mark-canvas: 28px;
+  --brand-gap: 8px;
 }
 
 .dayframe-brand-sm .dayframe-brand-wordmark {
@@ -1636,24 +1642,24 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-lg {
-  gap: 12px;
-}
-
-.dayframe-brand-lg .dayframe-brand-mark {
-  width: 42px;
+  --brand-mark-canvas: 42px;
+  --brand-gap: 12px;
 }
 
 .dayframe-brand-lg .dayframe-brand-wordmark {
   width: 164px;
 }
 
+/* Stacked: the canvas's top margin (145 / 1024) stays above the blocks and the gap gains its bottom
+   margin (194 / 1024); the blocks centre across. */
 .dayframe-brand[data-layout="compact"] {
+  --brand-mark-canvas: 30px;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px + var(--brand-mark-canvas) * 194 / 1024);
 }
 
 .dayframe-brand[data-layout="compact"] .dayframe-brand-mark {
-  width: 30px;
+  margin: calc(var(--brand-mark-canvas) * 145 / 1024) 0 0;
 }
 
 .dayframe-brand[data-layout="compact"] .dayframe-brand-wordmark {
@@ -4626,8 +4632,8 @@ dialog.ui-dialog.df-range-custom {
     min-height: 74px;
   }
 
-  .landing-brand .dayframe-brand-mark {
-    width: 34px;
+  .landing-brand .dayframe-brand {
+    --brand-mark-canvas: 34px;
   }
 
   .landing-brand .dayframe-brand-wordmark {

@@ -40,13 +40,14 @@ Every screen on iPhone and web, Settings included, is rebuilt to look and behave
 | File | Status | Use |
 | --- | --- | --- |
 | `logos/dayframe-colour-logo-transparent.svg` | Canonical symbol | The six-colour Dayframe mark on a transparent canvas. Do not recolour it. |
+| `logos/dayframe-colour-mark.svg` | Derived artwork | The canonical symbol with its `viewBox` cropped to the blocks (`170 145 655 685`), for the header lockup: the mark then centres beside the wordmark (the full canvas has more space below and right of the blocks, so the mark sat about 1 px high and left). Nothing else differs. |
 | `logos/dayframe-wordmark-outlined.svg` | Canonical wordmark | Source outline geometry with its original `#1D1E22` fill. It contains no font. |
 | `logos/dayframe-wordmark-light.svg` | Derived artwork | `#F7F8FB` wordmark for dark surfaces. “Light” describes the artwork colour. |
 | `logos/dayframe-wordmark-dark.svg` | Derived artwork | `#111827` wordmark for light surfaces. “Dark” describes the artwork colour. |
 | `apps/mobile/assets/dayframe_app_icon.png` | Derived runtime icon | Opaque 1024 px canonical symbol on the Midnight Core `#050914` canvas for Expo/iOS generation. |
 | `apps/mobile/ios/Dayframe/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png` | Native runtime mirror | Exact RGB mirror of the Expo icon; regenerated from the same canonical symbol. |
 
-The same four SVG files under `apps/web/public/logos/` are runtime mirrors, not additional sources of truth. Regenerate or copy those files from `logos/`; never edit the public copies independently. The two iOS icon PNGs must also remain byte-identical, 1024 × 1024 and opaque RGB.
+The same five SVG files under `apps/web/public/logos/` are runtime mirrors, not additional sources of truth. Regenerate or copy those files from `logos/`; never edit the public copies independently. The two iOS icon PNGs must also remain byte-identical, 1024 × 1024 and opaque RGB.
 
 The light and dark wordmarks differ from the canonical wordmark only in the single group fill. Every path, transform, dimension, `viewBox`, proportion and transparent area must remain unchanged. Do not add a background rectangle.
 
