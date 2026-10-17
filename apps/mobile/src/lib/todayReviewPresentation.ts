@@ -437,10 +437,13 @@ function adjustedCounts(
   // whatever the snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
   const outingStays = response.outstanding.outingStays;
   const excludedIds = excluded.map((effect) => effect.reviewItemId);
+  // Without the map (beyond its limit) a local decision moves the counts by an unknown amount.
+  const countsExact = !response.outstanding.countsApproximate &&
+    !(response.outstanding.outingStaysOverflow && excludedIds.length > 0);
   const global = {
     value: Math.max(0, response.outstanding.globalCount -
       (outingStays ? reviewCardsRemovedByOutings(outingStays, excludedIds) : excludedIds.length)),
-    exact: globalExact
+    exact: globalExact && countsExact
   };
   // A local decision leaves today's count by the server's own `todayCount` rule (and the Review
   // deck's Today segment): overlapping the whole local day, or detected today without a complete
@@ -460,7 +463,7 @@ function adjustedCounts(
     global,
     today: {
       value: Math.max(0, response.outstanding.todayCount - todayExcluded),
-      exact: globalExact && response.completeness.records
+      exact: globalExact && countsExact && response.completeness.records
     }
   };
 }

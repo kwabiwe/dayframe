@@ -165,6 +165,16 @@ describe("projectTodayReviewPresentation", () => {
     expect(stayAlone.todayReviewCount).toEqual({ value: 3, exact: true });
   });
 
+  it("calls counts moved without the outing map approximate (Codex r3 on #475)", () => {
+    const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");
+    const snapshot = response([walk], 1, 1);
+    const overflow = { ...snapshot, outstanding: { ...snapshot.outstanding, outingStaysOverflow: true as const } };
+    expect(project({ response: overflow }).globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(project({ response: overflow, effects: [effect("walk", "pending")] }).globalReviewCount).toEqual({ value: 0, exact: false });
+    const moved = { ...snapshot, outstanding: { ...snapshot.outstanding, countsApproximate: true as const } };
+    expect(project({ response: moved }).todayReviewCount.exact).toBe(false);
+  });
+
   it("moves the count exactly for an outing this window does not list (Codex r1 on #475)", () => {
     // Today's window lists one walk; an earlier outing's three cards are open but not in it.
     const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");

@@ -1639,6 +1639,8 @@ export function withNewerTerminalEvidence(
   // Counts of cards (an outing once, PRD D19, PR 12c) move by the server's outing map, exactly
   // whatever this snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
   const outingStays = response.outstanding.outingStays;
+  // Counts of cards with no map (beyond its limit): any removal leaves them approximate.
+  const approximate = Boolean(response.outstanding.outingStaysOverflow) && removedOpen.length > 0;
   const removedCards = outingStays ? reviewCardsRemovedByOutings(outingStays, removedOpen) : removedOpen.length;
   const removedToday = outingStays
     ? reviewCardsRemovedByOutings(outingStays, removedOpen, (id) => todayIds.has(id))
@@ -1653,7 +1655,8 @@ export function withNewerTerminalEvidence(
       todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
       openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id)),
       ...(outingStays ? { outingStays: Object.fromEntries(Object.entries(outingStays)
-        .filter(([member, stay]) => !closed.has(member) && !closed.has(stay))) } : {})
+        .filter(([member, stay]) => !closed.has(member) && !closed.has(stay))) } : {}),
+      ...(approximate ? { countsApproximate: true as const } : {})
     }
   };
 }
@@ -3207,34 +3210,36 @@ export function projectReviewBootstrap(
   const reviewItems = bootstrap.reviewItems.filter((item) => !hiddenIds.has(item.id)).map((item) => withSavedPlace(item, savedPlaceNames));
   const openBefore = bootstrap.reviewItems.filter((item) => item.status === "open");
   const hiddenOpenCount = openBefore.length - reviewItems.filter((item) => item.status === "open").length;
-  // Cards leave by the server's outing map, exactly even when the capped list misses part of an
-  // outing (an outing once, PRD D19, PR 12c; Codex r1 on #475); an older server sends none.
-  const outingStays = bootstrap.stats?.reviewOutingStays;
-  // Open: listed open, or in the map (whose Moves and Stays are all open, listed or not).
-  const knownOpen = new Set([...openBefore.map((item) => item.id), ...Object.entries(outingStays ?? {}).flat()]);
-  const hiddenOpen = [...hiddenIds].filter((id) => knownOpen.has(id));
-  const hiddenCards = outingStays ? reviewCardsRemovedByOutings(outingStays, hiddenOpen) : reviewCardsRemoved(openBefore, hiddenIds);
-  const cardCount = bootstrap.stats?.reviewCardCount;
-  // The map leaves with the cards it counted, so projecting an already projected bootstrap again
-  // never takes them off twice (Codex r2 on #475).
-  const hidden = new Set(hiddenOpen);
-  const remainingStays = outingStays
-    ? Object.fromEntries(Object.entries(outingStays).filter(([member, stay]) => !hidden.has(member) && !hidden.has(stay)))
-    : undefined;
-  // A server that counts cards but sent no map (more open outing Moves than it maps) leaves a local
-  // decision's effect on the count unknown: the count is then approximate (Codex r2 on #475).
-  const approximate = Boolean(bootstrap.stats?.reviewCardCountApproximate) ||
-    (typeof cardCount === "number" && !outingStays && hiddenOpen.length > 0);
+  // Cards leave by the server's outing map (an outing once, PRD D19, PR 12c), counted for the cards
+  // this list still shows: a projected bootstrap no longer lists what it took off, so projecting it
+  // again changes nothing (Codex r2/r3 on #475). The map is the server's, kept whole, so a later
+  // decision still knows its outing.
+  const stats = bootstrap.stats;
+  const outingStays = stats?.reviewOutingStays;
+  const cardCount = stats?.reviewCardCount;
+  const listedOpen = new Set(openBefore.map((item) => item.id));
+  const hiddenListed = [...hiddenIds].filter((id) => listedOpen.has(id));
+  const hiddenCards = outingStays ? reviewCardsRemovedByOutings(outingStays, hiddenListed) : reviewCardsRemoved(openBefore, hiddenIds);
+  // What this phone has taken off the count already, so a re-projection never calls it unknown.
+  const applied = new Set([...stats?.reviewCardCountAppliedIds ?? [], ...hiddenListed]);
+  const outingParts = new Set(Object.entries(outingStays ?? {}).flat());
+  // Not exact: a decided outing card the capped list does not show (the map knows it changes the
+  // count, the list cannot say by how much), or any decision while the server sent no map.
+  const approximate = typeof cardCount === "number" && (
+    Boolean(stats?.reviewCardCountApproximate) ||
+    (Boolean(stats?.reviewOutingStaysOverflow) && hiddenIds.size > 0) ||
+    [...hiddenIds].some((id) => outingParts.has(id) && !listedOpen.has(id) && !applied.has(id))
+  );
   return {
     ...bootstrap,
     reviewItems,
-    ...(bootstrap.stats
+    ...(stats
       ? {
           stats: {
-            ...bootstrap.stats,
-            reviewCount: Math.max(0, bootstrap.stats.reviewCount - hiddenOpenCount),
+            ...stats,
+            reviewCount: Math.max(0, stats.reviewCount - hiddenOpenCount),
             ...(typeof cardCount === "number" ? { reviewCardCount: Math.max(0, cardCount - hiddenCards) } : {}),
-            ...(remainingStays ? { reviewOutingStays: remainingStays } : {}),
+            ...(typeof cardCount === "number" && applied.size ? { reviewCardCountAppliedIds: [...applied] } : {}),
             ...(approximate ? { reviewCardCountApproximate: true } : {})
           }
         }

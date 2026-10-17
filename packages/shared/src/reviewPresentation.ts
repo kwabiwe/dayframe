@@ -300,7 +300,11 @@ export const ReviewPresentationResponseSchema = z
          * Only for clients sending the outing-count feature: each open Move folded into its outing's
          * open Stay card (member → Stay), so a local decision moves the counts of cards exactly.
          */
-        outingStays: z.record(uuid, uuid).refine((map) => Object.keys(map).length <= 200).optional()
+        outingStays: z.record(uuid, uuid).refine((map) => Object.keys(map).length <= 200).optional(),
+        /** Outing-count feature: more open outing Moves than the map holds, so no map was sent. */
+        outingStaysOverflow: z.literal(true).optional(),
+        /** Set on the phone when a local adjustment moved the counts without the map: not exact. */
+        countsApproximate: z.literal(true).optional()
       })
       .strict(),
     records: z.array(ReviewPresentationRecordSchema).max(REVIEW_PRESENTATION_MAX_LIMIT),

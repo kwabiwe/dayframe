@@ -136,8 +136,12 @@ export type MobileStats = {
   reviewCardCount?: number;
   /** Each open Move folded into its outing's open Stay card (member → Stay), to move the count locally. */
   reviewOutingStays?: Record<string, string>;
-  /** Set on this iPhone when a local decision moved `reviewCardCount` without the map: not exact. */
+  /** More open outing Moves than the server maps: it sent no map. */
+  reviewOutingStaysOverflow?: boolean;
+  /** Set on this iPhone when a local decision moved `reviewCardCount` without knowing by how much: not exact. */
   reviewCardCountApproximate?: boolean;
+  /** Set on this iPhone: the cards already taken off `reviewCardCount` here, so a re-projection skips them. */
+  reviewCardCountAppliedIds?: string[];
 };
 
 export type MobileTag = {

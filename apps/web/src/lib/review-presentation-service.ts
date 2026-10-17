@@ -218,9 +218,9 @@ export async function getReviewPresentation(
         records: !boundedCollection && !page.hasMore,
         // Exact counts remain in the response, but a local client must not
         // subtract hidden effects unless it has this complete membership list.
-        // Counts of cards also need the outing map (an outing once, PR 12c).
-        outstandingCounts: (counts.openReviewItemIds?.length ?? 0) <= COLLECTION_LIMIT &&
-          (!features.outingCount || counts.outingStays !== null),
+        // Complete open membership (it also lets the phone evict cards closed elsewhere); a missing
+        // outing map is said separately (Codex r3 on #475).
+        outstandingCounts: (counts.openReviewItemIds?.length ?? 0) <= COLLECTION_LIMIT,
         completedToday: input.mode === "window" && !boundedCollection && !page.hasMore,
         partialReason: boundedCollection ? "bounded_collection" : page.hasMore ? "page" : null
       },
@@ -228,7 +228,8 @@ export async function getReviewPresentation(
         globalCount: Number(counts.globalCount),
         todayCount: Number(counts.todayCount),
         openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT),
-        ...(features.outingCount && counts.outingStays ? { outingStays: counts.outingStays } : {})
+        ...(features.outingCount && counts.outingStays ? { outingStays: counts.outingStays } : {}),
+        ...(features.outingCount && counts.outingStays === null ? { outingStaysOverflow: true as const } : {})
       },
       records: page.records.map(({ record }) => forClient(record, features)),
       links,

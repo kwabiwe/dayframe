@@ -213,6 +213,8 @@ export type DashboardStats = {
    * `reviewCardCount` exactly for local decisions; left out beyond `OUTING_STAYS_LIMIT` Moves.
    */
   reviewOutingStays?: Record<string, string>;
+  /** More open outing Moves than the map holds: no map was sent (a local adjustment is then approximate). */
+  reviewOutingStaysOverflow?: boolean;
 };
 
 export type DashboardDateRange = {
@@ -395,7 +397,7 @@ export async function getBootstrapData(
       weekCoveredSeconds: weekCoverage.coveredSeconds,
       todayAdditionalOverlapSeconds: todayCoverage.additionalOverlapSeconds,
       weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds,
-      ...(reviewOutingStays ? { reviewOutingStays } : {})
+      ...(reviewOutingStays ? { reviewOutingStays } : { reviewOutingStaysOverflow: true })
     },
     todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
     weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))

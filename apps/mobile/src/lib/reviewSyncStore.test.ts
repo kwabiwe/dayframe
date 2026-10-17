@@ -88,18 +88,31 @@ describe("Review sync store contracts", () => {
     const capped = { ...bootstrap([...Array.from({ length: 98 }, (_, index) => reviewItem({ id: `other-${index}` })),
       outing("there", "in"), outing("back", "out")]),
       stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 101, reviewCardCount: 99, reviewOutingStays: { there: "stay", back: "stay" } } };
-    expect(projectReviewBootstrap(capped, new Set(["there"])).stats?.reviewCardCount).toBe(99);
+    expect(projectReviewBootstrap(capped, new Set(["there"])).stats).toMatchObject({ reviewCardCount: 99 });
+    expect(projectReviewBootstrap(capped, new Set(["there"])).stats).not.toHaveProperty("reviewCardCountApproximate");
     expect(projectReviewBootstrap(capped, new Set(["other-0"])).stats?.reviewCardCount).toBe(98);
-    // Its unlisted Stay decided on its own: both Moves come back as cards.
-    expect(projectReviewBootstrap(capped, new Set(["stay"])).stats?.reviewCardCount).toBe(100);
-    // Projecting a projected bootstrap again changes nothing (Codex r2 on #475).
-    const once = projectReviewBootstrap(capped, new Set(["stay"]));
-    expect(projectReviewBootstrap(once, new Set(["stay"])).stats?.reviewCardCount).toBe(100);
-    const outingDecided = projectReviewBootstrap(capped, new Set(["stay", "there", "back"]));
-    expect(outingDecided.stats?.reviewCardCount).toBe(98);
-    expect(projectReviewBootstrap(outingDecided, new Set(["stay", "there", "back"])).stats?.reviewCardCount).toBe(98);
+    // Its Stay is not listed: deciding it changes the count by what the list can't show, so it is
+    // said to be approximate rather than guessed (Codex r3 on #475).
+    expect(projectReviewBootstrap(capped, new Set(["stay"])).stats).toMatchObject({ reviewCardCount: 99, reviewCardCountApproximate: true });
+    // The Stay listed, its Moves not: deciding the Stay brings both back, exactly, once (Codex r2/r3 on #475).
+    const stayListed = { ...bootstrap([...Array.from({ length: 99 }, (_, index) => reviewItem({ id: `other-${index}` })), outing("stay", "stay")]),
+      stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 102, reviewCardCount: 100, reviewOutingStays: { there: "stay", back: "stay" } } };
+    const once = projectReviewBootstrap(stayListed, new Set(["stay"]));
+    expect(once.stats).toMatchObject({ reviewCardCount: 101, reviewOutingStays: { there: "stay", back: "stay" } });
+    expect(once.stats).not.toHaveProperty("reviewCardCountApproximate");
+    expect(projectReviewBootstrap(once, new Set(["stay"])).stats).toMatchObject({ reviewCardCount: 101 });
+    expect(projectReviewBootstrap(once, new Set(["stay"])).stats).not.toHaveProperty("reviewCardCountApproximate");
+    // A later decision on one of its unlisted Moves: the map knows it counts, the list can't take it off.
+    expect(projectReviewBootstrap(once, new Set(["stay", "there"])).stats).toMatchObject({ reviewCardCount: 101, reviewCardCountApproximate: true });
+    // The whole outing listed and decided: one card off, once.
+    const listed = { ...bootstrap([...Array.from({ length: 97 }, (_, index) => reviewItem({ id: `other-${index}` })),
+      outing("stay", "stay"), outing("there", "in"), outing("back", "out")]),
+      stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 100, reviewCardCount: 98, reviewOutingStays: { there: "stay", back: "stay" } } };
+    const outingDecided = projectReviewBootstrap(listed, new Set(["stay", "there", "back"]));
+    expect(outingDecided.stats?.reviewCardCount).toBe(97);
+    expect(projectReviewBootstrap(outingDecided, new Set(["stay", "there", "back"])).stats?.reviewCardCount).toBe(97);
     // A server that counts cards but sent no map (beyond its limit): a local decision makes the count approximate.
-    const unmapped = { ...capped, stats: { ...capped.stats, reviewOutingStays: undefined } };
+    const unmapped = { ...capped, stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 101, reviewCardCount: 99, reviewOutingStaysOverflow: true } };
     expect(projectReviewBootstrap(unmapped, new Set(["there"])).stats?.reviewCardCountApproximate).toBe(true);
     expect(projectReviewBootstrap(unmapped, new Set()).stats?.reviewCardCountApproximate).toBeUndefined();
     // An older server sends no count of cards: none is made up.
@@ -123,6 +136,10 @@ describe("Review sync store contracts", () => {
     expect(settled.outstanding).toMatchObject({ globalCount: 1, todayCount: 1 });
     const stayAlone = withNewerTerminalEvidence(snapshot, new Set(["stay"])) as { outstanding: { globalCount: number; todayCount: number; outingStays: object } };
     expect(stayAlone.outstanding).toMatchObject({ globalCount: 3, todayCount: 3, outingStays: {} });
+    // Without the map (beyond its limit) a removal leaves the counts approximate (Codex r3 on #475).
+    const overflow = { ...(snapshot as { outstanding: object }), outstanding: { globalCount: 2, todayCount: 2,
+      openReviewItemIds: ["stay", "there", "back", "walk"], outingStaysOverflow: true } } as never;
+    expect((withNewerTerminalEvidence(overflow, new Set(["walk"])) as { outstanding: object }).outstanding).toMatchObject({ countsApproximate: true });
   });
 
   it("does not cache coordinates, raw Health payloads or secrets", () => {

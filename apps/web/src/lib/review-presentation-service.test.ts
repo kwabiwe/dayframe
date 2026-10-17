@@ -130,7 +130,10 @@ describe("getReviewPresentation", () => {
       member: `72000000-0000-4000-8000-${String(index).padStart(12, "0")}`, stay: "71000000-0000-4000-8000-000000000001" }));
     const beyond = await getReviewPresentation(session, request, {}, { outingCount: true });
     expect(beyond.outstanding).not.toHaveProperty("outingStays");
-    expect(beyond.completeness.outstandingCounts).toBe(false);
+    // Membership stays complete (eviction relies on it); the missing map is said separately (Codex r3 on #475).
+    expect(beyond.completeness.outstandingCounts).toBe(true);
+    expect(beyond.outstanding.outingStaysOverflow).toBe(true);
+    expect(cards.outstanding).not.toHaveProperty("outingStaysOverflow");
   });
 
   it("marks time away only for clients that ask for it (review finding 3)", async () => {

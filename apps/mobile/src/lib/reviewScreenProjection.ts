@@ -67,23 +67,12 @@ export function projectReviewScreenData(input: {
     : reviewItems;
   const categories = current && sameJson(current.categories, projection.categories) ? current.categories : projection.categories;
   const reviewCount = projection.stats?.reviewCount ?? projection.reviewItems.length;
-  // The projection's count of cards has local decisions applied (an outing once, PR 12c).
-  const reviewCardCount = projection.stats?.reviewCardCount;
   const next: MobileBootstrap = {
     ...base,
     workspace: projection.workspace,
     categories,
     reviewItems: stableItems,
-    stats: base.stats
-      ? {
-          ...base.stats,
-          reviewCount,
-          ...(typeof reviewCardCount === "number" ? { reviewCardCount } : {}),
-          // The projection's map and exactness go with its count (Codex r2 on #475).
-          ...(projection.stats?.reviewOutingStays ? { reviewOutingStays: projection.stats.reviewOutingStays } : {}),
-          ...(projection.stats?.reviewCardCountApproximate ? { reviewCardCountApproximate: true } : {})
-        }
-      : projection.stats
+    stats: base.stats ? withProjectionCounts(base.stats, reviewCount, projection.stats) : projection.stats
   };
   if (
     current && current === base &&
@@ -118,6 +107,31 @@ function withCachedOuting(item: MobileReviewItem, cached: MobileReviewItem): Mob
       ...(key !== undefined ? { [OUTING_KEY_PAYLOAD_KEY]: key } : {}),
       ...(role !== undefined ? { [OUTING_ROLE_PAYLOAD_KEY]: role } : {})
     }
+  };
+}
+
+/**
+ * The projection's Review counts over `base`'s other stats: the count of cards with its map,
+ * exactness and applied decisions together, a field the projection lacks cleared, never left
+ * over from `base` (Codex r2/r3 on #475).
+ */
+function withProjectionCounts(
+  base: NonNullable<MobileBootstrap["stats"]>,
+  reviewCount: number,
+  projected: MobileBootstrap["stats"]
+): NonNullable<MobileBootstrap["stats"]> {
+  const {
+    reviewCardCount: _count, reviewOutingStays: _stays, reviewOutingStaysOverflow: _overflow,
+    reviewCardCountApproximate: _approximate, reviewCardCountAppliedIds: _applied, ...rest
+  } = base;
+  return {
+    ...rest,
+    reviewCount,
+    ...(typeof projected?.reviewCardCount === "number" ? { reviewCardCount: projected.reviewCardCount } : {}),
+    ...(projected?.reviewOutingStays ? { reviewOutingStays: projected.reviewOutingStays } : {}),
+    ...(projected?.reviewOutingStaysOverflow ? { reviewOutingStaysOverflow: true } : {}),
+    ...(projected?.reviewCardCountApproximate ? { reviewCardCountApproximate: true } : {}),
+    ...(projected?.reviewCardCountAppliedIds ? { reviewCardCountAppliedIds: projected.reviewCardCountAppliedIds } : {})
   };
 }
 
