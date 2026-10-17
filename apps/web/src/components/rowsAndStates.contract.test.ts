@@ -15,9 +15,29 @@ function rule(selector: string) {
 
 /** A theme block's hex tokens (`:root,\n:root[data-theme="light"]` or `:root[data-theme="dark"]`). */
 function themeTokens(header: string) {
-  const start = styles.indexOf(`${header} {`);
-  const body = styles.slice(start, styles.indexOf("}", start));
+  // Comments stripped, so a commented-out old value never reads as the token (Codex r3 on #495).
+  const css = styles.replace(/\/\*[\s\S]*?\*\//g, " ");
+  const start = css.indexOf(`${header} {`);
+  expect(start, header).toBeGreaterThanOrEqual(0);
+  const body = css.slice(start, css.indexOf("}", start));
+  // A later declaration of the same token wins, as in CSS.
   return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6});/gi)].map(([, name, value]) => [name, value]));
+}
+
+/** The value of the last `property` declared for `selector` at top level: the one that wins. */
+function lastDeclaration(selector: string, property: string) {
+  return lastDeclarationIn(rule(selector), property);
+}
+
+/** Declarations split one by one, so adjacent duplicates are each seen (Codex r1 on #497). */
+function lastDeclarationIn(body: string, property: string) {
+  const values = body
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split(";")
+    .map((declaration) => declaration.match(/^\s*([\w-]+)\s*:\s*([\s\S]+?)\s*$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match) && match?.[1] === property)
+    .map((match) => match[2]);
+  return values.at(-1);
 }
 
 const toLinear = (channel: number) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
@@ -68,9 +88,11 @@ describe("rows (WUI-028, WUI-029)", () => {
     // Grouped rows and their expanded occurrences share the anatomy (Codex r1 on #495).
     expect(entries.match(/className="timeline-task-secondary-line"/g)).toHaveLength(2);
     // Secondary text passes 4.5:1 on Midnight and Daylight cards and their hover fill.
-    const subline = "color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));";
-    expect(rule(".timeline-task-secondary-line")).toContain(subline);
-    expect(rule(".df-erow-text span")).toContain(subline);
+    const subline = "color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary))";
+    expect(lastDeclaration(".timeline-task-secondary-line", "color")).toBe(subline);
+    expect(lastDeclaration(".df-erow-text span", "color")).toBe(subline);
+    // The meta and tag spans set their own colour elsewhere; inside the line they inherit it.
+    expect(lastDeclaration(".timeline-task-secondary-line .timeline-task-meta,\n.timeline-task-secondary-line .tag-metadata", "color")).toBe("inherit");
     expect(rule(".timeline-task-secondary-line .tag-metadata.is-compact")).toContain("font-size: 12px;");
     expect(rule(".timeline-task-block")).toMatch(/width: 36px;[\s\S]*height: 36px;[\s\S]*border-radius: calc\(36px \* 0\.3\);/);
     expect(rule(".df-erow-block")).toContain("border-radius: calc(36px * 0.3);");
@@ -137,6 +159,12 @@ describe("Reports sections (WUI-031)", () => {
 });
 
 describe("row sub-line contrast (WCAG 1.4.3, Codex r2 on #495)", () => {
+  it("reads the declaration that wins, adjacent duplicates included", () => {
+    expect(lastDeclarationIn("color: red; color: var(--text-muted);", "color")).toBe("var(--text-muted)");
+    expect(lastDeclarationIn("color: red; /* color: blue; */ background: x;", "color")).toBe("red");
+    expect(lastDeclarationIn("background-color: red;", "color")).toBeUndefined();
+  });
+
   it("keeps 12 px sub-lines over 4.5:1 on the card and the hover/focus fill in both themes", () => {
     for (const header of [':root,\n:root[data-theme="light"]', ':root[data-theme="dark"]']) {
       const tokens = themeTokens(header);

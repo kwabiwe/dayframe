@@ -70,7 +70,9 @@ describe("web Settings and running-timer follow-up", () => {
   });
 
   it("uses flat workspace rows", () => {
-    expect(styles).toMatch(/\.swiss-profile-section \.swiss-menu-list button \{[^}]*box-shadow: none;/s);
+    // The Profile & workspace popover's rows (the older swiss-profile-section went in the UI audit's
+    // dead-CSS sweep, WUI-038): borderless and unfilled until hovered.
+    expect(styles).toMatch(/\.df-profile-pop-rows > button,\n\.df-profile-pop-rows > a,\n\.df-profile-pop-rows > form > button \{[^}]*border: 0;[^}]*background: transparent;/s);
   });
 
   it("keeps cached Settings data visible while refreshing quietly", () => {

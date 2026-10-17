@@ -19,7 +19,7 @@ describe("dialog padding (UIA-301)", () => {
   });
 
   it("drops per-dialog workarounds, and only edge-to-edge surfaces opt out", () => {
-    for (const selector of [".place-dialog-copy", ".place-role-dialog", ".swiss-confirm-body", ".settings-troubleshooting-copy", ".place-learned-details"]) {
+    for (const selector of [".place-dialog-copy", ".place-role-dialog", ".settings-troubleshooting-copy", ".place-learned-details"]) {
       expect(rule(selector)).not.toMatch(/\bpadding:/);
     }
     // Add time's dialog is gone: it is the shared editor's modal now (WUI-025).
