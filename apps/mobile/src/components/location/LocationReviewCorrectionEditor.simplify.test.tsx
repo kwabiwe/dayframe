@@ -219,7 +219,10 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
     expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
     await act(async () => keyboard.listeners.get("keyboardWillHide")?.({ duration: 250 }));
     expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
-    // Prefer Cross-Fade Transitions can report a zero frame: no space is made (Codex r2 on #480).
+    // Prefer Cross-Fade Transitions can report a zero frame, also while the keyboard is open: no
+    // space is made (Codex r2/r3 on #480).
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 476 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
     await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 0, height: 0 } }));
     expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
   });
@@ -245,17 +248,28 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
     expect(tree!.root.findAll((node) => isHost(node, "TextInput") && node.props.value === "Swimming")).toHaveLength(1);
     expect(chip()).toHaveLength(0);
     await press(primary());
-    expect((onResolve.mock.calls[0][0] as { edit?: { description?: string } }).edit?.description).toBe("Swimming");
+    // Using the chip is the person's own choice: a typed name, which teaches the pattern.
+    expect((onResolve.mock.calls[0][0] as { edit?: { description?: string; descriptionTyped?: boolean } }).edit)
+      .toMatchObject({ description: "Swimming", descriptionTyped: true });
+  });
+
+  it("never sends a learned name the person did not choose as typed", async () => {
+    // A stay whose display title is the learned name starts with it in Name, untouched.
+    const evidence = stay({ matched: false });
+    (evidence.display as { title: string }).title = "Swimming";
+    await render(evidence, [], { suggestedCategoryId: null, title: "Swimming", rawPayload: { nameSource: "learned" } });
+    expect(byTestId("location-evidence-learned-name")).toHaveLength(0);
+    await press(primary());
+    expect((onResolve.mock.calls[0][0] as { edit?: { descriptionTyped?: boolean } }).edit?.descriptionTyped).not.toBe(true);
   });
 
   it("says what the suggestion rests on in one line under the map that opens to the details", async () => {
     const evidence = stay({ matched: true });
     (evidence.map as { gaps: unknown[] }).gaps = [{ startedAt: "2026-08-14T09:20:00Z", stoppedAt: "2026-08-14T09:45:00Z", durationSeconds: 1500, fromPoint: null, toPoint: null }];
-    (evidence.map as { acceptedSamples: unknown[] }).acceptedSamples = ["a", "b"].map((id) => ({ id, point: { type: "Point", coordinates: [20, 10] },
-      occurredAt: "2026-08-14T09:10:00Z", accuracyMeters: 10, kind: "fix", role: null }));
+    (evidence.segment as { evidenceCount: number }).evidenceCount = 42;
     await render(evidence);
     const line = tree!.root.findAll((node) => node.props.testID === "location-evidence-line" && typeof node.type === "string")[0];
-    expect(text(line)).toBe("Based on 2 readings · 25-min gap");
+    expect(text(line)).toBe("Based on 42 readings · 25-min gap");
     expect(line.props.accessibilityState).toEqual({ expanded: false });
     expect(byTestId("location-evidence-details")).toHaveLength(0);
     await press(line);

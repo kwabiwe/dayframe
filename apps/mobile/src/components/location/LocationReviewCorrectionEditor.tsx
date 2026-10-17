@@ -157,6 +157,14 @@ export function LocationReviewCorrectionEditor({
   const isJourney = journeyCopy?.journey === true;
   const learnedName = learnedLocationName(reviewItem);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // The disclosure's chevron turns (down to up) with the details; Reduce Motion turns it at once.
+  const evidenceChevronTurn = useSharedValue(90);
+  const evidenceChevronStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${evidenceChevronTurn.value}deg` }] }));
+  useEffect(() => {
+    evidenceChevronTurn.value = reduceMotion ? (evidenceOpen ? -90 : 90) : withTiming(evidenceOpen ? -90 : 90, { duration: 180 });
+    // The shared value is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceOpen, reduceMotion]);
   const evidenceLine = locationEvidenceLine(evidence);
   const evidenceDetails = locationEvidenceDetails(evidence, (value) => formatTime(value, clockFormat));
   // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
@@ -890,9 +898,9 @@ export function LocationReviewCorrectionEditor({
               >
                 <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>{evidenceLine}</Text>
                 {evidenceDetails.length ? (
-                  <View style={{ transform: [{ rotate: evidenceOpen ? "-90deg" : "90deg" }] }}>
+                  <Reanimated.View style={evidenceChevronStyle}>
                     <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
-                  </View>
+                  </Reanimated.View>
                 ) : null}
               </Pressable>
               {evidenceOpen && evidenceDetails.length ? (
@@ -1146,6 +1154,9 @@ export function LocationReviewCorrectionEditor({
               ) : null}
               {/* D1: the entry sheet's Blocks chips (chosen, pinned, recent; wrapped, never a
                   sideways scroller), then All activities with search and Create. */}
+              {/* The chips move with the group's layout transition when the learned-name chip above
+                  comes or goes (Codex r1 on #481). */}
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <ActivityChipRow testID="location-evidence-activity-chips">
                 {chipActivities.map((category) => (
                   <ActivityChip
@@ -1170,6 +1181,7 @@ export function LocationReviewCorrectionEditor({
                   theme={theme}
                 />
               </ActivityChipRow>
+              </Reanimated.View>
               {automaticCommute ? (
                 <Reanimated.View
                   entering={localPresenceEntering(reduceMotion)}
