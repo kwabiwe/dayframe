@@ -76,3 +76,22 @@ export type NearbyPointOfInterestResolutionRequest = {
   id: string;
   requestId: string;
 };
+
+/** What the MapKit checks found: counts, distances, kinds and yes/no only (no names or points). */
+export type MapKitProbeReport = {
+  osVersion: string;
+  radii: { radiusMeters: number; count: number; farthestMeters: number | null; error: string | null }[];
+  kindsWithin400m: Record<string, number>;
+  areasOfInterest: { answered: boolean; count: number; error: string | null };
+  placeIds: {
+    supported: boolean;
+    places: number;
+    withPlaceId: number;
+    /** Looked up straight away, then a minute later: found, not found (Apple has no such place) or failed. */
+    lookup: MapKitProbeLookupRound | null;
+    lookupAMinuteLater: MapKitProbeLookupRound | null;
+  };
+  rapid: { attempts: number; succeeded: number; firstErrorAt: number | null; firstError: string | null };
+};
+
+export type MapKitProbeLookupRound = { found: number; notFound: number; failed: number; failure: string | null };

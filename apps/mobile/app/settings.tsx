@@ -188,6 +188,7 @@ import {
   recordLocationStoreError
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
+import { useMapKitChecks } from "@/lib/useMapKitChecks";
 import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-motion-activity";
 import {
@@ -1173,6 +1174,7 @@ export default function SettingsScreen() {
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
+  const appleMaps = useMapKitChecks({ onNote: setSyncHelpNote });
   const syncHelpIssueKey = [
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
     ...timeEntrySyncIssues.map((issue) => issue.clientCommandId),
@@ -2745,6 +2747,14 @@ export default function SettingsScreen() {
                   testID="sync-help-location"
                   theme={theme}
                   title="Share location details"
+                />
+                <SettingsBlockRow
+                  disabled={appleMaps.checking}
+                  onPress={appleMaps.start}
+                  subtitle={appleMaps.checking ? "Checking… about a minute" : appleMaps.note ?? "Counts only, without places or points"}
+                  testID="sync-help-apple-maps"
+                  theme={theme}
+                  title="Check Apple Maps nearby data"
                 />
                 <SettingsBlockRow
                   onPress={() => void exportAppleHealthDebug()}
