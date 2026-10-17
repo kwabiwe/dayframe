@@ -22,9 +22,12 @@ import { createPortal } from "react-dom";
  */
 export function ConfirmDialog({
   body,
+  busy = false,
+  busyLabel,
   cancelLabel = "Cancel",
   cancelRef,
   confirmLabel,
+  error,
   onCancel,
   onConfirm,
   open,
@@ -33,10 +36,16 @@ export function ConfirmDialog({
   tone = "danger"
 }: {
   body?: string;
+  /** The confirmed action is running: both buttons wait, Escape and the scrim do nothing. */
+  busy?: boolean;
+  /** The confirming button's label while busy ("Deleting…"). */
+  busyLabel?: string;
   cancelLabel?: string;
   /** Receives the way-back button, which takes focus when the dialog opens. */
   cancelRef?: RefObject<HTMLButtonElement | null>;
   confirmLabel: string;
+  /** Why the action failed, under the body (an alert); the dialog stays for a retry or Cancel. */
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
   open: boolean;
@@ -73,7 +82,7 @@ export function ConfirmDialog({
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      onCancel();
+      if (!busy) onCancel();
       return;
     }
     if (event.key !== "Tab") return;
@@ -99,7 +108,7 @@ export function ConfirmDialog({
         aria-hidden="true"
         onPointerDown={(event) => {
           event.preventDefault();
-          if (open) onCancel();
+          if (open && !busy) onCancel();
         }}
       />
       <div
@@ -114,17 +123,20 @@ export function ConfirmDialog({
       >
         <h2 className="df-confirm-title" id={titleId}>{title}</h2>
         {body ? <p className="df-confirm-body" id={bodyId}>{body}</p> : null}
+        {error ? <p className="df-confirm-error" role="alert">{error}</p> : null}
         <div className="df-confirm-actions">
-          <button ref={backRef} className="df-rbtn" type="button" onClick={onCancel}>
+          <button ref={backRef} className="df-rbtn" disabled={busy} type="button" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button
             ref={confirmRef}
+            aria-busy={busy || undefined}
             className={tone === "danger" ? "df-rbtn df-rbtn--danger" : "df-rbtn df-rbtn--inverse"}
+            disabled={busy}
             type="button"
             onClick={onConfirm}
           >
-            {confirmLabel}
+            {busy && busyLabel ? busyLabel : confirmLabel}
           </button>
         </div>
       </div>

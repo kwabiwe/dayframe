@@ -43,6 +43,8 @@ export type TimerStartRequestPayload = {
   mode: "start";
   categoryId?: string;
   description?: string;
+  /** A start in the past (Undo of a discarded running block); the server starts now without it. */
+  startedAt?: string;
   tagNames: string[];
 };
 
@@ -340,11 +342,12 @@ export function quickActionTimerDraft(categoryId: string | null | undefined): Ti
   };
 }
 
-export function timerStartRequestPayload(draft: TimerDraft): TimerStartRequestPayload {
+export function timerStartRequestPayload(draft: TimerDraft, startedAt?: string): TimerStartRequestPayload {
   return {
     mode: "start",
     categoryId: draft.categoryId || undefined,
     description: draft.description.trim() || undefined,
+    ...(startedAt ? { startedAt } : {}),
     tagNames: draft.tagNames
   };
 }
@@ -367,7 +370,8 @@ export async function runTimerStartMutation({
   send,
   refresh,
   beforeStart,
-  dedupeRunning = false
+  dedupeRunning = false,
+  startAt
 }: {
   gate: TimerMutationGate;
   snapshot: BootstrapData;
@@ -398,6 +402,8 @@ export async function runTimerStartMutation({
    * asked for) changes nothing instead of stopping and restarting it.
    */
   dedupeRunning?: boolean;
+  /** Start at this instant instead of now (Undo of a discarded running block, WUI-008). */
+  startAt?: string;
 }): Promise<TimerStartOutcome> {
   const result = await gate.runLatest(async (): Promise<TimerStartOutcome> => {
     const carried = beforeStart ? await beforeStart() : undefined;
@@ -405,7 +411,7 @@ export async function runTimerStartMutation({
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
-    const startedAt = now();
+    const startedAt = startAt ?? now();
     if (dedupeRunning && startMatchesRunning(acceptedSnapshot.activeEntry, { ...draft, categoryId: draft.categoryId || null })) {
       return { ok: true, own: true, alreadyRunning: true, unchanged: acceptedSnapshot.activeEntry, replaced: null, switchedAt: startedAt } as const;
     }
@@ -417,7 +423,7 @@ export async function runTimerStartMutation({
     setDraft(draft);
 
     try {
-      const startedServerId = (await send(timerStartRequestPayload(draft))) || undefined;
+      const startedServerId = (await send(timerStartRequestPayload(draft, startAt))) || undefined;
       return {
         ok: true,
         own: true,

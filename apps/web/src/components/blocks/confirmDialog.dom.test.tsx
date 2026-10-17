@@ -80,4 +80,23 @@ describe("ConfirmDialog (WUI-005/WUI-009)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     expect(screen.getByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeTruthy();
   });
+
+  it("waits while busy (no Escape, scrim or second press) and shows a failure under the body", () => {
+    const onCancel = vi.fn();
+    const onConfirm = vi.fn();
+    const { rerender } = render(
+      <ConfirmDialog busy busyLabel="Deleting…" confirmLabel="Delete" onCancel={onCancel} onConfirm={onConfirm} open title="Delete tag?" />
+    );
+    const confirm = screen.getByRole("button", { name: "Deleting…" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(confirm, { key: "Escape" });
+    fireEvent.pointerDown(document.querySelector(".df-confirm-scrim")!);
+    expect(onCancel).not.toHaveBeenCalled();
+
+    rerender(<ConfirmDialog confirmLabel="Delete" error="Unable to delete this tag." onCancel={onCancel} onConfirm={onConfirm} open title="Delete tag?" />);
+    expect(screen.getByRole("alert").textContent).toBe("Unable to delete this tag.");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
 });

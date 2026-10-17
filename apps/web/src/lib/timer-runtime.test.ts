@@ -70,6 +70,38 @@ describe("shell timer runtime", () => {
     }
   });
 
+  it("starts at a given instant when asked (Undo of a discarded running block, WUI-008), and at now otherwise", async () => {
+    for (const startAt of ["2026-08-24T09:15:00.000Z", undefined]) {
+      const gate = createTimerMutationGate();
+      const payloads: TimerStartRequestPayload[] = [];
+      let committed: BootstrapData | null = null;
+      const start = runTimerStartMutation({
+        gate,
+        snapshot: bootstrapData(null),
+        currentDraft: timerDraftForEntry(null),
+        input: { categoryId: "focus", description: "Plan", tagNames: ["deep"] },
+        now: () => "2026-08-24T16:00:00.000Z",
+        createOptimisticId: () => "optimistic",
+        commit: (next) => { committed = next; },
+        setDraft: () => undefined,
+        setBusy: () => undefined,
+        setError: () => undefined,
+        send: async (payload) => { payloads.push(payload); },
+        refresh: async () => undefined,
+        startAt
+      });
+      await expect(start).resolves.toMatchObject({ ok: true, switchedAt: startAt ?? "2026-08-24T16:00:00.000Z" });
+      expect(payloads[0]).toEqual({
+        mode: "start",
+        categoryId: "focus",
+        description: "Plan",
+        tagNames: ["deep"],
+        ...(startAt ? { startedAt: startAt } : {})
+      });
+      expect((committed as BootstrapData | null)?.activeEntry?.startedAt).toBe(startAt ?? "2026-08-24T16:00:00.000Z");
+    }
+  });
+
   it("returns a rejected switch to the still-running entry's own details", async () => {
     const gate = createTimerMutationGate();
     const running = entry({ id: "running", description: "Writing", categoryId: "focus" });

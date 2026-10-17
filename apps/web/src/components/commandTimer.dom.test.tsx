@@ -167,6 +167,41 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     render(<PersistentTimerBar />);
     expect(screen.getByRole("menuitem", { hidden: true }).textContent).toContain("Discard running block");
   });
+
+  it("discards the running block at once and offers Undo, which starts it again at its own start (WUI-008)", async () => {
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
+    runtime = runtimeFixture({ activeEntry: running, description: "Plan launch", tagNames: ["Deep work"] });
+    const { rerender } = render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    expect(runtime.deleteActiveTimer).toHaveBeenCalledTimes(1);
+    // The runtime now has nothing running.
+    runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
+    rerender(<PersistentTimerBar />);
+    expect(screen.getByRole("status").textContent).toContain("Discarded Plan launch");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
+    expect(runtime.startTimer).toHaveBeenCalledWith(
+      { categoryId: "focus", description: "Plan launch", tagNames: ["Deep work"] },
+      { startedAt: running.startedAt }
+    );
+  });
+
+  it("hides Undo once another block is running, and adds no toast when the discard fails", async () => {
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
+    runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
+    const { rerender } = render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    // Something else started meanwhile: no Undo, so it is never replaced by the discarded block.
+    runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: timeEntry({ id: "other", description: "Other" }) } };
+    rerender(<PersistentTimerBar />);
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
+
+    cleanup();
+    runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
+    (runtime.deleteActiveTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Offline" });
+    render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    expect(screen.queryByText(/Discarded/)).toBeNull();
+  });
 });
 
 function runtimeFixture(overrides: {

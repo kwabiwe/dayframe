@@ -24,7 +24,7 @@ import { Button, IconButton, ModalDialog } from "@/components/ui/Primitives";
 import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
-import { timeEntryAccentColor } from "@/lib/display";
+import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
 import { dateTimeLocalInputToIso, formatClockDuration, formatDuration, formatTime } from "@/lib/format";
 import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
@@ -40,7 +40,15 @@ const TASK_SUGGESTION_LIMIT = 5;
 const NOTICE_MS = 5_000;
 const NOTICE_EXIT_MS = 160;
 
-type TimerNotice = { detail?: string | null; exiting: boolean; label: string; swatch?: CSSProperties; token: number };
+type TimerNotice = {
+  /** An Undo for the notice (a discarded running block, WUI-008); shown only while nothing runs. */
+  action?: { label: string; onAction: () => void };
+  detail?: string | null;
+  exiting: boolean;
+  label: string;
+  swatch?: CSSProperties;
+  token: number;
+};
 
 /**
  * The idle description's placeholder is the example the old "Try …" line under the field gave
@@ -108,6 +116,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const startEditorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const timerActionsRef = useRef<HTMLDivElement | null>(null);
   const timerActionsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const timerActionsFirstItemRef = useRef<HTMLButtonElement | null>(null);
 
   const active = data?.activeEntry ?? null;
   const idle = !active;
@@ -280,7 +289,10 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     }
     document.addEventListener("mousedown", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
+    // A menu takes focus on its first item when it opens (WUI-008), so the keyboard is in it.
+    const frame = window.requestAnimationFrame(() => timerActionsFirstItemRef.current?.focus());
     return () => {
+      window.cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
@@ -443,6 +455,40 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
   function announce(label: string, swatch?: CSSProperties, detail?: string | null) {
     setNotice({ detail, exiting: false, label, swatch, token: ++noticeSequence.current });
+  }
+
+  /**
+   * "Discard running block" (web UI audit WUI-008, owner 17 Oct 2026): the block goes at once, as
+   * Today's Delete does, and the toast offers Undo for its five seconds, which starts the same
+   * block again at its own start (activity, description, tags) while nothing else is running.
+   */
+  async function discardRunningBlock() {
+    const discarded = active;
+    if (!discarded) return;
+    const restoreDraft = { ...timerDraft };
+    const name = timeEntryTitle({
+      ...discarded,
+      description: restoreDraft.description.trim() || discarded.description,
+      categoryName: restoreDraft.categoryId ? selectedCategory?.name ?? discarded.categoryName : discarded.categoryName
+    });
+    const swatchCategory = restoreDraft.categoryId ? selectedCategory : null;
+    const swatch = swatchCategory ? blockStyle(swatchCategory.color, swatchCategory.name) : undefined;
+    const outcome = await deleteActiveTimer();
+    if (!outcome.ok) return;
+    const token = ++noticeSequence.current;
+    setNotice({
+      action: {
+        label: "Undo",
+        onAction: () => {
+          setNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));
+          void startTimer(restoreDraft, { startedAt: discarded.startedAt });
+        }
+      },
+      exiting: false,
+      label: `Discarded ${name}`,
+      swatch,
+      token
+    });
   }
 
   async function chooseTimerSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
@@ -818,8 +864,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   className="is-danger"
                   onClick={() => {
                     setTimerActionsOpen(false);
-                    void deleteActiveTimer();
+                    void discardRunningBlock();
                   }}
+                  ref={timerActionsFirstItemRef}
                   role="menuitem"
                   type="button"
                 >
@@ -893,7 +940,15 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       ) : null}
 
       {notice ? (
-        <BlocksToast detail={notice.detail} exiting={notice.exiting} key={notice.token} message={notice.label} swatchStyle={notice.swatch} />
+        <BlocksToast
+          actionLabel={notice.action && !active ? notice.action.label : undefined}
+          detail={notice.detail}
+          exiting={notice.exiting}
+          key={notice.token}
+          message={notice.label}
+          onAction={notice.action && !active ? notice.action.onAction : undefined}
+          swatchStyle={notice.swatch}
+        />
       ) : null}
 
       {isManualEntryOpen ? (
