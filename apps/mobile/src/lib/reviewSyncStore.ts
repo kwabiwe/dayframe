@@ -678,12 +678,8 @@ export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
       // open-source update: it can refresh returned rows, never prove that an
       // older cached proposal or an acknowledged intent no longer exists.
       // Server data that shows a saved card's place, or the card decided, ends its saved-name overlay.
-      for (const item of bootstrap.reviewItems) {
-        if (item.status === "open" && !item.suggestedPlaceId) continue;
-        await transaction.runAsync(
-          `delete from review_mutation_outbox where account_key = ? and review_item_id = ?
-             and action_kind = 'save_place' and state = 'acknowledged'`, key, item.id);
-      }
+      await retireSavedPlaceOverlays(transaction, key, bootstrap.reviewItems
+        .filter((item) => item.status !== "open" || item.suggestedPlaceId).map((item) => item.id));
       for (const [position, item] of bootstrap.reviewItems.entries()) {
         if (item.status !== "open") continue;
         await transaction.runAsync(
@@ -1354,12 +1350,12 @@ export async function cacheReviewPresentation(input: {
         now
       );
     }
-    for (const record of response.records) {
-      if (record.kind !== "review" || (record.status === "open" && !record.place.id)) continue;
-      await transaction.runAsync(
-        `delete from review_mutation_outbox where account_key = ? and review_item_id = ?
-           and action_kind = 'save_place' and state = 'acknowledged'`, key, record.reviewItemId);
-    }
+    // Records, looked-up items or links that show a saved card's place or its decision (Codex r2 on #460).
+    await retireSavedPlaceOverlays(transaction, key, [...new Set([
+      ...[...response.records, ...response.lookup.reviewItems].flatMap((record) =>
+        record.kind === "review" && (record.status !== "open" || record.place.id) ? [record.reviewItemId] : []),
+      ...response.links.flatMap((link) => link.status !== "open" ? [link.reviewItemId] : [])
+    ])]);
     await transaction.runAsync(
       `insert into review_presentation_context (
          account_key, scope_key, backend_id, contract_version, snapshot_token,
@@ -2096,11 +2092,19 @@ export async function enqueueReviewMutation(input: {
     );
     if (existing) {
       if (existing.account_key === key && existing.review_item_id === input.item.id &&
-        (existing.request_json === requestJson ||
-          // A confirmation stored as its explicit edit behind a pending save (`afterSave`).
-          (mutation.action === "confirm" || mutation.action === "accept") &&
-            parseReviewMutationEnvelope(existing.request_json)?.mutation.action === "edit_and_confirm")) {
+        existing.request_json === requestJson) {
         idempotent = true;
+        return;
+      }
+      // A confirmation stored as its explicit edit behind a save (`afterSave`): the same one only when
+      // its times are still the card's (Codex r2 on #460).
+      const stored = parseReviewMutationEnvelope(existing.request_json);
+      const converted = afterSave(envelope, input.item, null);
+      if (existing.account_key === key && existing.review_item_id === input.item.id && stored?.mutation.action === "edit_and_confirm" &&
+        converted.mutation.action === "edit_and_confirm" && (mutation.action === "confirm" || mutation.action === "accept") &&
+        stored.mutation.edit.startedAt === converted.mutation.edit.startedAt && stored.mutation.edit.stoppedAt === converted.mutation.edit.stoppedAt) {
+        idempotent = true;
+        persistedEnvelope = stored;
         return;
       }
       throw new Error("This Review mutation ID is already used for different data.");
@@ -2133,7 +2137,7 @@ export async function enqueueReviewMutation(input: {
     }
     const pendingSave = await transaction.getFirstAsync<{ request_json: string; state: ReviewMutationState }>(
       `select request_json, state from review_mutation_outbox
-       where account_key = ? and review_item_id = ? and action_kind = 'save_place' and state <> 'acknowledged'`, key, input.item.id
+       where account_key = ? and review_item_id = ? and action_kind = 'save_place'`, key, input.item.id
     );
     if (keepsCardOpen && pendingSave) {
       const existingEnvelope = parseReviewMutationEnvelope(pendingSave.request_json);
@@ -2144,9 +2148,10 @@ export async function enqueueReviewMutation(input: {
       }
       throw new Error("This place is already being saved.");
     }
-    // Behind a save still going through, a confirmation states what the person saw (its times and the
-    // activity the save gives it) instead of the proposal hash the save is about to change, so replay
-    // can't slip other values in (Codex r1 on #460). Behind a rejected save it stays as it was.
+    // Behind a save still going through, or answered while the card still shows it from this iPhone,
+    // a confirmation states what the person saw (its times and the activity the save gives it) instead
+    // of the proposal hash the save changed, so replay can't slip other values in (Codex r1/r2 on
+    // #460). Behind a rejected save it stays as it was.
     const savedFor = pendingSave && pendingSave.state !== "needs_attention" ? parseReviewMutationEnvelope(pendingSave.request_json) : null;
     const stored = savedFor ? afterSave(envelope, input.item, savedFor.mutation) : envelope;
     const expectedProposalHash = stored.mutation.action === "accept" || stored.mutation.action === "confirm"
@@ -2247,8 +2252,9 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
   await restoreInterruptedReconciliation(db, account.account_key);
   // Snapshot selection prevents force from consuming a newly written backoff.
   const rows = await db.getAllAsync<MutationRow>(
-    `select * from review_mutation_outbox where account_key=?
+    `select * from review_mutation_outbox o where account_key=?
        and (? is null or client_mutation_id=?)
+       and ${saveBlockedSql("o")}
        and (state in ('pending','in_flight') or (state='needs_attention' and ?=1)
          or (${unknownOutcomeSql()} and updated_at<=?)
          or (state='retry_wait' and (?=1 or next_attempt_at is null or next_attempt_at<=?
@@ -2955,6 +2961,60 @@ function parseReviewSnapshot(value: string) {
     return sanitiseReviewItemForCache(item);
   } catch {
     return null;
+  }
+}
+
+/**
+ * A decision held behind an earlier unresolved "Save this place" of one of its cards: left out of a
+ * sync pass's selection, so blocked decisions never use up its 25 rows (Codex r2 on #460).
+ */
+function saveBlockedSql(alias: string) {
+  return `not (${alias}.action_kind <> 'save_place' and exists (
+    select 1 from review_mutation_outbox s
+    where s.account_key = ${alias}.account_key and s.action_kind = 'save_place' and s.state <> 'acknowledged'
+      and s.created_at <= ${alias}.created_at and s.client_mutation_id <> ${alias}.client_mutation_id
+      and (s.review_item_id = ${alias}.review_item_id or s.review_item_id in (
+        select e.review_item_id from review_mutation_effects e
+        where e.account_key = ${alias}.account_key and e.client_mutation_id = ${alias}.client_mutation_id))))`;
+}
+
+/**
+ * Writes a saved place into every cached Review presentation that shows its card, so Today keeps the
+ * place once the saved-name overlay ends (Codex r2 on #460).
+ */
+async function writeSavedPlaceIntoPresentations(
+  transaction: SQLite.SQLiteDatabase, accountKeyValue: string, reviewItemId: string, place: SavedPlaceName
+) {
+  const contexts = await transaction.getAllAsync<{ scope_key: string; context_json: string }>(
+    "select scope_key, context_json from review_presentation_context where account_key = ? and context_json like ?",
+    accountKeyValue, `%${reviewItemId}%`
+  );
+  for (const context of contexts) {
+    let response: ReviewPresentationSnapshot;
+    try { response = ReviewPresentationSnapshotSchema.parse(JSON.parse(context.context_json)); } catch { continue; }
+    const patch = <T extends { kind: string }>(record: T): T => record.kind === "review" && (record as unknown as { reviewItemId: string }).reviewItemId === reviewItemId
+      ? { ...record, title: place.name, place: { id: place.placeId ?? (record as unknown as { place: { id: string | null } }).place.id, label: place.name } }
+      : record;
+    const next = { ...response, records: response.records.map(patch),
+      lookup: { ...response.lookup, reviewItems: response.lookup.reviewItems.map(patch) } };
+    await transaction.runAsync("update review_presentation_context set context_json = ? where account_key = ? and scope_key = ?",
+      JSON.stringify(next), accountKeyValue, context.scope_key);
+  }
+}
+
+/** Ends acknowledged saves' overlays for cards the server now shows with a place or decided. */
+async function retireSavedPlaceOverlays(transaction: SQLite.SQLiteDatabase, accountKeyValue: string, reviewItemIds: readonly string[]) {
+  if (!reviewItemIds.length) return;
+  const saved = await pendingSavedPlaceNames(accountKeyValue, transaction);
+  for (const id of reviewItemIds) {
+    const place = saved.get(id);
+    const row = await transaction.getFirstAsync<{ state: string }>(
+      "select state from review_mutation_outbox where account_key = ? and review_item_id = ? and action_kind = 'save_place'", accountKeyValue, id);
+    if (!place || row?.state !== "acknowledged") continue;
+    await writeSavedPlaceIntoPresentations(transaction, accountKeyValue, id, place);
+    await transaction.runAsync(
+      `delete from review_mutation_outbox where account_key = ? and review_item_id = ?
+         and action_kind = 'save_place' and state = 'acknowledged'`, accountKeyValue, id);
   }
 }
 

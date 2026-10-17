@@ -850,10 +850,43 @@ describe("Review real SQLite transactions", () => {
     await store.cacheReviewPresentation({ owner, response: today });
     const read = await store.readReviewPresentationSnapshot({ owner, response: today });
     expect(read!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" } });
-    // Server data with the place ends the overlay.
+    // A quick confirmation made now states what was seen, not the hash the save changed (Codex r2 on #460).
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(143),
+      mutation: { action: "confirm", expectedProposalHash: "b".repeat(64) }, presentation: { backendId: "staging-fixture", scope: today.scope as never } });
+    expect(db.prepare("select action_kind from review_mutation_outbox where client_mutation_id = ?").get(syntheticId(143))!.action_kind).toBe("edit_and_confirm");
+    db.prepare("delete from review_mutation_outbox where client_mutation_id = ?").run(syntheticId(143));
+    // Server data with the place ends the overlay, and Today keeps the place (Codex r2 on #460).
     await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
       ? { ...candidate, title: "Synthetic pool", placeName: "Synthetic pool", suggestedPlaceId: syntheticId(152) } : candidate) });
     expect(count("review_mutation_outbox")).toBe(0);
+    const after = await store.readReviewPresentationSnapshot({ owner, response: today });
+    expect(after!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" } });
+  });
+  it("ends an acknowledged save's overlay on terminal proof from a lookup (Codex r2 on #460)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(144), mutation: savePlace });
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(153), rematchedCount: 0 }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" },
+      response: terminalPresentation(data, [item.id]) });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+  it("leaves decisions held behind rejected saves out of a pass, so later work still goes (Codex r2 on #460)", async () => {
+    const data = syntheticReviewBootstrap(40);
+    await store.processReviewBootstrap(data);
+    const items = data.reviewItems.filter((candidate) => !candidate.suggestedPlaceId).slice(0, 26);
+    expect(items.length).toBe(26);
+    for (const [index, item] of items.slice(0, 25).entries()) {
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(2000 + index), mutation: savePlace });
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(2100 + index), mutation: { action: "ignore_once_location" } });
+    }
+    db.prepare("update review_mutation_outbox set state = 'needs_attention', last_http_status = 422 where action_kind = 'save_place'").run();
+    await store.enqueueReviewMutation({ bootstrap: data, item: items[25], clientMutationId: syntheticId(2200), mutation: { action: "ignore_once_location" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "ignore_once_location", status: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(String((mocks.fetch.mock.calls[0][0]))).toContain(items[25].id);
   });
   it("keeps one Save this place per card, retries it idempotently, and discards a rejected one without hiding the card", async () => {
     const data = bootstrap();
