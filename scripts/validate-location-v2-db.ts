@@ -2002,8 +2002,13 @@ async function validateOutingCards() {
     const changed = parts(groups[2]);
     await resolveLocationReviewAction(changed.members[0], { action: "ignore_once_location" }, session);
     await assert.rejects(resolveIdempotentReviewMutation(changed.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000003",
-      mutation: { action: "confirm_outing", memberReviewItemIds: changed.members } }, session), /changed since it was shown/,
-      "An outing with a member decided on its own was logged.");
+      mutation: { action: "confirm_outing", memberReviewItemIds: changed.members } }, session), (error: unknown) => {
+      // The answer says which cards are still open, so clients bring back only those (Codex r2 on #466).
+      const statuses = (error as { details?: { canonicalReviewStatuses?: Record<string, string> } }).details?.canonicalReviewStatuses;
+      assert.equal(statuses?.[changed.anchor], "open", "The conflict did not say the Stay is still open.");
+      assert.equal(statuses?.[changed.members[0]], "ignored", "The conflict did not say which member was decided.");
+      return /changed since it was shown/.test((error as Error).message);
+    }, "An outing with a member decided on its own was logged.");
     assert.equal((await pool.query<{ status: string }>("select status from review_items where id = $1", [changed.anchor])).rows[0].status, "open",
       "A refused outing changed its Stay card.");
     console.info("Outing cards validated", { outings: groups.length });

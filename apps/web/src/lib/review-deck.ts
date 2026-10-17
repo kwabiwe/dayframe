@@ -344,7 +344,9 @@ export function reviewOutings(items: readonly ReviewItemRow[]) {
   const outings = new Map<string, ReviewOuting>();
   for (const group of byKey.values()) {
     const anchor = group.find((item) => outingRoleOf(item) === "stay");
-    const members = group.filter((item) => item !== anchor && outingRoleOf(item) !== "stay");
+    // In time order (then id), whatever order the deck lists them in.
+    const members = group.filter((item) => item !== anchor && outingRoleOf(item) !== "stay")
+      .sort((a, b) => (timeMs(a.suggestedStartedAt) - timeMs(b.suggestedStartedAt)) || a.id.localeCompare(b.id));
     if (anchor && members.length) outings.set(anchor.id, { anchor, members });
   }
   return outings;

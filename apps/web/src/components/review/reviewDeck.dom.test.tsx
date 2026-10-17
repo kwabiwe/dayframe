@@ -865,4 +865,33 @@ describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
     await render([back, review(READ, "Reading", "admin")]);
     expect(queue(container)).toEqual(["Reading"]);
   });
+
+  it("never revives a Stay decided elsewhere; its open Moves then show on their own (Codex r2 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing"
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "accepted", [THERE]: "open", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(queue(container)).not.toContain("Unknown place");
+    await render([there, back, review(READ, "Reading", "admin")]);
+    expect(queue(container)).toEqual(expect.arrayContaining(["Trip to the shop", "Trip home", "Reading"]));
+  });
+
+  it("brings the whole outing back on Undo after a refresh dropped part of it, and logs all of it again (Codex r2 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(expect.arrayContaining(["Unknown place", "Reading"]));
+    expect(queue(container)).not.toContain("Trip home");
+    expect(title(container)).toBe("Unknown place");
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => request.body.mutation)).toEqual([
+      { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] }
+    ]);
+  });
 });
+

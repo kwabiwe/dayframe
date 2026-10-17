@@ -77,7 +77,9 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     [data.entries, data.historyEntries, data.weekEntries]
   );
 
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh);
+  // A refused outing's canonical statuses (from the server's conflict answer): only its open cards return.
+  const outingConflictStatuses = useRef(new Map<string, Record<string, string>>());
+  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, outingConflictStatuses);
   // Cards the deck keeps although the loaded data (the newest 100) no longer lists them: the card
   // whose evidence editor is open, and a card Undo or a failed save brought back (iPhone keeps the
   // copy the deck showed the same way).
@@ -102,10 +104,16 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const outings = useMemo(() => reviewOutings(deckItems), [deckItems]);
   // An outing's held, saving or saved decision keeps all of its Moves folded away, whatever a refresh
   // lists meanwhile (Codex r1 on #466): the decision owns every member until it settles.
-  const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  // Each decided outing keeps its members' snapshots, so Undo or a refused save brings the whole
+  // outing back even when a refresh no longer lists some of it (Codex r2 on #466).
+  const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  const heldOutingsRef = useRef(heldOutings);
+  useLayoutEffect(() => {
+    heldOutingsRef.current = heldOutings;
+  }, [heldOutings]);
   const outingMemberIds = useMemo(() => new Set([
     ...[...outings.values()].flatMap((outing) => outing.members.map((member) => member.id)),
-    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, memberIds]) => memberIds)
+    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, members]) => members.map((member) => member.id))
   ]), [heldOutings, outings, state.hiddenIds]);
   const visible = useMemo(
     () => deckItems.filter((item) => !state.hiddenIds.has(item.id) && !outingMemberIds.has(item.id)),
@@ -204,8 +212,20 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     lastRestored.current = state.restored.sequence;
     const restoredId = state.restored.itemId;
     const snapshot = decidedSnapshots.current.get(restoredId);
-    if (!openIdsRef.current.has(restoredId) && snapshot) {
-      setRevived((current) => new Map(current).set(restoredId, snapshot));
+    // An outing comes back whole: its Stay and every member the data no longer lists, except cards a
+    // refused save says are no longer open.
+    const statuses = outingConflictStatuses.current.get(restoredId);
+    outingConflictStatuses.current.delete(restoredId);
+    const stillOpen = (id: string) => !statuses || statuses[id] === undefined || statuses[id] === "open";
+    const members = (heldOutingsRef.current.get(restoredId) ?? [])
+      .filter((member) => !openIdsRef.current.has(member.id) && stillOpen(member.id));
+    if ((!openIdsRef.current.has(restoredId) && snapshot) || members.length) {
+      setRevived((current) => {
+        const next = new Map(current);
+        if (!openIdsRef.current.has(restoredId) && snapshot) next.set(restoredId, snapshot);
+        for (const member of members) next.set(member.id, member);
+        return next;
+      });
     }
     if (evidenceOpenRef.current && evidenceOpenRef.current !== restoredId) return;
     setSelectedId(state.restored.itemId);
@@ -292,7 +312,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
     }, 0) : 0;
     decidedSnapshots.current.set(item.id, item);
-    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members.map((member) => member.id)));
+    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members));
     const held = decide({
       itemId: item.id,
       kind,
@@ -992,7 +1012,10 @@ function useMinuteClock(hydrated: boolean) {
   return nowMs;
 }
 
-function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>) {
+function useReviewDecisions(
+  openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>,
+  outingConflictStatuses: React.RefObject<Map<string, Record<string, string>>>
+) {
   const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
   const [controller] = useState(() => new ReviewDecisionController(setState));
   // The save reads the newest data: a held suggestion a refresh changed is not what the user
@@ -1016,6 +1039,12 @@ function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => 
       const outingAction = decision.mutation.action === "confirm_outing" || decision.mutation.action === "ignore_outing";
       if (outingAction && response.status === 409 && body.code === "resolution_conflict") {
         void refresh().catch(() => undefined);
+        // The server says which cards are still open (Codex r2 on #466): a Stay decided elsewhere is
+        // gone (its open Moves then show on their own); otherwise the outing comes back, open cards only.
+        const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
+          ? body.canonicalReviewStatuses as Record<string, string> : null;
+        if (statuses && statuses[decision.itemId] !== undefined && statuses[decision.itemId] !== "open") return "gone";
+        if (statuses) outingConflictStatuses.current.set(decision.itemId, statuses);
         return "changed";
       }
       // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
@@ -1037,7 +1066,7 @@ function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => 
       void refresh().catch(() => undefined);
       return "saved";
     });
-  }, [controller, openItems, refresh]);
+  }, [controller, openItems, outingConflictStatuses, refresh]);
 
   useEffect(() => onBeforeSessionChange(() => controller.flushAndSettle()), [controller]);
 
