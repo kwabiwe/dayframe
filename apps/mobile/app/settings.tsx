@@ -132,6 +132,7 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
+import { shownTripSwitch, withSavedTripSwitch, type SavedTripSwitch } from "@/lib/tripSwitch";
 import { publishMobileSignedOut, subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
@@ -1018,18 +1019,17 @@ export default function SettingsScreen() {
   // stored value holds until a bootstrap with a newer server revision arrives, so a copy read before
   // the save never replaces it (as on web).
   const [tripsDraft, setTripsDraft] = useState<boolean | null>(null);
-  const [tripsSaved, setTripsSaved] = useState<{ userId: string; value: boolean; revision: number } | null>(null);
+  const [tripsSaved, setTripsSaved] = useState<SavedTripSwitch | null>(null);
   async function toggleLogTrips(enabled: boolean) {
     const userId = data?.user.id;
     if (!userId || tripsDraft !== null) return;
     setTripsDraft(enabled);
     try {
       const stored = await updateLogTripsAutomatically(enabled, userId);
-      const revision = stored.revision ?? (data?.user.goalsRevision ?? 0) + 1;
-      setTripsSaved({ userId, value: stored.value, revision });
-      const withValue = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
-        ? { ...currentData, user: { ...currentData.user, logTripsAutomatically: stored.value, goalsRevision: Math.max(currentData.user.goalsRevision ?? 0, revision) } }
-        : currentData;
+      const saved = { userId, value: stored.value, revision: stored.revision ?? (data?.user.goalsRevision ?? 0) + 1 };
+      setTripsSaved(saved);
+      // Never over a copy at this revision or newer (it already has this value, or a later one).
+      const withValue = (currentData: MobileBootstrap | null) => withSavedTripSwitch(currentData, saved);
       const snapshotData = readSettingsSnapshot()?.data ?? null;
       if (snapshotData) updateSettingsSnapshot({ data: withValue(snapshotData) });
       setDataAndCache(withValue);
@@ -1046,9 +1046,7 @@ export default function SettingsScreen() {
       setTripsDraft(null);
     }
   }
-  const shownLogTrips = tripsSaved && shownUser?.id === tripsSaved.userId && (shownUser.goalsRevision ?? 0) < tripsSaved.revision
-    ? tripsSaved.value
-    : shownUser?.logTripsAutomatically;
+  const shownLogTrips = shownTripSwitch(shownUser, tripsSaved);
 
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);

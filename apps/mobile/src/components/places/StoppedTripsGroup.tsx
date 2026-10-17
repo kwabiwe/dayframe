@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { useFocusEffect } from "expo-router";
@@ -6,6 +6,7 @@ import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import { listStoppedTrips, resumeLoggingTrips, type StoppedTrip } from "@/lib/api";
 import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
+import { currentMobileAccountEpoch, subscribeActiveMobileAccount } from "@/lib/mobileAccount";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
@@ -15,39 +16,70 @@ import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
  * the person stopped logging automatically ("Don't log trips like this"), each with "Log again".
  * Read whenever Places gains focus; shown only when there are any. "Log again" removes the row at
  * once (presence fade, the rows below reflow) and puts it back with a line under the group, announced,
- * if the server refuses (no system alert: UIA-005).
+ * if the server refuses (no system alert: UIA-005). Everything belongs to one account lifetime (the
+ * account epoch): another account clears the list, and a read or answer from before is dropped; a read
+ * that started before a "Log again" never brings that trip back (Codex r1 on #464).
  */
 export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotion: boolean; styles: MobileStyles; theme: MobileTheme }) {
-  const [trips, setTrips] = useState<StoppedTrip[]>([]);
+  const [shown, setShown] = useState<{ epoch: number; trips: StoppedTrip[] }>(() => ({ epoch: currentMobileAccountEpoch(), trips: [] }));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  // Trips logged again (or being) in this account lifetime: a read never shows them again.
+  const resumed = useRef<{ epoch: number; keys: Set<string> }>({ epoch: currentMobileAccountEpoch(), keys: new Set() });
+  const resumedIn = (epoch: number) => {
+    if (resumed.current.epoch !== epoch) resumed.current = { epoch, keys: new Set() };
+    return resumed.current.keys;
+  };
+
+  useEffect(() => {
+    const unsubscribe = subscribeActiveMobileAccount(() => {
+      setShown({ epoch: currentMobileAccountEpoch(), trips: [] });
+      setProblem(null);
+      setBusyKey(null);
+    });
+    return () => { unsubscribe(); };
+  }, []);
 
   useFocusEffect(useCallback(() => {
     let live = true;
+    const epoch = currentMobileAccountEpoch();
     listStoppedTrips()
-      .then((next) => { if (live) setTrips(next); })
+      .then((next) => {
+        if (!live || epoch !== currentMobileAccountEpoch()) return;
+        const gone = resumedIn(epoch);
+        setShown({ epoch, trips: next.filter((trip) => !gone.has(trip.patternKey)) });
+      })
       .catch(() => undefined);
     return () => { live = false; };
   }, []));
 
+  const epochNow = currentMobileAccountEpoch();
+  const trips = shown.epoch === epochNow ? shown.trips : [];
+
   async function resume(trip: StoppedTrip) {
-    if (busyKey) return;
+    const epoch = currentMobileAccountEpoch();
+    if (busyKey || shown.epoch !== epoch) return;
     setBusyKey(trip.patternKey);
     setProblem(null);
-    setTrips((current) => current.filter((other) => other.patternKey !== trip.patternKey));
+    resumedIn(epoch).add(trip.patternKey);
+    setShown((current) => current.epoch === epoch
+      ? { epoch, trips: current.trips.filter((other) => other.patternKey !== trip.patternKey) } : current);
     try {
       await resumeLoggingTrips(trip.patternKey);
+      if (epoch !== currentMobileAccountEpoch()) return;
       AccessibilityInfo.announceForAccessibility(`${trip.label} logs itself again when it's clear.`);
     } catch (error) {
-      setTrips((current) => current.some((other) => other.patternKey === trip.patternKey) ? current
-        : [...current, trip].sort((a, b) => b.stoppedAt.localeCompare(a.stoppedAt)));
+      if (epoch !== currentMobileAccountEpoch()) return;
+      resumedIn(epoch).delete(trip.patternKey);
+      setShown((current) => current.epoch !== epoch || current.trips.some((other) => other.patternKey === trip.patternKey) ? current
+        : { epoch, trips: [...current.trips, trip].sort((a, b) => b.stoppedAt.localeCompare(a.stoppedAt)) });
       const message = isRetryableMobileConnectivityFailure(error)
         ? `${trip.label} still waits in Review. Try again when you're online.`
         : `${trip.label} still waits in Review. Try again.`;
       setProblem(message);
       AccessibilityInfo.announceForAccessibility(message);
     } finally {
-      setBusyKey(null);
+      if (epoch === currentMobileAccountEpoch()) setBusyKey(null);
     }
   }
 

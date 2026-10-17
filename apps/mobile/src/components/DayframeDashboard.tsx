@@ -382,8 +382,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   > | null>(null);
   // One automatic Move deleted: its toast offers "Don't log trips like this" (PRD D19, A4).
   const tripOptOut = useTripOptOut(
-    pendingDeletion?.entries.length === 1 ? pendingDeletion.entries[0].automaticMoveEventId : null,
-    pendingDeletion?.token
+    pendingDeletion?.phase === "active" && pendingDeletion.entries.length === 1 ? pendingDeletion.entries[0].automaticMoveEventId : null,
+    pendingDeletion?.phase === "active" ? pendingDeletion.token : null
   );
   const [pendingTimerStops, setPendingTimerStops] = useState<PendingTimerStop[]>([]);
   const {
