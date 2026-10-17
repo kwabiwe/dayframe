@@ -99,6 +99,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   if ([...revived.keys()].some((id) => loadedIds.has(id))) {
     setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   }
+  // Newer data listing a card open again lifts the server's earlier "decided" for it (Codex r4 on #466).
+  if ([...closedByServer].some((id) => loadedIds.has(id))) {
+    setClosedByServer(new Set([...closedByServer].filter((id) => !loadedIds.has(id))));
+  }
   const deckItems = useMemo(() => {
     const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id));
     if (evidenceOpenId && editorSnapshot?.id === evidenceOpenId && !loadedIds.has(evidenceOpenId) && !revived.has(evidenceOpenId)) {

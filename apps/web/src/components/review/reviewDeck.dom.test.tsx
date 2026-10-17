@@ -913,5 +913,23 @@ describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
       { action: "confirm_outing", memberReviewItemIds: [BACK] }
     ]);
   });
+
+  it("lets newer data reopen a card the server once called decided (Codex r4 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing" && sent.length === 1
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    // The arrival is open again in newer data; the outing is held, a refresh drops part of it, Undo.
+    await render([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.at(-1)?.body.mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: [THERE, BACK] });
+  });
 });
 
