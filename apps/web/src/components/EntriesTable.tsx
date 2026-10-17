@@ -921,7 +921,10 @@ export function EntriesTable({
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
+                            </span>
+                            <span className="timeline-task-secondary-line">
                               <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
+                              {occurrence.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
                               <TagMetadata compact tagNames={occurrence.tagNames} />
                             </span>
                             {renderInlineStatus(occurrence)}

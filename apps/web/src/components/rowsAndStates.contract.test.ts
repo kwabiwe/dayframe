@@ -16,13 +16,18 @@ function rule(selector: string) {
 describe("rows (WUI-028, WUI-029)", () => {
   it("draws List rows as Today's: transparent with hairlines, a 36 px X3 block, two lines, quiet actions", () => {
     const entries = source("components/EntriesTable.tsx");
-    expect(entries).toContain('className="timeline-task-secondary-line"');
+    // Grouped rows and their expanded occurrences share the anatomy (Codex r1 on #495).
+    expect(entries.match(/className="timeline-task-secondary-line"/g)).toHaveLength(2);
+    // Secondary text passes 4.5:1 on Midnight and Daylight cards and their hover fill.
+    expect(rule(".timeline-task-secondary-line")).toContain("color: var(--text-secondary);");
+    expect(rule(".df-erow-text span")).toContain("color: var(--text-secondary);");
+    expect(rule(".timeline-task-secondary-line .tag-metadata.is-compact")).toContain("font-size: 12px;");
     expect(rule(".timeline-task-block")).toMatch(/width: 36px;[\s\S]*height: 36px;[\s\S]*border-radius: calc\(36px \* 0\.3\);/);
     expect(rule(".df-erow-block")).toContain("border-radius: calc(36px * 0.3);");
     expect(rule(".timeline-list-row:hover > td,\n.timeline-list-row:has(:focus-visible) > td")).toContain("var(--surface-muted)");
-    // Actions appear on hover or focus, and always on touch-only screens and narrow layouts.
+    // Actions appear on hover or focus, and always on touch screens and narrow layouts.
     expect(rule(".timeline-list-actions")).toMatch(/opacity: 0;/);
-    expect(styles).toMatch(/@media \(hover: none\), \(max-width: 860px\) \{\s*\.timeline-list-actions \{\s*opacity: 1;/);
+    expect(styles).toMatch(/@media \(hover: none\), \(any-pointer: coarse\), \(max-width: 860px\) \{\s*\.timeline-list-actions \{\s*opacity: 1;/);
   });
 
   it("gives Places and Settings rows the 56 px management row", () => {

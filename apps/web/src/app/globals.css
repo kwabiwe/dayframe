@@ -10719,7 +10719,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-text span {
   overflow: hidden;
-  color: var(--text-muted);
+  /* textSecondary: textMuted measures 4.05:1 for this 12 px line on a Midnight card (WCAG 1.4.3). */
+  color: var(--text-secondary);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14930,7 +14931,8 @@ dialog.ui-dialog.df-palette {
   align-items: baseline;
   gap: 6px;
   overflow: hidden;
-  color: var(--text-muted);
+  /* textSecondary: textMuted is under 4.5:1 for 12 px text on a Midnight card (Codex r1 on #495). */
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
@@ -14943,6 +14945,11 @@ dialog.ui-dialog.df-palette {
   align-items: baseline;
 }
 
+.timeline-task-secondary-line .tag-metadata.is-compact {
+  font-size: 12px;
+  font-weight: inherit;
+}
+
 .timeline-list-actions {
   opacity: 0;
   transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -14953,7 +14960,9 @@ dialog.ui-dialog.df-palette {
   opacity: 1;
 }
 
-@media (hover: none), (max-width: 860px) {
+/* Shown where hover can't be relied on: touch-only screens, any touch screen (a hybrid laptop's
+   primary pointer may still hover) and the narrow layouts. */
+@media (hover: none), (any-pointer: coarse), (max-width: 860px) {
   .timeline-list-actions {
     opacity: 1;
   }
