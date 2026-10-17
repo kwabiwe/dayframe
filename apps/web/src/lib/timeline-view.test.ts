@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  firstVisitTimelinePreference,
   formatTimelinePeriodLabel,
   resetTimelineState,
   resolveTimelineRanges,
@@ -280,5 +281,24 @@ describe("Calendar today from the viewer's zone (the server renders in UTC)", ()
     expect(formatTimelinePeriodLabel("day", ranges, "2026-07-23")).toBe("Today");
     expect(formatTimelinePeriodLabel("day", ranges, null)).toBe("Thu, 23 Jul 2026");
     expect(formatTimelinePeriodLabel("day", ranges, "2026-07-24")).toBe("Thu, 23 Jul 2026");
+  });
+});
+
+describe("Calendar on phones (owner-approved 17 Oct 2026)", () => {
+  const iPhone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+  const android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36";
+  const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
+
+  it("opens Day on a phone's first visit and keeps Week elsewhere", () => {
+    expect(firstVisitTimelinePreference(iPhone)).toEqual({ lastView: "calendar", preferredScope: "day" });
+    expect(firstVisitTimelinePreference(android)).toEqual({ lastView: "calendar", preferredScope: "day" });
+    expect(firstVisitTimelinePreference(mac)).toBeNull();
+    expect(firstVisitTimelinePreference(null)).toBeNull();
+    expect(timelineStateFromSearchParams({}, { preference: firstVisitTimelinePreference(iPhone), today: "2026-10-17" }).scope).toBe("day");
+    expect(timelineStateFromSearchParams({}, { preference: firstVisitTimelinePreference(mac), today: "2026-10-17" }).scope).toBe("week");
+  });
+
+  it("never overrides a scope in the address", () => {
+    expect(timelineStateFromSearchParams({ scope: "week" }, { preference: firstVisitTimelinePreference(iPhone), today: "2026-10-17" }).scope).toBe("week");
   });
 });
