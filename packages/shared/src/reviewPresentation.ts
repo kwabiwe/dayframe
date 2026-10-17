@@ -189,7 +189,12 @@ export const ReviewProposalPresentationSchema = z
     /** A Move's second line (only for clients sending the move-route feature). */
     routeLabel: z.string().trim().min(1).max(200).optional(),
     /** The outing the card belongs to and its part in it (only for clients sending the outing feature). */
-    outing: z.object({ key: z.string().min(1).max(200), role: z.enum(["stay", "in", "out"]) }).strict().optional()
+    outing: z.object({
+      key: z.string().min(1).max(200),
+      role: z.enum(["stay", "in", "out"]),
+      /** A Move's way of travelling, for the outing card's travel line ("Drives there and back"). */
+      travelMode: z.string().min(1).max(40).optional()
+    }).strict().optional()
   })
   .strict();
 

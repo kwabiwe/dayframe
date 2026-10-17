@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MobileReviewItem } from "./api";
-import { heldOutingStillSame, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings } from "./reviewDeckOutings";
+import { heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings } from "./reviewDeckOutings";
 
 function item(id: string, start: string, stop: string, payload: Record<string, unknown>): MobileReviewItem {
   return {
@@ -58,5 +58,28 @@ describe("reviewDeckOutings (PRD D19, PR 12b)", () => {
     expect(heldOutingStillSame(members, "outing:a", (id) => (id === "back" ? rekeyed : open.get(id)), signature)).toBeNull();
     // The Stay itself left its outing.
     expect(heldOutingStillSame(members, null, (id) => open.get(id), signature)).toBeNull();
+  });
+});
+
+describe("outingFocusSegment (Codex r2 on #473)", () => {
+  // The Stay ends just before midnight (Earlier); the trip home ends after it (Today).
+  const segmentFor = (candidate: MobileReviewItem) => (candidate.id === "stay" ? "earlier" : "today");
+  const grouped = reviewDeckOutings([stay, there, back], () => true).anchorByMember;
+
+  it("moves a Move's focus to its outing's segment when the grouping arrives after it was placed", () => {
+    // First data: no outing known yet, so the focus opened Today.
+    expect(outingFocusSegment({ placed: { itemId: "back", segment: "today" }, currentSegment: "today",
+      anchorByMember: new Map(), openItems: [back], segmentFor })).toBeNull();
+    // Fresh data folds the Move into the evening's Stay.
+    expect(outingFocusSegment({ placed: { itemId: "back", segment: "today" }, currentSegment: "today",
+      anchorByMember: grouped, openItems: [stay, there, back], segmentFor })).toBe("earlier");
+  });
+
+  it("leaves the person where they are once they moved, and does nothing in the Stay's own segment", () => {
+    expect(outingFocusSegment({ placed: { itemId: "back", segment: "today" }, currentSegment: "earlier",
+      anchorByMember: grouped, openItems: [stay, there, back], segmentFor })).toBeNull();
+    expect(outingFocusSegment({ placed: { itemId: "back", segment: "earlier" }, currentSegment: "earlier",
+      anchorByMember: grouped, openItems: [stay, there, back], segmentFor })).toBeNull();
+    expect(outingFocusSegment({ placed: null, currentSegment: "today", anchorByMember: grouped, openItems: [stay, there, back], segmentFor })).toBeNull();
   });
 });

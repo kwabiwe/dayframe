@@ -137,7 +137,9 @@ import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavH
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
 import { DAYFRAME_APP_ICONS, formatClockTime, outingKeyOf, type ClockFormat } from "@dayframe/shared";
-import { heldOutingStillSame, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings } from "@/lib/reviewDeckOutings";
+import {
+  heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings
+} from "@/lib/reviewDeckOutings";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -351,6 +353,9 @@ export default function ReviewScreen() {
   const reviewBacklogRef = useRef<ReviewBacklogState | null>(null);
   const reviewBacklogRead = useRef<ReviewBacklogRead | null>(null);
   const focusConsumedKey = useRef<string | null>(null);
+  // Where an exact focus on a Review card was placed: a Move's focus follows its outing's card when the
+  // grouping arrives later (Codex r2 on #473).
+  const exactFocusPlacement = useRef<{ itemId: string; segment: ReviewDeckSegment } | null>(null);
   const focusLookupKey = useRef<string | null>(null);
   const loadRef = useRef<(options?: ReviewLoadOptions) => Promise<void>>(
     async () => undefined
@@ -1869,6 +1874,7 @@ export default function ReviewScreen() {
   const beginExactFocus = useCallback((key: string, segment: ReviewDeckSegment) => {
     if (focusConsumedKey.current === key) return;
     focusConsumedKey.current = key;
+    exactFocusPlacement.current = key.startsWith("review:") ? { itemId: key.slice("review:".length), segment } : null;
     if (segment !== deckSegmentRef.current) {
       // Placed at once (no thumb slide, no announcement beyond the one below); a held decision is
       // saved first, as any segment change saves it.
@@ -1881,9 +1887,28 @@ export default function ReviewScreen() {
     AccessibilityInfo.announceForAccessibility("Opened that moment.");
   }, [deckHold]);
 
+  // A focused Move whose outing arrives after the focus was placed moves with it to its outing's card,
+  // in the Stay's segment (a trip home after midnight belongs to the evening's card; Codex r2 on #473).
+  useEffect(() => {
+    const segment = outingFocusSegment({
+      placed: exactFocusPlacement.current,
+      currentSegment: deckSegmentRef.current,
+      anchorByMember: deckOutings.anchorByMember,
+      openItems: openReviewItems,
+      segmentFor: (item) => reviewDeckSegmentFor(reviewItemMoment(item), reviewDeckToday(Date.now()))
+    });
+    if (!segment || !exactFocusPlacement.current) return;
+    exactFocusPlacement.current = { ...exactFocusPlacement.current, segment };
+    deckHold.flush();
+    deckSegmentRef.current = segment;
+    setDeckSegmentSwitched(false);
+    setDeckSegment(segment);
+  }, [deckHold, deckOutings, openReviewItems]);
+
   useEffect(() => {
     const request = focusRequest;
     if (!request) {
+      exactFocusPlacement.current = null;
       setFocusedLegacyEntry(null);
       setHighlightedFocusKey(null);
       return;

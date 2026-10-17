@@ -77,7 +77,7 @@ describe("getReviewPresentation", () => {
   it("tells only clients that ask which outing a card belongs to (PRD D19, PR 12b)", async () => {
     const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Drive",
       eventType: "commute_detected", timeAwayStopCount: null, routeLabel: null,
-      outingKey: "outing:70000000-0000-4000-8000-000000000002", outingRole: "in" };
+      outingKey: "outing:70000000-0000-4000-8000-000000000002", outingRole: "in", outingTravelMode: "automotive" };
     const query = vi.fn(async (sql: string) => {
       if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
       if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
@@ -91,7 +91,7 @@ describe("getReviewPresentation", () => {
     mocks.connect.mockResolvedValue({ query, release: vi.fn() });
     const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
     const asked = await getReviewPresentation(session, request, {}, { timeAway: true, moveRoute: true, outing: true });
-    expect(asked.records[0]).toMatchObject({ outing: { key: "outing:70000000-0000-4000-8000-000000000002", role: "in" } });
+    expect(asked.records[0]).toMatchObject({ outing: { key: "outing:70000000-0000-4000-8000-000000000002", role: "in", travelMode: "automotive" } });
     expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
     // Older iPhone builds parse records strictly: they never receive the field.
     const older = await getReviewPresentation(session, request, {}, { timeAway: true, moveRoute: true });

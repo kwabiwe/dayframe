@@ -66,3 +66,24 @@ export function heldOutingStillSame(
   }
   return items;
 }
+
+/**
+ * A focus placed on a Move before its outing was known (cached data without the outing, or without
+ * its Stay) follows the Move into its outing's card when the grouping arrives: the segment to move
+ * to, or null (Codex r2 on #473). Only while the person is still in the segment the focus opened.
+ */
+export function outingFocusSegment<Segment extends string>(input: {
+  placed: { itemId: string; segment: Segment } | null;
+  currentSegment: Segment;
+  anchorByMember: ReadonlyMap<string, string>;
+  openItems: readonly MobileReviewItem[];
+  segmentFor: (item: MobileReviewItem) => Segment;
+}): Segment | null {
+  const { placed } = input;
+  if (!placed || input.currentSegment !== placed.segment) return null;
+  const anchorId = input.anchorByMember.get(placed.itemId);
+  const anchor = anchorId ? input.openItems.find((item) => item.id === anchorId) : undefined;
+  if (!anchor) return null;
+  const segment = input.segmentFor(anchor);
+  return segment === placed.segment ? null : segment;
+}

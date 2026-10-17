@@ -1740,7 +1740,9 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
       ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
       ...(record.routeLabel ? { routeLabel: record.routeLabel } : {}),
       // One card per outing (PRD D19): which outing it belongs to and its part in it.
-      ...(record.outing ? { [OUTING_KEY_PAYLOAD_KEY]: record.outing.key, [OUTING_ROLE_PAYLOAD_KEY]: record.outing.role } : {})
+      ...(record.outing ? { [OUTING_KEY_PAYLOAD_KEY]: record.outing.key, [OUTING_ROLE_PAYLOAD_KEY]: record.outing.role } : {}),
+      // A Move's way of travelling, so a backlog-only outing's travel line names it (Codex r2 on #473).
+      ...(record.outing?.travelMode ? { travelMode: record.outing.travelMode } : {})
     } : null,
     createdAt: record.createdAt
   };
