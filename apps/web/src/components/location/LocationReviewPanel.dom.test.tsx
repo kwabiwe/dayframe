@@ -61,8 +61,8 @@ describe("LocationReviewPanel", () => {
 
     expect(await screen.findByTestId("location-evidence-map")).not.toBeNull();
     const description = screen.getByLabelText("Description") as HTMLInputElement;
-    const start = screen.getByLabelText("Start") as HTMLInputElement;
-    const end = screen.getByLabelText("End") as HTMLInputElement;
+    const start = screen.getByLabelText("Start time") as HTMLInputElement;
+    const end = screen.getByLabelText("End time") as HTMLInputElement;
     const resolveGrid = description.closest(".location-review-resolve-grid");
     expect(resolveGrid).not.toBeNull();
     expect(resolveGrid?.contains(start)).toBe(true);
@@ -89,6 +89,82 @@ describe("LocationReviewPanel", () => {
       }
     });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("edits times with the shared date picker and a typed time, and never guesses an unreadable one (WUI-042)", async () => {
+    mocks.clientFetch
+      .mockResolvedValueOnce(jsonResponse(evidence()))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[0].id} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    // No native datetime-local field is left; each date opens the shared picker.
+    expect(document.querySelector('input[type="datetime-local"]')).toBeNull();
+    expect(screen.getByRole("button", { name: /Choose Start date, currently/ })).not.toBeNull();
+    expect(screen.getByRole("button", { name: /Choose End date, currently/ })).not.toBeNull();
+
+    await user.clear(start);
+    await user.type(start, "99");
+    expect(start.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByRole("alert").textContent).toMatch(/Enter a time like/);
+    expect((screen.getByRole("button", { name: "Confirm edits" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.clear(start);
+    await user.type(start, "9:15 am");
+    await user.tab();
+    expect(start.getAttribute("aria-invalid")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Confirm edits" }));
+    await waitFor(() => expect(mocks.clientFetch).toHaveBeenCalledTimes(2));
+    const day = localDay("2026-08-14T09:00:00.000Z");
+    expect(JSON.parse(String((mocks.clientFetch.mock.calls[1]?.[1] as RequestInit).body))).toMatchObject({
+      action: "edit_and_confirm",
+      edit: { startedAt: new Date(`${day}T09:15`).toISOString(), stoppedAt: "2026-08-14T10:00:00.000Z" }
+    });
+  });
+
+  it("holds the confirmations when an open End gets a day but no time, and never throws (Codex r1 on #474)", async () => {
+    const open = evidence();
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse({ ...open, segment: { ...open.segment, stoppedAt: null } }));
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[0].id} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    const end = await screen.findByLabelText("End time") as HTMLInputElement;
+    expect(end.value).toBe("");
+    const confirm = screen.getByRole("button", { name: "Confirm edits" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    // Focusing the empty End is not an error, and the hint and the gate agree (Codex r2 on #474).
+    await user.click(end);
+    expect(end.getAttribute("aria-invalid")).toBeNull();
+    await user.type(end, ":");
+    await user.clear(end);
+    expect(end.getAttribute("aria-invalid")).toBeNull();
+    expect(confirm.disabled).toBe(false);
+    await user.click(screen.getByRole("button", { name: /Choose End date, currently/ }));
+    const days = screen.getAllByRole("button").filter((button) => /^\d{1,2}$/.test(button.textContent ?? "") && !(button as HTMLButtonElement).disabled);
+    await user.click(days[0]);
+    expect(confirm.disabled).toBe(true);
+    expect(end.getAttribute("aria-invalid")).toBe("true");
+    await user.click(confirm);
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    await user.type(end, "11:20");
+    expect(confirm.disabled).toBe(false);
+  });
+
+  it("uses the Blocks controls only (WUI-041)", async () => {
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(unsavedStay()));
+    const { container } = render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[0].id} onClose={vi.fn()} />
+    );
+    await screen.findByLabelText("Place name");
+    expect(container.querySelector('[class*="industrial-"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "Close location evidence" }).className).toContain("df-rbtn");
+    expect(screen.getByRole("button", { name: "Confirm edits" }).className).toContain("df-rbtn--live");
   });
 
   it("saves where you were without logging, keeps the panel and its edits, and says what it matched (design §7)", async () => {
@@ -335,4 +411,9 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function localDay(iso: string) {
+  const date = new Date(iso);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }

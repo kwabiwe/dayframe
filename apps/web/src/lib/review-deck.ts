@@ -1,5 +1,5 @@
 import { formatClockTime, formatDuration as formatSharedDuration, type ClockFormat } from "@dayframe/shared";
-import type { ReviewMutation, ReviewMutationEdit } from "@dayframe/shared";
+import { groupOutings, outingTravelWords, type CardOuting, type ReviewMutation, type ReviewMutationEdit } from "@dayframe/shared";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 
 // Web Review (Blocks parity step 13): the queue, the card and the Log it / Skip decision, built on
@@ -318,54 +318,23 @@ export function nextAfterDecision(ids: readonly string[], decidedId: string) {
   return ids[index + 1] ?? ids[index - 1] ?? null;
 }
 
-/** One card per outing (PRD D19): the key an outing's cards share, from their event payload. */
-export function outingKeyOf(item: Pick<ReviewItemRow, "rawPayload">) {
-  const key = item.rawPayload?.outingKey;
-  return typeof key === "string" && key ? key : null;
-}
-
-function outingRoleOf(item: Pick<ReviewItemRow, "rawPayload">) {
-  const role = item.rawPayload?.outingRole;
-  return role === "stay" || role === "in" || role === "out" ? role : null;
-}
-
-export type ReviewOuting = { anchor: ReviewItemRow; members: ReviewItemRow[] };
+export type ReviewOuting = CardOuting<ReviewItemRow>;
 
 /**
- * The outings among these cards: an unknown Stay's card (the anchor) with the Move cards that share
- * its key. An outing whose Stay card is not among them is no outing (its Moves show on their own).
+ * The outings among these cards (PRD D19): an unknown Stay's card (the anchor) with the Move cards
+ * that share its key (shared `groupOutings`, as the iPhone deck groups them).
  */
 export function reviewOutings(items: readonly ReviewItemRow[]) {
-  const byKey = new Map<string, ReviewItemRow[]>();
-  for (const item of items) {
-    const key = outingKeyOf(item);
-    if (key) byKey.set(key, [...byKey.get(key) ?? [], item]);
-  }
-  const outings = new Map<string, ReviewOuting>();
-  for (const group of byKey.values()) {
-    const anchor = group.find((item) => outingRoleOf(item) === "stay");
-    // In time order (then id), whatever order the deck lists them in.
-    const members = group.filter((item) => item !== anchor && outingRoleOf(item) !== "stay")
-      .sort((a, b) => (timeMs(a.suggestedStartedAt) - timeMs(b.suggestedStartedAt)) || a.id.localeCompare(b.id));
-    if (anchor && members.length) outings.set(anchor.id, { anchor, members });
-  }
-  return outings;
+  return groupOutings(items);
 }
-
-const OUTING_VERB: Record<string, string> = { automotive: "Drives", walking: "Walks", cycling: "Cycles", running: "Runs" };
 
 /** The outing's travel line: "Drives there and back · 11m", "Walks there · 6m", "Travel on · 4m". */
 export function outingSummary(outing: ReviewOuting) {
-  // A verb only when every leg says the same way of travelling (Codex r1 on #466).
-  const modes = outing.members.map((member) => member.rawPayload?.travelMode);
-  const verb = typeof modes[0] === "string" && modes.every((mode) => mode === modes[0]) ? OUTING_VERB[modes[0]] ?? "Travel" : "Travel";
-  const roles = new Set(outing.members.map(outingRoleOf));
-  const where = roles.has("in") && roles.has("out") ? "there and back" : roles.has("in") ? "there" : "on";
   const totalMs = outing.members.reduce((sum, member) => {
     const span = reviewWindow(member);
     return sum + (span ? span.stopMs - span.startMs : 0);
   }, 0);
-  return `${verb} ${where}${totalMs > 0 ? ` · ${formatReviewDuration(totalMs)}` : ""}`;
+  return `${outingTravelWords(outing.members)}${totalMs > 0 ? ` · ${formatReviewDuration(totalMs)}` : ""}`;
 }
 
 /** Log it / Skip on a grouped card: every member decided together; "Log as" applies to the Stay. */

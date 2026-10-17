@@ -44,6 +44,29 @@ describe("projectReviewScreenData (one Review data owner)", () => {
     expect(again).toBe(next);
   });
 
+  it("takes a card's outing from the store, also when a later read moved or cleared it (Codex r1 on #473)", () => {
+    const server = syntheticReviewBootstrap(3);
+    const live = { ...server, reviewItems: server.reviewItems.map((item) => ({ ...item, rawPayload: { ...item.rawPayload, outingKey: "outing:old", outingRole: "in" } })) };
+    const cached = { ...cachedCopy(server), reviewItems: server.reviewItems.map((item, index) => ({ ...item,
+      rawPayload: index === 0 ? { ...item.rawPayload, outingKey: "outing:new", outingRole: "out" } : { ...item.rawPayload } })) };
+    const next = projectReviewScreenData({ base: live, projection: cached, live: liveReviewItems(live), current: null });
+    expect(next.reviewItems[0].rawPayload).toMatchObject({ outingKey: "outing:new", outingRole: "out" });
+    expect(next.reviewItems[1].rawPayload).not.toHaveProperty("outingKey");
+    expect(next.reviewItems[1].rawPayload).not.toHaveProperty("outingRole");
+    // The live copy's other fields still show (its reason, never cached).
+    expect(next.reviewItems[1].rawPayload).toMatchObject({ semanticReason: "existing_review_preserved" });
+  });
+
+  it("takes the count of cards with its map and exactness from the projection, never left over from the base (Codex r3 on #475)", () => {
+    const server = syntheticReviewBootstrap(2);
+    const base = { ...server, stats: { ...server.stats!, reviewCardCount: 2, reviewOutingStays: { a: "b" }, reviewCardCountApproximate: true } };
+    const projection = { ...cachedCopy(server), stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 2, reviewCardCount: 1 } };
+    const next = projectReviewScreenData({ base, projection, live: liveReviewItems(server), current: null });
+    expect(next.stats).toMatchObject({ reviewCardCount: 1 });
+    expect(next.stats).not.toHaveProperty("reviewOutingStays");
+    expect(next.stats).not.toHaveProperty("reviewCardCountApproximate");
+  });
+
   it("returns what is on screen when nothing changed (no re-render), and reuses unchanged cards", () => {
     const server = syntheticReviewBootstrap(3);
     const live = liveReviewItems(server);

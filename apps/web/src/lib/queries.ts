@@ -10,6 +10,7 @@ import type {
   RecentActivitySuggestionCandidate
 } from "@dayframe/shared";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
+import { foldedOutingMemberSql, OUTING_STAYS_SQL, outingStaysFromRows } from "./review-card-count";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
@@ -205,6 +206,15 @@ export type DashboardStats = {
   todayAdditionalOverlapSeconds: number;
   weekAdditionalOverlapSeconds: number;
   reviewCount: number;
+  /** Review cards (an outing once, PRD D19); `reviewCount` stays every open suggestion for older iPhones. */
+  reviewCardCount: number;
+  /**
+   * Each open Move folded into its outing's open Stay card (member → Stay review id), so a client moves
+   * `reviewCardCount` exactly for local decisions; left out beyond `OUTING_STAYS_LIMIT` Moves.
+   */
+  reviewOutingStays?: Record<string, string>;
+  /** More open outing Moves than the map holds: no map was sent (a local adjustment is then approximate). */
+  reviewOutingStaysOverflow?: boolean;
 };
 
 export type DashboardDateRange = {
@@ -292,7 +302,8 @@ export async function getBootstrapData(
     activityEvents,
     categoryUsage,
     { taskSuggestions, taskSuggestionCandidates },
-    stats
+    stats,
+    reviewOutingStays
   ] = await Promise.all([
     getUser(session),
     getWorkspaces(session),
@@ -328,7 +339,8 @@ export async function getBootstrapData(
     getActivityEvents(session),
     getCategoryUsageRanks(session),
     getTaskSuggestionSets(session),
-    getDashboardStats(session, dateRange, capturedNow)
+    getDashboardStats(session, dateRange, capturedNow),
+    getReviewOutingStays(session)
   ]);
 
   const capturedAt = new Date(capturedNow);
@@ -384,7 +396,8 @@ export async function getBootstrapData(
       todayCoveredSeconds: todayCoverage.coveredSeconds,
       weekCoveredSeconds: weekCoverage.coveredSeconds,
       todayAdditionalOverlapSeconds: todayCoverage.additionalOverlapSeconds,
-      weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds
+      weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds,
+      ...(reviewOutingStays ? { reviewOutingStays } : { reviewOutingStaysOverflow: true })
     },
     todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
     weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))
@@ -1245,6 +1258,11 @@ async function getActivityEvents(session: RequestSession) {
   return result.rows;
 }
 
+async function getReviewOutingStays(session: RequestSession) {
+  const result = await query<{ member: string; stay: string }>(OUTING_STAYS_SQL, [session.workspaceId, session.userId]);
+  return outingStaysFromRows(result.rows);
+}
+
 async function getDashboardStats(
   session: RequestSession,
   dateRange: DashboardDateRange,
@@ -1276,7 +1294,13 @@ async function getDashboardStats(
           where started_at < $5::timestamptz
             and coalesce(stopped_at, $7::timestamptz) > $4::timestamptz
         ), 0)::int as "weekSeconds",
-        (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount"
+        (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount",
+        -- One count per outing (PRD D19, PR 12c): the cards Review shows; older iPhones read reviewCount.
+        (select count(*)::int
+         from review_items ri
+         left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+         where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
+           and not ${foldedOutingMemberSql("ri", "ae")}) as "reviewCardCount"
      from time_entries
       where workspace_id = $1
         and user_id = $6
@@ -1299,7 +1323,8 @@ async function getDashboardStats(
     weekCoveredSeconds: 0,
     todayAdditionalOverlapSeconds: 0,
     weekAdditionalOverlapSeconds: 0,
-    reviewCount: 0
+    reviewCount: 0,
+    reviewCardCount: 0
   };
 }
 

@@ -12,7 +12,8 @@ import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { useClockFormat } from "@/components/ClockFormat";
-import { dateTimeLocalInputToIso } from "@/lib/format";
+import { dateTimeLocal, dateTimeLocalInputToIso } from "@/lib/format";
+import { LocationDateTimeField } from "./LocationDateTimeField";
 import { locationEvidenceRetentionLabel } from "@/lib/location/location-evidence-presentation";
 import type { CategoryRow, TimeEntryRow } from "@/lib/queries";
 
@@ -69,6 +70,8 @@ export function LocationReviewPanel({
   const [categoryId, setCategoryId] = useState(initialCategoryId ?? "");
   const [startedAt, setStartedAt] = useState("");
   const [stoppedAt, setStoppedAt] = useState("");
+  // A typed Start or End time that cannot be read holds Confirm edits (WUI-042): nothing guesses it.
+  const [unreadableTimes, setUnreadableTimes] = useState<ReadonlySet<"start" | "end">>(() => new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -168,12 +171,14 @@ export function LocationReviewPanel({
       categoryId: categoryId || null,
       description,
       ...typedMarker(description, descriptionEdited),
-      ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
-      ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
+      // Only a complete local time is sent (an incomplete one already holds the confirmations).
+      ...(dateTimeLocalInputToIso(startedAt) ? { startedAt: dateTimeLocalInputToIso(startedAt)! } : {}),
+      ...(dateTimeLocalInputToIso(stoppedAt) ? { stoppedAt: dateTimeLocalInputToIso(stoppedAt)! } : {})
     };
   }
 
   const actionsDisabled = isPending || isSubmitting;
+  const today = dateTimeLocal().slice(0, 10);
   const stayCentre = evidence?.map.centre
     ? { longitude: evidence.map.centre.coordinates[0], latitude: evidence.map.centre.coordinates[1] }
     : null;
@@ -185,7 +190,7 @@ export function LocationReviewPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">Private location evidence</p>
           <h4 className="mt-1 text-base font-semibold">{evidence?.display.title ?? "Loading evidence…"}</h4>
         </div>
-        <button className="industrial-icon-button focus-ring min-h-11 min-w-11" type="button" onClick={onClose} aria-label="Close location evidence">
+        <button className="df-rbtn df-rbtn--ghost location-review-close focus-ring" type="button" onClick={onClose} aria-label="Close location evidence">
           <X size={18} />
         </button>
       </div>
@@ -195,7 +200,7 @@ export function LocationReviewPanel({
           <span>{error}</span>
           {!evidence ? (
             <button
-              className="industrial-button focus-ring min-h-11 px-3 text-sm"
+              className="df-rbtn focus-ring"
               type="button"
               onClick={() => {
                 setEvidence(null);
@@ -255,7 +260,7 @@ export function LocationReviewPanel({
                 {evidence.map.nearbySavedPlaces.map((place) => (
                   <button
                     key={place.id}
-                    className="industrial-button focus-ring min-h-11 px-3 text-sm"
+                    className="df-rbtn focus-ring"
                     disabled={actionsDisabled}
                     type="button"
                     onClick={() => void act({ action: "change_place_and_confirm", placeId: place.id, learnedPlaceId: null })}
@@ -274,7 +279,7 @@ export function LocationReviewPanel({
               <div className="mt-3 grid gap-3">
                 <input
                   aria-label="Place name"
-                  className="industrial-input focus-ring min-h-11"
+                  className="location-resolve-control"
                   maxLength={120}
                   placeholder="Place name"
                   value={placeName}
@@ -330,7 +335,7 @@ export function LocationReviewPanel({
                 {/* The panel can be narrow (beside Review's queue): whole buttons wrap, never their labels. */}
                 <div className="flex flex-wrap gap-2">
                   <button
-                    className="industrial-button focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
+                    className="df-rbtn focus-ring whitespace-nowrap"
                     disabled={actionsDisabled || !placeName.trim()}
                     type="button"
                     onClick={() => void savePlace()}
@@ -338,8 +343,8 @@ export function LocationReviewPanel({
                     Save place
                   </button>
                   <button
-                    className="industrial-button-primary focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
-                    disabled={actionsDisabled || !placeName.trim()}
+                    className="df-rbtn df-rbtn--live focus-ring whitespace-nowrap"
+                    disabled={actionsDisabled || !placeName.trim() || unreadableTimes.size > 0}
                     type="button"
                     onClick={() => void act({
                       action: "save_place_and_confirm",
@@ -390,26 +395,28 @@ export function LocationReviewPanel({
                 triggerId={`location-category-${reviewItemId}`}
                 variant="quick"
               />
-              <label className="location-resolve-field">
-                <span>Start</span>
-                <input
-                  aria-label="Start"
-                  className="location-resolve-control tabular"
-                  type="datetime-local"
-                  value={startedAt}
-                  onChange={(event) => setStartedAt(event.target.value)}
-                />
-              </label>
-              <label className="location-resolve-field">
-                <span>End</span>
-                <input
-                  aria-label="End"
-                  className="location-resolve-control tabular"
-                  type="datetime-local"
-                  value={stoppedAt}
-                  onChange={(event) => setStoppedAt(event.target.value)}
-                />
-              </label>
+              <LocationDateTimeField
+                clock={clock}
+                disabled={actionsDisabled}
+                label="Start"
+                onChange={(value, readable) => {
+                  setStartedAt(value);
+                  setUnreadableTimes((current) => withReadable(current, "start", readable));
+                }}
+                today={today}
+                value={startedAt}
+              />
+              <LocationDateTimeField
+                clock={clock}
+                disabled={actionsDisabled}
+                label="End"
+                onChange={(value, readable) => {
+                  setStoppedAt(value);
+                  setUnreadableTimes((current) => withReadable(current, "end", readable));
+                }}
+                today={today}
+                value={stoppedAt}
+              />
             </div>
             <div className="mt-3">
               <OverlapNotice
@@ -422,15 +429,15 @@ export function LocationReviewPanel({
             </div>
             <div className="location-review-resolve-actions mt-3">
               <button
-                className="industrial-button-primary focus-ring min-h-11 px-4 text-sm"
-                disabled={actionsDisabled}
+                className="df-rbtn df-rbtn--live focus-ring"
+                disabled={actionsDisabled || unreadableTimes.size > 0}
                 type="button"
                 onClick={() => void act({ action: "edit_and_confirm", edit: resolveEdit() })}
               >
                 <Check size={15} /> Confirm edits
               </button>
               <button
-                className="industrial-button focus-ring min-h-11 px-4 text-sm"
+                className="df-rbtn focus-ring"
                 disabled={actionsDisabled}
                 type="button"
                 onClick={() => void act({ action: "record_once", edit: { description, ...typedMarker(description, descriptionEdited) } })}
@@ -440,7 +447,7 @@ export function LocationReviewPanel({
               {evidence.suggestedSplitPoints.map((split) => (
                 <button
                   key={split.at}
-                  className="industrial-button focus-ring min-h-11 px-4 text-sm"
+                  className="df-rbtn focus-ring"
                   disabled={actionsDisabled}
                   type="button"
                   onClick={() => void act({ action: "split", splitAt: split.at })}
@@ -450,7 +457,7 @@ export function LocationReviewPanel({
               ))}
               {adjacentReviewItemId && evidence.segment.kind === "stay" ? (
                 <button
-                  className="industrial-button focus-ring min-h-11 px-4 text-sm"
+                  className="df-rbtn focus-ring"
                   disabled={actionsDisabled}
                   type="button"
                   onClick={() => void act({
@@ -507,4 +514,12 @@ export function savedPlaceStatus(name: string, rematchedCount: number) {
 /** The marker for a name the person typed in this editor (PRD D19): only when they changed the field. */
 export function typedMarker(description: string, edited: boolean) {
   return edited && description.trim() ? { descriptionTyped: true as const } : {};
+}
+
+function withReadable(current: ReadonlySet<"start" | "end">, field: "start" | "end", readable: boolean) {
+  if (current.has(field) === !readable) return current;
+  const next = new Set(current);
+  if (readable) next.delete(field);
+  else next.add(field);
+  return next;
 }

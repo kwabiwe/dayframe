@@ -14,6 +14,7 @@ import type pg from "pg";
 import { withSyncTransaction, type SyncTransactionOptions } from "./sync-transaction";
 import { canonicalJson, isoOrNull, reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
+import { foldedOutingMemberSql, OUTING_STAYS_SQL, outingStaysFromRows } from "./review-card-count";
 import { placeDisplayNameSql } from "./place-display";
 
 const COLLECTION_LIMIT = 5_000;
@@ -44,6 +45,10 @@ type ReviewRow = {
   /** Stops on a time-away journey; null for every other Review item. */
   timeAwayStopCount: number | null;
   routeLabel: string | null;
+  outingKey?: string | null;
+  outingRole?: string | null;
+  outingTravelMode?: string | null;
+  learnedName?: boolean | null;
 };
 
 type LegacyRow = {
@@ -94,6 +99,8 @@ type CountsRow = {
   globalCount: number | string;
   todayCount: number | string;
   openReviewItemIds: string[] | null;
+  /** With the outing-count feature: the open outing map, or null beyond its limit. */
+  outingStays?: Record<string, string> | null;
 };
 
 type InternalRecord = {
@@ -129,7 +136,7 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean };
+export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean };
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -146,7 +153,7 @@ export async function getReviewPresentation(
     // transaction owner at BEGIN, before its configuration SELECTs.
 
     const [counts, reviewRows, legacyRows, entryRows, lookup] = await Promise.all([
-      loadCounts(client, session, input),
+      loadCounts(client, session, input, features),
       input.mode === "lookup" ? Promise.resolve([]) : loadReviewRows(client, session, input),
       input.mode === "lookup" ? Promise.resolve([]) : loadLegacyRows(client, session, input),
       input.mode === "window" ? loadCompletedTodayRows(client, session, input) : Promise.resolve([]),
@@ -212,6 +219,8 @@ export async function getReviewPresentation(
         records: !boundedCollection && !page.hasMore,
         // Exact counts remain in the response, but a local client must not
         // subtract hidden effects unless it has this complete membership list.
+        // Complete open membership (it also lets the phone evict cards closed elsewhere); a missing
+        // outing map is said separately (Codex r3 on #475).
         outstandingCounts: (counts.openReviewItemIds?.length ?? 0) <= COLLECTION_LIMIT,
         completedToday: input.mode === "window" && !boundedCollection && !page.hasMore,
         partialReason: boundedCollection ? "bounded_collection" : page.hasMore ? "page" : null
@@ -219,7 +228,9 @@ export async function getReviewPresentation(
       outstanding: {
         globalCount: Number(counts.globalCount),
         todayCount: Number(counts.todayCount),
-        openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT)
+        openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT),
+        ...(features.outingCount && counts.outingStays ? { outingStays: counts.outingStays } : {}),
+        ...(features.outingCount && counts.outingStays === null ? { outingStaysOverflow: true as const } : {})
       },
       records: page.records.map(({ record }) => forClient(record, features)),
       links,
@@ -238,7 +249,9 @@ export async function getReviewPresentation(
   });
 }
 
-async function loadCounts(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {
+async function loadCounts(
+  client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest, features: ReviewPresentationFeatures
+) {
   const todayStart = input.today?.start ?? null;
   const todayEnd = input.today?.end ?? null;
   const result = await client.query<CountsRow>(
@@ -246,6 +259,14 @@ async function loadCounts(client: pg.PoolClient, session: RequestSession, input:
        select ri.id, ri.event_id, ri.suggested_started_at, ri.suggested_stopped_at, ri.created_at
        from review_items ri
        where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+     ), counted_reviews as (
+       -- Cards for clients that ask (an outing once, PRD D19, PR 12c); every open suggestion otherwise.
+       select ri.id, ri.suggested_started_at, ri.suggested_stopped_at, ri.created_at
+       from review_items ri
+       ${features.outingCount ? `left join activity_events ae
+         on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id` : ""}
+       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+         ${features.outingCount ? `and not ${foldedOutingMemberSql("ri", "ae")}` : ""}
      ), unlinked_legacy as (
        select te.id, te.started_at, te.stopped_at, te.created_at
        from time_entries te
@@ -260,9 +281,9 @@ async function loadCounts(client: pg.PoolClient, session: RequestSession, input:
          )
      )
      select
-       ((select count(*) from open_reviews) + (select count(*) from unlinked_legacy))::int as "globalCount",
+       ((select count(*) from counted_reviews) + (select count(*) from unlinked_legacy))::int as "globalCount",
        (
-         (select count(*) from open_reviews
+         (select count(*) from counted_reviews
           where ($3::timestamptz is not null and $4::timestamptz is not null)
             and ((suggested_started_at is not null and suggested_stopped_at is not null
                   and suggested_started_at < $4::timestamptz and suggested_stopped_at > $3::timestamptz)
@@ -280,7 +301,10 @@ async function loadCounts(client: pg.PoolClient, session: RequestSession, input:
         from (select id from open_reviews order by id limit ${SQL_COLLECTION_LIMIT}) bounded) as "openReviewItemIds"`,
     [session.workspaceId, session.userId, todayStart, todayEnd]
   );
-  return result.rows[0] ?? { globalCount: 0, todayCount: 0, openReviewItemIds: [] };
+  const row = result.rows[0] ?? { globalCount: 0, todayCount: 0, openReviewItemIds: [] };
+  if (!features.outingCount) return row;
+  const stays = await client.query<{ member: string; stay: string }>(OUTING_STAYS_SQL, [session.workspaceId, session.userId]);
+  return { ...row, outingStays: outingStaysFromRows(stays.rows) };
 }
 
 async function loadReviewRows(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {
@@ -313,6 +337,10 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
               then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
             end as "timeAwayStopCount",
             case when ae.event_type = 'commute_detected' then nullif(btrim(ae.raw_payload ->> 'routeLabel'), '') end as "routeLabel",
+            case when ae.raw_payload ->> 'outingRole' in ('stay', 'in', 'out') then nullif(ae.raw_payload ->> 'outingKey', '') end as "outingKey",
+            ae.raw_payload ->> 'outingRole' as "outingRole",
+            case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
+            coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -465,6 +493,10 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
               then jsonb_array_length(case when jsonb_typeof(cs.metadata -> 'stops') = 'array' then cs.metadata -> 'stops' else '[]'::jsonb end)
             end as "timeAwayStopCount",
             case when ae.event_type = 'commute_detected' then nullif(btrim(ae.raw_payload ->> 'routeLabel'), '') end as "routeLabel",
+            case when ae.raw_payload ->> 'outingRole' in ('stay', 'in', 'out') then nullif(ae.raw_payload ->> 'outingKey', '') end as "outingKey",
+            ae.raw_payload ->> 'outingRole' as "outingRole",
+            case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
+            coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -595,7 +627,11 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     canonicalEntryIds: row.canonicalEntryIds ?? [],
     semanticRevision: isoOrNull(row.semanticRevision),
     ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } }),
-    ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {})
+    ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {}),
+    ...(row.learnedName ? { learnedName: true as const } : {}),
+    ...(row.outingKey && (row.outingRole === "stay" || row.outingRole === "in" || row.outingRole === "out") && row.outingKey.length <= 200
+      ? { outing: { key: row.outingKey, role: row.outingRole,
+          ...(row.outingTravelMode && row.outingTravelMode.length <= 40 ? { travelMode: row.outingTravelMode } : {}) } } : {})
   };
   return {
     record,
@@ -608,9 +644,11 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
   if (!record || typeof record !== "object") return record;
-  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown };
+  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown };
   if (!features.timeAway) delete rest.timeAway;
   if (!features.moveRoute) delete rest.routeLabel;
+  if (!features.outing) delete rest.outing;
+  if (!features.learnedName) delete rest.learnedName;
   return rest as T;
 }
 
@@ -727,7 +765,8 @@ function snapshotFor(
       counts: {
         global: Number(counts.globalCount),
         today: Number(counts.todayCount),
-        openReviewItemIds: counts.openReviewItemIds ?? []
+        openReviewItemIds: counts.openReviewItemIds ?? [],
+        ...(counts.outingStays !== undefined ? { outingStays: counts.outingStays } : {})
       },
       records: records.map(({ record }) => record),
       lookup: {

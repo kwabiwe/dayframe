@@ -144,3 +144,38 @@ export function chipsThatFit({
   }
   return keepFirst && chipWidths.length > 0 ? 1 : 0;
 }
+
+/**
+ * The chips to show so they and the All-activities pill wrap into at most `maxRows` rows, dropping
+ * chips from the end but never the selected one, so the pill never wraps alone onto a third row
+ * (owner, 17 Oct 2026; as web's WUI-002). Unmeasured widths keep every chip.
+ */
+export function fitActivityChips<T extends { id: string }>({
+  candidates,
+  gap,
+  maxRows,
+  pillWidth,
+  rowWidth,
+  selectedId,
+  widthOf
+}: {
+  candidates: readonly T[];
+  gap: number;
+  maxRows: number;
+  pillWidth: number;
+  rowWidth: number;
+  selectedId: string | null;
+  widthOf: (item: T) => number | undefined;
+}) {
+  const widths = candidates.map(widthOf);
+  if (rowWidth <= 0 || pillWidth <= 0 || widths.some((width) => !width)) return [...candidates];
+  const kept = [...candidates];
+  const fits = () => wrappedRowCount([...kept.map((item) => widthOf(item)!), pillWidth], rowWidth, gap) <= maxRows;
+  while (!fits()) {
+    let index = kept.length - 1;
+    while (index >= 0 && kept[index].id === selectedId) index -= 1;
+    if (index < 0) break;
+    kept.splice(index, 1);
+  }
+  return kept;
+}

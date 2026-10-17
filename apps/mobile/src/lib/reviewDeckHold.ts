@@ -17,6 +17,11 @@ export type ReviewDeckHeldDecision = {
   seconds: number;
   /** What the user saw when they decided (reviewDeckProposalSignature); a change cancels it. */
   proposal: string;
+  /**
+   * One card per outing (PRD D19): the Move cards folded into this Stay's card, decided with it and
+   * kept out of the deck while the decision is held. Each keeps the proposal the user saw.
+   */
+  outing?: { key: string; members: { key: string; itemId: string; proposal: string }[] };
 };
 
 /**
@@ -36,7 +41,7 @@ export type ReviewDeckHeld = ReviewDeckHeldDecision | ReviewDeckHeldBatch;
 /** The deck keys a hold keeps out of the deck. */
 export function reviewDeckHeldKeys(held: ReviewDeckHeld | null): string[] {
   if (!held) return [];
-  return held.kind === "batch" ? held.items.map((item) => item.key) : [held.key];
+  return held.kind === "batch" ? held.items.map((item) => item.key) : [held.key, ...(held.outing?.members.map((member) => member.key) ?? [])];
 }
 
 /**

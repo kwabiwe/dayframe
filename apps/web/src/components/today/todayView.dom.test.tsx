@@ -247,6 +247,17 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
+  it("counts an outing once in the moments waiting (PRD D19, PR 12c)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const data = bootstrap();
+    // Three suggestions waiting, an outing (a stop and its two trips) and one more: two cards.
+    const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2 } });
+    expect(container.textContent).toContain("2 moments waiting");
+    expect(container.textContent).not.toContain("4 moments waiting");
+    await act(async () => root.unmount());
+  });
+
   it("never offers Delete or Start again on the running block", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
@@ -293,7 +304,7 @@ function bootstrap(): BootstrapData {
     tags: [],
     taskSuggestions: [],
     reviewItems: [],
-    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0 },
+    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0, reviewCardCount: 0 },
     activityEvents: [],
     entries,
     historyEntries: entries,

@@ -13,7 +13,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
+  AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Keyboard: { addListener: () => ({ remove() {} }), dismiss: vi.fn() },
@@ -23,7 +23,17 @@ vi.mock("react-native", () => ({
   StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 },
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 47 }) }));
+vi.mock("react-native-reanimated", async () => {
+  const { useRef } = await import("react");
+  return {
+    default: { View: "AnimatedView" },
+    Easing: { out: (curve: unknown) => curve, cubic: "cubic" },
+    useAnimatedStyle: (style: () => object) => style(),
+    useSharedValue: (value: number) => useRef({ value }).current,
+    withTiming: (value: number) => value
+  };
+});
 vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
   pressable: (value: unknown) => value,
@@ -81,7 +91,6 @@ vi.mock("../ActivityPickerSheet", () => ({
 }));
 const map = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 // The Save place sheet draws a native map; these tests never open it.
-vi.mock("./SavePlaceSheet", () => ({ SavePlaceSheet: () => null }));
 vi.mock("./LocationEvidenceMap", () => ({
   LocationEvidenceMap: (props: Record<string, unknown>) => {
     map.props = props;
@@ -175,7 +184,7 @@ const byTestId = (id: string) => tree!.root.findAll((node) => node.props.testID 
 const byLabel = (label: string) => tree!.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.type === "string");
 const press = async (node: ReactTestInstance) => { await act(async () => { await node.props.onPress(); }); };
 const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityRole === "button" && node.props.onPress)
-  .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
+  .find((node) => ["Record visit", "Record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
 
 const field = (label: "Start" | "End") => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityLabel === label)[0];
 const screen = () => tree!.root.findAll((node) => typeof node.type === "string" && typeof node.props.onTouchStart === "function" && typeof node.props.onTouchEnd === "function")[0];

@@ -6,6 +6,7 @@ import { isLockNotAvailableError, isStatementTimeoutError, query } from "@/lib/d
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { wantsReviewCardCount } from "@/lib/review-card-count";
 import {
   ingestLocationEvidence,
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     }
     const result = await ingestLocationEvidence(body, session, undefined, {signal: request.signal, deadlineAt: startedAt + 8_000, onLocationStage: diagnostics.onLocationStage});
     // The phone schedules its evening Review reminder from this count.
-    return respond(withReviewCount(result, await openReviewCountFor(session)), result.duplicateBatch ? 200 : 201);
+    return respond(withReviewCount(result, await openReviewCountFor(session, { cards: wantsReviewCardCount(request) })), result.duplicateBatch ? 200 : 201);
   } catch (error) {
     const authResponse = authErrorResponse(error);
     if (authResponse) {

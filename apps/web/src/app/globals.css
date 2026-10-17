@@ -1605,11 +1605,18 @@ dialog.ui-popover-panel.bottom-left {
   }
 }
 
+/* The mark is cropped to its blocks (655 × 685 of the 1024 canvas, logos/dayframe-colour-mark.svg) so
+   it centres beside the wordmark. --brand-mark-canvas is the canvas size the blocks are drawn at (their
+   size is unchanged). The canvas's left margin (170 / 1024) and an even share of its height stay as the
+   mark's margin, and the gap gains its right margin (199 / 1024), so the blocks keep their place beside
+   the navigation and their distance from the wordmark, and the lockup keeps its size. */
 .dayframe-brand {
+  --brand-mark-canvas: 34px;
+  --brand-gap: 10px;
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: calc(var(--brand-gap) + var(--brand-mark-canvas) * 199 / 1024);
   line-height: 0;
 }
 
@@ -1621,7 +1628,9 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-mark {
-  width: 34px;
+  width: calc(var(--brand-mark-canvas) * 655 / 1024);
+  margin: calc(var(--brand-mark-canvas) * 339 / 2048) 0 calc(var(--brand-mark-canvas) * 339 / 2048)
+    calc(var(--brand-mark-canvas) * 170 / 1024);
 }
 
 .dayframe-brand-wordmark-wrap {
@@ -1641,11 +1650,8 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-sm {
-  gap: 8px;
-}
-
-.dayframe-brand-sm .dayframe-brand-mark {
-  width: 28px;
+  --brand-mark-canvas: 28px;
+  --brand-gap: 8px;
 }
 
 .dayframe-brand-sm .dayframe-brand-wordmark {
@@ -1653,24 +1659,29 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 .dayframe-brand-lg {
-  gap: 12px;
-}
-
-.dayframe-brand-lg .dayframe-brand-mark {
-  width: 42px;
+  --brand-mark-canvas: 42px;
+  --brand-gap: 12px;
 }
 
 .dayframe-brand-lg .dayframe-brand-wordmark {
   width: 164px;
 }
 
+/* Stacked: the canvas's top margin (145 / 1024) stays above the blocks and the gap gains its bottom
+   margin (194 / 1024); the blocks centre across. */
 .dayframe-brand[data-layout="compact"] {
+  --brand-mark-canvas: 30px;
   flex-direction: column;
-  gap: 8px;
+  gap: calc(8px + var(--brand-mark-canvas) * 194 / 1024);
 }
 
 .dayframe-brand[data-layout="compact"] .dayframe-brand-mark {
-  width: 30px;
+  margin: calc(var(--brand-mark-canvas) * 145 / 1024) 0 0;
+}
+
+/* The mark on its own keeps the whole canvas's footprint. */
+.dayframe-brand[data-layout="symbol"] .dayframe-brand-mark {
+  margin-right: calc(var(--brand-mark-canvas) * 199 / 1024);
 }
 
 .dayframe-brand[data-layout="compact"] .dayframe-brand-wordmark {
@@ -4641,8 +4652,8 @@ dialog.ui-dialog.df-range-custom {
     min-height: 74px;
   }
 
-  .landing-brand .dayframe-brand-mark {
-    width: 34px;
+  .landing-brand .dayframe-brand {
+    --brand-mark-canvas: 34px;
   }
 
   .landing-brand .dayframe-brand-wordmark {
@@ -4862,6 +4873,12 @@ dialog.ui-dialog.df-range-custom {
 
   .landing-brand .dayframe-brand-wordmark-wrap {
     display: none;
+  }
+
+  /* The mark alone keeps the canvas's right margin too, so its footprint and centre are unchanged
+     (Codex r1 on #476). */
+  .landing-brand .dayframe-brand-mark {
+    margin-right: calc(var(--brand-mark-canvas) * 199 / 1024);
   }
 }
 
@@ -7765,7 +7782,7 @@ dialog.ui-dialog.df-range-custom {
 
 .location-review-resolve-grid {
   display: grid;
-  grid-template-columns: minmax(14rem, 2fr) minmax(10rem, 1fr) repeat(2, minmax(11rem, 1fr));
+  grid-template-columns: minmax(14rem, 2fr) minmax(10rem, 1fr) repeat(2, minmax(13rem, 1fr));
   align-items: end;
   gap: 10px;
 }
@@ -7805,6 +7822,60 @@ dialog.ui-dialog.df-range-custom {
 .location-resolve-control:focus {
   outline: 0;
   box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+/* Start / End (WUI-042): the shared date picker beside a typed time, one 44 px row. */
+.location-resolve-datetime {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(5.5rem, 0.8fr);
+  gap: 6px;
+}
+
+.location-resolve-date {
+  min-width: 0;
+}
+
+.location-resolve-control.location-resolve-date-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.location-review-panel .location-resolve-control.location-resolve-date-trigger:focus:not(:focus-visible) {
+  box-shadow: none;
+}
+
+.location-resolve-field > .location-resolve-error {
+  /* Small text: the accessible danger text colour (Codex r3 on #474); the underline stays --danger. */
+  color: var(--danger-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Inside the panel these outrank the global field rules (Codex r1 on #474): a neutral ring on focus,
+   and a separate danger underline on an unreadable time, focused or not. */
+.location-review-panel .location-resolve-control:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.location-review-panel .location-resolve-control[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.location-review-panel .location-resolve-control[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -4px 0 var(--danger);
+}
+
+/* The panel's close (WUI-041): a 44 px round icon button in the Blocks treatment. */
+.df-rbtn.location-review-close {
+  width: 44px;
+  justify-content: center;
+  padding: 0;
 }
 
 .location-resolve-category > button:focus-visible {

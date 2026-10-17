@@ -11,18 +11,36 @@ vi.mock("react", async () => {
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
+const keyboard = vi.hoisted(() => ({ listeners: new Map<string, (event?: unknown) => void>() }));
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
+  AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
-  Keyboard: { addListener: () => ({ remove() {} }), dismiss: vi.fn() },
+  Keyboard: {
+    addListener: (name: string, listener: (event?: unknown) => void) => {
+      keyboard.listeners.set(name, listener);
+      return { remove() {} };
+    },
+    dismiss: vi.fn()
+  },
   Platform: { OS: "ios" },
   Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch",
   Text: "Text", TextInput: "TextInput", View: "View",
   StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 },
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 47 }) }));
+const reanimated = vi.hoisted(() => ({ withTiming: vi.fn((value: number) => value) }));
+vi.mock("react-native-reanimated", async () => {
+  const { useRef } = await import("react");
+  return {
+    default: { View: "AnimatedView" },
+    Easing: { out: (curve: unknown) => curve, cubic: "cubic" },
+    useAnimatedStyle: (style: () => object) => style(),
+    useSharedValue: (value: number) => useRef({ value }).current,
+    withTiming: reanimated.withTiming
+  };
+});
 vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
   pressable: (value: unknown) => value,
@@ -79,13 +97,6 @@ vi.mock("./LocationEvidenceMap", () => ({
     return null;
   }
 }));
-const sheet = vi.hoisted(() => ({ props: null as null | Record<string, (...args: never[]) => unknown> & Record<string, unknown> }));
-vi.mock("./SavePlaceSheet", () => ({
-  SavePlaceSheet: (props: Record<string, never>) => {
-    sheet.props = props as never;
-    return null;
-  }
-}));
 vi.mock("@/lib/locationReviewDraft", () => import("../../lib/locationReviewDraft"));
 vi.mock("@/lib/mobileTypography", () => import("../../lib/mobileTypography"));
 
@@ -134,9 +145,9 @@ beforeEach(() => {
   native.searchNearby.mockImplementation(async (request: { requestId: string }) => ({
     requestId: request.requestId,
     places: [
-      { id: "poi-a", requestId: request.requestId, title: "Example Bakery", subtitle: "2 Example Road", distanceMeters: 35 },
+      { id: "poi-a", requestId: request.requestId, title: "Example Bakery", subtitle: "2 Example Road", distanceMeters: 35, category: "Bakery" },
       { id: "poi-b", requestId: request.requestId, title: "Example Studio", subtitle: null, distanceMeters: 40 },
-      { id: "poi-c", requestId: request.requestId, title: "Example Gallery", subtitle: null, distanceMeters: 180 }
+      { id: "poi-c", requestId: request.requestId, title: "Example Gallery", subtitle: null, distanceMeters: 180, category: "FitnessCenter" }
     ]
   }));
 });
@@ -145,7 +156,7 @@ afterEach(() => {
   tree = undefined;
 });
 
-function editor(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
+function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem: object = { suggestedCategoryId: null }) {
   return (
     <LocationReviewCorrectionEditor
       adjacentReview={undefined}
@@ -156,14 +167,14 @@ function editor(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
       onResolve={onResolve}
       places={[]}
       recentActivityIds={recent}
-      reviewItem={{ suggestedCategoryId: null } as never}
+      reviewItem={reviewItem as never}
       saving={false}
     />
   );
 }
 
-async function render(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
-  await act(async () => { tree = create(editor(evidence, recent)); });
+async function render(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem?: object) {
+  await act(async () => { tree = create(editor(evidence, recent, reviewItem)); });
 }
 
 const isHost = (node: ReactTestInstance, type: string) => (node.type as unknown) === type;
@@ -173,14 +184,115 @@ const byTestId = (id: string) => tree!.root.findAll((node) => node.props.testID 
 const byLabel = (label: string) => tree!.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.type === "string");
 const press = async (node: ReactTestInstance) => { await act(async () => { await node.props.onPress(); }); };
 const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityRole === "button" && node.props.onPress)
-  .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
+  .find((node) => ["Record visit", "Record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
+
+describe("Location evidence polish (owner, 17 Oct 2026)", () => {
+  it("labels the duration plainly on screen and tells VoiceOver it is estimated", async () => {
+    const evidence = stay({ matched: true });
+    (evidence.segment as { approximateArrival?: boolean }).approximateArrival = true;
+    await render(evidence);
+    expect(texts("Duration")).toHaveLength(1);
+    expect(texts("Estimated duration")).toHaveLength(0);
+    expect(tree!.root.findAll((node) => typeof node.type === "string" &&
+      typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Estimated duration "))).not.toHaveLength(0);
+  });
+
+  it("keeps the primary action at the bottom of the screen, outside the scroll view", async () => {
+    await render(stay({ matched: true }));
+    const bar = tree!.root.findAll((node) => node.props.testID === "location-evidence-primary-bar" && typeof node.type === "string");
+    expect(bar).toHaveLength(1);
+    let ancestor = bar[0].parent;
+    while (ancestor) {
+      expect(ancestor.type).not.toBe("ScrollView");
+      ancestor = ancestor.parent;
+    }
+    expect(bar[0].findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button")).toHaveLength(1);
+    expect(texts("Record visit")).toHaveLength(1);
+  });
+
+  it("rides the primary bar above the keyboard, and back down when it hides (Codex r1 on #480)", async () => {
+    await render(stay({ matched: true }));
+    reanimated.withTiming.mockClear();
+    // An 812-point window with a 34-point home indicator inset; the keyboard's top at 476: the bar
+    // rises by the keyboard's overlap, on the keyboard's own duration, and comes back down.
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 476 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
+    await act(async () => keyboard.listeners.get("keyboardWillHide")?.({ duration: 250 }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
+    // Prefer Cross-Fade Transitions can report a zero frame, also while the keyboard is open: no
+    // space is made (Codex r2/r3 on #480).
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 476 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 0, height: 0 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
+  });
+
+  it("says beside Record why it did nothing, wherever the page is scrolled (Codex r1 on #480)", async () => {
+    const { AccessibilityInfo } = await import("react-native") as unknown as { AccessibilityInfo: { announceForAccessibility: Mock } };
+    const evidence = stay({ matched: true });
+    (evidence.segment as { stoppedAt: string | null }).stoppedAt = null;
+    await render(evidence);
+    await press(primary());
+    const bar = tree!.root.findAll((node) => node.props.testID === "location-evidence-primary-bar" && typeof node.type === "string")[0];
+    expect(bar.findAll((node) => typeof node.type === "string" && text(node) === "This suggestion does not have a complete time range.")).not.toHaveLength(0);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("This suggestion does not have a complete time range.");
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("offers a learned name one tap away in Name, and only while the field doesn't hold it", async () => {
+    await render(stay({ matched: false }), [], { suggestedCategoryId: null, title: "Swimming", rawPayload: { nameSource: "learned" } });
+    const chip = () => tree!.root.findAll((node) => node.props.testID === "location-evidence-learned-name" && typeof node.type === "string");
+    expect(chip()).toHaveLength(1);
+    expect(chip()[0].props.accessibilityLabel).toBe("Use the name Swimming");
+    await press(chip()[0]);
+    expect(tree!.root.findAll((node) => isHost(node, "TextInput") && node.props.value === "Swimming")).toHaveLength(1);
+    expect(chip()).toHaveLength(0);
+    await press(primary());
+    // Using the chip is the person's own choice: a typed name, which teaches the pattern.
+    expect((onResolve.mock.calls[0][0] as { edit?: { description?: string; descriptionTyped?: boolean } }).edit)
+      .toMatchObject({ description: "Swimming", descriptionTyped: true });
+  });
+
+  it("never sends a learned name the person did not choose as typed", async () => {
+    // A stay whose display title is the learned name starts with it in Name, untouched.
+    const evidence = stay({ matched: false });
+    (evidence.display as { title: string }).title = "Swimming";
+    await render(evidence, [], { suggestedCategoryId: null, title: "Swimming", rawPayload: { nameSource: "learned" } });
+    expect(byTestId("location-evidence-learned-name")).toHaveLength(0);
+    await press(primary());
+    expect((onResolve.mock.calls[0][0] as { edit?: { descriptionTyped?: boolean } }).edit?.descriptionTyped).not.toBe(true);
+  });
+
+  it("says what the suggestion rests on in one line under the map that opens to the details", async () => {
+    const evidence = stay({ matched: true });
+    (evidence.map as { gaps: unknown[] }).gaps = [{ startedAt: "2026-08-14T09:20:00Z", stoppedAt: "2026-08-14T09:45:00Z", durationSeconds: 1500, fromPoint: null, toPoint: null }];
+    (evidence.segment as { evidenceCount: number }).evidenceCount = 42;
+    await render(evidence);
+    const line = tree!.root.findAll((node) => node.props.testID === "location-evidence-line" && typeof node.type === "string")[0];
+    expect(text(line)).toBe("Based on 42 readings · 25-min gap");
+    expect(line.props.accessibilityState).toEqual({ expanded: false });
+    expect(byTestId("location-evidence-details")).toHaveLength(0);
+    await press(line);
+    expect(byTestId("location-evidence-details")).toHaveLength(1);
+    expect(texts("Synthetic test visit")).toHaveLength(1);
+  });
+
+  it("offers Skip in neutral text and no second Record once", async () => {
+    await render(stay({ matched: true }));
+    const skip = tree!.root.findAll((node) => node.props.testID === "location-evidence-skip" && typeof node.type !== "string");
+    expect(skip.length).toBeGreaterThan(0);
+    expect(skip.every((node) => !node.props.danger)).toBe(true);
+    expect(texts("Record once")).toHaveLength(0);
+  });
+});
 
 describe("Where were you? (D2, D3)", () => {
   it("lists the matched place once, in plain words, with nearby places under the empty search field", async () => {
     await render(stay({ matched: true }));
     // One row for the matched place: no separate answer card and no "Current match".
     expect(texts("Example Studio")).toHaveLength(1);
-    expect(texts("Matched place")).toHaveLength(1);
+    // One short line: what it is and how far (owner, 17 Oct 2026).
+    expect(texts("Matched place · 10 m")).toHaveLength(1);
     expect(texts("Current match")).toHaveLength(0);
     expect(texts("Record without choosing a place")).toHaveLength(0);
     expect(texts("Search other places")).toHaveLength(0);
@@ -188,9 +300,11 @@ describe("Where were you? (D2, D3)", () => {
     expect(native.searchNearby).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 400, limit: 5 }));
     expect(byTestId("location-evidence-nearby")).toHaveLength(1);
     expect(texts("Example Bakery")).toHaveLength(1);
-    expect(texts("40 m away · 2 Example Road")).toHaveLength(1);
-    expect(texts("40 m away")).toHaveLength(0);
-    expect(texts("180 m away")).toHaveLength(1);
+    // Each nearby row is its kind and distance, never the address (owner, 17 Oct 2026).
+    expect(texts("Bakery · 40 m")).toHaveLength(1);
+    expect(texts("Gym · 180 m")).toHaveLength(1);
+    expect(texts("2 Example Road")).toHaveLength(0);
+    expect(tree!.root.findAll((node) => node.props.glyph === "dumbbell")).not.toHaveLength(0);
     // Nearby sits under the search field.
     const order = tree!.root.findAll((node) => typeof node.type === "string" && (node.props.accessibilityLabel === "Search places" || node.props.testID === "location-evidence-nearby"));
     expect(order.map((node) => node.props.accessibilityLabel ?? node.props.testID)).toEqual(["Search places", "location-evidence-nearby"]);
@@ -216,15 +330,41 @@ describe("Where were you? (D2, D3)", () => {
     expect(native.resolveNearby).toHaveBeenCalledWith({ id: "poi-a", requestId: expect.stringMatching(/^nearby-\d+$/) });
     // The chosen place is the selected row (with Remove) and leaves the nearby list.
     const chosen = tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string");
-    expect(chosen.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState.checked])).toEqual([["Example Bakery, 2 Example Road", true]]);
-    expect(byLabel("Remove Example Bakery")).toHaveLength(1);
+    // One short line, no address; a single ✕ clears it (owner, 17 Oct 2026).
+    expect(chosen.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState.checked])).toEqual([["Example Bakery, New place · 20 m", true]]);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(1);
+    expect(texts("Save place")).toHaveLength(0);
+    expect(texts("Record")).toHaveLength(1);
     expect(tree!.root.findAll((node) => node.props.label === "Save for future visits")).not.toHaveLength(0);
     expect(byTestId("location-evidence-nearby-0")[0].props.accessibilityLabel).toMatch(/^Example Studio/);
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "record_poi_once", name: "Example Bakery" });
-    // Remove goes back to no place.
-    await press(byLabel("Remove Example Bakery")[0]);
+    // Its ✕ goes back to no place.
+    await press(byLabel("Clear Example Bakery")[0]);
     expect(texts("Record visit")).toHaveLength(1);
+  });
+
+  it("asks the map to show each place chosen from a list, never one chosen on the map (Codex r3 on #482)", async () => {
+    native.resolveNearby.mockResolvedValue({
+      suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
+      formattedAddress: "2 Example Road", latitude: 10.003, longitude: 20.0001
+    });
+    await render(stay({ matched: true }));
+    const token = () => map.props!.revealChoiceToken as number;
+    const opening = token();
+    await press(byTestId("location-evidence-nearby-0")[0]);
+    expect(map.props!.selectedPoint).toEqual({ latitude: 10.003, longitude: 20.0001 });
+    expect(token()).toBe(opening + 1);
+    // Back to the match from its row: shown again, and again for a second tap at the same point.
+    const studio = () => tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string"
+      && String(node.props.accessibilityLabel).startsWith("Example Studio"))[0];
+    await press(studio());
+    expect(token()).toBe(opening + 2);
+    await press(studio());
+    expect(token()).toBe(opening + 3);
+    // A tap on the place's own marker is on the map, so the map stays put.
+    act(() => { (map.props!.onSelectSavedPlace as (id: string) => void)("place-studio"); });
+    expect(token()).toBe(opening + 3);
   });
 
   // Codex r1 on #358: a pick that resolves late never overwrites what the person did meanwhile.
@@ -247,7 +387,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await press(tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string")[0]);
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "edit_and_confirm" });
     expect(onResolve.mock.calls[0][0].action).not.toBe("record_poi_once");
@@ -261,7 +401,7 @@ describe("Where were you? (D2, D3)", () => {
     await act(async () => byLabel("Search places")[0].props.onChangeText("Lib"));
     await act(async () => { finish(); await pick; });
     expect(byLabel("Search places")[0].props.value).toBe("Lib");
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(texts("Record visit")).toHaveLength(1);
   });
 
@@ -282,7 +422,7 @@ describe("Where were you? (D2, D3)", () => {
     await act(async () => { finish(); await pick; });
     expect(map.props!.selectedPoint).toEqual(moved);
     expect(typeof map.props!.onSelectPoint).toBe("function");
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
   });
 
   it("drops a late nearby pick after the pin is renamed, and saves the pin's own name and coordinate", async () => {
@@ -294,7 +434,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await act(async () => pinName().props.onChangeText("Corner spot"));
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(map.props!.selectedPoint).toEqual(moved);
     await press(tree!.root.find((node) => node.props.label === "Use this pin"));
     const save = tree!.root.findAll((node) => node.props.label === "Save for future visits" && typeof node.props.onValueChange === "function")[0];
@@ -312,7 +452,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await press(byTestId("location-evidence-map-pin")[0]);
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(typeof map.props!.onSelectPoint).toBe("function");
   });
 
@@ -335,9 +475,28 @@ describe("What did you do? (D1)", () => {
     await render(stay({ matched: false }), ["cat-read"]);
     expect(tree!.root.findAll((node) => isHost(node, "ScrollView") && node.props.horizontal)).toHaveLength(0);
     const chips = byTestId("location-evidence-activity-chips")[0];
-    const labels = chips.findAll((node) => isHost(node, "Pressable")).map((node) => node.props.accessibilityLabel);
+    // The visible chips (the off-screen measuring copies are hidden from VoiceOver).
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const labels = chips.findAll((node) => isHost(node, "Pressable") && !hidden(node)).map((node) => node.props.accessibilityLabel);
     expect(labels).toEqual(["Set activity to Desk work", "Set activity to Reading", "All activities, 4"]);
     expect(texts("No activity")).toHaveLength(0);
+  });
+
+  it("fits the chips and All activities into two rows, keeping the chosen chip (owner, 17 Oct 2026)", async () => {
+    await render(stay({ matched: false }), ["cat-read"]);
+    await press(byTestId("location-evidence-activity-cat-read")[0]);
+    const chips = byTestId("location-evidence-activity-chips")[0];
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const layout = (width: number) => ({ nativeEvent: { layout: { width, height: 38, x: 0, y: 0 } } });
+    await act(async () => {
+      chips.props.onLayout(layout(220));
+      for (const node of chips.findAll((candidate) => typeof candidate.type === "string" && hidden(candidate) && candidate.props.onLayout)) node.props.onLayout(layout(150));
+      byTestId("location-evidence-activity-all")[0].props.onLayout(layout(100));
+    });
+    // 220 wide, 150-wide chips: one chip and the pill take two rows; the chosen Reading stays.
+    const visible = byTestId("location-evidence-activity-chips")[0].findAll((node) => isHost(node, "Pressable") && !hidden(node))
+      .map((node) => node.props.accessibilityLabel);
+    expect(visible).toEqual(["Set activity to Reading", "All activities, 4"]);
   });
 
   it("picks with a tap, clears with a second tap, and sends the choice", async () => {
@@ -378,89 +537,3 @@ describe("What did you do? (D1)", () => {
     expect((onResolve.mock.calls[0][0] as { edit: object }).edit).not.toHaveProperty("categoryId");
   });
 });
-
-describe("Save this place (PRD D19, design §7)", () => {
-  const bakery = { suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
-    formattedAddress: "2 Example Road", latitude: 10.0001, longitude: 20.0001 };
-  async function renderSaving(evidence: LocationReviewEvidenceDto, onSavePlace: Mock, onPlaceSaved: Mock) {
-    sheet.props = null;
-    await act(async () => {
-      tree = create(
-        <LocationReviewCorrectionEditor adjacentReview={undefined} categories={categories} evidence={evidence} isFocused
-          onPlaceSaved={onPlaceSaved} onResolve={onResolve} onSavePlace={onSavePlace} places={[]}
-          reviewItem={{ suggestedCategoryId: "cat-gym" } as never} saving={false} />
-      );
-    });
-  }
-
-  it("saves an unsaved visit's chosen place without logging it, then logs the visit as that place", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => null);
-    const onPlaceSaved = vi.fn();
-    await renderSaving(stay({ matched: false }), onSavePlace, onPlaceSaved);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    // The sheet starts from the chosen venue's name, centres on where the visit was and logs as its activity.
-    expect(sheet.props).toMatchObject({ initialName: "Example Bakery", centre: { latitude: 10, longitude: 20 }, logsAs: "Training" });
-    const request = { name: "Bakery corner", radiusMeters: 110, suggestVisits: true, autoLog: false };
-    expect(await sheet.props!.onSave(request as never)).toBeNull();
-    expect(onSavePlace).toHaveBeenCalledWith({ ...request, categoryId: "cat-gym" });
-    expect(onResolve).not.toHaveBeenCalled();
-    // The sheet leaves first; then the row becomes the saved place and the screen raises its toast.
-    await act(async () => {
-      sheet.props!.onClose();
-      sheet.props!.onSaved(request as never);
-    });
-    expect(onPlaceSaved).toHaveBeenCalledWith("Bakery corner");
-    expect(texts("Bakery corner")).toHaveLength(1);
-    expect(texts("New saved place")).toHaveLength(1);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-    expect(tree!.root.findAll((node) => node.props.label === "Save for future visits")).toHaveLength(0);
-    await press(primary());
-    const logged = onResolve.mock.calls[0][0] as { action: string; edit?: Record<string, unknown> };
-    expect(logged.action).toBe("edit_and_confirm");
-    expect(logged.edit).not.toHaveProperty("placeId");
-  });
-
-  it("records the saved place, not its removal, once a refresh brings it back as the match (Codex r1 on #460)", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => null);
-    await renderSaving(stay({ matched: false }), onSavePlace, vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    const request = { name: "Bakery corner", radiusMeters: 110, suggestVisits: true, autoLog: false };
-    await sheet.props!.onSave(request as never);
-    await act(async () => { sheet.props!.onClose(); sheet.props!.onSaved(request as never); });
-    const refreshed = stay({ matched: true }) as unknown as { display: Record<string, unknown>; map: { nearbySavedPlaces: unknown[] } };
-    refreshed.display = { ...refreshed.display, title: "Bakery corner", placeId: "place-bakery", placeName: "Bakery corner" };
-    refreshed.map.nearbySavedPlaces = [];
-    await act(async () => {
-      tree!.update(
-        <LocationReviewCorrectionEditor adjacentReview={undefined} categories={categories} evidence={refreshed as never} isFocused
-          onPlaceSaved={vi.fn()} onResolve={onResolve} onSavePlace={onSavePlace} places={[]}
-          reviewItem={{ suggestedCategoryId: "cat-gym", suggestedPlaceId: "place-bakery" } as never} saving={false} />
-      );
-    });
-    expect(texts("New saved place")).toHaveLength(0);
-    await press(primary());
-    const logged = onResolve.mock.calls[0][0] as { action: string; edit?: Record<string, unknown> };
-    expect(logged.action).toBe("edit_and_confirm");
-    expect(logged.edit).not.toHaveProperty("placeId");
-  });
-
-  it("keeps the sheet's draft when the save is refused, and never offers it for a matched visit", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => "This place is already being saved.");
-    await renderSaving(stay({ matched: false }), onSavePlace, vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    expect(await sheet.props!.onSave({ name: "Bakery", radiusMeters: 60, suggestVisits: true, autoLog: false } as never)).toBe("This place is already being saved.");
-    act(() => tree!.unmount());
-    tree = undefined;
-    await renderSaving(stay({ matched: true }), vi.fn(), vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-  });
-});
-

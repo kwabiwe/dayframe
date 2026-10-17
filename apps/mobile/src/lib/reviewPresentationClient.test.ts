@@ -92,7 +92,7 @@ describe("fetchReviewPresentationPage", () => {
     })).rejects.toBeInstanceOf(ReviewPresentationSnapshotChangedError);
   });
 
-  it("asks for time away and Move route lines, which only this client understands", async () => {
+  it("asks for time away, Move route lines and outings, which only this client understands", async () => {
     vi.mocked(readOwnedAuthenticatedSessionSnapshot).mockResolvedValue({
       status: "authenticated",
       snapshot: { token: "fixture-token", owner: { workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" } }
@@ -103,7 +103,7 @@ describe("fetchReviewPresentationPage", () => {
       owner: { backendId: "staging-fixture", workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" },
       request: { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 100 }
     }).catch(() => undefined);
-    expect(vi.mocked(mobileJsonRequest).mock.lastCall?.[1]?.headers).toMatchObject({ "x-dayframe-review-features": "time-away,move-route" });
+    expect(vi.mocked(mobileJsonRequest).mock.lastCall?.[1]?.headers).toMatchObject({ "x-dayframe-review-features": "time-away,move-route,outing,outing-count,learned-name" });
   });
 
   it("classifies a malformed successful response without exposing its body", async () => {

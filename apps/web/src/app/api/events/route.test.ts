@@ -93,7 +93,7 @@ describe("POST /api/events", () => {
     reviewCountMock.mockResolvedValueOnce(4);
     const payload = await (await POST(jsonRequest(healthSleepEvent()))).json();
     expect(payload).toMatchObject({ eventId: "event-1", reviewCount: 4 });
-    expect(reviewCountMock).toHaveBeenCalledWith(session);
+    expect(reviewCountMock).toHaveBeenCalledWith(session, { cards: false });
   });
 
   it("reports a Health SQL timeout with its real phase and preserves retry semantics",async()=>{

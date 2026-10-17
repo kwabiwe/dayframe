@@ -1,7 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { formatClockTime, type DayframeGlyph } from "@dayframe/shared";
+import { formatClockTime, reviewCardCount, type DayframeGlyph } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -489,7 +489,8 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // Held or saving decisions for cards the newest 100 no longer list are not available either.
   const deckIds = new Set(deckItems.map((item) => item.id));
   const heldUnlisted = [...state.hiddenIds].filter((id) => !deckIds.has(id)).length;
-  const beyondLoaded = Math.max(0, data.stats.reviewCount - deckItems.length - heldUnlisted);
+  // Counted in cards, as the server counts them: an outing once (PRD D19, PR 12c).
+  const beyondLoaded = Math.max(0, data.stats.reviewCardCount - reviewCardCount(deckItems) - heldUnlisted);
   const total = visible.length + beyondLoaded;
   const toast = state.notice ? (
     <BlocksToast
