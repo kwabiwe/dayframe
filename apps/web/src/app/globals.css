@@ -14225,10 +14225,21 @@ dialog.ui-dialog.df-rf-dialog {
   }
 }
 
+/* Reduce Motion follows the block editor's own path (opacity in 1 ms), so a Discard that closes
+   both never leaves the dialog fading after the editor has gone (Codex r2 on #465). */
 @media (prefers-reduced-motion: reduce) {
   .df-confirm,
   .df-confirm-layer.is-entered .df-confirm {
     transform: none;
+  }
+
+  .df-confirm,
+  .df-confirm-scrim,
+  .df-confirm-layer.is-entered .df-confirm,
+  .df-confirm-layer.is-entered .df-confirm-scrim,
+  .df-confirm-layer:not(.is-open) {
+    transition-duration: 1ms;
+    transition-delay: 0s;
   }
 }
 
