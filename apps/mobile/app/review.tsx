@@ -136,7 +136,7 @@ import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
-import { DAYFRAME_APP_ICONS, formatClockTime, outingKeyOf, type ClockFormat } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, formatClockTime, outingKeyOf, reviewCardCount, type ClockFormat } from "@dayframe/shared";
 import {
   heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
@@ -166,6 +166,7 @@ import {
 } from "@/lib/reviewPresentationClient";
 import { isMobileTransportFailure } from "@/lib/mobile-network";
 import {
+  loadedReviewBacklogCards,
   mergeReviewBacklogPage,
   projectReviewBacklogPage,
   type ReviewBacklogState
@@ -999,7 +1000,8 @@ export default function ReviewScreen() {
       (left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()
     );
   }, [focusedLegacyEntry, reviewNeededEntries]);
-  const visibleReviewItemCount = openReviewItems.length + displayedReviewNeededEntries.length;
+  // Counted in cards, an outing once (PRD D19, PR 12c), as the server's counts are.
+  const visibleReviewItemCount = reviewCardCount(openReviewItems) + displayedReviewNeededEntries.length;
   const hasUnmaterialisedReviewEffects = Boolean(reviewSyncDiagnostics && (
     reviewSyncDiagnostics.pendingCount +
     reviewSyncDiagnostics.retryWaitCount +
@@ -1018,9 +1020,9 @@ export default function ReviewScreen() {
       ? "Review available · count updating"
       : `At least ${visibleReviewItemCount} ${visibleReviewItemCount === 1 ? "moment" : "moments"} to review`;
   const backlogProgressCopy = reviewBacklog?.nextCursor
-    ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
+    ? `Loaded ${loadedReviewBacklogCards(reviewBacklog)} of ${reviewBacklog.globalCount} moments.`
     : reviewBacklog && !reviewBacklog.recordsComplete
-      ? `Loaded ${reviewBacklog.recordKeys.length} of ${reviewBacklog.globalCount} moments.`
+      ? `Loaded ${loadedReviewBacklogCards(reviewBacklog)} of ${reviewBacklog.globalCount} moments.`
       : null;
   const showEmptyReviewState = reviewCountIsExact && totalNeedsReview === 0 && visibleReviewItemCount === 0;
   const editingEntry = editTarget?.entry ?? null;

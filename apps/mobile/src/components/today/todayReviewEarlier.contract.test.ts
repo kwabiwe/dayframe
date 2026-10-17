@@ -19,7 +19,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    expect(dashboard).toContain("earlierDayReviewCounts(earlierDays, (calendarData?.reviewItems ?? []).filter(isOpenReviewItem))");
+    expect(dashboard).toContain("const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
+    // An outing counts once on its day (PRD D19, PR 12c).
+    expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");
     expect(dashboard).toContain("reviewCounts={earlierDayReviewCountMap}");
   });
 

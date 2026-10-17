@@ -6,6 +6,8 @@ import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
   LocationReviewEvidenceDtoSchema,
+  REVIEW_COUNT_CARDS,
+  REVIEW_COUNT_REQUEST_HEADER,
   type ActivityEventInput,
   type ActivityEventType,
   type CategoryUsageRank,
@@ -130,6 +132,16 @@ export type MobileStats = {
   todayAdditionalOverlapSeconds?: number;
   weekAdditionalOverlapSeconds?: number;
   reviewCount: number;
+  /** Review cards, an outing once (PRD D19, PR 12c); absent from older servers. */
+  reviewCardCount?: number;
+  /** Each open Move folded into its outing's open Stay card (member → Stay), to move the count locally. */
+  reviewOutingStays?: Record<string, string>;
+  /** More open outing Moves than the server maps: it sent no map. */
+  reviewOutingStaysOverflow?: boolean;
+  /** Set on this iPhone when a local decision moved `reviewCardCount` without knowing by how much: not exact. */
+  reviewCardCountApproximate?: boolean;
+  /** Set on this iPhone: the cards already taken off `reviewCardCount` here, so a re-projection skips them. */
+  reviewCardCountAppliedIds?: string[];
 };
 
 export type MobileTag = {
@@ -608,7 +620,7 @@ export async function fetchBootstrap(options: { date?: string; signal?: AbortSig
     requireBootstrapCurrent();
     await activateMobileAccount(owner);
     requireBootstrapCurrent();
-    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCount);
+    noteReviewCountQuietly(owner, bootstrap.stats?.reviewCardCount ?? bootstrap.stats?.reviewCount);
   }
   const reviewStore = await reviewSyncStore();
   requireLogoutAllowsResponse();
@@ -1275,7 +1287,9 @@ async function syncQueueItems(
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${sessionRead.snapshot.token}`
+            Authorization: `Bearer ${sessionRead.snapshot.token}`,
+            // The reply's Review count counts cards, an outing once (PR 12c).
+            [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
           },
           body: JSON.stringify(queuedEventRequestBody(item)),
           signal: options.signal

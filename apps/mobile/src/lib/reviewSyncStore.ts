@@ -7,6 +7,9 @@ import {
   LocationReviewEvidenceDtoSchema,
   OUTING_KEY_PAYLOAD_KEY,
   OUTING_ROLE_PAYLOAD_KEY,
+  reviewCardCount,
+  reviewCardsRemoved,
+  reviewCardsRemovedByOutings,
   REVIEW_PRESENTATION_MAX_IDS,
   ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
@@ -916,7 +919,9 @@ export async function loadCachedReviewBootstrap(): Promise<{
       stats: {
         todaySeconds: 0,
         weekSeconds: 0,
-        reviewCount: reviewItems.length
+        reviewCount: reviewItems.length,
+        // Cards, an outing once (PRD D19, PR 12c).
+        reviewCardCount: reviewCardCount(reviewItems)
       }
     }
   };
@@ -1622,23 +1627,36 @@ export function withNewerTerminalEvidence(
   const today = response.scope.today;
   const todayStart = today ? Date.parse(today.start) : NaN;
   const todayEnd = today ? Date.parse(today.end) : NaN;
-  const removedToday = response.records.filter((record) => {
-    if (record.kind !== "review" || record.status !== "open" || !closed.has(record.reviewItemId)) return false;
+  const inToday = (record: ReviewProposalPresentation) => {
     const start = Date.parse(record.interval.start ?? "");
     const end = Date.parse(record.interval.end ?? "");
     return Number.isFinite(start) && Number.isFinite(end)
       ? start < todayEnd && end > todayStart
       : Date.parse(record.createdAt) >= todayStart && Date.parse(record.createdAt) < todayEnd;
-  }).length;
+  };
+  const todayIds = new Set(response.records.flatMap((record) =>
+    record.kind === "review" && record.status === "open" && inToday(record) ? [record.reviewItemId] : []));
+  // Counts of cards (an outing once, PRD D19, PR 12c) move by the server's outing map, exactly
+  // whatever this snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
+  const outingStays = response.outstanding.outingStays;
+  // Counts of cards with no map (beyond its limit): any removal leaves them approximate.
+  const approximate = Boolean(response.outstanding.outingStaysOverflow) && removedOpen.length > 0;
+  const removedCards = outingStays ? reviewCardsRemovedByOutings(outingStays, removedOpen) : removedOpen.length;
+  const removedToday = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, removedOpen, (id) => todayIds.has(id))
+    : removedOpen.filter((id) => todayIds.has(id)).length;
   return {
     ...response,
     records: response.records.filter((record) => !(record.kind === "review" && record.status === "open" && closed.has(record.reviewItemId))),
     links: response.links.filter((link) => !(link.status === "open" && closed.has(link.reviewItemId))),
     outstanding: {
       ...response.outstanding,
-      globalCount: Math.max(0, response.outstanding.globalCount - removedOpen.length),
+      globalCount: Math.max(0, response.outstanding.globalCount - removedCards),
       todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
-      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id))
+      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id)),
+      ...(outingStays ? { outingStays: Object.fromEntries(Object.entries(outingStays)
+        .filter(([member, stay]) => !closed.has(member) && !closed.has(stay))) } : {}),
+      ...(approximate ? { countsApproximate: true as const } : {})
     }
   };
 }
@@ -3190,17 +3208,44 @@ export function projectReviewBootstrap(
 ) {
   if (hiddenIds.size === 0 && savedPlaceNames.size === 0) return bootstrap;
   const reviewItems = bootstrap.reviewItems.filter((item) => !hiddenIds.has(item.id)).map((item) => withSavedPlace(item, savedPlaceNames));
-  const hiddenOpenCount =
-    bootstrap.reviewItems.filter((item) => item.status === "open").length -
-    reviewItems.filter((item) => item.status === "open").length;
+  const openBefore = bootstrap.reviewItems.filter((item) => item.status === "open");
+  const hiddenOpenCount = openBefore.length - reviewItems.filter((item) => item.status === "open").length;
+  // Cards leave by the server's outing map (an outing once, PRD D19, PR 12c), counted for the cards
+  // this list still shows: a projected bootstrap no longer lists what it took off, so projecting it
+  // again changes nothing (Codex r2/r3 on #475). The map is the server's, kept whole, so a later
+  // decision still knows its outing.
+  const stats = bootstrap.stats;
+  const outingStays = stats?.reviewOutingStays;
+  const cardCount = stats?.reviewCardCount;
+  const listedOpen = new Set(openBefore.map((item) => item.id));
+  const hiddenListed = [...hiddenIds].filter((id) => listedOpen.has(id));
+  // What this phone has taken off the count already: a new decision moves the count by what it
+  // adds to those (a decided Stay no longer folds its Moves; Codex r4 on #475), and a re-projection
+  // never calls them unknown.
+  const appliedBefore = stats?.reviewCardCountAppliedIds ?? [];
+  const applied = new Set([...appliedBefore, ...hiddenListed]);
+  const hiddenCards = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, applied) - reviewCardsRemovedByOutings(outingStays, appliedBefore)
+    : reviewCardsRemoved(openBefore, hiddenIds);
+  const outingParts = new Set(Object.entries(outingStays ?? {}).flat());
+  // Not exact: a decided outing card the capped list does not show (the map knows it changes the
+  // count, the list cannot say by how much), or any decision while the server sent no map.
+  const approximate = typeof cardCount === "number" && (
+    Boolean(stats?.reviewCardCountApproximate) ||
+    (Boolean(stats?.reviewOutingStaysOverflow) && hiddenIds.size > 0) ||
+    [...hiddenIds].some((id) => outingParts.has(id) && !listedOpen.has(id) && !applied.has(id))
+  );
   return {
     ...bootstrap,
     reviewItems,
-    ...(bootstrap.stats
+    ...(stats
       ? {
           stats: {
-            ...bootstrap.stats,
-            reviewCount: Math.max(0, bootstrap.stats.reviewCount - hiddenOpenCount)
+            ...stats,
+            reviewCount: Math.max(0, stats.reviewCount - hiddenOpenCount),
+            ...(typeof cardCount === "number" ? { reviewCardCount: Math.max(0, cardCount - hiddenCards) } : {}),
+            ...(typeof cardCount === "number" && applied.size ? { reviewCardCountAppliedIds: [...applied] } : {}),
+            ...(approximate ? { reviewCardCountApproximate: true } : {})
           }
         }
       : {})

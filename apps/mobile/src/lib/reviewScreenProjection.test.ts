@@ -57,6 +57,16 @@ describe("projectReviewScreenData (one Review data owner)", () => {
     expect(next.reviewItems[1].rawPayload).toMatchObject({ semanticReason: "existing_review_preserved" });
   });
 
+  it("takes the count of cards with its map and exactness from the projection, never left over from the base (Codex r3 on #475)", () => {
+    const server = syntheticReviewBootstrap(2);
+    const base = { ...server, stats: { ...server.stats!, reviewCardCount: 2, reviewOutingStays: { a: "b" }, reviewCardCountApproximate: true } };
+    const projection = { ...cachedCopy(server), stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 2, reviewCardCount: 1 } };
+    const next = projectReviewScreenData({ base, projection, live: liveReviewItems(server), current: null });
+    expect(next.stats).toMatchObject({ reviewCardCount: 1 });
+    expect(next.stats).not.toHaveProperty("reviewOutingStays");
+    expect(next.stats).not.toHaveProperty("reviewCardCountApproximate");
+  });
+
   it("returns what is on screen when nothing changed (no re-render), and reuses unchanged cards", () => {
     const server = syntheticReviewBootstrap(3);
     const live = liveReviewItems(server);

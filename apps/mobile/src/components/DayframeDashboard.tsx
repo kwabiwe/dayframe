@@ -42,6 +42,8 @@ import {
   timerStateChanged,
   timerStatePollDelay,
   formatClockTime,
+  foldedOutingMemberIds,
+  reviewCardCount,
   type ClockFormat,
   type RecentActivitySuggestion,
   type TimerStateFingerprint
@@ -1650,16 +1652,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
     // todayKey moves the seven-day window at midnight.
   }, [historySourceEntries, sortedCategories, todayKey]);
+  // Counted in cards, an outing once (PRD D19, PR 12c).
   const openReviewCount = useMemo(
-    () => (data?.reviewItems ?? []).filter(isOpenReviewItem).length,
+    () => reviewCardCount((data?.reviewItems ?? []).filter(isOpenReviewItem)),
     [data?.reviewItems]
   );
-  // The bootstrap's Review list is capped (100), so only the server's total counts as exact.
+  // The bootstrap's Review list is capped (100), so only the server's total counts as exact (its
+  // count of cards; an older server's count of suggestions).
+  const serverReviewCount = data?.stats?.reviewCardCount ?? data?.stats?.reviewCount;
+  const serverReviewCountExact = !data?.stats?.reviewCardCountApproximate;
   const todayReviewFallback = useMemo(
-    () => typeof data?.stats?.reviewCount === "number"
-      ? { value: data.stats.reviewCount, exact: true }
+    () => typeof serverReviewCount === "number"
+      ? { value: serverReviewCount, exact: serverReviewCountExact }
       : { value: openReviewCount, exact: false },
-    [data?.stats?.reviewCount, openReviewCount]
+    [openReviewCount, serverReviewCount, serverReviewCountExact]
   );
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(
@@ -1793,7 +1799,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
   // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
   const earlierDayReviewCountMap = useMemo(
-    () => earlierDayReviewCounts(earlierDays, (calendarData?.reviewItems ?? []).filter(isOpenReviewItem)),
+    () => {
+      // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
+      const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);
+      const folded = foldedOutingMemberIds(open);
+      return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
+    },
     [calendarData?.reviewItems, earlierDays]
   );
   const nativeCalendarBridge = useMemo(
