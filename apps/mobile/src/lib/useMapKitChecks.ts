@@ -23,6 +23,8 @@ type Options = {
  * Sync help's "Check Apple Maps nearby data" row. The run itself is single-flight for the app
  * (`startMapKitChecks`): a second tap, or Settings left and opened again, joins it. Only a screen
  * that is still showing presents the result; a screen the person left presents nothing.
+ * The run belongs to the device, not the account: its report is device diagnostics (counts and
+ * answers, no account data), so a run started before a sign-out may be shown to the next account.
  */
 export function useMapKitChecks({ onNote, share }: Options = {}) {
   const [checking, setChecking] = useState(() => runningMapKitChecks() !== null);
@@ -60,7 +62,9 @@ export function useMapKitChecks({ onNote, share }: Options = {}) {
   useEffect(() => {
     mounted.current = true;
     const run = runningMapKitChecks();
+    // A run the first render saw may have finished before this effect ran (Codex r2 on #489).
     if (run) void follow(run);
+    else setChecking(false);
     return () => {
       mounted.current = false;
       following.current = null;
