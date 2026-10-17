@@ -31,6 +31,7 @@ import {
   segmentStartedAfterSemanticCutover
 } from "./location-rollout";
 import { locationSemanticDisposition } from "./location-semantic-policy";
+import { reconcileHealthCoveredMoveCardsNow } from "./health-coverage";
 import { LOCATION_REPLAY_SCALABILITY_PROFILE } from "./location-replay-batching";
 
 export const LOCATION_EVIDENCE_BODY_LIMIT_BYTES = 512 * 1024;
@@ -223,7 +224,7 @@ export async function replayRetainedLocationEvidence(
     // is proven not to alter the transaction-local timeout settings.
     reuseFullCapTimeoutPair: rollout.effectiveMode === "v2_review"
   };
-  return withSyncTransaction("location_evidence", async ({ client, phase, remainingMs }) => {
+  const result: LocationReplayResponse = await withSyncTransaction("location_evidence", async ({ client, phase, remainingMs }) => {
     phase("owner_lock");
     const replayObservation = { ...options, remainingOperationMs: remainingMs };
     observeLocationTiming(replayObservation, "owner_lock", "started");
@@ -254,6 +255,15 @@ export async function replayRetainedLocationEvidence(
       warnings: locationReplayWarnings(rollout, semanticReplay.replay.diagnostics.warningCodes)
     };
   }, transactionOptions);
+  // Health walks win (PRD D19), from the cards themselves: a workout that arrived after its Move's card
+  // retires it, even once the Move's evidence has aged out. After the replay committed, page by page,
+  // so the sweep can never cost the replay its work (Codex r5 on #457).
+  if (rollout.effectiveMode === "v2_review" && rollout.emitV2ReviewItems && rollout.semanticCutoverAt) {
+    const retired = await reconcileHealthCoveredMoveCardsNow(session,
+      { deadlineAt: options.deadlineAt, signal: options.signal, now: processingAt, databasePool: options.databasePool });
+    if (retired) result.semanticChangeCount = (result.semanticChangeCount ?? 0) + retired;
+  }
+  return result;
 }
 
 async function replayAndEmitLocationSemantics(

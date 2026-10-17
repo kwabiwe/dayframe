@@ -72,4 +72,11 @@ describe("Save this place (PRD D19, design §7)", () => {
     expect(validReviewAcknowledgement({ ok: true, action: "save_place", status: "open" }, envelope, id)).toBe(false);
     expect(validReviewAcknowledgement({ ok: true, action: "save_place", status: "accepted", entryId: id }, envelope, id)).toBe(false);
   });
+
+  it("lets Save place and confirm carry the place's switches and a large size, which older apps omit", () => {
+    const base = { action: "save_place_and_confirm", name: "Synthetic place", latitude: 51.5, longitude: -0.1 };
+    expect(ReviewMutationSchema.safeParse({ ...base, radiusMeters: 200, suggestVisits: false, autoLog: false }).success).toBe(true);
+    expect(ReviewMutationSchema.parse(base)).not.toHaveProperty("suggestVisits");
+    expect(ReviewMutationSchema.safeParse({ ...base, radiusMeters: 201 }).success).toBe(false);
+  });
 });

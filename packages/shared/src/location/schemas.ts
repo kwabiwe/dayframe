@@ -229,7 +229,10 @@ export const RecordPoiOnceLocationReviewSchema = z.object({
 export const SavePlaceAndConfirmSchema = z.object({
   action: z.literal("save_place_and_confirm"), name: z.string().trim().min(1).max(120),
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
-  radiusMeters: z.number().int().min(30).max(160).default(80), edit: ReviewEntryEditSchema.optional()
+  radiusMeters: z.number().int().min(30).max(200).default(80), edit: ReviewEntryEditSchema.optional(),
+  /** The place's "Suggest visits here" and "Log automatically" (web's Save this place box, PRD D19); older apps omit them. */
+  suggestVisits: z.boolean().optional(),
+  autoLog: z.boolean().optional()
 }).strict();
 /** A saved place's size for "Save this place" (PRD D19, design §7): the circle around where you were. */
 export const SAVE_PLACE_RADIUS_METERS = { small: 60, medium: 110, large: 200 } as const;
