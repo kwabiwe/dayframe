@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alreadyRecordingToastMessage, startMatchesRunning, switchedToastCopy } from "./blocks-toast-copy";
+import { alreadyRecordingToastMessage, deletedToastLabel, startMatchesRunning, switchedToastCopy } from "./blocks-toast-copy";
 
 const previous = { categoryId: "c", categoryName: "Client Work", description: null, startedAt: "2026-10-10T22:52:00.000Z", tagNames: [] };
 
@@ -25,5 +25,14 @@ describe("web switch toast copy (UIA-209)", () => {
     expect(startMatchesRunning(null, { categoryId: "c", description: "", tagNames: [] })).toBe(false);
     // A bare start never matches.
     expect(startMatchesRunning({ ...previous, categoryId: null }, { categoryId: null, description: "", tagNames: [] })).toBe(false);
+  });
+});
+
+describe("toast grammar (web UI audit WUI-043)", () => {
+  it("puts the verb first, without quotes", () => {
+    expect(deletedToastLabel(1, "Shop run")).toBe("Deleted Shop run");
+    expect(deletedToastLabel(3, "Shop run")).toBe("Deleted 3 Shop run blocks");
+    expect(deletedToastLabel(1, "  ")).toBe("Deleted block");
+    expect(deletedToastLabel(2, null)).toBe("Deleted 2 blocks");
   });
 });

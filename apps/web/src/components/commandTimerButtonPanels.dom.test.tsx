@@ -439,6 +439,26 @@ describe("on phones the buttons' lists are sheets", () => {
     await waitFor(() => expect(document.activeElement).toBe(activityButton()));
   });
 
+  it("keeps the sheet on screen when the page scrolls its field away (the phone Calendar scrolls; Codex r1 on #488)", async () => {
+    phone();
+    renderBar();
+    await openTags();
+    const surface = surfaceOf(listbox("Tags"));
+    // The field has scrolled 300 px above the top of the screen.
+    const rect = { top: -300, bottom: -256, left: 12, right: 378, width: 366, height: 44, x: 12, y: -300, toJSON: () => ({}) } as DOMRect;
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect);
+    try {
+      act(() => {
+        window.dispatchEvent(new Event("scroll"));
+      });
+      expect(surface.style.top).toBe("12px");
+      expect(surface.style.maxHeight).toBe(`${window.innerHeight - 24}px`);
+      expect(within(surface).getByRole("button", { name: "Close tags" })).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("the Tags list is a full-width sheet with a 44 px Close that returns focus to the Tags button", async () => {
     phone();
     renderBar();

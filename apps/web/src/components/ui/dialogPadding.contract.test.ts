@@ -23,9 +23,9 @@ describe("dialog padding (UIA-301)", () => {
       expect(rule(selector)).not.toMatch(/\bpadding:/);
     }
     // Add time's dialog is gone: it is the shared editor's modal now (WUI-025).
-    for (const selector of [".ui-popover-content", ".df-palette .ui-dialog-content"]) {
-      expect(rule(selector)).toContain("padding: 0;");
-    }
+    expect(rule(".df-palette .ui-dialog-content")).toContain("padding: 0;");
+    // Popovers have the #391 surface's 6 px inside padding (WUI-022).
+    expect(rule(".ui-popover-content")).toContain("padding: 6px;");
   });
 
   it("puts the Settings dialogs' actions in the dialog footer", () => {

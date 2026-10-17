@@ -630,7 +630,8 @@ export function calculateCalendarEditorPosition({
   const width = Math.min(panelWidth, Math.max(0, viewportWidth - margin * 2));
   const maxHeight = Math.max(0, viewportHeight - margin * 2);
 
-  if (viewportWidth <= 640) {
+  // Phones (≤560 px, the one sheet breakpoint; WUI-026): the editor is a bottom sheet.
+  if (viewportWidth <= 560) {
     return {
       left: margin,
       maxHeight,
