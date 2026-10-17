@@ -1506,7 +1506,24 @@ dialog.ui-dialog.ui-dialog--wide {
   width: min(720px, calc(100vw - 24px));
 }
 
-/* The closed dialog's fading twin (see playDialogExit): above the page, never interactive. */
+/* The closed dialog's fading twin (see playDialogExit): a top-layer popover holding the scrim and
+   the copy, above every dialog still open, never interactive. */
+.ui-dialog-ghost-layer {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
 dialog.ui-dialog.ui-dialog-ghost {
   z-index: 1000;
   pointer-events: none;
@@ -1569,13 +1586,24 @@ dialog.ui-dialog.ui-dialog-ghost {
   }
 }
 
+/* Reduce Motion keeps the fades at their own lengths: these outrank the global 1 ms rule. */
 @media (prefers-reduced-motion: reduce) {
   dialog.ui-dialog[open] {
     animation-name: ui-dialog-fade-in;
+    animation-duration: 160ms !important;
+  }
+
+  dialog.ui-dialog::backdrop {
+    animation-duration: 160ms !important;
   }
 
   dialog.ui-dialog.ui-dialog-ghost {
     animation-name: ui-dialog-fade-out;
+    animation-duration: 120ms !important;
+  }
+
+  .ui-dialog-ghost-layer .ui-dialog-ghost-scrim {
+    animation-duration: 120ms !important;
   }
 }
 
@@ -1674,7 +1702,7 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 @media (max-width: 760px) {
-  dialog.ui-dialog,
+  /* Popover panels go full width; dialogs keep their tier (each is already min(tier, 100vw − 24px)). */
   dialog.ui-dialog.ui-popover-panel {
     width: min(100% - 24px, 720px);
     max-height: calc(100dvh - 24px);
@@ -1695,6 +1723,11 @@ dialog.ui-popover-panel.bottom-left {
   .ui-dialog-actions > :is(button, a) {
     flex: 1 1 0;
     justify-content: center;
+  }
+
+  /* Spacers would take a share of the row too. */
+  .ui-dialog-actions > .df-spacer {
+    display: none;
   }
 }
 

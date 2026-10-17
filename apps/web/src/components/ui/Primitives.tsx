@@ -12,6 +12,7 @@ import {
   forwardRef,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -252,7 +253,19 @@ let openDialogCount = 0;
  * 120 ms (opacity only under Reduce Motion, in the same 120 ms) and is then removed. The real
  * dialog has already closed, so focus and the page's interactivity return at once.
  */
-export function playDialogExit(dialog: HTMLDialogElement) {
+/** Scroll offsets inside a dialog, by position in `[dialog, ...descendants]` (only non-zero ones). */
+export type DialogScrollSnapshot = Array<[index: number, top: number, left: number]>;
+
+/** Reads the dialog's scroll offsets while it is still laid out (a detached copy has none). */
+export function captureDialogScroll(dialog: HTMLElement): DialogScrollSnapshot {
+  const snapshot: DialogScrollSnapshot = [];
+  [dialog, ...dialog.querySelectorAll<HTMLElement>("*")].forEach((element, index) => {
+    if (element.scrollTop || element.scrollLeft) snapshot.push([index, element.scrollTop, element.scrollLeft]);
+  });
+  return snapshot;
+}
+
+export function playDialogExit(dialog: HTMLDialogElement, scroll: DialogScrollSnapshot = []) {
   if (typeof document === "undefined" || !dialog.hasAttribute("open")) return;
   const ghost = dialog.cloneNode(true) as HTMLDialogElement;
   // Typed values are properties, not attributes: carry them over so fields do not blank.
@@ -271,12 +284,28 @@ export function playDialogExit(dialog: HTMLDialogElement) {
   ghost.setAttribute("open", "");
   const scrim = document.createElement("div");
   scrim.className = "ui-dialog-ghost-scrim";
-  scrim.setAttribute("aria-hidden", "true");
-  document.body.append(scrim, ghost);
-  window.setTimeout(() => {
-    scrim.remove();
-    ghost.remove();
-  }, 160);
+  // One inert, hidden layer holds the scrim and the copy. The outgoing dialog was the topmost layer,
+  // so the copy joins the top layer as a manual popover, above any dialog still open (a nested
+  // dialog closing over another fades in place, not behind it; Codex r1 on #487).
+  const layer = document.createElement("div");
+  layer.className = "ui-dialog-ghost-layer";
+  layer.setAttribute("aria-hidden", "true");
+  layer.inert = true;
+  layer.append(scrim, ghost);
+  document.body.append(layer);
+  if (typeof layer.showPopover === "function") {
+    layer.popover = "manual";
+    layer.showPopover();
+  }
+  // The frame as it was: the copy is scrolled where the dialog was.
+  const nodes = [ghost, ...ghost.querySelectorAll<HTMLElement>("*")];
+  for (const [index, top, left] of scroll) {
+    const copy = nodes[index];
+    if (!copy) continue;
+    copy.scrollTop = top;
+    copy.scrollLeft = left;
+  }
+  window.setTimeout(() => layer.remove(), 160);
 }
 
 export function ModalDialog({
@@ -310,8 +339,18 @@ export function ModalDialog({
   title?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const exitScrollRef = useRef<DialogScrollSnapshot>([]);
   const titleId = useId();
   const descriptionId = useId();
+
+  // A layout cleanup runs while the dialog is still laid out, before an unmount removes it: the
+  // exit's copy is scrolled from what it records.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    return () => {
+      if (dialog) exitScrollRef.current = captureDialogScroll(dialog);
+    };
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -333,7 +372,7 @@ export function ModalDialog({
       window.cancelAnimationFrame(focusHandle);
       // A real close (the host unmounted it) fades out; a re-run while still mounted does not.
       // jsdom draws nothing, so there the copy would only duplicate the dialog for DOM queries.
-      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog);
+      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog, exitScrollRef.current);
       if (dialog.open) dialog.close();
       openDialogCount = Math.max(0, openDialogCount - 1);
       if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");

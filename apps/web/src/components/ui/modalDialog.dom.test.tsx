@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { ModalDialog, playDialogExit } from "./Primitives";
+import { captureDialogScroll, ModalDialog, playDialogExit } from "./Primitives";
 
 const styles = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -61,7 +61,31 @@ describe("ModalDialog", () => {
     expect(document.querySelector(".ui-dialog-ghost-scrim")).not.toBeNull();
 
     vi.advanceTimersByTime(160);
-    expect(document.querySelector(".ui-dialog-ghost, .ui-dialog-ghost-scrim")).toBeNull();
+    expect(document.querySelector(".ui-dialog-ghost, .ui-dialog-ghost-scrim, .ui-dialog-ghost-layer")).toBeNull();
+  });
+
+  it("holds the copy and its scrim in one inert, hidden layer, scrolled where the dialog was (Codex r1 on #487)", () => {
+    vi.useFakeTimers();
+    const dialog = document.createElement("dialog");
+    dialog.className = "ui-dialog";
+    dialog.innerHTML = '<div class="ui-dialog-content"><p>Long</p></div>';
+    dialog.setAttribute("open", "");
+    document.body.append(dialog);
+    const content = dialog.querySelector<HTMLElement>(".ui-dialog-content")!;
+    // jsdom does no layout, so the offsets are set by hand; they are only read and written back.
+    Object.defineProperty(content, "scrollTop", { configurable: true, value: 200, writable: true });
+    const scroll = captureDialogScroll(dialog);
+    expect(scroll).toEqual([[1, 200, 0]]);
+    dialog.remove();
+
+    playDialogExit(dialog, scroll);
+    const layer = document.querySelector<HTMLElement>(".ui-dialog-ghost-layer")!;
+    expect(layer.inert).toBe(true);
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    expect(layer.querySelector(".ui-dialog-ghost-scrim")).not.toBeNull();
+    expect(layer.querySelector<HTMLElement>(".ui-dialog-ghost .ui-dialog-content")!.scrollTop).toBe(200);
+    vi.advanceTimersByTime(160);
+    expect(document.querySelector(".ui-dialog-ghost-layer")).toBeNull();
   });
 
   it("plays nothing for a dialog that was never open", () => {
@@ -80,6 +104,12 @@ describe("ModalDialog", () => {
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*dialog\.ui-dialog\[open\] \{\s*animation-name: ui-dialog-fade-in;/);
     expect(styles).toMatch(/@media \(max-width: 560px\) \{\s*dialog\.ui-dialog \{\s*border-radius: 24px;\s*\}\s*\.ui-dialog-actions > :is\(button, a\) \{\s*flex: 1 1 0;/);
     expect(styles).toMatch(/\.ui-dialog-header \.ui-icon-button \{\s*background: transparent;/);
+    // Reduce Motion keeps the fades at their lengths, above the global 1 ms rule.
+    expect(styles).toMatch(/dialog\.ui-dialog\[open\] \{\s*animation-name: ui-dialog-fade-in;\s*animation-duration: 160ms !important;/);
+    expect(styles).toMatch(/dialog\.ui-dialog\.ui-dialog-ghost \{\s*animation-name: ui-dialog-fade-out;\s*animation-duration: 120ms !important;/);
+    // Phone footers hide spacers, and below 760 px a dialog keeps its tier.
+    expect(styles).toMatch(/\.ui-dialog-actions > \.df-spacer \{\s*display: none;/);
+    expect(styles).not.toMatch(/@media \(max-width: 760px\) \{\s*dialog\.ui-dialog,/);
     // A host card styles only its own title, never a dialog header opened inside it.
     expect(styles).toMatch(/\.df-set-card > h2 \{/);
     expect(styles).not.toMatch(/\.df-set-card h2 \{/);

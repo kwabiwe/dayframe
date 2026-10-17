@@ -428,11 +428,11 @@ Block pull-to-refresh:
 
 - Trigger: a host renders `ModalDialog` (opening) or stops rendering it (closing: Cancel, Save, ✕, Escape, the scrim, navigation).
 - Owner: CSS on the native `<dialog>` for the entrance (`ui-dialog-in`, its `::backdrop` fade); `playDialogExit` for the exit, because the host's unmount removes the real dialog at once.
-- Entrance/update/exit: opacity 0→1 and scale .98→1 over 160 ms with the scrim; content updates in place; on close an inert, `aria-hidden` copy of the last frame and a scrim copy fade (and scale to .98) over 120 ms and are removed after 160 ms.
+- Entrance/update/exit: opacity 0→1 and scale .98→1 over 160 ms with the scrim; content updates in place; on close an inert, `aria-hidden` copy of the last frame (scrolled where it was) and a scrim copy fade (and scale to .98) over 120 ms inside one top-layer popover, above any dialog still open, and are removed after 160 ms.
 - Surrounding layout: the dialog is fixed over the page; nothing reflows.
 - Interruption: a reopen during the exit draws the new dialog over the fading copy; a re-run of the effect while still mounted (StrictMode, a new `initialFocusRef`) plays no exit.
 - Async outcome: busy dialogs stay open (Escape and the scrim do nothing); the exit plays only when the host unmounts.
-- Accessibility: Reduce Motion keeps the fades without the scale; focus returns to the opener immediately because the real dialog has closed; the copy is never focusable or announced.
+- Accessibility: Reduce Motion keeps the fades without the scale, at 160/120 ms (scoped exceptions to the global 1 ms rule); focus returns to the opener immediately because the real dialog has closed; the copy is never focusable or announced.
 
 ## Web Reports range menu (audit W8, UIA-304)
 
