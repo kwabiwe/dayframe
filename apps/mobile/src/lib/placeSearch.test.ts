@@ -111,14 +111,14 @@ describe("place search provider", () => {
 
   it("uses coordinate priority and a robust saved-place median", () => {
     const saved = [
-      { latitude: 51.73, longitude: 0.45 },
-      { latitude: 51.74, longitude: 0.46 },
+      { latitude: 10.73, longitude: 20.45 },
+      { latitude: 10.74, longitude: 20.46 },
       { latitude: -33.86, longitude: 151.2 }
     ];
-    expect(robustCoordinateMedian(saved)).toEqual({ latitude: 51.73, longitude: 0.46 });
+    expect(robustCoordinateMedian(saved)).toEqual({ latitude: 10.73, longitude: 20.46 });
     expect(selectPlaceSearchBias({
       selectedCoordinate: { latitude: 40.7, longitude: -74 },
-      existingCoordinate: { latitude: 51.7, longitude: 0.4 },
+      existingCoordinate: { latitude: 10.7, longitude: 20.4 },
       savedPlaceCoordinates: saved
     })).toMatchObject({ latitude: 40.7, longitude: -74 });
   });
@@ -128,13 +128,13 @@ describe("place search provider", () => {
     const grantedSource = {
       getForegroundPermissionsAsync: vi.fn().mockResolvedValue({ granted: true }),
       getLastKnownPositionAsync: vi.fn().mockResolvedValue({
-        coords: { latitude: 51.73, longitude: 0.47, accuracy: 45 },
+        coords: { latitude: 10.73, longitude: 20.47, accuracy: 45 },
         timestamp: now - 1_000
       })
     };
     await expect(resolvePlaceSearchBias({}, grantedSource)).resolves.toMatchObject({
-      latitude: 51.73,
-      longitude: 0.47
+      latitude: 10.73,
+      longitude: 20.47
     });
     expect(grantedSource.getLastKnownPositionAsync).toHaveBeenCalledWith({
       maxAge: PLACE_SEARCH_MAX_LOCATION_AGE_MS,
@@ -146,19 +146,19 @@ describe("place search provider", () => {
       getLastKnownPositionAsync: vi.fn()
     };
     await expect(resolvePlaceSearchBias({
-      savedPlaceCoordinates: [{ latitude: 51.7, longitude: 0.4 }]
-    }, deniedSource)).resolves.toMatchObject({ latitude: 51.7, longitude: 0.4 });
+      savedPlaceCoordinates: [{ latitude: 10.7, longitude: 20.4 }]
+    }, deniedSource)).resolves.toMatchObject({ latitude: 10.7, longitude: 20.4 });
     expect(deniedSource.getLastKnownPositionAsync).not.toHaveBeenCalled();
   });
 
   it("rejects stale or inaccurate cached locations and maps safe errors", () => {
     const now = Date.now();
     expect(isSuitableLastKnownLocation({
-      coords: { latitude: 51.7, longitude: 0.4, accuracy: 20 },
+      coords: { latitude: 10.7, longitude: 20.4, accuracy: 20 },
       timestamp: now - PLACE_SEARCH_MAX_LOCATION_AGE_MS - 1
     }, now)).toBe(false);
     expect(isSuitableLastKnownLocation({
-      coords: { latitude: 51.7, longitude: 0.4, accuracy: 6_000 },
+      coords: { latitude: 10.7, longitude: 20.4, accuracy: 6_000 },
       timestamp: now
     }, now)).toBe(false);
     expect(friendlyPlaceSearchError({ code: "network_unavailable" })).toContain("offline");

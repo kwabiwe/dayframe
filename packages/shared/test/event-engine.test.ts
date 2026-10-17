@@ -373,8 +373,8 @@ describe("event normalization", () => {
         rawPayload: {
           candidateName: "Regular place near 51.501, -0.120",
           address: {
-            street: "New London Road",
-            postalCode: "CM2 0XX"
+            street: "Sample Street",
+            postalCode: "ZZ3 3CC"
           },
           latitude: 51.501,
           longitude: -0.12,
@@ -396,34 +396,34 @@ describe("event normalization", () => {
     expect(candidate.action).toBe("create_review_item");
     expect(candidate.reviewStatus).toBe("needs_review");
     expect(candidate.confidence).toBe("medium");
-    expect(candidate.title).toBe("Near New London Road");
+    expect(candidate.title).toBe("Near Sample Street");
   });
 
   it("formats readable location names without promoting coordinates to primary copy", () => {
     expect(readableLocationNameFromParts({
-      address: { name: "Tesco Springfield", street: "Springfield Road", postalCode: "CM2 6QT" },
-      latitude: 51.7484,
-      longitude: 0.4381
-    })).toBe("Tesco Springfield");
+      address: { name: "Example Grocer", street: "Example Road", postalCode: "ZZ1 1AA" },
+      latitude: 10.7484,
+      longitude: 20.4381
+    })).toBe("Example Grocer");
     expect(readableLocationNameFromParts({
-      address: { name: "12 New London Road", streetNumber: "12", street: "New London Road", postalCode: "CM2 0XX" },
-      latitude: 51.7484,
-      longitude: 0.4381
-    })).toBe("Near New London Road");
+      address: { name: "12 Sample Street", streetNumber: "12", street: "Sample Street", postalCode: "ZZ3 3CC" },
+      latitude: 10.7484,
+      longitude: 20.4381
+    })).toBe("Near Sample Street");
     expect(readableLocationNameFromParts({
-      fallbackName: "Regular place near 51.748, 0.438",
-      latitude: 51.7484,
-      longitude: 0.4381
-    })).toBe("Unknown place near 51.748, 0.438");
-    expect(locationAddressSummary({ street: "New London Road", city: "Chelmsford", postalCode: "CM2 0XX" }))
-      .toBe("New London Road, Chelmsford, CM2 0XX");
+      fallbackName: "Regular place near 10.748, 20.438",
+      latitude: 10.7484,
+      longitude: 20.4381
+    })).toBe("Unknown place near 10.748, 20.438");
+    expect(locationAddressSummary({ street: "Sample Street", city: "Exampleton", postalCode: "ZZ3 3CC" }))
+      .toBe("Sample Street, Exampleton, ZZ3 3CC");
     expect(locationAddressSummary({
       streetNumber: "206",
-      street: "Rainsford Road",
-      district: "Marconi",
-      postalCode: "CM1 2PD"
-    })).toBe("206 Rainsford Road, Marconi, CM1 2PD");
-    expect(formatLocationCoordinates(51.7484, 0.4381)).toBe("51.748, 0.438");
+      street: "Synthetic Lane",
+      district: "Example District",
+      postalCode: "ZZ4 4DD"
+    })).toBe("206 Synthetic Lane, Example District, ZZ4 4DD");
+    expect(formatLocationCoordinates(10.7484, 20.4381)).toBe("10.748, 20.438");
   });
 
   it("maps HealthKit sleep stages into Dayframe stages", () => {

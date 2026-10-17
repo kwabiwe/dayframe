@@ -25,7 +25,7 @@ describe("historical global search", () => {
   });
 
   it("scopes every candidate to the active workspace and user", async () => {
-    await searchDayframe("  Lakeside   visit  ", session, 200);
+    await searchDayframe("  Examplegate   visit  ", session, 200);
     const [sql, values] = mocks.query.mock.calls[0];
     expect(sql).toContain("te.workspace_id = $1");
     expect(sql).toContain("te.user_id = $2");
@@ -35,7 +35,7 @@ describe("historical global search", () => {
     expect(sql).toContain("order by rank desc");
     expect(sql).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label)`);
     expect(sql).toContain("coalesce(lower(btrim(me.place_label)), '')");
-    expect(values).toEqual(["workspace-1", "user-1", "Lakeside visit", 40]);
+    expect(values).toEqual(["workspace-1", "user-1", "Examplegate visit", 40]);
   });
 
   it("removes the internal ranking value from the API result", async () => {

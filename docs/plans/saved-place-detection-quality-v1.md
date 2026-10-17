@@ -40,7 +40,7 @@ For the reported parking/gym sequence, aim for **one evidence-supported substant
 
 - Missing-return **native capture** investigation; no Swift, permissions, background tasks, GPS frequency or battery-profile change.
 - Enabling `v2_enabled`, changing server mode, resetting the semantic acknowledgement/cutover, or changing production configuration. Staging remains `v2_review`.
-- Increasing the PureGym radius or global matching/accuracy allowances.
+- Increasing the Example Gym radius or global matching/accuracy allowances.
 - Category-to-Activity terminology, icons, Quick Confirm visuals, Today labels or time-entry accessibility.
 - General Location learning, POI/geocoding, transport-mode inference, new analytics, new queues or coordinators.
 - A general historical backfill/cleanup tool, automatic modification of accepted/ignored entries, or recovery of expired evidence.
@@ -65,7 +65,7 @@ The following was supplied by OpenClaw after a read-only staging trace. All date
 | Completed native Visit | 11:55:29–12:46:44 | 12:55:29–13:46:44 | Retained interval support, not proof of exact building-door times |
 | Outbound commute | 12:44–12:52 | 13:44–13:52 | Existing surrounding Review proposal |
 
-All three gym suggestions were `needs_review`, `uncertain_gap`, and linked to the same saved place, with `suggested_category_id = null`. “PureGym” in the subtitle was the place label, not a category.
+All three gym suggestions were `needs_review`, `uncertain_gap`, and linked to the same saved place, with `suggested_category_id = null`. “Example Gym” in the subtitle was the place label, not a category.
 
 The trace found no linked/rejected observations explaining the central gap, but the read-only evidence API did not expose every unrelated accepted observation. **Do not claim complete raw-data absence.** Likewise, the later geofence callback and underlying outbound samples were not fully supplied. Do not invent them as historical facts.
 

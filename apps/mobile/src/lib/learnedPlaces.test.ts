@@ -8,21 +8,21 @@ import type { MobileLearnedPlace } from "./api";
 describe("learned-place detail helpers", () => {
   it("prefers a POI name and a complete cached address over coordinates", () => {
     expect(learnedPlaceDetailValues(learnedPlace())).toEqual({
-      name: "Tesco Springfield",
-      address: "Springfield Road, Chelmsford, CM2 6QT",
-      coordinates: "51.739532, 0.456310"
+      name: "Example Grocer",
+      address: "Example Road, Exampleton, ZZ1 1AA",
+      coordinates: "10.739532, 20.456310"
     });
   });
 
   it("copies the exact address shown in the detail sheet", async () => {
     const writeClipboard = vi.fn(async () => undefined);
     const copied = await copyLearnedPlaceDetail(
-      "206 Rainsford Road, Marconi, CM1 2PD",
+      "206 Synthetic Lane, Example District, ZZ4 4DD",
       writeClipboard
     );
 
     expect(copied).toBe(true);
-    expect(writeClipboard).toHaveBeenCalledWith("206 Rainsford Road, Marconi, CM1 2PD");
+    expect(writeClipboard).toHaveBeenCalledWith("206 Synthetic Lane, Example District, ZZ4 4DD");
   });
 
   it("does not offer an empty value to the clipboard", async () => {
@@ -35,9 +35,9 @@ describe("learned-place detail helpers", () => {
 function learnedPlace(): MobileLearnedPlace {
   return {
     id: "40000000-0000-4000-8000-000000000001",
-    name: "Tesco Springfield",
-    latitude: 51.739532,
-    longitude: 0.45631,
+    name: "Example Grocer",
+    latitude: 10.739532,
+    longitude: 20.45631,
     radiusMeters: 160,
     visitCount: 2,
     distinctDayCount: 2,
@@ -54,13 +54,13 @@ function learnedPlace(): MobileLearnedPlace {
     classification: "place_candidate",
     status: "candidate",
     address: {
-      name: "Tesco Springfield",
-      street: "Springfield Road",
-      city: "Chelmsford",
-      postalCode: "CM2 6QT"
+      name: "Example Grocer",
+      street: "Example Road",
+      city: "Exampleton",
+      postalCode: "ZZ1 1AA"
     },
-    poiName: "Tesco Springfield",
-    formattedAddress: "Springfield Road, Chelmsford, CM2 6QT",
+    poiName: "Example Grocer",
+    formattedAddress: "Example Road, Exampleton, ZZ1 1AA",
     geocodedAt: "2026-07-14T10:01:00.000Z",
     rawPayload: null
   };

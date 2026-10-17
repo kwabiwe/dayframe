@@ -423,7 +423,7 @@ describe("Settings' last-known values on the device (A4)", () => {
       foregroundPermission: "granted",
       backgroundPermission: "granted",
       activeMonitorCount: 2,
-      monitoredPlaceNames: ["Home", "Gym on Baker Street"],
+      monitoredPlaceNames: ["Home", "Gym on Example Street"],
       lastPlaceName: "Home",
       lastGeofenceEvent: { transition: "enter", placeName: "Home", occurredAt: "2026-10-12T08:00:00Z" },
       lastStatus: "Monitoring 2 saved places.",
@@ -446,7 +446,7 @@ describe("Settings' last-known values on the device (A4)", () => {
     await app.remember("motionFitnessStatus", "authorized");
     await app.remember("iosSettingsNeeded", false);
     await app.remember("reviewSyncDiagnostics", { waitingCount: 1, authenticationRequiredCount: 0, lastError: "token-xyz rejected" });
-    await app.remember("reviewSyncIssues", [{ clientMutationId: "mut-1", resolutionStatus: "rejected", title: "Gym on Baker Street" }]);
+    await app.remember("reviewSyncIssues", [{ clientMutationId: "mut-1", resolutionStatus: "rejected", title: "Gym on Example Street" }]);
     await app.remember("timeEntrySyncDiagnostics", { pendingCount: 2, quarantinedCount: 0, deviceQuarantinedCount: 0 });
     await app.remember("timeEntrySyncIssues", [{ clientCommandId: "cmd-1", description: "Dentist" }]);
     await app.remember("timerStopSyncDiagnostics", { pendingCount: 0 });

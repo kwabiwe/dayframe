@@ -520,7 +520,7 @@ describe("mobile review helpers", () => {
     expect(
       buildReviewItemDraftEntry(
         reviewItem({
-          title: "Near New London Road",
+          title: "Near Sample Street",
           eventSource: "location_learning",
           eventType: "learned_place_visit"
         }),

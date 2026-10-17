@@ -145,7 +145,7 @@ describe("POST /api/review/[id]", () => {
   });
 
   it("dispatches one-time POI recording through the location resolver", async () => {
-    const action = { action: "record_poi_once" as const, name: "Wagamama" };
+    const action = { action: "record_poi_once" as const, name: "Noodle House" };
     mocks.resolveLocationReviewAction.mockResolvedValueOnce({
       ok: true,
       action: action.action,

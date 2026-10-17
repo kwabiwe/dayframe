@@ -37,10 +37,10 @@ describe("/api/place-search", () => {
     mocks.suggest.mockResolvedValue([{
       id: "synthetic-place",
       title: "Synthetic Sports Centre",
-      subtitle: "Example Road, Chelmsford",
-      formattedAddress: "Synthetic Sports Centre, Example Road, Chelmsford",
-      latitude: 51.73,
-      longitude: 0.47,
+      subtitle: "Example Road, Exampleton",
+      formattedAddress: "Synthetic Sports Centre, Example Road, Exampleton",
+      latitude: 10.73,
+      longitude: 20.47,
       resultType: "amenity"
     }]);
   });
@@ -71,7 +71,7 @@ describe("/api/place-search", () => {
   });
 
   it("returns normalized private suggestions with the requested bias", async () => {
-    const response = await GET(request("?q=%20School%20&biasLat=51.7&biasLon=0.4&language=en"));
+    const response = await GET(request("?q=%20School%20&biasLat=10.7&biasLon=20.4&language=en"));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -79,8 +79,8 @@ describe("/api/place-search", () => {
     expect(payload.suggestions).toHaveLength(1);
     expect(mocks.suggest).toHaveBeenCalledWith({
       query: "School",
-      biasLat: 51.7,
-      biasLon: 0.4,
+      biasLat: 10.7,
+      biasLon: 20.4,
       language: "en",
       signal: expect.any(AbortSignal)
     });

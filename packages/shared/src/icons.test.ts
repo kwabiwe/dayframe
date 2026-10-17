@@ -51,7 +51,7 @@ describe("Dayframe icon set", () => {
 
   it.each([
     ["Gym", "gym"], ["Morning run", "gym"], ["Yoga", "gym"], ["Strength training", "gym"],
-    ["Train to London", "train"], ["Evening walk", "walk"], ["Swim", "swimming"], ["Cycling", "cycling"],
+    ["Train to the city", "train"], ["Evening walk", "walk"], ["Swim", "swimming"], ["Cycling", "cycling"],
     ["Sleep", "sleep"], ["Meditation", "mindfulness"], ["Dentist", "doctor"], ["Groceries", "groceries"],
     ["Errands", "errands"], ["Shopping", "errands"], ["Cooking dinner", "cooking"], ["Lunch", "meals"],
     ["Guitar practice", "instrument"], ["Reading", "learning"], ["Spanish lesson", "languages"],

@@ -33,10 +33,10 @@ describe("/api/learned-places", () => {
     mocks.deleteLearnedPlace.mockResolvedValue({ id: learnedPlaceId() });
     mocks.resolveLearnedPlaceLocation.mockResolvedValue({
       id: learnedPlaceId(),
-      name: "Tesco Springfield",
-      address: { name: "Tesco Springfield", formattedAddress: "Springfield Road, Chelmsford, CM2 6QT" },
-      poiName: "Tesco Springfield",
-      formattedAddress: "Springfield Road, Chelmsford, CM2 6QT",
+      name: "Example Grocer",
+      address: { name: "Example Grocer", formattedAddress: "Example Road, Exampleton, ZZ1 1AA" },
+      poiName: "Example Grocer",
+      formattedAddress: "Example Road, Exampleton, ZZ1 1AA",
       geocodedAt: "2026-07-14T10:00:00.000Z"
     });
     mocks.updateLearnedPlaceStatus.mockResolvedValue({ id: learnedPlaceId() });
@@ -44,11 +44,11 @@ describe("/api/learned-places", () => {
 
   it("caches a lazily resolved address for a legacy candidate", async () => {
     const address = {
-      name: "Tesco Springfield",
-      street: "Springfield Road",
-      city: "Chelmsford",
-      postalCode: "CM2 6QT",
-      formattedAddress: "Springfield Road, Chelmsford, CM2 6QT"
+      name: "Example Grocer",
+      street: "Example Road",
+      city: "Exampleton",
+      postalCode: "ZZ1 1AA",
+      formattedAddress: "Example Road, Exampleton, ZZ1 1AA"
     };
     const response = await PATCH(jsonRequest({
       id: learnedPlaceId(),
@@ -60,7 +60,7 @@ describe("/api/learned-places", () => {
     expect(response.status).toBe(200);
     expect(payload.learnedPlace).toMatchObject({
       id: learnedPlaceId(),
-      name: "Tesco Springfield"
+      name: "Example Grocer"
     });
     expect(mocks.resolveLearnedPlaceLocation).toHaveBeenCalledWith(learnedPlaceId(), address, session);
   });
