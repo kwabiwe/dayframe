@@ -10,6 +10,7 @@ import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
+import { learnedNamesFor, namePatternsFor } from "./name-patterns";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { healthCoveredMoves, retireCoveredCandidateCards } from "./health-coverage";
 import {
@@ -44,7 +45,9 @@ export async function segmentMoveName(
 }
 
 async function moveEndpoints(
-  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>,
+  /** Moves whose ends their person corrected: named from those ends alone (Codex r3 on #459). */
+  correctedMoves: ReadonlySet<string> = new Set()
 ) {
   const moves = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
   const saved = new Map<string, MoveEndpoint>();
@@ -80,21 +83,26 @@ async function moveEndpoints(
   return new Map(moves.map((segment) => {
     const from = end(segment.fromPlaceId, segment.fromStaySegmentId);
     const to = end(segment.toPlaceId, segment.toStaySegmentId);
-    const sameEndpoint = isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
-      Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
+    // A corrected Move is a round trip only when its corrected ends are one place; the engine's
+    // qualification still governs policy, never this name.
+    const sameEndpoint = correctedMoves.has(segment.clientSegmentId)
+      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
+      : isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
+        Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
     return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,
       stopCount: segment.stops?.length ?? 0 })] as const;
   }));
 }
 
 async function displayContext(
-  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>,
+  correctedMoves: ReadonlySet<string> = new Set()
 ) {
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
   // Moves are named from their ends and mode (PRD D19).
-  const moves = await moveEndpoints(client, session, segments, stayIds);
+  const moves = await moveEndpoints(client, session, segments, stayIds, correctedMoves);
   const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
@@ -147,7 +155,7 @@ async function displayContext(
  */
 export async function withCorrectedStayPlaces(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
-): Promise<{ segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null> }> {
+): Promise<{ segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null>; correctedMoves: ReadonlySet<string> }> {
   const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? []
     : [stayIds.get(segment.fromStaySegmentId), stayIds.get(segment.toStaySegmentId)].filter((id): id is string => Boolean(id))))].sort();
   const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
@@ -167,7 +175,8 @@ export async function withCorrectedStayPlaces(
     }
   }
   const correctedCategories = new Map<string, string | null>();
-  if (corrected.size === 0) return { segments, correctedCategories };
+  const correctedMoves = new Set<string>();
+  if (corrected.size === 0) return { segments, correctedCategories, correctedMoves };
   const savedPlaceOf = (clientStayId: string) => {
     const identity = corrected.get(stayIds.get(clientStayId) ?? "");
     return identity ? { placeId: identity.placeMatchKind === "saved" ? identity.placeId : null } : null;
@@ -177,6 +186,10 @@ export async function withCorrectedStayPlaces(
       if (segment.kind === "commute") {
         const from = savedPlaceOf(segment.fromStaySegmentId);
         const to = savedPlaceOf(segment.toStaySegmentId);
+        // Named from corrected ends only when a correction really moved an end (a time-only correction keeps it).
+        if ((from && from.placeId !== (segment.fromPlaceId ?? null)) || (to && to.placeId !== (segment.toPlaceId ?? null))) {
+          correctedMoves.add(segment.clientSegmentId);
+        }
         return from || to
           ? { ...segment, ...(from ? { fromPlaceId: from.placeId } : {}), ...(to ? { toPlaceId: to.placeId } : {}) }
           : segment;
@@ -186,7 +199,8 @@ export async function withCorrectedStayPlaces(
       if (categories.has(persistedId)) correctedCategories.set(segment.clientSegmentId, categories.get(persistedId) ?? null);
       return identity ? { ...segment, ...identity } : segment;
     }),
-    correctedCategories
+    correctedCategories,
+    correctedMoves
   };
 }
 
@@ -209,7 +223,9 @@ export async function emitReviewSemanticSegments(
     orphans: AutoLogOrphan[]; used: Set<string>; reconciliation?: AutoLogReconciliation;
     /** The blocks replay locked unedited, the only ones emission may move. */
     locked: ReadonlySet<string>;
-  } = { orphans: [], used: new Set(), locked: new Set() }
+  } = { orphans: [], used: new Set(), locked: new Set() },
+  /** The replayed device's readings' time zones, for learned names' time-of-day bands. */
+  evidenceTimeZones: ReadonlyMap<string, string> = new Map()
 ): Promise<number> {
   const corrections = await withCorrectedStayPlaces(client, session, segments, stayIds);
   segments = corrections.segments;
@@ -223,7 +239,7 @@ export async function emitReviewSemanticSegments(
     return [{ segment, segmentId, clientEventId: `location-segment:${segment.clientSegmentId}`.slice(0, 160) }];
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
-  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
+  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds, corrections.correctedMoves);
   const offerable = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
   // Health walks win (PRD D19): a Move an Apple Health workout of its kind covers is the workout.
   // It is not offered (nor reopened) here; replay retires any open card for it afterwards
@@ -275,11 +291,25 @@ export async function emitReviewSemanticSegments(
   // #435): only those are moved or removed.
   const lockedOrphans = autoLog.orphans.filter((orphan) => autoLog.locked.has(orphan.entryId));
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
+  // Learned names (PRD D19, A8): a name the person gave this pattern is the card's name, and its
+  // activity the card's activity; after two uses it also names a Log automatically block.
+  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones);
+  const learnedNames = await learnedNamesFor(client, session, patterns);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
-    const { trusted, title, move } = context(segment);
-    const categoryId = segment.kind === "commute" ? moveCategoryId(move)
-      : corrections.correctedCategories.has(segment.clientSegmentId) ? corrections.correctedCategories.get(segment.clientSegmentId) ?? null
-      : trusted?.categoryId ?? null;
+    const { trusted, title: placeTitle, move } = context(segment);
+    const pattern = patterns.get(clientEventId);
+    const learned = learnedNames.get(clientEventId);
+    const title = learned?.name ?? placeTitle;
+    // The activity a person corrected this Stay to (Save this place) comes first, then a learned one.
+    const corrected = corrections.correctedCategories.has(segment.clientSegmentId);
+    const learnedActivity = !corrected && learned?.categoryId ? learned.categoryId : null;
+    const categoryId = corrected ? corrections.correctedCategories.get(segment.clientSegmentId) ?? null
+      : learnedActivity ?? (segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null);
+    const nameFields = pattern ? {
+      namePatternKey: pattern.key, namePatternBand: pattern.band,
+      ...(learned?.name ? { nameSource: "learned" } : {}),
+      ...(learnedActivity ? { activitySource: "learned" } : {})
+    } : {};
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
@@ -309,6 +339,7 @@ export async function emitReviewSemanticSegments(
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,
+          ...nameFields,
           semanticDisposition: "needs_review",
           semanticReason
         }
@@ -330,6 +361,7 @@ export async function emitReviewSemanticSegments(
           continuityStatus: segment.continuityStatus,
           startedAt: segment.startedAt,
           stoppedAt: segment.stoppedAt,
+          ...nameFields,
           semanticDisposition: "needs_review",
           semanticReason
         };
@@ -343,7 +375,8 @@ export async function emitReviewSemanticSegments(
     return { client_event_id: clientEventId, segment_id: segmentId, kind: segment.kind,
       event_type: eventType, occurred_at: segment.startedAt, stopped_at: segment.stoppedAt,
       confidence: segment.confidence, raw_payload: payload, category_id: categoryId, place_id: placeId, title,
-      auto_log: autoLog, description: autoLog ? trusted?.description?.trim() || null : null,
+      auto_log: autoLog,
+      description: autoLog ? (learned?.name && learned.uses >= 2 ? learned.name : trusted?.description?.trim() || null) : null,
       initial_review_status: autoLog ? "confirmed" : "needs_review",
       review_status: autoLog ? "confirmed" : existing.get(clientEventId)?.reviewStatus ?? "needs_review",
       notes: overlapsConfirmedTime

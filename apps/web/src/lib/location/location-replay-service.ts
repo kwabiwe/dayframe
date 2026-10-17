@@ -68,6 +68,8 @@ export type LocationReplayResult = {
   stayIds: Map<string, string>;
   commuteIds: Map<string, string>;
   evidenceIds: Map<string, string>;
+  /** Each replayed reading's time zone by client evidence ID (this device's own readings only). */
+  evidenceTimeZones: Map<string, string>;
   diagnostics: ReturnType<typeof runLocationEngine>["diagnostics"];
   /** Unedited auto-logged blocks whose visit this replay retired (only with `autoLogReconciliation`). */
   autoLogOrphans: AutoLogOrphan[];
@@ -252,7 +254,9 @@ export async function replayLocationEvidence(
     options
   );
   return {
-    segments, stayIds, commuteIds, evidenceIds, diagnostics: output.diagnostics,
+    segments, stayIds, commuteIds, evidenceIds,
+    evidenceTimeZones: new Map(evidenceResult.rows.map((row) => [row.clientEvidenceId, row.timeZone])),
+    diagnostics: output.diagnostics,
     autoLogOrphans, autoLogLocked
   };
 }

@@ -32,6 +32,7 @@ export async function buildWorkspaceExport(session: RequestSession) {
     commuteSegments,
     locationEvidence,
     placeMatchFeedback,
+    locationNamePatterns,
     importRuns
   ] = await Promise.all([
     table("clients", session),
@@ -48,6 +49,7 @@ export async function buildWorkspaceExport(session: RequestSession) {
     table("commute_segments", session),
     locationEvidenceTable(session),
     table("place_match_feedback", session),
+    table("location_name_patterns", session),
     table("import_runs", session)
   ]);
 
@@ -68,6 +70,7 @@ export async function buildWorkspaceExport(session: RequestSession) {
     commuteSegments,
     locationEvidence,
     placeMatchFeedback,
+    locationNamePatterns,
     importRuns
   };
 }
@@ -128,7 +131,8 @@ async function table(tableName: string, session: RequestSession) {
     "stay_segments",
     "commute_segments",
     "location_evidence",
-    "place_match_feedback"
+    "place_match_feedback",
+    "location_name_patterns"
   ]);
   const result = userScoped.has(tableName)
     ? await query(`select * from ${tableName} where workspace_id = $1 and user_id = $2`, [session.workspaceId, session.userId])
