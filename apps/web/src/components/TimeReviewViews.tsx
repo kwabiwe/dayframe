@@ -11,6 +11,7 @@ import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
+import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
 import { EntriesTable } from "@/components/EntriesTable";
@@ -392,9 +393,13 @@ export function TimeReviewViews({
     undoPendingDelete
   } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
+  // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
+  const [deletedMoveEventId, setDeletedMoveEventId] = useState<string | null>(null);
+  const tripOptOut = useTripOptOut(deletedMoveEventId, pendingNotice?.token);
   const requestTimelineDelete = useCallback((entries: readonly TimeEntryRow[]) => {
     const first = entries[0];
     setDeletedEntrySwatch(first?.categoryId ? activityBlockStyle(first.categoryColor, first.categoryName ?? "") : undefined);
+    setDeletedMoveEventId(entries.length === 1 ? first?.automaticMoveEventId ?? null : null);
     requestDelete({ entries, label: timelineDeleteNoticeLabel(entries) });
   }, [requestDelete]);
   const visibleDayEntries = dayEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
@@ -570,6 +575,7 @@ export function TimeReviewViews({
           key={pendingNotice.token}
           message={pendingNotice.label}
           onAction={undoPendingDelete}
+          secondary={tripOptOut}
           swatchStyle={deletedEntrySwatch}
         />
       ) : null}

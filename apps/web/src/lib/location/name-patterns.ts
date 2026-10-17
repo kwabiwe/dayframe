@@ -246,13 +246,88 @@ export async function recordLearnedName(
  * every band, so a fallback from another band cannot bring one back (Codex r1 on #458).
  */
 export async function forgetLearnedNameForEntry(client: Pick<pg.PoolClient, "query">, session: RequestSession, entryId: string) {
-  const result = await client.query(
-    `delete from location_name_patterns lnp
-     using time_entries te
-     join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
-     where te.id = $3 and te.workspace_id = $1 and te.user_id = $2
-       and lnp.workspace_id = $1 and lnp.user_id = $2
-       and lnp.pattern_key = ae.raw_payload ->> 'namePatternKey'`,
+  const key = `(select ae.raw_payload ->> 'namePatternKey' from time_entries te
+       join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+       where te.id = $3 and te.workspace_id = $1 and te.user_id = $2)`;
+  // A pattern whose trips the person stopped logging keeps that choice, without its name (PRD D19).
+  const kept = await client.query(
+    `update location_name_patterns set name = null, uses = 0, category_id = null, category_uses = 0, updated_at = now()
+     where workspace_id = $1 and user_id = $2 and pattern_key = ${key} and auto_log_opt_out
+       and (name is not null or category_id is not null)`,
     [session.workspaceId, session.userId, entryId]);
+  const result = await client.query(
+    `delete from location_name_patterns
+     where workspace_id = $1 and user_id = $2 and pattern_key = ${key} and not auto_log_opt_out`,
+    [session.workspaceId, session.userId, entryId]);
+  return (result.rowCount ?? 0) + (kept.rowCount ?? 0);
+}
+
+/**
+ * "Don't log trips like this" (PRD D19, A4): the pattern of the Move an automatic block came from stops
+ * logging itself; its later Moves go to Review saying so. Takes the Move's event, which outlives the
+ * deleted block. Returns whether there was a pattern to stop.
+ */
+export async function stopLoggingTripsLike(client: Pick<pg.PoolClient, "query">, session: RequestSession, eventId: string) {
+  const result = await client.query(
+    `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, auto_log_opt_out)
+     select ae.workspace_id, ae.user_id, ae.raw_payload ->> 'namePatternKey', ae.raw_payload ->> 'namePatternBand', true
+     from activity_events ae
+     where ae.id = $3 and ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected'
+       and ae.raw_payload ->> 'namePatternKey' is not null
+       and ae.raw_payload ->> 'namePatternBand' in ('morning', 'afternoon', 'evening', 'weekend')
+     on conflict (workspace_id, user_id, pattern_key, band) do update set auto_log_opt_out = true, updated_at = now()
+     returning pattern_key as "patternKey"`,
+    [session.workspaceId, session.userId, eventId]);
+  return result.rows.length > 0;
+}
+
+/** Logs trips like these automatically again: clears the pattern's stop in every band. */
+export async function resumeLoggingTrips(client: Pick<pg.PoolClient, "query">, session: RequestSession, patternKey: string) {
+  await client.query(
+    `delete from location_name_patterns
+     where workspace_id = $1 and user_id = $2 and pattern_key = $3 and auto_log_opt_out
+       and name is null and category_id is null and uses = 0 and category_uses = 0`,
+    [session.workspaceId, session.userId, patternKey]);
+  const result = await client.query(
+    `update location_name_patterns set auto_log_opt_out = false, updated_at = now()
+     where workspace_id = $1 and user_id = $2 and pattern_key = $3 and auto_log_opt_out`,
+    [session.workspaceId, session.userId, patternKey]);
   return result.rowCount ?? 0;
+}
+
+/** How far back Places › Trips looks for a stopped trip's latest Move, to label it. */
+export const STOPPED_TRIP_LABEL_LOOKBACK_DAYS = 90;
+
+/**
+ * The trip patterns the person stopped logging, newest first (at most 200), each labelled by the name
+ * they gave it, else its latest Move's route ("Home → Gym") from the last
+ * `STOPPED_TRIP_LABEL_LOOKBACK_DAYS` days, else "A trip". The label lookup is one range scan of the
+ * owner's Move events in that window (idx_activity_events_workspace_occurred), whatever the history,
+ * and reads nothing else (Codex r1/r2 on #463).
+ */
+export async function stoppedTripPatterns(client: Pick<pg.PoolClient, "query">, session: RequestSession) {
+  const stopped = (await client.query<{ patternKey: string; name: string | null; stoppedAt: Date }>(
+    `select pattern_key as "patternKey", max(name) as name, max(updated_at) as "stoppedAt"
+     from location_name_patterns
+     where workspace_id = $1 and user_id = $2 and auto_log_opt_out
+     group by pattern_key
+     order by max(updated_at) desc
+     limit 200`,
+    [session.workspaceId, session.userId])).rows;
+  if (stopped.length === 0) return [];
+  const latest = new Map((await client.query<{ patternKey: string; route: string | null }>(
+    `select distinct on (ae.raw_payload ->> 'namePatternKey')
+            ae.raw_payload ->> 'namePatternKey' as "patternKey", ae.raw_payload ->> 'routeLabel' as route
+     from activity_events ae
+     where ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected'
+       and ae.occurred_at > now() - make_interval(days => $4)
+       and ae.raw_payload ->> 'namePatternKey' = any($3::text[]) and ae.raw_payload ? 'routeLabel'
+     order by ae.raw_payload ->> 'namePatternKey', ae.occurred_at desc`,
+    [session.workspaceId, session.userId, stopped.map((row) => row.patternKey), STOPPED_TRIP_LABEL_LOOKBACK_DAYS])).rows
+    .map((row) => [row.patternKey, row] as const));
+  return stopped.map((row) => ({
+    patternKey: row.patternKey,
+    label: row.name ?? latest.get(row.patternKey)?.route ?? "A trip",
+    stoppedAt: row.stoppedAt instanceof Date ? row.stoppedAt.toISOString() : String(row.stoppedAt)
+  }));
 }

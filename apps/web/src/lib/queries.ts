@@ -145,6 +145,8 @@ export type TimeEntryRow = {
   confirmedInReview?: boolean;
   /** True when the owner typed the description in the Review decision (see `ownerAuthoredInReviewSql`). */
   ownerAuthoredInReview?: boolean;
+  /** For a Move's automatic block (PRD D19), its Move's event, for "Don't log trips like this". */
+  automaticMoveEventId?: string | null;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -808,6 +810,13 @@ export const confirmedInReviewExpressionSql = `coalesce(
             )`;
 export const confirmedInReviewSql = `${confirmedInReviewExpressionSql} as "confirmedInReview"`;
 
+/** For a block a Move logged itself (PRD D19), the Move's event; null for every other block. */
+export const automaticMoveEventIdSql = `case when te.source = 'location_auto_log' then (
+  select move_event.id from activity_events move_event
+  where move_event.id = te.created_from_event_id and move_event.workspace_id = te.workspace_id
+    and move_event.user_id = te.user_id and move_event.event_type = 'commute_detected'
+) end as "automaticMoveEventId"`;
+
 /**
  * Whether the owner typed the block's description while making the Review decision that created
  * it (E1, Codex r2). Location Review actions record this on the block's source event at decision
@@ -883,6 +892,7 @@ export function buildTimeEntriesQuery(
             te.review_status as "reviewStatus",
             ${confirmedInReviewSql},
             ${ownerAuthoredInReviewSql},
+            ${automaticMoveEventIdSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",
@@ -1117,6 +1127,7 @@ async function getActiveEntry(session: RequestSession) {
             te.source,
             te.confidence,
             te.review_status as "reviewStatus",
+            ${automaticMoveEventIdSql},
             te.description,
             te.started_at as "startedAt",
             te.stopped_at as "stoppedAt",

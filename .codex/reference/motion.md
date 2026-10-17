@@ -593,3 +593,13 @@ Block pull-to-refresh:
 - Async: the save is one SQLite commit; a refused commit keeps the sheet and its draft with the reason (announced). Delivery to the server is silent and never moves the screen.
 - Accessibility: Reduce Motion uses the sheet's opacity path and the rows' opacity-only presence; fields and switches are labelled; the size is a radio group; the pill keeps a 44-point touch target; the toast is announced.
 
+
+## "Don't log trips like this" on the delete toast (location v3 PR 11c, PRD D19 A4)
+
+- Trigger: deleting one block that a Move logged by itself (Today row or editor, Calendar) raises the Undo toast with a second row, "Don't log trips like this"; tapping it.
+- Owner: the Undo toast keeps its single owner (web `BlocksToast` keyframes; "Undo toast" above). The second row is part of the toast's layout from its first frame (`.df-toast.has-secondary` wraps to two rows with 24 px corners), so it adds no animation of its own.
+- Entrance/update/exit: the toast enters and leaves as any Undo toast. Tapping the action replaces the button with its outcome ("Trips like this will wait in Review." or the failure line) in the same 44 px row, so the toast never changes height and Undo never moves; the toast still leaves when the Undo window ends.
+- Interruption: the outcome is keyed by the toast's token, so a newer toast starts fresh and a late answer for an older one changes nothing; the button is disabled while its request runs; Undo still restores the block and never undoes the stop (the stop is about later trips).
+- Async: one request; offline or refused shows the failure line; nothing else on the page moves.
+- Accessibility: the toast is a polite live region, so the outcome is announced; both controls keep 44 px targets; Reduce Motion uses the toast's opacity-only path.
+- Places › Trips ("Trips you log yourself") appears once its list arrives, below the other sections (nothing above it moves); "Log automatically again" removes the row with the list's ordinary re-render and announces the result.
