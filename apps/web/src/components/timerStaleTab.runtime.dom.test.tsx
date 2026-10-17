@@ -173,7 +173,7 @@ describe("a second tab never writes a stale timer description back", () => {
     await x.clearAndType("app testing @cod");
     await userEvent.setup().keyboard("{Enter}");
     expect(x.activity()).toBe("Activity: Coding");
-    const removeCubic = x.container.querySelector('button[aria-label="Remove tag Cubic"]') as HTMLButtonElement | null;
+    const removeCubic = x.container.querySelector('button[aria-label="#Cubic, remove tag"]') as HTMLButtonElement | null;
     expect(removeCubic).not.toBeNull();
     await userEvent.setup().click(removeCubic!);
     await waitFor(() => expect(server.entry).toMatchObject({ description: "app testing", categoryId: "coding", tagNames: [] }), { timeout: 3_000 });
@@ -187,7 +187,7 @@ describe("a second tab never writes a stale timer description back", () => {
     await y.refresh();
     await waitFor(() => expect(y.input.value).toBe("app testing"));
     expect(y.activity()).toBe("Activity: Coding");
-    expect(y.container.querySelector('button[aria-label="Remove tag Cubic"]')).toBeNull();
+    expect(y.container.querySelector('button[aria-label="#Cubic, remove tag"]')).toBeNull();
     await wait(1_500);
     expect(server.patches).toHaveLength(xPatches);
 

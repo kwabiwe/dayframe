@@ -6415,7 +6415,7 @@ dialog.ui-dialog.df-range-custom {
   overscroll-behavior: contain;
 }
 
-@media (max-width: 560px), (pointer: coarse) {
+@media (max-width: 560px), (any-pointer: coarse) {
   .df-flist {
     --df-flist-row: 44px;
   }
@@ -12897,7 +12897,7 @@ dialog.ui-dialog.df-palette {
   display: none;
 }
 
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .df-stepper-btn {
     /* The circle stays 36 px; the touch target is 44 px. */
     width: 44px;
@@ -15237,7 +15237,7 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
 }
 
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .df-range-menu button {
     min-height: 44px;
   }
@@ -15666,14 +15666,31 @@ dialog.ui-dialog.df-palette {
   }
 }
 
-/* Touch screens: every segment and every text field is a 44 px target (WUI-019, WUI-046). Last in
-   the file, so no base size declared later wins the cascade (Codex r1 on #472). */
+/* Up to the sidebar layout (≤860 px), small actions are 44 px targets whatever the pointer
+   (WUI-035): Today's Review now and This week rows, and the Reports range controls. */
+@media (max-width: 860px) {
+  .df-pill-action,
+  .df-mw-row,
+  .df-range-nav,
+  .df-range-trigger {
+    min-height: 44px;
+  }
+
+  .df-range-nav {
+    width: 44px;
+  }
+}
+
+/* Touch screens: every segment, text field and small action is a 44 px target (WUI-019, WUI-035,
+   WUI-046). Last in the file, so no base size declared later wins the cascade (Codex r1 on #472). */
 @media (any-pointer: coarse) {
   .df-seg a,
   .ui-segmented-control button,
   .df-pe-seg span,
   .df-flist-search input,
-  .df-logas input {
+  .df-logas input,
+  .df-pill-action,
+  .df-mw-row {
     min-height: 44px;
   }
 

@@ -62,7 +62,7 @@ describe("persistent block shell contract", () => {
     expect(timer).toContain('aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}');
     expect(timer).toContain("disabled={Boolean(active) && isTimerBusy}");
     expect(inlineTags).toContain("selectedTagNames.map");
-    expect(inlineTags).toContain("Remove tag ${tagName}");
+    expect(inlineTags).toContain("#${tagName}, remove tag");
     expect(compoundControl).toContain('className="inline-selected-tags"');
     expect(compoundControl).toContain('className="inline-selected-tag-overflow"');
   });

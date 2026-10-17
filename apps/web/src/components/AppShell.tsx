@@ -80,6 +80,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
     toggleTimer
   } = useAppShellRuntime();
   const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
+  // The account button's name starts with what it shows: the name and the workspace (WUI-044).
+  const profileLabel = shellIdentity
+    ? `${shellIdentity.userName}, ${shellIdentity.workspaceName}: profile and settings`
+    : "Profile and settings";
   const [overlay, setOverlay] = useState<Overlay>(null);
   const goToPending = useRef(false);
   const goToTimer = useRef<number | undefined>(undefined);
@@ -275,7 +279,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="df-profile"
-            aria-label="Profile, workspace and settings"
+            aria-label={profileLabel}
             data-profile-trigger="" onClick={() => setOverlay("profile")}
           >
             <ShellProfileInitials identity={shellIdentity} />
@@ -293,7 +297,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" data-profile-trigger="" onClick={() => setOverlay("profile")}>
+          <button type="button" className="df-mtop-avatar" aria-label={profileLabel} data-profile-trigger="" onClick={() => setOverlay("profile")}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>

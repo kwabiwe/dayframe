@@ -49,7 +49,7 @@ describe("web Settings and running-timer follow-up", () => {
   });
 
   it("uses a compact workspace selector with on-demand rename and create controls", () => {
-    expect(settings).toContain('aria-label="Active workspace"');
+    expect(settings).toContain('aria-label="Workspace"');
     expect(settings).toContain("<select");
     expect(settings).toContain('workspaceAction === "rename"');
     expect(settings).toContain('workspaceAction === "create"');

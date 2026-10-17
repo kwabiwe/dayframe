@@ -474,7 +474,7 @@ describe("# Tags stay as they were", () => {
     expect(input.getAttribute("aria-activedescendant")).toBe(option.id);
     await user.keyboard("{Enter}");
     expect(input.value).toBe("Plan");
-    expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Deep work, remove tag" })).not.toBeNull();
     expect(screen.queryByRole("listbox", { name: "Activities" })).toBeNull();
   });
 });
@@ -578,7 +578,7 @@ describe("one floating list style", () => {
     expect(tags.closest(".df-flist")!.textContent).not.toMatch(/Add ?\/ ?filter tags/);
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Remove tag launch" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#launch, remove tag" })).not.toBeNull();
     expect(input.value).toBe("Plan");
   });
 });

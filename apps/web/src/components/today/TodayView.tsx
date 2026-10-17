@@ -1,6 +1,6 @@
 "use client";
 
-import { formatClockHour, formatDuration as formatSharedDuration } from "@dayframe/shared";
+import { formatClockHour } from "@dayframe/shared";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +17,7 @@ import { blockStyle } from "@/lib/block-style";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
 import { dedupeDashboardEntries } from "@/lib/dashboard-intelligence";
 import { timeEntryTitle } from "@/lib/display";
-import { formatDuration as formatFullDuration, formatTime } from "@/lib/format";
+import { formatDuration, formatTime } from "@/lib/format";
 import { useClockFormat } from "@/components/ClockFormat";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
@@ -25,7 +25,6 @@ import {
   blockRowHeight,
   buildGoalFrame,
   coveredActivityTotals,
-  formatGoalHours,
   hourPercent,
   isUnsavedEntryId,
   localDayEnd,
@@ -201,8 +200,8 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
             </p>
             <p className="df-today-sub">
               {goal.goalSeconds < goal.totalSeconds
-                ? `framed today · ${formatDuration(goal.goalSeconds)} toward your ${formatGoalHours(goal.goalMinutes)} goal (${goal.percent}%)`
-                : `framed today · ${goal.percent}% of your ${formatGoalHours(goal.goalMinutes)} goal`}
+                ? `framed today · ${formatDuration(goal.goalSeconds)} toward your ${formatDuration(goal.goalMinutes * 60)} goal (${goal.percent}%)`
+                : `framed today · ${goal.percent}% of your ${formatDuration(goal.goalMinutes * 60)} goal`}
             </p>
           </div>
           <GoalCells cells={goal.cells} />
@@ -296,7 +295,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
                   />
                 ))}
               </span>
-              <span className="df-tnum">{formatShortDuration(day.totalSeconds)}</span>
+              <span className="df-tnum">{formatDuration(day.totalSeconds)}</span>
             </Link>
           ))}
         </div>
@@ -687,7 +686,8 @@ function TodayBlockRow({
   return (
     <li className={`df-erow${live ? " is-live" : ""}${isLeaving ? " is-leaving" : ""}`}>
       <button
-        aria-label={`${title}, ${activity}, ${start} to ${live ? "now" : end}, ${spokenDuration(elapsedSeconds)}. Edit${live ? "" : "; Delete or Backspace deletes"}.`}
+        // Everything the row shows, in its order: title, activity · #tags, times, duration (WUI-034).
+        aria-label={`${title}, ${activity}${tags ? ` · ${tags}` : ""}, ${start} to ${live ? "now" : end}, ${spokenDuration(elapsedSeconds)}. Edit${live ? "" : "; Delete or Backspace deletes"}.`}
         className="df-erow-main"
         onClick={onEdit}
         onKeyDown={onKeyDown}
@@ -769,15 +769,7 @@ function formatWeekdayLong(ms: number) {
   return new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(new Date(ms));
 }
 
-function formatShortDuration(seconds: number) {
-  return formatSharedDuration(seconds);
-}
-
-/** Durations as Dayframe writes them, with "<1m" for a block shorter than a minute. */
-function formatDuration(seconds: number) {
-  return seconds > 0 && seconds < 60 ? "<1m" : formatFullDuration(seconds);
-}
 
 function spokenDuration(seconds: number) {
-  return seconds > 0 && seconds < 60 ? "under a minute" : formatFullDuration(seconds);
+  return seconds > 0 && seconds < 60 ? "under a minute" : formatDuration(seconds);
 }

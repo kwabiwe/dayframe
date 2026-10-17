@@ -194,9 +194,6 @@ export function reviewDayLabel(ms: number, nowMs: number) {
   return SHORT_DAY.format(new Date(ms)).replace(",", "");
 }
 
-export function formatReviewDuration(ms: number) {
-  return formatSharedDuration(ms / 1000);
-}
 
 /**
  * "Today · 21:19–21:26" ("Today · 9:19 PM–9:26 PM" in 12-hour mode); a range over midnight names
@@ -334,7 +331,7 @@ export function outingSummary(outing: ReviewOuting) {
     const span = reviewWindow(member);
     return sum + (span ? span.stopMs - span.startMs : 0);
   }, 0);
-  return `${outingTravelWords(outing.members)}${totalMs > 0 ? ` · ${formatReviewDuration(totalMs)}` : ""}`;
+  return `${outingTravelWords(outing.members)}${totalMs > 0 ? ` · ${formatSharedDuration(totalMs / 1000)}` : ""}`;
 }
 
 /** Log it / Skip on a grouped card: every member decided together; "Log as" applies to the Stay. */

@@ -79,7 +79,7 @@ describe("Settings in Blocks", () => {
     const userEvents = userEvent.setup();
     mountAccount();
     await userEvents.click(screen.getByRole("button", { name: /Switch workspace/ }));
-    await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Active workspace"), "w2");
+    await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Workspace"), "w2");
     await waitFor(() => expect(order).toContain("/api/workspace/switch"));
     expect(order.indexOf("held decisions saved")).toBeLessThan(order.indexOf("/api/workspace/switch"));
   });
@@ -109,7 +109,7 @@ describe("Settings in Blocks", () => {
     }
     render(<Harness />);
     await userEvents.click(screen.getByRole("button", { name: /Switch workspace/ }));
-    await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Active workspace"), "w2");
+    await userEvents.selectOptions(within(screen.getByRole("dialog")).getByLabelText("Workspace"), "w2");
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Switched to Studio."));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.querySelector("#account")?.textContent).toContain("· Studio");

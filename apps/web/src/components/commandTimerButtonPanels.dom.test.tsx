@@ -339,19 +339,19 @@ describe("the Tags button opens the shared Tags list", () => {
       tagNames: []
     }).tagNames;
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Remove tag Admin" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Admin, remove tag" })).not.toBeNull();
     expect(within(listbox("Tags")).getByRole("option", { name: "#Admin" }).getAttribute("aria-selected")).toBe("true");
     await user.keyboard("{ArrowDown}");
     expect(search.getAttribute("aria-activedescendant")).toBe(within(listbox("Tags")).getByRole("option", { name: "#Deep work" }).id);
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Deep work, remove tag" })).not.toBeNull();
     expect(draftTags()).toEqual(["Admin", "Deep work"]);
     // Enter on a chosen tag removes it.
     await user.keyboard("{ArrowUp}{Enter}");
-    expect(screen.queryByRole("button", { name: "Remove tag Admin" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#Admin, remove tag" })).toBeNull();
     // Backspace in the empty search removes the last tag on the block.
     await user.keyboard("{Backspace}");
-    expect(screen.queryByRole("button", { name: "Remove tag Deep work" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#Deep work, remove tag" })).toBeNull();
     expect(within(listbox("Tags")).getAllByRole("option").map((option) => option.getAttribute("aria-selected"))).toEqual(["false", "false"]);
     expect(document.activeElement).toBe(search);
     expect(calls.startTimer).not.toHaveBeenCalled();
@@ -368,7 +368,7 @@ describe("the Tags button opens the shared Tags list", () => {
     const create = within(listbox("Tags")).getByRole("option", { name: "Create “#launch”" });
     expect(create.className).toContain("is-create");
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Remove tag launch" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#launch, remove tag" })).not.toBeNull();
     expect(search.value).toBe("");
     // The new tag is listed, checked.
     expect(within(listbox("Tags")).getByRole("option", { name: "#launch" }).getAttribute("aria-selected")).toBe("true");
@@ -640,7 +640,7 @@ describe("Codex r2 on #402: a saving Create keeps its form whatever the Activity
 
 describe("Codex r3 on #402: the buttons' lists belong to the block they were opened for", () => {
   const blockB = () => running({ id: "block-b", categoryId: "write", categoryName: "Writing", description: "Call", tagNames: ["Admin"] });
-  const removeTag = (name: string) => screen.queryByRole("button", { name: `Remove tag ${name}` });
+  const removeTag = (name: string) => screen.queryByRole("button", { name: `#${name}, remove tag` });
 
   it("a new block closes the Tags list; a stale Enter adds nothing to it and focus returns to the button", async () => {
     const { switchTo } = renderBar({ activeEntry: running() });

@@ -21,10 +21,6 @@ export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "descrip
   return (description && description !== "Start activity" ? description : null) || entry.categoryName || "No activity";
 }
 
-function compactDuration(seconds: number) {
-  return formatSharedDuration(seconds);
-}
-
 /**
  * "Switched to Work" over a muted "42m logged to Client Work" (owner decision 15 Oct 2026: back to
  * TestFlight 120's two lines, #400, on iPhone and web): what is recording now on the first line,
@@ -41,7 +37,7 @@ export function switchedToastCopy(
   const seconds = Number.isFinite(startedMs) ? Math.max(1, (nowMs - startedMs) / 1000) : 1;
   return {
     message: `Switched to ${nextName}`,
-    detail: `${compactDuration(seconds)} logged to ${toastBlockName(previous)}`
+    detail: `${formatSharedDuration(seconds)} logged to ${toastBlockName(previous)}`
   };
 }
 

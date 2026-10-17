@@ -47,7 +47,7 @@ describe("web tag editor interaction contract", () => {
 
   it("makes every selected tag directly removable", () => {
     expect(source).toContain("selectedTagNames.map");
-    expect(source).toContain("Remove tag ${tagName}");
+    expect(source).toContain("#${tagName}, remove tag");
     expect(source).toContain("onClick={() => toggleSelectedTag(tagName)}");
     expect(source).toContain('className="inline-selected-tag"');
     expect(source).toContain('className="inline-selected-tag-visual"');

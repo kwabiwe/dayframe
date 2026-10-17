@@ -254,7 +254,7 @@ export function AccountSettings({
               <label className="settings-workspace-select">
                 <span className="sr-only">Active workspace</span>
                 <select
-                  aria-label="Active workspace"
+                  aria-label="Workspace"
                   className="ui-control"
                   disabled={Boolean(busyAction)}
                   value={workspace.id}

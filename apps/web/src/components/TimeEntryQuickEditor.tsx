@@ -21,7 +21,6 @@ import {
   calendarEntryCompactInitialDraft,
   calendarEntryLocalDayOffset,
   emptyCalendarEntryCompactDirty,
-  formatCalendarEntryCompactDuration,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
   keepTypedMeridiemTime,
@@ -38,7 +37,7 @@ import {
 import { displayTypedTime, maskTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { dateTimeLocal, formatSourceLabel } from "@/lib/format";
+import { dateTimeLocal, formatDuration, formatSourceLabel } from "@/lib/format";
 import { overlapNoticeForCandidate } from "@/lib/overlap-notice";
 import type { OverlapPeerEntry } from "@/lib/overlap-notice";
 import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
@@ -915,7 +914,7 @@ export function TimeEntryQuickEditorPanel({
               <span className="calendar-compact-field-label">Duration</span>
               <div className="calendar-compact-duration is-readonly" aria-label="Elapsed time">
                 <span className="tabular">
-                  {preview.plan ? formatCalendarEntryCompactDuration(preview.plan.durationSeconds) : "—"}
+                  {preview.plan ? formatDuration(preview.plan.durationSeconds) : "—"}
                 </span>
               </div>
             </div>
