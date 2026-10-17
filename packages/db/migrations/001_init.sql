@@ -906,3 +906,27 @@ $$;
 -- Keep the clean base fixture aligned with 013_place_auto_log.sql.
 -- Per-place "Log automatically": off by default, never backfilled.
 alter table places add column if not exists auto_log boolean not null default false;
+
+-- Keep the clean base fixture aligned with 014_location_name_patterns.sql (learned names).
+create table if not exists location_name_patterns (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  pattern_key text not null check (length(pattern_key) between 1 and 300),
+  band text not null check (band in ('morning', 'afternoon', 'evening', 'weekend')),
+  name text check (name is null or length(btrim(name)) between 1 and 500),
+  category_id uuid references categories(id) on delete set null,
+  uses integer not null default 0 check (uses >= 0),
+  category_uses integer not null default 0 check (category_uses >= 0),
+  auto_log_opt_out boolean not null default false,
+  last_used_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, user_id, pattern_key, band)
+);
+create index if not exists idx_location_name_patterns_key
+  on location_name_patterns(workspace_id, user_id, pattern_key);
+-- A round trip's pattern reads its route links by commute (the existing indexes lead with evidence).
+create index if not exists idx_segment_evidence_commute_lookup
+  on location_segment_evidence(commute_segment_id, role)
+  where commute_segment_id is not null;

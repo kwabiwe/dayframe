@@ -314,7 +314,7 @@ async function replayAndEmitLocationSemantics(
         reconciliation: autoLogReconciliation(options.processingAt, options.rollout.semanticCutoverAt!)
       };
       semanticSegmentCount = await emitReviewSemanticSegments(
-        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges, autoLog
+        client, session, eligible, replay.stayIds, replay.commuteIds, semanticChanges, autoLog, replay.evidenceTimeZones
       );
       semanticChanges.count += await removeUnusedAutoLogOrphans(
         client, session, autoLog.orphans, autoLog.used, autoLog.locked);

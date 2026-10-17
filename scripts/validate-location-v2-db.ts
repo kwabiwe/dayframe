@@ -5,6 +5,7 @@ import {
   LOCATION_ACCEPTANCE_PLACES,
   LOCATION_ENGINE_V2_CONFIG,
   locationAcceptanceFixture,
+  nameBand,
   runLocationEngine,
   type CommuteSegment,
   type LocationEvidence,
@@ -17,7 +18,8 @@ import {
   ingestLocationEvidence as storeLocationEvidence,
   replayRetainedLocationEvidence
 } from "../apps/web/src/lib/location/location-ingest-service";
-import { resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
+import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
+import { forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName } from "../apps/web/src/lib/location/name-patterns";
 import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
@@ -169,7 +171,12 @@ async function seedOwner() {
   }
 }
 
-async function clearDerivedLocationState() {
+async function clearDerivedLocationState(options: { keepNamePatterns?: boolean } = {}) {
+  // Learned names (PRD D19, A8) come from decisions, so one validator's typed names would name the
+  // next validator's cards.
+  if (!options.keepNamePatterns) {
+    await pool.query("delete from location_name_patterns where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
+  }
   await pool.query("delete from review_items where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
   await pool.query("delete from commute_segments where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
   await pool.query("delete from location_evidence where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
@@ -1857,6 +1864,298 @@ async function validatePlaceDeleteWithSamePlaceJourneys() {
 }
 
 /**
+ * Learned names (PRD D19, A8): a name and activity the person gives a Move in Review become its next
+ * card's name and activity; keeping them counts another use; Dayframe's own titles never count; "Stop
+ * suggesting this" forgets them.
+ */
+async function validateLearnedNames() {
+  await clearDerivedLocationState();
+  await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const evidence = timeAwayEvidence();
+  const patterns = async () => (await pool.query<{ name: string | null; uses: number; categoryId: string | null; categoryUses: number; key: string; band: string }>(
+    `select name, uses, category_id as "categoryId", category_uses as "categoryUses", pattern_key as key, band from location_name_patterns
+     where workspace_id = $1 and user_id = $2 order by band`, [WORKSPACE_ID, USER_ID])).rows;
+  const card = async () => (await pool.query<{ id: string; title: string; categoryId: string | null; source: string | null; key: string | null }>(
+    `select ri.id, ri.title, ri.suggested_category_id as "categoryId", ae.raw_payload ->> 'nameSource' as source,
+            ae.raw_payload ->> 'namePatternKey' as key
+     from review_items ri join activity_events ae on ae.id = ri.event_id
+     join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+     order by ri.suggested_started_at, ri.id`, [WORKSPACE_ID, USER_ID])).rows;
+  const offer = async () => {
+    await clearDerivedLocationState({ keepNamePatterns: true });
+    await ingestLocationEvidence(batch("db-learned-names", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+    const [only] = await card();
+    assert(only, "The learned-name fixture offered no card.");
+    return only;
+  };
+  const travelId = () => travelCategory!;
+  let travelCategory: string | null = null;
+  const errands = await pool.query<{ id: string }>(
+    `insert into categories (workspace_id, name, color) values ($1, 'Shopping', 'amber') returning id`, [WORKSPACE_ID]);
+  const shoppingId = errands.rows[0].id;
+  try {
+    // Dayframe's own title never counts.
+    const first = await offer();
+    travelCategory = first.categoryId;
+    assert(travelCategory, "The fixture's Move suggested no activity.");
+    assert.equal(first.title, "Trip", "The fixture's Move was not titled Trip.");
+    assert(first.key && /^[0-9a-f]{64}$/.test(first.key), "The Move's pattern key was not a hash.");
+    await resolveLocationReviewAction(first.id, { action: "confirm" }, session);
+    assert.deepEqual(await patterns(), [], "Confirming Dayframe's own title was learned.");
+
+    // A name and activity the person gives are learned once…
+    const second = await offer();
+    await resolveLocationReviewAction(second.id, { action: "edit_and_confirm", edit: { description: "Shop run", categoryId: shoppingId } }, session);
+    assert.deepEqual((await patterns()).map(({ name, uses, categoryId, categoryUses }) => ({ name, uses, categoryId, categoryUses })),
+      [{ name: "Shop run", uses: 1, categoryId: shoppingId, categoryUses: 1 }], "A typed name and chosen activity were not learned.");
+
+    // …and are the next card's name and activity; keeping them counts another use.
+    const third = await offer();
+    assert.deepEqual({ title: third.title, categoryId: third.categoryId, source: third.source },
+      { title: "Shop run", categoryId: shoppingId, source: "learned" }, "A learned name did not name the next card.");
+    const kept = await resolveLocationReviewAction(third.id, { action: "confirm" }, session);
+    assert("entryId" in kept && kept.entryId);
+    const keptEntry = await pool.query<{ description: string | null }>("select description from time_entries where id = $1", [kept.entryId]);
+    assert.equal(keptEntry.rows[0].description, "Shop run", "Accepting a learned name did not keep it on the block.");
+    assert.deepEqual((await patterns()).map(({ uses, categoryUses }) => ({ uses, categoryUses })), [{ uses: 2, categoryUses: 2 }],
+      "Keeping a learned name and activity did not count a use of each.");
+    // An activity changed on its own never adds a use to the name (Codex r1 on #458).
+    const fourth = await offer();
+    await resolveLocationReviewAction(fourth.id, { action: "edit_and_confirm", edit: { categoryId: travelId() } }, session);
+    assert.deepEqual((await patterns()).map(({ name, uses, categoryUses }) => ({ name, uses, categoryUses })),
+      [{ name: "Shop run", uses: 3, categoryUses: 1 }], "A kept learned name with a new activity was counted wrongly.");
+    const reset = await offer();
+    const resetDecision = await resolveLocationReviewAction(reset.id, { action: "edit_and_confirm", edit: { categoryId: shoppingId } }, session);
+    assert("entryId" in resetDecision && resetDecision.entryId);
+    // A name in another band is a fallback; forgetting must remove it too.
+    await pool.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses)
+       select workspace_id, user_id, pattern_key, 'weekend', 'Weekend shop', 1 from location_name_patterns
+       where workspace_id = $1 and band <> 'weekend' limit 1`, [WORKSPACE_ID]);
+
+    // "Stop suggesting this" forgets it.
+    assert.equal(await forgetLearnedNameForEntry(pool, session, resetDecision.entryId), 2, "Stop suggesting this did not forget every band.");
+    assert.deepEqual(await patterns(), [], "Stop suggesting this left the learned name.");
+    assert.equal((await offer()).title, "Trip", "A forgotten name still named the card.");
+
+    // After two uses a learned name also names a Log automatically block (D17 visits).
+    const acceptance = locationAcceptanceFixture();
+    for (const place of LOCATION_ACCEPTANCE_PLACES) {
+      await pool.query(
+        `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses)
+         select $1, $2, $3, band, $4, 1 from unnest(array['morning', 'afternoon', 'evening', 'weekend']) as band`,
+        [WORKSPACE_ID, USER_ID, hashedPatternKey(session, `p:${place.id}`), `Learned ${place.name}`]);
+    }
+    await pool.query("update places set auto_log = true where workspace_id = $1", [WORKSPACE_ID]);
+    const autoBlocks = async () => {
+      await clearDerivedLocationState({ keepNamePatterns: true });
+      await ingestLocationEvidence(batch("db-learned-names-autolog", acceptance.evidence, "v2_review", acceptance.evidence[0].occurredAt), session);
+      return (await pool.query<{ description: string | null }>(
+        `select description from time_entries where workspace_id = $1 and user_id = $2 and source = 'location_auto_log'
+         order by started_at`, [WORKSPACE_ID, USER_ID])).rows.map((row) => row.description);
+    };
+    const once = await autoBlocks();
+    assert(once.length > 0, "The acceptance fixture logged no visit automatically.");
+    assert(once.every((description) => !description?.startsWith("Learned ")), "A learned name used once named a Log automatically block.");
+    await pool.query("update location_name_patterns set uses = 2 where workspace_id = $1 and name like 'Learned %'", [WORKSPACE_ID]);
+    const twice = await autoBlocks();
+    assert(twice.length > 0 && twice.every((description) => description?.startsWith("Learned ")),
+      `A learned name used twice did not name the Log automatically block: ${JSON.stringify(twice)}`);
+    await pool.query("update places set auto_log = false where workspace_id = $1", [WORKSPACE_ID]);
+    await pool.query("delete from location_name_patterns where workspace_id = $1 and name like 'Learned %'", [WORKSPACE_ID]);
+  } finally {
+    await clearDerivedLocationState();
+    await pool.query("update places set auto_log = false where workspace_id = $1", [WORKSPACE_ID]);
+    await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+    await pool.query("delete from categories where id = $1", [shoppingId]);
+  }
+}
+
+/**
+ * Learned names through corrections (Codex r2 on #458): a Stay corrected to another place, on its own
+ * or in the editor, or to a learned place teaches that place; split parts keep learned provenance and
+ * an activity chosen in the split; a cleared activity teaches none; an activity-only band never hides
+ * another band's name; and an older client's plain accept of a location card is a Confirm.
+ */
+async function validateLearnedNameCorrections() {
+  await clearDerivedLocationState();
+  await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const fixture = locationAcceptanceFixture();
+  const [placeA, placeB] = LOCATION_ACCEPTANCE_PLACES;
+  const keyOf = (id: string) => hashedPatternKey(session, `p:${id}`);
+  const rows = async () => (await pool.query<{ key: string; band: string; name: string | null; uses: number; categoryId: string | null; categoryUses: number }>(
+    `select pattern_key as key, band, name, uses, category_id as "categoryId", category_uses as "categoryUses"
+     from location_name_patterns where workspace_id = $1 and user_id = $2 order by pattern_key, band`, [WORKSPACE_ID, USER_ID])).rows;
+  const cards = async (type?: string) => (await pool.query<{ id: string; title: string; placeId: string | null; categoryId: string | null; band: string | null;
+    startedAt: Date; stoppedAt: Date }>(
+    `select ri.id, ri.title, ri.suggested_place_id as "placeId", ri.suggested_category_id as "categoryId",
+            ae.raw_payload ->> 'namePatternBand' as band, ri.suggested_started_at as "startedAt", ri.suggested_stopped_at as "stoppedAt"
+     from review_items ri join activity_events ae on ae.id = ri.event_id
+     join stay_segments st on st.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ($3::text is null or ri.type = $3)
+     order by ri.suggested_started_at, ri.id`, [WORKSPACE_ID, USER_ID, type ?? null])).rows;
+  const offer = async () => {
+    await clearDerivedLocationState({ keepNamePatterns: true });
+    await ingestLocationEvidence(batch("db-learned-name-corrections", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt), session);
+    const card = (await cards()).find((row) => row.placeId === placeA.id);
+    assert(card && card.band, "The acceptance fixture offered no Stay card at its first place.");
+    return card;
+  };
+  const forgetAll = () => pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+  const seed = (key: string, name: string | null, uses: number, categoryId: string | null, categoryUses: number, bands = ["morning", "afternoon", "evening", "weekend"]) =>
+    pool.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses, category_id, category_uses)
+       select $1, $2, $3, band, $4, $5, $6, $7 from unnest($8::text[]) as band`,
+      [WORKSPACE_ID, USER_ID, key, name, uses, categoryId, categoryUses, bands]);
+  const midpoint = (card: { startedAt: Date; stoppedAt: Date }) =>
+    new Date((new Date(card.startedAt).getTime() + new Date(card.stoppedAt).getTime()) / 2).toISOString();
+  const category = await pool.query<{ id: string }>(
+    `insert into categories (workspace_id, name, color) values ($1, 'Visiting', 'amber') returning id`, [WORKSPACE_ID]);
+  const chosenId = category.rows[0].id;
+  let learnedPlaceId: string | null = null;
+  try {
+    // An older client's plain accept reaches a location card as Confirm.
+    const located = await offer();
+    assert.equal(await isLocationSegmentReview(located.id, session), true, "A Stay card was not recognised as a location card.");
+    assert.equal(await isLocationSegmentReview("not-a-uuid", session), false);
+
+    // Correcting the place in the editor teaches the corrected place.
+    const edited = await offer();
+    await resolveLocationReviewAction(edited.id, { action: "edit_and_confirm", edit: { placeId: placeB.id, description: "Corrected visit" } }, session);
+    assert.deepEqual((await rows()).map((row) => row.key), [keyOf(placeB.id)], "An edited place still taught the original place.");
+    await forgetAll();
+
+    // A standalone change of place, confirmed later, teaches the new place.
+    const changed = await offer();
+    await resolveLocationReviewAction(changed.id, { action: "change_place", placeId: placeB.id }, session);
+    await resolveLocationReviewAction(changed.id, { action: "edit_and_confirm", edit: { description: "Corrected visit" } }, session);
+    assert.deepEqual((await rows()).map((row) => row.key), [keyOf(placeB.id)], "A standalone change of place still taught the original place.");
+    await forgetAll();
+
+    // Replay keeps a standalone correction's place in the card's pattern (Codex r3 on #458).
+    const replayed = await offer();
+    await resolveLocationReviewAction(replayed.id, { action: "change_place", placeId: placeB.id }, session);
+    await ingestLocationEvidence(batch("db-learned-name-corrections", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt), session);
+    const replayedKey = await pool.query<{ key: string | null }>(
+      `select ae.raw_payload ->> 'namePatternKey' as key from review_items ri join activity_events ae on ae.id = ri.event_id where ri.id = $1`,
+      [replayed.id]);
+    assert.equal(replayedKey.rows[0]?.key, keyOf(placeB.id), "Replay put back the uncorrected place's pattern.");
+    await resolveLocationReviewAction(replayed.id, { action: "edit_and_confirm", edit: { description: "Corrected visit" } }, session);
+    assert.deepEqual((await rows()).map((row) => row.key), [keyOf(placeB.id)], "A replayed correction taught the original place.");
+    await forgetAll();
+
+    // Split parts learn in their own time-of-day bands.
+    const banded = await offer();
+    const bandedSplit = await resolveLocationReviewAction(banded.id, { action: "split_and_confirm", splitAt: midpoint(banded),
+      left: { description: "First part" }, right: { description: "Second part" } }, session);
+    assert("entryIds" in bandedSplit);
+    const expectedBands = [
+      { name: "First part", band: nameBand(new Date(banded.startedAt).toISOString(), "Europe/London") },
+      { name: "Second part", band: nameBand(midpoint(banded), "Europe/London") }
+    ];
+    // Each band keeps the last name given in it.
+    const lastPerBand = [...new Map(expectedBands.map((part) => [part.band, part])).values()];
+    assert.deepEqual((await rows()).map(({ name, band }) => ({ name, band })).sort((a, b) => a.band.localeCompare(b.band)),
+      lastPerBand.sort((a, b) => a.band.localeCompare(b.band)), "Split parts did not learn in their own bands.");
+    await forgetAll();
+
+    // A part with no reading of its own takes its visit's zone, never a later trip's (Codex r5 on #458).
+    const sparse = await offer();
+    await pool.query(
+      `insert into location_evidence
+       select (jsonb_populate_record(null::location_evidence, to_jsonb(le) || jsonb_build_object(
+         'id', gen_random_uuid(), 'client_evidence_id', le.client_evidence_id || '-later-zone',
+         'occurred_at', le.occurred_at + interval '1 day', 'time_zone', 'Asia/Tokyo'))).*
+       from location_evidence le where le.workspace_id = $1 and le.user_id = $2 order by le.occurred_at desc limit 1`,
+      [WORKSPACE_ID, USER_ID]);
+    const lateSplitAt = new Date(new Date(sparse.stoppedAt).getTime() - 70_000).toISOString();
+    await resolveLocationReviewAction(sparse.id, { action: "split_and_confirm", splitAt: lateSplitAt,
+      left: { description: "Before" }, right: { description: "Last minute" } }, session);
+    const lastMinute = (await rows()).find((row) => row.name === "Last minute");
+    assert.equal(lastMinute?.band, nameBand(lateSplitAt, "Europe/London"), "A sparse split part learned in a later trip's time zone.");
+    await pool.query("delete from location_evidence where workspace_id = $1 and client_evidence_id like '%-later-zone'", [WORKSPACE_ID]);
+    await forgetAll();
+
+    // A correction to an accepted learned place teaches that learned place.
+    const learned = await pool.query<{ id: string }>(
+      `insert into learned_places (workspace_id, user_id, cluster_key, name, latitude, longitude, first_seen_at, last_seen_at, status)
+       values ($1, $2, 'db-learned-name-corrections', 'Synthetic learned place', 0.001, 0.001, now(), now(), 'accepted') returning id`,
+      [WORKSPACE_ID, USER_ID]);
+    learnedPlaceId = learned.rows[0].id;
+    const toLearned = await offer();
+    await resolveLocationReviewAction(toLearned.id, { action: "change_place", placeId: null, learnedPlaceId }, session);
+    await resolveLocationReviewAction(toLearned.id, { action: "edit_and_confirm", edit: { description: "Corrected visit" } }, session);
+    assert.deepEqual((await rows()).map((row) => row.key), [hashedPatternKey(session, `l:${learnedPlaceId}`)],
+      "A correction to a learned place did not teach that learned place.");
+    await forgetAll();
+    await clearDerivedLocationState();
+    await pool.query("delete from learned_places where id = $1", [learnedPlaceId]);
+    learnedPlaceId = null;
+
+    // Split parts keep the learned name and activity; confirming one counts a use of each.
+    await seed(keyOf(placeA.id), "Learned visit", 1, chosenId, 1);
+    const parent = await offer();
+    assert.deepEqual({ title: parent.title, categoryId: parent.categoryId }, { title: "Learned visit", categoryId: chosenId },
+      "The seeded learned name did not name the Stay card.");
+    await resolveLocationReviewAction(parent.id, { action: "split", splitAt: midpoint(parent) }, session);
+    const [left] = await cards("location_manual_correction");
+    assert(left, "Split offered no correction cards.");
+    await resolveLocationReviewAction(left.id, { action: "confirm" }, session);
+    const afterSplit = (await rows()).find((row) => row.band === parent.band);
+    assert.deepEqual(afterSplit && { uses: afterSplit.uses, categoryUses: afterSplit.categoryUses }, { uses: 2, categoryUses: 2 },
+      "Confirming a split part's kept learned name and activity was not learned.");
+    await forgetAll();
+
+    // A cleared activity in a split stays cleared and teaches no activity.
+    await seed(keyOf(placeA.id), "Learned visit", 1, chosenId, 1);
+    const cleared = await offer();
+    const clearedSplit = await resolveLocationReviewAction(cleared.id,
+      { action: "split_and_confirm", splitAt: midpoint(cleared), left: { categoryId: null }, right: {} }, session);
+    assert("entryIds" in clearedSplit && clearedSplit.entryIds);
+    const clearedEntry = await pool.query<{ categoryId: string | null }>(
+      `select category_id as "categoryId" from time_entries where id = $1`, [clearedSplit.entryIds[0]]);
+    assert.equal(clearedEntry.rows[0].categoryId, null, "A cleared activity got the suggested activity.");
+    const afterClear = (await rows()).find((row) => row.band === cleared.band);
+    assert.deepEqual(afterClear && { categoryId: afterClear.categoryId, categoryUses: afterClear.categoryUses }, { categoryId: chosenId, categoryUses: 2 },
+      "A cleared activity was learned as a choice, or the kept one was not.");
+    await forgetAll();
+
+    // An activity chosen in a split is learned when its part is confirmed.
+    const choosing = await offer();
+    await resolveLocationReviewAction(choosing.id, { action: "split", splitAt: midpoint(choosing), left: { categoryId: chosenId } }, session);
+    const [chosenPart] = await cards("location_manual_correction");
+    await resolveLocationReviewAction(chosenPart.id, { action: "confirm" }, session);
+    assert.deepEqual((await rows()).map(({ categoryId, categoryUses }) => ({ categoryId, categoryUses })), [{ categoryId: chosenId, categoryUses: 1 }],
+      "An activity chosen in a split was not learned when its part was confirmed.");
+    await forgetAll();
+
+    // An activity-only band never hides another band's name.
+    await seed("db-independent-bands", "Morning name", 3, null, 0, ["morning"]);
+    await seed("db-independent-bands", null, 0, chosenId, 1, ["afternoon"]);
+    const independent = await learnedNamesFor(pool, session, new Map([["card", { key: "db-independent-bands", band: "afternoon" as const }]]));
+    assert.deepEqual(independent.get("card"), { name: "Morning name", categoryId: chosenId, uses: 3, categoryUses: 1 },
+      "An activity-only band hid another band's learned name.");
+
+    // Keeping another band's name in this band never makes it less trusted (Codex r4 on #458).
+    await forgetAll();
+    await seed("db-kept-fallback", "School run", 2, null, 0, ["morning"]);
+    const fallbackPattern = { key: "db-kept-fallback", band: "afternoon" as const };
+    assert.equal((await learnedNamesFor(pool, session, new Map([["card", fallbackPattern]]))).get("card")?.uses, 2);
+    await recordLearnedName(pool, session, fallbackPattern, { name: "school  RUN", categoryId: null });
+    assert.equal((await learnedNamesFor(pool, session, new Map([["card", fallbackPattern]]))).get("card")?.uses, 2,
+      "Keeping a fallback name in its own band demoted it below the automatic-name threshold.");
+  } finally {
+    await clearDerivedLocationState();
+    await forgetAll();
+    if (learnedPlaceId) await pool.query("delete from learned_places where id = $1", [learnedPlaceId]);
+    await pool.query("delete from categories where id = $1", [chosenId]);
+  }
+}
+
+/**
  * Health walks win (PRD D19, design §9): a Move an Apple Health walk covers is not offered; when the
  * workout arrives after the card, the next replay retires the card, and it comes back if the
  * workout goes. A workout of another kind never hides a Move.
@@ -2422,6 +2721,8 @@ async function main() {
     await validateMotionActivityEvidence();
     await validateMotionOnlyReviewRetirement();
     await validateTimeAwayReview();
+    await validateLearnedNames();
+    await validateLearnedNameCorrections();
     await validatePlaceDeleteWithSamePlaceJourneys();
     await validateHealthWalksWin();
     await validateShadowToReviewCutover();
@@ -2435,7 +2736,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

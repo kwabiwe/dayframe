@@ -11,11 +11,13 @@ const mocks = vi.hoisted(() => ({
   resolveRequestSession: vi.fn(),
   resolveReviewItem: vi.fn(),
   resolveLocationReviewAction: vi.fn(),
+  isLocationSegmentReview: vi.fn(),
   resolveIdempotentReviewMutation: vi.fn()
 }));
 
 vi.mock("@/lib/location/location-review-service", () => ({
-  resolveLocationReviewAction: mocks.resolveLocationReviewAction
+  resolveLocationReviewAction: mocks.resolveLocationReviewAction,
+  isLocationSegmentReview: mocks.isLocationSegmentReview
 }));
 
 vi.mock("@/lib/ingest-auth", () => ({
@@ -41,6 +43,7 @@ describe("POST /api/review/[id]", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
+    mocks.isLocationSegmentReview.mockResolvedValue(false);
     mocks.resolveReviewItem.mockResolvedValue({
       ok: true,
       action: "accept",
@@ -62,6 +65,16 @@ describe("POST /api/review/[id]", () => {
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ ok: true, entryId: "entry-1" });
     expect(mocks.resolveReviewItem).toHaveBeenCalledWith("review-1", "accept", session, expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }));
+  });
+
+  it("confirms an older client's plain accept of a location Stay or Move like Confirm (Codex r2 on #458)", async () => {
+    mocks.isLocationSegmentReview.mockResolvedValueOnce(true);
+    mocks.resolveLocationReviewAction.mockResolvedValueOnce({ ok: true, action: "confirm", status: "accepted", entryId: "entry-2" });
+    const response = await POST(jsonRequest({ action: "accept" }), params("review-1"));
+
+    expect(await response.json()).toMatchObject({ ok: true, entryId: "entry-2" });
+    expect(mocks.resolveLocationReviewAction).toHaveBeenCalledWith("review-1", { action: "confirm" }, session, expect.objectContaining({ deadlineAt: expect.any(Number) }));
+    expect(mocks.resolveReviewItem).not.toHaveBeenCalled();
   });
 
   it("returns JSON for expected review resolution failures", async () => {
