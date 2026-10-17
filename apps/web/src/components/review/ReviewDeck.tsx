@@ -42,6 +42,9 @@ import {
   reviewSourceLabel,
   reviewTitle,
   reviewWhen,
+  outingMutationFor,
+  outingSummary,
+  reviewOutings,
   reviewWindow,
   stepSelection,
   type ReviewDecisionKind,
@@ -94,7 +97,17 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     }
     return extra.length ? [...openItems, ...extra] : openItems;
   }, [editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
-  const visible = useMemo(() => deckItems.filter((item) => !state.hiddenIds.has(item.id)), [deckItems, state.hiddenIds]);
+  // One card per outing (PRD D19): a Move card that belongs to an unknown Stay's card on the deck is
+  // folded into it (also while that card's decision is held), and comes back on its own otherwise.
+  const outings = useMemo(() => reviewOutings(deckItems), [deckItems]);
+  const outingMemberIds = useMemo(
+    () => new Set([...outings.values()].flatMap((outing) => outing.members.map((member) => member.id))),
+    [outings]
+  );
+  const visible = useMemo(
+    () => deckItems.filter((item) => !state.hiddenIds.has(item.id) && !outingMemberIds.has(item.id)),
+    [deckItems, outingMemberIds, state.hiddenIds]
+  );
   const visibleIds = useMemo(() => visible.map((item) => item.id), [visible]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -270,14 +283,19 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     const category = reviewCardCategory(item, draft, categories);
     const span = reviewWindow(item);
     const name = draft?.name?.trim() || reviewDefaultName(item);
+    const outing = outings.get(item.id);
+    const outingMs = outing ? outing.members.reduce((sum, member) => {
+      const memberSpan = reviewWindow(member);
+      return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
+    }, 0) : 0;
     decidedSnapshots.current.set(item.id, item);
     const held = decide({
       itemId: item.id,
       kind,
-      mutation: reviewMutationFor(item, kind, draft),
+      mutation: outing ? outingMutationFor(outing, kind, draft) : reviewMutationFor(item, kind, draft),
       signature: reviewProposalSignature(item),
       label: kind === "log" ? `Logged ${name}` : `Skipped ${reviewTitle(item)}`,
-      durationMs: span ? span.stopMs - span.startMs : 0,
+      durationMs: (span ? span.stopMs - span.startMs : 0) + outingMs,
       color: category?.color ?? null,
       colorName: category?.name ?? ""
     });
@@ -313,7 +331,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       const box = cardRef.current?.getBoundingClientRect();
       setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined, overEmpty: next === null });
     }
-  }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
+  }, [categories, decide, drafts, evidenceOpenId, outings, revived, visibleIds]);
 
   // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
   // moves to the card.
@@ -558,6 +576,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               nowMs={nowMs}
               onDecide={decideCurrent}
               onDraft={(patch) => setDraft(selected.id, patch)}
+              outing={outings.get(selected.id) ? outingSummary(outings.get(selected.id)!) : undefined}
               overlap={span ? (
                 <OverlapLine
                   candidate={{ startedAt: new Date(span.startMs).toISOString(), stoppedAt: new Date(span.stopMs).toISOString() }}
@@ -678,6 +697,7 @@ function CardFace({
   nowMs,
   onDecide,
   onDraft,
+  outing,
   overlap,
   titleId
 }: {
@@ -693,6 +713,8 @@ function CardFace({
   onDraft?: (patch: ReviewLogAsDraft) => void;
   /** The top card's overlap line, shown under the time. */
   overlap?: React.ReactNode;
+  /** One card per outing (PRD D19): the travel line of the Moves folded into this Stay's card. */
+  outing?: string;
   titleId?: string;
 }) {
   const clock = useClockFormat();
@@ -748,6 +770,7 @@ function CardFace({
           </p>
         ) : null}
         {overlap}
+        {outing ? <p className="df-rwhen df-routing">{outing}</p> : null}
         {span ? (
           <div className="df-logas">
             <label htmlFor={inert ? undefined : "df-logas-name"}>Log as</label>

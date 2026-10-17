@@ -260,6 +260,17 @@ export const MergeLocationReviewSchema = z.object({
   acknowledgeContradictoryEvidence: z.boolean().default(false), edit: ReviewEntryEditSchema.optional()
 }).strict();
 
+/**
+ * One card per outing (PRD D19): logs (`confirm_outing`) or skips (`ignore_outing`) an unknown Stay's
+ * card and the Move cards either side of it together, in one transaction. Sent on the Stay's card
+ * with the other members' ids; `edit` ("Log as" on the grouped card) applies to the Stay only.
+ */
+export const OutingLocationReviewSchema = z.object({
+  action: z.enum(["confirm_outing", "ignore_outing"]),
+  memberReviewItemIds: z.array(z.string().uuid()).min(1).max(3),
+  edit: ReviewEntryEditSchema.optional()
+}).strict();
+
 export const LocationReviewActionSchema = z.discriminatedUnion("action", [
   legacyReviewActionSchema, ConfirmLocationReviewSchema, IgnoreLocationReviewSchema, EditLocationReviewSchema,
   z.object({
@@ -267,7 +278,8 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
     learnedPlaceId: z.string().uuid().nullable().optional()
   }).strict(),
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
-  SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
+  SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema,
+  OutingLocationReviewSchema
 ]);
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;

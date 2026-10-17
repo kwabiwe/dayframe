@@ -175,6 +175,9 @@ export async function resolveIdempotentReviewMutation(
 }
 
 function affectedReviewIds(reviewItemId: string, mutation: ReviewMutation) {
+  if (mutation.action === "confirm_outing" || mutation.action === "ignore_outing") {
+    return [reviewItemId, ...mutation.memberReviewItemIds];
+  }
   return mutation.action === "merge" || mutation.action === "merge_and_confirm"
     ? [reviewItemId, mutation.adjacentReviewItemId] : [reviewItemId];
 }

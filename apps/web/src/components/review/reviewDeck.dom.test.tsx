@@ -45,11 +45,13 @@ const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     const reviewItemId = input.slice("/api/review/".length);
     const action = body.mutation.action as string;
     const ignored = action.startsWith("ignore");
+    const members = Array.isArray(body.mutation.memberReviewItemIds) ? body.mutation.memberReviewItemIds as string[] : null;
     return new Response(JSON.stringify({
       ok: true,
       action,
       status: ignored ? "ignored" : "accepted",
       ...(ignored ? {} : { entryId: "e-1" }),
+      ...(members ? { reviewItemIds: [reviewItemId, ...members], ...(ignored ? {} : { entryIds: [reviewItemId, ...members].map((_, index) => `e-${index}`) }) } : {}),
       clientMutationId: body.clientMutationId,
       reviewItemId
     }), { status: 200 });
@@ -137,6 +139,32 @@ describe("Review", () => {
     expect(queue(container)).toEqual(["Morning walk", "Reading"]);
     await act(async () => vi.advanceTimersByTime(6_000));
     expect(sent).toEqual([]);
+    await act(async () => root.unmount());
+  });
+
+  it("shows an outing as one card and logs all of it together (PRD D19, one card per outing)", async () => {
+    const THERE = "30000000-0000-4000-8000-0000000000a1";
+    const SHOP = "30000000-0000-4000-8000-0000000000a2";
+    const BACK = "30000000-0000-4000-8000-0000000000a3";
+    const part = (id: string, title: string, role: string, from: [number, number], to: [number, number]): ReviewItemRow => ({
+      ...review(id, title, "admin"), eventSource: "location_learning", eventType: role === "stay" ? "unknown_stay" : "commute_detected",
+      suggestedStartedAt: local(...from), suggestedStoppedAt: local(...to),
+      rawPayload: { clientSegmentId: id, outingKey: "outing:shop", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
+    });
+    const { container, root } = await mount([
+      part(THERE, "Trip to the shop", "in", [9, 0], [9, 6]), part(SHOP, "Unknown place", "stay", [9, 6], [9, 40]),
+      part(BACK, "Trip home", "out", [9, 40], [9, 45]), review(READ, "Reading", "admin")
+    ]);
+    expect(queue(container)).toEqual(["Unknown place", "Reading"]);
+    expect(title(container)).toBe("Unknown place");
+    expect(container.querySelector(".df-routing")?.textContent).toBe("Drives there and back · 11m");
+    await key("y");
+    expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => [request.url, request.body.mutation])).toEqual([
+      [`/api/review/${SHOP}`, { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] }]
+    ]);
+    expect(container.textContent).not.toContain("Couldn’t");
     await act(async () => root.unmount());
   });
 

@@ -3,6 +3,9 @@ import type { ReviewItemRow } from "@/lib/queries";
 import {
   activeDraft,
   nextAfterDecision,
+  outingMutationFor,
+  outingSummary,
+  reviewOutings,
   reviewCardCategory,
   reviewMutationFor,
   reviewPicture,
@@ -169,3 +172,36 @@ describe("location reason line (location v3 bug 8)", () => {
     expect(location("ambiguous_place", "unknown_stay")).toBe("It’s near more than one saved place.");
   });
 });
+
+describe("one card per outing (PRD D19)", () => {
+  const v2 = (id: string, role: string, extra: Record<string, unknown>, from: [number, number], to: [number, number]) => item({
+    id, eventSource: "location_learning", eventType: role === "stay" ? "unknown_stay" : "commute_detected",
+    suggestedStartedAt: local(10, ...from), suggestedStoppedAt: local(10, ...to),
+    rawPayload: { clientSegmentId: id, outingKey: "outing:shop", outingRole: role, ...extra }
+  });
+  const there = v2("30000000-0000-4000-8000-0000000000a1", "in", { travelMode: "automotive" }, [12, 28], [12, 34]);
+  const shop = v2("30000000-0000-4000-8000-0000000000a2", "stay", {}, [12, 34], [13, 10]);
+  const back = v2("30000000-0000-4000-8000-0000000000a3", "out", { travelMode: "automotive" }, [13, 10], [13, 15]);
+
+  it("folds the Move cards into their unknown Stay's card, and leaves them alone without it", () => {
+    const outings = reviewOutings([there, shop, back]);
+    expect([...outings.keys()]).toEqual([shop.id]);
+    expect(outings.get(shop.id)!.members.map((member) => member.id)).toEqual([there.id, back.id]);
+    expect(reviewOutings([there, back]).size).toBe(0);
+  });
+
+  it("says how the outing travelled, there and back, with the travel time", () => {
+    expect(outingSummary(reviewOutings([there, shop, back]).get(shop.id)!)).toBe("Drives there and back · 11m");
+    expect(outingSummary(reviewOutings([there, shop]).get(shop.id)!)).toBe("Drives there · 6m");
+  });
+
+  it("logs or skips every member together; Log as applies to the Stay", () => {
+    const outing = reviewOutings([there, shop, back]).get(shop.id)!;
+    expect(outingMutationFor(outing, "skip", undefined)).toEqual({ action: "ignore_outing", memberReviewItemIds: [there.id, back.id] });
+    expect(outingMutationFor(outing, "log", undefined)).toEqual({ action: "confirm_outing", memberReviewItemIds: [there.id, back.id] });
+    expect(outingMutationFor(outing, "log", { name: "Groceries" })).toMatchObject({
+      action: "confirm_outing", edit: { description: "Groceries", startedAt: shop.suggestedStartedAt, stoppedAt: shop.suggestedStoppedAt }
+    });
+  });
+});
+

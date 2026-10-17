@@ -62,6 +62,8 @@ type LockedReview = {
   /** Its learned-name pattern (PRD D19, A8), when the emitter keyed it; and whether its title is a learned name. */
   namePatternKey: string | null;
   namePatternBand: string | null;
+  /** One card per outing (PRD D19): the key its outing's cards share, if any. */
+  outingKey?: string | null;
   learnedName: boolean;
   /** Its suggested activity is one the person chose for this pattern before. */
   learnedActivity: boolean;
@@ -207,6 +209,9 @@ export async function resolveLocationReviewActionWithClient(
   options: { expectedProposalHash?: string } = {}
 ) {
   const action = LocationReviewActionSchema.parse(input);
+  if (action.action === "confirm_outing" || action.action === "ignore_outing") {
+    return resolveOuting(client, reviewItemId, action, session);
+  }
   setSyncPhase(client, "review_lock");
   const lockedItems = action.action === "merge" || action.action === "merge_and_confirm"
     ? await lockLocationReviews(
@@ -235,6 +240,53 @@ export async function resolveLocationReviewActionWithClient(
     : [item];
   await lockLocationSegments(client, segmentItems, session);
   return performAction(client, item, action, session);
+}
+
+/**
+ * One card per outing (PRD D19): logs or skips an unknown Stay's card and the Move cards either side
+ * of it in one transaction. Every member is locked in id order (as merge does), must still carry the
+ * Stay card's outing key, and must still be open; otherwise nothing changes (a resolution conflict), unless
+ * every member was already decided the same way, which acknowledges as already resolved. "Log as" on
+ * the grouped card (`edit`) applies to the Stay card only; each Move is logged as proposed.
+ */
+async function resolveOuting(
+  client: pg.PoolClient, reviewItemId: string,
+  action: Extract<LocationReviewAction, { action: "confirm_outing" | "ignore_outing" }>, session: RequestSession
+) {
+  setSyncPhase(client, "review_lock");
+  const ids = [reviewItemId, ...action.memberReviewItemIds];
+  if (new Set(ids).size !== ids.length) {
+    throw new ReviewResolutionError("invalid_action", "An outing lists the same card twice.", { status: 422 });
+  }
+  const items = await lockLocationReviews(client, ids, session);
+  setSyncPhase(client, "effect");
+  const anchor = items.find((item) => item.id === reviewItemId);
+  if (!anchor) throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
+  const confirm = action.action === "confirm_outing";
+  const closed = items.filter((item) => item.status !== "open");
+  if (closed.length === items.length && items.every((item) => item.status === (confirm ? "accepted" : "ignored"))) {
+    return { ok: true, action: action.action, status: confirm ? "accepted" : "ignored", reviewItemIds: ids,
+      alreadyResolved: true, equivalent: true };
+  }
+  if (closed.length > 0 || !anchor.outingKey || items.some((item) => item.outingKey !== anchor.outingKey)) {
+    throw new ReviewResolutionError("resolution_conflict",
+      "This outing changed since it was shown. Review it again.", { status: 409, details: { reviewItemIds: ids } });
+  }
+  await lockLocationSegments(client, items, session);
+  const entryIds: string[] = [];
+  for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
+    const memberAction: LocationReviewAction = !confirm ? { action: "ignore_once_location" }
+      : item.id === anchor.id && action.edit ? { action: "edit_and_confirm", edit: action.edit } : { action: "confirm" };
+    const result = await performAction(client, item, memberAction, session) as { entryId?: unknown };
+    if (confirm) {
+      if (typeof result?.entryId !== "string") {
+        throw new ReviewResolutionError("resolution_conflict", "Part of this outing could not be logged.", { status: 409 });
+      }
+      entryIds.push(result.entryId);
+    }
+  }
+  return { ok: true, action: action.action, status: confirm ? "accepted" : "ignored", reviewItemIds: ids,
+    ...(confirm ? { entryIds } : {}) };
 }
 
 async function lockLocationReview(client: pg.PoolClient, id: string, session: RequestSession) {
@@ -278,6 +330,7 @@ async function lockLocationReviews(
             ae.raw_payload -> '${REVIEW_SUGGESTED_TITLES_PAYLOAD_KEY}' as "reviewSuggestedTitles",
             ae.raw_payload ->> 'namePatternKey' as "namePatternKey",
             ae.raw_payload ->> 'namePatternBand' as "namePatternBand",
+            ae.raw_payload ->> 'outingKey' as "outingKey",
             coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             coalesce(ae.raw_payload ->> 'activitySource' = 'learned', false) as "learnedActivity",
             coalesce(ae.client_event_id like 'location-correction:%', false) as "correctionEvent",
