@@ -44,6 +44,8 @@ describe("fields (web UI audit P4)", () => {
     expect(rule(".df-palette-input")).not.toMatch(/inset 0 -1px/);
     // Inputs whose wrapper owns the ring never draw their own (Codex r2 on #472).
     expect(styles).toMatch(/:is\(\s*\.ui-compound-control > input,[\s\S]*?\):focus \{\s*box-shadow: none;/);
+    expect(styles).toMatch(/:is\([^)]*\.category-picker-create-name-control > input,[\s\S]*?\):focus \{\s*box-shadow: none;/);
+    expect(styles).toMatch(/\[data-focus-ring="keyboard"\] \.inline-tag-input-anchor:has\(\.inline-tag-description-input:focus\):has\(input\[aria-invalid="true"\]\) \{\s*box-shadow: inset 0 0 0 1px var\(--focus\), inset 0 -2px 0 var\(--danger\);/);
     // The timer's Description draws nothing on pointer focus (Trello 213).
     expect(rule(".swiss-timer-description-control .ui-compound-control:focus-within")).toMatch(/box-shadow: none;/);
     expect(rule(".df-palette-input:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
