@@ -138,7 +138,7 @@ describe("Review sync store contracts", () => {
     expect(presented.rawPayload).toEqual({ outingKey: "outing:synthetic-a", outingRole: "in" });
     expect(sanitiseReviewItemForCache(presented).rawPayload).toEqual({ outingKey: "outing:synthetic-a", outingRole: "in" });
     // From bootstrap too: the key and role survive the cache (coordinates never do).
-    const cached = sanitiseReviewItemForCache(reviewItem({ rawPayload: { outingKey: "outing:synthetic-a", outingRole: "stay", latitude: 51.5 } }));
+    const cached = sanitiseReviewItemForCache(reviewItem({ rawPayload: { outingKey: "outing:synthetic-a", outingRole: "stay", latitude: 0.5 } }));
     expect(cached.rawPayload).toEqual({ outingKey: "outing:synthetic-a", outingRole: "stay" });
   });
 
