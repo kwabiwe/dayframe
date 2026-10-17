@@ -37,4 +37,20 @@ describe("withCorrectedStayPlaces (Codex r1/r2 on #459)", () => {
     expect(result.segments).toBe(segments);
     expect(result.correctedCategories.size).toBe(0);
   });
+
+  it("names a corrected round trip by its corrected ends, keeping its qualification (Codex r3 on #459)", async () => {
+    const query = vi.fn(async (_sql: string, _params: unknown[]) => ({ rows: [
+      { id: "db-away", placeId: "place-work", learnedPlaceId: null, kind: "saved", hasCategory: false, categoryId: null },
+      { id: "db-home", placeId: "place-home", learnedPlaceId: null, kind: "saved", hasCategory: false, categoryId: null }
+    ] }));
+    const roundTrip = { ...move("loop", "home", "away", "place-home", "place-home"), qualificationReason: "same_place_meaningful_round_trip" } as LocationSegment;
+    const result = await withCorrectedStayPlaces({ query } as never, session, [roundTrip], new Map([["home", "db-home"], ["away", "db-away"]]));
+    expect(result.segments[0]).toMatchObject({ fromPlaceId: "place-home", toPlaceId: "place-work", qualificationReason: "same_place_meaningful_round_trip" });
+    expect([...result.correctedMoves]).toEqual(["loop"]);
+    // A time-only correction of an end that keeps its place changes nothing about the name.
+    const timeOnly = await withCorrectedStayPlaces({ query: vi.fn(async () => ({ rows: [
+      { id: "db-home", placeId: "place-home", learnedPlaceId: null, kind: "saved", hasCategory: false, categoryId: null }] })) } as never,
+    session, [roundTrip], new Map([["home", "db-home"], ["away", "db-away"]]));
+    expect(timeOnly.correctedMoves.size).toBe(0);
+  });
 });
