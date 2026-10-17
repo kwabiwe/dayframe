@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
@@ -34,9 +35,12 @@ function mount(reduceMotion = false) {
   let tree: ReactTestRenderer | undefined;
   let token = 0;
   let point = centre;
+  // StrictMode replays effects, as development builds do (Codex r4 on #482).
   const element = (value: LocationReviewEvidenceDto = stay) => (
-    <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
-      revealChoiceToken={token} selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
+    <StrictMode>
+      <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
+        revealChoiceToken={token} selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
+    </StrictMode>
   );
   act(() => {
     tree = create(element(), {
