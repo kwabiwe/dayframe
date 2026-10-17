@@ -1084,6 +1084,12 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
     for (const motion of [false, true]) expect(drivesCovered(twoVisits(6), seed, motion)).toEqual([true, true, true]);
   });
 
+  // Home → A → B, still at B: the ongoing stay at B anchors the outing (Codex r3 on #461: seed 38 lost both Moves).
+  it.each([38])("keeps both Moves of Home → A → B while still at B (seed %i)", (seed) => {
+    const endingAtB: Scenario = { ...twoVisits(12), legs: twoVisits(12).legs.slice(0, 5) };
+    for (const motion of [false, true]) expect(drivesCovered(endingAtB, seed, motion)).toEqual([true, true]);
+  });
+
   it("costs no more with 12-minute visits to recover legs for than with 9-minute stops (Codex r2 on #461)", () => {
     // A week of six such outings a day. Recovery used to derive each visit over all the evidence
     // (about 3× the run with stops instead of visits); over its own window it costs about the same.
@@ -1095,7 +1101,9 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
         { kind: "stay", minutes: 300 }] });
       const inputs = Array.from({ length: 7 }, (_, index) =>
         simulate(day(new Date(Date.parse("2026-03-09T06:00:00Z") + index * 86_400_000).toISOString()), index + 1, { motion: true }).input());
-      return { ...inputs[6], evidence: inputs.flatMap((value) => value.evidence) };
+      // The simulator's IDs restart each day: prefix them so every day's visits stay distinct (Codex r3 on #461).
+      return { ...inputs[6], evidence: inputs.flatMap((value, index) =>
+        value.evidence.map((item) => ({ ...item, clientEvidenceId: `d${index}-${item.clientEvidenceId}` }))) };
     };
     const fastest = (value: LocationEngineInput) => {
       runLocationEngine(value);

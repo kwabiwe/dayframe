@@ -1311,7 +1311,8 @@ function outingLegsAround(
   const added: CommuteSegment[] = [];
   const key = (fromId: string, toId: string) => `${fromId}>${toId}`;
   const existing = new Set(legs.map((leg) => key(leg.fromStaySegmentId, leg.toStaySegmentId)));
-  const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && !isOutingVisit(stay, config);
+  // A closed short unknown stop; an ongoing unknown stay can still anchor an outing (Codex r3 on #461).
+  const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null && !isOutingVisit(stay, config);
   const majors = stays.flatMap((stay, index) => minorStop(stay) ? [] : [index]);
   if (!majors.some((index) => isOutingVisit(stays[index], config))) return added;
   const times = acceptedEvidence.map((item) => Date.parse(item.evidence.occurredAt));

@@ -399,10 +399,14 @@ async function excludeProtectedReplacements(
   // commute that starts or ends there, and for a trip's interior stops.
   const commutes = [...segments, ...fallbackLegs].filter((segment): segment is CommuteSegment => segment.kind === "commute");
   const decidedStays = await decidedStayBounds(client, session, options, [...new Set(commutes.flatMap((commute) => [
-    commute.fromStaySegmentId, commute.toStaySegmentId, ...(commute.stops ?? []).map((stop) => stop.staySegmentId)]))].sort());
+    commute.fromStaySegmentId, commute.toStaySegmentId, ...(commute.stops ?? []).map((stop) => stop.staySegmentId),
+    ...(commute.outingStayIds ?? [])]))].sort());
+  // A leg that stands only through its outing also depends on every stay of that outing (Codex r3 on #461).
   const movesEndpoint = (commute: CommuteSegment) =>
     boundariesMoved(commute.fromStaySegmentId, "stop", decidedStays, segments) ||
-    boundariesMoved(commute.toStaySegmentId, "start", decidedStays, segments);
+    boundariesMoved(commute.toStaySegmentId, "start", decidedStays, segments) ||
+    (commute.outingStayIds ?? []).some((id) =>
+      boundariesMoved(id, "start", decidedStays, segments) || boundariesMoved(id, "stop", decidedStays, segments));
   // A trip also depends on its interior stops: it cannot span time whose stop
   // replacement was held by, or already belongs to, decided history. Nor can it
   // keep an endpoint that decided history has moved: its qualified legs are
@@ -526,16 +530,16 @@ function rebuildLegWithinDecidedStops(
   options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">,
   places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
 ): CommuteSegment[] {
-  if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId)) return [leg];
+  const config = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
+  // A leg that stood only because its outing qualified keeps that support only while the outing,
+  // with every decided boundary in it, still qualifies (Codex r2/r3 on #461).
+  const outing = leg.outingStayIds?.map((id) => stayWithDecidedBounds(id, decided, segments));
+  const outingLeg = Boolean(outing && outing.every((stay): stay is StaySegment => stay != null) &&
+    outingQualifies(outing, acceptedEvidence, config, options.processingAt, places));
+  if (!decided.has(leg.fromStaySegmentId) && !decided.has(leg.toStaySegmentId) && (!leg.outingStayIds || outingLeg)) return [leg];
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
-  const config = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
-  // A leg that stood only because its outing qualified keeps that support only while the outing,
-  // with every decided boundary in it, still qualifies (Codex r2 on #461).
-  const outing = leg.outingStayIds?.map((id) => stayWithDecidedBounds(id, decided, segments));
-  const outingLeg = outing && outing.every((stay): stay is StaySegment => stay != null) &&
-    outingQualifies(outing, acceptedEvidence, config, options.processingAt, places);
   return deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
