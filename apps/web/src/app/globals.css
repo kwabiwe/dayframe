@@ -1703,10 +1703,15 @@ dialog.ui-popover-panel.bottom-left {
   margin: auto auto 18px 18px;
 }
 
+/* The #391 surface's 6 px inside padding (WUI-022): rows never touch the panel's edge. */
 .ui-popover-content {
   display: grid;
-  /* Popover rows lay out their own edges. */
-  padding: 0;
+  padding: 6px;
+}
+
+/* Beside its opener (not modal): above the page and the tab bar, below sheets and dialogs. */
+dialog.ui-dialog.ui-popover-panel.is-anchored {
+  z-index: 90;
 }
 
 @media (max-width: 1180px) {
@@ -1716,15 +1721,59 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 @media (max-width: 760px) {
-  /* Popover panels go full width; dialogs keep their tier (each is already min(tier, 100vw − 24px)). */
-  dialog.ui-dialog.ui-popover-panel {
-    width: min(100% - 24px, 720px);
-    max-height: calc(100dvh - 24px);
-    margin: auto;
-  }
-
   .ui-segmented-control {
     width: 100%;
+  }
+}
+
+/* Phones (WUI-026): an anchored popover is a bottom sheet over the scrim, with a grabber and ✕,
+   rising 8 px as it fades in (fade only under Reduce Motion). */
+@media (max-width: 560px) {
+  dialog.ui-dialog.ui-popover-panel.is-sheet {
+    width: auto;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
+    margin: auto 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-radius: 24px;
+  }
+
+  /* The entrance only: the exit copy keeps its fade-out (Codex r1 on #492). */
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
+    animation-name: ui-sheet-in;
+  }
+
+  dialog.ui-dialog.ui-popover-panel.is-sheet .ui-dialog-header {
+    position: relative;
+    padding-top: 18px;
+  }
+
+  dialog.ui-dialog.ui-popover-panel.is-sheet .ui-dialog-header::before {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
+    content: "";
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes ui-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 560px) {
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
+    animation-name: ui-dialog-fade-in;
   }
 }
 
@@ -6432,6 +6481,32 @@ dialog.ui-dialog.df-range-custom {
   z-index: var(--df-layer-sheet);
   max-width: calc(100vw - 24px);
   overflow: hidden;
+}
+
+/* Sheets rise 8 px into place as they fade in, and sink as they fade out (WUI-026); anchored
+   lists fade in place. Reduce Motion keeps the fade only. */
+.df-flist.ui-floating-surface.is-sheet {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 160ms;
+}
+
+.df-flist.ui-floating-surface.is-sheet.is-open {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+
+.df-flist.ui-floating-surface.is-sheet:not(.is-open) {
+  transform: translateY(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-flist.ui-floating-surface.is-sheet:not(.is-open) {
+    transform: none;
+  }
 }
 
 .df-flist.is-sheet .df-flist-head {
@@ -13708,7 +13783,7 @@ dialog.ui-dialog.df-palette {
 
 /* UIA-204: between the phone layout and the sidebar (761-860 px) the avatar sits in the top bar,
    so the profile popover opens under it, top right, instead of bottom left over the tab bar. */
-@media (min-width: 761px) and (max-width: 860px) {
+@media (min-width: 561px) and (max-width: 860px) {
   dialog.ui-popover-panel.bottom-left {
     max-height: calc(100dvh - 64px - 12px);
     margin: 64px 12px auto auto;
@@ -13719,7 +13794,7 @@ dialog.ui-dialog.df-palette {
    Settings and Sign out as rows. */
 .df-profile-pop {
   display: grid;
-  gap: 14px;
+  gap: 6px;
 }
 
 .df-profile-pop-card {
@@ -13762,11 +13837,16 @@ dialog.ui-dialog.df-palette {
   white-space: nowrap;
 }
 
+/* The #391 list head (WUI-018/WUI-022): 11 px uppercase, muted, tracked. */
 .df-profile-pop h3 {
-  margin: 0 0 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
+  margin: 0;
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 .df-profile-pop-rows {
@@ -13783,7 +13863,7 @@ dialog.ui-dialog.df-palette {
   align-items: center;
   gap: 10px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   padding: 0 10px;
   color: var(--foreground);
@@ -15041,28 +15121,46 @@ dialog.ui-dialog.df-palette {
   position: relative;
 }
 
+/* The Reports range menu on the shared floating surface (web UI audit WUI-023): the #391 surface
+   (1 px line, radius 16, floating shadow, 6 px padding), a "Date range" head, 36 px rows (44 px on
+   phones and touch screens) with an inset neutral highlight and a neutral check on the chosen one. */
 .df-range-menu {
   position: absolute;
   z-index: 40;
   top: calc(100% + 6px);
   left: 0;
   display: grid;
-  min-width: 200px;
+  min-width: 220px;
   max-width: calc(100vw - 24px);
   max-height: min(420px, 70vh);
   overflow-y: auto;
-  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   padding: 6px;
-  background: var(--surface-raised, var(--surface));
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
   animation: df-range-menu-in 120ms ease-out both;
 }
 
+.df-range-menu-head {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
 .df-range-menu button {
+  display: flex;
   min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border: 0;
-  border-radius: 9px;
-  padding: 0 12px;
+  border-radius: 10px;
+  padding: 0 10px;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
@@ -15076,13 +15174,30 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-range-menu button[aria-checked="true"] {
-  background: var(--surface-muted);
-  font-weight: 700;
+  font-weight: 650;
+}
+
+.df-range-menu button > svg {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+@media (pointer: coarse) {
+  .df-range-menu button {
+    min-height: 44px;
+  }
 }
 
 @keyframes df-range-menu-in {
   from {
     opacity: 0;
+  }
+}
+
+@keyframes df-range-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
 }
 
@@ -15138,8 +15253,11 @@ dialog.ui-dialog.df-palette {
   .df-range-nav {
     width: 44px;
   }
+}
 
-  /* A bottom sheet above the phone tab bar (z-index 40), clear of the home indicator. */
+/* Phones (WUI-026: anchored menus become bottom sheets at ≤560 px): a sheet above the phone tab
+   bar (z-index 40), clear of the home indicator, rising 8 px as it fades in. */
+@media (max-width: 560px) {
   .df-range-menu {
     position: fixed;
     z-index: 70;
@@ -15149,7 +15267,16 @@ dialog.ui-dialog.df-palette {
     left: 12px;
     max-width: calc(100vw - 24px);
     max-height: min(520px, calc(100dvh - 24px - env(safe-area-inset-bottom, 0px)));
-    padding-top: 52px;
+    border-radius: 24px;
+    animation-name: df-range-sheet-in;
+  }
+
+  /* The head shares its row with the sheet's 44 px Close. */
+  .df-range-menu-head {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    padding-right: 52px;
   }
 
   .df-range-menu-close {

@@ -38,7 +38,8 @@ describe("web UI foundation contracts", () => {
     expect(primitiveSource).toContain('event.key !== "Escape"');
     expect(primitiveSource).toContain("previouslyFocused?.focus()");
     expect(primitiveSource).toContain('role?: DialogRole');
-    expect(primitiveSource).toContain('aria-modal="true"');
+    // Modal unless a popover asks otherwise (WUI-022).
+    expect(primitiveSource).toContain('aria-modal={modal ? "true" : undefined}');
   });
 
   it("keeps icon actions centred in the shared accessible target", () => {
