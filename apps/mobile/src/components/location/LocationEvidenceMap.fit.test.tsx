@@ -30,6 +30,7 @@ const stay = {
 
 function mount(reduceMotion = false) {
   const fitToCoordinates = vi.fn();
+  const animateToRegion = vi.fn();
   let tree: ReactTestRenderer | undefined;
   const element = (point: { latitude: number; longitude: number }) => (
     <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={stay} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
@@ -37,87 +38,76 @@ function mount(reduceMotion = false) {
   );
   act(() => {
     tree = create(element(centre), {
-      createNodeMock: (node) => node.type === "MapView" ? { fitToCoordinates } : null
+      createNodeMock: (node) => node.type === "MapView" ? { animateToRegion, fitToCoordinates } : null
     });
   });
   return {
+    animateToRegion,
     fitToCoordinates,
+    moves: () => fitToCoordinates.mock.calls.length + animateToRegion.mock.calls.length,
     choose(point: { latitude: number; longitude: number }) { act(() => tree!.update(element(point))); },
     tap(point: { latitude: number; longitude: number }) {
       act(() => {
         tree!.root.findByType("MapView" as never).props.onPress({ nativeEvent: { coordinate: point } });
         tree!.update(element(point));
       });
-    },
-    pan(region: { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number }) {
-      act(() => tree!.root.findByType("MapView" as never).props.onRegionChangeComplete(region));
     }
   };
 }
 
-describe("the evidence map shows the chosen place's pin", () => {
-  it("leaves the camera alone when the chosen point is the stay's own centre", () => {
-    expect(mount().fitToCoordinates).not.toHaveBeenCalled();
+// About 350 m north: beyond the opening 0.004° view.
+const far = { latitude: 10.0032, longitude: 20 };
+const near = { latitude: 10.0002, longitude: 20.0002 };
+const opening = { ...centre, latitudeDelta: 0.004, longitudeDelta: 0.004 };
+
+describe("the evidence map shows the chosen place's pin with the stay's area", () => {
+  it("leaves the camera alone for the opening choice", () => {
+    expect(mount().moves()).toBe(0);
   });
 
-  it("moves once to show a place chosen outside the opening view, with the stay's area", () => {
+  it("fits a place chosen outside the opening view together with the stay's area", () => {
     const map = mount();
-    // About 350 m north: beyond the opening 0.004° view.
-    map.choose({ latitude: 10.0032, longitude: 20 });
+    map.choose(far);
     expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
     const [points, options] = map.fitToCoordinates.mock.calls[0];
     const latitudes = points.map((point: { latitude: number }) => point.latitude);
     expect(Math.min(...latitudes)).toBeLessThan(centre.latitude - 0.0005);
-    expect(Math.max(...latitudes)).toBeGreaterThan(10.0032 + 0.0007);
+    expect(Math.max(...latitudes)).toBeGreaterThan(far.latitude + 0.0007);
     expect(options).toEqual(expect.objectContaining({ animated: true }));
   });
 
-  it("does not move for a point already in view, such as a tap on the map", () => {
+  it("returns to the stay's opening view for a place that fits in it", () => {
     const map = mount();
-    map.choose({ latitude: 10.0002, longitude: 20.0002 });
-    expect(map.fitToCoordinates).not.toHaveBeenCalled();
+    map.choose(far);
+    map.choose(near);
+    expect(map.animateToRegion).toHaveBeenCalledWith(opening, expect.any(Number));
+    expect(map.animateToRegion.mock.calls[0][1]).toBeGreaterThan(0);
+  });
+
+  it("makes one camera call per choice, so the newest choice always wins (Codex r2 on #482)", () => {
+    const map = mount();
+    map.choose(far);
+    map.choose({ latitude: 10, longitude: 20.0009 });
+    map.choose(far);
+    expect(map.moves()).toBe(3);
+    expect(map.fitToCoordinates.mock.lastCall?.[0]).toEqual(map.fitToCoordinates.mock.calls[0][0]);
   });
 
   it("never moves for a map tap, even one near the edge whose circle runs off screen (Codex r1 on #482)", () => {
     const map = mount();
     map.tap({ latitude: 10.0019, longitude: 20.0019 });
-    expect(map.fitToCoordinates).not.toHaveBeenCalled();
-    // A later list choice out of view still moves it.
-    map.choose({ latitude: 10.0032, longitude: 20 });
+    map.tap(far);
+    expect(map.moves()).toBe(0);
+    // A later list choice still moves it.
+    map.choose({ latitude: 10.0040, longitude: 20 });
     expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
-  });
-
-  it("judges a choice made while the camera moves against where it is heading (Codex r1 on #482)", () => {
-    const map = mount();
-    map.choose({ latitude: 10.0032, longitude: 20 });
-    // Inside the opening view, but not inside the view the camera is heading for.
-    map.choose({ latitude: 10, longitude: 20.0009 });
-    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
-  });
-
-  it("shows the newest choice if the camera settles without it, and only once (Codex r1 on #482)", () => {
-    const map = mount();
-    map.choose({ latitude: 10.0032, longitude: 20 });
-    map.choose({ latitude: 10.0016, longitude: 20 });
-    expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
-    map.pan({ latitude: 10.0032, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
-    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
-    // That fit's own settle, and a later pan by the person, move nothing more.
-    map.pan({ latitude: 10.0032, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
-    map.pan({ latitude: 10.01, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
-    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
-  });
-
-  it("judges what is in view from where the person has panned", () => {
-    const map = mount();
-    map.pan({ latitude: 10.0032, longitude: 20, latitudeDelta: 0.01, longitudeDelta: 0.01 });
-    map.choose({ latitude: 10.0032, longitude: 20 });
-    expect(map.fitToCoordinates).not.toHaveBeenCalled();
   });
 
   it("jumps instead of gliding under Reduce Motion", () => {
     const map = mount(true);
-    map.choose({ latitude: 10.0032, longitude: 20 });
+    map.choose(far);
+    map.choose(near);
     expect(map.fitToCoordinates.mock.calls[0][1]).toEqual(expect.objectContaining({ animated: false }));
+    expect(map.animateToRegion).toHaveBeenCalledWith(opening, 0);
   });
 });
