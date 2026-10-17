@@ -5,6 +5,8 @@ import { REVIEW_EFFECTS_V5_SQL, REVIEW_OBSERVATION_V8_SQL,
   REVIEW_SAVE_PLACE_V9_SQL, REVIEW_PRESENTATION_V7_SQL, REVIEW_RECOVERY_V6_SQL } from "./reviewSyncSchema";
 import {
   LocationReviewEvidenceDtoSchema,
+  OUTING_KEY_PAYLOAD_KEY,
+  OUTING_ROLE_PAYLOAD_KEY,
   REVIEW_PRESENTATION_MAX_IDS,
   ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
@@ -1331,8 +1333,10 @@ export async function cacheReviewPresentation(input: {
       );
       const earlier = existing ? parseReviewSnapshot(existing.snapshot_json) : null;
       // Presented fields (a time-away subtype) win; earlier reason fields fill in underneath.
+      // The presentation is the outing's owner (this build always asks for it): a card it lists
+      // in no outing keeps no outing an earlier read cached.
       const item = earlier?.rawPayload && sameCachedProposal(earlier, presented)
-        ? { ...presented, rawPayload: { ...earlier.rawPayload, ...(presented.rawPayload ?? {}) } }
+        ? { ...presented, rawPayload: { ...withoutOuting(earlier.rawPayload), ...(presented.rawPayload ?? {}) } }
         : presented;
       await transaction.runAsync(
         `insert into review_item_cache (
@@ -1732,9 +1736,13 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     notes: null,
     // Coordinate-free subtype and a Move's route line only, so time away keeps its labels and no
     // Commute fallback, and a Move keeps its second line (PRD D19).
-    rawPayload: record.timeAway || record.routeLabel ? {
+    rawPayload: record.timeAway || record.routeLabel || record.outing ? {
       ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
-      ...(record.routeLabel ? { routeLabel: record.routeLabel } : {})
+      ...(record.routeLabel ? { routeLabel: record.routeLabel } : {}),
+      // One card per outing (PRD D19): which outing it belongs to and its part in it.
+      ...(record.outing ? { [OUTING_KEY_PAYLOAD_KEY]: record.outing.key, [OUTING_ROLE_PAYLOAD_KEY]: record.outing.role } : {}),
+      // A Move's way of travelling, so a backlog-only outing's travel line names it (Codex r2 on #473).
+      ...(record.outing?.travelMode ? { travelMode: record.outing.travelMode } : {})
     } : null,
     createdAt: record.createdAt
   };
@@ -1964,7 +1972,7 @@ function acknowledgementRequiresLinkedResult(
   envelope: ReviewMutationEnvelope
 ) {
   return (
-    (envelope.mutation.action === "accept" || envelope.mutation.action === "confirm") &&
+    (envelope.mutation.action === "accept" || envelope.mutation.action === "confirm" || envelope.mutation.action === "confirm_outing") &&
     acknowledgement.alreadyResolved === true &&
     acknowledgement.equivalent === true
   );
@@ -2035,6 +2043,10 @@ async function bumpPresentationRevision(accountKeyValue: string, transaction: SQ
   );
 }
 
+function isOutingMutation(mutation: ReviewMutation): mutation is Extract<ReviewMutation, { action: "confirm_outing" | "ignore_outing" }> {
+  return mutation.action === "confirm_outing" || mutation.action === "ignore_outing";
+}
+
 export async function enqueueReviewMutation(input: {
   bootstrap: MobileBootstrap;
   item: MobileReviewItem;
@@ -2048,20 +2060,28 @@ export async function enqueueReviewMutation(input: {
 }) {
   const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: input.clientMutationId, mutation: input.mutation });
   const mutation = envelope.mutation;
+  const outing = isOutingMutation(mutation);
   const expectedIds = [...new Set(mutation.action === "merge" || mutation.action === "merge_and_confirm"
-    ? [input.item.id, mutation.adjacentReviewItemId] : [input.item.id])].sort();
+    ? [input.item.id, mutation.adjacentReviewItemId]
+    : outing ? [input.item.id, ...mutation.memberReviewItemIds] : [input.item.id])].sort();
   if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && expectedIds.length !== 2) {
     throw new Error("Choose a different adjacent visit.");
   }
+  if (outing && expectedIds.length !== mutation.memberReviewItemIds.length + 1) {
+    throw new Error("An outing lists the same moment twice.");
+  }
   const affected = [...(input.affectedItems ?? [input.item])].sort((a, b) => a.id.localeCompare(b.id));
   if (affected.length !== expectedIds.length || affected.some((item, index) => item.id !== expectedIds[index])) {
-    throw new Error("Both visits must be available in saved Review data before merging.");
+    throw new Error(outing
+      ? "Every part of this outing must be available in saved Review data."
+      : "Both visits must be available in saved Review data before merging.");
   }
   for (const item of affected) {
     assertActionableReviewItem(item);
     if ((mutation.action === "merge" || mutation.action === "merge_and_confirm") && !isLocationReviewItem(item)) {
       throw new Error("Only saved Location Review visits can be merged.");
     }
+    if (outing && !isLocationReviewItem(item)) throw new Error("Only Location Review moments make an outing.");
     if (!input.bootstrap.reviewItems.some((cached) => cached.id === item.id && cached.status === "open")) {
       throw new Error("This suggestion is no longer available in this account's Review data.");
     }
@@ -2334,12 +2354,16 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         }
         // Gone, or decided differently elsewhere: the moment is settled, not a rejection.
         // Only a single-source proof says which source was decided; a merge keeps its parked row.
-        if(effectRows.length<=1&&(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision"))) {
+        // An outing is decided whole or not at all (no receipt, nothing written): its own request
+        // answers which parts are still open, and that answer settles it (below).
+        if(isOutingMutation(envelope.mutation)&&(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision"))) {
+          // Falls through to the request.
+        } else if(effectRows.length<=1&&(proof.state==="missing"||(proof.state==="conflict"&&proof.reason==="different_final_decision"))) {
           const status=proof.state==="missing"?"missing":envelope.mutation.action.startsWith("ignore")?"accepted":"ignored";
           await settleResolvedElsewhere(row,[{reviewItemId:row.review_item_id,status}],proof.checkedAt,isCurrent);continue;
         }
-        if(proof.state==="conflict") {await attention(proof.reason==="mutation_id_conflict"?"mutation_id_conflict":"resolution_conflict",response.status);continue;}
-        if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
+        else if(proof.state==="conflict") {await attention(proof.reason==="mutation_id_conflict"?"mutation_id_conflict":"resolution_conflict",response.status);continue;}
+        else if(proof.state!=="open" && !(proof.state==="unknown"&&proof.retryOriginal)) {await attention("resolution_unknown",response.status);continue;}
       }
       if(!await isCurrent()) {outcome="cancelled";stopped=true;break;}
       const attemptedAt=new Date().toISOString();
@@ -2360,7 +2384,8 @@ async function synchroniseReviewMutationsUnsafe(account: AccountRow, options: Re
         else {await scheduleRetry(row,response.status,disposition==="acknowledge"?"Invalid acknowledgement. Saved action retained.":safeFailureSummary(response.status,responseBody));if(outcome!=="needs_attention")outcome="server_busy";}
         continue;
       }
-      const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id));
+      const settlement=reviewResolvedElsewhere(response.status,responseBody,row.review_item_id,effectRows.map(effect=>effect.review_item_id),
+        {outing:isOutingMutation(envelope.mutation)});
       if(settlement) {await settleResolvedElsewhere(row,settlement.retired,reviewResponseServerTime(response),isCurrent);continue;}
       await attention(safeFailureSummary(response.status,responseBody),response.status,canonicalOpenEffectIds(responseBody,row.review_item_id));
     } catch(error) {
@@ -2413,7 +2438,13 @@ export function reviewResolvedElsewhere(
   status: number,
   body: Record<string, unknown> | null,
   primaryId: string,
-  sourceIds: string[]
+  sourceIds: string[],
+  /**
+   * One card per outing (PRD D19): an outing refused because a part of it changed saved nothing, so
+   * it settles whatever its Stay's status: the parts decided elsewhere leave, the open ones come back
+   * as cards of their own (as on web), and nothing waits for Retry or Discard.
+   */
+  options: { outing?: boolean } = {}
 ): { retired: RetiredReviewSource[] } | null {
   const code = typeof body?.code === "string" ? body.code : null;
   const notFound = status === 404 && code === "review_item_not_found";
@@ -2425,7 +2456,7 @@ export function reviewResolvedElsewhere(
     : notFound
       ? (sources.length === 1 ? { [primaryId]: "missing" } : {})
       : { [primaryId]: body?.canonicalStatus };
-  if (!TERMINAL_REVIEW_STATUSES.has(String(statuses[primaryId]))) return null;
+  if (!TERMINAL_REVIEW_STATUSES.has(String(statuses[primaryId])) && !(options.outing && statuses[primaryId] === "open")) return null;
   if (sources.some((id) => statuses[id] !== "open" && !TERMINAL_REVIEW_STATUSES.has(String(statuses[id])))) return null;
   return {
     retired: sources.flatMap((reviewItemId): RetiredReviewSource[] => {
@@ -2921,6 +2952,11 @@ export function sanitiseDashboardBootstrapForCache(
   };
 }
 
+function withoutOuting(rawPayload: Record<string, unknown>) {
+  const { [OUTING_KEY_PAYLOAD_KEY]: _key, [OUTING_ROLE_PAYLOAD_KEY]: _role, ...rest } = rawPayload;
+  return rest;
+}
+
 function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
   if (!rawPayload) return null;
   const allowedKeys = [
@@ -2941,7 +2977,10 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     // Display-only commute mode ("car", "walk"): shown on the card's time line.
     "travelMode",
     // A Move's second line ("Home → Gym"; PRD D19).
-    "routeLabel"
+    "routeLabel",
+    // One card per outing (PRD D19): an opaque outing id and the card's part in it.
+    OUTING_KEY_PAYLOAD_KEY,
+    OUTING_ROLE_PAYLOAD_KEY
   ];
   return Object.fromEntries(
     allowedKeys.flatMap((key) =>

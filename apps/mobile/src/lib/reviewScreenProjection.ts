@@ -1,3 +1,4 @@
+import { OUTING_KEY_PAYLOAD_KEY, OUTING_ROLE_PAYLOAD_KEY } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "./api";
 
 // The Review screen has one owner for its items: the SQLite projection (the cache with local
@@ -51,11 +52,12 @@ export function projectReviewScreenData(input: {
     const liveItem = live.get(cached.id);
     // The live copy adds what is never cached (visit titles); fields only the store holds (a time-away
     // subtype from a presentation read) stay underneath, so the card keeps its kind.
-    const chosen = liveItem && sameReviewProposal(liveItem, cached)
+    const merged = liveItem && sameReviewProposal(liveItem, cached)
       ? cached.rawPayload && Object.keys(cached.rawPayload).some((key) => !(key in (liveItem.rawPayload ?? {})))
         ? { ...liveItem, rawPayload: { ...cached.rawPayload, ...(liveItem.rawPayload ?? {}) } }
         : liveItem
       : cached;
+    const chosen = merged === cached ? cached : withCachedOuting(merged, cached);
     const shown = previous.get(chosen.id);
     return shown && sameJson(shown, chosen) ? shown : chosen;
   });
@@ -82,6 +84,27 @@ export function projectReviewScreenData(input: {
     return current;
   }
   return next;
+}
+
+/**
+ * One card per outing (PRD D19): which outing a card is in comes from the store alone, which takes
+ * each read as it lands (a presentation read after a replay clears or moves an outing an earlier
+ * bootstrap gave), never from the live bootstrap copy (Codex r1 on #473).
+ */
+function withCachedOuting(item: MobileReviewItem, cached: MobileReviewItem): MobileReviewItem {
+  const key = cached.rawPayload?.[OUTING_KEY_PAYLOAD_KEY];
+  const role = cached.rawPayload?.[OUTING_ROLE_PAYLOAD_KEY];
+  const payload = item.rawPayload ?? {};
+  if (payload[OUTING_KEY_PAYLOAD_KEY] === key && payload[OUTING_ROLE_PAYLOAD_KEY] === role) return item;
+  const { [OUTING_KEY_PAYLOAD_KEY]: _key, [OUTING_ROLE_PAYLOAD_KEY]: _role, ...rest } = payload;
+  return {
+    ...item,
+    rawPayload: {
+      ...rest,
+      ...(key !== undefined ? { [OUTING_KEY_PAYLOAD_KEY]: key } : {}),
+      ...(role !== undefined ? { [OUTING_ROLE_PAYLOAD_KEY]: role } : {})
+    }
+  };
 }
 
 export function liveReviewItems(bootstrap: MobileBootstrap) {

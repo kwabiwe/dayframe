@@ -17,6 +17,8 @@ export const REVIEW_PRESENTATION_FEATURES_HEADER = "x-dayframe-review-features";
 export const REVIEW_PRESENTATION_TIME_AWAY_FEATURE = "time-away";
 /** Feature: a Move's Review item carries its second line, `routeLabel` ("Home → Gym"; PRD D19). */
 export const REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE = "move-route";
+/** Feature: an outing's Review items (PRD D19) carry `outing`, so the client shows them as one card. */
+export const REVIEW_PRESENTATION_OUTING_FEATURE = "outing";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -185,7 +187,14 @@ export const ReviewProposalPresentationSchema = z
     /** Time away from a saved place (only for clients sending the time-away feature). */
     timeAway: z.object({ stopCount: z.number().int().nonnegative().max(100) }).strict().optional(),
     /** A Move's second line (only for clients sending the move-route feature). */
-    routeLabel: z.string().trim().min(1).max(200).optional()
+    routeLabel: z.string().trim().min(1).max(200).optional(),
+    /** The outing the card belongs to and its part in it (only for clients sending the outing feature). */
+    outing: z.object({
+      key: z.string().min(1).max(200),
+      role: z.enum(["stay", "in", "out"]),
+      /** A Move's way of travelling, for the outing card's travel line ("Drives there and back"). */
+      travelMode: z.string().min(1).max(40).optional()
+    }).strict().optional()
   })
   .strict();
 

@@ -4,7 +4,10 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticLocation, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { assessAutomaticMove, hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
+import {
+  assessAutomaticMove, hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, OUTING_KEY_PAYLOAD_KEY, OUTING_ROLE_PAYLOAD_KEY,
+  type MoveEndpoint, type MoveName
+} from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
@@ -216,8 +219,7 @@ export async function withCorrectedStayPlaces(
 }
 
 /** Event payload keys for one card per outing (PRD D19): the shared key and each member's role. */
-export const OUTING_KEY_PAYLOAD_KEY = "outingKey";
-export const OUTING_ROLE_PAYLOAD_KEY = "outingRole";
+export { OUTING_KEY_PAYLOAD_KEY, OUTING_ROLE_PAYLOAD_KEY };
 
 /**
  * Tags the cards of each outing (PRD D19: "an unknown Stay and the Moves either side of it are one
