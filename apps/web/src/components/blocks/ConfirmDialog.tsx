@@ -32,8 +32,12 @@ function openModal(layer: HTMLElement) {
 function closeModal(layer: HTMLElement) {
   const index = modalStack.lastIndexOf(layer);
   if (index >= 0) modalStack.splice(index, 1);
-  // A closed layer is inert through its own prop; the stack no longer owns that attribute.
-  isolatedByStack.delete(layer);
+  if (isolatedByStack.has(layer)) {
+    // A closed layer stays inert through its own prop. One still open (React StrictMode replaying
+    // the effect, or an unmount) gets back the interactivity the stack took (Codex r3 on #469).
+    if (layer.getAttribute("aria-hidden") !== "true") layer.removeAttribute("inert");
+    isolatedByStack.delete(layer);
+  }
   syncModalIsolation();
 }
 

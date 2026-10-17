@@ -52,7 +52,7 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).toContain("current.target.entryIds");
     expect(entries).toContain("setOptimisticDescriptions");
     expect(entries).toContain("timelineEntryGroupKey");
-    expect(entries).toContain("Double-click to edit the latest occurrence");
+    expect(entries).toContain('data-tip="Double-click to edit the latest occurrence"');
   });
 
   it("offers the previous stop in the running start editor", () => {

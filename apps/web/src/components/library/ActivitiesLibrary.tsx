@@ -229,7 +229,7 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
       {error ? (
         <p className="df-review-error" role="alert">
           <span>{error}</span>
-          <button className="df-icon-action" type="button" aria-label="Dismiss" onClick={() => setError(null)}>
+          <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={() => setError(null)}>
             <DayframeIcon glyph="x" size={15} />
           </button>
         </p>
@@ -459,7 +459,7 @@ function ActivityEditor({
             </button>
           ) : null}
           <span className="df-spacer" />
-          <button className="df-rbtn" disabled={busy} onClick={onClose} type="button">Cancel</button>
+          <button className="df-rbtn df-rbtn--ghost" disabled={busy} onClick={onClose} type="button">Cancel</button>
           <button className="df-rbtn df-rbtn--live" disabled={busy} onClick={submit} type="button">
             {target ? "Save" : "Create"}
           </button>

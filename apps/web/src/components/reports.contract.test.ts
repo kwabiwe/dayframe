@@ -145,10 +145,10 @@ describe("Reports staging feedback I1–I3", () => {
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.df-wb-stack > \.df-tblock \{\s*animation: none;/);
   });
 
-  it("draws the Filter button with a generic funnel before its label (I3)", () => {
-    expect(filtersSource).toMatch(/import \{[^}]*\bFunnel\b[^}]*\} from "lucide-react"/);
+  it("draws the Filter button with the registry funnel before its label (I3, WUI-016)", () => {
+    expect(filtersSource).not.toMatch(/import \{[^}]*\bFunnel\b[^}]*\} from "lucide-react"/);
     expect(filtersSource).toMatch(/className="df-rbtn df-rbtn--sm df-report-filter-button"/);
-    expect(filtersSource).toMatch(/<Funnel aria-hidden="true" size=\{16\} \/>\s*Filter\{/);
+    expect(filtersSource).toMatch(/<DayframeIcon glyph="funnel" size=\{16\} \/>\s*Filter\{/);
   });
 });
 

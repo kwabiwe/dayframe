@@ -157,7 +157,8 @@ describe("Calendar range and toolbar contract", () => {
     expect(styles).toMatch(/\.swiss-timeline-surface \.swiss-persistent-timer-shell \{[^}]*z-index: 50;/s);
     expect(styles).toMatch(/\.calendar-grid-corner,[\s\S]*\.calendar-day-heading \{[^}]*z-index: 40;/s);
     expect(styles).toMatch(/:root \{[^}]*--web-control-height: 44px;/s);
-    expect(styles).toMatch(/@media \(min-width: 761px\) \{[\s\S]*:root \{[^}]*--web-control-height: 38px;/s);
+    // One control scale on every width (WUI-015): no 38 px desktop controls.
+    expect(styles).not.toMatch(/--web-control-height: 38px;/);
     // Timeline Undo uses the Blocks toast (step 12b): a 44 px action inside the pill.
     expect(styles).toMatch(/\.df-toast-action \{[^}]*min-height: 44px;/s);
   });

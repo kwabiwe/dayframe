@@ -177,7 +177,7 @@ function TimelineInlineTimeControl({
         readOnly={readOnly}
         ref={inputRef}
         role="combobox"
-        title={`Edit ${edgeLabel.toLowerCase()} time and choose its date`}
+        data-tip={`Edit ${edgeLabel.toLowerCase()} time and choose its date`}
         type="text"
         value={typing && typedValue !== null ? typedValue : value}
       />
@@ -623,7 +623,7 @@ export function EntriesTable({
           }}
           placeholder="Untitled block"
           readOnly={!editor || editor.isSaving}
-          title={isGroupedTarget ? `Click to edit all ${editTarget.entryIds.length} occurrences.` : "Click to edit. Double-click for the full editor."}
+          data-tip={isGroupedTarget ? `Click to edit all ${editTarget.entryIds.length} occurrences.` : "Click to edit. Double-click for the full editor."}
           value={value}
         />
       </span>
@@ -688,7 +688,7 @@ export function EntriesTable({
           event.stopPropagation();
           openFullEditor(entry);
         }}
-        title="Click to edit. Double-click for the full editor."
+        data-tip="Click to edit. Double-click for the full editor."
       >
         {timeInput("start", interval.startedAt)}
         <span aria-hidden="true" className="timeline-inline-time-separator">
@@ -831,7 +831,7 @@ export function EntriesTable({
                             aria-label={isGrouped
                               ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
                               : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries, clock)}
-                            title={isGrouped
+                            data-tip={isGrouped
                               ? `${overlappingOccurrences.length} blocks in this group overlap other blocks`
                               : overlapMarkerDescription(entry, overlapById.get(entry.id), displayedEntries, clock)}
                           >
@@ -851,7 +851,7 @@ export function EntriesTable({
                           <span
                             className="timeline-group-time-summary"
                             onDoubleClick={() => openFullEditor(entry)}
-                            title="Double-click to edit the latest occurrence"
+                            data-tip="Double-click to edit the latest occurrence"
                           >
                             {group.entries.length} occurrences
                           </span>
@@ -868,6 +868,7 @@ export function EntriesTable({
                     <div className="timeline-list-actions">
                       <button
                         className="df-icon-action"
+                        data-tip={entry.stoppedAt ? "Start again" : "Restart"}
                         disabled={isPending || Boolean(continuingEntryId)}
                         aria-label={!entry.stoppedAt
                           ? `Restart ${timeEntryTitle(entry)} from zero`
@@ -881,6 +882,7 @@ export function EntriesTable({
                       </button>
                       <button
                         className="df-icon-action"
+                        data-tip="Edit"
                         aria-label={isGrouped ? `Edit the latest ${timeEntryTitle(entry)}` : `Edit ${timeEntryTitle(entry)}`}
                         onClick={() => openFullEditor(entry)}
                         type="button"
@@ -889,6 +891,7 @@ export function EntriesTable({
                       </button>
                       <button
                         className="df-icon-action"
+                        data-tip="Delete"
                         aria-label={isGrouped
                           ? `Delete all ${group.entries.length} ${timeEntryTitle(entry)} blocks`
                           : `Delete ${timeEntryTitle(entry)}`}
@@ -928,7 +931,7 @@ export function EntriesTable({
                                   displayedEntries,
                                   clock
                                 )}
-                                title={overlapMarkerDescription(
+                                data-tip={overlapMarkerDescription(
                                   occurrence,
                                   overlapById.get(occurrence.id),
                                   displayedEntries,
@@ -955,6 +958,7 @@ export function EntriesTable({
                         <div className="timeline-list-actions">
                           <button
                             className="df-icon-action"
+                            data-tip="Edit"
                             aria-label={`Edit this ${timeEntryTitle(occurrence)}`}
                             onClick={() => openFullEditor(occurrence)}
                             type="button"
@@ -963,6 +967,7 @@ export function EntriesTable({
                           </button>
                           <button
                             className="df-icon-action"
+                            data-tip="Delete"
                             aria-label={`Delete this ${timeEntryTitle(occurrence)}`}
                             onClick={() => onDeleteEntries([occurrence])}
                             type="button"

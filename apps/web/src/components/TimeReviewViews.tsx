@@ -5,7 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEve
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, List } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, formatClockParts, type ClockFormat } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
@@ -104,7 +104,7 @@ const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
 
 const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
   { id: "calendar", label: "Calendar", icon: <DayframeIcon glyph="calendar-days" size={16}/> },
-  { id: "list", label: "List", icon: <List size={16} /> }
+  { id: "list", label: "List", icon: <DayframeIcon glyph="list" size={16}/> }
 ];
 
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
@@ -1728,6 +1728,7 @@ export function CalendarReview({
                         <button
                           type="button"
                           className="calendar-start-again"
+                          data-tip="Start again"
                           aria-busy={isContinuing}
                           aria-label={`Start ${timeEntryTitle(entry)} again`}
                           disabled={isTimerBusy || Boolean(continuingEntryId)}

@@ -167,7 +167,7 @@ export function ReportBlockRow({
         <span className="df-erow-dur">{duration}</span>
       </button>
       <span className="df-erow-acts">
-        <button aria-label={`Edit ${title}`} className="df-icon-action" disabled={disabled} onClick={onEdit} type="button">
+        <button aria-label={`Edit ${title}`} className="df-icon-action" data-tip="Edit" disabled={disabled} onClick={onEdit} type="button">
           <DayframeIcon glyph="pencil" size={16} />
         </button>
       </span>

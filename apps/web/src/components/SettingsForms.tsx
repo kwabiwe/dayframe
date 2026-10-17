@@ -222,7 +222,7 @@ export function AccountSettings({
           // The action sits in the dialog's footer, like every confirmation (UIA-301).
           footer={(
             <>
-              <Button compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
+              <Button variant="ghost" compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
               <Button compact disabled={Boolean(busyAction)} form="settings-profile-form" type="submit" variant="primary">
                 {busyAction === "profile" ? "Saving…" : "Save profile"}
               </Button>
@@ -298,7 +298,7 @@ export function AccountSettings({
               <Button compact type="submit" disabled={Boolean(busyAction)}>
                 {busyAction === "rename-workspace" ? "Saving…" : "Save name"}
               </Button>
-              <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
+              <Button variant="ghost" compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
             </form> : null}
             {workspaceAction === "create" ? <form className="settings-inline-form settings-workspace-detail-form" onSubmit={createWorkspace}>
               <TextField
@@ -314,7 +314,7 @@ export function AccountSettings({
               <Button compact type="submit" disabled={Boolean(busyAction)}>
                 {busyAction === "create-workspace" ? "Creating…" : "Create"}
               </Button>
-              <Button compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
+              <Button variant="ghost" compact type="button" onClick={() => setWorkspaceAction(null)}>Cancel</Button>
             </form> : null}
             {dialogError}
           </div>
@@ -327,7 +327,7 @@ export function AccountSettings({
           description={securitySummary(authMode)}
           footer={(
             <>
-              <Button compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
+              <Button variant="ghost" compact disabled={Boolean(busyAction)} onClick={closeDialog} type="button">Cancel</Button>
               <Button compact disabled={Boolean(busyAction)} form="settings-password-form" type="submit" variant="primary">
                 {busyAction === "password" ? "Saving…" : "Change password"}
               </Button>
@@ -545,7 +545,7 @@ export function DataPrivacySettings() {
           description="This removes recent raw location evidence for your current account and workspace."
           footer={(
             <>
-              <Button disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              <Button variant="ghost" disabled={deleting} onClick={() => setConfirmDelete(false)}>Cancel</Button>
               <Button variant="danger" disabled={deleting} onClick={() => void deleteEvidence()}>
                 {deleting ? "Deleting…" : "Delete evidence"}
               </Button>
