@@ -124,6 +124,46 @@ describe("ConfirmDialog (WUI-005/WUI-009)", () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it("keeps only the newest of two dialogs interactive, and the page inert until the last one closes (Codex r2 on #469)", async () => {
+    function Two({ initial }: { initial: [boolean, boolean] }) {
+      const [[first, second], setOpen] = useState(initial);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(([, b]) => [true, b])}>Open first</button>
+          <button type="button" onClick={() => setOpen(([a]) => [a, true])}>Open second</button>
+          <ConfirmDialog confirmLabel="Delete" onCancel={() => setOpen(([, b]) => [false, b])} onConfirm={vi.fn()} open={first} title="First?" />
+          <ConfirmDialog confirmLabel="Delete" onCancel={() => setOpen(([a]) => [a, false])} onConfirm={vi.fn()} open={second} title="Second?" />
+        </>
+      );
+    }
+    const layerOf = (title: string) => screen.getByRole("alertdialog", { name: title }).closest<HTMLElement>(".df-confirm-layer")!;
+
+    // Both open in one commit: the second is on top and interactive, the first is not.
+    const view = render(<Two initial={[true, true]} />);
+    expect(layerOf("Second?").hasAttribute("inert")).toBe(false);
+    expect(layerOf("First?").hasAttribute("inert")).toBe(true);
+    expect(view.container.hasAttribute("inert")).toBe(true);
+    view.unmount();
+    expect(document.body.querySelector("[inert]:not(.df-confirm-layer)")).toBeNull();
+
+    // Opened one after the other, the older closed first: the page stays inert under the newer.
+    const again = render(<Two initial={[false, false]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open first" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open second", hidden: true }));
+    const first = layerOf("First?");
+    const second = layerOf("Second?");
+    expect(second.hasAttribute("inert")).toBe(false);
+    expect(first.hasAttribute("inert")).toBe(true);
+    fireEvent.keyDown(first, { key: "Escape" });
+    expect(again.container.hasAttribute("inert")).toBe(true);
+    expect(second.hasAttribute("inert")).toBe(false);
+    fireEvent.keyDown(second, { key: "Escape" });
+    expect(again.container.hasAttribute("inert")).toBe(false);
+    // Closed layers stay inert through their own prop.
+    expect(first.hasAttribute("inert")).toBe(true);
+    expect(second.hasAttribute("inert")).toBe(true);
+  });
+
   it("keeps its buttons focusable while busy, so focus is never lost", async () => {
     render(<ConfirmDialog busy busyLabel="Deleting…" confirmLabel="Delete" onCancel={vi.fn()} onConfirm={vi.fn()} open title="Delete tag?" />);
     const cancel = screen.getByRole("button", { name: "Cancel" });

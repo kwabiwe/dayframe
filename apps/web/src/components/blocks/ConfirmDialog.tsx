@@ -3,6 +3,40 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
+// Open confirmations, oldest first, and the page elements this module made inert. Only the newest
+// dialog is interactive; the page (and any older dialog) stays inert until the last one closes
+// (Codex r2 on #469). Elements made inert by someone else are left alone.
+const modalStack: HTMLElement[] = [];
+const isolatedByStack = new Set<HTMLElement>();
+
+function syncModalIsolation() {
+  const top = modalStack[modalStack.length - 1] ?? null;
+  for (const element of [...isolatedByStack]) {
+    if (top && element !== top && element.isConnected) continue;
+    element.removeAttribute("inert");
+    isolatedByStack.delete(element);
+  }
+  if (!top) return;
+  for (const element of document.body.children) {
+    if (!(element instanceof HTMLElement) || element === top || element.hasAttribute("inert")) continue;
+    element.setAttribute("inert", "");
+    isolatedByStack.add(element);
+  }
+}
+
+function openModal(layer: HTMLElement) {
+  modalStack.push(layer);
+  syncModalIsolation();
+}
+
+function closeModal(layer: HTMLElement) {
+  const index = modalStack.lastIndexOf(layer);
+  if (index >= 0) modalStack.splice(index, 1);
+  // A closed layer is inert through its own prop; the stack no longer owns that attribute.
+  isolatedByStack.delete(layer);
+  syncModalIsolation();
+}
+
 /**
  * The one web confirmation (audit WUI-005/WUI-009, owner 17 Oct 2026; the web twin of the iPhone's
  * BlocksConfirmSheet): a small centred dialog over a scrim, a question for its title, one short
@@ -70,21 +104,19 @@ export function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return undefined;
-    // Modal, as a native dialog's showModal() is (Codex r1 on #469): everything else on the page is
-    // inert while it asks, and focus goes back to what opened it when it closes.
+    // Modal, as a native dialog's showModal() is (Codex r1 and r2 on #469): everything else on the
+    // page, older confirmations included, is inert while it asks, and focus goes back to what opened
+    // it when it closes.
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const layer = layerRef.current;
-    const isolated = [...document.body.children].filter(
-      (element): element is HTMLElement => element instanceof HTMLElement && element !== layer && !element.hasAttribute("inert")
-    );
-    for (const element of isolated) element.setAttribute("inert", "");
+    if (layer) openModal(layer);
     const frame = window.requestAnimationFrame(() => {
       setEntered(true);
       backRef.current?.focus({ preventScroll: true });
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      for (const element of isolated) element.removeAttribute("inert");
+      if (layer) closeModal(layer);
       const active = document.activeElement;
       const focusLeftWithDialog = !active || active === document.body || Boolean(layer?.contains(active));
       if (focusLeftWithDialog && opener?.isConnected) opener.focus({ preventScroll: true });

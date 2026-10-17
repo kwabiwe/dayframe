@@ -1067,6 +1067,16 @@ function QuickEditorModal({
       const previous = previouslyFocusedRef.current;
       const target = previous && previous.isConnected && previous !== document.body ? previous : fallbackFocusRef.current?.();
       target?.focus({ preventScroll: true });
+      // A Discard under Reduce Motion unmounts the editor while its confirmation still holds the
+      // page inert, so that focus is refused; try once more when the page is interactive again
+      // (Codex r2 on #469).
+      if (target && target.closest("[inert]")) {
+        window.requestAnimationFrame(() => {
+          if (target.isConnected && !target.closest("[inert]") && (document.activeElement === document.body || !document.activeElement)) {
+            target.focus({ preventScroll: true });
+          }
+        });
+      }
     };
   }, [controller.descriptionRef]);
 
