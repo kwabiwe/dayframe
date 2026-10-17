@@ -1877,18 +1877,24 @@ async function validateSavePlace() {
   // The venue's saved place moves far away, so its visits arrive as unsaved Stays.
   await pool.query("update places set latitude = latitude + 1 where id = $1", [venue.id]);
   const created: string[] = [];
+  let movedSecond = false;
   const category = await pool.query<{ id: string }>(
     `insert into categories (workspace_id, name, color) values ($1, 'Swimming', 'mint') returning id`, [WORKSPACE_ID]);
   const categoryId = category.rows[0].id;
   try {
     await clearDerivedLocationState();
     // Recent enough for the seven-day re-match: the fixture's own days are long past.
-    // Two recent days of the same synthetic visits, so a second visit at the venue can be re-matched.
-    const shifted = [1, 2].flatMap((daysBack) => fixture.evidence.map((item) => ({ ...item,
+    // Four recent days of the same synthetic visits, so a second visit at the venue can be re-matched
+    // and enough other unsaved visits remain for the activity cases below.
+    const shifted = [1, 2, 3, 4].flatMap((daysBack) => fixture.evidence.map((item) => ({ ...item,
       clientEvidenceId: `${item.clientEvidenceId}-d${daysBack}`,
       occurredAt: shiftedIso(item.occurredAt, daysBack), ...(item.endedAt ? { endedAt: shiftedIso(item.endedAt, daysBack) } : {}),
       receivedAt: shiftedIso(item.receivedAt, 1) }))).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
-    await ingestLocationEvidence(batch("db-save-place", shifted, "v2_review", shifted[0].occurredAt), session, new Date().toISOString());
+    // Uploads hold at most 100 readings: oldest first, as the phone sends them.
+    for (let offset = 0; offset < shifted.length; offset += 100) {
+      await ingestLocationEvidence(batch(`db-save-place-${offset}`, shifted.slice(offset, offset + 100), "v2_review", shifted[0].occurredAt),
+        session, new Date().toISOString());
+    }
     const unsaved = async () => (await pool.query<{ id: string; startedAt: Date; distance: number }>(
       `select ri.id, ri.suggested_started_at as "startedAt",
               ST_Distance(st.centre, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography) as distance
@@ -1985,10 +1991,59 @@ async function validateSavePlace() {
       const clearedCard = (await pool.query<{ categoryId: string | null }>(`select suggested_category_id as "categoryId" from review_items where id = $1`, [clearable.id])).rows[0];
       assert.equal(clearedCard.categoryId, null, "An explicitly cleared activity stayed on the card.");
     }
+
+    // An activity the person chose when saving is theirs to teach when the card is logged, straight
+    // after the save and after a replay in between (Codex r5 on #459; the emitter's side, when replay
+    // rebuilds the card, is in corrected-stay-places.test.ts); a re-matched card's own activity, which
+    // nobody chose there, teaches nothing.
+    const learnedActivity = async (eventId: string) => (await pool.query<{ categoryId: string | null; categoryUses: number }>(
+      `select category_id as "categoryId", category_uses as "categoryUses" from location_name_patterns
+       where workspace_id = $1 and pattern_key = (select raw_payload ->> 'namePatternKey' from activity_events where id = $2)`,
+      [WORKSPACE_ID, eventId])).rows;
+    const eventOf = async (reviewId: string) => (await pool.query<{ eventId: string }>(
+      `select event_id as "eventId" from review_items where id = $1`, [reviewId])).rows[0].eventId;
+    const rematchedOther = (await pool.query<{ id: string }>(
+      `select id from review_items where workspace_id = $1 and status = 'open' and suggested_place_id = $2 and id <> $3 order by id limit 1`,
+      [WORKSPACE_ID, saved.placeId, first.id])).rows[0];
+    assert(rematchedOther, "The fixture left no re-matched card to log.");
+    await resolveLocationReviewAction(rematchedOther.id, { action: "confirm" }, session);
+    assert.deepEqual((await learnedActivity(await eventOf(rematchedOther.id))).filter((row) => row.categoryUses > 0), [],
+      "Logging a re-matched card learned an activity nobody chose there.");
+    // Fresh unsaved visits for them, at two places so one save never re-matches the other case's
+    // visit: Home and the round-trip home move away too, and replay re-offers their visits.
+    const movedPlaces = [LOCATION_ACCEPTANCE_PLACES[0].id, LOCATION_ACCEPTANCE_PLACES[4].id];
+    await pool.query("update places set latitude = latitude + 1 where id = any($1::uuid[])", [movedPlaces]);
+    movedSecond = true;
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: shifted[0].occurredAt }, session, new Date().toISOString());
+    const usedCentres: string[] = [];
+    for (const replayFirst of [false, true]) {
+      const chosen = (await pool.query<{ id: string; segmentId: string }>(
+        `select ri.id, st.id as "segmentId" from review_items ri join stay_segments st on st.id = ri.location_segment_id
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ri.suggested_place_id is null and st.centre is not null
+           and not exists (select 1 from stay_segments used where used.id = any($3::uuid[]) and ST_DWithin(used.centre, st.centre, 500))
+         order by ri.suggested_started_at, ri.id limit 1`, [WORKSPACE_ID, USER_ID, usedCentres])).rows[0];
+      assert(chosen, `The fixture left no unsaved visit for the chosen-activity case (replay ${replayFirst}).`);
+      const result = await resolveLocationReviewAction(chosen.id, {
+        action: "save_place", name: `Synthetic chosen ${replayFirst ? "replayed" : "direct"}`, radiusMeters: 50, categoryId: ownCategory }, session) as { placeId: string };
+      created.push(result.placeId);
+      usedCentres.push(chosen.segmentId);
+      if (replayFirst) {
+        await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+          rolloutMode: "v2_review", semanticModeAcknowledgedAt: shifted[0].occurredAt }, session, new Date().toISOString());
+      }
+      await resolveLocationReviewAction(chosen.id, { action: "confirm" }, session);
+      assert.deepEqual((await learnedActivity(await eventOf(chosen.id))).map((row) => [row.categoryId, row.categoryUses]), [[ownCategory, 1]],
+        `Logging a card saved with a chosen activity did not learn it (replay ${replayFirst}).`);
+    }
   } finally {
     await clearDerivedLocationState();
     if (created.length) await pool.query("delete from places where id = any($1::uuid[])", [created]);
     await pool.query("update places set latitude = latitude - 1 where id = $1", [venue.id]);
+    if (movedSecond) {
+      await pool.query("update places set latitude = latitude - 1 where id = any($1::uuid[])",
+        [[LOCATION_ACCEPTANCE_PLACES[0].id, LOCATION_ACCEPTANCE_PLACES[4].id]]);
+    }
     await pool.query("delete from categories where id = $1", [categoryId]);
     await pool.query("delete from categories where workspace_id = $1 and name = 'Visiting friends'", [WORKSPACE_ID]);
   }

@@ -12,8 +12,10 @@ const move = (clientSegmentId: string, from: string, to: string, fromPlaceId: st
 describe("withCorrectedStayPlaces (Codex r1/r2 on #459)", () => {
   it("keeps a corrected Stay's place and activity, and ends its Moves at that place", async () => {
     const query = vi.fn(async (_sql: string, _params: unknown[]) => ({ rows: [
-      { id: "db-visit", placeId: "place-pool", learnedPlaceId: null, kind: "saved", hasCategory: true, categoryId: "cat-own" },
-      { id: "db-home", placeId: null, learnedPlaceId: null, kind: "unknown", hasCategory: false, categoryId: null }
+      { id: "db-visit", placeId: "place-pool", learnedPlaceId: null, kind: "saved", hasCategory: true, categoryId: "cat-own", chosen: true },
+      { id: "db-home", placeId: null, learnedPlaceId: null, kind: "unknown", hasCategory: false, categoryId: null, chosen: null },
+      // Re-matched by a save: its own activity, which nobody chose there.
+      { id: "db-work", placeId: "place-work", learnedPlaceId: null, kind: "saved", hasCategory: true, categoryId: "cat-work", chosen: null }
     ] }));
     const stayIds = new Map([["visit", "db-visit"], ["home", "db-home"], ["work", "db-work"]]);
     const result = await withCorrectedStayPlaces({ query } as never, session, [
@@ -28,7 +30,9 @@ describe("withCorrectedStayPlaces (Codex r1/r2 on #459)", () => {
     expect(work).toMatchObject({ placeId: "place-work", placeMatchKind: "saved" });
     expect(there).toMatchObject({ fromPlaceId: null, toPlaceId: "place-pool" });
     expect(onward).toMatchObject({ fromPlaceId: "place-pool", toPlaceId: "place-work" });
-    expect([...result.correctedCategories]).toEqual([["visit", "cat-own"]]);
+    expect([...result.correctedCategories]).toEqual([["visit", "cat-own"], ["work", "cat-work"]]);
+    // Only the activity the person chose when saving is theirs to teach after replay (Codex r5 on #459).
+    expect([...result.chosenCategories]).toEqual(["visit"]);
   });
 
   it("changes nothing without a corrected Stay", async () => {

@@ -876,12 +876,15 @@ async function savePlace(
        where id = $2 and workspace_id = $3 and user_id = $4`,
       [place.id, target.eventId, session.workspaceId, session.userId, target.own && Boolean(action.categoryId)]);
     // The Stay keeps the activity its card now has, which replay keeps over the place's default
-    // (a re-matched card keeps its own; Codex r2 on #459).
+    // (a re-matched card keeps its own; Codex r2 on #459), and whether the person chose it here, so
+    // replay keeps it theirs to teach (Codex r5 on #459).
     await client.query(
       `update stay_segments set place_id = $1, learned_place_id = null, continuity_status = 'manual',
-         metadata = metadata || jsonb_build_object('placeMatchKind', 'saved', 'correctedCategoryId', $5::uuid), updated_at = now()
+         metadata = (metadata - 'correctedCategoryChosen') || jsonb_build_object('placeMatchKind', 'saved', 'correctedCategoryId', $5::uuid)
+           || case when $6 then jsonb_build_object('correctedCategoryChosen', true) else '{}'::jsonb end, updated_at = now()
        where id = $2 and workspace_id = $3 and user_id = $4`,
-      [place.id, target.segmentId, session.workspaceId, session.userId, card.rows[0]?.categoryId ?? null]);
+      [place.id, target.segmentId, session.workspaceId, session.userId, card.rows[0]?.categoryId ?? null,
+        target.own && Boolean(action.categoryId)]);
   }
   await client.query(
     `insert into place_match_feedback (

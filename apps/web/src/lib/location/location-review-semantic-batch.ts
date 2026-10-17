@@ -151,20 +151,26 @@ async function displayContext(
  * place it was corrected to when replay re-emits its card, so the card, its activity and its reason
  * follow the correction rather than the engine's match (Codex r1 on #459); the Moves either side of it
  * end at that place too, for their names and activity (Codex r2 on #459). A Stay saved as a place
- * also keeps the activity its card had then (`correctedCategoryId`), never the place's default.
+ * also keeps the activity its card had then (`correctedCategoryId`), never the place's default, and
+ * whether the person chose that activity there (`chosenCategories`), which a decision then learns.
  */
 export async function withCorrectedStayPlaces(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
-): Promise<{ segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null>; correctedMoves: ReadonlySet<string> }> {
+): Promise<{
+  segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null>; correctedMoves: ReadonlySet<string>;
+  chosenCategories: ReadonlySet<string>;
+}> {
   const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? []
     : [stayIds.get(segment.fromStaySegmentId), stayIds.get(segment.toStaySegmentId)].filter((id): id is string => Boolean(id))))].sort();
   const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
   const categories = new Map<string, string | null>();
+  const chosen = new Set<string>();
   for (const batch of chunks(ids)) {
     const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null;
-      hasCategory: boolean; categoryId: string | null }>(
+      hasCategory: boolean; categoryId: string | null; chosen: boolean | null }>(
       `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind,
-              metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId"
+              metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId",
+              (metadata ->> 'correctedCategoryChosen')::boolean as chosen
        from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
       [session.workspaceId, session.userId, batch]);
     for (const row of result.rows) {
@@ -172,11 +178,13 @@ export async function withCorrectedStayPlaces(
         : row.placeId ? "saved" : row.learnedPlaceId ? "learned" : "unknown";
       corrected.set(row.id, { placeId: row.placeId, learnedPlaceId: row.learnedPlaceId, placeMatchKind });
       if (row.hasCategory) categories.set(row.id, row.categoryId);
+      if (row.hasCategory && row.chosen === true) chosen.add(row.id);
     }
   }
   const correctedCategories = new Map<string, string | null>();
   const correctedMoves = new Set<string>();
-  if (corrected.size === 0) return { segments, correctedCategories, correctedMoves };
+  const chosenCategories = new Set<string>();
+  if (corrected.size === 0) return { segments, correctedCategories, correctedMoves, chosenCategories };
   const savedPlaceOf = (clientStayId: string) => {
     const identity = corrected.get(stayIds.get(clientStayId) ?? "");
     return identity ? { placeId: identity.placeMatchKind === "saved" ? identity.placeId : null } : null;
@@ -197,10 +205,12 @@ export async function withCorrectedStayPlaces(
       const persistedId = stayIds.get(segment.clientSegmentId) ?? "";
       const identity = corrected.get(persistedId);
       if (categories.has(persistedId)) correctedCategories.set(segment.clientSegmentId, categories.get(persistedId) ?? null);
+      if (chosen.has(persistedId)) chosenCategories.add(segment.clientSegmentId);
       return identity ? { ...segment, ...identity } : segment;
     }),
     correctedCategories,
-    correctedMoves
+    correctedMoves,
+    chosenCategories
   };
 }
 
@@ -308,7 +318,8 @@ export async function emitReviewSemanticSegments(
     const nameFields = pattern ? {
       namePatternKey: pattern.key, namePatternBand: pattern.band,
       ...(learned?.name ? { nameSource: "learned" } : {}),
-      ...(learnedActivity ? { activitySource: "learned" } : {})
+      // An activity the person chose when saving the place stays theirs to teach (Codex r5 on #459).
+      ...(learnedActivity || (corrected && corrections.chosenCategories.has(segment.clientSegmentId)) ? { activitySource: "learned" } : {})
     } : {};
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
