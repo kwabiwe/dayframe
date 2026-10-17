@@ -38,16 +38,16 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (122)` (2026-10-16)
+- Last repository-recorded verified build: `0.1.0 (123)` (2026-10-17)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `aec8985f-0435-4653-b975-cc9b9b68caff`
-- Archived commit: `35d6b2b`
-- Performance gate reading (baseline for the next build): staging build of `35d6b2b`, Today in front with a block running on the iPhone 17 over USB (a wireless `devicectl` session dropped after about six minutes, so gate over a cable with Auto-Lock off), after a five-minute warm-up (6.3 %, −0.44 MiB per minute): gate 1 6.5 % and +0.46 MiB per minute; gate 2 6.3 % and +4.54 MiB per minute, over the memory budget as one step (footprint 292 → 316 MiB at one moment while compressed memory rose 128 → 191 MiB, back to 306 MiB within a minute); two further windows 6.3 % / +0.21 and 6.4 % / −0.78 MiB per minute; about +0.38 MiB per minute over the whole 28 minutes, footprint about 303 MiB. **Accepted exception (owner, 16 Oct):** gate 2's one-off step was accepted and the build released; the cause of the step is not identified. Build 121: 7.1 % / +0.98 and 5.7 % / +0.63 MiB per minute; build 120: 6.9 % and +1.8 MB per minute.
+- Delivery/build ID: `e2356f3f-c814-4d40-87ba-a587d595a442`
+- Archived commit: `f96616e`
+- Performance gate reading (baseline for the next build): staging build of `f96616e`, Today in front with a block running on the iPhone 17 over USB with Auto-Lock off (check from a screenshot that it is Dayframe Staging, full-screen, with a block running: a first attempt ran with nothing recording and was discarded), after a five-minute warm-up (6.4 %, +1.02 MiB per minute): gate 1 6.8 % and +0.65 MiB per minute, gate 2 6.4 % and +0.02 MiB per minute (17 Oct). Build 122: 6.3–6.5 %, with one accepted +4.54 MiB-per-minute step; build 121: 7.1 % / +0.98 and 5.7 % / +0.63 MiB per minute.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 122 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 123 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
