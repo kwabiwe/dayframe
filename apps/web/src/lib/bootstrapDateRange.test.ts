@@ -68,6 +68,17 @@ describe("bootstrap day and week ranges", () => {
     }
   });
 
+  it("rolls an impossible date key over as the server-zone path does, instead of failing", () => {
+    process.env.TZ = "UTC";
+    expect(buildDashboardDateRange("2026-13-01", "Europe/London").selectedDate).toBe("2027-01-01");
+    const february = buildDashboardDateRange("2026-02-30", "America/New_York");
+    expect(february.selectedDate).toBe("2026-03-02");
+    expect(february.dayStart).toBe("2026-03-02T05:00:00.000Z");
+    expect(new Date(february.dayStart) >= new Date(february.weekStart)).toBe(true);
+    expect(new Date(february.dayEnd) <= new Date(february.weekEnd)).toBe(true);
+    expect(buildDashboardDateRange("2026-13-01").selectedDate).toBe("2027-01-01");
+  });
+
   it("is unchanged without a zone, whatever the server's own zone", () => {
     process.env.TZ = "America/Los_Angeles";
     const range = buildDashboardDateRange("2026-10-12");

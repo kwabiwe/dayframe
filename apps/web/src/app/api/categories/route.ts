@@ -13,6 +13,7 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { isMissingRequiredColumnError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getBootstrapData } from "@/lib/queries";
+import { viewerTimeZoneIfSentForRequest } from "@/lib/viewer-time-zone-server";
 
 // An activity icon is a key from the shared set; null clears it so the name decides.
 const activityIconSchema = z
@@ -48,7 +49,7 @@ export async function GET(request: Request) {
     if (new URL(request.url).searchParams.get("archived") === "1") {
       return NextResponse.json({ categories: await listArchivedCategories(session) });
     }
-    const data = await getBootstrapData(session);
+    const data = await getBootstrapData(session, { timeZone: viewerTimeZoneIfSentForRequest(request) });
     return NextResponse.json({ categories: data.categories });
   } catch (error) {
     const response = authErrorResponse(error);

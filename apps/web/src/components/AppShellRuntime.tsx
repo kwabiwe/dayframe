@@ -11,6 +11,7 @@ import {
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import type { BootstrapData, CategoryRow, TimeEntryRow } from "@/lib/queries";
+import { snapshotFitsViewerZone } from "@/lib/viewer-time-zone";
 import { timelineStateFromSearchParams } from "@/lib/timeline-view";
 import { goalDrafts } from "@/lib/goal-stepper";
 import {
@@ -123,6 +124,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const dataRef = useRef<BootstrapData | null>(null);
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
+  /**
+   * A cached day, only when its ranges were built for the zone the browser sends now (Codex r1 on
+   * #484): a snapshot from before the zone cookie existed, or from another zone, is fetched again.
+   */
+  const cachedDateData = useCallback((date: string) => {
+    const cached = dateDataCacheRef.current.get(date);
+    if (!cached) return undefined;
+    // A misfit stays until a fresh load of that day replaces it.
+    return snapshotFitsViewerZone(cached.viewerTimeZone, typeof document === "undefined" ? null : document.cookie) ? cached : undefined;
+  }, []);
   const draftRef = useRef(timerDraft);
   // The base: per field, the server copy this tab's edit of that field is based on (the newest
   // server copy for a field the user has not edited). Autosave sends only the fields that differ
@@ -280,7 +291,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [commitData, selectedDate]);
 
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
-    const cached = dateDataCacheRef.current.get(date);
+    const cached = cachedDateData(date);
     if (cached) {
       setDateLoadError(null);
       commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
@@ -314,11 +325,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsDateLoading(false);
       }
     }
-  }, [commitData]);
+  }, [cachedDateData, commitData]);
 
   useLayoutEffect(() => {
+    // Read inline (not through cachedDateData), the same check, so this stays a ref-driven sync.
     const cached = dateDataCacheRef.current.get(selectedDate);
-    if (!cached) return;
+    if (!cached || !snapshotFitsViewerZone(cached.viewerTimeZone, document.cookie)) return;
     setDateLoadError(null);
     if (dataRef.current?.dateRange.selectedDate !== selectedDate) {
       commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
@@ -328,7 +340,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
       if (
-        !dateDataCacheRef.current.has(selectedDate) &&
+        !cachedDateData(selectedDate) &&
         dataRef.current?.dateRange.selectedDate !== selectedDate
       ) {
         void refresh();
@@ -350,7 +362,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [commitData, refresh, selectedDate]);
+  }, [cachedDateData, commitData, refresh, selectedDate]);
 
   useEffect(() => {
     let cancelled = false;

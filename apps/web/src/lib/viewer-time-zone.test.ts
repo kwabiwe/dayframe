@@ -6,6 +6,7 @@ import {
   viewerTimeZoneCookie,
   viewerTimeZoneFromCookieHeader,
   addDaysToDateKey,
+  snapshotFitsViewerZone,
   mondayOfDateKey,
   zonedDateKey,
   zonedStartOfDay,
@@ -105,5 +106,19 @@ describe("date-key arithmetic and wall hours in a zone", () => {
     expect(zonedWallHour("2026-10-25", 1, "Europe/London").toISOString()).toBe("2026-10-25T00:00:00.000Z");
     expect(zonedWallHour("2026-10-25", 8, "Europe/London").toISOString()).toBe("2026-10-25T08:00:00.000Z");
     expect(zonedWallHour("2026-10-25", 24, "Europe/London").toISOString()).toBe("2026-10-26T00:00:00.000Z");
+  });
+});
+
+describe("which cached bootstrap fits the browser's zone (Codex r1 on #484)", () => {
+  it("matches a snapshot's zone to the cookie the browser sends now", () => {
+    expect(snapshotFitsViewerZone(null, "")).toBe(true);
+    expect(snapshotFitsViewerZone(undefined, "other=1")).toBe(true);
+    // Built before the cookie existed: fetched again once it does.
+    expect(snapshotFitsViewerZone(null, "dayframe_tz=Europe/London")).toBe(false);
+    expect(snapshotFitsViewerZone("Europe/London", "a=b; dayframe_tz=Europe/London")).toBe(true);
+    expect(snapshotFitsViewerZone("Europe/London", "dayframe_tz=America/New_York")).toBe(false);
+    expect(snapshotFitsViewerZone("Europe/London", "")).toBe(false);
+    // An unknown zone is UTC on both sides.
+    expect(snapshotFitsViewerZone("UTC", "dayframe_tz=Mars/Base")).toBe(true);
   });
 });

@@ -236,6 +236,12 @@ export type DashboardSeriesPoint = {
 
 export type BootstrapData = {
   authMode?: RequestSession["authMode"];
+  /**
+   * The zone whose midnights built `dateRange` and the series: the web viewer's (`dayframe_tz`)
+   * when the browser sent it, null for the server's own. The web runtime reuses a cached day only
+   * when this matches its current cookie. Optional so older cached snapshots still read.
+   */
+  viewerTimeZone?: string | null;
   user: {
     id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: number;
     /** "Log trips automatically" (PRD D19, A4); false where the column is not there yet. */
@@ -379,6 +385,7 @@ export async function getBootstrapData(
 
   return {
     authMode: session.authMode,
+    viewerTimeZone: timeZone,
     user,
     workspace: workspaces.find((workspace) => workspace.id === session.workspaceId) ?? workspaces[0],
     workspaces,
@@ -1359,10 +1366,19 @@ export function buildDashboardDateRange(input?: string | Date | null, timeZone?:
   };
 }
 
+/**
+ * A "YYYY-MM-DD" key rolled over as a calendar date ("2026-13-01" → "2027-01-01",
+ * "2026-02-30" → "2026-03-02"), as the server-zone path's `new Date(year, month - 1, day)` does.
+ */
+function normalizeDateKey(key: string) {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
+}
+
 /** The same range with the viewer zone's midnights (DST-safe; date keys do the calendar maths). */
 function buildZonedDashboardDateRange(input: string | Date | null | undefined, timeZone: string): DashboardDateRange {
   const selectedDate = typeof input === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input)
-    ? input
+    ? normalizeDateKey(input)
     : zonedDateKey(coerceDate(input), timeZone);
   const weekKey = mondayOfDateKey(selectedDate);
   return {
@@ -1425,11 +1441,13 @@ export function buildHourlySeries(
     instant.setHours(hour, 0, 0, 0);
     return instant;
   };
+  // Each bucket's bounds once, not once per entry.
+  const bounds = new Map([...hours, hours[hours.length - 1] + 2].map((hour) => [hour, at(hour)]));
   return hours.map((hour) => ({
     key: `${hour}`,
     label: `${hour.toString().padStart(2, "0")}:00`,
     seconds: entries.reduce(
-      (sum, entry) => sum + entryOverlapSeconds(entry, { start: at(hour), end: at(hour + 2) }, capturedNow),
+      (sum, entry) => sum + entryOverlapSeconds(entry, { start: bounds.get(hour)!, end: bounds.get(hour + 2)! }, capturedNow),
       0
     )
   }));

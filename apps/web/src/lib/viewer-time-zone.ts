@@ -159,6 +159,16 @@ export function zonedWallHour(dateKey: string, hour: number, timeZone: string): 
 }
 
 /**
+ * Whether a bootstrap snapshot's ranges were built for the zone a browser with this cookie header
+ * sends now: the web runtime reuses a cached day only then (Codex r1 on #484). A snapshot without
+ * a zone used the server's midnights and fits only a browser that sends none.
+ */
+export function snapshotFitsViewerZone(snapshotZone: string | null | undefined, cookieHeader: string | null | undefined) {
+  const sent = viewerTimeZoneFromCookieHeader(cookieHeader);
+  return (snapshotZone ?? null) === (sent ? normalizeViewerTimeZone(sent) : null);
+}
+
+/**
  * Writes the browser's zone to the cookie when it is missing or different (client only).
  * Returns true when it changed, so a page the server drew for another zone can redraw.
  */
