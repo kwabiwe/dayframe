@@ -334,7 +334,7 @@ function ChipGroup({
           return (
             <button
               aria-pressed={on}
-              className={`df-rchip${on ? " is-checked is-neutral" : ""}`}
+              className={`df-rchip df-rchip--text${on ? " is-checked" : ""}`}
               key={option.id}
               onClick={() => onToggle(option.id)}
               type="button"
