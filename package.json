@@ -32,6 +32,7 @@
     "validate:starter-activities-db": "tsx --tsconfig apps/web/tsconfig.json scripts/validate-starter-activities-db.ts",
     "validate:integration-token-security": "tsx scripts/validate-integration-token-security.ts",
     "validate:session-fence-security": "tsx scripts/validate-session-fence-security.ts",
+    "validate:event-entry-rls": "tsx scripts/validate-event-entry-rls.ts",
     "testflight:preflight": "node scripts/dayframe-testflight-preflight.mjs",
     "validate:sync-transactions": "tsx scripts/validate-sync-transactions.ts",
     "validate:health-sync-units": "tsx scripts/validate-health-sync-units.ts",
