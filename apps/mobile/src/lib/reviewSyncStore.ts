@@ -1754,13 +1754,15 @@ export function mobileReviewItemFromPresentation(record: ReviewProposalPresentat
     notes: null,
     // Coordinate-free subtype and a Move's route line only, so time away keeps its labels and no
     // Commute fallback, and a Move keeps its second line (PRD D19).
-    rawPayload: record.timeAway || record.routeLabel || record.outing ? {
+    rawPayload: record.timeAway || record.routeLabel || record.outing || record.learnedName ? {
       ...(record.timeAway ? { qualificationReason: "same_place_outing", stopCount: record.timeAway.stopCount } : {}),
       ...(record.routeLabel ? { routeLabel: record.routeLabel } : {}),
       // One card per outing (PRD D19): which outing it belongs to and its part in it.
       ...(record.outing ? { [OUTING_KEY_PAYLOAD_KEY]: record.outing.key, [OUTING_ROLE_PAYLOAD_KEY]: record.outing.role } : {}),
       // A Move's way of travelling, so a backlog-only outing's travel line names it (Codex r2 on #473).
-      ...(record.outing?.travelMode ? { travelMode: record.outing.travelMode } : {})
+      ...(record.outing?.travelMode ? { travelMode: record.outing.travelMode } : {}),
+      // A learned name, offered in Location evidence's Name (Codex r1 on #481).
+      ...(record.learnedName ? { nameSource: "learned" } : {})
     } : null,
     createdAt: record.createdAt
   };
@@ -2970,8 +2972,9 @@ export function sanitiseDashboardBootstrapForCache(
   };
 }
 
+/** An earlier payload without the fields a presentation read owns (it says them, or that they are gone). */
 function withoutOuting(rawPayload: Record<string, unknown>) {
-  const { [OUTING_KEY_PAYLOAD_KEY]: _key, [OUTING_ROLE_PAYLOAD_KEY]: _role, ...rest } = rawPayload;
+  const { [OUTING_KEY_PAYLOAD_KEY]: _key, [OUTING_ROLE_PAYLOAD_KEY]: _role, nameSource: _nameSource, ...rest } = rawPayload;
   return rest;
 }
 
@@ -2996,6 +2999,8 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "travelMode",
     // A Move's second line ("Home → Gym"; PRD D19).
     "routeLabel",
+    // A learned name (the card's title then), offered in Location evidence's Name.
+    "nameSource",
     // One card per outing (PRD D19): an opaque outing id and the card's part in it.
     OUTING_KEY_PAYLOAD_KEY,
     OUTING_ROLE_PAYLOAD_KEY

@@ -1,5 +1,6 @@
 import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph } from "@dayframe/shared";
 import { formatPlaceDistance, nearbyPlaceCategory } from "../../lib/placeCategories";
+import { learnedLocationName, locationEvidenceDetails, locationEvidenceLine } from "../../lib/locationEvidenceSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -154,6 +155,18 @@ export function LocationReviewCorrectionEditor({
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
   const journeyCopy = locationReviewJourneyCopy(evidence.segment);
   const isJourney = journeyCopy?.journey === true;
+  const learnedName = learnedLocationName(reviewItem);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // The disclosure's chevron turns (down to up) with the details; Reduce Motion turns it at once.
+  const evidenceChevronTurn = useSharedValue(90);
+  const evidenceChevronStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${evidenceChevronTurn.value}deg` }] }));
+  useEffect(() => {
+    evidenceChevronTurn.value = reduceMotion ? (evidenceOpen ? -90 : 90) : withTiming(evidenceOpen ? -90 : 90, { duration: 180 });
+    // The shared value is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceOpen, reduceMotion]);
+  const evidenceLine = locationEvidenceLine(evidence);
+  const evidenceDetails = locationEvidenceDetails(evidence, (value) => formatTime(value, clockFormat));
   // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
   const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [description, setDescription] = useState(() => initialLocationReviewDescription({
@@ -870,6 +883,41 @@ export function LocationReviewCorrectionEditor({
             />
           </Reanimated.View>
 
+          {/* What the suggestion rests on, in one line that opens to the details (owner, 17 Oct 2026). */}
+          {evidenceLine ? (
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.evidenceLine}>
+              <Pressable
+                accessibilityHint={evidenceDetails.length ? (evidenceOpen ? "Hides the details" : "Shows the details") : undefined}
+                accessibilityRole={evidenceDetails.length ? "button" : "text"}
+                accessibilityState={evidenceDetails.length ? { expanded: evidenceOpen } : undefined}
+                disabled={!evidenceDetails.length}
+                hitSlop={{ top: 8, bottom: 8 }}
+                onPress={() => setEvidenceOpen((open) => !open)}
+                style={({ pressed }) => [editorStyles.evidenceLineRow, pressed ? { opacity: 0.72 } : null]}
+                testID="location-evidence-line"
+              >
+                <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>{evidenceLine}</Text>
+                {evidenceDetails.length ? (
+                  <Reanimated.View style={evidenceChevronStyle}>
+                    <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+                  </Reanimated.View>
+                ) : null}
+              </Pressable>
+              {evidenceOpen && evidenceDetails.length ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  style={editorStyles.evidenceDetails}
+                  testID="location-evidence-details"
+                >
+                  {evidenceDetails.map((line) => (
+                    <Text key={line} {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>{line}</Text>
+                  ))}
+                </Reanimated.View>
+              ) : null}
+            </Reanimated.View>
+          ) : null}
+
           {evidence.segment.kind === "stay" ? (
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockGroup theme={theme} title="Where were you?">
@@ -1078,8 +1126,37 @@ export function LocationReviewCorrectionEditor({
                 style={styles.textInput}
                 value={description}
               />
+              {/* A name Dayframe learned for this kind of visit or trip, one tap away when the field
+                  doesn't hold it (owner, 17 Oct 2026). Using it is the person's own choice. */}
+              {learnedName && description.trim() !== learnedName ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={editorStyles.learnedNameRow}
+                >
+                  <Pressable
+                    accessibilityHint="Fills in the name"
+                    accessibilityLabel={`Use the name ${learnedName}`}
+                    accessibilityRole="button"
+                    disabled={saving}
+                    hitSlop={{ top: 6, bottom: 6 }}
+                    onPress={() => {
+                      setDescription(learnedName);
+                      setDescriptionTouched(true);
+                    }}
+                    style={({ pressed }) => [editorStyles.learnedNameChip, pressed ? { opacity: 0.72 } : null]}
+                    testID="location-evidence-learned-name"
+                  >
+                    <Text {...mobileTextProps("control")} numberOfLines={1} style={editorStyles.learnedNameText}>Use “{learnedName}”</Text>
+                  </Pressable>
+                </Reanimated.View>
+              ) : null}
               {/* D1: the entry sheet's Blocks chips (chosen, pinned, recent; wrapped, never a
                   sideways scroller), then All activities with search and Create. */}
+              {/* The chips move with the group's layout transition when the learned-name chip above
+                  comes or goes (Codex r1 on #481). */}
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <ActivityChipRow testID="location-evidence-activity-chips">
                 {chipActivities.map((category) => (
                   <ActivityChip
@@ -1104,6 +1181,7 @@ export function LocationReviewCorrectionEditor({
                   theme={theme}
                 />
               </ActivityChipRow>
+              </Reanimated.View>
               {automaticCommute ? (
                 <Reanimated.View
                   entering={localPresenceEntering(reduceMotion)}
@@ -1610,6 +1688,15 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
+    evidenceLine: { paddingHorizontal: 4, gap: 6 },
+    evidenceLineRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 6 },
+    evidenceDetails: { gap: 4 },
+    learnedNameRow: { flexDirection: "row" },
+    learnedNameChip: {
+      minHeight: 38, maxWidth: "100%", paddingHorizontal: 14, borderRadius: DAYFRAME_BLOCKS.radius.pill,
+      alignItems: "center", justifyContent: "center", backgroundColor: theme.surfaceInset
+    },
+    learnedNameText: { color: theme.textPrimary, fontSize: 13.5, fontWeight: "600" },
     primaryBar: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 8, backgroundColor: theme.background },
     primaryBarButton: { marginTop: 0 },
     hero: { gap: 4, paddingHorizontal: 4 },

@@ -108,6 +108,27 @@ describe("getReviewPresentation", () => {
     expect(odd.records[0]).not.toHaveProperty("outing");
   });
 
+  it("says a title is a learned name only to clients that ask (Codex r1 on #481)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Swimming",
+      eventType: "commute_detected", timeAwayStopCount: null, routeLabel: null, learnedName: true };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain(`ae.raw_payload ->> 'nameSource' = 'learned'`);
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { learnedName: true });
+    expect(asked.records[0]).toMatchObject({ learnedName: true });
+    expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
+    expect((await getReviewPresentation(session, request, {}, {})).records[0]).not.toHaveProperty("learnedName");
+  });
+
   it("counts cards and sends the outing map only to clients that ask; beyond its limit the counts are not exact (PR 12c)", async () => {
     let stays = [{ member: "71000000-0000-4000-8000-000000000002", stay: "71000000-0000-4000-8000-000000000001" }];
     const query = vi.fn(async (sql: string) => {

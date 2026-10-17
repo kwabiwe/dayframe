@@ -21,6 +21,8 @@ export const REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE = "move-route";
 export const REVIEW_PRESENTATION_OUTING_FEATURE = "outing";
 /** Feature: `outstanding` counts Review cards, an outing once (PRD D19, PR 12c). */
 export const REVIEW_PRESENTATION_OUTING_COUNT_FEATURE = "outing-count";
+/** Feature: a Review item named by a learned name carries `learnedName: true` (Location evidence offers it). */
+export const REVIEW_PRESENTATION_LEARNED_NAME_FEATURE = "learned-name";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -191,6 +193,8 @@ export const ReviewProposalPresentationSchema = z
     /** A Move's second line (only for clients sending the move-route feature). */
     routeLabel: z.string().trim().min(1).max(200).optional(),
     /** The outing the card belongs to and its part in it (only for clients sending the outing feature). */
+    /** Its title is a name Dayframe learned (only for clients sending the learned-name feature). */
+    learnedName: z.literal(true).optional(),
     outing: z.object({
       key: z.string().min(1).max(200),
       role: z.enum(["stay", "in", "out"]),

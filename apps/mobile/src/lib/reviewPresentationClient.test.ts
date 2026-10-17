@@ -103,7 +103,7 @@ describe("fetchReviewPresentationPage", () => {
       owner: { backendId: "staging-fixture", workspaceId: "10000000-0000-4000-8000-000000000001", userId: "20000000-0000-4000-8000-000000000001" },
       request: { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 100 }
     }).catch(() => undefined);
-    expect(vi.mocked(mobileJsonRequest).mock.lastCall?.[1]?.headers).toMatchObject({ "x-dayframe-review-features": "time-away,move-route,outing,outing-count" });
+    expect(vi.mocked(mobileJsonRequest).mock.lastCall?.[1]?.headers).toMatchObject({ "x-dayframe-review-features": "time-away,move-route,outing,outing-count,learned-name" });
   });
 
   it("classifies a malformed successful response without exposing its body", async () => {

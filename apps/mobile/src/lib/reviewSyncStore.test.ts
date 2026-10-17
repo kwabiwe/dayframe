@@ -214,6 +214,8 @@ describe("Review sync store contracts", () => {
       status: "open" as const, createdAt: "2026-03-10T12:20:00.000Z", updatedAt: "2026-03-10T12:20:00.000Z",
       proposalHash: null, canonicalEntryIds: [], semanticRevision: null
     };
+    // A learned name crosses too (Codex r1 on #481).
+    expect(mobileReviewItemFromPresentation({ ...record, learnedName: true }).rawPayload).toEqual({ nameSource: "learned" });
     const presented = mobileReviewItemFromPresentation({ ...record, outing: { key: "outing:synthetic-a", role: "in", travelMode: "automotive" } });
     expect(presented.rawPayload).toEqual({ outingKey: "outing:synthetic-a", outingRole: "in", travelMode: "automotive" });
     expect(sanitiseReviewItemForCache(presented).rawPayload).toEqual({ outingKey: "outing:synthetic-a", outingRole: "in", travelMode: "automotive" });

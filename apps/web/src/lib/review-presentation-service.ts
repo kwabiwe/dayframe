@@ -48,6 +48,7 @@ type ReviewRow = {
   outingKey?: string | null;
   outingRole?: string | null;
   outingTravelMode?: string | null;
+  learnedName?: boolean | null;
 };
 
 type LegacyRow = {
@@ -135,7 +136,7 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean };
+export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean };
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -339,6 +340,7 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             case when ae.raw_payload ->> 'outingRole' in ('stay', 'in', 'out') then nullif(ae.raw_payload ->> 'outingKey', '') end as "outingKey",
             ae.raw_payload ->> 'outingRole' as "outingRole",
             case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
+            coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -494,6 +496,7 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
             case when ae.raw_payload ->> 'outingRole' in ('stay', 'in', 'out') then nullif(ae.raw_payload ->> 'outingKey', '') end as "outingKey",
             ae.raw_payload ->> 'outingRole' as "outingRole",
             case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
+            coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -625,6 +628,7 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     semanticRevision: isoOrNull(row.semanticRevision),
     ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } }),
     ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {}),
+    ...(row.learnedName ? { learnedName: true as const } : {}),
     ...(row.outingKey && (row.outingRole === "stay" || row.outingRole === "in" || row.outingRole === "out") && row.outingKey.length <= 200
       ? { outing: { key: row.outingKey, role: row.outingRole,
           ...(row.outingTravelMode && row.outingTravelMode.length <= 40 ? { travelMode: row.outingTravelMode } : {}) } } : {})
@@ -640,10 +644,11 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
   if (!record || typeof record !== "object") return record;
-  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown };
+  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown };
   if (!features.timeAway) delete rest.timeAway;
   if (!features.moveRoute) delete rest.routeLabel;
   if (!features.outing) delete rest.outing;
+  if (!features.learnedName) delete rest.learnedName;
   return rest as T;
 }
 
