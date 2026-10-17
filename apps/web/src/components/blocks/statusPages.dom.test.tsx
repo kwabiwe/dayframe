@@ -9,11 +9,21 @@ vi.mock("next/image", () => ({
   default: (props: Record<string, unknown>) => <span data-image={String(props.src)} />
 }));
 
+const router = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
+
+const shell = vi.hoisted(() => ({ inside: false }));
+vi.mock("@/components/AppShellRuntime", () => ({ useInsideAppShell: () => shell.inside }));
+
 const { default: NotFound } = await import("@/app/not-found");
 const { default: AppError } = await import("@/app/error");
 const { default: SettingsError } = await import("@/app/settings/error");
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  shell.inside = false;
+  router.refresh.mockReset();
+});
 
 const styles = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -25,17 +35,37 @@ describe("missing and failed pages (WUI-048)", () => {
     expect(screen.getByRole("link", { name: "Go to Today" }).getAttribute("href")).toBe("/");
   });
 
-  it("offers Try again and Today when a page fails, Settings included", () => {
+  it("fetches the failed page again on Try again, not only re-renders it (Codex r1 on #493)", () => {
     const reset = vi.fn();
-    const view = render(<AppError error={new Error("boom")} reset={reset} />);
+    const retry = vi.fn();
+    const view = render(<AppError error={new Error("boom")} reset={reset} unstable_retry={retry} />);
     expect(screen.getByRole("heading", { level: 1, name: "Something went wrong" })).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    expect(reset).toHaveBeenCalledOnce();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(reset).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Go to Today" })).not.toBeNull();
     view.unmount();
 
+    // Without Next's retry: refresh the route and reset the boundary.
+    const fallback = render(<AppError error={new Error("boom")} reset={reset} />);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(router.refresh).toHaveBeenCalledOnce();
+    expect(reset).toHaveBeenCalledOnce();
+    fallback.unmount();
+
     render(<SettingsError error={new Error("boom")} reset={vi.fn()} />);
     expect(screen.getByRole("heading", { level: 1, name: "Settings are unavailable" })).not.toBeNull();
+  });
+});
+
+describe("one main landmark (Codex r1 on #493)", () => {
+  it("is the page's main on a bare page and a plain section inside the shell", () => {
+    const bare = render(<NotFound />);
+    expect(document.querySelectorAll("main")).toHaveLength(1);
+    bare.unmount();
+    shell.inside = true;
+    render(<main><NotFound /></main>);
+    expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 });
 

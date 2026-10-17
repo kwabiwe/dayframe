@@ -112,7 +112,9 @@ describe("web Settings contracts", () => {
     expect(errorSource).toContain("Your saved preferences have not changed.");
     // The shared status page (WUI-048): a neutral Try again beside Go to Today, never coral.
     expect(errorSource).toContain("<StatusPage");
-    expect(errorSource).toContain('<button className="df-rbtn df-rbtn--inverse" onClick={reset} type="button">Try again</button>');
+    expect(errorSource).toContain('<button className="df-rbtn df-rbtn--inverse" onClick={retry} type="button">Try again</button>');
+    // Try again fetches the page again (Codex r1 on #493).
+    expect(errorSource).toContain("useErrorRetry(reset, unstableRetry)");
     expect(errorSource).not.toMatch(/stack|sql|api route/i);
   });
 });

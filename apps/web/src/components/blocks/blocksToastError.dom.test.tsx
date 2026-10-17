@@ -23,6 +23,21 @@ describe("BlocksToast error variant", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
+  it("takes focus only when the keyboard has nowhere else to be (Codex r1 on #491)", async () => {
+    const { rerender } = render(<><button type="button">Elsewhere</button></>);
+    (document.activeElement as HTMLElement | null)?.blur();
+    rerender(<><button type="button">Elsewhere</button><BlocksToast actionLabel="Try again" focusActionIfLost message="Refused" onAction={vi.fn()} tone="error" /></>);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Try again" }));
+    cleanup();
+
+    render(<><button type="button">Elsewhere</button></>);
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    render(<BlocksToast actionLabel="Try again" focusActionIfLost message="Refused" onAction={vi.fn()} tone="error" />);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Elsewhere" }));
+  });
+
   it("stays a polite status otherwise", () => {
     render(<BlocksToast message="Deleted Shop run" />);
     expect(screen.getByRole("status").className).not.toContain("is-error");
@@ -30,7 +45,12 @@ describe("BlocksToast error variant", () => {
 
   it("is what Calendar uses for its errors, and every delete toast puts the verb first", () => {
     const calendar = source("components/TimeReviewViews.tsx");
-    expect(calendar).toMatch(/deleteError \? \([\s\S]*?<BlocksToast[\s\S]*?actionLabel="Try again"[\s\S]*?tone="error"/);
+    expect(calendar).toMatch(/deleteError \? \([\s\S]*?<BlocksToast[\s\S]*?actionLabel=\{failedDelete \? "Try again" : "Dismiss"\}[\s\S]*?focusActionIfLost[\s\S]*?tone="error"/);
+    // Try again goes through the view's own delete (its swatch and trip opt-out; Codex r1 on #491).
+    expect(calendar).toContain("() => requestTimelineDelete(failedDelete.entries)");
+    // One toast at a time: the Calendar's own error and notice wait for this view's toasts.
+    expect(calendar).toContain("undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}");
+    expect(calendar).toContain("{actionError && !undoToastVisible ? (");
     expect(calendar).not.toContain("timeline-delete-error");
     for (const path of ["components/TimeReviewViews.tsx", "components/today/TodayView.tsx"]) {
       expect(source(path), path).not.toMatch(/” deleted`|occurrences deleted/);

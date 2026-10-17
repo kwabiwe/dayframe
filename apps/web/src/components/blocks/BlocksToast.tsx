@@ -14,6 +14,7 @@ export function BlocksToast({
   actionLabel,
   autoFocusAction = false,
   detail,
+  focusActionIfLost = false,
   exiting = false,
   message,
   onAction,
@@ -24,6 +25,11 @@ export function BlocksToast({
   actionLabel?: string;
   /** Move focus to the action when the toast appears (when the surface that was focused just went away). */
   autoFocusAction?: boolean;
+  /**
+   * Move focus to the action only when focus has nowhere else to be (the page, or a toast that just
+   * left): an error toast that replaces a focused Undo toast keeps the keyboard on it.
+   */
+  focusActionIfLost?: boolean;
   /** A muted second line under the message ("42m logged to Client Work"), as on iPhone. */
   detail?: string | null;
   exiting?: boolean;
@@ -54,6 +60,14 @@ export function BlocksToast({
     const active = document.activeElement;
     if (!active || active === document.body) actionRef.current?.focus();
   }, [secondaryDone]);
+  useEffect(() => {
+    if (!focusActionIfLost || exiting) return;
+    const frame = window.requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (!active || active === document.body || active.closest(".df-toast-host")) actionRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusActionIfLost, exiting]);
   useEffect(() => {
     if (!autoFocusAction || exiting) return;
     const frame = window.requestAnimationFrame(() => actionRef.current?.focus());

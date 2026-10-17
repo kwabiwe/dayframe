@@ -55,7 +55,7 @@ describe("/api/places", () => {
     expect(response.status).toBe(200);
     expect(payload.places).toHaveLength(1);
     expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
-    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session);
+    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { timeZone: null });
   });
 
   it("creates a category-first current-location place without auto-start", async () => {

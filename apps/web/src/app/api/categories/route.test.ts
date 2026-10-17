@@ -131,7 +131,7 @@ describe("/api/categories", () => {
 
     expect(response.status).toBe(200);
     expect(payload.categories).toHaveLength(1);
-    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session);
+    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { timeZone: null });
   });
 
   it("creates a pinned category", async () => {

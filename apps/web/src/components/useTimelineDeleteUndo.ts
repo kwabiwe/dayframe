@@ -49,10 +49,10 @@ export function useTimelineDeleteUndo({
 
   return {
     error: state.error,
+    failedDelete: state.failed,
     hiddenEntryIds: state.hiddenEntryIds,
     pendingNotice: state.notice,
     requestDelete,
-    retryFailedDelete: () => controller.retryFailedDelete(),
     dismissDeleteError: () => controller.dismissError(),
     undoPendingDelete: () => controller.undoPendingDelete()
   };
