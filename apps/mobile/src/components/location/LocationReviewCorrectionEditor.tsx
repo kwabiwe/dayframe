@@ -1189,19 +1189,6 @@ export function LocationReviewCorrectionEditor({
             </SettingsBlockGroup>
           </Reanimated.View>
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={saving}
-            onPress={() => void recordSuggestion()}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && !saving ? styles.buttonPressed : null,
-              saving ? styles.buttonDisabled : null
-            ]}
-          >
-            <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
-          </Pressable>
-
           {/* More options is a plain list of the other ways to resolve this moment (D7). */}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <SettingsBlockGroup theme={theme} title="More options">
@@ -1335,6 +1322,24 @@ export function LocationReviewCorrectionEditor({
           </Reanimated.View>
         </View>
       </ScrollView>
+      {/* The primary action stays at the bottom of the screen, under the scroll view, so recording
+          is one tap from anywhere on the page (owner, 17 Oct 2026). It is part of the layout from
+          the first frame and never moves; the screen's safe area keeps it above the home indicator. */}
+      <View style={editorStyles.primaryBar} testID="location-evidence-primary-bar">
+        <Pressable
+          accessibilityRole="button"
+          disabled={saving}
+          onPress={() => void recordSuggestion()}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            editorStyles.primaryBarButton,
+            pressed && !saving ? styles.buttonPressed : null,
+            saving ? styles.buttonDisabled : null
+          ]}
+        >
+          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
+        </Pressable>
+      </View>
       {activityPickerOpen ? (
         <ActivityPickerSheet
           activities={categories}
@@ -1546,6 +1551,8 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
+    primaryBar: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, backgroundColor: theme.background },
+    primaryBarButton: { marginTop: 0 },
     hero: { gap: 4, paddingHorizontal: 4 },
     heroTitle: { color: theme.textPrimary, fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, letterSpacing: -0.6, lineHeight: 34 },
     section: { padding: 16, gap: 12 },

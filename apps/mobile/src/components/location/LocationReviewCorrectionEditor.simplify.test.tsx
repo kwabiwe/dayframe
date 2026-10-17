@@ -179,6 +179,19 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
       typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Estimated duration "))).not.toHaveLength(0);
   });
 
+  it("keeps the primary action at the bottom of the screen, outside the scroll view", async () => {
+    await render(stay({ matched: true }));
+    const bar = tree!.root.findAll((node) => node.props.testID === "location-evidence-primary-bar" && typeof node.type === "string");
+    expect(bar).toHaveLength(1);
+    let ancestor = bar[0].parent;
+    while (ancestor) {
+      expect(ancestor.type).not.toBe("ScrollView");
+      ancestor = ancestor.parent;
+    }
+    expect(bar[0].findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button")).toHaveLength(1);
+    expect(texts("Record visit")).toHaveLength(1);
+  });
+
   it("offers Skip in neutral text and no second Record once", async () => {
     await render(stay({ matched: true }));
     const skip = tree!.root.findAll((node) => node.props.testID === "location-evidence-skip" && typeof node.type !== "string");
@@ -241,7 +254,7 @@ describe("Where were you? (D2, D3)", () => {
     expect(byTestId("location-evidence-nearby-0")[0].props.accessibilityLabel).toMatch(/^Example Studio/);
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "record_poi_once", name: "Example Bakery" });
-    // Remove goes back to no place.
+    // Its ✕ goes back to no place.
     await press(byLabel("Clear Example Bakery")[0]);
     expect(texts("Record visit")).toHaveLength(1);
   });
@@ -266,7 +279,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await press(tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string")[0]);
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "edit_and_confirm" });
     expect(onResolve.mock.calls[0][0].action).not.toBe("record_poi_once");
@@ -280,7 +293,7 @@ describe("Where were you? (D2, D3)", () => {
     await act(async () => byLabel("Search places")[0].props.onChangeText("Lib"));
     await act(async () => { finish(); await pick; });
     expect(byLabel("Search places")[0].props.value).toBe("Lib");
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(texts("Record visit")).toHaveLength(1);
   });
 
@@ -301,7 +314,7 @@ describe("Where were you? (D2, D3)", () => {
     await act(async () => { finish(); await pick; });
     expect(map.props!.selectedPoint).toEqual(moved);
     expect(typeof map.props!.onSelectPoint).toBe("function");
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
   });
 
   it("drops a late nearby pick after the pin is renamed, and saves the pin's own name and coordinate", async () => {
@@ -313,7 +326,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await act(async () => pinName().props.onChangeText("Corner spot"));
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(map.props!.selectedPoint).toEqual(moved);
     await press(tree!.root.find((node) => node.props.label === "Use this pin"));
     const save = tree!.root.findAll((node) => node.props.label === "Save for future visits" && typeof node.props.onValueChange === "function")[0];
@@ -331,7 +344,7 @@ describe("Where were you? (D2, D3)", () => {
     act(() => { pick = byTestId("location-evidence-nearby-0")[0].props.onPress(); });
     await press(byTestId("location-evidence-map-pin")[0]);
     await act(async () => { finish(); await pick; });
-    expect(byLabel("Remove Example Bakery")).toHaveLength(0);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(0);
     expect(typeof map.props!.onSelectPoint).toBe("function");
   });
 
