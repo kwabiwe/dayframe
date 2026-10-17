@@ -152,13 +152,13 @@ export async function getReviewPresentation(
     // are acquired for presentation. Repeatable Read is selected by the
     // transaction owner at BEGIN, before its configuration SELECTs.
 
-    const [counts, reviewRows, legacyRows, entryRows, lookup] = await Promise.all([
-      loadCounts(client, session, input, features),
-      input.mode === "lookup" ? Promise.resolve([]) : loadReviewRows(client, session, input),
-      input.mode === "lookup" ? Promise.resolve([]) : loadLegacyRows(client, session, input),
-      input.mode === "window" ? loadCompletedTodayRows(client, session, input) : Promise.resolve([]),
-      input.mode === "lookup" ? loadLookupRows(client, session, input) : Promise.resolve({ reviews: [], entries: [] })
-    ]);
+    // One client runs one query at a time: pg queues overlapping calls and warns that it will
+    // refuse them in pg@9, so the reads are awaited in turn (no slower: they shared one connection).
+    const counts = await loadCounts(client, session, input, features);
+    const reviewRows = input.mode === "lookup" ? [] : await loadReviewRows(client, session, input);
+    const legacyRows = input.mode === "lookup" ? [] : await loadLegacyRows(client, session, input);
+    const entryRows = input.mode === "window" ? await loadCompletedTodayRows(client, session, input) : [];
+    const lookup = input.mode === "lookup" ? await loadLookupRows(client, session, input) : { reviews: [], entries: [] };
 
     const allRecords = [
       ...reviewRows.map(toReviewRecord),
@@ -466,17 +466,10 @@ async function loadLookupRows(client: pg.PoolClient, session: RequestSession, in
   if (reviewIds.length > REVIEW_PRESENTATION_MAX_IDS || entryIds.length > REVIEW_PRESENTATION_MAX_IDS) {
     throw new ReviewPresentationError("presentation_unavailable", "Lookup IDs exceed the bounded request.");
   }
-  const [reviews, completedEntries, legacyEntries] = await Promise.all([
-    reviewIds.length
-      ? loadReviewRowsByIds(client, session, reviewIds)
-      : Promise.resolve([]),
-    entryIds.length
-      ? loadCompletedEntriesByIds(client, session, entryIds)
-      : Promise.resolve([]),
-    entryIds.length
-      ? loadLegacyRowsByIds(client, session, entryIds)
-      : Promise.resolve([])
-  ]);
+  // In turn, on the one client (see getReviewPresentation).
+  const reviews = reviewIds.length ? await loadReviewRowsByIds(client, session, reviewIds) : [];
+  const completedEntries = entryIds.length ? await loadCompletedEntriesByIds(client, session, entryIds) : [];
+  const legacyEntries = entryIds.length ? await loadLegacyRowsByIds(client, session, entryIds) : [];
   return { reviews, entries: [...completedEntries, ...legacyEntries] };
 }
 

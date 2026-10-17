@@ -82,7 +82,7 @@ describe("Calendar range and toolbar contract", () => {
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
     expect(page).toContain("await cookies()");
     expect(page).toContain("timelinePreferenceFromCookieValue");
-    expect(page).toContain("timelineStateFromSearchParams(params, { preference, today: todayKey })");
+    expect(page).toContain("timelineStateFromSearchParams(params, { preference: statePreference, today: todayKey })");
     expect(page).toContain("if (currentHref !== canonicalHref) redirect(canonicalHref)");
     expect(page).toContain("getBootstrapData(session, { selectedDate: state.date })");
     expect(page).not.toContain("PageHeader");

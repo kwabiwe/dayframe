@@ -19,6 +19,8 @@ export type TimelineDeleteUndoState = {
   committed: readonly TimelineDeleteTransaction[];
   committing: readonly TimelineDeleteTransaction[];
   error: string | null;
+  /** What the server refused, while any of it is still there to delete again (WUI-027). */
+  failed: TimelineDeleteRequest | null;
   hiddenEntryIds: ReadonlySet<string>;
   notice: TimelineDeleteNotice | null;
   pending: TimelineDeleteTransaction | null;
@@ -78,6 +80,7 @@ export class TimelineDeleteUndoController {
     }
 
     return {
+      failed: this.failed,
       committed,
       committing,
       error: this.error,
@@ -152,6 +155,15 @@ export class TimelineDeleteUndoController {
   reconcileEntryIds(entryIds: ReadonlySet<string>) {
     if (this.disposed) return;
     let changed = false;
+    // A refused delete's blocks that a refresh no longer shows are not deleted again (the batch
+    // would refuse them all); with none left there is nothing to retry (Codex r1 on #491).
+    if (this.failed) {
+      const remaining = this.failed.entries.filter((entry) => entryIds.has(entry.id));
+      if (remaining.length !== this.failed.entries.length) {
+        this.failed = remaining.length ? { ...this.failed, entries: remaining } : null;
+        changed = true;
+      }
+    }
     for (const [token, active] of this.active) {
       if (active.status !== "committed") continue;
       if (active.transaction.ids.every((id) => !entryIds.has(id))) {
@@ -238,6 +250,7 @@ export function initialTimelineDeleteUndoState(): TimelineDeleteUndoState {
     committed: [],
     committing: [],
     error: null,
+    failed: null,
     hiddenEntryIds: new Set(),
     notice: null,
     pending: null

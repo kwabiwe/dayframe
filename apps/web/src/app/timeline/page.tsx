@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { TimeReviewViews } from "@/components/TimeReviewViews";
 import { resolvePageSession } from "@/lib/auth/server";
@@ -6,6 +6,7 @@ import { getBootstrapData } from "@/lib/queries";
 import {
   TIMELINE_PREFERENCE_COOKIE,
   timelineHref,
+  firstVisitTimelinePreference,
   timelinePreferenceFromCookieValue,
   timelineSearchString,
   timelineStateFromSearchParams
@@ -31,7 +32,9 @@ export default async function TimelinePage({
   // opens, and the server's best guess at "today" for the first render. The browser replaces the
   // guess with its own clock after hydration.
   const todayKey = zonedDateKey(renderedAt, await getViewerTimeZone());
-  const state = timelineStateFromSearchParams(params, { preference, today: todayKey });
+  // A first visit from a phone opens Day (no cookie yet); the user's own choice wins once made.
+  const statePreference = preference ?? firstVisitTimelinePreference((await headers()).get("user-agent"));
+  const state = timelineStateFromSearchParams(params, { preference: statePreference, today: todayKey });
   const currentSearch = timelineSearchString(params);
   const currentHref = currentSearch ? `/timeline?${currentSearch}` : "/timeline";
   const canonicalHref = timelineHref(params, state);

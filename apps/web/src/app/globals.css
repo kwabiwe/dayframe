@@ -1734,6 +1734,10 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
     max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
     margin: auto 12px calc(12px + env(safe-area-inset-bottom, 0px));
     border-radius: 24px;
+  }
+
+  /* The entrance only: the exit copy keeps its fade-out (Codex r1 on #492). */
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
     animation-name: ui-sheet-in;
   }
 
@@ -1768,7 +1772,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 }
 
 @media (prefers-reduced-motion: reduce) and (max-width: 560px) {
-  dialog.ui-dialog.ui-popover-panel.is-sheet {
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
     animation-name: ui-dialog-fade-in;
   }
 }
@@ -6479,9 +6483,30 @@ dialog.ui-dialog.df-range-custom {
   overflow: hidden;
 }
 
-/* Sheets rise into place (WUI-026); anchored lists still drop 4 px from their field. */
+/* Sheets rise 8 px into place as they fade in, and sink as they fade out (WUI-026); anchored
+   lists fade in place. Reduce Motion keeps the fade only. */
+.df-flist.ui-floating-surface.is-sheet {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 160ms;
+}
+
+.df-flist.ui-floating-surface.is-sheet.is-open {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+
 .df-flist.ui-floating-surface.is-sheet:not(.is-open) {
   transform: translateY(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-flist.ui-floating-surface.is-sheet:not(.is-open) {
+    transform: none;
+  }
 }
 
 .df-flist.is-sheet .df-flist-head {
@@ -8882,6 +8907,20 @@ dialog.ui-dialog.df-range-custom {
 .calendar-day-total {
   white-space: nowrap;
 }
+
+/* Calendar phone layout (owner-approved 17 Oct 2026): a 104 px gutter and 130 px day columns on wider
+   screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Short
+   blocks stay data marks; List is the phone path for detail (WUI-045). */
+.timeline-calendar-workspace {
+  --calendar-axis-width: 104px;
+  --calendar-day-min-width: 130px;
+  position: relative;
+}
+
+.calendar-phone-zoom {
+  display: none;
+}
+
 
 .calendar-corner-zoom {
   display: grid;
@@ -15538,6 +15577,92 @@ dialog.ui-dialog.df-palette {
 
   .df-report-row {
     animation: none;
+  }
+}
+
+/* Calendar phone layout, last in the file so it wins over the phone shell's fixed-height frame: the
+   Calendar page scrolls as a page and the card takes nearly a screen of its own, so one scroll puts a
+   full-height grid (sticky day headings inside) on screen instead of a ~120 px sliver under the
+   timer, quick start, week strip and toolbar. The grid hands a scroll past its ends to the page. */
+@media (max-width: 560px) {
+  .swiss-app-shell.is-timeline {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline {
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline .timeline-calendar-workspace,
+  .swiss-main-frame.is-timeline .timeline-list-workspace {
+    /* Its row parent (.timeline-view-stage) gives it the full width; this fixes its height. */
+    height: calc(100dvh - var(--df-tabbar-space) - 24px);
+    min-height: 420px;
+  }
+
+  .calendar-grid-scroller,
+  .timeline-list-scroll {
+    overscroll-behavior: auto;
+  }
+
+  .timeline-calendar-workspace {
+    --calendar-axis-width: 60px;
+    --calendar-day-min-width: 118px;
+  }
+
+  /* "12:00 PM" fits the narrow gutter on one line. */
+  .calendar-now-pill {
+    right: 2px;
+    padding: 2px 5px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .calendar-grid-corner .calendar-corner-zoom {
+    display: none;
+  }
+
+  .calendar-grid-corner {
+    padding: 4px;
+  }
+
+  .calendar-time-axis .tabular {
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .calendar-phone-zoom {
+    position: absolute;
+    z-index: 45;
+    right: 12px;
+    bottom: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    border-radius: 999px;
+    padding: 2px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-floating);
+  }
+
+  .calendar-phone-zoom button {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 17px;
+  }
+
+  .calendar-phone-zoom button:hover:not(:disabled) {
+    background: var(--surface-muted);
+  }
+
+  .calendar-phone-zoom button:disabled {
+    color: var(--muted);
+    opacity: 0.42;
   }
 }
 
