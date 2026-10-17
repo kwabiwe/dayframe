@@ -199,6 +199,24 @@ describe("TimelineDeleteUndoController", () => {
     expect(controller.getState().pending).toBeNull();
   });
 
+  it("drops refused blocks a refresh no longer shows, and offers nothing once none are left (Codex r1 on #491)", async () => {
+    vi.useFakeTimers();
+    const commit = vi.fn(() => Promise.reject(new Error("Group delete failed")));
+    const controller = new TimelineDeleteUndoController(commit, () => undefined);
+
+    controller.requestDelete(request([entry("a"), entry("b")]));
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().failed?.entries.map((item) => item.id)).toEqual(["a", "b"]);
+
+    controller.reconcileEntryIds(new Set(["b"]));
+    expect(controller.getState().failed?.entries.map((item) => item.id)).toEqual(["b"]);
+    controller.reconcileEntryIds(new Set());
+    expect(controller.getState().failed).toBeNull();
+    expect(controller.getState().error).toBe("Group delete failed");
+  });
+
   it("ignores a stale timeout after a replacement", async () => {
     vi.useFakeTimers();
     const commit = successfulCommit();
