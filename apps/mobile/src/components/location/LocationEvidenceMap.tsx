@@ -1,5 +1,6 @@
+import { useEffect, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import MapView, { Circle, Marker, Polyline, type MapPressEvent } from "react-native-maps";
+import MapView, { Circle, Marker, Polyline, type MapPressEvent, type Region } from "react-native-maps";
 import type { LocationReviewEvidenceDto } from "@dayframe/shared";
 
 type Props = {
@@ -14,6 +15,8 @@ type Props = {
   selectedPointRadiusMeters?: number;
   selectedSavedPlaceId?: string | null;
   showDetails?: boolean;
+  /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
+  reduceMotion?: boolean;
   onSelectPoint?: (point: { latitude: number; longitude: number }) => void;
   onSelectSavedPlace?: (placeId: string) => void;
 };
@@ -29,9 +32,12 @@ export function LocationEvidenceMap({
   selectedPointRadiusMeters,
   selectedSavedPlaceId,
   showDetails = true,
+  reduceMotion = false,
   onSelectPoint,
   onSelectSavedPlace
 }: Props) {
+  const mapRef = useRef<MapView>(null);
+  const regionRef = useRef<Region | null>(null);
   const samples = evidence.map.acceptedSamples;
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   // Time away has no route line, so its readings are the evidence to inspect.
@@ -56,8 +62,30 @@ export function LocationEvidenceMap({
         longitude: evidence.map.centre.coordinates[0]
       }
     : coordinates[0];
+  const latitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.latitude)) * 1.6);
+  const longitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.longitude)) * 1.6);
+  const initialRegion = centre ? { ...centre, latitudeDelta, longitudeDelta } : null;
+  regionRef.current ??= initialRegion;
+  const stayRadiusMeters = evidence.map.centre ? evidence.map.stayRadiusMeters ?? 0 : 0;
 
-  if (!centre) {
+  // A place chosen from a list can sit outside the stay's opening view: the camera then moves
+  // once to show its pin alongside the stay's area. A pin already in view (a map tap) stays put.
+  const selectedLatitude = selectedPoint?.latitude;
+  const selectedLongitude = selectedPoint?.longitude;
+  useEffect(() => {
+    if (!centre || selectedLatitude === undefined || selectedLongitude === undefined) return;
+    const point = { latitude: selectedLatitude, longitude: selectedLongitude };
+    const region = regionRef.current;
+    if (region && regionContains(region, point, selectedPointRadiusMeters ?? 0)) return;
+    mapRef.current?.fitToCoordinates(
+      [...circleExtent(centre, stayRadiusMeters), ...circleExtent(point, selectedPointRadiusMeters ?? 0)],
+      { animated: !reduceMotion, edgePadding: { top: 40, right: 40, bottom: 40, left: 40 } }
+    );
+    // Only a new chosen point moves the camera; the stay centre is fixed for this evidence.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLatitude, selectedLongitude]);
+
+  if (!centre || !initialRegion) {
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
         {showDetails ? (
@@ -68,8 +96,6 @@ export function LocationEvidenceMap({
     );
   }
 
-  const latitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.latitude)) * 1.6);
-  const longitudeDelta = Math.max(0.004, spread(coordinates.map((point) => point.longitude)) * 1.6);
   const route = evidence.map.route?.coordinates.map(([longitude, latitude]) => ({ latitude, longitude })) ?? [];
   const straightLineFallback = evidence.map.straightLineFallback?.coordinates
     .map(([longitude, latitude]) => ({ latitude, longitude })) ?? [];
@@ -91,7 +117,9 @@ export function LocationEvidenceMap({
             : evidence.segment.kind === "commute"
             ? `Approximate commute map with Start and End markers${usesApproximateFallback ? ". Detailed path unavailable" : ""}.`
             : "Map showing the detected visit location."}
-        initialRegion={{ ...centre, latitudeDelta, longitudeDelta }}
+        initialRegion={initialRegion}
+        ref={mapRef}
+        onRegionChangeComplete={(region) => { regionRef.current = region; }}
         userInterfaceStyle={appearance}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
@@ -229,6 +257,28 @@ export function LocationEvidenceMap({
       ) : null}
     </View>
   );
+}
+
+const METRES_PER_DEGREE = 111_320;
+
+/** The four compass points of a circle, so a fit keeps the whole area on screen. */
+function circleExtent(point: { latitude: number; longitude: number }, radiusMeters: number) {
+  if (radiusMeters <= 0) return [point];
+  const latitudeOffset = radiusMeters / METRES_PER_DEGREE;
+  const longitudeOffset = radiusMeters / (METRES_PER_DEGREE * Math.max(0.01, Math.cos((point.latitude * Math.PI) / 180)));
+  return [
+    { latitude: point.latitude + latitudeOffset, longitude: point.longitude },
+    { latitude: point.latitude - latitudeOffset, longitude: point.longitude },
+    { latitude: point.latitude, longitude: point.longitude + longitudeOffset },
+    { latitude: point.latitude, longitude: point.longitude - longitudeOffset }
+  ];
+}
+
+/** Whether the point and its area sit inside the visible region, with a small margin. */
+function regionContains(region: Region, point: { latitude: number; longitude: number }, radiusMeters: number) {
+  return circleExtent(point, radiusMeters).every((corner) =>
+    Math.abs(corner.latitude - region.latitude) <= region.latitudeDelta * 0.45
+    && Math.abs(corner.longitude - region.longitude) <= region.longitudeDelta * 0.45);
 }
 
 function spread(values: number[]) {

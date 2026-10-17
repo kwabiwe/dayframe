@@ -57,9 +57,9 @@ import {
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton, SettingsSwitch } from "../settings/SettingsBlocks";
-import { ActivityChip, ActivityChipRow, AllActivitiesChip } from "../ActivityChips";
+import { ACTIVITY_CHIP_GAP, ActivityChip, ActivityChipRow, AllActivitiesChip, activityChipStyles } from "../ActivityChips";
 import { ActivityPickerSheet } from "../ActivityPickerSheet";
-import { activityChips } from "../../lib/activityChoice";
+import { activityChips, fitActivityChips } from "../../lib/activityChoice";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -404,10 +404,25 @@ export function LocationReviewCorrectionEditor({
     nearbyState.places,
     newPlace ? [...listedSavedPlaceNames, newPlace.name] : listedSavedPlaceNames
   );
-  const chipActivities = useMemo(
+  const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivityIds),
     [categories, chipAnchorId, recentActivityIds]
   );
+  // The chips and All activities fit into two rows, the pill never alone on a third (owner, 17 Oct
+  // 2026, as web's WUI-002): chips drop from the end, never the chosen one. Until every candidate
+  // is measured, all show.
+  const [chipWidths, setChipWidths] = useState<Record<string, number>>({});
+  const [chipRowWidth, setChipRowWidth] = useState(0);
+  const [chipPillWidth, setChipPillWidth] = useState(0);
+  const chipActivities = useMemo(() => fitActivityChips({
+    candidates: chipCandidates,
+    gap: ACTIVITY_CHIP_GAP,
+    maxRows: 2,
+    pillWidth: chipPillWidth,
+    rowWidth: chipRowWidth,
+    selectedId: selectedCategoryId,
+    widthOf: (category) => chipWidths[category.id]
+  }), [chipCandidates, chipPillWidth, chipRowWidth, chipWidths, selectedCategoryId]);
   // A journey with no suggested activity is filed as Commute unless the person picks one.
   const automaticCommute = isJourney && baselineCategoryId === null && !categoryTouched;
 
@@ -878,6 +893,7 @@ export function LocationReviewCorrectionEditor({
               selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
               selectedSavedPlaceId={selectedSavedPlaceId}
               showDetails={false}
+              reduceMotion={reduceMotion}
               onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? moveMapPin : undefined}
               onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
             />
@@ -1157,7 +1173,31 @@ export function LocationReviewCorrectionEditor({
               {/* The chips move with the group's layout transition when the learned-name chip above
                   comes or goes (Codex r1 on #481). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
-              <ActivityChipRow testID="location-evidence-activity-chips">
+              <ActivityChipRow
+                onLayout={(event) => {
+                  const width = Math.floor(event.nativeEvent.layout.width);
+                  setChipRowWidth((current) => (current === width ? current : width));
+                }}
+                testID="location-evidence-activity-chips"
+              >
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  pointerEvents="none"
+                  style={activityChipStyles.measure}
+                >
+                  {chipCandidates.map((category) => (
+                    <View
+                      key={category.id}
+                      onLayout={(event) => {
+                        const width = Math.ceil(event.nativeEvent.layout.width);
+                        setChipWidths((current) => (current[category.id] === width ? current : { ...current, [category.id]: width }));
+                      }}
+                    >
+                      <ActivityChip activity={category} onPress={() => undefined} selected={selectedCategoryId === category.id} theme={theme} />
+                    </View>
+                  ))}
+                </View>
                 {chipActivities.map((category) => (
                   <ActivityChip
                     activity={category}
@@ -1171,6 +1211,10 @@ export function LocationReviewCorrectionEditor({
                 <AllActivitiesChip
                   count={categories.length}
                   disabled={saving}
+                  onLayout={(event) => {
+                    const width = Math.ceil(event.nativeEvent.layout.width);
+                    setChipPillWidth((current) => (current === width ? current : width));
+                  }}
                   onPress={() => {
                     Keyboard.dismiss();
                     setTimeWheel(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityChips, activityPickerSections, canCreateActivity, recentActivityIds } from "./activityChoice";
+import { activityChips, activityPickerSections, canCreateActivity, fitActivityChips, recentActivityIds } from "./activityChoice";
 
 const activity = (id: string, name: string, isPinned = false, icon: string | null = null) => ({ color: "blue", icon, id, isPinned, name });
 const all = [
@@ -74,5 +74,22 @@ describe("chipsThatFit", () => {
     expect(chipsThatFit({ chipWidths: [300], gap: 8, keepFirst: true, maxRows: 1, pillWidth: 170, rowWidth: 361 })).toBe(1);
     expect(chipsThatFit({ chipWidths: [300], gap: 8, keepFirst: false, maxRows: 1, pillWidth: 170, rowWidth: 361 })).toBe(0);
     expect(chipsThatFit({ chipWidths: [90, 90], gap: 8, keepFirst: false, maxRows: 2, pillWidth: 170, rowWidth: 361 })).toBe(2);
+  });
+});
+
+describe("fitActivityChips (owner, 17 Oct 2026)", () => {
+  const chips = ["a", "b", "c", "d", "e", "f"].map((id) => ({ id }));
+  const widthOf = () => 100;
+  it("fits the chips and All activities into two rows, dropping from the end", () => {
+    // 330 wide, 100-wide chips, 8 gap: three a row; the pill (100) needs a slot, so five chips fit.
+    expect(fitActivityChips({ candidates: chips, gap: 8, maxRows: 2, pillWidth: 100, rowWidth: 330, selectedId: null, widthOf }).map((chip) => chip.id))
+      .toEqual(["a", "b", "c", "d", "e"]);
+  });
+  it("never drops the selected chip", () => {
+    expect(fitActivityChips({ candidates: chips, gap: 8, maxRows: 2, pillWidth: 100, rowWidth: 330, selectedId: "f", widthOf }).map((chip) => chip.id))
+      .toEqual(["a", "b", "c", "d", "f"]);
+  });
+  it("keeps every chip until they are measured", () => {
+    expect(fitActivityChips({ candidates: chips, gap: 8, maxRows: 2, pillWidth: 0, rowWidth: 330, selectedId: null, widthOf })).toHaveLength(6);
   });
 });

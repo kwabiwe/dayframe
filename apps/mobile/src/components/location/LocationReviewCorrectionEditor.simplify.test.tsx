@@ -452,9 +452,28 @@ describe("What did you do? (D1)", () => {
     await render(stay({ matched: false }), ["cat-read"]);
     expect(tree!.root.findAll((node) => isHost(node, "ScrollView") && node.props.horizontal)).toHaveLength(0);
     const chips = byTestId("location-evidence-activity-chips")[0];
-    const labels = chips.findAll((node) => isHost(node, "Pressable")).map((node) => node.props.accessibilityLabel);
+    // The visible chips (the off-screen measuring copies are hidden from VoiceOver).
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const labels = chips.findAll((node) => isHost(node, "Pressable") && !hidden(node)).map((node) => node.props.accessibilityLabel);
     expect(labels).toEqual(["Set activity to Desk work", "Set activity to Reading", "All activities, 4"]);
     expect(texts("No activity")).toHaveLength(0);
+  });
+
+  it("fits the chips and All activities into two rows, keeping the chosen chip (owner, 17 Oct 2026)", async () => {
+    await render(stay({ matched: false }), ["cat-read"]);
+    await press(byTestId("location-evidence-activity-cat-read")[0]);
+    const chips = byTestId("location-evidence-activity-chips")[0];
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const layout = (width: number) => ({ nativeEvent: { layout: { width, height: 38, x: 0, y: 0 } } });
+    await act(async () => {
+      chips.props.onLayout(layout(220));
+      for (const node of chips.findAll((candidate) => typeof candidate.type === "string" && hidden(candidate) && candidate.props.onLayout)) node.props.onLayout(layout(150));
+      byTestId("location-evidence-activity-all")[0].props.onLayout(layout(100));
+    });
+    // 220 wide, 150-wide chips: one chip and the pill take two rows; the chosen Reading stays.
+    const visible = byTestId("location-evidence-activity-chips")[0].findAll((node) => isHost(node, "Pressable") && !hidden(node))
+      .map((node) => node.props.accessibilityLabel);
+    expect(visible).toEqual(["Set activity to Reading", "All activities, 4"]);
   });
 
   it("picks with a tap, clears with a second tap, and sends the choice", async () => {
