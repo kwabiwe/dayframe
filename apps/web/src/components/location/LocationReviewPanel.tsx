@@ -171,8 +171,9 @@ export function LocationReviewPanel({
       categoryId: categoryId || null,
       description,
       ...typedMarker(description, descriptionEdited),
-      ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
-      ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
+      // Only a complete local time is sent (an incomplete one already holds the confirmations).
+      ...(dateTimeLocalInputToIso(startedAt) ? { startedAt: dateTimeLocalInputToIso(startedAt)! } : {}),
+      ...(dateTimeLocalInputToIso(stoppedAt) ? { stoppedAt: dateTimeLocalInputToIso(stoppedAt)! } : {})
     };
   }
 

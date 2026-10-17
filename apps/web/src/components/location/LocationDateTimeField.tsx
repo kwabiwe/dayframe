@@ -32,7 +32,9 @@ export function LocationDateTimeField({
   const time = value.slice(11, 16);
   // What is being typed; null shows the value in the clock setting.
   const [typed, setTyped] = useState<string | null>(null);
-  const readable = typed === null || parseTimeInput(typed) !== null;
+  // A day with no time yet (an End the evidence left open, then a day picked) is not a time either
+  // (Codex r1 on #474): it holds the confirmations and says what to type.
+  const readable = (typed === null || parseTimeInput(typed) !== null) && !(value && !time && typed === null);
   const errorId = `${id}-error`;
 
   return (
@@ -45,7 +47,10 @@ export function LocationDateTimeField({
           disabled={disabled}
           label={formatShortDate(date)}
           max={today}
-          onChange={(next) => onChange(`${next}T${(typed !== null ? parseTimeInput(typed) : null) ?? time}`, readable)}
+          onChange={(next) => {
+            const nextTime = (typed !== null ? parseTimeInput(typed) : null) ?? time;
+            onChange(`${next}T${nextTime}`, readable && Boolean(nextTime));
+          }}
           panelLabel={`Choose ${label} date`}
           portal
           today={today}
@@ -67,6 +72,11 @@ export function LocationDateTimeField({
             const next = maskTimeInput(event.target.value);
             setTyped(next);
             const parsed = parseTimeInput(next);
+            // Emptying a field that had no time leaves it empty (nothing is sent for it).
+            if (next === "" && !time) {
+              onChange("", true);
+              return;
+            }
             onChange(`${date}T${parsed ?? time}`, parsed !== null);
           }}
           onFocus={() => {

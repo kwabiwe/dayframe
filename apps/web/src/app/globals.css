@@ -7793,7 +7793,7 @@ dialog.ui-dialog.df-range-custom {
   cursor: pointer;
 }
 
-.location-resolve-control.location-resolve-date-trigger:focus:not(:focus-visible) {
+.location-review-panel .location-resolve-control.location-resolve-date-trigger:focus:not(:focus-visible) {
   box-shadow: none;
 }
 
@@ -7804,8 +7804,19 @@ dialog.ui-dialog.df-range-custom {
   letter-spacing: 0;
 }
 
-.location-resolve-time[aria-invalid="true"] {
-  box-shadow: inset 0 0 0 2px var(--danger);
+/* Inside the panel these outrank the global field rules (Codex r1 on #474): a neutral ring on focus,
+   and a separate danger underline on an unreadable time, focused or not. */
+.location-review-panel .location-resolve-control:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.location-review-panel .location-resolve-control[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.location-review-panel .location-resolve-control[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -4px 0 var(--danger);
 }
 
 /* The panel's close (WUI-041): a 44 px round icon button in the Blocks treatment. */

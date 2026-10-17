@@ -125,6 +125,29 @@ describe("LocationReviewPanel", () => {
     });
   });
 
+  it("holds the confirmations when an open End gets a day but no time, and never throws (Codex r1 on #474)", async () => {
+    const open = evidence();
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse({ ...open, segment: { ...open.segment, stoppedAt: null } }));
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[0].id} onClose={vi.fn()} />
+    );
+    const user = userEvent.setup();
+    const end = await screen.findByLabelText("End time") as HTMLInputElement;
+    expect(end.value).toBe("");
+    const confirm = screen.getByRole("button", { name: "Confirm edits" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    await user.click(screen.getByRole("button", { name: /Choose End date, currently/ }));
+    const days = screen.getAllByRole("button").filter((button) => /^\d{1,2}$/.test(button.textContent ?? "") && !(button as HTMLButtonElement).disabled);
+    await user.click(days[0]);
+    expect(confirm.disabled).toBe(true);
+    expect(end.getAttribute("aria-invalid")).toBe("true");
+    await user.click(confirm);
+    expect(mocks.clientFetch).toHaveBeenCalledTimes(1);
+    await user.type(end, "11:20");
+    expect(confirm.disabled).toBe(false);
+  });
+
   it("uses the Blocks controls only (WUI-041)", async () => {
     mocks.clientFetch.mockResolvedValueOnce(jsonResponse(unsavedStay()));
     const { container } = render(
