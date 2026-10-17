@@ -465,14 +465,15 @@ describe("review round 2", () => {
   });
 
   it("never moves a stay across a dwell threshold in either direction", () => {
-    // An unknown stop of 17m47s whose departure bounds allow 21m40s: motion must not make it a Review visit.
+    // An unknown stop of 8m47s whose departure bounds allow 12m40s: motion must not make it a Review
+    // visit (the threshold is 10 minutes, PRD D19).
     const stop: StaySegment = {
       kind: "stay", clientSegmentId: "stop", algorithmVersion: config.algorithmVersion, status: "finalised",
-      startedAt: at(11 + 40 / 60), stoppedAt: at(29 + 27 / 60), startLowerBoundAt: at(11), startUpperBoundAt: at(12),
-      stopLowerBoundAt: at(25), stopUpperBoundAt: at(33.9), placeMatchKind: "unknown", candidatePlaceIds: [],
+      startedAt: at(11 + 40 / 60), stoppedAt: at(20 + 27 / 60), startLowerBoundAt: at(11), startUpperBoundAt: at(12),
+      stopLowerBoundAt: at(16), stopUpperBoundAt: at(24.9), placeMatchKind: "unknown", candidatePlaceIds: [],
       sampleCount: 4, continuityStatus: "continuous", confidence: "medium", evidenceIds: []
     };
-    const timeline = buildMotionTimeline(toEvidence(motion([[0, "stationary"], [33 + 20 / 60, "automotive"], [40, "stationary"]], 60)), config, Date.parse(at(240)));
+    const timeline = buildMotionTimeline(toEvidence(motion([[0, "stationary"], [24 + 20 / 60, "automotive"], [31, "stationary"]], 60)), config, Date.parse(at(240)));
     expect(refineStayDeparturesWithMotion([stop], timeline, config)[0].stoppedAt).toBe(stop.stoppedAt);
   });
 

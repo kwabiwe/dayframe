@@ -1449,13 +1449,14 @@ async function validateSupersededReviewReactivation() {
     const [shortBefore] = await currentStays();
     assert.equal((await reviewOf(shortBefore.clientSegmentId)).reviewStatus, "open", "The twenty-minute stop was not offered.");
     await ingest("short-enter", [callback("short-enter", 400, "geofence_enter")]);
-    // Back as the same segment but under twenty minutes, so not offered: its Review stays retired by replay.
+    // Back as the same segment, shortened to about 15 minutes. Unknown stays reach Review from 10 minutes
+    // (PRD D19; an unknown stay under that is no stay at all), so it is offered again.
     await ingest("short-exit", [callback("short-exit", 450, "geofence_exit"), fix("o1", 960, 900, 10)]);
     const [short] = await currentStays();
     assert.equal(short.clientSegmentId, shortBefore.clientSegmentId, "The shortened stay did not keep its segment.");
     assert.deepEqual(await stayState(short.clientSegmentId),
-      { status: "finalised", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" },
-      "A restored stay under the Review threshold changed its retired Review.");
+      { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" },
+      "A restored stay of 10 minutes or more was not offered again.");
     // A later genuine entry must still make it the saved place: the retired Review is not a decision. The restored
     // unknown segment is gone from current output, so it must not linger as a second current stay.
     await ingest("short-enter-again", [callback("short-enter-again", 850, "geofence_enter")]);

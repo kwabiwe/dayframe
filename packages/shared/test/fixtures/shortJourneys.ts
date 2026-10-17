@@ -17,8 +17,9 @@ export function shortJourneysFixture(savedDestination = false): LocationEngineIn
     config, processingAt: shortAt(3_000_000), savedPlaces: savedDestination ? [home, destination] : [home], acceptedLearnedPlaces: [],
     evidence: [visit("origin-visit", 0, 600_000, 0), point("origin-a", 0, 0), point("origin-b", 300_000, 0), point("origin-c", 600_000, 0),
       ...[20_000,40_000,60_000].map((offset,i)=>point(`out-${i}`,600_000+offset,0.0025*(i+1),{speedMetersPerSecond:12})),
-      visit("destination-visit",684_496,1_284_496,0.009), ...[684_496,984_496,1_284_496].map((ms,i)=>point(`destination-${i}`,ms,0.009)),
-      ...[20_000,40_000,60_000].map((offset,i)=>point(`back-${i}`,1_284_496+offset,0.009-0.0025*(i+1),{speedMetersPerSecond:12})),
-      visit("return-visit",1_365_496,1_965_496,0), ...[1_365_496,1_665_496,1_965_496].map((ms,i)=>point(`return-${i}`,ms,0))]
+      // A 9½-minute unknown stop: under the 10-minute Review threshold (PRD D19), so it sits inside its trip.
+      visit("destination-visit",684_496,1_254_496,0.009), ...[684_496,969_496,1_254_496].map((ms,i)=>point(`destination-${i}`,ms,0.009)),
+      ...[20_000,40_000,60_000].map((offset,i)=>point(`back-${i}`,1_254_496+offset,0.009-0.0025*(i+1),{speedMetersPerSecond:12})),
+      visit("return-visit",1_335_496,1_935_496,0), ...[1_335_496,1_635_496,1_935_496].map((ms,i)=>point(`return-${i}`,ms,0))]
   };
 }

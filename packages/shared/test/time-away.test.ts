@@ -67,7 +67,9 @@ describe("time away from a saved place", () => {
   });
 
   it.each([1, 2, 3])("names the stop when the phone stopped somewhere on a walk out and back (seed %s)", (seed) => {
-    const away = outings(simulate(shopRun("walk"), seed).input());
+    // A 4-minute stop: on foot the detected stay also takes in the slow approach, and from 10 minutes
+    // it is a visit of its own (PRD D19), no longer a stop inside the outing.
+    const away = outings(simulate(shopRun("walk", 300, 4), seed).input());
     expect(away).toHaveLength(1);
     expect(away[0].stops).toHaveLength(1);
   });

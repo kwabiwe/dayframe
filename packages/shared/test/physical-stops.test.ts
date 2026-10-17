@@ -143,9 +143,9 @@ describe("physical stops", () => {
   });
 
   it("does not count an observed stop as a route observation gap (re-review finding 1)", () => {
-    // A 16-minute corroborated stop with dense movement either side.
+    // A 9-minute corroborated stop (under the 10-minute Review threshold, PRD D19) with dense movement either side.
     const { trips } = run(physicalStopFixture(shape({
-      visit: [670_000, 1_630_000], slowAt: [860_000, 900_000, 1_500_000], departAt: 1_634_000, returnAt: 1_718_000
+      visit: [670_000, 1_210_000], slowAt: [860_000, 900_000, 1_150_000], departAt: 1_214_000, returnAt: 1_298_000
     })));
     expect(trips).toHaveLength(1);
     expect(trips[0].stops).toHaveLength(1);
@@ -155,10 +155,10 @@ describe("physical stops", () => {
 
   it("reports a real unobserved route gap beside a stop", () => {
     const input = physicalStopFixture(shape({
-      visit: [670_000, 1_630_000], slowAt: [860_000, 900_000, 1_500_000], departAt: 1_634_000, returnAt: 2_800_000
+      visit: [670_000, 1_210_000], slowAt: [860_000, 900_000, 1_150_000], departAt: 1_214_000, returnAt: 2_380_000
     }));
     const { trips } = run(input);
-    // Return leg: last route fix at departure + 36 s, home at 2,800 s, so about 19 minutes are unobserved.
+    // Return leg: last route fix at departure + 36 s, home at 2,380 s, so about 19 minutes are unobserved.
     expect(trips[0]?.maximumObservationGapSeconds ?? 0).toBeGreaterThan(config.maxContinuityGapMs / 1_000);
   });
 

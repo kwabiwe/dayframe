@@ -644,10 +644,11 @@ describe("departures after a finished walk (review round 9)", () => {
     const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }),
       e("out-a", 49.1, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 49.2, 400), still("out-accurate-2", 49.3, 500),
       e("out-b", 49.5, 750, { horizontalAccuracyMeters: null }), e("out-c", 49.8, 1_000, { horizontalAccuracyMeters: null }),
-      visit("stop-visit", 50, 1_000, { endedAt: at(60), metadata: {} }),
-      e("back-a", 60.2, 900, { horizontalAccuracyMeters: null }), e("back-b", 60.5, 600, { horizontalAccuracyMeters: null }),
-      still("back-accurate", 60.7, 400), e("back-c", 60.9, 200, { horizontalAccuracyMeters: null }),
-      geofence("last-return", 61.2, "geofence_enter"), still("final-a", 61.5, 0), still("final-b", 71.5, 0), still("final-c", 81.5, 0)];
+      // A 9-minute stop: under the 10-minute Review threshold (PRD D19), so it stays inside the trip.
+      visit("stop-visit", 50, 1_000, { endedAt: at(59), metadata: {} }),
+      e("back-a", 59.2, 900, { horizontalAccuracyMeters: null }), e("back-b", 59.5, 600, { horizontalAccuracyMeters: null }),
+      still("back-accurate", 59.7, 400), e("back-c", 59.9, 200, { horizontalAccuracyMeters: null }),
+      geofence("last-return", 60.2, "geofence_enter"), still("final-a", 60.5, 0), still("final-b", 70.5, 0), still("final-c", 80.5, 0)];
     const trips = commutes(withWork(evidence, false)).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     expect(trips.length).toBeGreaterThan(0);
     for (let index = 1; index < trips.length; index += 1) {
@@ -680,7 +681,7 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(49) })]);
   });
 
-  it("keeps a trip through a stop after the walk's return whole, with consistent leg and trip starts", () => {
+  it("makes a 10-minute stop after the walk's return a visit, with no Move before the return (PRD D19)", () => {
     const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"),
       e("out-a", 39.6, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 39.7, 400), still("out-accurate-2", 39.8, 500),
       e("out-b", 40, 750, { horizontalAccuracyMeters: null }), e("out-c", 40.3, 1_000, { horizontalAccuracyMeters: null }),
@@ -688,7 +689,12 @@ describe("departures after a finished walk (review round 9)", () => {
       e("back-a", 51, 900, { horizontalAccuracyMeters: null }), e("back-b", 51.2, 600, { horizontalAccuracyMeters: null }),
       still("back-accurate", 51.4, 400), e("back-c", 51.6, 200, { horizontalAccuracyMeters: null }),
       geofence("last-return", 52, "geofence_enter"), still("final-a", 52.5, 0), still("final-b", 62.5, 0), still("final-c", 72.5, 0)];
-    expect(commutes(withWork(evidence, false))).toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(52), stops: [expect.anything()] })]);
+    // A 10-minute stop is a visit of its own (PRD D19), so no trip runs through it. Its legs here carry no
+    // accuracy, so neither qualifies on its own; whatever does never starts before the walk's return.
+    const output = runLocationEngine(withWork(evidence, false));
+    expect(output.segmentUpserts.some((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown" &&
+      segment.startedAt >= at(40) && segment.startedAt <= at(41) && segment.stoppedAt != null && segment.stoppedAt >= at(50.5))).toBe(true);
+    for (const trip of commutes(withWork(evidence, false))) expect(Date.parse(trip.startedAt)).toBeGreaterThanOrEqual(Date.parse(at(39)));
   });
 
   // Review round 12: a mirror of the last approach fix or a broad reading must not hide the approach.
