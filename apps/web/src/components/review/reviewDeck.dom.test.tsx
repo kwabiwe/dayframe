@@ -817,3 +817,52 @@ function bootstrap(reviewItems: ReviewItemRow[], reviewCount = reviewItems.lengt
     }
   } as unknown as BootstrapData;
 }
+
+describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
+  const THERE = "30000000-0000-4000-8000-0000000000b1";
+  const SHOP = "30000000-0000-4000-8000-0000000000b2";
+  const BACK = "30000000-0000-4000-8000-0000000000b3";
+  const part = (id: string, title: string, role: string, from: [number, number], to: [number, number]): ReviewItemRow => ({
+    ...review(id, title, "admin"), eventSource: "location_learning", eventType: role === "stay" ? "unknown_stay" : "commute_detected",
+    suggestedStartedAt: local(...from), suggestedStoppedAt: local(...to),
+    rawPayload: { clientSegmentId: id, outingKey: "outing:shop", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
+  });
+  const there = part(THERE, "Trip to the shop", "in", [9, 0], [9, 6]);
+  const shop = part(SHOP, "Unknown place", "stay", [9, 6], [9, 40]);
+  const back = part(BACK, "Trip home", "out", [9, 40], [9, 45]);
+  async function controllable(items: ReviewItemRow[]) {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    fakeFrames();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = trackedRoot(container);
+    const render = (next: ReviewItemRow[]) => act(async () => root.render(
+      <AppShellRuntimeProvider>
+        <ReviewDeck initialData={bootstrap(next)} />
+      </AppShellRuntimeProvider>
+    ));
+    await render(items);
+    return { container, root, render };
+  }
+
+  it("brings the Stay back with the reason when the outing changed on the server", async () => {
+    const { container } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing"
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown." }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(queue(container)).toContain("Unknown place");
+    expect(container.textContent).toContain("changed, so it was not saved");
+  });
+
+  it("keeps a held outing's Moves folded away when a refresh no longer lists its Stay", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    expect(queue(container)).toEqual(["Reading"]);
+    // A capped refresh during the Undo hold drops the Stay but still lists the Move home.
+    await render([back, review(READ, "Reading", "admin")]);
+    expect(queue(container)).toEqual(["Reading"]);
+  });
+});

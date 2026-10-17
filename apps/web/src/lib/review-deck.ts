@@ -354,8 +354,9 @@ const OUTING_VERB: Record<string, string> = { automotive: "Drives", walking: "Wa
 
 /** The outing's travel line: "Drives there and back · 11m", "Walks there · 6m", "Travel on · 4m". */
 export function outingSummary(outing: ReviewOuting) {
-  const modes = new Set(outing.members.map((member) => member.rawPayload?.travelMode).filter((mode): mode is string => typeof mode === "string"));
-  const verb = modes.size === 1 ? OUTING_VERB[[...modes][0]] ?? "Travel" : "Travel";
+  // A verb only when every leg says the same way of travelling (Codex r1 on #466).
+  const modes = outing.members.map((member) => member.rawPayload?.travelMode);
+  const verb = typeof modes[0] === "string" && modes.every((mode) => mode === modes[0]) ? OUTING_VERB[modes[0]] ?? "Travel" : "Travel";
   const roles = new Set(outing.members.map(outingRoleOf));
   const where = roles.has("in") && roles.has("out") ? "there and back" : roles.has("in") ? "there" : "on";
   const totalMs = outing.members.reduce((sum, member) => {

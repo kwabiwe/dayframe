@@ -193,6 +193,9 @@ describe("one card per outing (PRD D19)", () => {
   it("says how the outing travelled, there and back, with the travel time", () => {
     expect(outingSummary(reviewOutings([there, shop, back]).get(shop.id)!)).toBe("Drives there and back · 11m");
     expect(outingSummary(reviewOutings([there, shop]).get(shop.id)!)).toBe("Drives there · 6m");
+    // A leg without a known way of travelling keeps the line neutral (Codex r1 on #466).
+    const unknownBack = { ...back, rawPayload: { ...back.rawPayload, travelMode: undefined } };
+    expect(outingSummary(reviewOutings([there, shop, unknownBack]).get(shop.id)!)).toBe("Travel there and back · 11m");
   });
 
   it("logs or skips every member together; Log as applies to the Stay", () => {

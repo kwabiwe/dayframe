@@ -100,10 +100,13 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // One card per outing (PRD D19): a Move card that belongs to an unknown Stay's card on the deck is
   // folded into it (also while that card's decision is held), and comes back on its own otherwise.
   const outings = useMemo(() => reviewOutings(deckItems), [deckItems]);
-  const outingMemberIds = useMemo(
-    () => new Set([...outings.values()].flatMap((outing) => outing.members.map((member) => member.id))),
-    [outings]
-  );
+  // An outing's held, saving or saved decision keeps all of its Moves folded away, whatever a refresh
+  // lists meanwhile (Codex r1 on #466): the decision owns every member until it settles.
+  const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  const outingMemberIds = useMemo(() => new Set([
+    ...[...outings.values()].flatMap((outing) => outing.members.map((member) => member.id)),
+    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, memberIds]) => memberIds)
+  ]), [heldOutings, outings, state.hiddenIds]);
   const visible = useMemo(
     () => deckItems.filter((item) => !state.hiddenIds.has(item.id) && !outingMemberIds.has(item.id)),
     [deckItems, outingMemberIds, state.hiddenIds]
@@ -289,6 +292,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
     }, 0) : 0;
     decidedSnapshots.current.set(item.id, item);
+    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members.map((member) => member.id)));
     const held = decide({
       itemId: item.id,
       kind,
@@ -1007,6 +1011,13 @@ function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => 
         method: "POST"
       });
       const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      // An outing that changed (one of its cards decided elsewhere or retired) saved nothing: its Stay
+      // comes back with the reason, and the next data shows whatever is still open (Codex r1 on #466).
+      const outingAction = decision.mutation.action === "confirm_outing" || decision.mutation.action === "ignore_outing";
+      if (outingAction && response.status === 409 && body.code === "resolution_conflict") {
+        void refresh().catch(() => undefined);
+        return "changed";
+      }
       // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
       if (
         response.status === 404 ||

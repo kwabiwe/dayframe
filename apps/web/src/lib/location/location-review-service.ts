@@ -263,8 +263,16 @@ async function resolveOuting(
   const anchor = items.find((item) => item.id === reviewItemId);
   if (!anchor) throw new ReviewResolutionError("review_item_not_found", "Location review item not found.", { status: 404 });
   const confirm = action.action === "confirm_outing";
+  const memberAction = (item: LockedReview): LocationReviewAction => !confirm ? { action: "ignore_once_location" }
+    : item.id === anchor.id && action.edit ? { action: "edit_and_confirm", edit: action.edit } : { action: "confirm" };
   const closed = items.filter((item) => item.status !== "open");
-  if (closed.length === items.length && items.every((item) => item.status === (confirm ? "accepted" : "ignored"))) {
+  if (closed.length === items.length) {
+    // Every member decided already: acknowledged only when each one is that decision, proved as a
+    // single card's retry is (its block matches; a replay-retired Skip becomes the person's own), or
+    // a conflict otherwise (Codex r1 on #466).
+    for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
+      await resolveClosedLocationReview(client, item, memberAction(item), session);
+    }
     return { ok: true, action: action.action, status: confirm ? "accepted" : "ignored", reviewItemIds: ids,
       alreadyResolved: true, equivalent: true };
   }
@@ -275,9 +283,7 @@ async function resolveOuting(
   await lockLocationSegments(client, items, session);
   const entryIds: string[] = [];
   for (const item of [...items].sort((a, b) => a.id.localeCompare(b.id))) {
-    const memberAction: LocationReviewAction = !confirm ? { action: "ignore_once_location" }
-      : item.id === anchor.id && action.edit ? { action: "edit_and_confirm", edit: action.edit } : { action: "confirm" };
-    const result = await performAction(client, item, memberAction, session) as { entryId?: unknown };
+    const result = await performAction(client, item, memberAction(item), session) as { entryId?: unknown };
     if (confirm) {
       if (typeof result?.entryId !== "string") {
         throw new ReviewResolutionError("resolution_conflict", "Part of this outing could not be logged.", { status: 409 });

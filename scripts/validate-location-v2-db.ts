@@ -24,7 +24,7 @@ import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/we
 import {
   forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName, resumeLoggingTrips, stopLoggingTripsLike, stoppedTripPatterns
 } from "../apps/web/src/lib/location/name-patterns";
-import { resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
+import { reconcileReviewMutations, resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
 import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
@@ -1977,6 +1977,14 @@ async function validateOutingCards() {
     assert.equal(Number((await pool.query("select count(*) from time_entries where id = any($1::uuid[])", [result.entryIds])).rows[0].count),
       result.entryIds.length, "An outing member's block is missing.");
     assert.deepEqual(await resolveIdempotentReviewMutation(logged.anchor, envelope, session), result, "A retried outing did not replay its receipt.");
+    // Without its receipt (another device's identical decision): each member is proved logged as asked,
+    // and a Skip of the logged outing is a conflict (Codex r1 on #466).
+    const again = await resolveIdempotentReviewMutation(logged.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000011",
+      mutation: { action: "confirm_outing", memberReviewItemIds: logged.members } }, session) as { alreadyResolved?: boolean };
+    assert.equal(again.alreadyResolved, true, "An identical decided outing was not acknowledged as already resolved.");
+    await assert.rejects(resolveIdempotentReviewMutation(logged.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000012",
+      mutation: { action: "ignore_outing", memberReviewItemIds: logged.members } }, session), /resolved differently|changed/,
+      "Skipping a logged outing was acknowledged.");
 
     // Skip: every member ignored.
     const skipped = parts(groups[1]);
@@ -1985,6 +1993,10 @@ async function validateOutingCards() {
     assert.equal(ignored.status, "ignored", "Skipping an outing did not ignore it.");
     assert((await pool.query<{ status: string }>("select status from review_items where id = any($1::uuid[])",
       [[skipped.anchor, ...skipped.members]])).rows.every((row) => row.status === "ignored"), "An outing member stayed open after Skip.");
+    // Receiptless reconciliation of the same Skip expects every member ignored (Codex r1 on #466).
+    const reconciled = await reconcileReviewMutations({ mutations: [{ clientMutationId: "18800000-0000-4000-8000-000000000013",
+      reviewItemId: skipped.anchor, mutation: { action: "ignore_outing", memberReviewItemIds: skipped.members } }] }, session);
+    assert.notEqual(reconciled.results[0].state, "conflict", "Reconciling a skipped outing called it a different decision.");
 
     // A member decided on its own: the outing is a conflict and nothing else changes.
     const changed = parts(groups[2]);
