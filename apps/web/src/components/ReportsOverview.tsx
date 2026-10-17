@@ -8,6 +8,8 @@ import {
 } from "@/lib/report-calculations";
 import { reportsHref } from "@/lib/report-filters";
 import type { ReportBreakdownRow, ReportResult } from "@/lib/report-service";
+import type { DayframeGlyph } from "@dayframe/shared";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 
 
 /**
@@ -37,18 +39,16 @@ function DailyTrend({ report }: { report: ReportResult }) {
   } as CSSProperties;
 
   return (
-    <section className="fill-group-surface report-trend" aria-labelledby="report-trend-title">
-      <header className="report-section-header">
-        <div>
-          <h2 id="report-trend-title">Daily trend</h2>
-          <p>
-            {trend.granularity === "day"
-              ? "One bar for each calendar day in the selected range."
-              : "Ranges longer than 62 days are grouped into seven-day bars for readability."}
-          </p>
-        </div>
-        <strong className="df-tnum">{formatDuration(report.totalLoggedSeconds)}</strong>
-      </header>
+    <section className="df-card report-trend" aria-labelledby="report-trend-title">
+      <div className="df-card-head">
+        <h2 id="report-trend-title">Daily trend</h2>
+        <span className="df-faint df-tnum">{formatDuration(report.totalLoggedSeconds)}</span>
+      </div>
+      <p className="df-muted report-trend-note">
+        {trend.granularity === "day"
+          ? "One bar for each calendar day in the selected range."
+          : "Ranges longer than 62 days are grouped into seven-day bars for readability."}
+      </p>
 
       <div className={`report-trend-scroll${scrollable ? " is-scrollable" : ""}`}>
         <div className="report-trend-bars" style={chartStyle} role="img" aria-label={buildTrendSummary(trend.points)}>
@@ -96,38 +96,32 @@ function DailyTrend({ report }: { report: ReportResult }) {
 
 function TagBreakdown({ report }: { report: ReportResult }) {
   return (
-    <details className="fill-group-surface report-secondary-insights report-tags" aria-labelledby="report-tags-title">
-      <summary>
-        <span>
-          <strong id="report-tags-title">Tags</strong>
-          <small>
-            {report.byTag.length > 0
-              ? `${report.byTag.length} ${report.byTag.length === 1 ? "tag" : "tags"} · totals may overlap`
-              : "No tags in this result"}
-          </small>
+    <details className="df-card df-report-more report-tags" aria-labelledby="report-tags-title">
+      <summary className="df-card-head">
+        <h2 id="report-tags-title">Tags</h2>
+        <span className="df-faint">
+          {report.byTag.length > 0
+            ? `${report.byTag.length} ${report.byTag.length === 1 ? "tag" : "tags"} · totals may overlap`
+            : "No tags in this result"}
         </span>
         <ChevronIndicator />
       </summary>
       {report.byTag.length > 0 ? (
-        <div className="report-ranked-list">
+        <ul aria-label="Time by tag" className="df-rows">
           {report.byTag.map((row) => (
-            <Link
-              key={row.id}
+            <RankRow
+              glyph="tag"
               href={reportsHref(report.appliedFilters, { tags: [row.id], page: 1 })}
-              className="report-ranked-row"
-              aria-label={`Filter by tag ${row.name}, ${formatDuration(row.seconds)}`}
-            >
-              <span className="report-ranked-name">#{row.name}</span>
-              <strong>{formatDuration(row.seconds)}</strong>
-              <small>{percentageOf(row.seconds, report.totalSeconds)}% · {row.entryCount} {row.entryCount === 1 ? "block" : "blocks"}</small>
-              <span className="report-ranked-track" aria-hidden="true">
-                <i style={{ width: `${percentageOf(row.seconds, report.totalSeconds)}%` }} />
-              </span>
-            </Link>
+              key={row.id}
+              label={`Filter by tag ${row.name}, ${formatDuration(row.seconds)}`}
+              name={`#${row.name}`}
+              row={row}
+              totalSeconds={report.totalSeconds}
+            />
           ))}
-        </div>
+        </ul>
       ) : (
-        <p className="report-secondary-empty">Tagged blocks appear here when they match the filters.</p>
+        <p className="df-muted">No tagged blocks yet. Add #tags to a block and they’re totalled here.</p>
       )}
       <AccessibleBreakdownTable caption="Exact tag totals; totals may overlap" rows={report.byTag} totalSeconds={report.totalSeconds} />
     </details>
@@ -136,15 +130,13 @@ function TagBreakdown({ report }: { report: ReportResult }) {
 
 function SecondaryInsights({ report }: { report: ReportResult }) {
   return (
-    <details className="fill-group-surface report-secondary-insights">
-      <summary>
-        <span>
-          <strong>More insights</strong>
-          <small>Place and source breakdowns</small>
-        </span>
+    <details className="df-card df-report-more" aria-labelledby="report-more-title">
+      <summary className="df-card-head">
+        <h2 id="report-more-title">More insights</h2>
+        <span className="df-faint">Places and sources</span>
         <ChevronIndicator />
       </summary>
-      <div className="report-secondary-grid">
+      <div className="df-report-more-grid">
         <RankedBreakdown title="Places" rows={report.byPlace} report={report} filterKey="places" />
         <RankedBreakdown title="Sources" rows={report.bySource} report={report} filterKey="sources" friendlySources />
       </div>
@@ -166,25 +158,61 @@ function RankedBreakdown({
   title: string;
 }) {
   return (
-    <section className="report-secondary-card" aria-labelledby={`report-${filterKey}-title`}>
-      <h3 id={`report-${filterKey}-title`}>{title}</h3>
+    <section aria-labelledby={`report-${filterKey}-title`}>
+      <h3 className="df-eyebrow" id={`report-${filterKey}-title`}>{title}</h3>
       {rows.length > 0 ? (
-        <div className="report-ranked-list is-secondary">
+        <ul aria-label={`Time by ${title.toLocaleLowerCase()}`} className="df-rows">
           {rows.map((row) => {
             const name = friendlySources ? formatSourceLabel(row.name) : row.name;
             return (
-              <Link key={row.id} href={reportsHref(report.appliedFilters, { [filterKey]: [row.id], page: 1 })} className="report-ranked-row">
-                <span className="report-ranked-name">{name}</span>
-                <strong>{formatDuration(row.seconds)}</strong>
-                <small>{percentageOf(row.seconds, report.totalSeconds)}%</small>
-                <span className="report-ranked-track" aria-hidden="true"><i style={{ width: `${percentageOf(row.seconds, report.totalSeconds)}%` }} /></span>
-              </Link>
+              <RankRow
+                glyph={filterKey === "places" ? "map-pin" : "inbox"}
+                href={reportsHref(report.appliedFilters, { [filterKey]: [row.id], page: 1 })}
+                key={row.id}
+                label={`Filter by ${filterKey === "places" ? "place" : "source"} ${name}, ${formatDuration(row.seconds)}`}
+                name={name}
+                row={row}
+                totalSeconds={report.totalSeconds}
+              />
             );
           })}
-        </div>
-      ) : <p className="report-secondary-empty">No matching {title.toLocaleLowerCase()}.</p>}
+        </ul>
+      ) : <p className="df-muted">No {title.toLocaleLowerCase()} in this result yet.</p>}
       <AccessibleBreakdownTable caption={`Exact ${title.toLocaleLowerCase()} totals`} rows={rows} totalSeconds={report.totalSeconds} friendlySources={friendlySources} />
     </section>
+  );
+}
+
+/** A ranked total as a Blocks row (WUI-031): glyph tile, name, share and blocks, then the duration;
+ *  the row filters the report to it. */
+function RankRow({
+  glyph,
+  href,
+  label,
+  name,
+  row,
+  totalSeconds
+}: {
+  glyph: DayframeGlyph;
+  href: string;
+  label: string;
+  name: string;
+  row: ReportBreakdownRow;
+  totalSeconds: number;
+}) {
+  return (
+    <li className="df-erow df-rank-row">
+      <Link aria-label={label} className="df-erow-main" href={href}>
+        <span aria-hidden="true" className="df-erow-block">
+          <DayframeIcon glyph={glyph} size={16} />
+        </span>
+        <span className="df-erow-text">
+          <b>{name}</b>
+          <span>{percentageOf(row.seconds, totalSeconds)}% · {row.entryCount} {row.entryCount === 1 ? "block" : "blocks"}</span>
+        </span>
+        <span className="df-erow-dur">{formatDuration(row.seconds)}</span>
+      </Link>
+    </li>
   );
 }
 

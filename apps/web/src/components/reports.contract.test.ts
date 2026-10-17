@@ -77,7 +77,7 @@ describe("Reports accessibility and responsive contracts", () => {
 
 describe("Reports in Blocks audit fixes (W8)", () => {
   it("never paints data, disclosures or pagination coral (UIA-302)", () => {
-    for (const selector of [".report-ranked-track i", ".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
+    for (const selector of [".report-trend-track span", ".report-data-table > summary", ".report-pagination a,\n.report-pagination > span"]) {
       expect(rule(selector)).not.toMatch(/--accent/);
     }
     expect(rule(".df-erow-dur")).not.toMatch(/--accent/);
@@ -156,7 +156,7 @@ describe("Reports rows and Filter dialog in Blocks (W8b)", () => {
   it("ends Reports at Where it went, collapsed Tags and More insights, and Blocks rows (UIA-303)", () => {
     expect(overviewSource).not.toContain("report-allocation-title");
     expect(overviewSource).not.toContain("report-analysis-grid");
-    expect(overviewSource).toMatch(/<details className="fill-group-surface report-secondary-insights report-tags"/);
+    expect(overviewSource).toMatch(/<details className="df-card df-report-more report-tags"/);
     expect(overviewSource).not.toMatch(/<details[^>]*\bopen\b/);
     expect(pageSource).toContain("exactRows={report.byCategory}");
     expect(detailsSource).not.toContain("<table");

@@ -839,10 +839,11 @@ textarea.ui-control {
   overflow: hidden;
 }
 
+/* 56 px like every management row (WUI-029); a two-line description grows it. */
 .settings-group .ui-settings-row {
-  min-height: 72px;
+  min-height: 56px;
   grid-template-columns: 22px minmax(0, 1fr) minmax(260px, auto);
-  padding: 12px 18px;
+  padding: 10px 18px;
 }
 
 .settings-group .ui-settings-row:not(.has-icon) {
@@ -2228,15 +2229,15 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   font-weight: 600;
 }
 
+/* Places' delete failure (a Places file, so restyled here): the error banner without a dismiss
+   (WUI-030). Every other page error is the shared ErrorBanner. */
 .swiss-inline-error {
   margin: 0;
-  color: var(--danger-text);
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.swiss-menu-list + .swiss-inline-error {
-  padding: 0 16px 12px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+  color: var(--text-primary);
+  font-size: 14px;
 }
 
 .swiss-panel-link,
@@ -4038,9 +4039,7 @@ kbd {
 }
 
 .report-filter-panel,
-.report-trend,
-.report-ranked-card,
-.report-secondary-insights {
+.report-trend {
   min-width: 0;
 }
 
@@ -4077,27 +4076,22 @@ dialog.ui-dialog.df-range-custom {
   text-align: center;
 }
 
-.report-filter-heading,
-.report-section-header {
+.report-filter-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
 }
 
-.report-filter-heading h2,
-.report-section-header h2,
-.report-secondary-card h3 {
+.report-filter-heading h2 {
   margin: 0;
   font-size: 16px;
   font-weight: 650;
 }
 
 .report-filter-heading p,
-.report-section-header p,
 .report-summary-card p,
-.report-empty-analysis p,
-.report-secondary-empty {
+.report-empty-analysis p {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
@@ -4120,8 +4114,7 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .report-multi-select-trigger,
-.report-more-filters-trigger,
-.report-secondary-insights > summary {
+.report-more-filters-trigger {
   display: flex;
   min-height: 52px;
   align-items: center;
@@ -4148,39 +4141,33 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .report-multi-select > summary::-webkit-details-marker,
-.report-more-filters > summary::-webkit-details-marker,
-.report-secondary-insights > summary::-webkit-details-marker {
+.report-more-filters > summary::-webkit-details-marker {
   display: none;
 }
 
-.report-multi-select-trigger > span,
-.report-secondary-insights > summary > span {
+.report-multi-select-trigger > span {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
 
-.report-multi-select-trigger strong,
-.report-secondary-insights summary strong {
+.report-multi-select-trigger strong {
   font-size: 13px;
   font-weight: 650;
 }
 
-.report-multi-select-trigger small,
-.report-secondary-insights summary small {
+.report-multi-select-trigger small {
   color: var(--muted);
   font-size: 11px;
 }
 
 .report-multi-select-trigger svg,
-.report-more-filters-trigger svg,
-.report-secondary-insights .report-chevron {
+.report-more-filters-trigger svg {
   transition: transform 160ms ease-out;
 }
 
 .report-multi-select.is-open .report-multi-select-trigger svg,
-.report-more-filters.is-open .report-more-filters-trigger svg,
-.report-secondary-insights[open] .report-chevron {
+.report-more-filters.is-open .report-more-filters-trigger svg {
   transform: rotate(180deg);
 }
 
@@ -4349,8 +4336,7 @@ dialog.ui-dialog.df-range-custom {
   font-size: 12px;
 }
 
-.report-summary-card strong,
-.report-section-header > strong {
+.report-summary-card strong {
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
   font-weight: 650;
@@ -4360,11 +4346,6 @@ dialog.ui-dialog.df-range-custom {
   overflow-wrap: anywhere;
   font-size: clamp(20px, 2.2vw, 28px);
   letter-spacing: -0.03em;
-}
-
-.report-trend,
-.report-ranked-card {
-  padding: var(--web-panel-padding);
 }
 
 .report-trend-scroll {
@@ -4430,12 +4411,6 @@ dialog.ui-dialog.df-range-custom {
   font-variant-numeric: tabular-nums;
 }
 
-.report-secondary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
 .report-donut-figure {
   position: relative;
   width: min(100%, 210px);
@@ -4489,70 +4464,6 @@ dialog.ui-dialog.df-range-custom {
   font-weight: 650;
 }
 
-.report-ranked-list {
-  display: grid;
-}
-
-.report-ranked-row:last-child {
-  border-bottom: 0;
-}
-
-.report-ranked-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.report-ranked-row strong {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.report-ranked-row small {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.report-ranked-list {
-  margin-top: 12px;
-}
-
-.report-ranked-row {
-  display: grid;
-  min-width: 0;
-  min-height: 58px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 14px;
-  border-bottom: 1px solid var(--line);
-  color: var(--foreground);
-  font-size: 12px;
-}
-
-.report-ranked-row small {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-
-.report-ranked-track {
-  grid-column: 1 / -1;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--chart-track);
-}
-
-.report-ranked-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  /* UIA-302: tags, places and sources have no activity colour, so their bars are neutral. */
-  background: var(--text-secondary);
-}
-
 .report-empty-analysis {
   display: grid;
   min-height: 150px;
@@ -4568,27 +4479,9 @@ dialog.ui-dialog.df-range-custom {
   font-size: 14px;
 }
 
-.report-secondary-insights > summary {
-  padding: 12px 20px;
-}
-
 .report-chevron {
   color: var(--muted);
   font-size: 20px;
-}
-
-.report-secondary-grid {
-  border-top: 1px solid var(--line);
-  padding: 0 20px 20px;
-}
-
-.report-secondary-card {
-  min-width: 0;
-  padding-top: 18px;
-}
-
-.report-ranked-list.is-secondary .report-ranked-row {
-  min-height: 52px;
 }
 
 .report-data-table {
@@ -4756,13 +4649,11 @@ dialog.ui-dialog.df-range-custom {
 
 @media (max-width: 760px) {
   .report-primary-filters,
-  .report-more-filter-grid,
-  .report-secondary-grid {
+  .report-more-filter-grid {
     grid-template-columns: 1fr;
   }
 
-  .report-filter-heading,
-  .report-section-header {
+  .report-filter-heading {
     align-items: stretch;
     flex-direction: column;
   }
@@ -4788,14 +4679,6 @@ dialog.ui-dialog.df-range-custom {
     padding: 14px;
   }
 
-  .report-trend,
-  .report-ranked-card {
-    padding: 16px;
-  }
-
-  .report-secondary-grid {
-    padding-inline: 16px;
-  }
 }
 
 @media (max-width: 430px) {
@@ -5171,17 +5054,11 @@ dialog.ui-dialog.df-range-custom {
   line-height: 1.5;
 }
 
-.fill-group-surface,
 .fill-inset-surface,
 .fill-toggle-row,
 .fill-list-action {
   border: 0;
   box-shadow: none;
-}
-
-.fill-group-surface {
-  border-radius: var(--web-radius-group);
-  background: var(--surface);
 }
 
 .fill-inset-surface,
@@ -5323,18 +5200,20 @@ dialog.ui-dialog.df-range-custom {
   gap: 8px;
 }
 
+/* Empty states are one muted sentence in the card (WUI-030): 14 px secondary text. */
 .places-empty-state {
   display: grid;
   justify-items: start;
   gap: 8px;
-  padding: 24px 18px;
-  color: var(--muted);
-  font-size: 13px;
+  padding: 16px 18px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .places-empty-state strong {
-  color: var(--foreground);
+  color: var(--text-primary);
   font-size: 14px;
+  font-weight: 600;
 }
 
 .place-dialog-copy {
@@ -5956,16 +5835,21 @@ dialog.ui-dialog.df-range-custom {
   padding-inline: 12px;
 }
 
+/* Inline loading is one muted line; a failed load is the error banner (WUI-030). */
 .timeline-range-feedback {
   flex: 0 0 auto;
   margin: 0;
   padding: 6px var(--web-panel-padding);
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 14px;
 }
 
 .timeline-range-feedback.is-error {
-  color: var(--danger-text);
+  margin: 0 var(--web-panel-padding) 8px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+  color: var(--text-primary);
 }
 
 .fill-panel-header {
@@ -6654,8 +6538,8 @@ dialog.ui-dialog.df-range-custom {
   min-height: var(--df-flist-row);
   align-items: center;
   padding: 6px 10px;
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 /* The @ Activities row: the activity's solid block with its icon, its name, and "Pinned" for a
@@ -7380,8 +7264,7 @@ dialog.ui-dialog.df-range-custom {
 
   .swiss-panel,
   .industrial-panel,
-  .industrial-panel-strong,
-  .fill-group-surface {
+  .industrial-panel-strong {
     border-radius: 20px;
   }
 
@@ -7543,7 +7426,6 @@ dialog.ui-dialog.df-range-custom {
   max-height: min(22.5rem, calc(100dvh - 10rem));
 }
 
-.inline-tag-empty,
 .inline-tag-help {
   color: var(--muted);
   font-size: 0.75rem;
@@ -10811,7 +10693,8 @@ dialog.ui-dialog.df-palette {
   display: grid;
   width: 36px;
   place-items: center;
-  border-radius: 9px;
+  /* The X3 radius (WUI-028: 30% of the 36 px block), fixed so a tall block keeps round corners. */
+  border-radius: calc(36px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
@@ -10836,7 +10719,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-text span {
   overflow: hidden;
-  color: var(--text-muted);
+  /* As List's secondary line: over 4.5:1 on the card and the hover/focus fill in both themes. */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10854,6 +10738,85 @@ dialog.ui-dialog.df-palette {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Reports' Tags and More insights (web UI audit WUI-031, owner 17 Oct 2026): Blocks cards that stay
+   collapsed (UIA-303) behind a card head, with Today-style rows: a glyph tile, the name over its share
+   and block count, the duration, and the row filters the report. Empty is one muted sentence. */
+.df-report-more > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 44px;
+  margin: -6px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.df-report-more[open] > summary {
+  margin-bottom: 8px;
+}
+
+.df-report-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.df-report-more > summary h2 {
+  margin: 0;
+}
+
+.df-report-more > summary .df-faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.df-report-more .report-chevron {
+  color: var(--text-secondary);
+  transition: transform 160ms ease-out;
+}
+
+.df-report-more[open] .report-chevron {
+  transform: rotate(180deg);
+}
+
+.df-report-more-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+}
+
+.df-report-more-grid .df-eyebrow {
+  margin: 4px 0 6px;
+}
+
+.df-rank-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.df-rank-row .df-erow-main {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  text-decoration: none;
+}
+
+.df-rank-row .df-erow-block {
+  aspect-ratio: 1;
+}
+
+.report-trend-note {
+  margin-top: -6px;
+}
+
+@media (max-width: 760px) {
+  .df-report-more-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-report-more .report-chevron {
+    transition: none;
+  }
 }
 
 /* A running block's duration is neutral everywhere (web UI audit WUI-047, owner 17 Oct 2026; as
@@ -11474,8 +11437,11 @@ dialog.ui-dialog.df-palette {
   min-height: 420px;
 }
 
+/* The one page/panel error (WUI-030, `ErrorBanner`): a danger-tinted banner, one sentence and a
+   Dismiss whose target is 44 px. Without a Dismiss it keeps the same inner space. */
 .df-review-error {
   display: flex;
+  min-height: 46px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -11485,6 +11451,10 @@ dialog.ui-dialog.df-palette {
   background: color-mix(in oklab, var(--danger) 12%, var(--surface));
   color: var(--text-primary);
   font-size: 14px;
+}
+
+.df-review-error:not(:has(button)) {
+  padding-right: 14px;
 }
 
 /* Phones only (UIA-315): "‹ 2 of 4 ›" above the Review card. */
@@ -12649,10 +12619,11 @@ dialog.ui-dialog.df-palette {
   bottom: 0;
 }
 
+/* Management rows are one height (web UI audit WUI-029): 56 px, as `df-srow`. */
 .df-library .place-list-row {
   position: relative;
-  min-height: 64px;
-  padding: 10px 18px;
+  min-height: 56px;
+  padding: 8px 18px;
 }
 
 .df-library .place-list-row + .place-list-row {
@@ -13909,6 +13880,10 @@ dialog.ui-dialog.df-palette {
   gap: 2px;
 }
 
+.df-profile-pop-rows + .df-review-error {
+  margin-top: 8px;
+}
+
 .df-profile-pop-rows > button,
 .df-profile-pop-rows > a,
 .df-profile-pop-rows > form > button {
@@ -14863,8 +14838,12 @@ dialog.ui-dialog.df-palette {
   white-space: nowrap;
 }
 
+/* Calendar › List rows are Today's rows (web UI audit WUI-028, owner 17 Oct 2026): transparent on
+   hairlines that start after the block, a neutral fill on hover or keyboard focus, a 36 px activity
+   block with the X3 radius, the title over "activity · #tags", times, duration, and actions that
+   appear on hover or focus (always on touch screens and phones). */
 .timeline-list-table {
-  border-spacing: 0 6px;
+  border-spacing: 0;
   padding: 0 12px 12px;
 }
 
@@ -14889,8 +14868,20 @@ dialog.ui-dialog.df-palette {
 }
 
 .timeline-list-row > td {
-  background: var(--surface-inset);
+  background: transparent;
   transition: background-color 140ms ease-out;
+}
+
+.timeline-list-row + .timeline-list-row > td {
+  background-image: linear-gradient(var(--border), var(--border));
+  background-repeat: no-repeat;
+  background-position: top left;
+  background-size: 100% 1px;
+}
+
+.timeline-list-row + .timeline-list-row > td:first-child {
+  background-position: 60px 0;
+  background-size: calc(100% - 60px) 1px;
 }
 
 .timeline-list-row > td:first-child {
@@ -14901,22 +14892,91 @@ dialog.ui-dialog.df-palette {
   border-radius: 0 14px 14px 0;
 }
 
-.timeline-list-row:hover > td {
-  background: var(--surface-muted);
+.timeline-list-row:hover > td,
+.timeline-list-row:has(:focus-visible) > td {
+  background-color: var(--surface-muted);
+  background-image: none;
+}
+
+.timeline-list-row:hover + .timeline-list-row > td,
+.timeline-list-row:has(:focus-visible) + .timeline-list-row > td {
+  background-image: none;
+}
+
+.timeline-list-table .timeline-task-cell {
+  --timeline-task-primary-height: 22px;
+  align-items: center;
 }
 
 .timeline-task-block {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   flex: none;
   place-items: center;
-  /* Centred on the row's primary line, like the group count beside it. */
-  margin-top: calc((var(--timeline-task-primary-height) - 30px) / 2);
-  align-self: start;
-  border-radius: 9px;
+  align-self: center;
+  border-radius: calc(36px * 0.3);
   background: var(--surface-muted);
   color: var(--text-secondary);
+}
+
+.timeline-list-table .timeline-group-count {
+  margin-top: 0;
+  align-self: center;
+}
+
+.timeline-task-secondary-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  /* textSecondary nudged 15 % toward textPrimary: 12 px text stays over 4.5:1 on the card and on the
+     hover/focus fill in both themes (textMuted 4.05:1, plain textSecondary 4.39:1 on Daylight's
+     surfaceMuted; Codex r1/r2 on #495). */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.timeline-task-secondary-line .timeline-task-meta,
+.timeline-task-secondary-line .tag-metadata {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: baseline;
+  color: inherit;
+}
+
+.timeline-task-secondary-line .tag-metadata.is-compact {
+  font-size: 12px;
+  font-weight: inherit;
+}
+
+.timeline-list-actions {
+  opacity: 0;
+  transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.timeline-list-row:hover .timeline-list-actions,
+.timeline-list-row:focus-within .timeline-list-actions {
+  opacity: 1;
+}
+
+/* Shown where hover can't be relied on: touch-only screens, any touch screen (a hybrid laptop's
+   primary pointer may still hover) and the narrow layouts. */
+@media (hover: none), (any-pointer: coarse), (max-width: 860px) {
+  .timeline-list-actions {
+    opacity: 1;
+  }
+}
+
+/* Touch screens: a taller title line to tap into editing (32 px; above WCAG 2.5.8's 24 px), short
+   enough to keep the row's two lines together. */
+@media (any-pointer: coarse) {
+  .timeline-list-table .timeline-task-cell {
+    --timeline-task-primary-height: 32px;
+  }
 }
 
 .timeline-task-block.df-block {
@@ -14937,7 +14997,8 @@ dialog.ui-dialog.df-palette {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-list-row > td {
+  .timeline-list-row > td,
+  .timeline-list-actions {
     transition: none;
   }
 }

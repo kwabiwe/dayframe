@@ -1,6 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { DestructiveConfirmationDialog } from "@/components/DestructiveConfirmationDialog";
@@ -100,7 +101,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
           Create tag
         </button>
       </form>
-      {error && !pendingDelete ? <p className="df-review-error" role="alert"><span>{error}</span></p> : null}
+      {error && !pendingDelete ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
       <p className="df-faint df-tags-note">Tags add context to blocks; activities stay the main grouping. Names use letters, numbers, spaces, hyphens or underscores.</p>
 
       {tags.length === 0 ? (

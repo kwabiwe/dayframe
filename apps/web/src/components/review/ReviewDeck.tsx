@@ -1,6 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { formatClockTime, formatDuration, reviewCardCount, type DayframeGlyph } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import Link from "next/link";
@@ -502,21 +503,15 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     />
   ) : null;
   const errorLine = state.error ? (
-    <p className="df-review-error" role="alert">
-      <span>{state.error}</span>
-      <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={clearError}>
-        <X size={15} aria-hidden="true" />
-      </button>
-    </p>
+    <ErrorBanner message={state.error} onDismiss={clearError} />
   ) : null;
 
   const missingLine = missingTargetId ? (
-    <p className="df-review-error" role="status">
-      <span>That moment isn’t waiting here: it was already decided, or it’s older than the newest 100 shown.</span>
-      <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={() => setMissingTargetId(null)}>
-        <X size={15} aria-hidden="true" />
-      </button>
-    </p>
+    <ErrorBanner
+      message="That moment isn’t waiting here: it was already decided, or it’s older than the newest 100 shown."
+      onDismiss={() => setMissingTargetId(null)}
+      role="status"
+    />
   ) : null;
 
   if (!selected) {

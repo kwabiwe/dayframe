@@ -13,6 +13,7 @@ import {
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { LibraryHead } from "@/components/library/LibraryHead";
 import { ModalDialog } from "@/components/ui/Primitives";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
@@ -227,12 +228,7 @@ export function ActivitiesLibrary({ initialData }: { initialData: BootstrapData 
     <div className="df-library">
       <LibraryHead current="/categories" />
       {error ? (
-        <p className="df-review-error" role="alert">
-          <span>{error}</span>
-          <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={() => setError(null)}>
-            <DayframeIcon glyph="x" size={15} />
-          </button>
-        </p>
+        <ErrorBanner message={error} onDismiss={() => setError(null)} />
       ) : null}
       <p className="df-faint df-library-pins">{pinnedCount} of {QUICK_START_PIN_LIMIT} pinned to quick start</p>
       {groups.map((group) => (

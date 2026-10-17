@@ -9,6 +9,7 @@ import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRun
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { useTimelineDeleteUndo } from "@/components/useTimelineDeleteUndo";
@@ -88,7 +89,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const refreshData = useCallback(async () => {
     await refresh();
   }, [refresh]);
-  const { error: deleteError, hiddenEntryIds, pendingNotice, requestDelete, undoPendingDelete } = useTimelineDeleteUndo({
+  const { dismissDeleteError, error: deleteError, hiddenEntryIds, pendingNotice, requestDelete, undoPendingDelete } = useTimelineDeleteUndo({
     entryIds,
     onSynced: refreshData
   });
@@ -310,7 +311,10 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           </span>
         </div>
         {actionError || deleteError ? (
-          <p className="swiss-inline-error" role="alert">{actionError ?? deleteError}</p>
+          <ErrorBanner
+            message={(actionError ?? deleteError) as string}
+            onDismiss={() => (actionError ? setActionError(null) : dismissDeleteError())}
+          />
         ) : null}
         {blocks.length ? (
           <ul className="df-rows">

@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Minus } from "lucide-react";
 import { analyzeTimeIntervals, resolveActivityIcon, type ClockFormat, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
@@ -720,9 +721,7 @@ export function EntriesTable({
   return (
     <section className="timeline-list-workspace">
       {actionError ? (
-        <p className="swiss-inline-error" role="alert">
-          {actionError}
-        </p>
+        <ErrorBanner message={actionError} onDismiss={() => setActionError(null)} />
       ) : null}
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
@@ -821,7 +820,11 @@ export function EntriesTable({
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}
+                        </span>
+                        {/* Today's row anatomy (WUI-028): the title, then "activity · #tags". */}
+                        <span className="timeline-task-secondary-line">
                           <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
+                          {entry.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
                           <TagMetadata compact tagNames={entry.tagNames} />
                         </span>
                         {renderInlineStatus(entry)}
@@ -918,7 +921,10 @@ export function EntriesTable({
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
+                            </span>
+                            <span className="timeline-task-secondary-line">
                               <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
+                              {occurrence.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
                               <TagMetadata compact tagNames={occurrence.tagNames} />
                             </span>
                             {renderInlineStatus(occurrence)}

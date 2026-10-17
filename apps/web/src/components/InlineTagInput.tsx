@@ -695,7 +695,7 @@ export function InlineTagInput({
               tabIndex={shouldOpen ? 0 : -1}
             />
           ))}
-          {actions.length === 0 ? <span className="df-flist-empty inline-tag-empty">Type a name to search or create</span> : null}
+          {actions.length === 0 ? <span className="df-flist-empty">Type a name to search or create</span> : null}
         </FloatingList>)}
         {activities ? maybePortal(<FloatingList
           activeId={activityMatches.length ? `${name}-activity-option-${activeActivityIndex}` : undefined}
@@ -778,7 +778,7 @@ export function InlineTagInput({
             );
           })}
           {pickerActions.length === 0 ? (
-            <span className="df-flist-empty inline-tag-empty">
+            <span className="df-flist-empty">
               {pickerQuery.trim() ? "No matching tags" : "Type a name to search or create"}
             </span>
           ) : null}

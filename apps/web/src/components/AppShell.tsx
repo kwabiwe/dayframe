@@ -9,6 +9,7 @@ import { Check } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { TooltipHost } from "@/components/blocks/TooltipHost";
 import { CommandPalette } from "@/components/blocks/CommandPalette";
 import { getResolvedThemeChoice, setThemeChoice, subscribeToThemeChoice } from "@/components/ThemeSettings";
@@ -441,7 +442,7 @@ function ProfileWorkspacePopover({
               );
             })}
           </div>
-          {error ? <p className="swiss-inline-error" role="alert">{error}</p> : null}
+          {error ? <ErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
         </section>
 
         <div className="df-profile-pop-rows">

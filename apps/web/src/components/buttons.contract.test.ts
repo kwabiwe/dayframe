@@ -69,8 +69,7 @@ describe("buttons (web UI audit P3)", () => {
       ["components/TimeReviewViews.tsx", ["Start again"]],
       ["components/TagManager.tsx", ["Delete"]],
       ["components/ReportDetailsTable.tsx", ["Edit"]],
-      ["components/library/ActivitiesLibrary.tsx", ["Dismiss"]],
-      ["components/review/ReviewDeck.tsx", ["Dismiss"]],
+      ["components/blocks/ErrorBanner.tsx", ["Dismiss"]],
       ["components/TimeEntryQuickEditor.tsx", ["Close"]]
     ] as const) {
       for (const tip of tips) expect(source(path), `${path} ${tip}`).toContain(`data-tip="${tip}"`);
