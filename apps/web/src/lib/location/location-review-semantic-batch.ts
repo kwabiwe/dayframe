@@ -4,14 +4,14 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticLocation, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
+import { assessAutomaticMove, hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { learnedNamesFor, namePatternsFor } from "./name-patterns";
-import { chooseAutoLoggedMoves, logTripsAutomatically, optedOutMoves } from "./location-auto-moves";
+import { chooseAutoLoggedMoves, logTripsAutomatically, moveEndsKnown, movesBlocked, optedOutMoves, retireCoveredAutoMoves } from "./location-auto-moves";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { healthCoveredMoves, retireCoveredCandidateCards } from "./health-coverage";
 import {
@@ -257,6 +257,7 @@ export async function emitReviewSemanticSegments(
   // (retireHealthCoveredMoveCards), and it comes back if the workout goes while its evidence lasts.
   const healthCovered = await healthCoveredMoves(client, session, offerable);
   changes.count += await retireCoveredCandidateCards(client, session, [...healthCovered]);
+  changes.count += await retireCoveredAutoMoves(client, session, [...healthCovered], autoLog.locked);
   const eligible = offerable.filter((row) => !healthCovered.has(row.clientEventId));
   const existing = new Map<string, { id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>();
   for (const batch of chunks(eligible)) {
@@ -477,7 +478,23 @@ export async function emitReviewSemanticSegments(
   // window, where replay re-persisted the segment; elsewhere it is a decision and its block stays put.
   if (autoLog.reconciliation) {
     const since = Date.parse(autoLog.reconciliation.sinceAt);
-    const followed = linked.filter((row) => !row.auto_log && Date.parse(row.occurred_at) >= since);
+    // A Move's block follows only while the Move, so moved, would still log itself: clear, and over no
+    // tracked time beyond five minutes nor a running timer (its own block aside); otherwise the block
+    // stays where it was logged (Codex r1 on #462).
+    const segmentOf = new Map(eligible.map((row) => [row.clientEventId, row.segment]));
+    const stayById = new Map(segments.flatMap((segment) => segment.kind === "stay" ? [[segment.clientSegmentId, segment] as const] : []));
+    const moves = linked.filter((row) => !row.auto_log && row.kind === "commute" && Date.parse(row.occurred_at) >= since &&
+      existing.get(row.client_event_id)?.reviewStatus === "confirmed");
+    const stillClear = moves.filter((row) => {
+      const segment = segmentOf.get(row.client_event_id);
+      return segment?.kind === "commute" && assessAutomaticMove(segment, moveEndsKnown(segment, stayById)).eligible;
+    });
+    const blockedMoves = await movesBlocked(client, session, stillClear.map((row) => ({
+      key: row.client_event_id, startedAt: row.occurred_at, stoppedAt: row.stopped_at!, eventId: row.event_id
+    })), lockedOrphans.map((orphan) => orphan.entryId), "overlap");
+    const unfollowed = new Set(moves.filter((row) => !stillClear.includes(row) || blockedMoves.has(row.client_event_id))
+      .map((row) => row.client_event_id));
+    const followed = linked.filter((row) => !row.auto_log && Date.parse(row.occurred_at) >= since && !unfollowed.has(row.client_event_id));
     for (const batch of chunks(followed)) {
       const bounds = JSON.stringify(batch.map((row) => ({
         event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at

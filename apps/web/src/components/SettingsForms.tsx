@@ -397,30 +397,60 @@ export function PlacesLocationSettings() {
   );
 }
 
-/**
- * "Log trips automatically" (PRD D19, A4; on by default): a Move between two known places with a clear
- * way of travelling becomes a block without a Review card. The switch moves at once and the server
- * stores it; a refused save puts it back and says so.
- */
+/** "Log trips automatically" for the signed-in account; a different account gets a fresh switch. */
 function TripLoggingSetting() {
   const { data, refresh } = useAppShellRuntime();
-  const stored = data?.user.logTripsAutomatically ?? false;
+  if (!data) return null;
+  return (
+    <TripLoggingSwitch
+      key={data.user.id}
+      refresh={refresh}
+      stored={data.user.logTripsAutomatically ?? false}
+      userId={data.user.id}
+    />
+  );
+}
+
+/**
+ * "Log trips automatically" (PRD D19, A4; on by default): a Move between two known places with a clear
+ * way of travelling becomes a block without a Review card. The switch moves at once; once the server
+ * stores it, the stored value shows even if the refresh after it fails, until a newer bootstrap
+ * value arrives (Codex r1 on #462); a refused save puts it back and says why.
+ */
+export function TripLoggingSwitch({ refresh, stored, userId }: {
+  refresh: (options?: { force?: boolean }) => Promise<unknown>;
+  stored: boolean;
+  userId: string;
+}) {
   const [pending, setPending] = useState<boolean | null>(null);
+  const [saved, setSaved] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const checked = pending ?? stored;
+  // A newer value from the server replaces the one this switch saved.
+  const [seenStored, setSeenStored] = useState(stored);
+  if (seenStored !== stored) {
+    setSeenStored(stored);
+    setSaved(null);
+  }
+  const checked = pending ?? saved ?? stored;
 
   async function save(next: boolean) {
-    if (!data || pending !== null) return;
+    if (pending !== null) return;
     setPending(next);
     setError(null);
     try {
       const response = await clientFetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ logTripsAutomatically: next, expectedUserId: data.user.id })
+        body: JSON.stringify({ logTripsAutomatically: next, expectedUserId: userId })
       });
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to save this setting."));
-      await refresh({ force: true });
+      const body = (await response.json().catch(() => ({}))) as { logTripsAutomatically?: unknown };
+      setSaved(typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : next);
+      try {
+        await refresh({ force: true });
+      } catch {
+        // The saved value still shows; the next bootstrap brings the rest.
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to save this setting.");
     } finally {
@@ -439,7 +469,7 @@ function TripLoggingSetting() {
           aria-describedby="df-set-trips-hint"
           aria-label="Log trips automatically"
           checked={checked}
-          disabled={!data || pending !== null}
+          disabled={pending !== null}
           onChange={(event) => void save(event.target.checked)}
           role="switch"
           type="checkbox"

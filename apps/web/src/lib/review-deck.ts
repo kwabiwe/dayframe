@@ -134,6 +134,8 @@ export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventTyp
       return "Not logged automatically · how you travelled isn’t clear.";
     case "log_trips_off":
       return "Log trips automatically is off.";
+    case "trip_logged_before":
+      return "Not logged automatically · this trip was logged once before.";
     case "trip_logging_opted_out":
       return "Not logged automatically · you stopped logging trips like this.";
     case "review_mode":

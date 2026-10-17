@@ -2495,6 +2495,17 @@ async function validateReviewModeAutoMoves() {
     assert.equal((await moveBlocks()).length, 0, "A Move logged itself with Log trips automatically off.");
     const offCards = await moveCards();
     assert.deepEqual(offCards.map((card) => card.reason), ["log_trips_off"], "The Move's card did not say Log trips automatically is off.");
+    // Offered once, it never logs itself later, even under a new ID with the switch on (Codex r1 on #462).
+    await pool.query(`update commute_segments set client_segment_id = client_segment_id || '-old'
+      where workspace_id = $1 and user_id = $2 and status <> 'superseded'`, [WORKSPACE_ID, USER_ID]);
+    await pool.query(`update activity_events set client_event_id = client_event_id || '-old'
+      where workspace_id = $1 and user_id = $2 and event_type = 'commute_detected'`, [WORKSPACE_ID, USER_ID]);
+    await setSwitch(true);
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: fixture.evidence[0].occurredAt }, session, PROCESSING_AT);
+    assert.equal((await moveBlocks()).length, 0, "A Move offered before under another ID logged itself.");
+    assert.deepEqual((await moveCards()).map((card) => card.reason), ["auto_log_offered_before"],
+      "The re-identified Move's card did not say it was offered before.");
 
     // On (the default): one block, no card; its event is confirmed and says why.
     await clearDerivedLocationState();
@@ -2521,6 +2532,20 @@ async function validateReviewModeAutoMoves() {
     assert.equal(moved.length, 1, "Replay left the automatic Move with no block, or two.");
     assert.equal(moved[0].id, blocks[0].id, "Replay did not move the unedited block to the Move's new ID.");
     assert.notEqual(moved[0].eventId, blocks[0].eventId, "The moved block still points at the retired Move.");
+    // Its block follows the Move only while the Move, moved, would still log itself: a block it would
+    // overlap by more than five minutes keeps it where it was (Codex r1 on #462).
+    const shifted = (await pool.query<{ startedAt: Date; stoppedAt: Date }>(
+      `update time_entries set started_at = started_at + interval '10 minutes', stopped_at = stopped_at + interval '10 minutes'
+       where id = $1 returning started_at as "startedAt", stopped_at as "stoppedAt"`, [moved[0].id])).rows[0];
+    const busy = await pool.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, source, review_status, started_at, stopped_at)
+       values ($1, $2, 'manual_app', 'confirmed', $3::timestamptz - interval '15 minutes', $3::timestamptz - interval '3 minutes') returning id`,
+      [WORKSPACE_ID, USER_ID, shifted.startedAt]);
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: fixture.evidence[0].occurredAt }, session, PROCESSING_AT);
+    const kept = (await pool.query<{ startedAt: Date }>(`select started_at as "startedAt" from time_entries where id = $1`, [moved[0].id])).rows[0];
+    assert.equal(kept.startedAt.getTime(), shifted.startedAt.getTime(), "A Move's block followed it over tracked time.");
+    await pool.query("delete from time_entries where id = $1", [busy.rows[0].id]);
 
     // Tracked time overlapping it by more than five minutes keeps it a card that says so.
     await clearDerivedLocationState();
@@ -2545,10 +2570,32 @@ async function validateReviewModeAutoMoves() {
     await ingest();
     assert.equal((await moveBlocks()).length, 0, "A Move whose pattern was stopped logged itself.");
     assert.deepEqual((await moveCards()).map((card) => card.reason), ["trip_logging_opted_out"], "The stopped Move's card did not say why.");
+    // A Health walk that arrives after a walk logged itself takes the walk's block; when it goes, the
+    // walk comes back and logs itself again (Codex r1 on #462).
+    await clearDerivedLocationState();
+    const walk = trustedCommuteFixture("auto-walk").evidence.map((item) => ({ ...item, isSimulated: false,
+      ...(item.speedMetersPerSecond ? { speedMetersPerSecond: 1.4 } : {}) }));
+    const walkBatch = batch("db-auto-walk", walk, "v2_review", walk[0].occurredAt);
+    await ingestLocationEvidence(walkBatch, session, PROCESSING_AT);
+    assert.equal((await moveBlocks()).length, 1, "A clear walk between two saved places did not log itself.");
+    const workout = (await pool.query<{ id: string }>(
+      `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, duration_seconds, raw_payload)
+       values ($1, $2, 'db-auto-walk-workout', 'walking', $3::timestamptz - interval '3 minutes', $4::timestamptz + interval '3 minutes', 1200,
+         '{"workoutType":"walking"}'::jsonb) returning id`,
+      [WORKSPACE_ID, USER_ID, walk[2].occurredAt, walk[6].occurredAt])).rows[0].id;
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: walk[0].occurredAt }, session, PROCESSING_AT);
+    assert.equal((await moveBlocks()).length, 0, "A later Health walk left the walk's own block.");
+    assert.equal((await moveCards()).length, 0, "A walk a Health workout covers was offered in Review.");
+    await pool.query("delete from health_workouts where id = $1", [workout]);
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: walk[0].occurredAt }, session, PROCESSING_AT);
+    assert.equal((await moveBlocks()).length, 1, "The walk did not log itself again when its Health workout went.");
     console.info("Automatic Moves validated");
   } finally {
     await clearDerivedLocationState();
     await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+    await pool.query("delete from health_workouts where workspace_id = $1 and external_sample_id like 'db-auto-walk%'", [WORKSPACE_ID]);
     await setSwitch(true);
   }
 }

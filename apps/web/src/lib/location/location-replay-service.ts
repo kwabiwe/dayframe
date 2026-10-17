@@ -383,7 +383,9 @@ async function excludeProtectedReplacements(
        and s.stopped_at > $5::timestamptz - ($6::int * interval '1 day')
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
+         -- An unedited Move that logged itself is still replay's to move (PRD D19; Codex r1 on #462).
+         and not ${autoLoggedUneditedSql("s", options.autoLogReconciliation)}))
      order by s.client_segment_id`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
       LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays + 1])).rows;

@@ -23,12 +23,15 @@ const context = (patch: Partial<Parameters<typeof chooseAutoLoggedMoves>[3]> = {
 
 describe("chooseAutoLoggedMoves (PRD D19, A3/A4)", () => {
   it("logs a clear Move and gives every other Move the reason its card shows", async () => {
+    const reasons: Record<string, string> = { overlapping: "overlap", "logged-elsewhere": "logged", "offered-elsewhere": "offered" };
     const query = vi.fn(async (_sql: string, params: unknown[]) => ({
-      rows: (JSON.parse(params[2] as string) as Array<{ key: string }>).filter((row) => row.key === "overlapping").map(({ key }) => ({ key }))
+      rows: (JSON.parse(params[2] as string) as Array<{ key: string }>).map(({ key }) => ({ key, reason: reasons[key] ?? null }))
     }));
     const candidates = [
       ["clear", move("clear")], ["no-mode", move("no-mode", { travelMode: undefined })], ["unknown-end", move("unknown-end", { toPlaceId: null })],
-      ["decided", move("decided")], ["returned", move("returned")], ["stopped", move("stopped")], ["overlapping", move("overlapping")]
+      ["decided", move("decided")], ["returned", move("returned")], ["stopped", move("stopped")], ["overlapping", move("overlapping")],
+      // Under another ID: a Move here already logged itself and is a decision, or a card was offered here (Codex r1 on #462).
+      ["logged-elsewhere", move("logged-elsewhere")], ["offered-elsewhere", move("offered-elsewhere")]
     ].map(([clientEventId, segment]) => ({ clientEventId: clientEventId as string, segment: segment as LocationSegment }));
     const result = await chooseAutoLoggedMoves({ query } as never, session, candidates, context({
       prior: new Set(["decided", "returned"]), freshAgain: new Set(["returned"]), optedOut: new Set(["stopped"]), orphanEntryIds: ["orphan-entry"]
@@ -36,13 +39,15 @@ describe("chooseAutoLoggedMoves (PRD D19, A3/A4)", () => {
     expect([...result.logged].sort()).toEqual(["clear", "returned"]);
     expect(Object.fromEntries(result.fallback)).toEqual({
       "no-mode": "travel_mode_unknown", "unknown-end": "untrusted_commute_endpoints", decided: "auto_log_offered_before",
-      stopped: "trip_logging_opted_out", overlapping: "auto_log_overlap"
+      stopped: "trip_logging_opted_out", overlapping: "auto_log_overlap",
+      "logged-elsewhere": "trip_logged_before", "offered-elsewhere": "auto_log_offered_before"
     });
     // One bounded read for the eligible Moves; a retired Move's own block never counts as overlap.
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.calls[0][1][3]).toEqual(["orphan-entry"]);
     expect(query.mock.calls[0][1][4]).toBe(300);
     expect(query.mock.calls[0][0]).toContain("te.stopped_at is null");
+    expect(query.mock.calls[0][1][5]).toBe(true);
   });
 
   it("keeps every clear Move in Review with the switch off, reading nothing", async () => {

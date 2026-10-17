@@ -157,6 +157,7 @@ describe("location reason line (location v3 bug 8)", () => {
     // Moves that log themselves (PRD D19).
     expect(location("travel_mode_unknown")).toBe("Not logged automatically · how you travelled isn’t clear.");
     expect(location("log_trips_off")).toBe("Log trips automatically is off.");
+    expect(location("trip_logged_before")).toBe("Not logged automatically · this trip was logged once before.");
     expect(location("trip_logging_opted_out")).toBe("Not logged automatically · you stopped logging trips like this.");
   });
 
