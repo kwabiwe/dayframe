@@ -2463,6 +2463,96 @@ async function validateHealthWalksWin() {
  * timer or the switch off keep it in Review; retries never duplicate; replay moves an unedited block
  * with its visit and removes it with a vanished visit; edited or deleted blocks are never touched.
  */
+/**
+ * Moves that log themselves in Review mode (PRD D19, A3/A4): with "Log trips automatically" on, a clear
+ * Move between two saved places becomes a location_auto_log block, not a Review card; with it off, an
+ * overlap over five minutes, or its pattern stopped ("Don't log trips like this"), it stays a card
+ * saying why. Replay keeps one block per Move and moves it with a Move whose ID changed.
+ */
+async function validateReviewModeAutoMoves() {
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  // Real (not simulated) fixes, so the speed rule gives the drive its mode (PRD D19, A2).
+  const base = trustedCommuteFixture("auto-move");
+  const fixture = { ...base, evidence: base.evidence.map((item) => ({ ...item, isSimulated: false })) };
+  const ingest = () => ingestLocationEvidence(batch("db-auto-moves", fixture.evidence, "v2_review", fixture.evidence[0].occurredAt), session, PROCESSING_AT);
+  const setSwitch = (on: boolean) => pool.query("update users set log_trips_automatically = $2 where id = $1", [USER_ID, on]);
+  const moveBlocks = async () => (await pool.query<{ id: string; eventId: string; categoryId: string | null; reason: string | null; status: string }>(
+    `select te.id, te.created_from_event_id as "eventId", te.category_id as "categoryId",
+            ae.raw_payload ->> 'semanticReason' as reason, ae.review_status as status
+     from time_entries te join activity_events ae on ae.id = te.created_from_event_id
+     where te.workspace_id = $1 and te.user_id = $2 and te.source = 'location_auto_log' and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID])).rows;
+  const moveCards = async () => (await pool.query<{ reason: string | null; patternKey: string | null }>(
+    `select ae.raw_payload ->> 'semanticReason' as reason, ae.raw_payload ->> 'namePatternKey' as "patternKey"
+     from review_items ri join activity_events ae on ae.id = ri.event_id
+     where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and ae.event_type = 'commute_detected'`,
+    [WORKSPACE_ID, USER_ID])).rows;
+  try {
+    // Off: a card that says the switch is off.
+    await clearDerivedLocationState();
+    await setSwitch(false);
+    await ingest();
+    assert.equal((await moveBlocks()).length, 0, "A Move logged itself with Log trips automatically off.");
+    const offCards = await moveCards();
+    assert.deepEqual(offCards.map((card) => card.reason), ["log_trips_off"], "The Move's card did not say Log trips automatically is off.");
+
+    // On (the default): one block, no card; its event is confirmed and says why.
+    await clearDerivedLocationState();
+    await setSwitch(true);
+    await ingest();
+    const blocks = await moveBlocks();
+    assert.equal(blocks.length, 1, "A clear Move between two saved places did not log itself.");
+    assert.deepEqual({ reason: blocks[0].reason, status: blocks[0].status }, { reason: "move_auto_log", status: "confirmed" },
+      "The automatic Move's event does not say it logged itself.");
+    assert(blocks[0].categoryId, "The automatic Move's block has no activity.");
+    assert.equal((await moveCards()).length, 0, "A Move that logged itself still has a Review card.");
+
+    // Replay keeps exactly that block, and moves it with the Move when its ID changes.
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: fixture.evidence[0].occurredAt }, session, PROCESSING_AT);
+    assert.deepEqual((await moveBlocks()).map((block) => block.id), [blocks[0].id], "Replay changed an unedited automatic Move's block.");
+    await pool.query(`update commute_segments set client_segment_id = client_segment_id || '-old'
+      where workspace_id = $1 and user_id = $2 and created_from_event_id = $3`, [WORKSPACE_ID, USER_ID, blocks[0].eventId]);
+    await pool.query(`update activity_events set client_event_id = client_event_id || '-old'
+      where workspace_id = $1 and user_id = $2 and id = $3`, [WORKSPACE_ID, USER_ID, blocks[0].eventId]);
+    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: fixture.evidence[0].occurredAt }, session, PROCESSING_AT);
+    const moved = await moveBlocks();
+    assert.equal(moved.length, 1, "Replay left the automatic Move with no block, or two.");
+    assert.equal(moved[0].id, blocks[0].id, "Replay did not move the unedited block to the Move's new ID.");
+    assert.notEqual(moved[0].eventId, blocks[0].eventId, "The moved block still points at the retired Move.");
+
+    // Tracked time overlapping it by more than five minutes keeps it a card that says so.
+    await clearDerivedLocationState();
+    const overlap = await pool.query<{ id: string }>(
+      `insert into time_entries (workspace_id, user_id, source, review_status, started_at, stopped_at)
+       values ($1, $2, 'manual_app', 'confirmed', $3, $4) returning id`,
+      [WORKSPACE_ID, USER_ID, fixture.evidence[3].occurredAt, fixture.evidence[6].occurredAt]);
+    await ingest();
+    await pool.query("delete from time_entries where id = $1", [overlap.rows[0].id]);
+    assert.equal((await moveBlocks()).length, 0, "A Move overlapping tracked time logged itself.");
+    const overlapCards = await moveCards();
+    assert.deepEqual(overlapCards.map((card) => card.reason), ["auto_log_overlap"], "The overlapping Move's card did not say why.");
+
+    // "Don't log trips like this": its pattern stopped, it stays a card.
+    await clearDerivedLocationState();
+    const patternKey = overlapCards[0].patternKey;
+    assert(patternKey, "The Move had no learned-name pattern to stop.");
+    await pool.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, auto_log_opt_out)
+       select $1, $2, $3, band, true from unnest(array['morning', 'afternoon', 'evening', 'weekend']) as band`,
+      [WORKSPACE_ID, USER_ID, patternKey]);
+    await ingest();
+    assert.equal((await moveBlocks()).length, 0, "A Move whose pattern was stopped logged itself.");
+    assert.deepEqual((await moveCards()).map((card) => card.reason), ["trip_logging_opted_out"], "The stopped Move's card did not say why.");
+    console.info("Automatic Moves validated");
+  } finally {
+    await clearDerivedLocationState();
+    await pool.query("delete from location_name_patterns where workspace_id = $1", [WORKSPACE_ID]);
+    await setSwitch(true);
+  }
+}
+
 async function validateReviewModeAutoLogPlaces() {
   const fixture = locationAcceptanceFixture();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
@@ -2923,13 +3013,14 @@ async function main() {
     await validateRecentOwnerAuthoredSignal();
     await validateRecentTitleHistoryAcrossReplay();
     await validateReviewModeAutoLogPlaces();
+    await validateReviewModeAutoMoves();
     await validateSavePlace();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, Moves that log themselves in Review mode (the switch, overlap and stopped-pattern fallbacks, replay moving the block), per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);

@@ -72,7 +72,7 @@ export default function SettingsPage() {
           <SetCard
             glyph="map-pin"
             id="automatic-tracking"
-            note="Dayframe only logs on its own at places you trust. Anything it isn’t sure about waits in Review for you. Visit suggestions are set for each saved place; background location is managed in the iPhone app, and the web only asks for this browser’s location when you choose Current location for a place."
+            note="Dayframe logs on its own only when it’s clear: visits at places you trust, and trips between your places. Anything it isn’t sure about waits in Review for you. Visit suggestions are set for each saved place; background location is managed in the iPhone app, and the web only asks for this browser’s location when you choose Current location for a place."
             title="Automatic tracking"
           >
             <PlacesLocationSettings />

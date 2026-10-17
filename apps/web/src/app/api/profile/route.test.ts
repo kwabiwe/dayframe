@@ -160,6 +160,15 @@ describe("PATCH /api/profile", () => {
     expect(await response.json()).toEqual({ ok: true, goals: { dailyGoalMinutes: 540, weeklyGoalMinutes: 2400, goalsRevision: 7 } });
   });
 
+  it("turns Log trips automatically on or off and replies with the stored value (PRD D19, A4)", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ value: false }] });
+    const response = await PATCH(jsonRequest({ logTripsAutomatically: false }));
+    expect(await response.json()).toEqual({ ok: true, logTripsAutomatically: false });
+    expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining("log_trips_automatically = $1"), [false, baseSession.userId]);
+    const invalid = await PATCH(jsonRequest({ logTripsAutomatically: "no" }));
+    expect(invalid.status).toBe(400);
+  });
+
   it("leaves the goals revision alone when no goal changes", async () => {
     const response = await PATCH(jsonRequest({ name: "Demo User" }));
     expect(await response.json()).toEqual({ ok: true });

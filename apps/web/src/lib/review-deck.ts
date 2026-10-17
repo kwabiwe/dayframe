@@ -129,6 +129,13 @@ export function reviewReason(item: Pick<ReviewItemRow, "eventSource" | "eventTyp
       return "Not logged automatically · it was offered in Review before.";
     case "auto_log_off":
       return "Log automatically is off for this place.";
+    // Moves that log themselves (PRD D19): why this trip came here instead.
+    case "travel_mode_unknown":
+      return "Not logged automatically · how you travelled isn’t clear.";
+    case "log_trips_off":
+      return "Log trips automatically is off.";
+    case "trip_logging_opted_out":
+      return "Not logged automatically · you stopped logging trips like this.";
     case "review_mode":
       // Journeys are never logged automatically in Review mode; an older visit card says only that.
       return item.eventType === "commute_detected" ? "Trips aren’t logged automatically yet." : "Not logged automatically.";

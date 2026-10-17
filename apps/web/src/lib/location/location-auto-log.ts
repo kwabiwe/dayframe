@@ -47,7 +47,11 @@ type PlacedInterval = Interval & { placeId: string | null; candidatePlaceIds: re
  * accepted as (`learnedToSaved`), as emission resolves it — and the saved places it may yet become
  * (its candidates, learned ones through the same link; Codex r6 on #435).
  */
-export type AutoLogStayTiming = { offered: PlacedInterval[]; held: PlacedInterval[] };
+export type AutoLogStayTiming = {
+  offered: PlacedInterval[]; held: PlacedInterval[];
+  /** Moves replay produces (PRD D19), offered now or held, for the blocks of Moves that log themselves. */
+  moves?: { offered: Interval[]; held: Interval[] };
+};
 
 export function autoLogStayTiming(
   segments: ReadonlyArray<{
@@ -57,9 +61,14 @@ export function autoLogStayTiming(
   reconciliation: AutoLogReconciliation,
   learnedToSaved: ReadonlyMap<string, string>
 ): AutoLogStayTiming {
-  const timing: AutoLogStayTiming = { offered: [], held: [] };
+  const timing: AutoLogStayTiming = { offered: [], held: [], moves: { offered: [], held: [] } };
   for (const segment of segments) {
-    if (segment.kind !== "stay") continue;
+    if (segment.kind !== "stay") {
+      const move = { startedAt: segment.startedAt, stoppedAt: segment.stoppedAt ?? null };
+      const offered = segment.status === "finalised" && Date.parse(segment.startedAt) >= Date.parse(reconciliation.semanticCutoverAt);
+      (offered ? timing.moves!.offered : timing.moves!.held).push(move);
+      continue;
+    }
     const placeId = segment.placeMatchKind === "saved" && segment.placeId ? segment.placeId
       : segment.placeMatchKind === "learned" && segment.learnedPlaceId ? learnedToSaved.get(segment.learnedPlaceId) ?? null
         : null;
@@ -80,7 +89,12 @@ export function autoLogStayTiming(
  * is, or may yet become, that place (directly or through an accepted learned place). Such a visit has not vanished, so its stay is not retired and
  * stays live and linked until a later replay offers the replacement (Codex r2/r4/r5 on #435).
  */
-function awaitsHeldReplacement(block: Interval, placeId: string | null, timing: AutoLogStayTiming) {
+function awaitsHeldReplacement(block: Interval, placeId: string | null, timing: AutoLogStayTiming, kind: "stay" | "commute" = "stay") {
+  // A Move's block waits while no offered Move overlaps it and a held one does (Moves have no place).
+  if (kind === "commute") {
+    const moves = timing.moves ?? { offered: [], held: [] };
+    return !moves.offered.some((move) => overlaps(move, block)) && moves.held.some((move) => overlaps(move, block));
+  }
   if (!placeId) return false;
   if (timing.offered.some((stay) => stay.placeId === placeId && overlaps(stay, block))) return false;
   return timing.held.some((stay) => overlaps(stay, block) &&
@@ -106,6 +120,8 @@ export function autoLoggedUneditedSql(alias: string, reconciliation: AutoLogReco
 /** An unedited auto-logged block whose visit replay no longer finds; re-linked to its replacement or removed. */
 export type AutoLogOrphan = {
   entryId: string;
+  /** Whether a visit's or (PRD D19) a Move's block; only a replacement of the same kind takes it. */
+  kind: "stay" | "commute";
   placeId: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -128,15 +144,16 @@ export async function lockAutoLoggedBlocks(
   session: RequestSession,
   options: { deviceId: string; algorithmVersion: string; reconciliation: AutoLogReconciliation }
 ): Promise<Set<string>> {
+  // Visits' blocks and, since Moves log themselves (PRD D19), Moves' blocks.
+  const segmentOf = (table: "stay_segments" | "commute_segments") => `exists (select 1 from ${table} sg
+       where sg.workspace_id = te.workspace_id and sg.user_id = te.user_id and sg.created_from_event_id = te.created_from_event_id
+         and sg.device_id = $3 and sg.algorithm_version = $4 and sg.status <> 'superseded' and sg.started_at >= $5::timestamptz)`;
   const rows = (await client.query<{ id: string }>(
     `select te.id
      from time_entries te
-     join stay_segments st
-       on st.workspace_id = te.workspace_id and st.user_id = te.user_id and st.created_from_event_id = te.created_from_event_id
      where te.workspace_id = $1 and te.user_id = $2
        and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
-       and st.device_id = $3 and st.algorithm_version = $4 and st.status <> 'superseded'
-       and st.started_at >= $5::timestamptz
+       and (${segmentOf("stay_segments")} or ${segmentOf("commute_segments")})
      order by te.id
      for update of te`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.reconciliation.sinceAt]
@@ -145,7 +162,7 @@ export async function lockAutoLoggedBlocks(
 }
 
 /**
- * The visits this replay retires: within the reconciliation window — from the current semantic
+ * The visits (and, since Moves log themselves, the Moves) this replay retires: within the reconciliation window — from the current semantic
  * cutover and young enough that none of the visit's evidence has expired, so a visit only ageing
  * evidence hides is never mistaken for one that vanished, with lineage still retained (Codex r1 on
  * #435) — every stay it no longer produces whose block `lockAutoLoggedBlocks` holds unedited. A block
@@ -161,26 +178,33 @@ export async function retireAutoLoggedMissingStays(
   options: { deviceId: string; algorithmVersion: string; processingAt: string; reconciliation: AutoLogReconciliation },
   stayClientIds: string[],
   locked: ReadonlySet<string>,
-  timing: AutoLogStayTiming
+  timing: AutoLogStayTiming,
+  commuteClientIds: string[] = []
 ): Promise<AutoLogOrphan[]> {
-  const stays = (await client.query<{ segmentId: string; eventId: string }>(
-    `select st.id as "segmentId", st.created_from_event_id as "eventId"
-     from stay_segments st
-     where st.workspace_id = $1 and st.user_id = $2 and st.device_id = $3 and st.algorithm_version = $4
-       and st.continuity_status <> 'manual' and st.status <> 'superseded'
-       and not (st.client_segment_id = any($5::text[]))
-       and ${autoLoggedUneditedSql("st", options.reconciliation)}
-       and exists (
+  // Retained lineage: a stay's own evidence; a Move's own, or both its endpoint stays' (a Move only
+  // Motion & Fitness timed may have little of its own).
+  const retained = (predicate: string) => `exists (
          select 1 from location_segment_evidence lse
          join location_evidence le
            on le.id = lse.evidence_id and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
-         where lse.workspace_id = st.workspace_id and lse.user_id = st.user_id and lse.stay_segment_id = st.id
+         where lse.workspace_id = sg.workspace_id and lse.user_id = sg.user_id and ${predicate}
            and le.accepted = true and le.device_id = $3 and le.algorithm_version = $4
-           and le.expires_at > $6::timestamptz)
-     order by st.id
-     for update of st`,
-    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, stayClientIds, options.processingAt]
-  )).rows;
+           and le.expires_at > $6::timestamptz)`;
+  const missing = async (table: "stay_segments" | "commute_segments", clientIds: string[]) => (await client.query<{ segmentId: string; eventId: string }>(
+    `select sg.id as "segmentId", sg.created_from_event_id as "eventId"
+     from ${table} sg
+     where sg.workspace_id = $1 and sg.user_id = $2 and sg.device_id = $3 and sg.algorithm_version = $4
+       and sg.continuity_status <> 'manual' and sg.status <> 'superseded'
+       and not (sg.client_segment_id = any($5::text[]))
+       and ${autoLoggedUneditedSql("sg", options.reconciliation)}
+       and ${table === "stay_segments" ? retained("lse.stay_segment_id = sg.id")
+         : `(${retained("lse.commute_segment_id = sg.id")} or (${retained("lse.stay_segment_id = sg.from_stay_segment_id")}
+           and ${retained("lse.stay_segment_id = sg.to_stay_segment_id")}))`}
+     order by sg.id
+     for update of sg`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, clientIds, options.processingAt]
+  )).rows.map((row) => ({ ...row, table }));
+  const stays = [...await missing("stay_segments", stayClientIds), ...await missing("commute_segments", commuteClientIds)];
   if (stays.length === 0) return [];
   const entries = (await client.query<{
     entryId: string; eventId: string; placeId: string | null; startedAt: Date | string; stoppedAt: Date | string | null;
@@ -193,17 +217,22 @@ export async function retireAutoLoggedMissingStays(
     [session.workspaceId, session.userId, [...locked], stays.map((stay) => stay.eventId)]
   )).rows;
   const blockInterval = (entry: (typeof entries)[number]) => ({ startedAt: iso(entry.startedAt)!, stoppedAt: iso(entry.stoppedAt) });
+  const kindOf = new Map(stays.map((stay) => [stay.eventId, stay.table === "stay_segments" ? "stay" as const : "commute" as const]));
   const eventsWithBlocks = new Set(entries.map((entry) => entry.eventId));
   for (const entry of entries) {
-    if (awaitsHeldReplacement(blockInterval(entry), entry.placeId, timing)) eventsWithBlocks.delete(entry.eventId);
+    if (awaitsHeldReplacement(blockInterval(entry), entry.placeId, timing, kindOf.get(entry.eventId))) eventsWithBlocks.delete(entry.eventId);
   }
   const rows = stays.filter((stay) => eventsWithBlocks.has(stay.eventId));
   if (rows.length === 0) return [];
-  await client.query(
-    `update stay_segments set status = 'superseded', created_from_event_id = null, updated_at = now()
-     where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])`,
-    [session.workspaceId, session.userId, [...new Set(rows.map((row) => row.segmentId))]]
-  );
+  for (const table of ["stay_segments", "commute_segments"] as const) {
+    const ids = [...new Set(rows.filter((row) => row.table === table).map((row) => row.segmentId))];
+    if (ids.length === 0) continue;
+    await client.query(
+      `update ${table} set status = 'superseded', created_from_event_id = null, updated_at = now()
+       where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])`,
+      [session.workspaceId, session.userId, ids]
+    );
+  }
   const retiredEvents = new Set(rows.map((row) => row.eventId));
   await client.query(
     `update activity_events
@@ -213,6 +242,7 @@ export async function retireAutoLoggedMissingStays(
   );
   return entries.filter((entry) => retiredEvents.has(entry.eventId)).map((entry) => ({
     entryId: entry.entryId,
+    kind: kindOf.get(entry.eventId) ?? "stay",
     placeId: entry.placeId,
     startedAt: iso(entry.startedAt)!,
     stoppedAt: iso(entry.stoppedAt)

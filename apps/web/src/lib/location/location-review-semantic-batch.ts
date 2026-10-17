@@ -11,6 +11,7 @@ import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId 
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { learnedNamesFor, namePatternsFor } from "./name-patterns";
+import { chooseAutoLoggedMoves, logTripsAutomatically, optedOutMoves } from "./location-auto-moves";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { healthCoveredMoves, retireCoveredCandidateCards } from "./health-coverage";
 import {
@@ -305,6 +306,16 @@ export async function emitReviewSemanticSegments(
   // activity the card's activity; after two uses it also names a Log automatically block.
   const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones, corrections.correctedMoves);
   const learnedNames = await learnedNamesFor(client, session, patterns);
+  // Moves log themselves (PRD D19, A3/A4) when the person's switch is on and the evidence is clear.
+  const moveIds = new Set(eligible.flatMap((row) => row.segment.kind === "commute" ? [row.clientEventId] : []));
+  const autoMoves = await chooseAutoLoggedMoves(client, session, eligible, {
+    stays: new Map(segments.flatMap((segment) => segment.kind === "stay" ? [[segment.clientSegmentId, segment] as const] : [])),
+    prior: new Set(existing.keys()),
+    freshAgain,
+    optedOut: moveIds.size ? await optedOutMoves(client, session, patterns, moveIds) : new Set(),
+    orphanEntryIds: lockedOrphans.map((orphan) => orphan.entryId),
+    enabled: moveIds.size > 0 && await logTripsAutomatically(client, session)
+  });
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title: placeTitle, move } = context(segment);
     const pattern = patterns.get(clientEventId);
@@ -329,7 +340,8 @@ export async function emitReviewSemanticSegments(
     const overlapsConfirmedTime = !overlapDecision.allowed;
     const semanticReason = overlapsConfirmedTime
       ? overlapDecision.reason
-      : reviewModeSemanticReason(segment, trusted, autoLogged.fallback.get(clientEventId));
+      : reviewModeSemanticReason(segment, trusted, segment.kind === "commute"
+        ? autoMoves.fallback.get(clientEventId) : autoLogged.fallback.get(clientEventId));
     const policyEvidence = {
       policyVersion: AUTOMATIC_LOCATION_POLICY_VERSION,
       confidenceTier: disposition.confidenceTier,
@@ -378,10 +390,10 @@ export async function emitReviewSemanticSegments(
         };
     const eventType = segment.kind === "commute" ? "commute_detected" : segment.placeMatchKind === "learned"
       ? "learned_place_visit" : segment.placeMatchKind === "saved" ? "geofence_exit" : "unknown_stay";
-    // Log automatically: confirmed now, never a Review card.
-    const autoLog = autoLogged.logged.has(clientEventId);
+    // Log automatically (a visit) or a Move that logs itself: confirmed now, never a Review card.
+    const autoLog = autoLogged.logged.has(clientEventId) || autoMoves.logged.has(clientEventId);
     const payload: Record<string, unknown> = autoLog
-      ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: "place_auto_log" }
+      ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: segment.kind === "commute" ? "move_auto_log" : "place_auto_log" }
       : rawPayload;
     return { client_event_id: clientEventId, segment_id: segmentId, kind: segment.kind,
       event_type: eventType, occurred_at: segment.startedAt, stopped_at: segment.stoppedAt,
@@ -460,12 +472,12 @@ export async function emitReviewSemanticSegments(
   for (const row of linked.filter((candidate) => candidate.auto_log)) {
     changes.count += await writeAutoLoggedBlock(client, session, row, autoLog);
   }
-  // A visit already auto-logged whose stay kept its ID while its boundaries moved (a late fix): its
-  // unedited block follows (Codex r1 on #435). Only within the reconciliation window, where replay
-  // re-persisted the stay; elsewhere the stay is a decision and its block stays put.
+  // A visit (or a Move, PRD D19) already auto-logged whose segment kept its ID while its boundaries
+  // moved (a late fix): its unedited block follows (Codex r1 on #435). Only within the reconciliation
+  // window, where replay re-persisted the segment; elsewhere it is a decision and its block stays put.
   if (autoLog.reconciliation) {
     const since = Date.parse(autoLog.reconciliation.sinceAt);
-    const followed = linked.filter((row) => row.kind === "stay" && !row.auto_log && Date.parse(row.occurred_at) >= since);
+    const followed = linked.filter((row) => !row.auto_log && Date.parse(row.occurred_at) >= since);
     for (const batch of chunks(followed)) {
       const bounds = JSON.stringify(batch.map((row) => ({
         event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at
@@ -618,20 +630,22 @@ async function chooseAutoLoggedVisits(
 }
 
 /**
- * Writes one auto-logged visit's block: the unedited block of a visit replay just retired at the same
- * place and overlapping time moves to this visit (owner decision 15 Oct 2026: the block follows the
+ * Writes one auto-logged visit's (or Move's) block: the unedited block of a visit (Move) replay just
+ * retired at the same place and overlapping time moves to this one (owner decision 15 Oct 2026: the block follows the
  * visit), otherwise a new block tied to the stay's event, at most one per event. Returns the number
  * of blocks written.
  */
 async function writeAutoLoggedBlock(
   client: pg.PoolClient, session: RequestSession,
-  row: { event_id: string; place_id: string | null; category_id: string | null; description: string | null;
+  row: { event_id: string; kind: string; place_id: string | null; category_id: string | null; description: string | null;
     occurred_at: string; stopped_at?: string | null; confidence: string },
   autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; locked: ReadonlySet<string> }
 ) {
   const start = Date.parse(row.occurred_at);
   const stop = row.stopped_at ? Date.parse(row.stopped_at) : Number.POSITIVE_INFINITY;
   const orphan = autoLog.orphans.find((candidate) => autoLog.locked.has(candidate.entryId) && !autoLog.used.has(candidate.entryId) &&
+    // A visit's block moves only to a visit, a Move's only to a Move (PRD D19).
+    (candidate.kind ?? "stay") === (row.kind === "commute" ? "commute" : "stay") &&
     candidate.placeId === row.place_id && Date.parse(candidate.startedAt) < stop &&
     (candidate.stoppedAt ? Date.parse(candidate.stoppedAt) : Number.POSITIVE_INFINITY) > start);
   if (orphan) {

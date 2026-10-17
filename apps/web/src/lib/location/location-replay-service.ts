@@ -239,7 +239,7 @@ export async function replayLocationEvidence(
       const toStayId = stayIds.get(segment.toStaySegmentId);
       return fromStayId && toStayId ? [{...segment, fromStayId, toStayId}] : [];
     });
-  const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds);
+  const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "commute_persistence", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
@@ -563,7 +563,7 @@ async function supersedeMissingSegments(
   // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
   // event and no Review) untouched.
   const autoLog = options.autoLogReconciliation
-    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked, autoLogTiming)
+    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked, autoLogTiming, commuteClientIds)
     : [];
   await retireOpenReviewsForMissingSegments(
     client,
@@ -833,9 +833,10 @@ async function persistCommutes(
   session: RequestSession,
   deviceId: string,
   segments: (CommuteSegment & { fromStayId: string; toStayId: string })[],
-  protectedSegmentIds: Set<string>
+  protectedSegmentIds: Set<string>,
+  autoLogReconciliation?: AutoLogReconciliation
 ): Promise<Map<string, string>> {
-  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "commute_segments", segments, protectedSegmentIds);
+  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "commute_segments", segments, protectedSegmentIds, autoLogReconciliation);
   for (const chunk of segmentChunks(mutable)) {
     const parameters = chunk.flatMap(segment => [
       session.workspaceId,

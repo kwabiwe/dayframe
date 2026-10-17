@@ -930,3 +930,6 @@ create index if not exists idx_location_name_patterns_key
 create index if not exists idx_segment_evidence_commute_lookup
   on location_segment_evidence(commute_segment_id, role)
   where commute_segment_id is not null;
+
+-- Keep the clean base fixture aligned with 015_log_trips_automatically.sql ("Log trips automatically").
+alter table users add column if not exists log_trips_automatically boolean not null default true;

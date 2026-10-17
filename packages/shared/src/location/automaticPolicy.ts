@@ -58,7 +58,7 @@ export type LocationAutomaticLoggingReason =
   | "insufficient_confidence" | "insufficient_route_evidence" | "internal_route_gap"
   | "boundary_uncertainty_exceeded" | "boundary_bounds_missing" | "boundary_bounds_invalid"
   | "uncertain_boundary" | "short_journey_review_only" | "journey_contains_stop" | "motion_review_only"
-  | "time_away_review_only";
+  | "time_away_review_only" | "travel_mode_unknown" | "log_trips_off";
 
 export type CommuteRouteAssessment = {
   eligible: boolean;
@@ -112,6 +112,51 @@ export function assessAutomaticCommuteRoute(segment: CommuteSegment): CommuteRou
     tier: standard ? "standard" : "medium_saved_route",
     reason: standard ? "enabled_trusted_commute" : "enabled_medium_saved_route_commute"
   };
+}
+
+/** Location v3 (PRD D19, A3/A4): a Move shorter than this never logs itself. */
+export const AUTOMATIC_MOVE_MINIMUM_DURATION_MS = 60_000;
+
+/**
+ * Whether a Move logs itself in Review mode (PRD D19, A3): between two known places (saved or accepted
+ * learned, `endsKnown`), medium_high confidence (or the medium saved-route exception), a known mode
+ * (Motion & Fitness or the speed rule), at least two route readings, no internal gap over the
+ * continuity maximum, bounds within five minutes, at least one minute, no stop, never time away, and
+ * never a Move only Motion & Fitness found. Unlike `assessAutomaticCommuteRoute` (v2_enabled), Motion
+ * timing no longer forces Review, and a Move under the journey minimum logs itself when the engine's
+ * short-journey proof qualified it (two independent fast fixes between two different known places,
+ * not Motion support). Overlap, Health coverage, the person's switch and opt-outs are the server's.
+ */
+export function assessAutomaticMove(segment: CommuteSegment, endsKnown: boolean): CommuteRouteAssessment {
+  const reject = (reason: LocationAutomaticLoggingReason): CommuteRouteAssessment => ({ eligible: false, tier: "ineligible", reason });
+  if (segment.status !== "finalised") return reject("segment_not_finalised");
+  if (segment.qualificationReason === "same_place_outing") return reject("time_away_review_only");
+  if (segment.stops?.length) return reject("journey_contains_stop");
+  if (segment.motionSupported) return reject("motion_review_only");
+  const duration = Date.parse(segment.stoppedAt) - Date.parse(segment.startedAt);
+  if (!Number.isFinite(duration) || duration < AUTOMATIC_MOVE_MINIMUM_DURATION_MS) return reject("short_journey_review_only");
+  if (!endsKnown) return reject("untrusted_commute_endpoints");
+  if (!segment.travelMode) return reject("travel_mode_unknown");
+  const standard = hasAutomaticConfidence(segment.confidence);
+  if (!standard && segment.confidence !== "medium") return reject("insufficient_confidence");
+  if (segment.continuityStatus === "manual") return reject("uncertain_boundary");
+  const qualification = segment.qualificationReason;
+  const qualified = standard
+    ? qualification === "significant_endpoint_displacement" || qualification === "same_place_meaningful_round_trip"
+    : Boolean(segment.fromPlaceId && segment.toPlaceId) && segment.fromPlaceId !== segment.toPlaceId &&
+      (qualification === "significant_endpoint_displacement" || qualification === "significant_route_distance");
+  if (!qualified || !Number.isInteger(segment.routeSampleCount) ||
+    segment.routeSampleCount < (standard ? 2 : AUTOMATIC_MEDIUM_COMMUTE_MIN_ROUTE_SAMPLES)) {
+    return reject("insufficient_route_evidence");
+  }
+  if (!Number.isFinite(segment.maximumObservationGapSeconds) || segment.maximumObservationGapSeconds < 0 ||
+    segment.maximumObservationGapSeconds * 1_000 > LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs) {
+    return reject("internal_route_gap");
+  }
+  const boundary = assessAutomaticLocationBoundaries(segment);
+  if (!boundary.eligible) return reject(boundaryReason(boundary));
+  return { eligible: true, tier: standard ? "standard" : "medium_saved_route",
+    reason: standard ? "enabled_trusted_commute" : "enabled_medium_saved_route_commute" };
 }
 
 export type LocationAutomaticLoggingDecision = {

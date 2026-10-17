@@ -392,6 +392,60 @@ export function PlacesLocationSettings() {
         detail="Places Dayframe recognises, and whether visits there are suggested."
         action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
       />
+      <TripLoggingSetting />
+    </>
+  );
+}
+
+/**
+ * "Log trips automatically" (PRD D19, A4; on by default): a Move between two known places with a clear
+ * way of travelling becomes a block without a Review card. The switch moves at once and the server
+ * stores it; a refused save puts it back and says so.
+ */
+function TripLoggingSetting() {
+  const { data, refresh } = useAppShellRuntime();
+  const stored = data?.user.logTripsAutomatically ?? false;
+  const [pending, setPending] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const checked = pending ?? stored;
+
+  async function save(next: boolean) {
+    if (!data || pending !== null) return;
+    setPending(next);
+    setError(null);
+    try {
+      const response = await clientFetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logTripsAutomatically: next, expectedUserId: data.user.id })
+      });
+      if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to save this setting."));
+      await refresh({ force: true });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save this setting.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <>
+      <label className="place-suggestion-toggle df-set-trips">
+        <span>
+          <strong>Log trips automatically</strong>
+          <small id="df-set-trips-hint">Trips between your places become blocks when it’s clear how you travelled. Anything unclear waits in Review.</small>
+        </span>
+        <input
+          aria-describedby="df-set-trips-hint"
+          aria-label="Log trips automatically"
+          checked={checked}
+          disabled={!data || pending !== null}
+          onChange={(event) => void save(event.target.checked)}
+          role="switch"
+          type="checkbox"
+        />
+      </label>
+      {error ? <p className="settings-section-feedback is-error" role="alert">{error}</p> : null}
     </>
   );
 }
