@@ -505,7 +505,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const errorLine = state.error ? (
     <p className="df-review-error" role="alert">
       <span>{state.error}</span>
-      <button className="df-icon-action" type="button" aria-label="Dismiss" onClick={clearError}>
+      <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={clearError}>
         <X size={15} aria-hidden="true" />
       </button>
     </p>
@@ -514,7 +514,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   const missingLine = missingTargetId ? (
     <p className="df-review-error" role="status">
       <span>That moment isn’t waiting here: it was already decided, or it’s older than the newest 100 shown.</span>
-      <button className="df-icon-action" type="button" aria-label="Dismiss" onClick={() => setMissingTargetId(null)}>
+      <button className="df-icon-action" data-tip="Dismiss" type="button" aria-label="Dismiss" onClick={() => setMissingTargetId(null)}>
         <X size={15} aria-hidden="true" />
       </button>
     </p>

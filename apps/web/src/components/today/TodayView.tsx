@@ -714,6 +714,7 @@ function TodayBlockRow({
           <button
             aria-label={`Start ${title} again`}
             className="df-icon-action"
+            data-tip="Start again"
             disabled={startDisabled || isLeaving}
             onClick={onStartAgain}
             type="button"
@@ -724,6 +725,7 @@ function TodayBlockRow({
         <button
           aria-label={`Edit ${title}`}
           className="df-icon-action"
+          data-tip="Edit"
           disabled={isLeaving || isUnsavedEntryId(entry.id)}
           onClick={onEdit}
           type="button"
@@ -734,6 +736,7 @@ function TodayBlockRow({
           <button
             aria-label={`Delete ${title}`}
             className="df-icon-action"
+            data-tip="Delete"
             disabled={isLeaving || isStarting}
             onClick={onDelete}
             type="button"

@@ -5,10 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Check, Folder } from "lucide-react";
+import { Check } from "lucide-react";
 import { AppShellRuntimeProvider, useAppShellRuntime } from "@/components/AppShellRuntime";
 import { DayframeBrand } from "@/components/brand/DayframeBrand";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { TooltipHost } from "@/components/blocks/TooltipHost";
 import { CommandPalette } from "@/components/blocks/CommandPalette";
 import { getResolvedThemeChoice, setThemeChoice, subscribeToThemeChoice } from "@/components/ThemeSettings";
 import { ShellSidebarNav, ShellTabBar } from "@/components/blocks/ShellNav";
@@ -336,6 +337,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           }}
         />
       ) : null}
+      <TooltipHost />
       {overlay === "search" && data ? (
         <CommandPalette
           commands={paletteCommands}
@@ -423,7 +425,7 @@ function ProfileWorkspacePopover({
                   onClick={() => void switchWorkspace(workspace.id)}
                   type="button"
                 >
-                  <Folder aria-hidden="true" size={18} />
+                  <DayframeIcon glyph="folder" size={18} />
                   <span>{workspace.name}</span>
                   {current ? <Check aria-label="Current workspace" size={16} /> : null}
                 </button>

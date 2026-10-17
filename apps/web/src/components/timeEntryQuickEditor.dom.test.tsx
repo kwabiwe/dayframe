@@ -86,6 +86,35 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
   });
 
+  it("closes on the first Escape when there is nothing to suggest (Codex r2 on #468)", async () => {
+    const onClose = vi.fn();
+    renderModal({
+      onClose,
+      sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, tagNames: [], tags: [] }),
+      withSuggestions: false
+    });
+    const description = await screen.findByLabelText("Description");
+    fireEvent.focus(description);
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("closes a visible Suggestions list on the first Escape and the editor on the second", async () => {
+    const onClose = vi.fn();
+    renderModal({ onClose, sourceEntry: timeEntry({ categoryId: null, categoryName: null, description: null, tagNames: [], tags: [] }) });
+    await screen.findByRole("listbox", { name: "Suggestions" });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it("hydrates, removes and selects tags and saves one Place-safe partial payload", async () => {
     const onClose = vi.fn();
     const onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true });
@@ -452,15 +481,17 @@ function renderModal({
   onClose = vi.fn(),
   onDelete,
   onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
-  sourceEntry = timeEntry()
+  sourceEntry = timeEntry(),
+  withSuggestions = true
 }: {
   categories?: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   onClose?: () => void;
   onDelete?: DeleteHandler;
   onSave?: SaveHandler;
   sourceEntry?: TimeEntryRow;
+  withSuggestions?: boolean;
 } = {}) {
-  return render(createElement(TimeEntryQuickEditorModal, modalProps({ categories, onClose, onDelete, onSave, sourceEntry })));
+  return render(createElement(TimeEntryQuickEditorModal, modalProps({ categories, onClose, onDelete, onSave, sourceEntry, withSuggestions })));
 }
 
 function modalProps({
@@ -468,13 +499,15 @@ function modalProps({
   onClose = vi.fn(),
   onDelete,
   onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
-  sourceEntry = timeEntry()
+  sourceEntry = timeEntry(),
+  withSuggestions = true
 }: {
   categories?: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   onClose?: () => void;
   onDelete?: DeleteHandler;
   onSave?: SaveHandler;
   sourceEntry?: TimeEntryRow;
+  withSuggestions?: boolean;
 } = {}): ComponentProps<typeof TimeEntryQuickEditorModal> {
   return {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
@@ -485,7 +518,7 @@ function modalProps({
     onDelete,
     onSave,
     peerEntries: [],
-    taskSuggestions: [{
+    taskSuggestions: withSuggestions ? [{
       key: "deep-planning",
       categoryId: "focus",
       categoryName: "Focus",
@@ -497,7 +530,7 @@ function modalProps({
       useCount: 3,
       totalSeconds: 10_800,
       tagNames: ["Deep work"]
-    }],
+    }] : [],
     tags: [
       { id: "planning", name: "Planning", normalizedName: "planning", usageCount: 2 },
       { id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 1 }

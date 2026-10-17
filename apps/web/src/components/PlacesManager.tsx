@@ -235,7 +235,7 @@ export function PlacesManager({
             : "Existing blocks keep their time data, but this place label will be removed."}
           footer={(
             <>
-              <Button disabled={busyId === deletingPlace.id} onClick={() => setDeletingPlace(null)}>
+              <Button variant="ghost" disabled={busyId === deletingPlace.id} onClick={() => setDeletingPlace(null)}>
                 Cancel
               </Button>
               <Button

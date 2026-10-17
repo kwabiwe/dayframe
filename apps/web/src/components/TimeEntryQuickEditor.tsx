@@ -429,7 +429,9 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         cancelDiscardPrompt();
         return;
       }
-      if (suggestionsOpen) {
+      // Only a Suggestions list on screen takes Escape; an empty one (nothing to suggest) lets the
+      // first Escape close the editor.
+      if (suggestionsOpen && visibleTaskSuggestions.length) {
         event.preventDefault();
         setSuggestionsOpen(false);
         suppressSuggestionFocusRef.current = true;
@@ -451,7 +453,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [attemptDismiss, cancelDiscardPrompt, isCategoryOpen, openDatePicker, suggestionsOpen, tagPanelOpen]);
+  }, [attemptDismiss, cancelDiscardPrompt, isCategoryOpen, openDatePicker, suggestionsOpen, tagPanelOpen, visibleTaskSuggestions.length]);
 
   function handleTaskSuggestionKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (!suggestionsOpen || tagPanelOpen || !visibleTaskSuggestions.length) return;
@@ -746,6 +748,7 @@ export function TimeEntryQuickEditorPanel({
             className="calendar-compact-icon-action"
             type="button"
             aria-label="Close editor"
+            data-tip="Close"
             disabled={controlsDisabled}
             onClick={() => controller.attemptDismiss(true)}
           >

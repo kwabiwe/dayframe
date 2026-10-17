@@ -56,6 +56,8 @@ export const IconButton = forwardRef<
       type={type}
       aria-label={label}
       className={classNames("ui-icon-button", `ui-icon-button-${variant}`, className)}
+      // Its label as a tooltip on hover and keyboard focus (WUI-014; TooltipHost).
+      data-tip={label}
     >
       {children}
     </button>

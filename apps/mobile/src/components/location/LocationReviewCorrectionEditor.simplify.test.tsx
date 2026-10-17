@@ -79,13 +79,6 @@ vi.mock("./LocationEvidenceMap", () => ({
     return null;
   }
 }));
-const sheet = vi.hoisted(() => ({ props: null as null | Record<string, (...args: never[]) => unknown> & Record<string, unknown> }));
-vi.mock("./SavePlaceSheet", () => ({
-  SavePlaceSheet: (props: Record<string, never>) => {
-    sheet.props = props as never;
-    return null;
-  }
-}));
 vi.mock("@/lib/locationReviewDraft", () => import("../../lib/locationReviewDraft"));
 vi.mock("@/lib/mobileTypography", () => import("../../lib/mobileTypography"));
 
@@ -173,14 +166,35 @@ const byTestId = (id: string) => tree!.root.findAll((node) => node.props.testID 
 const byLabel = (label: string) => tree!.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.type === "string");
 const press = async (node: ReactTestInstance) => { await act(async () => { await node.props.onPress(); }); };
 const primary = () => tree!.root.findAll((node) => isHost(node, "Pressable") && node.props.accessibilityRole === "button" && node.props.onPress)
-  .find((node) => ["Record visit", "Use once and record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
+  .find((node) => ["Record visit", "Record", "Save place and record", "Use place and record", "Record commute", "Record trip"].includes(text(node)))!;
+
+describe("Location evidence polish (owner, 17 Oct 2026)", () => {
+  it("labels the duration plainly on screen and tells VoiceOver it is estimated", async () => {
+    const evidence = stay({ matched: true });
+    (evidence.segment as { approximateArrival?: boolean }).approximateArrival = true;
+    await render(evidence);
+    expect(texts("Duration")).toHaveLength(1);
+    expect(texts("Estimated duration")).toHaveLength(0);
+    expect(tree!.root.findAll((node) => typeof node.type === "string" &&
+      typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Estimated duration "))).not.toHaveLength(0);
+  });
+
+  it("offers Skip in neutral text and no second Record once", async () => {
+    await render(stay({ matched: true }));
+    const skip = tree!.root.findAll((node) => node.props.testID === "location-evidence-skip" && typeof node.type !== "string");
+    expect(skip.length).toBeGreaterThan(0);
+    expect(skip.every((node) => !node.props.danger)).toBe(true);
+    expect(texts("Record once")).toHaveLength(0);
+  });
+});
 
 describe("Where were you? (D2, D3)", () => {
   it("lists the matched place once, in plain words, with nearby places under the empty search field", async () => {
     await render(stay({ matched: true }));
     // One row for the matched place: no separate answer card and no "Current match".
     expect(texts("Example Studio")).toHaveLength(1);
-    expect(texts("Matched place")).toHaveLength(1);
+    // One short line: what it is and how far (owner, 17 Oct 2026).
+    expect(texts("Matched place · 10 m")).toHaveLength(1);
     expect(texts("Current match")).toHaveLength(0);
     expect(texts("Record without choosing a place")).toHaveLength(0);
     expect(texts("Search other places")).toHaveLength(0);
@@ -216,14 +230,17 @@ describe("Where were you? (D2, D3)", () => {
     expect(native.resolveNearby).toHaveBeenCalledWith({ id: "poi-a", requestId: expect.stringMatching(/^nearby-\d+$/) });
     // The chosen place is the selected row (with Remove) and leaves the nearby list.
     const chosen = tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string");
-    expect(chosen.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState.checked])).toEqual([["Example Bakery, 2 Example Road", true]]);
-    expect(byLabel("Remove Example Bakery")).toHaveLength(1);
+    // One short line, no address; a single ✕ clears it (owner, 17 Oct 2026).
+    expect(chosen.map((node) => [node.props.accessibilityLabel, node.props.accessibilityState.checked])).toEqual([["Example Bakery, New place · 20 m", true]]);
+    expect(byLabel("Clear Example Bakery")).toHaveLength(1);
+    expect(texts("Save place")).toHaveLength(0);
+    expect(texts("Record")).toHaveLength(1);
     expect(tree!.root.findAll((node) => node.props.label === "Save for future visits")).not.toHaveLength(0);
     expect(byTestId("location-evidence-nearby-0")[0].props.accessibilityLabel).toMatch(/^Example Studio/);
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "record_poi_once", name: "Example Bakery" });
     // Remove goes back to no place.
-    await press(byLabel("Remove Example Bakery")[0]);
+    await press(byLabel("Clear Example Bakery")[0]);
     expect(texts("Record visit")).toHaveLength(1);
   });
 
@@ -378,89 +395,3 @@ describe("What did you do? (D1)", () => {
     expect((onResolve.mock.calls[0][0] as { edit: object }).edit).not.toHaveProperty("categoryId");
   });
 });
-
-describe("Save this place (PRD D19, design §7)", () => {
-  const bakery = { suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
-    formattedAddress: "2 Example Road", latitude: 10.0001, longitude: 20.0001 };
-  async function renderSaving(evidence: LocationReviewEvidenceDto, onSavePlace: Mock, onPlaceSaved: Mock) {
-    sheet.props = null;
-    await act(async () => {
-      tree = create(
-        <LocationReviewCorrectionEditor adjacentReview={undefined} categories={categories} evidence={evidence} isFocused
-          onPlaceSaved={onPlaceSaved} onResolve={onResolve} onSavePlace={onSavePlace} places={[]}
-          reviewItem={{ suggestedCategoryId: "cat-gym" } as never} saving={false} />
-      );
-    });
-  }
-
-  it("saves an unsaved visit's chosen place without logging it, then logs the visit as that place", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => null);
-    const onPlaceSaved = vi.fn();
-    await renderSaving(stay({ matched: false }), onSavePlace, onPlaceSaved);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    // The sheet starts from the chosen venue's name, centres on where the visit was and logs as its activity.
-    expect(sheet.props).toMatchObject({ initialName: "Example Bakery", centre: { latitude: 10, longitude: 20 }, logsAs: "Training" });
-    const request = { name: "Bakery corner", radiusMeters: 110, suggestVisits: true, autoLog: false };
-    expect(await sheet.props!.onSave(request as never)).toBeNull();
-    expect(onSavePlace).toHaveBeenCalledWith({ ...request, categoryId: "cat-gym" });
-    expect(onResolve).not.toHaveBeenCalled();
-    // The sheet leaves first; then the row becomes the saved place and the screen raises its toast.
-    await act(async () => {
-      sheet.props!.onClose();
-      sheet.props!.onSaved(request as never);
-    });
-    expect(onPlaceSaved).toHaveBeenCalledWith("Bakery corner");
-    expect(texts("Bakery corner")).toHaveLength(1);
-    expect(texts("New saved place")).toHaveLength(1);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-    expect(tree!.root.findAll((node) => node.props.label === "Save for future visits")).toHaveLength(0);
-    await press(primary());
-    const logged = onResolve.mock.calls[0][0] as { action: string; edit?: Record<string, unknown> };
-    expect(logged.action).toBe("edit_and_confirm");
-    expect(logged.edit).not.toHaveProperty("placeId");
-  });
-
-  it("records the saved place, not its removal, once a refresh brings it back as the match (Codex r1 on #460)", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => null);
-    await renderSaving(stay({ matched: false }), onSavePlace, vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    const request = { name: "Bakery corner", radiusMeters: 110, suggestVisits: true, autoLog: false };
-    await sheet.props!.onSave(request as never);
-    await act(async () => { sheet.props!.onClose(); sheet.props!.onSaved(request as never); });
-    const refreshed = stay({ matched: true }) as unknown as { display: Record<string, unknown>; map: { nearbySavedPlaces: unknown[] } };
-    refreshed.display = { ...refreshed.display, title: "Bakery corner", placeId: "place-bakery", placeName: "Bakery corner" };
-    refreshed.map.nearbySavedPlaces = [];
-    await act(async () => {
-      tree!.update(
-        <LocationReviewCorrectionEditor adjacentReview={undefined} categories={categories} evidence={refreshed as never} isFocused
-          onPlaceSaved={vi.fn()} onResolve={onResolve} onSavePlace={onSavePlace} places={[]}
-          reviewItem={{ suggestedCategoryId: "cat-gym", suggestedPlaceId: "place-bakery" } as never} saving={false} />
-      );
-    });
-    expect(texts("New saved place")).toHaveLength(0);
-    await press(primary());
-    const logged = onResolve.mock.calls[0][0] as { action: string; edit?: Record<string, unknown> };
-    expect(logged.action).toBe("edit_and_confirm");
-    expect(logged.edit).not.toHaveProperty("placeId");
-  });
-
-  it("keeps the sheet's draft when the save is refused, and never offers it for a matched visit", async () => {
-    native.resolveNearby.mockResolvedValue(bakery);
-    const onSavePlace = vi.fn(async () => "This place is already being saved.");
-    await renderSaving(stay({ matched: false }), onSavePlace, vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    await press(byTestId("location-evidence-save-place")[0]);
-    expect(await sheet.props!.onSave({ name: "Bakery", radiusMeters: 60, suggestVisits: true, autoLog: false } as never)).toBe("This place is already being saved.");
-    act(() => tree!.unmount());
-    tree = undefined;
-    await renderSaving(stay({ matched: true }), vi.fn(), vi.fn());
-    await press(byTestId("location-evidence-nearby-0")[0]);
-    expect(byTestId("location-evidence-save-place")).toHaveLength(0);
-  });
-});
-

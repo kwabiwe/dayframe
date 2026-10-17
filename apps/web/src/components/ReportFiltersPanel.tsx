@@ -3,7 +3,8 @@
 import { useId, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Funnel, X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { ModalDialog } from "@/components/ui/Primitives";
 import { blockStyle } from "@/lib/block-style";
@@ -55,9 +56,9 @@ export function ReportFiltersPanel({
     <section className="df-report-filters" aria-label="Report filters">
       <p className="sr-only" role="status">{summary}</p>
       <button aria-haspopup="dialog" className="df-rbtn df-rbtn--sm df-report-filter-button" onClick={() => setOpen(true)} type="button">
-        {/* A generic funnel (UIA-212 allows lucide for generic controls), as on the iPhone's Filter;
-            the one text button outside primaries that keeps an icon (owner staging feedback I3). */}
-        <Funnel aria-hidden="true" size={16} />
+        {/* The funnel, as on the iPhone's Filter: the one text button outside primaries that keeps an
+            icon (owner staging feedback I3), drawn from the registry like every Dayframe glyph. */}
+        <DayframeIcon glyph="funnel" size={16} />
         Filter{chips.length ? ` · ${chips.length}` : ""}
       </button>
       {chips.length > 0 ? (

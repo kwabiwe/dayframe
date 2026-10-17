@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -161,6 +161,26 @@ describe("ConfirmDialog (WUI-005/WUI-009)", () => {
     expect(again.container.hasAttribute("inert")).toBe(false);
     // Closed layers stay inert through their own prop.
     expect(first.hasAttribute("inert")).toBe(true);
+    expect(second.hasAttribute("inert")).toBe(true);
+  });
+
+  it("leaves the older dialog interactive after the newer closes under StrictMode (Codex r3 on #469)", () => {
+    function Two() {
+      const [second, setSecond] = useState(true);
+      return (
+        <>
+          <ConfirmDialog confirmLabel="Delete" onCancel={vi.fn()} onConfirm={vi.fn()} open title="First?" />
+          <ConfirmDialog confirmLabel="Delete" onCancel={() => setSecond(false)} onConfirm={vi.fn()} open={second} title="Second?" />
+        </>
+      );
+    }
+    render(<StrictMode><Two /></StrictMode>);
+    const first = screen.getByRole("alertdialog", { name: "First?" }).closest<HTMLElement>(".df-confirm-layer")!;
+    const second = screen.getByRole("alertdialog", { name: "Second?" }).closest<HTMLElement>(".df-confirm-layer")!;
+    expect(first.hasAttribute("inert")).toBe(true);
+    expect(second.hasAttribute("inert")).toBe(false);
+    fireEvent.keyDown(second, { key: "Escape" });
+    expect(first.hasAttribute("inert")).toBe(false);
     expect(second.hasAttribute("inert")).toBe(true);
   });
 

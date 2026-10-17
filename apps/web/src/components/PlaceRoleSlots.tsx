@@ -152,7 +152,7 @@ export function PlaceRoleSlots({
             : `Choose the saved place that is your ${editingSlot.label.toLowerCase()}. Past blocks stay where they were recorded.`}
           footer={(
             <>
-              <Button disabled={saving} onClick={() => setEditing(null)}>Cancel</Button>
+              <Button variant="ghost" disabled={saving} onClick={() => setEditing(null)}>Cancel</Button>
               <Button disabled={saving} variant={editing.mode === "clear" ? "danger" : "primary"} onClick={() => void save()}>
                 {saving ? "Saving…" : editing.mode === "clear" ? "Clear" : "Save"}
               </Button>
