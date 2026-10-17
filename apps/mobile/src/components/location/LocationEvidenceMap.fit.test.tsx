@@ -32,7 +32,7 @@ function mount(reduceMotion = false) {
   const fitToCoordinates = vi.fn();
   let tree: ReactTestRenderer | undefined;
   const element = (point: { latitude: number; longitude: number }) => (
-    <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={stay} reduceMotion={reduceMotion}
+    <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={stay} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
       selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
   );
   act(() => {
@@ -43,6 +43,12 @@ function mount(reduceMotion = false) {
   return {
     fitToCoordinates,
     choose(point: { latitude: number; longitude: number }) { act(() => tree!.update(element(point))); },
+    tap(point: { latitude: number; longitude: number }) {
+      act(() => {
+        tree!.root.findByType("MapView" as never).props.onPress({ nativeEvent: { coordinate: point } });
+        tree!.update(element(point));
+      });
+    },
     pan(region: { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number }) {
       act(() => tree!.root.findByType("MapView" as never).props.onRegionChangeComplete(region));
     }
@@ -70,6 +76,36 @@ describe("the evidence map shows the chosen place's pin", () => {
     const map = mount();
     map.choose({ latitude: 10.0002, longitude: 20.0002 });
     expect(map.fitToCoordinates).not.toHaveBeenCalled();
+  });
+
+  it("never moves for a map tap, even one near the edge whose circle runs off screen (Codex r1 on #482)", () => {
+    const map = mount();
+    map.tap({ latitude: 10.0019, longitude: 20.0019 });
+    expect(map.fitToCoordinates).not.toHaveBeenCalled();
+    // A later list choice out of view still moves it.
+    map.choose({ latitude: 10.0032, longitude: 20 });
+    expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
+  });
+
+  it("judges a choice made while the camera moves against where it is heading (Codex r1 on #482)", () => {
+    const map = mount();
+    map.choose({ latitude: 10.0032, longitude: 20 });
+    // Inside the opening view, but not inside the view the camera is heading for.
+    map.choose({ latitude: 10, longitude: 20.0009 });
+    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the newest choice if the camera settles without it, and only once (Codex r1 on #482)", () => {
+    const map = mount();
+    map.choose({ latitude: 10.0032, longitude: 20 });
+    map.choose({ latitude: 10.0016, longitude: 20 });
+    expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
+    map.pan({ latitude: 10.0032, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
+    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
+    // That fit's own settle, and a later pan by the person, move nothing more.
+    map.pan({ latitude: 10.0032, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
+    map.pan({ latitude: 10.01, longitude: 20, latitudeDelta: 0.001, longitudeDelta: 0.001 });
+    expect(map.fitToCoordinates).toHaveBeenCalledTimes(2);
   });
 
   it("judges what is in view from where the person has panned", () => {

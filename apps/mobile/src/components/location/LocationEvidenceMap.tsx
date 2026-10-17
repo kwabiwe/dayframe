@@ -38,6 +38,11 @@ export function LocationEvidenceMap({
 }: Props) {
   const mapRef = useRef<MapView>(null);
   const regionRef = useRef<Region | null>(null);
+  // The point a map tap chose: the camera never follows a tap (it is on screen where it was tapped).
+  const tappedPointRef = useRef<Point | null>(null);
+  // The newest list choice, and the one the camera is moving to (null once it arrives).
+  const latestChoiceRef = useRef<Point | null>(null);
+  const fittingToRef = useRef<Point | null>(null);
   const samples = evidence.map.acceptedSamples;
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   // Time away has no route line, so its readings are the evidence to inspect.
@@ -68,22 +73,52 @@ export function LocationEvidenceMap({
   regionRef.current ??= initialRegion;
   const stayRadiusMeters = evidence.map.centre ? evidence.map.stayRadiusMeters ?? 0 : 0;
 
+  /** Moves the camera to the chosen pin and circle with the stay's area; a newer call retargets it. */
+  function revealChoice(point: Point) {
+    if (!centre) return;
+    const extent = [...circleExtent(centre, stayRadiusMeters), ...circleExtent(point, selectedPointRadiusMeters ?? 0)];
+    // Judge later choices against where the camera is heading, not where it was.
+    regionRef.current = boundingRegion(extent);
+    fittingToRef.current = point;
+    mapRef.current?.fitToCoordinates(extent, {
+      animated: !reduceMotion,
+      edgePadding: { top: 40, right: 40, bottom: 40, left: 40 }
+    });
+  }
+
   // A place chosen from a list can sit outside the stay's opening view: the camera then moves
-  // once to show its pin alongside the stay's area. A pin already in view (a map tap) stays put.
+  // once to show its pin alongside the stay's area. A pin already in view, or a map tap, stays put.
   const selectedLatitude = selectedPoint?.latitude;
   const selectedLongitude = selectedPoint?.longitude;
   useEffect(() => {
     if (!centre || selectedLatitude === undefined || selectedLongitude === undefined) return;
     const point = { latitude: selectedLatitude, longitude: selectedLongitude };
+    const tapped = tappedPointRef.current;
+    tappedPointRef.current = null;
+    if (tapped && samePoint(tapped, point)) {
+      latestChoiceRef.current = null;
+      return;
+    }
+    latestChoiceRef.current = point;
     const region = regionRef.current;
     if (region && regionContains(region, point, selectedPointRadiusMeters ?? 0)) return;
-    mapRef.current?.fitToCoordinates(
-      [...circleExtent(centre, stayRadiusMeters), ...circleExtent(point, selectedPointRadiusMeters ?? 0)],
-      { animated: !reduceMotion, edgePadding: { top: 40, right: 40, bottom: 40, left: 40 } }
-    );
+    revealChoice(point);
     // Only a new chosen point moves the camera; the stay centre is fixed for this evidence.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedLatitude, selectedLongitude]);
+
+  function settleRegion(region: Region) {
+    regionRef.current = region;
+    const fittedTo = fittingToRef.current;
+    fittingToRef.current = null;
+    // A choice made while the camera moved was judged against its predicted end; if the camera
+    // settled elsewhere, show that newest choice (once: the next settle has nothing newer).
+    const latest = latestChoiceRef.current;
+    if (fittedTo && latest && !samePoint(latest, fittedTo)
+      && !regionContains(region, latest, selectedPointRadiusMeters ?? 0)) {
+      revealChoice(latest);
+    }
+  }
 
   if (!centre || !initialRegion) {
     return (
@@ -105,7 +140,10 @@ export function LocationEvidenceMap({
     ? commuteLine[commuteLine.length - 1]
     : undefined;
   const usesApproximateFallback = evidence.segment.kind === "commute" && route.length < 2 && straightLineFallback.length >= 2;
-  const handlePress = (event: MapPressEvent) => onSelectPoint?.(event.nativeEvent.coordinate);
+  const handlePress = (event: MapPressEvent) => {
+    tappedPointRef.current = event.nativeEvent.coordinate;
+    onSelectPoint?.(event.nativeEvent.coordinate);
+  };
 
   return (
     <View>
@@ -119,7 +157,7 @@ export function LocationEvidenceMap({
             : "Map showing the detected visit location."}
         initialRegion={initialRegion}
         ref={mapRef}
-        onRegionChangeComplete={(region) => { regionRef.current = region; }}
+        onRegionChangeComplete={settleRegion}
         userInterfaceStyle={appearance}
         onPress={onSelectPoint ? handlePress : undefined}
         pitchEnabled={false}
@@ -259,7 +297,25 @@ export function LocationEvidenceMap({
   );
 }
 
+type Point = { latitude: number; longitude: number };
+
 const METRES_PER_DEGREE = 111_320;
+
+function samePoint(a: Point, b: Point) {
+  return a.latitude === b.latitude && a.longitude === b.longitude;
+}
+
+/** The region a fit to these points heads for (a little wider, as the fit's padding makes it). */
+function boundingRegion(points: Point[]): Region {
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  return {
+    latitude: (Math.max(...latitudes) + Math.min(...latitudes)) / 2,
+    longitude: (Math.max(...longitudes) + Math.min(...longitudes)) / 2,
+    latitudeDelta: spread(latitudes) * 1.25,
+    longitudeDelta: spread(longitudes) * 1.25
+  };
+}
 
 /** The four compass points of a circle, so a fit keeps the whole area on screen. */
 function circleExtent(point: { latitude: number; longitude: number }, radiusMeters: number) {
