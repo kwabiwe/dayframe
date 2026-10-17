@@ -806,22 +806,25 @@ async function savePlace(
      for update of ri, st, ae skip locked`,
     [session.workspaceId, session.userId, item.id, SAVE_PLACE_REMATCH_DAYS, item.centreLongitude, item.centreLatitude, action.radiusMeters]);
   for (const target of [{ reviewId: item.id, segmentId: item.segmentId, eventId: item.eventId, own: true }, ...others.rows.map((row) => ({ ...row, own: false }))]) {
-    await client.query(
+    const card = await client.query<{ categoryId: string | null }>(
       `update review_items ri set suggested_place_id = $1,
          title = (select ${placeDisplayNameSql("p")} from places p where p.id = $1),
          suggested_category_id = case when $5 then $6::uuid else coalesce(ri.suggested_category_id, $6::uuid) end
-       where ri.id = $2 and ri.workspace_id = $3 and ri.user_id = $4`,
+       where ri.id = $2 and ri.workspace_id = $3 and ri.user_id = $4
+       returning ri.suggested_category_id as "categoryId"`,
       [place.id, target.reviewId, session.workspaceId, session.userId, target.own, categoryId]);
     // The card's reason was about the place it did not have; replay gives the saved place's (Codex r1 on #459).
     await client.query(
       `update activity_events set suggested_place_id = $1, raw_payload = raw_payload - 'semanticReason'
        where id = $2 and workspace_id = $3 and user_id = $4`,
       [place.id, target.eventId, session.workspaceId, session.userId]);
+    // The Stay keeps the activity its card now has, which replay keeps over the place's default
+    // (a re-matched card keeps its own; Codex r2 on #459).
     await client.query(
-      `update stay_segments set place_id = $1, learned_place_id = null,
-         continuity_status = 'manual', metadata = metadata || '{"placeMatchKind":"saved"}'::jsonb, updated_at = now()
+      `update stay_segments set place_id = $1, learned_place_id = null, continuity_status = 'manual',
+         metadata = metadata || jsonb_build_object('placeMatchKind', 'saved', 'correctedCategoryId', $5::uuid), updated_at = now()
        where id = $2 and workspace_id = $3 and user_id = $4`,
-      [place.id, target.segmentId, session.workspaceId, session.userId]);
+      [place.id, target.segmentId, session.workspaceId, session.userId, card.rows[0]?.categoryId ?? null]);
   }
   await client.query(
     `insert into place_match_feedback (

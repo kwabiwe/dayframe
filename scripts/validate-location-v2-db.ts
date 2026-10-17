@@ -1890,7 +1890,11 @@ async function validateSavePlace() {
        order by ri.suggested_started_at, ri.id`, [WORKSPACE_ID, USER_ID, venue.longitude, venue.latitude])).rows;
     const atVenue = (await unsaved()).filter((row) => row.distance < 150);
     assert(atVenue.length >= 2, "The fixture offered fewer than two unsaved Stays at the moved venue.");
-    const [first] = atVenue;
+    const [first, other] = atVenue;
+    // The other visit there has its own activity, which re-matching and replay keep (Codex r2 on #459).
+    const ownCategory = (await pool.query<{ id: string }>(
+      `insert into categories (workspace_id, name, color) values ($1, 'Visiting friends', 'violet') returning id`, [WORKSPACE_ID])).rows[0].id;
+    await pool.query("update review_items set suggested_category_id = $2 where id = $1", [other.id, ownCategory]);
     const centre = (await pool.query<{ latitude: number; longitude: number }>(
       `select st_y(st.centre::geometry) as latitude, st_x(st.centre::geometry) as longitude
        from review_items ri join stay_segments st on st.id = ri.location_segment_id where ri.id = $1`, [first.id])).rows[0];
@@ -1941,7 +1945,9 @@ async function validateSavePlace() {
     const afterReplay = (await pool.query<{ status: string; placeId: string | null; categoryId: string | null }>(
       `select status, suggested_place_id as "placeId", suggested_category_id as "categoryId" from review_items where id = $1`, [first.id])).rows[0];
     assert.deepEqual(afterReplay, { status: "open", placeId: saved.placeId, categoryId }, "Replay undid Save this place on the open card.");
-
+    const otherAfterReplay = (await pool.query<{ placeId: string | null; categoryId: string | null }>(
+      `select suggested_place_id as "placeId", suggested_category_id as "categoryId" from review_items where id = $1`, [other.id])).rows[0];
+    assert.deepEqual(otherAfterReplay, { placeId: saved.placeId, categoryId: ownCategory }, "Replay gave a re-matched visit the place's activity.");
     // A visit that has a place already is refused; the card can still be logged afterwards.
     await assert.rejects(resolveLocationReviewAction(first.id, { action: "save_place", name: "Again", radiusMeters: 110 }, session),
       /already has a saved place/, "Save this place saved a second place for one visit.");
@@ -1969,6 +1975,7 @@ async function validateSavePlace() {
     if (created.length) await pool.query("delete from places where id = any($1::uuid[])", [created]);
     await pool.query("update places set latitude = latitude - 1 where id = $1", [venue.id]);
     await pool.query("delete from categories where id = $1", [categoryId]);
+    await pool.query("delete from categories where workspace_id = $1 and name = 'Visiting friends'", [WORKSPACE_ID]);
   }
 }
 

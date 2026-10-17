@@ -141,30 +141,53 @@ async function displayContext(
 /**
  * A Stay its person corrected (Change place, Save this place: its persisted row is `manual`) keeps the
  * place it was corrected to when replay re-emits its card, so the card, its activity and its reason
- * follow the correction rather than the engine's match (Codex r1 on #459).
+ * follow the correction rather than the engine's match (Codex r1 on #459); the Moves either side of it
+ * end at that place too, for their names and activity (Codex r2 on #459). A Stay saved as a place
+ * also keeps the activity its card had then (`correctedCategoryId`), never the place's default.
  */
-async function withCorrectedStayPlaces(
-  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
-): Promise<LocationSegment[]> {
-  const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? [] : []))].sort();
+export async function withCorrectedStayPlaces(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+): Promise<{ segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null> }> {
+  const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? []
+    : [stayIds.get(segment.fromStaySegmentId), stayIds.get(segment.toStaySegmentId)].filter((id): id is string => Boolean(id))))].sort();
   const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
+  const categories = new Map<string, string | null>();
   for (const batch of chunks(ids)) {
-    const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null }>(
-      `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind
+    const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null;
+      hasCategory: boolean; categoryId: string | null }>(
+      `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind,
+              metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId"
        from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
       [session.workspaceId, session.userId, batch]);
     for (const row of result.rows) {
       const placeMatchKind = row.kind === "saved" && row.placeId ? "saved" : row.kind === "learned" && row.learnedPlaceId ? "learned"
         : row.placeId ? "saved" : row.learnedPlaceId ? "learned" : "unknown";
       corrected.set(row.id, { placeId: row.placeId, learnedPlaceId: row.learnedPlaceId, placeMatchKind });
+      if (row.hasCategory) categories.set(row.id, row.categoryId);
     }
   }
-  if (corrected.size === 0) return segments;
-  return segments.map((segment) => {
-    if (segment.kind !== "stay") return segment;
-    const identity = corrected.get(stayIds.get(segment.clientSegmentId) ?? "");
-    return identity ? { ...segment, ...identity } : segment;
-  });
+  const correctedCategories = new Map<string, string | null>();
+  if (corrected.size === 0) return { segments, correctedCategories };
+  const savedPlaceOf = (clientStayId: string) => {
+    const identity = corrected.get(stayIds.get(clientStayId) ?? "");
+    return identity ? { placeId: identity.placeMatchKind === "saved" ? identity.placeId : null } : null;
+  };
+  return {
+    segments: segments.map((segment) => {
+      if (segment.kind === "commute") {
+        const from = savedPlaceOf(segment.fromStaySegmentId);
+        const to = savedPlaceOf(segment.toStaySegmentId);
+        return from || to
+          ? { ...segment, ...(from ? { fromPlaceId: from.placeId } : {}), ...(to ? { toPlaceId: to.placeId } : {}) }
+          : segment;
+      }
+      const persistedId = stayIds.get(segment.clientSegmentId) ?? "";
+      const identity = corrected.get(persistedId);
+      if (categories.has(persistedId)) correctedCategories.set(segment.clientSegmentId, categories.get(persistedId) ?? null);
+      return identity ? { ...segment, ...identity } : segment;
+    }),
+    correctedCategories
+  };
 }
 
 /**
@@ -188,7 +211,8 @@ export async function emitReviewSemanticSegments(
     locked: ReadonlySet<string>;
   } = { orphans: [], used: new Set(), locked: new Set() }
 ): Promise<number> {
-  segments = await withCorrectedStayPlaces(client, session, segments, stayIds);
+  const corrections = await withCorrectedStayPlaces(client, session, segments, stayIds);
+  segments = corrections.segments;
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
         !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)) return [];
@@ -253,7 +277,9 @@ export async function emitReviewSemanticSegments(
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title, move } = context(segment);
-    const categoryId = segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null;
+    const categoryId = segment.kind === "commute" ? moveCategoryId(move)
+      : corrections.correctedCategories.has(segment.clientSegmentId) ? corrections.correctedCategories.get(segment.clientSegmentId) ?? null
+      : trusted?.categoryId ?? null;
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);
     // Same pure overlap result as the original review path; never read time entries here.
