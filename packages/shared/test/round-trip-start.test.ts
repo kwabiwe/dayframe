@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assessAutomaticCommuteRoute } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { physicalStopAt, physicalStopFixture, PHYSICAL_STOP_PICKUP } from "../src/location/physicalStopFixture";
@@ -1093,6 +1093,8 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
   it("costs no more with 12-minute visits to recover legs for than with 9-minute stops (Codex r2 on #461)", () => {
     // Four days of six such outings a day. Recovery used to derive each visit over all the evidence
     // (about 3× the run with stops instead of visits); over its own window it costs about the same.
+    // Cost is counted, not timed (timings flaked under load): the timestamps the engine parses, which
+    // grow with every pass over the evidence.
     const week = (minutes: number) => {
       const day = (start: string): Scenario => ({ start, origin: HOME.at, places: [HOME], legs: [
         { kind: "stay", minutes: 60 },
@@ -1105,16 +1107,17 @@ describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex
       return { ...inputs[3], evidence: inputs.flatMap((value, index) =>
         value.evidence.map((item) => ({ ...item, clientEvidenceId: `d${index}-${item.clientEvidenceId}` }))) };
     };
-    const fastest = (value: LocationEngineInput) => {
-      runLocationEngine(value);
-      let best = Number.POSITIVE_INFINITY;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const started = performance.now();
+    const work = (value: LocationEngineInput) => {
+      const parse = vi.spyOn(Date, "parse");
+      try {
         runLocationEngine(value);
-        best = Math.min(best, performance.now() - started);
+        return parse.mock.calls.length;
+      } finally {
+        parse.mockRestore();
       }
-      return best;
     };
-    expect(fastest(week(12)) / fastest(week(9))).toBeLessThan(2);
+    const ratio = work(week(12)) / work(week(9));
+    // Deterministic: about 1.36 here, 2.77 with #461's round-2 per-visit full-evidence derivation.
+    expect(ratio).toBeLessThan(2);
   }, 60_000);
 });

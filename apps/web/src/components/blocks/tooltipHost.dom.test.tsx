@@ -84,6 +84,28 @@ describe("TooltipHost", () => {
     expect(tip()).toBeNull();
   });
 
+  it("keeps a keyboard tip when the pointer leaves something else, and drops a pending tip whose button went (Codex r1 on #471)", () => {
+    const view = setup();
+    const button = view.getByRole("button", { name: "Edit block" });
+    const plain = view.getByRole("button", { name: "Plain" });
+
+    act(() => button.focus());
+    pointer("pointerout", plain, "mouse", document.body);
+    expect(tip()?.textContent).toBe("Edit");
+    act(() => button.blur());
+
+    // A button outside React, so the test can remove it while the tip waits.
+    const loose = document.createElement("button");
+    loose.dataset.tip = "Gone";
+    document.body.append(loose);
+    pointer("pointerover", loose, "mouse");
+    act(() => {
+      loose.remove();
+      vi.advanceTimersByTime(400);
+    });
+    expect(tip()).toBeNull();
+  });
+
   it("shows a text field's tip on hover only, never while it has focus", () => {
     const view = render(
       <>

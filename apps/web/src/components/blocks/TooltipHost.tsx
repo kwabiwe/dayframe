@@ -75,11 +75,18 @@ export function TooltipHost() {
       if (!target || target === targetRef.current) return;
       hide();
       targetRef.current = target;
-      timerRef.current = window.setTimeout(() => showFor(target), SHOW_DELAY_MS);
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        // The button may have gone, or a dialog made it inert, while the pointer rested on it.
+        if (targetRef.current === target && target.isConnected && !target.closest("[inert]")) showFor(target);
+        else if (targetRef.current === target) hide();
+      }, SHOW_DELAY_MS);
     }
     function onPointerOut(event: PointerEvent) {
       const target = targetRef.current;
-      if (!target) return;
+      // Only the pointer leaving the tip's own button hides it; a keyboard tip ignores the pointer.
+      if (!target || fromFocusRef.current) return;
+      if (!(event.target instanceof Node) || !target.contains(event.target)) return;
       const next = event.relatedTarget instanceof Node ? event.relatedTarget : null;
       if (next && target.contains(next)) return;
       hide();

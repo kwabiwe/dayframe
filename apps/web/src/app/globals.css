@@ -10463,7 +10463,8 @@ dialog.ui-dialog.df-palette {
 .df-erow {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px;
+  /* Three 34 px actions 10 px apart, so their 44 px targets meet without overlapping (WUI-013). */
+  grid-template-columns: minmax(0, 1fr) 132px;
   grid-template-rows: 1fr;
   align-items: center;
   border-radius: 14px;
@@ -10587,7 +10588,7 @@ dialog.ui-dialog.df-palette {
 .df-erow-acts {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 10px;
   padding-right: 10px;
   opacity: 0;
   transition: opacity 140ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -13519,6 +13520,10 @@ dialog.ui-dialog.df-rf-dialog {
 
   .df-erow-acts {
     opacity: 1;
+  }
+
+  .df-erow-acts {
+    gap: 4px;
   }
 
   .df-erow-acts .df-icon-action {
