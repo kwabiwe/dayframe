@@ -67,7 +67,8 @@ describe("PersistentTimerBar typed suggestion search", () => {
     runtime = runtimeFixture({ isManualEntryOpen: true });
     render(<PersistentTimerBar />);
 
-    const description = await screen.findByLabelText("Manual block description") as HTMLInputElement;
+    // Add time is the shared New block editor (WUI-025); the timer bar keeps its own Description.
+    const description = within(await screen.findByRole("dialog", { name: "New block" })).getByLabelText("Description") as HTMLInputElement;
     await userEvent.click(description);
     await userEvent.type(description, "  APP");
     const list = await screen.findByRole("listbox", { name: "Suggestions" });

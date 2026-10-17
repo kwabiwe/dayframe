@@ -1011,7 +1011,24 @@ export function TimeEntryQuickEditorPanel({
 export function TimeEntryQuickEditorModal(props: Omit<Extract<TimeEntryQuickEditorProps, { mode: "entry" }>, "mode" | "onDismiss"> & {
   onClose: () => void;
 }) {
-  const modalProps: TimeEntryQuickEditorProps = { ...props, mode: "entry", onDismiss: props.onClose };
+  return <QuickEditorModal modalProps={{ ...props, mode: "entry", onDismiss: props.onClose }} />;
+}
+
+/**
+ * The same editor opened to add a finished block (web UI audit WUI-025, owner 17 Oct 2026): the
+ * timer's Add time and the palette open this "New block" modal instead of a separate dialog.
+ */
+export function TimeEntryQuickCreateModal(props: Omit<Extract<TimeEntryQuickEditorProps, { mode: "create" }>, "mode" | "onDismiss" | "onDraftChange"> & {
+  onClose: () => void;
+}) {
+  return <QuickEditorModal modalProps={{ ...props, mode: "create", onDismiss: props.onClose, onDraftChange: ignoreDraftChange }} />;
+}
+
+function ignoreDraftChange() {
+  // Only Calendar draws a live create preview.
+}
+
+function QuickEditorModal({ modalProps }: { modalProps: TimeEntryQuickEditorProps }) {
   const controller = useTimeEntryQuickEditor(modalProps);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 

@@ -28,25 +28,40 @@ afterEach(() => {
 // Owner decision D2 (14 Oct 2026; Codex r1 on #422): Add time never adds a day after today, even
 // when Calendar is showing one.
 describe("Add time with a future day selected", () => {
-  it("defaults to the hour ending now, not the future day", () => {
+  it("opens the shared New block editor on the hour ending now, not the future day (WUI-025)", () => {
     runtime = runtimeFixture("2026-10-16");
     render(<PersistentTimerBar />);
-    const start = document.querySelector<HTMLInputElement>('input[name="startedAt"]')!;
-    const finish = document.querySelector<HTMLInputElement>('input[name="stoppedAt"]')!;
-    expect(start.value).toBe("2026-10-14T10:00");
-    expect(finish.value).toBe("2026-10-14T11:00");
+    expect(screen.getByRole("dialog", { name: "New block" })).not.toBeNull();
+    expect(screen.getByText("Wednesday 14 October")).not.toBeNull();
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("10:00");
+    expect((screen.getByLabelText("End time") as HTMLInputElement).value).toBe("11:00");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("1h");
   });
 
   it("refuses a finish after today and adds nothing", async () => {
     runtime = runtimeFixture("2026-10-14");
     render(<PersistentTimerBar />);
-    const finish = document.querySelector<HTMLInputElement>('input[name="stoppedAt"]')!;
-    fireEvent.change(finish, { target: { value: "2026-10-15T09:00" } });
-    finish.value = "2026-10-15T09:00";
-    const form = finish.closest("form")!;
-    await act(async () => { fireEvent.submit(form); });
-    expect(screen.getByText("Add time can't go past today.")).not.toBeNull();
+    // An End earlier than Start is the next day: tomorrow, after today.
+    const finish = screen.getByLabelText("End time") as HTMLInputElement;
+    fireEvent.change(finish, { target: { value: "09:00" } });
+    fireEvent.blur(finish);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add block" }));
+    });
+    expect(screen.getByRole("alert").textContent).not.toBe("");
     expect(runtime.createManualEntry).not.toHaveBeenCalled();
+  });
+
+  it("adds the block through Add time's own rules", async () => {
+    runtime = runtimeFixture("2026-10-14");
+    render(<PersistentTimerBar />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add block" }));
+    });
+    expect(runtime.createManualEntry).toHaveBeenCalledTimes(1);
+    const input = (runtime.createManualEntry as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(new Date(input.startedAt).getHours()).toBe(10);
+    expect(new Date(input.stoppedAt).getHours()).toBe(11);
   });
 });
 

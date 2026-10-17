@@ -101,7 +101,8 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain('<span className="calendar-compact-field-label">Duration</span>');
     expect(quick).not.toContain('<strong className="tabular">');
     expect(styles).toMatch(/\.calendar-compact-date-time-controls > input,[\s\S]*?\.calendar-compact-running-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
-    expect(styles).toMatch(/\.dayframe-date-time-compact-value \{[^}]*font-size:\s*15px;[^}]*font-weight:\s*400;[^}]*line-height:\s*21px;/s);
+    // Add time's own date-time picker is retired (WUI-025): its CSS goes with it.
+    expect(styles).not.toContain("dayframe-date-time");
   });
 
   it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {
