@@ -96,6 +96,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [idleMinute, setIdleMinute] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
+  const addTimeButtonRef = useRef<HTMLButtonElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   // Trello 213: the Description's neutral perimeter shows for keyboard focus only, never a click.
@@ -833,6 +834,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               disabled={isTimerBusy}
               label="Add time manually"
               onClick={openManualEntry}
+              ref={addTimeButtonRef}
             >
               <Plus size={18} />
             </IconButton>
@@ -898,6 +900,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       {isManualEntryOpen ? (
         <ManualEntryEditor
           data={data}
+          fallbackFocus={() => addTimeButtonRef.current ?? descriptionInputRef.current}
           isBusy={isTimerBusy}
           onClose={closeManualEntry}
           onCreateCategory={createCategory}
@@ -916,12 +919,15 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
  */
 function ManualEntryEditor({
   data,
+  fallbackFocus,
   isBusy,
   onClose,
   onCreateCategory,
   onCreate
 }: {
   data: BootstrapData;
+  /** Focus on close when what opened Add time is gone (the palette). */
+  fallbackFocus: () => HTMLElement | null;
   isBusy: boolean;
   onClose: () => void;
   onCreateCategory: (name: string) => Promise<CreateCategoryOutcome>;
@@ -955,8 +961,10 @@ function ManualEntryEditor({
 
   return (
     <TimeEntryQuickCreateModal
+      allowLaterToday
       capturedNow={capturedNow}
       categories={data.categories}
+      fallbackFocus={fallbackFocus}
       isTimerBusy={isBusy}
       onClose={onClose}
       onCreateCategory={onCreateCategory}
