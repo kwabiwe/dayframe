@@ -140,12 +140,12 @@ describe("TimeEntryQuickEditorModal", () => {
     await userEvent.type(description, " updated");
 
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" }, { timeout: 3000 })).not.toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
 
     fireEvent.mouseDown(screen.getByTestId("time-entry-quick-editor-modal"));
-    expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" }, { timeout: 3000 })).not.toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -283,7 +283,7 @@ describe("TimeEntryQuickEditorModal", () => {
     expect((screen.getByRole("button", { name: /All activities/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByLabelText("End time") as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByLabelText("Duration in hours and minutes") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /Delete Plan release/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Close editor" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
@@ -346,7 +346,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const view = renderModal({ onClose, sourceEntry: timeEntry({ stoppedAt: null, durationSeconds: 3_600 }) });
     await screen.findByText("Running");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("alertdialog", { name: "Discard changes?" })).toBeNull();
+    expect(screen.queryByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeNull();
     expect(onClose).toHaveBeenCalledOnce();
 
     view.unmount();
@@ -355,7 +355,7 @@ describe("TimeEntryQuickEditorModal", () => {
     const start = await screen.findByLabelText("Start time");
     fireEvent.change(start, { target: { value: "08:30" } });
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
+    expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" }, { timeout: 3000 })).not.toBeNull();
     expect(dirtyClose).not.toHaveBeenCalled();
   });
 

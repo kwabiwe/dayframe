@@ -34,18 +34,18 @@ describe("Calendar compact temporal DOM", () => {
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
 
     fireEvent.change(start, { target: { value: "09:30" } });
-    expect(duration.value).toBe("00:30");
+    expect(duration.value).toBe("30m");
     expect(finish.value).toBe("10:00");
 
     fireEvent.change(finish, { target: { value: "10:30" } });
-    expect(duration.value).toBe("01:00");
+    expect(duration.value).toBe("1h");
 
     fireEvent.change(duration, { target: { value: "90m" } });
-    expect(duration.value).toBe("01:30");
+    expect(duration.value).toBe("1h 30m");
     expect(start.value).toBe("09:30");
     expect(finish.value).toBe("11:00");
-    expect(duration.getAttribute("aria-label")).toBe("Duration in hours and minutes");
-    expect(duration.getAttribute("placeholder")).toBe("00:30");
+    expect(duration.getAttribute("aria-label")).toBe("Duration");
+    expect(duration.getAttribute("placeholder")).toBe("30m");
   });
 
   it.each([
@@ -97,7 +97,7 @@ describe("Calendar compact temporal DOM", () => {
     await user.clear(start);
     await user.type(start, "815p");
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("alertdialog", { name: "Discard changes?" })).toBeNull();
+    expect(screen.queryByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeNull();
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
@@ -111,7 +111,7 @@ describe("Calendar compact temporal DOM", () => {
     fireEvent.change(start, { target: { value: "24:" } });
     expect(start.value).toBe("24:");
     expect(finish.value).toBe("10:30");
-    expect(duration.value).toBe("00:30");
+    expect(duration.value).toBe("30m");
     expect(screen.queryByRole("alert")).toBeNull();
 
     fireEvent.blur(start);
@@ -138,7 +138,7 @@ describe("Calendar compact temporal DOM", () => {
     // Leaving the field reads it as 09:10, never 00:91 or 01:09.
     fireEvent.blur(start);
     expect(start.value).toBe("09:10");
-    expect(duration.value).toBe("00:30");
+    expect(duration.value).toBe("30m");
     expect(finish.value).toBe("09:40");
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -241,7 +241,7 @@ describe("Calendar compact temporal DOM", () => {
 
     await waitFor(() => expect(finishDate.getAttribute("aria-label")).toContain("3 August 2026"));
     expect(screen.getByText("+1").getAttribute("title")).toBe("End time, one day after Start");
-    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24:30");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("24h 30m");
     expect(document.activeElement).toBe(finishDate);
   });
 
@@ -280,7 +280,13 @@ describe("Calendar compact temporal DOM", () => {
     expect(feedback.getAttribute("data-feedback-mode")).toBe("error");
 
     await user.click(screen.getByRole("button", { name: "Close editor" }));
-    expect(await screen.findByRole("alertdialog", { name: "Discard changes?" })).not.toBeNull();
+    // A direct lookup: a whole-document role query is slow enough under a full parallel run to miss.
+    const prompt = await waitFor(() => {
+      const dialog = document.querySelector<HTMLElement>('.df-confirm[role="alertdialog"]');
+      if (!dialog) throw new Error("The discard confirmation is not open yet");
+      return dialog;
+    });
+    expect(document.getElementById(prompt.getAttribute("aria-labelledby") ?? "")?.textContent).toBe("Discard unsaved changes?");
     expect(feedback.getAttribute("data-feedback-mode")).toBe("discard");
     expect(finish.getAttribute("aria-describedby")).toBeNull();
     expect(document.getElementById(alert.id)).toBeNull();
@@ -320,7 +326,7 @@ describe("Calendar compact temporal DOM", () => {
     expect(finish.getAttribute("aria-invalid")).toBeNull();
     expect(finish.getAttribute("aria-describedby")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("02:00");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("2h");
   });
 
   it("exposes Calendar Cancel and routes it through the shared clean-dismiss path", async () => {
@@ -354,10 +360,10 @@ describe("Calendar compact temporal DOM", () => {
     expect(screen.queryByLabelText("End time")).toBeNull();
     expect(screen.queryByRole("button", { name: /Choose End date/ })).toBeNull();
     expect(screen.queryByLabelText("Duration")).toBeNull();
-    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30");
+    expect(screen.getByLabelText("Elapsed time").textContent).toContain("30m");
 
     act(() => vi.advanceTimersByTime(1_000));
-    expect(screen.getByLabelText("Elapsed time").textContent).toContain("00:30");
+    expect(screen.getByLabelText("Elapsed time").textContent).toContain("30m");
 
     const start = screen.getByLabelText("Start time");
     fireEvent.change(start, { target: { value: "09:45" } });

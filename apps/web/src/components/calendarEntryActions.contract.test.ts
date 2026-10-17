@@ -49,23 +49,30 @@ describe("shared web time-entry quick editor", () => {
     expect(reports).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
     expect(timeline).toContain("taskSuggestions={shellData?.taskSuggestions ?? []}");
     expect(quick).toContain("onEnter={controller.handleDescriptionEnter}");
-    expect(quick).toContain('aria-label="Duration in hours and minutes"');
-    expect(quick).toContain('placeholder="00:30"');
+    // Durations read as the app writes them everywhere ("30m", "1h 3m"; WUI-003), never "00:30".
+    expect(quick).toContain('aria-label="Duration"');
+    expect(quick).toContain('placeholder="30m"');
   });
 
-  it("uses one fixed feedback plane with danger discard copy and equal action sizing", () => {
+  it("puts a note above the actions and asks about unsaved changes in the shared confirmation (WUI-004/WUI-005)", () => {
     // Blocks editor head (UIA-201): "Edit block" / "Running block" / "New block" under an eyebrow.
     expect(quick).toContain('const editorHeading = props.mode === "entry" ? (isRunning ? "Running block" : "Edit block") : "New block";');
     expect(quick).toContain("<h2>{editorHeading}</h2>");
     expect(quick).toContain('<p className="df-ed-eyebrow">{editorEyebrow}</p>');
     expect(quick).not.toContain('className="calendar-compact-editor-kicker"');
     expect(quick).toContain('data-feedback-mode={feedbackMode}');
-    expect(quick).toContain("Discard changes?");
-    expect(quick).toContain("Go back");
-    expect(styles).toMatch(/\.calendar-compact-editor-footer \{[^}]*height:\s*var\(--calendar-compact-feedback-height\);[^}]*overflow:\s*hidden;/s);
-    expect(styles).toMatch(/\.calendar-compact-discard-confirmation strong \{[^}]*color:\s*var\(--danger-text\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
-    expect(styles).toMatch(/\.calendar-compact-save,[\s\S]*\.calendar-compact-discard-confirm \{[^}]*height:\s*var\(--web-control-height\);[^}]*font-size:\s*14px;[^}]*line-height:\s*1\.2;/s);
-    // At least the shared width, wider for a longer label, never wrapping (owner, 16 Oct 2026).
+    // The note (error or overlap) has its own line above the actions; it never shares their row.
+    expect(quick).toMatch(/className=\{`df-ed-note[\s\S]*?className="df-ed-actions"/);
+    expect(styles).toMatch(/\.df-ed-note \{[^}]*grid-template-rows:\s*0fr;/s);
+    expect(styles).toMatch(/\.df-ed-note\.is-shown \{[^}]*grid-template-rows:\s*1fr;/s);
+    // Unsaved changes: a real modal, not a footer swap.
+    expect(quick).toContain("<ConfirmDialog");
+    expect(quick).toContain('title="Discard unsaved changes?"');
+    expect(quick).toContain('cancelLabel="Go back"');
+    expect(quick).toContain('surfaceClassName="time-entry-quick-editor-nested-surface"');
+    expect(quick).not.toContain("calendar-compact-discard-confirmation");
+    expect(styles).toMatch(/\.calendar-compact-editor-footer\.df-ed-foot \{[^}]*height:\s*auto;[^}]*border-top:\s*0;[^}]*background:\s*transparent;/s);
+    // Buttons never wrap and are at least the shared width.
     expect(styles).toMatch(/\.calendar-compact-save,\s*\.calendar-compact-cancel \{[^}]*width: max-content;[^}]*min-width:\s*var\(--calendar-compact-action-width\);[^}]*white-space: nowrap;/s);
   });
 
@@ -74,8 +81,10 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-editor-panel input:focus \{[^}]*var\(--web-focus-border\)/s);
     expect(styles).toMatch(/\.calendar-compact-temporal-fields \{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s);
     expect(styles).toMatch(/@container time-entry-editor \(max-width: 380px\)[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/s);
-    expect(styles).toMatch(/@container time-entry-editor \(max-width: 340px\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
-    expect(styles).toMatch(/\.calendar-compact-date-time-controls:focus-within \{[^}]*var\(--web-focus-border\)/s);
+    expect(styles).toMatch(/@container time-entry-editor \(max-width: 280px\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
+    // Time boxes (WUI-001): one inset box per field with the focus ring on the box, not an inner row.
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \* \{[^}]*border-radius:\s*12px;[^}]*padding:\s*7px 12px 6px;[^}]*background:\s*var\(--surface-inset\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \*:focus-within \{[^}]*var\(--web-focus-border\)/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
     expect(quick).toContain('className="calendar-compact-duration-field"');
@@ -101,13 +110,16 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).toContain("useTimelineDeleteUndo");
   });
 
-  it("puts Start again and Delete (danger) in the head beside Close, and neutral selection in shared controls (UIA-201, UIA-205)", () => {
-    expect(quick).toMatch(/className="calendar-compact-editor-icons"[\s\S]*?className="calendar-compact-start-again"[\s\S]*?Start again[\s\S]*?className="calendar-compact-icon-action is-danger"[\s\S]*?glyph="trash-2"[\s\S]*?aria-label="Close editor"/);
+  it("keeps Close alone in the head, puts Delete and Start again as labelled footer pills, and neutral selection in shared controls (WUI-006, UIA-205)", () => {
+    expect(quick).toMatch(/className="calendar-compact-editor-icons">\s*<button[\s\S]*?aria-label="Close editor"[\s\S]*?<\/button>\s*<\/div>/);
+    expect(quick).toMatch(/className="df-ed-actions-start"[\s\S]*?className="df-ed-pill is-danger"[\s\S]*?\{isRunning \? "Discard" : "Delete"\}[\s\S]*?className="df-ed-pill"[\s\S]*?Start again/);
+    expect(quick).not.toContain("calendar-compact-start-again");
     expect(quick).not.toContain("df-ed-lead");
-    expect(quick).toContain('{entry ? "Save" : "Add block"}');
+    expect(quick).toContain('{entry ? "Save" : "Add"}');
     expect(quick).toContain("<ActivityChipGroup");
     expect(quick).toContain('variant="more"');
-    expect(styles).toMatch(/\.calendar-compact-discard-confirm \{[^}]*color: var\(--danger-text\);/);
+    expect(styles).toMatch(/\.df-ed-pill\.is-danger \{[^}]*color: var\(--danger-text\);/);
+    expect(styles).toMatch(/\.df-rbtn--danger \{[^}]*background: var\(--danger\);[^}]*color: var\(--on-danger\);/);
     for (const selected of [
       /\.ui-segmented-control button\[aria-pressed="true"\] \{([^}]*)\}/,
       /\.dayframe-calendar-grid button\[aria-pressed="true"\] \{([^}]*)\}/,

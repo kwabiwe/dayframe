@@ -32,7 +32,7 @@ describe("Timeline inline entry editing", () => {
 
     expect(edit.draft.startedAtTime).toBe("08:30");
     expect(edit.draft.stoppedAtTime).toBe("10:00");
-    expect(edit.draft.duration).toBe("01:30");
+    expect(edit.draft.duration).toBe("1h 30m");
     expect(plan.payload).toEqual({
       startedAt: localIso("2026-08-10T08:30")
     });
@@ -49,7 +49,7 @@ describe("Timeline inline entry editing", () => {
     const plan = buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-11T00:00"));
 
     expect(edit.draft.stoppedAtTime).toBe("10:15");
-    expect(edit.draft.duration).toBe("01:15");
+    expect(edit.draft.duration).toBe("1h 15m");
     expect(plan.payload).toEqual({ stoppedAt: localIso("2026-08-10T10:15") });
   });
 
@@ -109,7 +109,7 @@ describe("Timeline inline entry editing", () => {
 
     // Not synchronised while typing: Duration still reflects the saved block.
     expect(partial.draft.stoppedAtTime).toBe("09:4");
-    expect(partial.draft.duration).toBe("01:00");
+    expect(partial.draft.duration).toBe("1h");
     // Saving reads it as 09:40, never 00:94 or 09:04.
     expect(buildTimelineInlineSavePlan(partial, entry, localDate("2026-08-11T00:00")).payload)
       .toEqual({ stoppedAt: localIso("2026-08-10T09:40") });
@@ -142,7 +142,7 @@ describe("Timeline inline entry editing", () => {
 
     expect(edit.draft.startedAtTime).toBe("17:33");
     expect(edit.draft.stoppedAtTime).toBe("00:00");
-    expect(edit.draft.duration).toBe("06:27");
+    expect(edit.draft.duration).toBe("6h 27m");
     expect(buildTimelineInlineSavePlan(edit, entry, localDate("2026-08-04T00:00")).payload)
       .toEqual({});
   });
@@ -174,7 +174,7 @@ describe("Timeline inline entry editing", () => {
     );
 
     expect(edit.draft.stoppedAtDate).toBe("2026-08-11");
-    expect(edit.draft.duration).toBe("25:00");
+    expect(edit.draft.duration).toBe("25h");
   });
 });
 
