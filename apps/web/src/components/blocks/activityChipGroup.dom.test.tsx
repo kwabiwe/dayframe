@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { ActivityChipGroup, editorChipCategories } from "./ActivityChipGroup";
@@ -94,5 +95,47 @@ describe("Activity chips (UIA-201 entry editor)", () => {
   it("shows every chip without maxRows", () => {
     render(<ActivityChipGroup categories={all.slice(0, 7)} onSelect={vi.fn()} selectedId="" trailing={<button type="button">All activities</button>} />);
     expect(screen.getAllByRole("radio")).toHaveLength(7);
+  });
+});
+
+describe("fitted chips (Codex r1 on #465)", () => {
+  it("keeps the last chosen chip after it is cleared, so focus never loses its chip", async () => {
+    const { fittedChips } = await import("./ActivityChipGroup");
+    const late = all[8];
+    // Chosen: it takes the last place among the fitted chips.
+    expect(fittedChips(all, 3, late.id).map((c) => c.id)).toEqual(["work", "gym", late.id]);
+    // Cleared: the host passes the last chosen one as the chip to keep, so it stays.
+    expect(fittedChips(all, 3, late.id).at(-1)?.id).toBe(late.id);
+    expect(fittedChips(all, 3, "").map((c) => c.id)).toEqual(["work", "gym", "read"]);
+  });
+
+  it("keeps focus on a chip kept only because it was chosen when it is cleared (wrapping layout)", () => {
+    // Three items to a row; the trailing control counts as an item (as rowCount measures).
+    const rect = (top: number) => ({ top, bottom: top + 32, left: 0, right: 0, width: 0, height: 32, x: 0, y: top, toJSON() {} }) as DOMRect;
+    const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const group = this.closest(".df-ed-chips");
+      if (!group) return rect(0);
+      const items = [...group.querySelectorAll<HTMLElement>(".df-rchips > .df-rchip"), ...[...group.children].filter((child) => !child.classList.contains("df-rchips"))];
+      const index = items.indexOf(this);
+      return index < 0 ? rect(0) : rect(Math.floor(index / 3) * 40);
+    });
+    try {
+      function Host() {
+        const [selected, setSelected] = useState("music");
+        return <ActivityChipGroup categories={all} maxRows={2} onSelect={setSelected} selectedId={selected} trailing={<button type="button">All activities</button>} />;
+      }
+      render(<Host />);
+      // Five chips and All activities fit in two rows; the chosen late chip keeps the last place.
+      const music = screen.getByRole("radio", { name: "Music" });
+      expect(screen.getAllByRole("radio")).toHaveLength(5);
+      music.focus();
+      fireEvent.click(music);
+      // Cleared: it stays among the chips and keeps keyboard focus.
+      const kept = screen.getByRole("radio", { name: "Music" });
+      expect(kept.getAttribute("aria-checked")).toBe("false");
+      expect(document.activeElement).toBe(kept);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

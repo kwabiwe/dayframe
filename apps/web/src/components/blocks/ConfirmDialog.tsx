@@ -11,7 +11,8 @@ import { createPortal } from "react-dom";
  * 100vw − 24 px), so it is phone-safe without becoming a sheet.
  *
  * Motion: the scrim fades and the card fades in from scale(.98) in 160 ms, and both fade out in
- * 120 ms; under Reduce Motion only the opacities change. The host owns `open`; the dialog stays
+ * 90 ms (the block editor's own exit, so a Discard that closes both never cuts the fade); under
+ * Reduce Motion only the opacities change. The host owns `open`; the dialog stays
  * mounted (hidden and inert while closed), so a fast close never cuts the fade and no presence
  * timer can race a reopening.
  *
@@ -86,7 +87,7 @@ export function ConfirmDialog({
   return createPortal(
     <div
       // Always mounted (no presence timer to race an opening): closed, it is hidden, inert and out
-      // of the accessibility tree once its fade has run (CSS holds visibility for 120 ms).
+      // of the accessibility tree once its fade has run (CSS holds visibility for 90 ms).
       aria-hidden={open ? undefined : true}
       className={`df-confirm-layer ${surfaceClassName}${open ? " is-open" : ""}${open && entered ? " is-entered" : ""}`.trim()}
       data-testid="confirm-dialog"

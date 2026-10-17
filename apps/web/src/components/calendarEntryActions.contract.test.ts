@@ -85,6 +85,16 @@ describe("shared web time-entry quick editor", () => {
     // Time boxes (WUI-001): one inset box per field with the focus ring on the box, not an inner row.
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \* \{[^}]*border-radius:\s*12px;[^}]*padding:\s*7px 12px 6px;[^}]*background:\s*var\(--surface-inset\);/s);
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \*:focus-within \{[^}]*var\(--web-focus-border\)/s);
+    // The date glyph keeps a full 44 × 44 target (Codex r1 on #465).
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-trigger \{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
+    // The uppercase field labels are the editor panel's own: Add time keeps its labels (Codex r1 on #465).
+    expect(styles).toMatch(/\n\.calendar-compact-field-label,\n\.calendar-compact-editor-description > label,\n\.calendar-compact-editor-fields label > span,\n\.calendar-compact-duration-field > span \{[^}]*font-size:\s*0\.7rem;[^}]*letter-spacing:\s*0\.02em;\n\}/);
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-field-label,[^{]*\{[^}]*text-transform:\s*uppercase;/s);
+    // The touch rule comes after the "All activities" chip's 32 px, so it wins (Codex r1 on #465).
+    const moreChip = styles.indexOf(".df-ed-chips .calendar-compact-category-field > .df-rchip--more {");
+    const coarseChips = styles.indexOf("@media (any-pointer: coarse) {\n  .df-ed-chips .df-rchip,");
+    expect(moreChip).toBeGreaterThan(-1);
+    expect(coarseChips).toBeGreaterThan(moreChip);
     expect(styles).toMatch(/\.calendar-compact-date-trigger \{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
     expect(styles).toMatch(/\.calendar-compact-date-trigger:hover,[\s\S]*background:\s*transparent;/s);
     expect(quick).toContain('className="calendar-compact-duration-field"');

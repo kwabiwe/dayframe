@@ -8161,14 +8161,22 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 1.3;
 }
 
-/* The #391 floating-panel eyebrow: small uppercase, as the lists' and the start panel's heads. */
 .calendar-compact-field-label,
 .calendar-compact-editor-description > label,
 .calendar-compact-editor-fields label > span,
 .calendar-compact-duration-field > span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.7rem;
   font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+/* The block editors' field labels: the #391 small uppercase head, inside each time box. Scoped to
+   the editor panel, so Add time keeps its own labels (Codex r1 on #465). */
+.calendar-compact-editor-panel .calendar-compact-field-label,
+.calendar-compact-editor-panel .calendar-compact-editor-fields label > span,
+.calendar-compact-editor-panel .calendar-compact-duration-field > span {
+  font-size: 11px;
   letter-spacing: 0.06em;
   line-height: 16px;
   text-transform: uppercase;
@@ -14167,13 +14175,13 @@ dialog.ui-dialog.df-rf-dialog {
   font-variant-numeric: tabular-nums;
 }
 
-/* The date glyph keeps a 44 px target that overhangs the box's padding, not its height. */
+/* The date glyph keeps a 44 × 44 px target that overhangs the box's padding, not its height. */
 .calendar-compact-editor-panel .calendar-compact-date-trigger {
-  width: 36px;
-  min-width: 36px;
+  width: 44px;
+  min-width: 44px;
   height: 44px;
   min-height: 44px;
-  margin: -8px -10px -8px 0;
+  margin: -8px -12px -8px -6px;
   color: var(--muted);
 }
 
@@ -14293,15 +14301,6 @@ dialog.ui-dialog.df-rf-dialog {
   min-width: 76px;
 }
 
-/* The editor's chips and pills are 44 px wherever touch is the input, whatever the viewport width. */
-@media (any-pointer: coarse) {
-  .df-ed-chips .df-rchip,
-  .df-ed-chips .calendar-compact-category-field > .df-rchip--more,
-  .df-ed-pill {
-    min-height: 44px;
-  }
-}
-
 /* Narrow editors (phones): Start and End share a row and Duration takes the next; very narrow
    ones stack all three. */
 @container time-entry-editor (max-width: 380px) {
@@ -14363,6 +14362,16 @@ dialog.ui-dialog.df-rf-dialog {
   white-space: nowrap;
 }
 
+/* The editor's chips and pills are 44 px wherever touch is the input, whatever the viewport width
+   (after the "All activities" chip's own 32 px, which it overrides; Codex r1 on #465). */
+@media (any-pointer: coarse) {
+  .df-ed-chips .df-rchip,
+  .df-ed-chips .calendar-compact-category-field > .df-rchip--more,
+  .df-ed-pill {
+    min-height: 44px;
+  }
+}
+
 /* Confirmation (WUI-005/WUI-009; `ConfirmDialog`): a centred card over a scrim, a question, one
    line of body, a neutral way back and the confirming action. Phone-safe by width. */
 .df-confirm-layer {
@@ -14374,11 +14383,11 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 12px;
 }
 
-/* Closed, it stays mounted but hidden once its 120 ms fade has run, and takes no presses. */
+/* Closed, it stays mounted but hidden once its 90 ms fade has run, and takes no presses. */
 .df-confirm-layer:not(.is-open) {
   pointer-events: none;
   visibility: hidden;
-  transition: visibility 0s linear 120ms;
+  transition: visibility 0s linear 90ms;
 }
 
 .df-confirm-scrim {
@@ -14386,7 +14395,7 @@ dialog.ui-dialog.df-rf-dialog {
   inset: 0;
   background: var(--overlay);
   opacity: 0;
-  transition: opacity 120ms ease-in;
+  transition: opacity 90ms ease-in;
 }
 
 .df-confirm {
@@ -14403,7 +14412,8 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--foreground);
   opacity: 0;
   transform: scale(0.98);
-  transition: opacity 120ms ease-in, transform 120ms ease-in;
+  /* 90 ms, the editor's own exit, so a Discard that closes both never cuts this fade. */
+  transition: opacity 90ms ease-in, transform 90ms ease-in;
 }
 
 .df-confirm-layer.is-entered .df-confirm-scrim {

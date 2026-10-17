@@ -39,7 +39,12 @@ export function ActivityChipGroup({
   // again from all of them.
   const fitKey = `${categories.map((category) => category.id).join("|")}#${selectedId}#${width}`;
   const [fit, setFit] = useState<{ key: string; count: number } | null>(null);
-  const shown = fit && fit.key === fitKey ? fittedChips(categories, fit.count, selectedId) : categories;
+  // The last activity chosen stays among the fitted chips after it is cleared, so clearing a chip
+  // kept only because it was chosen never drops it from under the keyboard (Codex r1 on #465).
+  const [lastChosen, setLastChosen] = useState(selectedId);
+  if (selectedId && selectedId !== lastChosen) setLastChosen(selectedId);
+  const keepId = selectedId || lastChosen;
+  const shown = fit && fit.key === fitKey ? fittedChips(categories, fit.count, keepId) : categories;
 
   // Before paint: one chip fewer until everything fits in `maxRows` rows.
   useLayoutEffect(() => {
@@ -119,10 +124,11 @@ export function editorChipCategories(categories: readonly CategoryRow[], selecte
   return shown;
 }
 
-/** The first `count` chips, with the chosen one kept in the last place when it would drop. */
-function fittedChips(categories: readonly CategoryRow[], count: number, selectedId: string) {
+/** The first `count` chips, with `keepId` (the chosen, or last chosen, one) kept in the last place
+ *  when it would drop. */
+export function fittedChips(categories: readonly CategoryRow[], count: number, keepId: string) {
   const fitted = categories.slice(0, Math.max(1, count));
-  const chosen = categories.find((category) => category.id === selectedId);
+  const chosen = categories.find((category) => category.id === keepId);
   if (chosen && !fitted.includes(chosen)) fitted[fitted.length - 1] = chosen;
   return fitted;
 }
