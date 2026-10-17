@@ -81,6 +81,7 @@ describe("Review deck Today · Earlier segments (owner decision 14 Oct 2026, opt
 
   it("opens the segment the route asks for, and a focused card's own segment", () => {
     expect(screen).toContain('() => parseReviewDeckSegmentParam(routeParams.segment) ?? "today"');
-    expect(screen).toContain("beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(item), reviewDeckToday(Date.now())));");
+    // (A folded Move opens in its outing's segment: the Stay's, PR 12b.)
+    expect(screen).toContain("beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(shown), reviewDeckToday(Date.now())));");
   });
 });

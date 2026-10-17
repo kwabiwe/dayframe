@@ -1312,7 +1312,8 @@ export default function ReviewScreen() {
     ownDeckDecisionKeys.current.add(key);
     const item = source.item;
     const logged = direction === 1;
-    // One card per outing (PRD D19): its Moves are decided with it and logged with its time.
+    // One card per outing (PRD D19): its Moves are decided with it and logged with its time. The
+    // outing is one decision of this visit ("N of M" counts cards; Codex r1 on #473).
     const outing = deckOutings.outings.get(item.id);
     const outingKey = outing ? outingKeyOf(item) : null;
     const outingMembers = outing && outingKey ? outing.members.map((member) => ({
@@ -1320,7 +1321,6 @@ export default function ReviewScreen() {
       itemId: member.id,
       proposal: reviewDeckProposalSignature(member)
     })) : [];
-    for (const member of outingMembers) ownDeckDecisionKeys.current.add(member.key);
     const stayBlock = deckLoggedBlock(item);
     const block = outing && outingKey ? { ...stayBlock, seconds: stayBlock.seconds + outingTravelSeconds(outing, Date.now()) } : stayBlock;
     // C2: a logged card's toast names the block as it will be listed, from what this decision
@@ -1391,7 +1391,6 @@ export default function ReviewScreen() {
     }
     unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
     ownDeckDecisionKeys.current.delete(held.key);
-    for (const member of held.outing?.members ?? []) ownDeckDecisionKeys.current.delete(member.key);
     setDeckThrowRequest(null);
     if (flyingDeckKey === held.key) {
       // Undone mid-flight: the card comes back as a fresh card instead of finishing its flight.
@@ -1685,7 +1684,6 @@ export default function ReviewScreen() {
     const undoCount = () => {
       unrecordDeckDecision(held.logged ? { color: held.color, seconds: held.seconds } : null);
       ownDeckDecisionKeys.current.delete(held.key);
-      for (const key of memberKeys) ownDeckDecisionKeys.current.delete(key);
     };
     // The outing's Moves come back with it whenever the Stay's card does.
     const restoreMembers = () => {
@@ -1897,7 +1895,11 @@ export default function ReviewScreen() {
     if (request.kind === "review") {
       const item = openReviewItems.find((candidate) => candidate.id === request.id);
       if (item) {
-        beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(item), reviewDeckToday(Date.now())));
+        // A Move folded into its outing opens the outing's card, in the Stay's segment (a trip home
+        // after midnight belongs to the evening's card; Codex r1 on #473).
+        const anchorId = deckOutings.anchorByMember.get(item.id);
+        const shown = (anchorId ? openReviewItems.find((candidate) => candidate.id === anchorId) : undefined) ?? item;
+        beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(shown), reviewDeckToday(Date.now())));
         return;
       }
     } else {
@@ -1978,6 +1980,7 @@ export default function ReviewScreen() {
   }, [
     beginExactFocus,
     data,
+    deckOutings,
     displayedReviewNeededEntries,
     focusRequest,
     openReviewItems

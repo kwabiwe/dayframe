@@ -62,6 +62,10 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     expect(screen).toContain("for (const member of held.outing?.members ?? []) restorePagedOutDeckItem(member.itemId);");
     expect(screen).toMatch(/const failed = \(\) => \{[\s\S]*?restoreMembers\(\);[\s\S]*?undoCount\(\);/);
     expect(deck).toContain('testID="review-deck-outing"');
+    // A focused Move opens its outing in the Stay's segment (a trip after midnight; Codex r1 on #473).
+    expect(screen).toContain("beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(shown), reviewDeckToday(Date.now())));");
+    // The outing is one decision of this visit: its Moves never count toward "N of M".
+    expect(screen).not.toMatch(/ownDeckDecisionKeys\.current\.(add|delete)\(member/);
   });
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {

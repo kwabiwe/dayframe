@@ -44,6 +44,19 @@ describe("projectReviewScreenData (one Review data owner)", () => {
     expect(again).toBe(next);
   });
 
+  it("takes a card's outing from the store, also when a later read moved or cleared it (Codex r1 on #473)", () => {
+    const server = syntheticReviewBootstrap(3);
+    const live = { ...server, reviewItems: server.reviewItems.map((item) => ({ ...item, rawPayload: { ...item.rawPayload, outingKey: "outing:old", outingRole: "in" } })) };
+    const cached = { ...cachedCopy(server), reviewItems: server.reviewItems.map((item, index) => ({ ...item,
+      rawPayload: index === 0 ? { ...item.rawPayload, outingKey: "outing:new", outingRole: "out" } : { ...item.rawPayload } })) };
+    const next = projectReviewScreenData({ base: live, projection: cached, live: liveReviewItems(live), current: null });
+    expect(next.reviewItems[0].rawPayload).toMatchObject({ outingKey: "outing:new", outingRole: "out" });
+    expect(next.reviewItems[1].rawPayload).not.toHaveProperty("outingKey");
+    expect(next.reviewItems[1].rawPayload).not.toHaveProperty("outingRole");
+    // The live copy's other fields still show (its reason, never cached).
+    expect(next.reviewItems[1].rawPayload).toMatchObject({ semanticReason: "existing_review_preserved" });
+  });
+
   it("returns what is on screen when nothing changed (no re-render), and reuses unchanged cards", () => {
     const server = syntheticReviewBootstrap(3);
     const live = liveReviewItems(server);
