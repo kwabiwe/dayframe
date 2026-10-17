@@ -223,6 +223,23 @@ async function run() {
         workspace, rows.time_entries.owner, tag
       ]);
       assert.equal((await client.query(link, [rows.time_entries.owner, tag])).rowCount, 1, "the owner tags their own entry");
+      // A link of theirs cannot be moved onto another member's entry (Codex r2 on #486).
+      await client.query("savepoint retarget");
+      await client.query("insert into public.time_entry_tags (workspace_id, time_entry_id, tag_id) values ($1, $2, $3)", [
+        workspace, rows.time_entries.owner, secondTag
+      ]);
+      await assert.rejects(client.query("update public.time_entry_tags set time_entry_id = $2 where time_entry_id = $1 and tag_id = $3", [
+        rows.time_entries.owner, rows.time_entries.member, secondTag
+      ]), /row-level security/, "a tag link cannot be moved onto another member's entry");
+      await client.query("rollback to savepoint retarget");
+      // Deleting their own tagged entry removes its links (the cascade runs as the table's owner).
+      await client.query("savepoint cascade");
+      assert.equal((await client.query("delete from public.time_entries where id = $1", [rows.time_entries.owner])).rowCount, 1,
+        "the owner deletes their own tagged entry");
+      await client.query("reset role");
+      assert.equal((await client.query(link, [rows.time_entries.owner, tag])).rowCount, 0, "its tag links go with it");
+      await client.query("set local role authenticated");
+      await client.query("rollback to savepoint cascade");
       assert.equal((await client.query("delete from public.time_entry_tags where time_entry_id = $1", [rows.time_entries.owner])).rowCount, 1,
         "the owner removes their own entry's tags");
     });
