@@ -24,7 +24,10 @@ describe("web contextual category creation contract", () => {
   });
 
   it("portals every create-enabled picker while leaving Reports in its existing flow", () => {
-    expect(timer.match(/onCreateCategory=\{createCategory\}[\s\S]*?portal/g)).toHaveLength(2);
+    // The timer's Activity block portals its list; Add time is the shared editor (WUI-025), whose
+    // pickers portal through `portal={Boolean(props.onCreateCategory)}` below.
+    expect(timer.match(/onCreateCategory=\{createCategory\}[\s\S]*?portal/g)?.length).toBeGreaterThanOrEqual(1);
+    expect(timer).toContain("<TimeEntryQuickCreateModal");
     expect(quickEditor).toContain("portal={Boolean(props.onCreateCategory)}");
     expect(picker).toContain("createPortal(menu, portalTarget)");
     expect(picker).toContain('triggerRef.current?.closest("dialog") ?? document.body');

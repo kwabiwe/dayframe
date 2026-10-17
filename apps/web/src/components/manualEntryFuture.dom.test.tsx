@@ -28,25 +28,68 @@ afterEach(() => {
 // Owner decision D2 (14 Oct 2026; Codex r1 on #422): Add time never adds a day after today, even
 // when Calendar is showing one.
 describe("Add time with a future day selected", () => {
-  it("defaults to the hour ending now, not the future day", () => {
+  it("opens the shared New block editor on the hour ending now, not the future day (WUI-025)", () => {
     runtime = runtimeFixture("2026-10-16");
     render(<PersistentTimerBar />);
-    const start = document.querySelector<HTMLInputElement>('input[name="startedAt"]')!;
-    const finish = document.querySelector<HTMLInputElement>('input[name="stoppedAt"]')!;
-    expect(start.value).toBe("2026-10-14T10:00");
-    expect(finish.value).toBe("2026-10-14T11:00");
+    expect(screen.getByRole("dialog", { name: "New block" })).not.toBeNull();
+    expect(screen.getByText("Wednesday 14 October")).not.toBeNull();
+    expect((screen.getByLabelText("Start time") as HTMLInputElement).value).toBe("10:00");
+    expect((screen.getByLabelText("End time") as HTMLInputElement).value).toBe("11:00");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("1h");
   });
 
-  it("refuses a finish after today and adds nothing", async () => {
+  it("refuses a finish on a day after today (a duration carried past midnight) and adds nothing", async () => {
     runtime = runtimeFixture("2026-10-14");
     render(<PersistentTimerBar />);
-    const finish = document.querySelector<HTMLInputElement>('input[name="stoppedAt"]')!;
-    fireEvent.change(finish, { target: { value: "2026-10-15T09:00" } });
-    finish.value = "2026-10-15T09:00";
-    const form = finish.closest("form")!;
-    await act(async () => { fireEvent.submit(form); });
-    expect(screen.getByText("Add time can't go past today.")).not.toBeNull();
+    // 10:00 + 15h ends at 01:00 tomorrow.
+    const duration = screen.getByLabelText("Duration") as HTMLInputElement;
+    fireEvent.change(duration, { target: { value: "15h" } });
+    fireEvent.blur(duration);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add block" }));
+    });
+    expect(screen.getByRole("alert").textContent).toContain("Finish can't be on a day after today.");
     expect(runtime.createManualEntry).not.toHaveBeenCalled();
+  });
+
+  it("adds a window later today, as Add time always could (Codex r1 on #468)", async () => {
+    runtime = runtimeFixture("2026-10-14");
+    render(<PersistentTimerBar />);
+    const start = screen.getByLabelText("Start time") as HTMLInputElement;
+    fireEvent.change(start, { target: { value: "12:00" } });
+    fireEvent.blur(start);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add block" }));
+    });
+    expect(runtime.createManualEntry).toHaveBeenCalledTimes(1);
+    const input = (runtime.createManualEntry as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(new Date(input.startedAt).getHours()).toBe(12);
+    expect(new Date(input.stoppedAt).getHours()).toBe(13);
+  });
+
+  it("returns focus to Add time's button when what opened it is gone (the palette; Codex r1 on #468)", async () => {
+    const paletteInput = document.createElement("input");
+    document.body.append(paletteInput);
+    paletteInput.focus();
+    runtime = runtimeFixture("2026-10-14");
+    const { rerender } = render(<PersistentTimerBar />);
+    // The palette closes as Add time opens.
+    paletteInput.remove();
+    runtime = { ...runtime, isManualEntryOpen: false };
+    rerender(<PersistentTimerBar />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add time manually" }));
+  });
+
+  it("adds the block through Add time's own rules", async () => {
+    runtime = runtimeFixture("2026-10-14");
+    render(<PersistentTimerBar />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Add block" }));
+    });
+    expect(runtime.createManualEntry).toHaveBeenCalledTimes(1);
+    const input = (runtime.createManualEntry as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(new Date(input.startedAt).getHours()).toBe(10);
+    expect(new Date(input.stoppedAt).getHours()).toBe(11);
   });
 });
 

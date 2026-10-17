@@ -346,10 +346,16 @@ export function buildCalendarEntryCompactSavePlan({
 }
 
 export function buildCalendarEntryCompactCreatePlan({
+  allowLaterToday = false,
   draft,
   now = new Date(),
   source
 }: {
+  /**
+   * Add time's rule (web UI audit WUI-025; as its own dialog had): a window later today may be
+   * planned; only a day after today is refused (D2). Calendar's New block starts no later than now.
+   */
+  allowLaterToday?: boolean;
   draft: CalendarEntryCompactDraft;
   now?: Date;
   source: CalendarEntryCompactCreateSource;
@@ -362,7 +368,8 @@ export function buildCalendarEntryCompactCreatePlan({
     originalStartedAt: source.startedAt,
     originalStoppedAt: source.stoppedAt
   });
-  validateStartNotFuture(window.startedAt, now);
+  if (allowLaterToday) validateStartDayNotAfterToday(window.startedAt, now);
+  else validateStartNotFuture(window.startedAt, now);
   validateFinishDayNotAfterToday(window.stoppedAt, null, now);
   const stoppedAt = window.stoppedAt as string;
 
@@ -574,6 +581,10 @@ function draftEdgeCandidates({
 
 function validateStartNotFuture(startedAt: string, now: Date) {
   if (new Date(startedAt).getTime() > now.getTime()) throw new Error("Start time cannot be in the future.");
+}
+
+function validateStartDayNotAfterToday(startedAt: string, now: Date) {
+  if (localParts(startedAt).date > localParts(now.toISOString()).date) throw new Error("Start can't be on a day after today.");
 }
 
 /**

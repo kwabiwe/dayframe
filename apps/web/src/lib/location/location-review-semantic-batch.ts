@@ -215,6 +215,42 @@ export async function withCorrectedStayPlaces(
   };
 }
 
+/** Event payload keys for one card per outing (PRD D19): the shared key and each member's role. */
+export const OUTING_KEY_PAYLOAD_KEY = "outingKey";
+export const OUTING_ROLE_PAYLOAD_KEY = "outingRole";
+
+/**
+ * Tags the cards of each outing (PRD D19: "an unknown Stay and the Moves either side of it are one
+ * Review card"): among this emission's open cards, an unknown Stay with a Move card arriving at it
+ * and/or one leaving it. A Move belongs to the unknown Stay it arrives at; it joins the Stay it leaves
+ * only when it does not arrive at another unknown Stay's card, so Home → A → B → Home gives A
+ * (with the Move there) and B (with the Move from A and the Move home). Time away is never a member.
+ * Decided rows are left alone. Mutates the rows' payloads: the key is `outing:<Stay segment>`.
+ */
+export function tagOutings(rows: Array<{ kind: string; review_status: string; raw_payload: Record<string, unknown> }>) {
+  const open = rows.filter((row) => row.review_status === "needs_review");
+  const stays = open.filter((row) => row.kind === "stay" && row.raw_payload.placeMatchKind === "unknown" &&
+    typeof row.raw_payload.clientSegmentId === "string");
+  const unknownStayIds = new Set(stays.map((row) => row.raw_payload.clientSegmentId as string));
+  const moves = open.filter((row) => row.kind === "commute" && typeof row.raw_payload.fromStaySegmentId === "string" &&
+    typeof row.raw_payload.toStaySegmentId === "string" && !("stopCount" in row.raw_payload) &&
+    row.raw_payload.qualificationReason !== "same_place_outing");
+  for (const stay of stays) {
+    const id = stay.raw_payload.clientSegmentId as string;
+    const arriving = moves.find((move) => move.raw_payload.toStaySegmentId === id);
+    const leaving = moves.find((move) => move.raw_payload.fromStaySegmentId === id &&
+      !unknownStayIds.has(move.raw_payload.toStaySegmentId as string));
+    if (!arriving && !leaving) continue;
+    const key = `outing:${id}`;
+    const tag = (row: { raw_payload: Record<string, unknown> }, role: "stay" | "in" | "out") => {
+      row.raw_payload = { ...row.raw_payload, [OUTING_KEY_PAYLOAD_KEY]: key, [OUTING_ROLE_PAYLOAD_KEY]: role };
+    };
+    tag(stay, "stay");
+    if (arriving) tag(arriving, "in");
+    if (leaving) tag(leaving, "out");
+  }
+}
+
 /**
  * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
  * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
@@ -417,6 +453,9 @@ export async function emitReviewSemanticSegments(
         ? "The boundary includes an evidence gap; check the Calendar before confirming."
         : "Ordered location evidence supports this suggestion." };
   });
+  // One card per outing (PRD D19): an unknown Stay's card and the Move cards either side of it share
+  // an outing key, so clients show them as one card and decide them together (`confirm_outing`).
+  tagOutings(rows);
   const eventIds = new Map<string, string>();
   for (const batch of chunks(rows)) {
     // `previous` reads the rows as they were before this statement (all CTEs share one snapshot), so

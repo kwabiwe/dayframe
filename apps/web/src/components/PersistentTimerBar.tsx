@@ -16,12 +16,11 @@ import { CategoryPicker, type CreateCategoryOutcome } from "@/components/Categor
 import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
 import { InlineTagInput, type ActivityChoiceTrigger } from "@/components/InlineTagInput";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
-import { DayframeDateTimePicker } from "@/components/DayframeDateTimePicker";
-import { OverlapNotice } from "@/components/OverlapNotice";
 import { TaskSuggestionsPanel } from "@/components/TaskSuggestionsPanel";
 import { useKeyboardFocusRing } from "@/components/useKeyboardFocusRing";
-import { Button, IconButton, ModalDialog } from "@/components/ui/Primitives";
-import { calendarEntryLocalDayOffset } from "@/lib/calendar-entry-compact-editor";
+import { IconButton } from "@/components/ui/Primitives";
+import type { CalendarEntryCompactCreatePlan } from "@/lib/calendar-entry-compact-editor";
+import { TimeEntryQuickCreateModal } from "@/components/TimeEntryQuickEditor";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
 import { useClockFormat } from "@/components/ClockFormat";
 import { timeEntryAccentColor, timeEntryTitle } from "@/lib/display";
@@ -105,6 +104,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   const [idleMinute, setIdleMinute] = useState(0);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const descriptionInputRef = useRef<HTMLInputElement | null>(null);
+  const addTimeButtonRef = useRef<HTMLButtonElement | null>(null);
   const suppressSuggestionFocusRef = useRef(false);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
   // Trello 213: the Description's neutral perimeter shows for keyboard focus only, never a click.
@@ -900,6 +900,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
               disabled={isTimerBusy}
               label="Add time manually"
               onClick={openManualEntry}
+              ref={addTimeButtonRef}
             >
               <Plus size={18} />
             </IconButton>
@@ -971,8 +972,9 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       ) : null}
 
       {isManualEntryOpen ? (
-        <ManualEntryDialog
+        <ManualEntryEditor
           data={data}
+          fallbackFocus={() => addTimeButtonRef.current ?? descriptionInputRef.current}
           isBusy={isTimerBusy}
           onClose={closeManualEntry}
           onCreateCategory={createCategory}
@@ -983,14 +985,23 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
   );
 }
 
-function ManualEntryDialog({
+/**
+ * Add time (web UI audit WUI-025, owner 17 Oct 2026): the shared block editor's "New block", as a
+ * modal, instead of a separate dialog with its own date-time picker and activity dropdown. It
+ * opens on the hour ending now (or 9–10 on an earlier day Calendar shows) and keeps Add time's
+ * rules on save: nothing after today (D2) and a valid manual window.
+ */
+function ManualEntryEditor({
   data,
+  fallbackFocus,
   isBusy,
   onClose,
   onCreateCategory,
   onCreate
 }: {
   data: BootstrapData;
+  /** Focus on close when what opened Add time is gone (the palette). */
+  fallbackFocus: () => HTMLElement | null;
   isBusy: boolean;
   onClose: () => void;
   onCreateCategory: (name: string) => Promise<CreateCategoryOutcome>;
@@ -1002,234 +1013,42 @@ function ManualEntryDialog({
     stoppedAt: string;
   }) => Promise<{ ok: true } | { ok: false; error: string }>;
 }) {
-  const [formError, setFormError] = useState<string | null>(null);
-  const [categoryId, setCategoryId] = useState("");
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
-  const [description, setDescription] = useState("");
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
-  const [tagPanelOpen, setTagPanelOpen] = useState(false);
-  const [tagNames, setTagNames] = useState<string[]>([]);
-  const descriptionInputRef = useRef<HTMLInputElement | null>(null);
-  const suppressSuggestionFocusRef = useRef(false);
-  const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
-  const suggestionsRef = useRef<HTMLDivElement | null>(null);
-  const defaults = useMemo(() => manualEntryDefaults(data.dateRange.selectedDate), [data.dateRange.selectedDate]);
-  const [startedAtDraft, setStartedAtDraft] = useState(defaults.start);
-  const [stoppedAtDraft, setStoppedAtDraft] = useState(defaults.finish);
-  const durationLabel = useMemo(() => {
-    const startedAt = dateTimeLocalInputToIso(startedAtDraft);
-    const stoppedAt = dateTimeLocalInputToIso(stoppedAtDraft);
-    if (!startedAt || !stoppedAt) return "—";
-    const seconds = Math.floor((Date.parse(stoppedAt) - Date.parse(startedAt)) / 1_000);
-    // A read-only label, so the one Dayframe duration (the field itself takes H:MM).
-    return seconds > 0 ? formatDuration(seconds) : "—";
-  }, [startedAtDraft, stoppedAtDraft]);
-  const finishDayOffset = useMemo(() => calendarEntryLocalDayOffset(
-    startedAtDraft.slice(0, 10),
-    stoppedAtDraft.slice(0, 10)
-  ), [startedAtDraft, stoppedAtDraft]);
-  const visibleTaskSuggestions = useMemo(() => {
-    const query = description.trim();
-    if (!query) return data.taskSuggestions.slice(0, TASK_SUGGESTION_LIMIT);
-    return searchTaskSuggestions(data.taskSuggestionCandidates, data.taskSuggestions, query, TASK_SUGGESTION_LIMIT);
-  }, [data.taskSuggestionCandidates, data.taskSuggestions, description]);
-  const formId = "persistent-manual-entry-form";
+  // Fixed for this opening, so a re-render never moves the draft under the person.
+  const [capturedNow] = useState(() => new Date());
+  const [source] = useState(() => manualEntrySource(data.dateRange.selectedDate));
 
-  useEffect(() => {
-    if (!suggestionsOpen) return undefined;
-    function closeOnOutside(event: MouseEvent) {
-      if (!descriptionInteractionRef.current?.contains(event.target as Node)) setSuggestionsOpen(false);
-    }
-    document.addEventListener("mousedown", closeOnOutside);
-    return () => document.removeEventListener("mousedown", closeOnOutside);
-  }, [suggestionsOpen]);
-
-  function chooseSuggestion(suggestion: BootstrapData["taskSuggestions"][number]) {
-    setDescription(suggestion.description);
-    setCategoryId(suggestion.categoryId ?? "");
-    setTagNames(suggestion.tagNames);
-    setSuggestionsOpen(false);
-    suppressSuggestionFocusRef.current = true;
-    window.requestAnimationFrame(() => {
-      descriptionInputRef.current?.focus({ preventScroll: true });
-      window.setTimeout(() => {
-        suppressSuggestionFocusRef.current = false;
-      }, 0);
-    });
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setFormError(null);
-    const formData = new FormData(event.currentTarget);
-    const startedAt = dateTimeLocalInputToIso(formData.get("startedAt"));
-    const stoppedAt = dateTimeLocalInputToIso(formData.get("stoppedAt"));
-    if (!startedAt || !stoppedAt) {
-      setFormError("Use valid start and finish times.");
-      return;
-    }
+  async function save(plan: CalendarEntryCompactCreatePlan) {
+    const { startedAt, stoppedAt } = plan.input;
     // No day after today (owner decision D2), however Start or Finish was set (Codex r1 on #422).
     const todayKey = dateKey(new Date());
     if (dateKey(new Date(startedAt)) > todayKey || dateKey(new Date(stoppedAt)) > todayKey) {
-      setFormError("Add time can't go past today.");
-      return;
+      return { ok: false, error: "Add time can't go past today." } as const;
     }
     let validatedWindow: { startedAt: string; stoppedAt: string };
     try {
-      validatedWindow = validateManualTimeEntryWindow({
-        now: new Date(),
-        startedAt,
-        stoppedAt
-      });
+      validatedWindow = validateManualTimeEntryWindow({ now: new Date(), startedAt, stoppedAt });
     } catch (validationError) {
-      setFormError(validationError instanceof Error ? validationError.message : "Check the time values.");
-      return;
+      return { ok: false, error: validationError instanceof Error ? validationError.message : "Check the time values." } as const;
     }
-    const outcome = await onCreate({
-      categoryId: categoryId || undefined,
-      description: description.trim() || undefined,
-      tagNames,
-      startedAt: validatedWindow.startedAt,
-      stoppedAt: validatedWindow.stoppedAt
-    });
-    if (outcome.ok) onClose();
-    else setFormError(outcome.error);
+    return onCreate({ ...plan.input, ...validatedWindow });
   }
 
   return (
-    <ModalDialog
-      busy={isBusy}
-      className="manual-entry-dialog"
-      contentClassName="manual-entry-dialog-content"
-      initialFocusRef={descriptionInputRef}
+    <TimeEntryQuickCreateModal
+      allowLaterToday
+      capturedNow={capturedNow}
+      categories={data.categories}
+      fallbackFocus={fallbackFocus}
+      isTimerBusy={isBusy}
       onClose={onClose}
-      title="Add Time"
-      footer={(
-        <>
-          <OverlapNotice
-            compact
-            candidate={{
-              startedAt: dateTimeLocalInputToIso(startedAtDraft) ?? "invalid",
-              stoppedAt: dateTimeLocalInputToIso(stoppedAtDraft)
-            }}
-            entries={data.entries}
-          />
-          <Button className="calendar-compact-cancel" onClick={onClose} disabled={isBusy}>Cancel</Button>
-          <Button className="calendar-compact-save" variant="primary" type="submit" form={formId} disabled={isBusy}>Add time</Button>
-        </>
-      )}
-    >
-      <form id={formId} className="calendar-compact-editor-fields manual-entry-form" onSubmit={submit}>
-        <div className="calendar-compact-editor-description manual-entry-description">
-          <label htmlFor="manual-entry-description">Description</label>
-          <div ref={descriptionInteractionRef}>
-            <InlineTagInput
-              ariaLabel="Manual block description"
-              className="manual-entry-inline-tags time-entry-quick-tags"
-              inputId="manual-entry-description"
-              inputRef={descriptionInputRef}
-              name="manual-description"
-              onChange={(value) => {
-                setDescription(value);
-                setSuggestionsOpen(true);
-              }}
-              onClick={() => setSuggestionsOpen(true)}
-              onFocus={() => {
-                if (suppressSuggestionFocusRef.current) {
-                  suppressSuggestionFocusRef.current = false;
-                  return;
-                }
-                setSuggestionsOpen(true);
-              }}
-              onHashtagPanelChange={(open) => {
-                setTagPanelOpen(open);
-                if (open) setSuggestionsOpen(false);
-              }}
-              onInputKeyDown={(event) => {
-                if (!suggestionsOpen || tagPanelOpen || !visibleTaskSuggestions.length) return;
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setSuggestionsOpen(false);
-                } else if (event.key === "Enter") {
-                  event.preventDefault();
-                  chooseSuggestion(visibleTaskSuggestions[0]);
-                } else if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  suggestionsRef.current?.querySelector<HTMLButtonElement>('[role="option"]')?.focus();
-                }
-              }}
-              onSelectedTagNamesChange={setTagNames}
-              placeholder="What did you work on?"
-              selectedTagNames={tagNames}
-              tags={data.tags}
-              value={description}
-            />
-            {visibleTaskSuggestions.length ? (
-              <TaskSuggestionsPanel
-                isBusy={isBusy}
-                anchorRef={descriptionInteractionRef}
-                isOpen={suggestionsOpen && !tagPanelOpen}
-                onClose={() => setSuggestionsOpen(false)}
-                onSelect={chooseSuggestion}
-                panelRef={suggestionsRef}
-                suggestions={visibleTaskSuggestions}
-              />
-            ) : null}
-          </div>
-        </div>
-        <CategoryPicker
-          categories={data.categories}
-          className="manual-entry-category"
-          label="Activity"
-          menuId="manual-entry-category-menu"
-          onBeforeOpen={() => setSuggestionsOpen(false)}
-          onCreateCategory={onCreateCategory}
-          onOpenChange={setCategoryMenuOpen}
-          onSelect={setCategoryId}
-          open={categoryMenuOpen}
-          portal
-          selectedId={categoryId}
-          triggerId="manual-entry-category"
-          variant="quick"
-        />
-        <div className="calendar-compact-temporal-fields manual-entry-temporal-fields">
-          <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Start</span>
-            <DayframeDateTimePicker
-              compact
-              id="manual-entry-start"
-              label="Start"
-              max={dateKey(new Date())}
-              name="startedAt"
-              defaultValue={defaults.start}
-              onChange={setStartedAtDraft}
-              required
-            />
-          </div>
-          <div className="calendar-compact-moment-field">
-            <span className="calendar-compact-field-label">Finish</span>
-            <DayframeDateTimePicker
-              compact
-              dayOffset={finishDayOffset}
-              id="manual-entry-finish"
-              label="Finish"
-              max={dateKey(new Date())}
-              name="stoppedAt"
-              defaultValue={defaults.finish}
-              onChange={setStoppedAtDraft}
-              required
-            />
-          </div>
-          <div className="calendar-compact-duration-field">
-            <span className="calendar-compact-field-label">Duration</span>
-            <div className="calendar-compact-duration is-readonly" aria-label="Duration">
-              <span className="tabular">{durationLabel}</span>
-            </div>
-          </div>
-        </div>
-        {formError ? <p className="swiss-inline-error" role="alert">{formError}</p> : null}
-      </form>
-    </ModalDialog>
+      onCreateCategory={onCreateCategory}
+      onSave={save}
+      peerEntries={data.entries}
+      source={source}
+      tags={data.tags}
+      taskSuggestionCandidates={data.taskSuggestionCandidates}
+      taskSuggestions={data.taskSuggestions}
+    />
   );
 }
 
@@ -1279,24 +1098,20 @@ function buildLearnedQuickActions(data: BootstrapData): QuickAction[] {
     }));
 }
 
-function manualEntryDefaults(selectedDate: string) {
+/** Add time's opening window: the hour ending now on today (or a later day Calendar shows; D2), or
+ *  9–10 on an earlier day. */
+function manualEntrySource(selectedDate: string) {
   const [year, month, day] = selectedDate.split("-").map(Number);
   const today = new Date();
-  // Today, or a day after it (Calendar can show one; Add time never adds a later day, D2): the
-  // hour ending now.
   if (dateKey(today) <= selectedDate) {
     const finish = new Date(today);
     finish.setSeconds(0, 0);
     const start = new Date(finish.getTime() - 60 * 60 * 1000);
-    return { start: dateTimeLocal(start), finish: dateTimeLocal(finish) };
+    return { startedAt: start.toISOString(), stoppedAt: finish.toISOString() };
   }
   const start = new Date(year, month - 1, day, 9, 0, 0, 0);
   const finish = new Date(start.getTime() + 60 * 60 * 1000);
-  return { start: dateTimeLocal(start), finish: dateTimeLocal(finish) };
-}
-
-function dateTimeLocal(date: Date) {
-  return `${dateKey(date)}T${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+  return { startedAt: start.toISOString(), stoppedAt: finish.toISOString() };
 }
 
 /** Midnight starting the viewer's local day containing `ms`. */
