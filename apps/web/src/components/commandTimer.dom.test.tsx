@@ -181,8 +181,34 @@ describe("Command block menus and switch toasts (UIA-202/209/210)", () => {
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
     expect(runtime.startTimer).toHaveBeenCalledWith(
       { categoryId: "focus", description: "Plan launch", tagNames: ["Deep work"] },
-      { startedAt: running.startedAt }
+      expect.objectContaining({ startedAt: running.startedAt })
     );
+    // The restore is checked inside the timer's queue: refused once something covers that time.
+    const { guard } = (runtime.startTimer as ReturnType<typeof vi.fn>).mock.calls[0][1] as { guard: (snapshot: BootstrapData) => string | null };
+    const covering = timeEntry({ id: "b", startedAt: "2026-08-14T09:30:00.000Z", stoppedAt: "2026-08-14T09:40:00.000Z" });
+    expect(guard({ ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [covering] })).toContain("covers that time");
+    expect(guard({ ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] })).toBeNull();
+  });
+
+  it("says why a refused restore cannot happen, and offers Try again with the same start after a failure (Codex r1 on #469)", async () => {
+    const running = timeEntry({ categoryId: "focus", categoryName: "Focus", description: "Plan launch" });
+    runtime = runtimeFixture({ activeEntry: running, description: "Plan launch" });
+    const { rerender } = render(<PersistentTimerBar />);
+    await act(async () => { fireEvent.click(screen.getByRole("menuitem", { hidden: true })); });
+    runtime = { ...runtime, shellData: { ...(runtime.shellData as BootstrapData), activeEntry: null, entries: [] } };
+    rerender(<PersistentTimerBar />);
+
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Unable to start the block: 503" });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Undo" })); });
+    expect(screen.getByRole("status").textContent).toContain("Couldn't bring back Plan launch.");
+    (runtime.startTimer as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, error: "Another block now covers that time, so the discarded one can't come back." });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Try again" })); });
+    const calls = (runtime.startTimer as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[1][1]).toEqual(expect.objectContaining({ startedAt: running.startedAt }));
+    // Refused: the reason, and no button to press again.
+    expect(screen.getByRole("status").textContent).toContain("covers that time");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
   it("hides Undo once another block is running, and adds no toast when the discard fails", async () => {

@@ -59,6 +59,7 @@ export function ConfirmDialog({
   const ownCancelRef = useRef<HTMLButtonElement | null>(null);
   const backRef = cancelRef ?? ownCancelRef;
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const layerRef = useRef<HTMLDivElement | null>(null);
   const [entered, setEntered] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
   // Closing starts the fade at once; opening fades in on the next frame.
@@ -69,11 +70,25 @@ export function ConfirmDialog({
 
   useEffect(() => {
     if (!open) return undefined;
+    // Modal, as a native dialog's showModal() is (Codex r1 on #469): everything else on the page is
+    // inert while it asks, and focus goes back to what opened it when it closes.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const layer = layerRef.current;
+    const isolated = [...document.body.children].filter(
+      (element): element is HTMLElement => element instanceof HTMLElement && element !== layer && !element.hasAttribute("inert")
+    );
+    for (const element of isolated) element.setAttribute("inert", "");
     const frame = window.requestAnimationFrame(() => {
       setEntered(true);
       backRef.current?.focus({ preventScroll: true });
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      for (const element of isolated) element.removeAttribute("inert");
+      const active = document.activeElement;
+      const focusLeftWithDialog = !active || active === document.body || Boolean(layer?.contains(active));
+      if (focusLeftWithDialog && opener?.isConnected) opener.focus({ preventScroll: true });
+    };
   }, [backRef, open]);
 
   if (typeof document === "undefined") return null;
@@ -99,6 +114,7 @@ export function ConfirmDialog({
       // of the accessibility tree once its fade has run (CSS holds visibility for 90 ms).
       aria-hidden={open ? undefined : true}
       className={`df-confirm-layer ${surfaceClassName}${open ? " is-open" : ""}${open && entered ? " is-entered" : ""}`.trim()}
+      ref={layerRef}
       data-testid="confirm-dialog"
       inert={!open || undefined}
       onKeyDown={onKeyDown}
@@ -125,16 +141,27 @@ export function ConfirmDialog({
         {body ? <p className="df-confirm-body" id={bodyId}>{body}</p> : null}
         {error ? <p className="df-confirm-error" role="alert">{error}</p> : null}
         <div className="df-confirm-actions">
-          <button ref={backRef} className="df-rbtn" disabled={busy} type="button" onClick={onCancel}>
+          <button
+            ref={backRef}
+            aria-disabled={busy || undefined}
+            className="df-rbtn"
+            type="button"
+            onClick={() => {
+              if (!busy) onCancel();
+            }}
+          >
             {cancelLabel}
           </button>
           <button
             ref={confirmRef}
             aria-busy={busy || undefined}
+            // Busy buttons stay focusable, so focus is never lost while the action runs.
+            aria-disabled={busy || undefined}
             className={tone === "danger" ? "df-rbtn df-rbtn--danger" : "df-rbtn df-rbtn--inverse"}
-            disabled={busy}
             type="button"
-            onClick={onConfirm}
+            onClick={() => {
+              if (!busy) onConfirm();
+            }}
           >
             {busy && busyLabel ? busyLabel : confirmLabel}
           </button>

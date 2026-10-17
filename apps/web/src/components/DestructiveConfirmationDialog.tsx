@@ -15,6 +15,7 @@ export function DestructiveConfirmationDialog({
   isBusy,
   onCancel,
   onConfirm,
+  open = true,
   title
 }: {
   body: string;
@@ -26,6 +27,8 @@ export function DestructiveConfirmationDialog({
   isBusy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  /** Keep it mounted with `open={false}` to let it fade out and hand focus back. */
+  open?: boolean;
   title: string;
 }) {
   return (
@@ -39,7 +42,7 @@ export function DestructiveConfirmationDialog({
       onConfirm={() => {
         if (!isBusy) onConfirm();
       }}
-      open
+      open={open}
       title={title}
     />
   );

@@ -371,6 +371,7 @@ export async function runTimerStartMutation({
   refresh,
   beforeStart,
   dedupeRunning = false,
+  guard,
   startAt
 }: {
   gate: TimerMutationGate;
@@ -402,6 +403,11 @@ export async function runTimerStartMutation({
    * asked for) changes nothing instead of stopping and restarting it.
    */
   dedupeRunning?: boolean;
+  /**
+   * Checked inside the gate, against the snapshot this Start would replace, before anything is
+   * shown: a message refuses the Start (Undo of a discard that would overlap; Codex r1 on #469).
+   */
+  guard?: (snapshot: BootstrapData) => string | null;
   /** Start at this instant instead of now (Undo of a discarded running block, WUI-008). */
   startAt?: string;
 }): Promise<TimerStartOutcome> {
@@ -409,6 +415,8 @@ export async function runTimerStartMutation({
     const carried = beforeStart ? await beforeStart() : undefined;
     const notice = carried ? carried.notice ?? null : null;
     const acceptedSnapshot = getCurrentSnapshot?.() ?? snapshot;
+    const refusal = guard?.(acceptedSnapshot);
+    if (refusal) return { ok: false, error: refusal } as const;
     const acceptedDraft = getCurrentDraft?.() ?? currentDraft;
     const draft = mergeTimerDraft(acceptedDraft, input);
     const startedAt = startAt ?? now();
@@ -457,6 +465,25 @@ export async function runTimerStartMutation({
   if (result.ownsResult && result.value.ok && !result.value.alreadyRunning && !gate.isActive()) await refresh();
   // A superseded waiter is handed the latest Start's result; it is not this Start's to announce.
   return result.value.ok ? { ...result.value, own: result.ownsResult } : result.value;
+}
+
+/**
+ * Why a discarded running block cannot come back at its own start now (Undo, WUI-008; Codex r1 on
+ * #469): something is running, or a block other than the discarded one covers any of the time
+ * from its start until now. Null when it can.
+ */
+export const DISCARD_RESTORE_REFUSALS = [
+  "Another block is running now, so the discarded one can't come back.",
+  "Another block now covers that time, so the discarded one can't come back."
+] as const;
+
+export function discardedBlockRestoreBlocker(snapshot: BootstrapData, discarded: Pick<TimeEntryRow, "id" | "startedAt">, now = Date.now()) {
+  if (snapshot.activeEntry) return DISCARD_RESTORE_REFUSALS[0];
+  const start = Date.parse(discarded.startedAt);
+  const covered = snapshot.entries.some((entry) => entry.id !== discarded.id &&
+    Date.parse(entry.startedAt) < now &&
+    (entry.stoppedAt ? Date.parse(entry.stoppedAt) : now) > start);
+  return covered ? DISCARD_RESTORE_REFUSALS[1] : null;
 }
 
 export function mergeTimerDraft(current: TimerDraft, input: TimerDraftInput): TimerDraft {

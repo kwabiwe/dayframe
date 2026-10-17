@@ -501,7 +501,7 @@ html.ui-dialog-open {
 }
 
 .ui-dialog .ui-button-danger:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--danger) 88%, var(--text-primary));
+  background: color-mix(in oklab, var(--danger) 86%, white);
 }
 
 .ui-button-ghost {
@@ -14505,8 +14505,16 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--on-danger);
 }
 
+/* Hover lightens, so the dark onDanger label keeps at least its rest contrast in both themes
+   (darkening fell below 4.5:1 in Daylight; Codex r1 on #469). */
 .df-rbtn--danger:hover {
-  background: color-mix(in oklab, var(--danger) 88%, var(--text-primary));
+  background: color-mix(in oklab, var(--danger) 86%, white);
+}
+
+/* A busy confirmation keeps its buttons focusable (aria-disabled), drawn as unavailable. */
+.df-confirm .df-rbtn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* Neutral Done / confirm for a reversible action (the date sheets' Done look). */

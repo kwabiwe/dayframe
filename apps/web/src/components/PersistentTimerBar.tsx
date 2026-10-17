@@ -30,7 +30,7 @@ import { validateManualTimeEntryWindow } from "@/lib/manual-time-entry";
 import type { BootstrapData } from "@/lib/queries";
 import { searchTaskSuggestions } from "@/lib/task-suggestion-search";
 import { shouldStartTimerFromEntrySubmit } from "@/lib/timer-entry-draft";
-import { quickActionTimerDraft } from "@/lib/timer-runtime";
+import { DISCARD_RESTORE_REFUSALS, discardedBlockRestoreBlocker, quickActionTimerDraft } from "@/lib/timer-runtime";
 import { blockStyle } from "@/lib/block-style";
 import { alreadyRecordingToastMessage, switchedToastCopy } from "@/lib/blocks-toast-copy";
 import { parseCommand } from "@/lib/command-parse";
@@ -475,13 +475,32 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     const swatch = swatchCategory ? blockStyle(swatchCategory.color, swatchCategory.name) : undefined;
     const outcome = await deleteActiveTimer();
     if (!outcome.ok) return;
+    // Undo restarts it at its own start, checked inside the timer's queue against what is there
+    // then (nothing running, nothing covering that time); a failed restore offers Try again with
+    // the same start, so the discarded time is never lost to a later retry (Codex r1 on #469).
+    const restore = async () => {
+      const outcome = await startTimer(restoreDraft, {
+        guard: (snapshot) => discardedBlockRestoreBlocker(snapshot, discarded),
+        startedAt: discarded.startedAt
+      });
+      if (outcome.ok) return;
+      const refused = (DISCARD_RESTORE_REFUSALS as readonly string[]).includes(outcome.error);
+      setNotice({
+        action: refused ? undefined : { label: "Try again", onAction: () => void restore() },
+        detail: refused ? null : outcome.error,
+        exiting: false,
+        label: refused ? outcome.error : `Couldn't bring back ${name}.`,
+        swatch,
+        token: ++noticeSequence.current
+      });
+    };
     const token = ++noticeSequence.current;
     setNotice({
       action: {
         label: "Undo",
         onAction: () => {
           setNotice((current) => (current?.token === token ? { ...current, exiting: true } : current));
-          void startTimer(restoreDraft, { startedAt: discarded.startedAt });
+          void restore();
         }
       },
       exiting: false,

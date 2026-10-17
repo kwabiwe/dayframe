@@ -88,15 +88,47 @@ describe("ConfirmDialog (WUI-005/WUI-009)", () => {
       <ConfirmDialog busy busyLabel="Deleting…" confirmLabel="Delete" onCancel={onCancel} onConfirm={onConfirm} open title="Delete tag?" />
     );
     const confirm = screen.getByRole("button", { name: "Deleting…" }) as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(confirm.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("button", { name: "Cancel" }).getAttribute("aria-disabled")).toBe("true");
     fireEvent.keyDown(confirm, { key: "Escape" });
     fireEvent.pointerDown(document.querySelector(".df-confirm-scrim")!);
+    fireEvent.click(confirm);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).not.toHaveBeenCalled();
+    expect(onConfirm).not.toHaveBeenCalled();
 
     rerender(<ConfirmDialog confirmLabel="Delete" error="Unable to delete this tag." onCancel={onCancel} onConfirm={onConfirm} open title="Delete tag?" />);
     expect(screen.getByRole("alert").textContent).toBe("Unable to delete this tag.");
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("is modal: the rest of the page is inert while it asks, and focus returns to its opener (Codex r1 on #469)", async () => {
+    function Opener() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Delete tag</button>
+          <ConfirmDialog confirmLabel="Delete" onCancel={() => setOpen(false)} onConfirm={() => setOpen(false)} open={open} title="Delete tag?" />
+        </>
+      );
+    }
+    const { container } = render(<Opener />);
+    const opener = screen.getByRole("button", { name: "Delete tag" });
+    opener.focus();
+    fireEvent.click(opener);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })));
+    expect(container.hasAttribute("inert")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(container.hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("keeps its buttons focusable while busy, so focus is never lost", async () => {
+    render(<ConfirmDialog busy busyLabel="Deleting…" confirmLabel="Delete" onCancel={vi.fn()} onConfirm={vi.fn()} open title="Delete tag?" />);
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    await waitFor(() => expect(document.activeElement).toBe(cancel));
+    expect(cancel.hasAttribute("disabled")).toBe(false);
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
   });
 });
