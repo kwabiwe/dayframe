@@ -625,7 +625,7 @@ async function confirmReview(
   }
   if (entryId) {
     await learnFromDecision(client, session, item, item.eventId,
-      await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: window.startedAt,
+      await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: window.startedAt, stoppedAt: window.stoppedAt,
         place: placeIdentity ? placeIdentity.patternPlace : editedPatternPlace(item, edit) }),
       { description, categoryId, edit });
   }
@@ -762,7 +762,8 @@ async function changePlace(
   // A Stay corrected to another place teaches that place's pattern when it is confirmed later (Codex
   // r2 on #458).
   await persistPattern(client, session, item, item.eventId,
-    await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: new Date(item.suggestedStartedAt).toISOString(), place: patternPlace }));
+    await resultPattern(client, session, item, { segmentId: item.segmentId, startedAt: new Date(item.suggestedStartedAt).toISOString(),
+      stoppedAt: new Date(item.suggestedStoppedAt).toISOString(), place: patternPlace }));
   return { ok: true, action: action.action, status: "open" };
 }
 
@@ -1187,7 +1188,7 @@ async function createChildEvent(
   decision: { ownerAuthoredDescription: boolean } = { ownerAuthoredDescription: false }
 ) {
   // The part's own segment holds its identity: the Stay's, or the place it was corrected to.
-  const pattern = await resultPattern(client, session, item, { segmentId, startedAt });
+  const pattern = await resultPattern(client, session, item, { segmentId, startedAt, stoppedAt });
   const event = await client.query<{ id: string }>(
     `insert into activity_events (
        workspace_id, user_id, client_event_id, source, event_type, occurred_at,
@@ -1285,23 +1286,30 @@ function editedPatternPlace(item: LockedReview, edit?: ReviewEntryEdit): Pattern
  */
 async function resultPattern(
   client: pg.PoolClient, session: RequestSession, item: LockedReview,
-  result: { segmentId: string; startedAt: string; place?: PatternPlace }
+  result: { segmentId: string; startedAt: string; stoppedAt: string; place?: PatternPlace }
 ) {
   if (!isNameBand(item.namePatternBand)) return null;
   // The time zone of the device's first reading from the result's start (as the emitter keys a
-  // segment by its first reading), else its last one before: a split part with no reading of its own
-  // still gets its own start's band (Codex r4 on #458). Seeks idx_location_evidence_user_time.
+  // segment by its first reading), else its last one before; only readings inside the visit itself
+  // (the result's window joined with the item's), so a split part with no reading of its own takes
+  // its source's zone and never a later trip's (Codex r4/r5 on #458). Seeks idx_location_evidence_user_time.
+  const from = Math.min(Date.parse(result.startedAt), Date.parse(String(item.suggestedStartedAt)));
+  const to = Math.max(Date.parse(result.stoppedAt), Date.parse(String(item.suggestedStoppedAt)));
   const evidence = await client.query<{ timeZone: string }>(
     `select "timeZone" from (
        (select time_zone as "timeZone", 0 as rank from location_evidence
-        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4) and occurred_at >= $3::timestamptz
+        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4)
+          and occurred_at >= $3::timestamptz and occurred_at <= $6::timestamptz
         order by occurred_at limit 1)
        union all
        (select time_zone as "timeZone", 1 as rank from location_evidence
-        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4) and occurred_at < $3::timestamptz
+        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4)
+          and occurred_at < $3::timestamptz and occurred_at >= $5::timestamptz
         order by occurred_at desc limit 1)
      ) nearest order by rank limit 1`,
-    [session.workspaceId, session.userId, result.startedAt, item.deviceId]);
+    [session.workspaceId, session.userId, result.startedAt, item.deviceId,
+      Number.isFinite(from) ? new Date(from).toISOString() : result.startedAt,
+      Number.isFinite(to) ? new Date(to).toISOString() : result.stoppedAt]);
   const timeZone = evidence.rows[0]?.timeZone;
   const band = timeZone ? nameBand(result.startedAt, timeZone) : item.namePatternBand;
   if (item.segmentKind !== "stay") return item.namePatternKey ? { key: item.namePatternKey, band } : null;

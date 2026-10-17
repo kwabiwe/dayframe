@@ -2062,6 +2062,23 @@ async function validateLearnedNameCorrections() {
       lastPerBand.sort((a, b) => a.band.localeCompare(b.band)), "Split parts did not learn in their own bands.");
     await forgetAll();
 
+    // A part with no reading of its own takes its visit's zone, never a later trip's (Codex r5 on #458).
+    const sparse = await offer();
+    await pool.query(
+      `insert into location_evidence
+       select (jsonb_populate_record(null::location_evidence, to_jsonb(le) || jsonb_build_object(
+         'id', gen_random_uuid(), 'client_evidence_id', le.client_evidence_id || '-later-zone',
+         'occurred_at', le.occurred_at + interval '1 day', 'time_zone', 'Asia/Tokyo'))).*
+       from location_evidence le where le.workspace_id = $1 and le.user_id = $2 order by le.occurred_at desc limit 1`,
+      [WORKSPACE_ID, USER_ID]);
+    const lateSplitAt = new Date(new Date(sparse.stoppedAt).getTime() - 70_000).toISOString();
+    await resolveLocationReviewAction(sparse.id, { action: "split_and_confirm", splitAt: lateSplitAt,
+      left: { description: "Before" }, right: { description: "Last minute" } }, session);
+    const lastMinute = (await rows()).find((row) => row.name === "Last minute");
+    assert.equal(lastMinute?.band, nameBand(lateSplitAt, "Europe/London"), "A sparse split part learned in a later trip's time zone.");
+    await pool.query("delete from location_evidence where workspace_id = $1 and client_evidence_id like '%-later-zone'", [WORKSPACE_ID]);
+    await forgetAll();
+
     // A correction to an accepted learned place teaches that learned place.
     const learned = await pool.query<{ id: string }>(
       `insert into learned_places (workspace_id, user_id, cluster_key, name, latitude, longitude, first_seen_at, last_seen_at, status)
