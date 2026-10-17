@@ -86,6 +86,7 @@ import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
 import { TodayReviewNudge } from "./today/TodayReviewNudge";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
+import { useTripOptOut } from "../lib/useTripOptOut";
 import {
   alreadyRecordingToastMessage,
   deletedToastAnnouncement,
@@ -379,6 +380,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     TimeEntry,
     MobileBootstrap | null
   > | null>(null);
+  // One automatic Move deleted: its toast offers "Don't log trips like this" (PRD D19, A4).
+  const tripOptOut = useTripOptOut(
+    pendingDeletion?.entries.length === 1 ? pendingDeletion.entries[0].automaticMoveEventId : null,
+    pendingDeletion?.token
+  );
   const [pendingTimerStops, setPendingTimerStops] = useState<PendingTimerStop[]>([]);
   const {
     reduceMotion,
@@ -3392,6 +3398,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           message={deletedToastMessage(pendingDeletion.entries)}
           onAction={undoDeletion}
           reduceMotion={reduceMotion}
+          secondary={tripOptOut ? { ...tripOptOut, testID: "today-delete-trip-opt-out" } : null}
           style={styles.todayToast}
           swatchColor={pendingDeletion.entries.length === 1 ? toastSwatchColor(pendingDeletion.entries[0], theme.mode) : null}
           testID="today-delete-toast"

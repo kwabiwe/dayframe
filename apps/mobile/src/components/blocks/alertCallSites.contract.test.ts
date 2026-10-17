@@ -34,6 +34,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Unable to refresh Settings"',
     '"Apple Health"', // mapping save failed (the one Health mapping writer)
     '"Evening reminder"', // change failed
+    '"Log trips automatically"', // switch not saved (PRD D19, A4)
     '"Your day"', // goal not saved
     '"Activities"', // restore failed
     '"Activities"', // pin failed

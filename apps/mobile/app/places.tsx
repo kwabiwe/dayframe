@@ -28,6 +28,7 @@ import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } fro
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
+import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
@@ -561,6 +562,7 @@ export default function PlacesScreen() {
               ))}
             </SettingsBlockGroup>
           ) : null}
+          <StoppedTripsGroup reduceMotion={reduceMotion} styles={styles} theme={theme} />
           </>
           )}
         </View>

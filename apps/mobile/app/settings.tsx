@@ -97,6 +97,7 @@ import {
   retryFailedQueuedEvents,
   subscribeActivityQueue,
   updateCategory,
+  updateLogTripsAutomatically,
   updateTimeGoals,
   type MobileBootstrap,
   type QueueDiagnostics,
@@ -1012,6 +1013,36 @@ export default function SettingsScreen() {
     ? shownCategories.filter((category) => category.isPinned).length
     : lastKnown?.activities?.pinned ?? 0;
   const shownPlacesCount = shownBootstrap ? shownBootstrap.places.length : lastKnown?.placesCount ?? 0;
+  // Settings › Automatic tracking › "Log trips automatically" (PRD D19, A4): the switch moves at once
+  // and the account keeps what the server stored; a refused save puts it back with the reason.
+  const [tripsDraft, setTripsDraft] = useState<boolean | null>(null);
+  async function toggleLogTrips(enabled: boolean) {
+    const userId = data?.user.id;
+    if (!userId || tripsDraft !== null) return;
+    setTripsDraft(enabled);
+    try {
+      const stored = await updateLogTripsAutomatically(enabled, userId);
+      const withValue = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
+        ? { ...currentData, user: { ...currentData.user, logTripsAutomatically: stored } }
+        : currentData;
+      const snapshotData = readSettingsSnapshot()?.data ?? null;
+      if (snapshotData) updateSettingsSnapshot({ data: withValue(snapshotData) });
+      setDataAndCache(withValue);
+    } catch (error) {
+      if (!(error instanceof AuthRequiredError)) {
+        Alert.alert(
+          "Log trips automatically",
+          isRetryableMobileConnectivityFailure(error)
+            ? "Not saved. Try again when you're online."
+            : error instanceof Error ? error.message : "Not saved. Try again."
+        );
+      }
+    } finally {
+      setTripsDraft(null);
+    }
+  }
+  const shownLogTrips = shownUser?.logTripsAutomatically;
+
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);
   // The account whose goals are on screen (Today is told only about the same account).
@@ -2160,7 +2191,7 @@ export default function SettingsScreen() {
               </SettingsBlockGroup>
 
               <SettingsBlockGroup
-                foot="Dayframe only logs on its own at places you trust."
+                foot="Dayframe logs on its own only when it's clear: visits at places you trust, and trips between your places."
                 theme={theme}
                 title="Automatic tracking"
               >
@@ -2192,6 +2223,26 @@ export default function SettingsScreen() {
                   theme={theme}
                   title="Suggest visits and commutes"
                 />
+                {/* Only when the server knows the switch (an older server sends no value). */}
+                {typeof shownLogTrips === "boolean" ? (
+                  <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
+                    <SettingsBlockRow
+                      control={
+                        <SettingsSwitch
+                          disabled={!data || tripsDraft !== null}
+                          label="Log trips automatically"
+                          onValueChange={(enabled) => void toggleLogTrips(enabled)}
+                          theme={theme}
+                          value={tripsDraft ?? shownLogTrips}
+                        />
+                      }
+                      subtitle="Trips between your places, when it's clear how you travelled"
+                      testID="settings-log-trips"
+                      theme={theme}
+                      title="Log trips automatically"
+                    />
+                  </Reanimated.View>
+                ) : null}
                 {/* UIA-086: Motion & Fitness is a status with its own action, not a page. */}
                 <SettingsBlockRow
                   control={shownMotionFitness?.action ? (

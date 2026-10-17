@@ -150,6 +150,8 @@ export type MobileTimeEntry = {
   categoryColor?: string | null;
   placeName: string | null;
   placeKind?: "saved" | "one_time" | null;
+  /** For a block a Move logged by itself (PRD D19), its Move's event, for "Don't log trips like this". */
+  automaticMoveEventId?: string | null;
   source: string;
   confidence: string;
   reviewStatus: string;
@@ -197,6 +199,8 @@ export type MobileBootstrap = {
     name: string;
     dailyGoalMinutes?: number;
     weeklyGoalMinutes?: number;
+    /** "Log trips automatically" (PRD D19, A4); absent on servers before it. */
+    logTripsAutomatically?: boolean;
   };
   workspace: { id: string; name: string };
   locationRolloutMode?: LocationRolloutMode;
@@ -1824,6 +1828,58 @@ export async function updateTimeGoals(goals: { dailyGoalMinutes?: number; weekly
     throw new AuthRequiredError();
   }
   if (!response.ok) throw await apiResponseError(response, "Unable to save your goal");
+}
+
+/** Settings › Automatic tracking › "Log trips automatically" (PRD D19, A4). Returns the stored value. */
+export async function updateLogTripsAutomatically(enabled: boolean, expectedUserId?: string) {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/profile`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ logTripsAutomatically: enabled, ...(expectedUserId ? { expectedUserId } : {}) })
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw await apiResponseError(response, "Unable to save this setting");
+  const body = await readJsonResponse<{ logTripsAutomatically?: unknown }>(response);
+  return typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : enabled;
+}
+
+/** A trip pattern the person stopped logging automatically (Places › Trips, PRD D19 A4). */
+export type StoppedTrip = { patternKey: string; label: string; stoppedAt: string };
+
+/** "Don't log trips like this": stops the pattern of the Move a deleted automatic block came from. */
+export async function stopLoggingTripsLike(eventId: string) {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/location/name-patterns`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ action: "stop_trips", eventId })
+  });
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) throw await apiResponseError(response, "Unable to stop logging trips like this");
+}
+
+/** Places › Trips: the trips the person stopped logging automatically. */
+export async function listStoppedTrips(): Promise<StoppedTrip[]> {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/location/name-patterns`, { headers: await authHeaders() });
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) throw await apiResponseError(response, "Unable to load trips");
+  const body = await readJsonResponse<{ trips?: StoppedTrip[] }>(response);
+  return body.trips ?? [];
+}
+
+/** Places › Trips: "Log automatically again". */
+export async function resumeLoggingTrips(patternKey: string) {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/location/name-patterns`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ action: "resume_trips", patternKey })
+  });
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) throw await apiResponseError(response, "Unable to change this trip");
 }
 
 /** Settings › Activities › Archived (Blocks 6b-2): the workspace's archived activities. */
