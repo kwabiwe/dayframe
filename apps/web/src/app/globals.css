@@ -356,11 +356,13 @@ button:disabled {
   opacity: 0.58;
 }
 
+/* One field (web UI audit WUI-017, owner 17 Oct 2026; the #442 start panel's): an inset fill with no
+   idle outline, and a stable 2 px perimeter that turns the neutral focus colour on focus. */
 input,
 select,
 textarea {
   min-height: 38px;
-  border: var(--web-control-border-width) solid var(--control-border);
+  border: var(--web-control-border-width) solid transparent;
   background: var(--surface-inset);
   color: var(--foreground);
 }
@@ -568,7 +570,7 @@ html.ui-dialog-open {
 .ui-control {
   width: 100%;
   min-height: var(--web-control-height);
-  border: var(--web-control-border-width) solid var(--control-border);
+  border: var(--web-control-border-width) solid transparent;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 var(--web-control-padding-inline);
@@ -598,7 +600,7 @@ html.ui-dialog-open {
 
 .ui-compound-control {
   min-width: 0;
-  border: var(--web-control-border-width) solid var(--control-border);
+  border: var(--web-control-border-width) solid transparent;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   transition:
@@ -648,21 +650,26 @@ textarea.ui-control {
   color: var(--danger-text);
 }
 
+/* One segmented control (web UI audit WUI-019, owner 17 Oct 2026; the Reports and Library `df-seg`):
+   a `surface` track with an inset 1 px border, 36 px items (44 px on touch screens) in 13/650
+   secondary text, and the chosen item on `surfaceMuted` in primary text. Selection is neutral
+   (UIA-205): coral stays for the primary action and recording. */
 .ui-segmented-control {
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
-  gap: 4px;
+  gap: 2px;
   border-radius: 999px;
-  background: var(--surface-inset);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
   padding: 4px;
   overflow: visible;
 }
 
 .ui-segmented-control button {
   display: inline-flex;
-  min-width: var(--web-control-height);
-  min-height: var(--web-control-height);
+  min-width: 36px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -670,15 +677,18 @@ textarea.ui-control {
   border-radius: 999px;
   background: transparent;
   padding: 0 14px;
-  color: var(--foreground);
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
 }
 
-/* UIA-205: selection is neutral in the shared controls; coral stays for the primary action and recording. */
+.ui-segmented-control button:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
 .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 
 .ui-segmented-control button:disabled {
@@ -856,12 +866,6 @@ textarea.ui-control {
 
 .settings-appearance-row .ui-segmented-control {
   width: 100%;
-}
-
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
-  color: var(--on-accent);
 }
 
 .settings-inline-form > .ui-button {
@@ -1050,6 +1054,12 @@ textarea.ui-control {
   outline: 0;
 }
 
+/* An inline edit shows the shared neutral field ring while it has focus (WUI-017). */
+.timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus) {
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
 .timeline-inline-time {
   box-sizing: border-box;
   display: inline-grid;
@@ -1120,11 +1130,16 @@ textarea.ui-control {
   box-shadow: none;
 }
 
-.timeline-inline-time:has(.timeline-inline-time-input:focus-visible),
 .timeline-inline-time .timeline-inline-time-input:focus-visible {
   border: 0;
   outline: 0;
   box-shadow: none;
+}
+
+.timeline-inline-time:has(.timeline-inline-time-input:focus-visible) {
+  border: 0;
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .timeline-inline-time-separator {
@@ -4870,7 +4885,8 @@ dialog.ui-dialog.df-range-custom {
 
 :root {
   --uncategorized-color: var(--muted);
-  --web-radius-control: 16px;
+  /* Fields and field-like triggers: radius 10 at every width (WUI-017). */
+  --web-radius-control: 10px;
   --web-radius-group: 24px;
   --web-radius-floating: 24px;
   --web-control-height: 44px;
@@ -5216,7 +5232,7 @@ dialog.ui-dialog.df-range-custom {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  border: var(--web-control-border-width) solid var(--control-border);
+  border: var(--web-control-border-width) solid transparent;
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 4px 0 13px;
@@ -7522,25 +7538,31 @@ dialog.ui-dialog.df-range-custom {
   min-height: 44px;
 }
 
+/* The date sheet's quick picks are the one segmented control (WUI-019), 44 px on this phone sheet. */
 .date-sheet-segments {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 2px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 4px;
 }
 
 .date-sheet-segments button {
   min-height: 44px;
   border: 0;
-  border-radius: 12px;
-  background: var(--surface-muted);
-  color: var(--foreground);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
   font: inherit;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .date-sheet-segments button[aria-pressed="true"] {
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 
 .date-sheet-segments button:disabled {
@@ -7832,7 +7854,6 @@ dialog.ui-dialog.df-range-custom {
   }
 
   :root {
-    --web-radius-control: 12px;
     --web-radius-group: 18px;
     --web-radius-floating: 18px;
     /* One control scale with the Blocks controls (web UI audit WUI-015): 44 px, compact 36 px. */
@@ -9791,12 +9812,16 @@ dialog.ui-dialog.df-palette {
   padding: 0;
 }
 
+/* The search is the one field (WUI-017): an inset fill, radius 10, the neutral ring on focus. */
 .df-palette-input {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 4px 10px 10px;
-  box-shadow: inset 0 -1px 0 var(--border);
+  margin: 8px 8px 4px;
+  border-radius: 10px;
+  padding: 0 6px 0 12px;
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 2px transparent;
   color: var(--text-muted);
 }
 
@@ -9812,7 +9837,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-palette-input:focus-within {
-  box-shadow: inset 0 -2px 0 var(--focus);
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .df-palette-input kbd {
@@ -10911,12 +10936,6 @@ dialog.ui-dialog.df-palette {
  * weekday / date / total day headings, a coral now line, hatched Review suggestions in a
  * right-hand lane and neutral view switches. Geometry, drag-to-create and resize are unchanged.
  */
-.timeline-range-controls .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--surface);
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 14%, transparent);
-}
-
 .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
   grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size) auto;
 }
@@ -11842,6 +11861,21 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
 }
 
+/* Touch screens: every segment and every text field is a 44 px target (WUI-019, WUI-046). */
+@media (any-pointer: coarse) {
+  .df-seg a,
+  .ui-segmented-control button,
+  .df-pe-seg span,
+  .df-flist-search input,
+  .df-logas input {
+    min-height: 44px;
+  }
+
+  .df-flist-search {
+    height: auto;
+  }
+}
+
 .df-library-pins {
   margin: 0;
 }
@@ -12097,10 +12131,10 @@ dialog.ui-dialog.df-palette {
 
 .df-ce-field input {
   min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: var(--web-control-border-width) solid transparent;
+  border-radius: 10px;
   padding: 0 12px;
-  background: var(--surface);
+  background: var(--surface-inset);
   color: var(--text-primary);
   font-size: 16px;
 }
@@ -12611,19 +12645,6 @@ dialog.ui-dialog.df-ce-dialog {
 
 .df-set-card .ui-settings-row-action {
   margin-left: auto;
-}
-
-/* Selection is neutral in Blocks: coral stays for recording and the one primary action. */
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
-.df-set-card .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--surface-muted);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
-  color: var(--text-primary);
 }
 
 .df-set-card .ui-settings-row + .ui-settings-row::before {
@@ -14699,7 +14720,8 @@ dialog.ui-dialog.df-rf-dialog {
   gap: 2px;
   border-radius: 999px;
   padding: 4px;
-  background: var(--surface-inset);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-pe-seg label {
@@ -14735,7 +14757,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-pe-seg input:checked + span {
-  background: var(--surface-raised);
+  background: var(--surface-muted);
 }
 
 .df-pe-seg input:focus-visible + span {
