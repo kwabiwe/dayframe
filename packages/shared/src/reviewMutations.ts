@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   ReviewEntryEditSchema, IgnoreLocationReviewSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
-  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
+  SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 } from "./location/schemas";
 
 export const ReviewMutationEditSchema = ReviewEntryEditSchema.extend({
@@ -38,7 +38,7 @@ export const GenericReviewMutationSchema = z.discriminatedUnion("action", [
 export const DurableLocationReviewMutationSchema = z.discriminatedUnion("action", [
   durableConfirmMutationSchema, IgnoreLocationReviewSchema, completeEditMutationSchema,
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
-  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
+  SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 ]);
 export const ReviewMutationSchema = z.discriminatedUnion("action", [
   acceptMutationSchema, ignoreMutationSchema, ...DurableLocationReviewMutationSchema.options
@@ -83,6 +83,10 @@ export function validReviewAcknowledgement(body: unknown, envelope: ReviewMutati
       value.childSegmentIds.every(id => typeof id === "string" && id.length > 0) &&
       (envelope.mutation.action !== "split_and_confirm" || Array.isArray(value.entryIds) && value.entryIds.length === 2 &&
         value.entryIds.every(id => typeof id === "string" && id.length > 0));
+  }
+  // "Save this place" leaves its card open: it is acknowledged by the place it saved.
+  if (envelope.mutation.action === "save_place") {
+    return value.status === "open" && typeof value.placeId === "string" && value.placeId.length > 0;
   }
   if (["merge", "merge_and_confirm"].includes(envelope.mutation.action)) {
     return value.status === "accepted" && typeof value.mergedSegmentId === "string" && value.mergedSegmentId.length > 0 &&

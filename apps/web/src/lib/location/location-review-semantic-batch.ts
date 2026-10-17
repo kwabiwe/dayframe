@@ -45,7 +45,9 @@ export async function segmentMoveName(
 }
 
 async function moveEndpoints(
-  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>,
+  /** Moves whose ends their person corrected: named from those ends alone (Codex r3 on #459). */
+  correctedMoves: ReadonlySet<string> = new Set()
 ) {
   const moves = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
   const saved = new Map<string, MoveEndpoint>();
@@ -81,21 +83,26 @@ async function moveEndpoints(
   return new Map(moves.map((segment) => {
     const from = end(segment.fromPlaceId, segment.fromStaySegmentId);
     const to = end(segment.toPlaceId, segment.toStaySegmentId);
-    const sameEndpoint = isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
-      Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
+    // A corrected Move is a round trip only when its corrected ends are one place; the engine's
+    // qualification still governs policy, never this name.
+    const sameEndpoint = correctedMoves.has(segment.clientSegmentId)
+      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
+      : isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
+        Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
     return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,
       stopCount: segment.stops?.length ?? 0 })] as const;
   }));
 }
 
 async function displayContext(
-  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>,
+  correctedMoves: ReadonlySet<string> = new Set()
 ) {
   const stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
   const places = new Map<string, Place>();
   const learned = new Map<string, LearnedPlace>();
   // Moves are named from their ends and mode (PRD D19).
-  const moves = await moveEndpoints(client, session, segments, stayIds);
+  const moves = await moveEndpoints(client, session, segments, stayIds, correctedMoves);
   const placeIds = [...new Set(stays.flatMap(s => s.placeId ? [s.placeId] : []))].sort();
   const learnedIds = [...new Set(stays.flatMap(s => s.learnedPlaceId ? [s.learnedPlaceId] : []))].sort();
   // Saved places belong to a workspace; learned places additionally belong to a user.
@@ -140,6 +147,74 @@ async function displayContext(
 }
 
 /**
+ * A Stay its person corrected (Change place, Save this place: its persisted row is `manual`) keeps the
+ * place it was corrected to when replay re-emits its card, so the card, its activity and its reason
+ * follow the correction rather than the engine's match (Codex r1 on #459); the Moves either side of it
+ * end at that place too, for their names and activity (Codex r2 on #459). A Stay saved as a place
+ * also keeps the activity its card had then (`correctedCategoryId`), never the place's default, and
+ * whether the person chose that activity there (`chosenCategories`), which a decision then learns.
+ */
+export async function withCorrectedStayPlaces(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+): Promise<{
+  segments: LocationSegment[]; correctedCategories: ReadonlyMap<string, string | null>; correctedMoves: ReadonlySet<string>;
+  chosenCategories: ReadonlySet<string>;
+}> {
+  const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? []
+    : [stayIds.get(segment.fromStaySegmentId), stayIds.get(segment.toStaySegmentId)].filter((id): id is string => Boolean(id))))].sort();
+  const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
+  const categories = new Map<string, string | null>();
+  const chosen = new Set<string>();
+  for (const batch of chunks(ids)) {
+    const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null;
+      hasCategory: boolean; categoryId: string | null; chosen: boolean | null }>(
+      `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind,
+              metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId",
+              (metadata ->> 'correctedCategoryChosen')::boolean as chosen
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+      [session.workspaceId, session.userId, batch]);
+    for (const row of result.rows) {
+      const placeMatchKind = row.kind === "saved" && row.placeId ? "saved" : row.kind === "learned" && row.learnedPlaceId ? "learned"
+        : row.placeId ? "saved" : row.learnedPlaceId ? "learned" : "unknown";
+      corrected.set(row.id, { placeId: row.placeId, learnedPlaceId: row.learnedPlaceId, placeMatchKind });
+      if (row.hasCategory) categories.set(row.id, row.categoryId);
+      if (row.hasCategory && row.chosen === true) chosen.add(row.id);
+    }
+  }
+  const correctedCategories = new Map<string, string | null>();
+  const correctedMoves = new Set<string>();
+  const chosenCategories = new Set<string>();
+  if (corrected.size === 0) return { segments, correctedCategories, correctedMoves, chosenCategories };
+  const savedPlaceOf = (clientStayId: string) => {
+    const identity = corrected.get(stayIds.get(clientStayId) ?? "");
+    return identity ? { placeId: identity.placeMatchKind === "saved" ? identity.placeId : null } : null;
+  };
+  return {
+    segments: segments.map((segment) => {
+      if (segment.kind === "commute") {
+        const from = savedPlaceOf(segment.fromStaySegmentId);
+        const to = savedPlaceOf(segment.toStaySegmentId);
+        // Named from corrected ends only when a correction really moved an end (a time-only correction keeps it).
+        if ((from && from.placeId !== (segment.fromPlaceId ?? null)) || (to && to.placeId !== (segment.toPlaceId ?? null))) {
+          correctedMoves.add(segment.clientSegmentId);
+        }
+        return from || to
+          ? { ...segment, ...(from ? { fromPlaceId: from.placeId } : {}), ...(to ? { toPlaceId: to.placeId } : {}) }
+          : segment;
+      }
+      const persistedId = stayIds.get(segment.clientSegmentId) ?? "";
+      const identity = corrected.get(persistedId);
+      if (categories.has(persistedId)) correctedCategories.set(segment.clientSegmentId, categories.get(persistedId) ?? null);
+      if (chosen.has(persistedId)) chosenCategories.add(segment.clientSegmentId);
+      return identity ? { ...segment, ...identity } : segment;
+    }),
+    correctedCategories,
+    correctedMoves,
+    chosenCategories
+  };
+}
+
+/**
  * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
  * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
  * suggestions or payload changed (Review renders the payload); and a created Commute activity. A replay re-emits every finalised segment, so the
@@ -162,6 +237,8 @@ export async function emitReviewSemanticSegments(
   /** The replayed device's readings' time zones, for learned names' time-of-day bands. */
   evidenceTimeZones: ReadonlyMap<string, string> = new Map()
 ): Promise<number> {
+  const corrections = await withCorrectedStayPlaces(client, session, segments, stayIds);
+  segments = corrections.segments;
   const clientEventIdOf = (segment: LocationSegment) => `location-segment:${segment.clientSegmentId}`.slice(0, 160);
   // A stay too short to offer (an unknown stay under 10 minutes, PRD D19; a known place under its
   // window). One that shrank there while its card is open loses that card, as replay retires a card
@@ -180,7 +257,7 @@ export async function emitReviewSemanticSegments(
     return [{ segment, segmentId, clientEventId: clientEventIdOf(segment) }];
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
-  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds);
+  const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds, corrections.correctedMoves);
   const offerable = candidates.filter(row => context(row.segment).trusted?.loggingEnabled !== false);
   // Health walks win (PRD D19): a Move an Apple Health workout of its kind covers is the workout.
   // It is not offered (nor reopened) here; replay retires any open card for it afterwards
@@ -234,18 +311,23 @@ export async function emitReviewSemanticSegments(
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   // Learned names (PRD D19, A8): a name the person gave this pattern is the card's name, and its
   // activity the card's activity; after two uses it also names a Log automatically block.
-  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones);
+  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones, corrections.correctedMoves);
   const learnedNames = await learnedNamesFor(client, session, patterns);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title: placeTitle, move } = context(segment);
     const pattern = patterns.get(clientEventId);
     const learned = learnedNames.get(clientEventId);
     const title = learned?.name ?? placeTitle;
-    const categoryId = learned?.categoryId ?? (segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null);
+    // The activity a person corrected this Stay to (Save this place) comes first, then a learned one.
+    const corrected = corrections.correctedCategories.has(segment.clientSegmentId);
+    const learnedActivity = !corrected && learned?.categoryId ? learned.categoryId : null;
+    const categoryId = corrected ? corrections.correctedCategories.get(segment.clientSegmentId) ?? null
+      : learnedActivity ?? (segment.kind === "commute" ? moveCategoryId(move) : trusted?.categoryId ?? null);
     const nameFields = pattern ? {
       namePatternKey: pattern.key, namePatternBand: pattern.band,
       ...(learned?.name ? { nameSource: "learned" } : {}),
-      ...(learned?.categoryId ? { activitySource: "learned" } : {})
+      // An activity the person chose when saving the place stays theirs to teach (Codex r5 on #459).
+      ...(learnedActivity || (corrected && corrections.chosenCategories.has(segment.clientSegmentId)) ? { activitySource: "learned" } : {})
     } : {};
     const placeId = trusted?.id ?? (segment.kind === "stay" ? segment.placeId ?? null : null);
     const disposition = locationSemanticDisposition("v2_review", segment);

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   ReviewMutationEnvelopeSchema,
-  ReviewMutationSchema
+  ReviewMutationSchema,
+  validReviewAcknowledgement
 } from "../src/reviewMutations";
 
 describe("Review mutation schemas", () => {
@@ -40,7 +41,8 @@ describe("durable structural Location envelopes", () => {
     { action: "save_place_and_confirm", name: "Synthetic place", latitude: 51.5, longitude: -0.1 },
     { action: "split", splitAt: "2026-08-28T08:30:00Z" },
     { action: "split_and_confirm", splitAt: "2026-08-28T08:30:00Z" },
-    { action: "merge", adjacentReviewItemId: id }, { action: "merge_and_confirm", adjacentReviewItemId: id }
+    { action: "merge", adjacentReviewItemId: id }, { action: "merge_and_confirm", adjacentReviewItemId: id },
+    { action: "save_place", name: "Synthetic place", radiusMeters: 110 }
   ];
   it.each(actions)("accepts strict $action and rejects extra provider payload", (mutation) => {
     expect(ReviewMutationEnvelopeSchema.safeParse({ clientMutationId: id, mutation }).success).toBe(true);
@@ -49,5 +51,32 @@ describe("durable structural Location envelopes", () => {
   it("does not silently accept a pure place edit or invalid save coordinates", () => {
     expect(ReviewMutationSchema.safeParse({ action: "change_place", placeId: id }).success).toBe(false);
     expect(ReviewMutationSchema.safeParse({ action:"save_place_and_confirm", name:"X", latitude:91,longitude:0 }).success).toBe(false);
+  });
+});
+
+describe("Save this place (PRD D19, design §7)", () => {
+  const id = "18600000-0000-4000-8000-000000000002";
+  const envelope = ReviewMutationEnvelopeSchema.parse({ clientMutationId: id,
+    mutation: { action: "save_place", name: "Synthetic place", radiusMeters: 110, categoryId: null } });
+
+  it("defaults to suggesting visits without logging them automatically, within 50–200 m", () => {
+    expect(envelope.mutation).toMatchObject({ suggestVisits: true, autoLog: false });
+    for (const radiusMeters of [49, 201]) {
+      expect(ReviewMutationSchema.safeParse({ action: "save_place", name: "X", radiusMeters }).success).toBe(false);
+    }
+    expect(ReviewMutationSchema.safeParse({ action: "save_place", name: "X", radiusMeters: 110, latitude: 0, longitude: 0 }).success).toBe(false);
+  });
+
+  it("is acknowledged by the place it saved while its card stays open", () => {
+    expect(validReviewAcknowledgement({ ok: true, action: "save_place", status: "open", placeId: id }, envelope, id)).toBe(true);
+    expect(validReviewAcknowledgement({ ok: true, action: "save_place", status: "open" }, envelope, id)).toBe(false);
+    expect(validReviewAcknowledgement({ ok: true, action: "save_place", status: "accepted", entryId: id }, envelope, id)).toBe(false);
+  });
+
+  it("lets Save place and confirm carry the place's switches and a large size, which older apps omit", () => {
+    const base = { action: "save_place_and_confirm", name: "Synthetic place", latitude: 51.5, longitude: -0.1 };
+    expect(ReviewMutationSchema.safeParse({ ...base, radiusMeters: 200, suggestVisits: false, autoLog: false }).success).toBe(true);
+    expect(ReviewMutationSchema.parse(base)).not.toHaveProperty("suggestVisits");
+    expect(ReviewMutationSchema.safeParse({ ...base, radiusMeters: 201 }).success).toBe(false);
   });
 });

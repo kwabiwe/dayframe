@@ -583,3 +583,13 @@ Block pull-to-refresh:
 - Interruption: toggling again mid-transition retargets the CSS transition from where it is; there are no timers or stale states.
 - Reduce Motion: the panel and chevron transitions are `none`, so expand and collapse are immediate.
 - Evidence: `reportFilters.dom.test.tsx` (stays open after the only source or description is cleared, inert after a user collapse, rapid toggles) and `reports.contract.test.ts` (one transition owner, Reduce Motion CSS).
+
+## Save this place sheet (location v3 PR 9b, PRD D19)
+
+- Trigger: the Save place pill on an unsaved visit's chosen place in Location evidence; Save; Cancel, the backdrop or a swipe down.
+- Owner: `SwipeDismissSheet` owns the sheet's entrance and exit (the place-role sheet's pattern). The editor's place rows keep their existing local presence/layout owners (`localPresenceEntering`/`Exiting`, `localLayoutTransition`); the screen's `BlocksToast` owns the notice.
+- Entrance/update/exit: the sheet rises. On Save it leaves first; only from its `onDismiss` does the chosen row become the saved place (its row fades out and the saved row fades in, in place; the rows below reflow with the layout transition) and the toast rises. Choosing a size redraws the map's circle in place.
+- Interruption: Save is one-shot (a second tap, or a tap after dismissal started, does nothing); a swipe or backdrop tap while saving is refused; a late answer never touches a closed sheet.
+- Async: the save is one SQLite commit; a refused commit keeps the sheet and its draft with the reason (announced). Delivery to the server is silent and never moves the screen.
+- Accessibility: Reduce Motion uses the sheet's opacity path and the rows' opacity-only presence; fields and switches are labelled; the size is a radio group; the pill keeps a 44-point touch target; the toast is announced.
+

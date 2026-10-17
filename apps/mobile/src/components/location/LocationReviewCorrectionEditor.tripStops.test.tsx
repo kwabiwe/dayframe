@@ -46,6 +46,8 @@ vi.mock("@/lib/placeSearch", () => ({
   selectPlaceSearchBias: () => undefined
 }));
 vi.mock("@/components/location/LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
+// The Save place sheet draws a native map; these tests never open it.
+vi.mock("./SavePlaceSheet", () => ({ SavePlaceSheet: () => null }));
 vi.mock("./LocationEvidenceMap", () => ({ LocationEvidenceMap: () => null }));
 // All activities is a native sheet; these tests never open it.
 // The A11b time wheel panel and haptics are native; these tests render the editor's text only.

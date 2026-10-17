@@ -5,7 +5,9 @@ import { useEffect, useState, useTransition } from "react";
 import { Check, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { tripStopRows, tripStopsHeading, type LocationReviewAction, type LocationReviewEvidenceDto } from "@dayframe/shared";
+import {
+  SAVE_PLACE_RADIUS_METERS, tripStopRows, tripStopsHeading, type LocationReviewAction, type LocationReviewEvidenceDto, type ReviewEntryEdit
+} from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -56,7 +58,11 @@ export function LocationReviewPanel({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [placeName, setPlaceName] = useState("");
-  const [selectedPoint, setSelectedPoint] = useState<{ latitude: number; longitude: number } | null>(null);
+  // "Save this place" (PRD D19, design §7): its size, and the place's visit switches.
+  const [placeSize, setPlaceSize] = useState<keyof typeof SAVE_PLACE_RADIUS_METERS>("medium");
+  const [suggestVisits, setSuggestVisits] = useState(true);
+  const [placeAutoLog, setPlaceAutoLog] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
   const [descriptionEdited, setDescriptionEdited] = useState(false);
@@ -82,9 +88,6 @@ export function LocationReviewPanel({
         setDescriptionEdited(Boolean(initialDescription?.trim()));
         setStartedAt(toLocalDateTimeInput(next.segment.startedAt));
         setStoppedAt(next.segment.stoppedAt ? toLocalDateTimeInput(next.segment.stoppedAt) : "");
-        if (next.map.centre) {
-          setSelectedPoint({ longitude: next.map.centre.coordinates[0], latitude: next.map.centre.coordinates[1] });
-        }
       })
       .catch((loadError: unknown) => {
         if (!cancelled) {
@@ -111,12 +114,69 @@ export function LocationReviewPanel({
       onResolved?.();
       startTransition(() => router.refresh());
       onClose();
+    } catch {
+      // A network failure keeps every field as it is (Codex r1 on #459).
+      setError("Couldn't reach Dayframe. Check your connection and try again.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  /** "Save place": saves where you were and keeps this card open with it, keeping every field here. */
+  async function savePlace() {
+    setError(null);
+    setSaveStatus(null);
+    setIsSubmitting(true);
+    try {
+      const name = placeName.trim();
+      const response = await clientFetch(`/api/review/${reviewItemId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_place", name, radiusMeters: SAVE_PLACE_RADIUS_METERS[placeSize],
+          categoryId: categoryId || null, suggestVisits, autoLog: suggestVisits && placeAutoLog
+        } satisfies LocationReviewAction)
+      });
+      const body = await response.json().catch(() => ({})) as { message?: string; error?: string; rematchedCount?: number };
+      if (!response.ok) {
+        setError(body.message ?? body.error ?? "Couldn't save this place. Try again.");
+        return;
+      }
+      setSaveStatus(savedPlaceStatus(name, body.rematchedCount ?? 0));
+      setPlaceName("");
+    } catch {
+      // Nothing was saved that we know of: every field stays (Codex r1 on #459).
+      setError("Couldn't reach Dayframe. Check your connection and try again.");
+      return;
+    } finally {
+      setIsSubmitting(false);
+    }
+    // Saved: Review refreshes whatever happens next, and the card's evidence reloads without
+    // touching the fields being edited (a failed reload keeps the shown evidence).
+    startTransition(() => router.refresh());
+    try {
+      const reloaded = await clientFetch(`/api/review/${reviewItemId}/location-evidence`, { cache: "no-store" });
+      if (reloaded.ok) setEvidence(await reloaded.json() as LocationReviewEvidenceDto);
+    } catch {
+      // The saved place shows once the panel is opened again.
+    }
+  }
+
+  /** What the Resolve fields say, for Confirm edits and Save place and confirm. */
+  function resolveEdit(): ReviewEntryEdit {
+    return {
+      categoryId: categoryId || null,
+      description,
+      ...typedMarker(description, descriptionEdited),
+      ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
+      ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
+    };
+  }
+
   const actionsDisabled = isPending || isSubmitting;
+  const stayCentre = evidence?.map.centre
+    ? { longitude: evidence.map.centre.coordinates[0], latitude: evidence.map.centre.coordinates[1] }
+    : null;
 
   return (
     <div className="location-review-panel mt-4 max-h-[min(78vh,760px)] overflow-y-auto rounded-2xl bg-[var(--surface-muted)] p-3 sm:p-4">
@@ -156,7 +216,7 @@ export function LocationReviewPanel({
       ) : null}
       {evidence ? (
         <div className="mt-4 space-y-4">
-          <LocationEvidenceMap evidence={evidence} onSelectPoint={setSelectedPoint} />
+          <LocationEvidenceMap evidence={evidence} />
           <section className="rounded-2xl bg-[var(--surface)] p-4">
             <h5 className="font-semibold">Time and uncertainty</h5>
             <p className="mt-1 text-sm text-[var(--muted)]">
@@ -207,35 +267,98 @@ export function LocationReviewPanel({
             </section>
           ) : null}
 
-          {evidence.segment.kind === "stay" ? (
-            <section className="rounded-2xl bg-[var(--surface)] p-4">
-              <h5 className="font-semibold">Save this place</h5>
-              <p className="mt-1 text-sm text-[var(--muted)]">Click the map to correct its centre. New places start with a bounded 80 metre radius.</p>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          {evidence.segment.kind === "stay" && !evidence.display.placeId && stayCentre ? (
+            <section className="location-save-place rounded-2xl bg-[var(--surface)] p-4" aria-labelledby={`location-save-place-${reviewItemId}`}>
+              <h5 className="font-semibold" id={`location-save-place-${reviewItemId}`}>Save this place</h5>
+              <p className="mt-1 text-sm text-[var(--muted)]">The circle centres on where you were. It logs as the activity below.</p>
+              <div className="mt-3 grid gap-3">
                 <input
-                  className="industrial-input focus-ring min-h-11 flex-1"
+                  aria-label="Place name"
+                  className="industrial-input focus-ring min-h-11"
                   maxLength={120}
                   placeholder="Place name"
                   value={placeName}
                   onChange={(event) => setPlaceName(event.target.value)}
                 />
-                <button
-                  className="industrial-button-primary focus-ring min-h-11 px-4 text-sm"
-                  disabled={actionsDisabled || !placeName.trim() || !selectedPoint}
-                  type="button"
-                  onClick={() => selectedPoint && void act({
-                    action: "save_place_and_confirm",
-                    name: placeName.trim(),
-                    latitude: selectedPoint.latitude,
-                    longitude: selectedPoint.longitude,
-                    radiusMeters: 80
-                  })}
-                >
-                  Save place and confirm
-                </button>
+                {/* Native radios: arrow keys move between sizes, as in the place editor. */}
+                <div aria-label="Place size" className="df-pe-seg" role="radiogroup">
+                  {(Object.keys(SAVE_PLACE_RADIUS_METERS) as Array<keyof typeof SAVE_PLACE_RADIUS_METERS>).map((size) => (
+                    <label key={size}>
+                      <input
+                        checked={placeSize === size}
+                        name={`location-save-place-size-${reviewItemId}`}
+                        onChange={() => setPlaceSize(size)}
+                        type="radio"
+                        value={size}
+                      />
+                      <span>{SAVE_PLACE_SIZE_LABELS[size]}</span>
+                    </label>
+                  ))}
+                </div>
+                <label className="place-suggestion-toggle">
+                  <span>
+                    <strong>Suggest visits here</strong>
+                    <small>{suggestVisits ? "Show detected visits in Review." : "Do not suggest visits for this place."}</small>
+                  </span>
+                  <input
+                    aria-label="Suggest visits here"
+                    checked={suggestVisits}
+                    role="switch"
+                    type="checkbox"
+                    onChange={(event) => {
+                      setSuggestVisits(event.target.checked);
+                      if (!event.target.checked) setPlaceAutoLog(false);
+                    }}
+                  />
+                </label>
+                <label className={`place-suggestion-toggle${suggestVisits ? "" : " is-disabled"}`}>
+                  <span>
+                    <strong>Log automatically</strong>
+                    <small>{suggestVisits
+                      ? "Visits here become blocks without a Review card."
+                      : "Visits here become blocks without a Review card. Turn on Suggest visits here first."}</small>
+                  </span>
+                  <input
+                    aria-label="Log automatically"
+                    checked={suggestVisits && placeAutoLog}
+                    disabled={!suggestVisits}
+                    role="switch"
+                    type="checkbox"
+                    onChange={(event) => setPlaceAutoLog(event.target.checked)}
+                  />
+                </label>
+                {/* The panel can be narrow (beside Review's queue): whole buttons wrap, never their labels. */}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    className="industrial-button focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
+                    disabled={actionsDisabled || !placeName.trim()}
+                    type="button"
+                    onClick={() => void savePlace()}
+                  >
+                    Save place
+                  </button>
+                  <button
+                    className="industrial-button-primary focus-ring min-h-11 whitespace-nowrap px-4 text-sm"
+                    disabled={actionsDisabled || !placeName.trim()}
+                    type="button"
+                    onClick={() => void act({
+                      action: "save_place_and_confirm",
+                      name: placeName.trim(),
+                      latitude: stayCentre.latitude,
+                      longitude: stayCentre.longitude,
+                      radiusMeters: SAVE_PLACE_RADIUS_METERS[placeSize],
+                      suggestVisits,
+                      autoLog: suggestVisits && placeAutoLog,
+                      edit: resolveEdit()
+                    })}
+                  >
+                    Save place and confirm
+                  </button>
+                </div>
               </div>
             </section>
           ) : null}
+          {saveStatus ? <p className="location-save-place-status text-sm" role="status">{saveStatus}</p> : null}
 
           <section className="location-review-resolve rounded-2xl bg-[var(--surface)] p-4">
             <h5 className="font-semibold">Resolve</h5>
@@ -302,16 +425,7 @@ export function LocationReviewPanel({
                 className="industrial-button-primary focus-ring min-h-11 px-4 text-sm"
                 disabled={actionsDisabled}
                 type="button"
-                onClick={() => void act({
-                  action: "edit_and_confirm",
-                  edit: {
-                    categoryId: categoryId || null,
-                    description,
-                    ...typedMarker(description, descriptionEdited),
-                    ...(startedAt ? { startedAt: new Date(startedAt).toISOString() } : {}),
-                    ...(stoppedAt ? { stoppedAt: new Date(stoppedAt).toISOString() } : {})
-                  }
-                })}
+                onClick={() => void act({ action: "edit_and_confirm", edit: resolveEdit() })}
               >
                 <Check size={15} /> Confirm edits
               </button>
@@ -380,6 +494,14 @@ export function initialEvidenceDescription(evidence: Pick<LocationReviewEvidence
   const title = evidence.display.title?.trim() ?? "";
   return ["unknown place", "near saved places", "visit at an unknown place", "visit near saved places"]
     .includes(title.replace(/\s+/g, " ").toLowerCase()) ? "" : title;
+}
+
+const SAVE_PLACE_SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large" } as const;
+
+/** "Saved Gym · 2 more visits now use it" (design §7). */
+export function savedPlaceStatus(name: string, rematchedCount: number) {
+  if (rematchedCount <= 0) return `Saved ${name}`;
+  return `Saved ${name} · ${rematchedCount} more ${rematchedCount === 1 ? "visit now uses" : "visits now use"} it`;
 }
 
 /** The marker for a name the person typed in this editor (PRD D19): only when they changed the field. */

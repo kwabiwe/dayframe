@@ -229,7 +229,27 @@ export const RecordPoiOnceLocationReviewSchema = z.object({
 export const SavePlaceAndConfirmSchema = z.object({
   action: z.literal("save_place_and_confirm"), name: z.string().trim().min(1).max(120),
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
-  radiusMeters: z.number().int().min(30).max(160).default(80), edit: ReviewEntryEditSchema.optional()
+  radiusMeters: z.number().int().min(30).max(200).default(80), edit: ReviewEntryEditSchema.optional(),
+  /** The place's "Suggest visits here" and "Log automatically" (web's Save this place box, PRD D19); older apps omit them. */
+  suggestVisits: z.boolean().optional(),
+  autoLog: z.boolean().optional()
+}).strict();
+/** A saved place's size for "Save this place" (PRD D19, design §7): the circle around where you were. */
+export const SAVE_PLACE_RADIUS_METERS = { small: 60, medium: 110, large: 200 } as const;
+/**
+ * "Save this place" (PRD D19, design §7): saves the Stay's spot as a place and applies it to this
+ * visit without logging it (the card stays open), then re-matches other open unsaved Stays there in
+ * the last seven days. The circle centres on the Stay, not on a venue's point.
+ */
+export const SavePlaceLocationReviewSchema = z.object({
+  action: z.literal("save_place"), name: z.string().trim().min(1).max(120),
+  radiusMeters: z.number().int().min(50).max(200),
+  /** The place's "Logs as" activity, also this visit's. */
+  categoryId: z.string().uuid().nullable().optional(),
+  /** "Suggest visits here" (the place's logging switch). */
+  suggestVisits: z.boolean().default(true),
+  /** "Log automatically" (D17); only with suggestions on. */
+  autoLog: z.boolean().default(false)
 }).strict();
 export const SplitLocationReviewSchema = z.object({
   action: z.enum(["split", "split_and_confirm"]), splitAt: z.string().datetime({ offset: true }),
@@ -247,7 +267,7 @@ export const LocationReviewActionSchema = z.discriminatedUnion("action", [
     learnedPlaceId: z.string().uuid().nullable().optional()
   }).strict(),
   ChangePlaceAndConfirmSchema, RecordOnceLocationReviewSchema, RecordPoiOnceLocationReviewSchema,
-  SavePlaceAndConfirmSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
+  SavePlaceAndConfirmSchema, SavePlaceLocationReviewSchema, SplitLocationReviewSchema, MergeLocationReviewSchema
 ]);
 
 export type LocationEvidenceBatchRequest = z.output<typeof LocationEvidenceBatchRequestSchema>;
