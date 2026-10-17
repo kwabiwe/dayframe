@@ -12771,7 +12771,9 @@ dialog.ui-dialog.df-palette {
   padding: 16px 4px 8px;
 }
 
-.df-set-card h2 {
+/* The card's own title only: a dialog opened from a card keeps its own header (it used to pick up
+   this 16 px indent, WUI-020). */
+.df-set-card > h2 {
   display: flex;
   align-items: center;
   gap: 8px;

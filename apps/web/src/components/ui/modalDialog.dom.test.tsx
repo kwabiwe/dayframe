@@ -80,6 +80,9 @@ describe("ModalDialog", () => {
     expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*dialog\.ui-dialog\[open\] \{\s*animation-name: ui-dialog-fade-in;/);
     expect(styles).toMatch(/@media \(max-width: 560px\) \{\s*dialog\.ui-dialog \{\s*border-radius: 24px;\s*\}\s*\.ui-dialog-actions > :is\(button, a\) \{\s*flex: 1 1 0;/);
     expect(styles).toMatch(/\.ui-dialog-header \.ui-icon-button \{\s*background: transparent;/);
+    // A host card styles only its own title, never a dialog header opened inside it.
+    expect(styles).toMatch(/\.df-set-card > h2 \{/);
+    expect(styles).not.toMatch(/\.df-set-card h2 \{/);
     // No dialog keeps the old 720 px default or a one-off width that duplicates a tier.
     expect(styles).not.toMatch(/dialog\.ui-dialog\.(df-ce-dialog|df-rf-dialog|ui-confirm-dialog) \{[^}]*width/);
   });

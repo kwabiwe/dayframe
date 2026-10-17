@@ -424,6 +424,16 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web dialogs (web UI audit WUI-020, 17 Oct 2026)
+
+- Trigger: a host renders `ModalDialog` (opening) or stops rendering it (closing: Cancel, Save, ✕, Escape, the scrim, navigation).
+- Owner: CSS on the native `<dialog>` for the entrance (`ui-dialog-in`, its `::backdrop` fade); `playDialogExit` for the exit, because the host's unmount removes the real dialog at once.
+- Entrance/update/exit: opacity 0→1 and scale .98→1 over 160 ms with the scrim; content updates in place; on close an inert, `aria-hidden` copy of the last frame and a scrim copy fade (and scale to .98) over 120 ms and are removed after 160 ms.
+- Surrounding layout: the dialog is fixed over the page; nothing reflows.
+- Interruption: a reopen during the exit draws the new dialog over the fading copy; a re-run of the effect while still mounted (StrictMode, a new `initialFocusRef`) plays no exit.
+- Async outcome: busy dialogs stay open (Escape and the scrim do nothing); the exit plays only when the host unmounts.
+- Accessibility: Reduce Motion keeps the fades without the scale; focus returns to the opener immediately because the real dialog has closed; the copy is never focusable or announced.
+
 ## Web Reports range menu (audit W8, UIA-304)
 
 - Trigger: the range text button under the Reports title (‹ range ›). Single owner: `ReportRangeControls`' `menu` state (`closed` / `open` / `closing`); nothing else animates it.
