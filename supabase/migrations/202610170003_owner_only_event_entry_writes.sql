@@ -2,8 +2,9 @@
 --
 -- Members of a workspace keep reading each other's events and entries ("workspace members can
 -- read" from 202607020001 is unchanged), but only a row's own user may insert, change or delete
--- it, as the location tables already require (202607200001, 202610170001). Moving a row to
--- another user or workspace is refused by the same check.
+-- it, as the location tables already require (202607200001, 202610170001). Handing a row to
+-- another user, or moving it into a workspace its user is not a member of, is refused by the
+-- same check (a move between two of the user's own workspaces is allowed, as for location rows).
 --
 -- The Dayframe server connects as the tables' owner, which RLS does not apply to, so the app is
 -- unaffected; this closes the signed-in client path (PostgREST with a user's JWT).
