@@ -38,13 +38,25 @@ final class MapKitProbeTests: XCTestCase {
     XCTAssertEqual(MapKitProbeReport.errorWord(NSError(domain: "Other", code: 1)), "error")
   }
 
+  func testLookupsKeepNotFoundApartFromFailedRequests() {
+    XCTAssertEqual(
+      MapKitProbeLookupRound.from([nil, "not_found", "network", nil, "throttled"]),
+      MapKitProbeLookupRound(found: 2, notFound: 1, failed: 2, failure: "network")
+    )
+    XCTAssertEqual(MapKitProbeLookupRound.from([]), MapKitProbeLookupRound(found: 0, notFound: 0, failed: 0, failure: nil))
+  }
+
   func testTheReportCarriesOnlyCountsAndAnswers() throws {
     let report = MapKitProbeReport(
       osVersion: MapKitProbeReport.osVersion(OperatingSystemVersion(majorVersion: 27, minorVersion: 2, patchVersion: 1)),
       radii: [MapKitProbeRadiusResult(radiusMeters: 200, count: 4, farthestMeters: 190, error: nil)],
       kinds: ["Store": 3],
       areasOfInterest: MapKitProbeAreasResult(answered: true, count: 1, error: nil),
-      placeIds: MapKitProbePlaceIdResult(supported: true, places: 4, withPlaceId: 4, found: 4, notFound: 0, foundLater: 4, notFoundLater: 0),
+      placeIds: MapKitProbePlaceIdResult(
+        supported: true, places: 4, withPlaceId: 4,
+        first: MapKitProbeLookupRound(found: 4, notFound: 0, failed: 0, failure: nil),
+        aMinuteLater: MapKitProbeLookupRound(found: 2, notFound: 0, failed: 2, failure: "network")
+      ),
       rapid: MapKitProbeRapidResult(attempts: 20, succeeded: 20, firstErrorAt: nil, firstError: nil)
     )
     let dictionary = report.dictionary

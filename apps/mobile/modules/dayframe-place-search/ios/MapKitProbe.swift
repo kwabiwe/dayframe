@@ -18,15 +18,36 @@ struct MapKitProbeAreasResult: Equatable {
   let error: String?
 }
 
+/// One round of looking Place IDs up again: found, genuinely not found (Apple has no such
+/// place), or the request failed (network, throttling…), with the first failure's word.
+struct MapKitProbeLookupRound: Equatable {
+  let found: Int
+  let notFound: Int
+  let failed: Int
+  let failure: String?
+
+  static func from(_ outcomes: [String?]) -> MapKitProbeLookupRound {
+    let failures = outcomes.compactMap { $0 }.filter { $0 != "not_found" }
+    return MapKitProbeLookupRound(
+      found: outcomes.filter { $0 == nil }.count,
+      notFound: outcomes.filter { $0 == "not_found" }.count,
+      failed: failures.count,
+      failure: failures.first
+    )
+  }
+
+  var dictionary: [String: Any] {
+    ["found": found, "notFound": notFound, "failed": failed, "failure": failure as Any]
+  }
+}
+
 struct MapKitProbePlaceIdResult: Equatable {
   /// Whether this iOS has Place IDs on map items (iOS 18 and later).
   let supported: Bool
   let places: Int
   let withPlaceId: Int
-  let found: Int
-  let notFound: Int
-  let foundLater: Int?
-  let notFoundLater: Int?
+  let first: MapKitProbeLookupRound?
+  let aMinuteLater: MapKitProbeLookupRound?
 }
 
 struct MapKitProbeRapidResult: Equatable {
@@ -66,10 +87,8 @@ struct MapKitProbeReport {
         "supported": placeIds.supported,
         "places": placeIds.places,
         "withPlaceId": placeIds.withPlaceId,
-        "found": placeIds.found,
-        "notFound": placeIds.notFound,
-        "foundAMinuteLater": placeIds.foundLater as Any,
-        "notFoundAMinuteLater": placeIds.notFoundLater as Any
+        "lookup": placeIds.first?.dictionary as Any,
+        "lookupAMinuteLater": placeIds.aMinuteLater?.dictionary as Any
       ],
       "rapid": [
         "attempts": rapid.attempts,
@@ -205,7 +224,8 @@ final class MapKitProbe {
 
   private func areasOfInterest(at location: CLLocation) async -> MapKitProbeAreasResult {
     do {
-      // Deprecated in iOS 27.2: whether it still answers is what this check is for.
+      // CLGeocoder is deprecated since iOS 26 (and areasOfInterest with it); whether it still
+      // answers on the person's iOS is what this check is for.
       let placemarks = try await CLGeocoder().reverseGeocodeLocation(location)
       let count = placemarks.first?.areasOfInterest?.count ?? 0
       return MapKitProbeAreasResult(answered: true, count: count, error: nil)
@@ -216,9 +236,7 @@ final class MapKitProbe {
 
   private func placeIdLookups(_ items: [MKMapItem]) async -> MapKitProbePlaceIdResult {
     guard #available(iOS 18.0, macOS 15.0, *) else {
-      return MapKitProbePlaceIdResult(
-        supported: false, places: items.count, withPlaceId: 0, found: 0, notFound: 0, foundLater: nil, notFoundLater: nil
-      )
+      return MapKitProbePlaceIdResult(supported: false, places: items.count, withPlaceId: 0, first: nil, aMinuteLater: nil)
     }
     // The IDs stay in this function: only how many were found crosses the bridge.
     let identifiers = items.prefix(MapKitProbeReport.placeIdSampleLimit).compactMap(\.identifier)
@@ -231,20 +249,24 @@ final class MapKitProbe {
       supported: true,
       places: items.count,
       withPlaceId: items.filter { $0.identifier != nil }.count,
-      found: first,
-      notFound: identifiers.count - first,
-      foundLater: later,
-      notFoundLater: identifiers.count - later
+      first: first,
+      aMinuteLater: later
     )
   }
 
   @available(iOS 18.0, macOS 15.0, *)
-  private func lookUp(_ identifiers: [MKMapItem.Identifier]) async -> Int {
-    var found = 0
+  private func lookUp(_ identifiers: [MKMapItem.Identifier]) async -> MapKitProbeLookupRound {
+    var outcomes: [String?] = []
     for identifier in identifiers {
-      if (try? await MKMapItemRequest(mapItemIdentifier: identifier).mapItem) != nil { found += 1 }
+      do {
+        _ = try await MKMapItemRequest(mapItemIdentifier: identifier).mapItem
+        outcomes.append(nil)
+      } catch {
+        // "not_found" only when Apple says so; anything else is a failed request.
+        outcomes.append(MapKitProbeReport.errorWord(error))
+      }
     }
-    return found
+    return MapKitProbeLookupRound.from(outcomes)
   }
 
   private func rapidRequests(center: CLLocationCoordinate2D) async -> MapKitProbeRapidResult {

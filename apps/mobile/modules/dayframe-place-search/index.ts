@@ -99,6 +99,7 @@ export const addSearchErrorListener = (
 ): EventSubscription | null => nativeModule?.addListener("onSearchError", listener) ?? null;
 
 export type {
+  MapKitProbeLookupRound,
   MapKitProbeReport,
   PlaceSearchBias,
   NearbyPointOfInterest,

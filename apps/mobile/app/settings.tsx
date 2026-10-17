@@ -188,7 +188,7 @@ import {
   recordLocationStoreError
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
-import { runMapKitChecks } from "@/lib/mapKitProbe";
+import { useMapKitChecks } from "@/lib/useMapKitChecks";
 import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-motion-activity";
 import {
@@ -479,8 +479,6 @@ export default function SettingsScreen() {
   // which only rows, labels and switch positions read; every action reads the live state instead.
   const lastKnown = useSettingsLastKnown();
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
-  const [checkingAppleMaps, setCheckingAppleMaps] = useState(false);
-  const [appleMapsNote, setAppleMapsNote] = useState<string | null>(null);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
   // AsyncStorage outboxes, native permission/HealthKit/geofence reads, the bootstrap refresh) start
@@ -1176,6 +1174,7 @@ export default function SettingsScreen() {
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
+  const appleMaps = useMapKitChecks({ onNote: setSyncHelpNote });
   const syncHelpIssueKey = [
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
     ...timeEntrySyncIssues.map((issue) => issue.clientCommandId),
@@ -1893,33 +1892,6 @@ export default function SettingsScreen() {
   /** Saves a Health type's mapping change; true once it is saved (a failure shows the saved mapping and alerts). */
   function updateHealthAutoLogMapping(type: HealthImportPreferenceKey, patch: HealthAutoLogMapping): Promise<boolean> {
     return healthMappingWriter.patch(type, patch);
-  }
-
-  /** The MapKit checks (location v3 PR 7/8): counts and yes/no answers only, shared by the person. */
-  async function checkAppleMaps() {
-    if (checkingAppleMaps) return;
-    setCheckingAppleMaps(true);
-    setAppleMapsNote(null);
-    setSyncHelpNote("Checking Apple Maps here… this takes about a minute.");
-    try {
-      const outcome = await runMapKitChecks();
-      if (outcome.status === "ready") {
-        await Share.share({ title: "Dayframe Apple Maps checks", message: outcome.message });
-        setSyncHelpNote("Apple Maps checks finished.");
-        setAppleMapsNote("Finished · run it again at another place");
-      } else {
-        const message = outcome.status === "needs_location"
-          ? "Allow Location for Dayframe in iPhone Settings, then try again."
-          : outcome.status === "no_position"
-            ? "Your iPhone couldn't find where you are just now. Try again in a moment."
-            : "Apple Maps couldn't be checked on this iPhone.";
-        // Said on the row and in the Status note (UIA-005: no system alert for a notice).
-        setSyncHelpNote(message);
-        setAppleMapsNote(message);
-      }
-    } finally {
-      setCheckingAppleMaps(false);
-    }
   }
 
   async function exportAppleHealthDebug() {
@@ -2777,9 +2749,9 @@ export default function SettingsScreen() {
                   title="Share location details"
                 />
                 <SettingsBlockRow
-                  disabled={checkingAppleMaps}
-                  onPress={() => void checkAppleMaps()}
-                  subtitle={checkingAppleMaps ? "Checking… about a minute" : appleMapsNote ?? "Counts only, without places or points"}
+                  disabled={appleMaps.checking}
+                  onPress={appleMaps.start}
+                  subtitle={appleMaps.checking ? "Checking… about a minute" : appleMaps.note ?? "Counts only, without places or points"}
                   testID="sync-help-apple-maps"
                   theme={theme}
                   title="Check Apple Maps nearby data"

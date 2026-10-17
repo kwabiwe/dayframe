@@ -87,10 +87,11 @@ export type MapKitProbeReport = {
     supported: boolean;
     places: number;
     withPlaceId: number;
-    found: number;
-    notFound: number;
-    foundAMinuteLater: number | null;
-    notFoundAMinuteLater: number | null;
+    /** Looked up straight away, then a minute later: found, not found (Apple has no such place) or failed. */
+    lookup: MapKitProbeLookupRound | null;
+    lookupAMinuteLater: MapKitProbeLookupRound | null;
   };
   rapid: { attempts: number; succeeded: number; firstErrorAt: number | null; firstError: string | null };
 };
+
+export type MapKitProbeLookupRound = { found: number; notFound: number; failed: number; failure: string | null };
