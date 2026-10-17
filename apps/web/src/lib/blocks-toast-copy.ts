@@ -68,3 +68,14 @@ export function startMatchesRunning(
     (active.description?.trim() ?? "").toLowerCase() === description.toLowerCase() &&
     tagKey(active.tagNames) === tagKey(request.tagNames);
 }
+
+/**
+ * One toast grammar (web UI audit WUI-043, owner 17 Oct 2026): verb first, no quotes, as every other
+ * toast ("Skipped Visit to Gym", "Discarded App testing"): "Deleted Shop run", "Deleted 3 Shop run
+ * blocks", and "Deleted block" when nothing names it.
+ */
+export function deletedToastLabel(count: number, title: string | null | undefined) {
+  const name = title?.trim();
+  if (!name) return count > 1 ? `Deleted ${count} blocks` : "Deleted block";
+  return count > 1 ? `Deleted ${count} ${name} blocks` : `Deleted ${name}`;
+}

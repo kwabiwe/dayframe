@@ -125,7 +125,7 @@ describe("Today", () => {
     await act(async () => vi.advanceTimersByTime(200));
     expect(rowLabels(container)).toEqual(["Deep work"]);
     const toast = container.querySelector(".df-toast");
-    expect(toast?.textContent).toContain("“Inbox” deleted");
+    expect(toast?.textContent).toContain("Deleted Inbox");
 
     await act(async () => {
       toast!.querySelector<HTMLButtonElement>(".df-toast-action")!.click();

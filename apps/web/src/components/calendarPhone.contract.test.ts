@@ -21,7 +21,8 @@ describe("Calendar phone layout", () => {
 
   it("lets the page scroll and gives the card nearly a screen, last in the cascade", () => {
     const phone = styles.slice(styles.lastIndexOf("/* Calendar phone layout"));
-    expect(styles.trimEnd().endsWith(phone.trimEnd())).toBe(true);
+    // After the phone shell's fixed-height frame, so it wins over it.
+    expect(styles.lastIndexOf("/* Calendar phone layout")).toBeGreaterThan(styles.lastIndexOf("  .swiss-app-shell.is-timeline {\n    display: flex;"));
     expect(phone).toMatch(/\.swiss-app-shell\.is-timeline \{\s*height: auto;\s*min-height: 100dvh;\s*overflow: visible;/);
     expect(phone).toMatch(/\.timeline-calendar-workspace,\s*\.swiss-main-frame\.is-timeline \.timeline-list-workspace \{[^}]*height: calc\(100dvh - var\(--df-tabbar-space\) - 24px\);[^}]*min-height: 420px;/);
     // Its row parent stretches it; a fixed flex basis would shrink it to its content.

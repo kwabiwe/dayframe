@@ -12,6 +12,7 @@ import {
   forwardRef,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -241,8 +242,71 @@ export function SettingsRow({
 }
 
 type DialogRole = "dialog" | "alertdialog";
+/** Width tiers (web UI audit WUI-021): confirm 400, compact 520, form 620, wide 720. */
+export type DialogSize = "confirm" | "compact" | "form" | "wide";
 
 let openDialogCount = 0;
+
+/**
+ * The dialog's exit (WUI-020): hosts unmount a ModalDialog to close it, so its last frame is
+ * copied into an inert, hidden-from-assistive-technology twin that fades out over the page in
+ * 120 ms (opacity only under Reduce Motion, in the same 120 ms) and is then removed. The real
+ * dialog has already closed, so focus and the page's interactivity return at once.
+ */
+/** Scroll offsets inside a dialog, by position in `[dialog, ...descendants]` (only non-zero ones). */
+export type DialogScrollSnapshot = Array<[index: number, top: number, left: number]>;
+
+/** Reads the dialog's scroll offsets while it is still laid out (a detached copy has none). */
+export function captureDialogScroll(dialog: HTMLElement): DialogScrollSnapshot {
+  const snapshot: DialogScrollSnapshot = [];
+  [dialog, ...dialog.querySelectorAll<HTMLElement>("*")].forEach((element, index) => {
+    if (element.scrollTop || element.scrollLeft) snapshot.push([index, element.scrollTop, element.scrollLeft]);
+  });
+  return snapshot;
+}
+
+export function playDialogExit(dialog: HTMLDialogElement, scroll: DialogScrollSnapshot = []) {
+  if (typeof document === "undefined" || !dialog.hasAttribute("open")) return;
+  const ghost = dialog.cloneNode(true) as HTMLDialogElement;
+  // Typed values are properties, not attributes: carry them over so fields do not blank.
+  const sources = dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+  const copies = ghost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+  sources.forEach((source, index) => {
+    const copy = copies[index];
+    if (!copy) return;
+    if (copy instanceof HTMLInputElement && source instanceof HTMLInputElement && (source.type === "checkbox" || source.type === "radio")) copy.checked = source.checked;
+    else copy.value = source.value;
+  });
+  for (const element of [ghost, ...ghost.querySelectorAll("[id]")]) element.removeAttribute("id");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.inert = true;
+  ghost.classList.add("ui-dialog-ghost");
+  ghost.setAttribute("open", "");
+  const scrim = document.createElement("div");
+  scrim.className = "ui-dialog-ghost-scrim";
+  // One inert, hidden layer holds the scrim and the copy. The outgoing dialog was the topmost layer,
+  // so the copy joins the top layer as a manual popover, above any dialog still open (a nested
+  // dialog closing over another fades in place, not behind it; Codex r1 on #487).
+  const layer = document.createElement("div");
+  layer.className = "ui-dialog-ghost-layer";
+  layer.setAttribute("aria-hidden", "true");
+  layer.inert = true;
+  layer.append(scrim, ghost);
+  document.body.append(layer);
+  if (typeof layer.showPopover === "function") {
+    layer.popover = "manual";
+    layer.showPopover();
+  }
+  // The frame as it was: the copy is scrolled where the dialog was.
+  const nodes = [ghost, ...ghost.querySelectorAll<HTMLElement>("*")];
+  for (const [index, top, left] of scroll) {
+    const copy = nodes[index];
+    if (!copy) continue;
+    copy.scrollTop = top;
+    copy.scrollLeft = left;
+  }
+  window.setTimeout(() => layer.remove(), 160);
+}
 
 export function ModalDialog({
   ariaLabel,
@@ -256,6 +320,7 @@ export function ModalDialog({
   onClose,
   role = "dialog",
   showClose = true,
+  size,
   title
 }: {
   ariaLabel?: string;
@@ -269,11 +334,23 @@ export function ModalDialog({
   onClose: () => void;
   role?: DialogRole;
   showClose?: boolean;
+  /** Defaults to `confirm` for an alert dialog and `form` otherwise. */
+  size?: DialogSize;
   title?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
+  const exitScrollRef = useRef<DialogScrollSnapshot>([]);
   const titleId = useId();
   const descriptionId = useId();
+
+  // A layout cleanup runs while the dialog is still laid out, before an unmount removes it: the
+  // exit's copy is scrolled from what it records.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    return () => {
+      if (dialog) exitScrollRef.current = captureDialogScroll(dialog);
+    };
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -293,6 +370,9 @@ export function ModalDialog({
 
     return () => {
       window.cancelAnimationFrame(focusHandle);
+      // A real close (the host unmounted it) fades out; a re-run while still mounted does not.
+      // jsdom draws nothing, so there the copy would only duplicate the dialog for DOM queries.
+      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog, exitScrollRef.current);
       if (dialog.open) dialog.close();
       openDialogCount = Math.max(0, openDialogCount - 1);
       if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");
@@ -307,7 +387,7 @@ export function ModalDialog({
   return (
     <dialog
       ref={dialogRef}
-      className={classNames("ui-dialog", className)}
+      className={classNames("ui-dialog", `ui-dialog--${size ?? (role === "alertdialog" ? "confirm" : "form")}`, className)}
       role={role}
       aria-modal="true"
       aria-label={title ? undefined : ariaLabel}

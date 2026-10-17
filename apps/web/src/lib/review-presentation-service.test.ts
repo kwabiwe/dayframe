@@ -18,6 +18,30 @@ const reviewId = "30000000-0000-4000-8000-000000000001";
 const entryId = "40000000-0000-4000-8000-000000000001";
 
 describe("getReviewPresentation", () => {
+  it("runs one query at a time on its client in every mode (pg@9 refuses overlapping queries)", async () => {
+    let active = 0;
+    let most = 0;
+    const query = vi.fn(async (sql: string) => {
+      active += 1;
+      most = Math.max(most, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 0, todayCount: 0, openReviewItemIds: [] }] };
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const window = { start: "2026-09-01T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" };
+    const today = { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" };
+    await getReviewPresentation(session, { version: 1, mode: "window", timeZone: "Etc/UTC", limit: 100, window, today }, {}, { outingCount: true });
+    await getReviewPresentation(session, { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 100 }, {}, { outingCount: true });
+    await getReviewPresentation(session, {
+      version: 1, mode: "lookup", timeZone: "Etc/UTC", limit: 100, reviewItemIds: [reviewId], entryIds: [entryId]
+    });
+    expect(query.mock.calls.length).toBeGreaterThan(10);
+    expect(most).toBe(1);
+  });
+
   it.each(["backlog", "lookup"] as const)("hashes raw suggested IDs when display joins miss (%s)", async (mode) => {
     const raw = {
       ...reviewRow(reviewId),
