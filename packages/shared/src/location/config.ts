@@ -63,6 +63,11 @@ export type LocationEngineConfig = {
   motionMinimumStillMs: number;
   motionTravelModeMinimumShare: number;
   motionTravelModeMinimumCoverage: number;
+  speedTravelModeMinimumFixes: number;
+  speedTravelModeDriveMps: number;
+  speedTravelModeWalkMaximumMps: number;
+  speedTravelModeWalkMinimumMps: number;
+  speedTravelModeMinimumDistanceMeters: number;
   motionMaximumWalkingSpeedMps: number;
   motionMaximumRunningSpeedMps: number;
   motionMaximumCyclingSpeedMps: number;
@@ -198,9 +203,26 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // A journey's travel mode is the fastest mode sustained for
   // `motionMinimumModeMs` and at least this share of its movement (a short
   // drive is mostly the walks to and from the car), when movement covers at
-  // least `motionTravelModeMinimumCoverage` of the journey.
+  // least `motionTravelModeMinimumCoverage` of the journey. An unknown (or
+  // low-confidence moving) spell between two of the same mode, with no
+  // stillness between, carries that mode: stop-and-go driving reads as long
+  // unknown spells (location v3 bug 9).
   motionTravelModeMinimumShare: 0.25,
   motionTravelModeMinimumCoverage: 0.5,
+  // Without a mode from Motion & Fitness, the journey's own accurate route
+  // fixes decide it: at least this many independent ones faster than
+  // `speedTravelModeDriveMps` is a drive (Core Motion often needs a minute or
+  // two to call one, so 1–2 minute drives have only unknown records); at least
+  // this many at walking pace and none faster is a walk. A journey whose stays
+  // are at least `speedTravelModeMinimumDistanceMeters` apart in a straight
+  // line, covered faster than `speedTravelModeDriveMps` over its whole time,
+  // is a drive too (a 1.4-minute school run: 870 m in 83 s, fixes without
+  // native speed).
+  speedTravelModeMinimumFixes: 3,
+  speedTravelModeDriveMps: 8,
+  speedTravelModeWalkMaximumMps: 2.2,
+  speedTravelModeWalkMinimumMps: 0.5,
+  speedTravelModeMinimumDistanceMeters: 500,
   // A moving block can only explain endpoints this far apart per second of it.
   motionMaximumWalkingSpeedMps: 3,
   motionMaximumRunningSpeedMps: 7,

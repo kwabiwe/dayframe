@@ -239,22 +239,125 @@ export function motionJourneyBlock(
   return mode && straightLineMeters / seconds <= maximumSpeedMps(mode, config) ? { block, mode } : null;
 }
 
+const carriedModesByTimeline = new WeakMap<readonly MotionInterval[], Array<MotionTravelMode | null>>();
+
+/**
+ * Each interval's mode for labelling a journey: its own, or for a run of indeterminate intervals
+ * (`unknown`, or low confidence) between two confident intervals of the same mode, that mode, when no
+ * interval in the run is stillness (of any confidence) or a low-confidence record of another mode.
+ * iOS reports stop-and-go driving and pick-ups as long unknown spells between automotive records
+ * (location v3 bug 9: a 13-minute drive was 45 % confident motion). Low-confidence stillness is a
+ * stop and a low-confidence drive between two walks is the drive, so neither carries a walk; and only
+ * driving and cycling carry at all. Carried time only adds coverage (motionTravelMode). Only the
+ * label uses this; journey timing and blocks never do.
+ */
+function carriedModes(intervals: readonly MotionInterval[]) {
+  const cached = carriedModesByTimeline.get(intervals);
+  if (cached) return cached;
+  const modes = intervals.map(travelMode);
+  const carried = [...modes];
+  for (let start = 0; start < intervals.length; start += 1) {
+    if (modes[start]) continue;
+    let end = start;
+    while (end + 1 < intervals.length && !modes[end + 1]) end += 1;
+    const mode = start > 0 ? modes[start - 1] : null;
+    // Only a drive or a ride carries: unknown between two walks is as often a drive Core Motion never
+    // called (a short school run) as a walk, so it never reads as walking (Codex r1 on #453).
+    if ((mode === "automotive" || mode === "cycling") && end + 1 < intervals.length && modes[end + 1] === mode && intervals.slice(start, end + 1).every((interval) =>
+      interval.activity === "unknown" || interval.activity === mode)) {
+      for (let index = start; index <= end; index += 1) carried[index] = mode;
+    }
+    start = end;
+  }
+  carriedModesByTimeline.set(intervals, carried);
+  return carried;
+}
+
 /** The fastest mode sustained through a fair share of a journey's movement, when movement covers enough of it. */
 export function motionTravelMode(timeline: MotionTimeline | null, startMs: number, stopMs: number, config: LocationEngineConfig) {
   if (!timeline || !(stopMs > startMs)) return null;
+  // The mode comes only from confident records inside the journey; carried spells (carriedModes)
+  // only add coverage, so a carried walk can never outvote a drive, and a journey with no confident
+  // movement of its own gets no mode from the walks around it (Codex r1 on #453).
   const byMode = new Map<MotionTravelMode, number>();
-  let moving = 0;
-  for (const interval of timeline.intervals) {
-    const mode = travelMode(interval);
+  const carried = carriedModes(timeline.intervals);
+  let confident = 0;
+  let covered = 0;
+  for (const [index, interval] of timeline.intervals.entries()) {
     const overlap = Math.min(interval.toMs, stopMs) - Math.max(interval.fromMs, startMs);
-    if (!mode || overlap <= 0) continue;
-    moving += overlap;
-    byMode.set(mode, (byMode.get(mode) ?? 0) + overlap);
+    if (overlap <= 0) continue;
+    const mode = travelMode(interval);
+    if (mode) {
+      confident += overlap;
+      byMode.set(mode, (byMode.get(mode) ?? 0) + overlap);
+    }
+    if (mode || carried[index]) covered += overlap;
   }
-  if (moving < config.motionTravelModeMinimumCoverage * (stopMs - startMs)) return null;
+  if (covered < config.motionTravelModeMinimumCoverage * (stopMs - startMs)) return null;
   return TRAVEL_MODES.find((mode) => (byMode.get(mode) ?? 0) >= config.motionMinimumModeMs &&
-    (byMode.get(mode) ?? 0) >= config.motionTravelModeMinimumShare * moving) ?? null;
+    (byMode.get(mode) ?? 0) >= config.motionTravelModeMinimumShare * confident) ?? null;
 }
+
+/** Whether Core Motion reported anything faster than walking (any confidence) during the window. */
+export function motionShowsFasterThanWalking(timeline: MotionTimeline | null, startMs: number, stopMs: number) {
+  return Boolean(timeline?.intervals.some((interval) => interval.fromMs < stopMs && interval.toMs > startMs &&
+    (interval.activity === "automotive" || interval.activity === "cycling" || interval.activity === "running")));
+}
+
+/**
+ * A journey's mode from its own fixes, for when Motion & Fitness gives none.
+ * - Drive: at least `speedTravelModeMinimumFixes` independent genuine accurate `standard_location`
+ *   fixes with native speed above `speedTravelModeDriveMps` (independent: at least five seconds
+ *   apart and at different coordinates, so native mirrors and copies never count twice), or stays at
+ *   least `speedTravelModeMinimumDistanceMeters` apart in a straight line covered faster than
+ *   `speedTravelModeDriveMps` over the journey's whole time (short drives often carry no native
+ *   speed, and a straight line cannot be lengthened by GPS noise).
+ * - Walk: that many independent fixes at walking pace, and no sign of anything faster: no accurate
+ *   reading of any kind (mirrors and native callbacks without simulation provenance included) faster
+ *   than `speedTravelModeWalkMaximumMps` anywhere in the journey's window (endpoint matches
+ *   included), and no faster Core Motion record of any confidence (`fasterMotion`) — Codex r1/r2
+ *   on #453.
+ */
+export function speedTravelMode(
+  route: readonly ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  journey: {
+    straightLineMeters: number | null; durationMs: number; fasterMotion?: boolean;
+    /** Every reading inside the journey's window, endpoint matches included: any of them vetoes a walk. */
+    windowReadings?: readonly ClassifiedEvidence[];
+  } | null = null
+): MotionTravelMode | null {
+  if (journey?.straightLineMeters != null && journey.straightLineMeters >= config.speedTravelModeMinimumDistanceMeters &&
+    journey.durationMs > 0 && journey.straightLineMeters / (journey.durationMs / 1_000) > config.speedTravelModeDriveMps) return "automotive";
+  const accurateOf = (items: readonly ClassifiedEvidence[]) => items.filter(({ evidence }) =>
+    (evidence.kind === "standard_location" || evidence.kind === "significant_change") &&
+    evidence.isSimulated !== true && evidence.latitude != null && evidence.longitude != null &&
+    evidence.horizontalAccuracyMeters != null && evidence.horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters &&
+    evidence.speedMetersPerSecond != null && Number.isFinite(evidence.speedMetersPerSecond) && evidence.speedMetersPerSecond >= 0);
+  const accurate = accurateOf(route);
+  const independent = (counts: (speed: number) => boolean) => {
+    const counted: Array<{ atMs: number; coordinate: string }> = [];
+    for (const { evidence } of accurate) {
+      const speed = evidence.speedMetersPerSecond!;
+      if (evidence.kind !== "standard_location" || evidence.isSimulated !== false || !counts(speed)) continue;
+      const atMs = Date.parse(evidence.occurredAt);
+      const coordinate = `${evidence.latitude},${evidence.longitude}`;
+      if (counted.some((other) => Math.abs(atMs - other.atMs) < SPEED_MODE_MIRROR_WINDOW_MS || other.coordinate === coordinate)) continue;
+      counted.push({ atMs, coordinate });
+    }
+    return counted.length;
+  };
+  if (independent((speed) => speed > config.speedTravelModeDriveMps) >= config.speedTravelModeMinimumFixes) return "automotive";
+  const fasterThanWalking = journey?.fasterMotion === true ||
+    [...accurate, ...accurateOf(journey?.windowReadings ?? [])]
+      .some(({ evidence }) => evidence.speedMetersPerSecond! > config.speedTravelModeWalkMaximumMps);
+  if (!fasterThanWalking && independent((speed) => speed >= config.speedTravelModeWalkMinimumMps &&
+    speed <= config.speedTravelModeWalkMaximumMps) >= config.speedTravelModeMinimumFixes) return "walking";
+  return null;
+}
+
+// Native callbacks mirror a standard fix within a few seconds (physicalStops.ts uses the same window).
+const SPEED_MODE_MIRROR_WINDOW_MS = 5_000;
 
 /**
  * The stay's end from location evidence alone, before any motion refinement:

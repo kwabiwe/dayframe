@@ -20,6 +20,7 @@ import {
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
 import { forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName } from "../apps/web/src/lib/location/name-patterns";
+import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
@@ -2138,6 +2139,116 @@ async function validateLearnedNameCorrections() {
 }
 
 /**
+ * Health walks win (PRD D19, design §9): a Move an Apple Health walk covers is not offered; when the
+ * workout arrives after the card, the next replay retires the card, and it comes back if the
+ * workout goes. A workout of another kind never hides a Move.
+ */
+async function validateHealthWalksWin() {
+  await clearDerivedLocationState();
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  const evidence = timeAwayEvidence();
+  const moveCards = async () => (await pool.query<{ status: string; scope: string | null }>(
+    `select ri.status, ri.ignored_scope as scope from review_items ri join commute_segments cs on cs.id = ri.location_segment_id
+     where ri.workspace_id = $1 and ri.user_id = $2`, [WORKSPACE_ID, USER_ID])).rows;
+  // An imported Apple Health workout (`health_workouts`), whatever became of its own card or block.
+  const addWorkout = async (id: string, workoutType: string, payload: Record<string, unknown> = { workoutType }) =>
+    (await pool.query<{ id: string }>(
+      `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, duration_seconds, raw_payload)
+       values ($1, $2, $3, $4, '2026-07-20T08:58:00Z', '2026-07-20T09:10:00Z', 720, $5) returning id`,
+      [WORKSPACE_ID, USER_ID, `db-health-${id}`, workoutType, payload])).rows[0].id;
+  const removeWorkout = (id: string) => pool.query("delete from health_workouts where id = $1", [id]);
+
+  // Workout first: the walk it covers is never offered.
+  const first = await addWorkout("first", "walking");
+  await ingestLocationEvidence(batch("db-health-walk-first", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+  assert.deepEqual(await moveCards(), [], "A Move a Health walk covers was offered in Review.");
+  await removeWorkout(first);
+
+  // Card first, then the import alone (no location call) retires it.
+  await clearDerivedLocationState();
+  const cardFirst = batch("db-health-walk-card-first", evidence, "v2_review", "2026-06-01T07:00:00.000Z");
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move was not offered without a workout.");
+  const late = await addWorkout("late", "walking");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 1, "A Health import did not retire the Move it covers.");
+  assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }], "A late Health walk did not retire the Move's card.");
+  // Removing the workout brings it back while its evidence lasts.
+  await removeWorkout(late);
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move did not come back when its Health walk went.");
+
+  // The card's stored window can be stale (later evidence moved the Move): emission retires it by the
+  // Move's current window, not the card's (Codex r2 on #457).
+  await pool.query(
+    `update review_items set suggested_started_at = suggested_started_at - interval '3 hours',
+            suggested_stopped_at = suggested_stopped_at - interval '3 hours'
+     where workspace_id = $1 and user_id = $2 and status = 'open'`, [WORKSPACE_ID, USER_ID]);
+  const stale = await addWorkout("stale", "walking");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0,
+    "The stored-card sweep matched a card whose stored window the workout does not cover.");
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }],
+    "A Move covered by its current window kept its stale open card.");
+  await removeWorkout(stale);
+  await ingestLocationEvidence(cardFirst, session);
+  assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "The Move did not come back after the stale-window case.");
+
+  // Its evidence gone, a later workout is still reconciled from the card itself on the next replay.
+  await pool.query("delete from location_evidence where workspace_id = $1 and user_id = $2", [WORKSPACE_ID, USER_ID]);
+  const afterExpiry = await addWorkout("expired", "other", { workoutType: null, workoutLabel: "Walk" });
+  const replayed = { replay: await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    rolloutMode: "v2_review", semanticModeAcknowledgedAt: "2026-06-01T07:00:00.000Z" }, session, PROCESSING_AT) };
+  assert.deepEqual(await moveCards(), [{ status: "ignored", scope: "superseded" }],
+    "A workout (typed only by its label) did not retire a Move whose evidence had aged out.");
+  assert(replayed.replay.semanticChangeCount > 0, "Retiring a card for a Health walk reported no change.");
+  await removeWorkout(afterExpiry);
+
+  // A card older than the replay sweep's 30 days is still reached through the imported workout's own
+  // window (Codex r3 on #457).
+  await clearDerivedLocationState();
+  await ingestLocationEvidence(cardFirst, session);
+  await pool.query(
+    `update review_items set suggested_started_at = suggested_started_at - interval '40 days',
+            suggested_stopped_at = suggested_stopped_at - interval '40 days'
+     where workspace_id = $1 and user_id = $2 and status = 'open'`, [WORKSPACE_ID, USER_ID]);
+  const aged = (await pool.query<{ id: string }>(
+    `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, raw_payload)
+     values ($1, $2, 'db-health-aged', 'walking', timestamptz '2026-07-20T08:58:00Z' - interval '40 days',
+             timestamptz '2026-07-20T09:10:00Z' - interval '40 days', '{}'::jsonb) returning id`, [WORKSPACE_ID, USER_ID])).rows[0].id;
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0, "The 30-day sweep reached a 40-day-old card.");
+  // The request's own window is not the stored one (an earlier revision of the sample set it, or the
+  // request named no stop): the stored row decides (Codex r4 on #457).
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, workout: {
+    provider: null, externalSampleId: "db-health-aged", startedAt: PROCESSING_AT, stoppedAt: PROCESSING_AT } }), 1,
+    "A workout import did not retire the old Move card its stored window covers.");
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT, workout: {
+    provider: null, externalSampleId: "db-health-missing", startedAt: PROCESSING_AT, stoppedAt: PROCESSING_AT } }), 0,
+    "A workout that was never stored retired a card.");
+  await removeWorkout(aged);
+
+  // No cap hides the covering workout among many others in the same window (Codex r1 on #457).
+  await clearDerivedLocationState();
+  await pool.query(
+    `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, raw_payload)
+     select $1, $2, 'db-health-crowd-' || n, 'strength_training', '2026-07-20T08:30:00Z', '2026-07-20T09:30:00Z', '{}'::jsonb
+     from generate_series(1, 600) as n`, [WORKSPACE_ID, USER_ID]);
+  const crowded = await addWorkout("crowded", "walking");
+  await ingestLocationEvidence(batch("db-health-walk-crowded", evidence, "v2_review", "2026-06-01T07:00:00.000Z"), session);
+  assert.deepEqual(await moveCards(), [], "A covering Health walk among 600 other workouts did not hide its Move.");
+  await removeWorkout(crowded);
+  await pool.query("delete from health_workouts where workspace_id = $1 and external_sample_id like 'db-health-crowd-%'", [WORKSPACE_ID]);
+
+  // A workout of another kind never hides a Move.
+  await clearDerivedLocationState();
+  const strength = await addWorkout("strength", "strength_training");
+  await ingestLocationEvidence(cardFirst, session);
+  assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 0, "A strength workout retired a Move.");
+  assert.deepEqual(await moveCards(), [{ status: "open", scope: null }], "A strength workout hid a Move.");
+  await removeWorkout(strength);
+  await clearDerivedLocationState();
+}
+
+/**
  * Per-place "Log automatically" in v2_review (owner decisions 14–15 Oct 2026): a trusted stay at an
  * auto_log place becomes a location_auto_log block instead of a Review card; overlaps, a running
  * timer or the switch off keep it in Review; retries never duplicate; replay moves an unedited block
@@ -2596,6 +2707,7 @@ async function main() {
     await validateLearnedNames();
     await validateLearnedNameCorrections();
     await validatePlaceDeleteWithSamePlaceJourneys();
+    await validateHealthWalksWin();
     await validateShadowToReviewCutover();
     await validateSemanticIdempotencyAndRollback();
     await validateCommuteReviewCategoryAndDescription();
@@ -2607,7 +2719,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Moves, deleting a place with same-place journeys, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
