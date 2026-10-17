@@ -11,6 +11,7 @@ import { Ellipsis, Plus } from "lucide-react";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { Odometer } from "@/components/blocks/Odometer";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { FLOATING_LIST_HINTS } from "@/components/FloatingList";
@@ -768,6 +769,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                   <label className="df-start-field" htmlFor="active-start-time">
                     <span className="df-start-field-label">Time</span>
                     <input
+                      aria-describedby={startEditError ? "active-start-time-error" : undefined}
                       aria-invalid={startEditError ? true : undefined}
                       autoComplete="off"
                       className="df-start-time-input"
@@ -809,7 +811,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
                     Set to last stop time · <span className="tabular">{formatTime(lastStoppedAt, clock)}</span>
                   </button>
                 ) : null}
-                {startEditError ? <p className="swiss-inline-error" role="alert">{startEditError}</p> : null}
+                {startEditError ? <p className="ui-field-error" id="active-start-time-error" role="alert">{startEditError}</p> : null}
                 <div className="df-start-actions">
                   <button
                     className="df-rbtn df-rbtn--ghost"
@@ -931,10 +933,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
       </div>
 
       {timerError ? (
-        <p className="swiss-inline-error" role="alert">
-          {timerError}
-          <button type="button" onClick={clearTimerError}>Dismiss</button>
-        </p>
+        <ErrorBanner message={timerError} onDismiss={clearTimerError} />
       ) : null}
 
       {quickActions.length ? (
