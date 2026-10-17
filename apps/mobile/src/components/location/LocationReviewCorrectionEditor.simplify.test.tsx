@@ -423,6 +423,32 @@ describe("Save this place (PRD D19, design §7)", () => {
     expect(logged.edit).not.toHaveProperty("placeId");
   });
 
+  it("records the saved place, not its removal, once a refresh brings it back as the match (Codex r1 on #460)", async () => {
+    native.resolveNearby.mockResolvedValue(bakery);
+    const onSavePlace = vi.fn(async () => null);
+    await renderSaving(stay({ matched: false }), onSavePlace, vi.fn());
+    await press(byTestId("location-evidence-nearby-0")[0]);
+    await press(byTestId("location-evidence-save-place")[0]);
+    const request = { name: "Bakery corner", radiusMeters: 110, suggestVisits: true, autoLog: false };
+    await sheet.props!.onSave(request as never);
+    await act(async () => { sheet.props!.onClose(); sheet.props!.onSaved(request as never); });
+    const refreshed = stay({ matched: true }) as unknown as { display: Record<string, unknown>; map: { nearbySavedPlaces: unknown[] } };
+    refreshed.display = { ...refreshed.display, title: "Bakery corner", placeId: "place-bakery", placeName: "Bakery corner" };
+    refreshed.map.nearbySavedPlaces = [];
+    await act(async () => {
+      tree!.update(
+        <LocationReviewCorrectionEditor adjacentReview={undefined} categories={categories} evidence={refreshed as never} isFocused
+          onPlaceSaved={vi.fn()} onResolve={onResolve} onSavePlace={onSavePlace} places={[]}
+          reviewItem={{ suggestedCategoryId: "cat-gym", suggestedPlaceId: "place-bakery" } as never} saving={false} />
+      );
+    });
+    expect(texts("New saved place")).toHaveLength(0);
+    await press(primary());
+    const logged = onResolve.mock.calls[0][0] as { action: string; edit?: Record<string, unknown> };
+    expect(logged.action).toBe("edit_and_confirm");
+    expect(logged.edit).not.toHaveProperty("placeId");
+  });
+
   it("keeps the sheet's draft when the save is refused, and never offers it for a matched visit", async () => {
     native.resolveNearby.mockResolvedValue(bakery);
     const onSavePlace = vi.fn(async () => "This place is already being saved.");

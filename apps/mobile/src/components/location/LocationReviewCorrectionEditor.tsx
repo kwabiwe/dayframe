@@ -189,6 +189,13 @@ export function LocationReviewCorrectionEditor({
   // "Save this place": the sheet, and the place this visit was saved as (shown until Review refreshes).
   const [savePlaceOpen, setSavePlaceOpen] = useState(false);
   const [savedPlaceName, setSavedPlaceName] = useState<string | null>(null);
+  // Once the evidence refreshes with the saved place as its match, the row is that match, chosen as
+  // before, so recording never reads as removing it (Codex r1 on #460).
+  useEffect(() => {
+    if (!savedPlaceName || !baselinePlaceId || newPlace) return;
+    setSavedPlaceName(null);
+    setSelectedSavedPlaceId((current) => current ?? baselinePlaceId);
+  }, [baselinePlaceId, newPlace, savedPlaceName]);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   // Each nearby or search pick takes a token; any later place or search interaction takes a new
   // one, so a pick that resolves late never overwrites newer input (Codex r1 on #358).
