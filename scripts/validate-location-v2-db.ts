@@ -1912,6 +1912,12 @@ async function validateSavePlace() {
          and ST_DWithin(st.centre, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, 200)`,
       [WORKSPACE_ID, USER_ID, first.id, centre.longitude, centre.latitude])).rows[0].count;
 
+    // A card titled by a learned name: once saved it is titled by the place, which is never learned as
+    // the person's name (Codex r4 on #459).
+    await pool.query(
+      `update activity_events set raw_payload = raw_payload || '{"nameSource":"learned","namePatternBand":"morning"}'::jsonb
+       where id = (select event_id from review_items where id = $1)`, [first.id]);
+    await pool.query("update review_items set title = 'Weekly lesson' where id = $1", [first.id]);
     // The visit's own activity, which an omitted one means (Codex r1 on #459).
     await pool.query("update review_items set suggested_category_id = $2 where id = $1", [first.id, categoryId]);
     const envelope = { clientMutationId: "18700000-0000-4000-8000-000000000001",
@@ -1963,6 +1969,8 @@ async function validateSavePlace() {
     const entry = (await pool.query<{ placeId: string | null; categoryId: string | null }>(
       `select place_id as "placeId", category_id as "categoryId" from time_entries where id = $1`, [logged.entryId])).rows[0];
     assert.deepEqual(entry, { placeId: saved.placeId, categoryId }, "Logging a saved visit lost its place or activity.");
+    assert.equal(Number((await pool.query("select count(*) from location_name_patterns where workspace_id = $1 and name = 'Synthetic pool'", [WORKSPACE_ID])).rows[0].count), 0,
+      "Logging a saved card learned the place's name as the person's.");
     // A decided card can no longer be saved.
     await assert.rejects(resolveLocationReviewAction(first.id, { action: "save_place", name: "Late", radiusMeters: 110 }, session),
       /resolved differently/, "Save this place changed a decided card.");

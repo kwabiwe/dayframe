@@ -293,7 +293,7 @@ export async function emitReviewSemanticSegments(
   const autoLogged = await chooseAutoLoggedVisits(client, session, eligible, context, existing, freshAgain, lockedOrphans);
   // Learned names (PRD D19, A8): a name the person gave this pattern is the card's name, and its
   // activity the card's activity; after two uses it also names a Log automatically block.
-  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones);
+  const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones, corrections.correctedMoves);
   const learnedNames = await learnedNamesFor(client, session, patterns);
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title: placeTitle, move } = context(segment);

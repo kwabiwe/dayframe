@@ -867,10 +867,14 @@ async function savePlace(
        returning ri.suggested_category_id as "categoryId"`,
       [place.id, target.reviewId, session.workspaceId, session.userId, target.own, categoryId]);
     // The card's reason was about the place it did not have; replay gives the saved place's (Codex r1 on #459).
+    // The card is now titled by the place, never a learned name; an activity the person chose here is
+    // theirs to teach (Codex r4 on #459).
     await client.query(
-      `update activity_events set suggested_place_id = $1, raw_payload = raw_payload - 'semanticReason'
+      `update activity_events set suggested_place_id = $1,
+         raw_payload = (raw_payload - 'semanticReason' - 'nameSource')
+           || case when $5 then jsonb_build_object('activitySource', 'learned') else '{}'::jsonb end
        where id = $2 and workspace_id = $3 and user_id = $4`,
-      [place.id, target.eventId, session.workspaceId, session.userId]);
+      [place.id, target.eventId, session.workspaceId, session.userId, target.own && Boolean(action.categoryId)]);
     // The Stay keeps the activity its card now has, which replay keeps over the place's default
     // (a re-matched card keeps its own; Codex r2 on #459).
     await client.query(
