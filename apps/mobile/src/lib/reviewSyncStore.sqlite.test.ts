@@ -1457,6 +1457,18 @@ describe("Review cache keeps one shape per proposal (12 Oct 2026 footnote flicke
     const cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
     expect(cached.rawPayload).toEqual(expect.objectContaining({ semanticReason: "time_away_review_only", qualificationReason: "same_place_outing", stopCount: 1 }));
   });
+  it("drops an earlier learned name the presentation no longer says, keeping the reason (Codex r2 on #481)", async () => {
+    const data = bootstrap(); const item = data.reviewItems[1];
+    await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
+      ? { ...candidate, rawPayload: { semanticReason: "review_mode", nameSource: "learned" } } : candidate) });
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "dayframe-staging" };
+    let cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
+    expect(cached.rawPayload).toEqual(expect.objectContaining({ nameSource: "learned" }));
+    await store.cacheReviewPresentation({ owner, response: openPresentation(data, item.id, "a".repeat(64)) });
+    cached = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id)!;
+    expect(cached.rawPayload).toEqual(expect.objectContaining({ semanticReason: "review_mode" }));
+    expect(cached.rawPayload).not.toHaveProperty("nameSource");
+  });
   it("keeps the bootstrap's reason fields when a presentation read rewrites the same proposal, and drops them for a changed one", async () => {
     const data = bootstrap(); const item = data.reviewItems[1];
     await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
