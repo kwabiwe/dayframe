@@ -123,7 +123,7 @@ describe("Calendar click-to-create DOM interactions", () => {
 
     fireEvent.scroll(screen.getByLabelText("Calendar time grid"));
     const prompt = await screen.findByRole("alertdialog");
-    expect(prompt.textContent).toContain("Discard changes?");
+    expect(prompt.textContent).toContain("Discard unsaved changes?");
     fireEvent.scroll(screen.getByLabelText("Calendar time grid"));
     expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
 

@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { parseTimeInput } from "@/lib/calendar-grid";
 import { dateTimeLocal, dateTimeLocalInputToIsoCandidates } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
@@ -140,6 +141,8 @@ export function calendarEntryCompactDraftsHaveChanges(
   return editableDraftHasChanges(initial, running ? { ...draft, duration: initial.duration } : draft);
 }
 
+const DURATION_INPUT_ERROR = "Enter a duration of at least 1m, like 45m or 1h 30m.";
+
 export function normalizeCalendarEntryCompactDuration(raw: string) {
   const value = raw.trim().toLowerCase();
   let minutes: number | null = null;
@@ -158,18 +161,20 @@ export function normalizeCalendarEntryCompactDuration(raw: string) {
     if (remainder < 60 && explicitSeconds === 0) minutes = hours * 60 + remainder;
   }
   if (minutes === null || !Number.isSafeInteger(minutes) || minutes < 1) {
-    throw new Error("Enter a duration of at least 00:01 using HH:MM.");
+    throw new Error(DURATION_INPUT_ERROR);
   }
   const seconds = minutes * 60;
-  if (!Number.isSafeInteger(seconds)) throw new Error("Enter a duration of at least 00:01 using HH:MM.");
+  if (!Number.isSafeInteger(seconds)) throw new Error(DURATION_INPUT_ERROR);
   return { seconds, value: formatCalendarEntryCompactDuration(seconds) };
 }
 
+/**
+ * The editor's Duration in the app's one duration format (WUI-003, owner 16 Oct 2026): "8m",
+ * "1h 3m", "2h" — never the clock-like "00:08", which read as seconds. Typing still accepts
+ * "1h 3m", "63m", "63" and "1:03" (`normalizeCalendarEntryCompactDuration`).
+ */
 export function formatCalendarEntryCompactDuration(totalSeconds: number) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(safeSeconds / 3_600);
-  const minutes = Math.floor((safeSeconds % 3_600) / 60);
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  return formatDuration(Math.max(0, Math.floor(totalSeconds)));
 }
 
 /** An optional AM/PM at the end of a typed time (`9:30 pm`, `930p`, `9 AM`). */

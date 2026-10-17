@@ -8171,6 +8171,17 @@ dialog.ui-dialog.manual-entry-dialog {
   letter-spacing: 0.02em;
 }
 
+/* The block editors' field labels: the #391 small uppercase head, inside each time box. Scoped to
+   the editor panel, so Add time keeps its own labels (Codex r1 on #465). */
+.calendar-compact-editor-panel .calendar-compact-field-label,
+.calendar-compact-editor-panel .calendar-compact-editor-fields label > span,
+.calendar-compact-editor-panel .calendar-compact-duration-field > span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
 .calendar-compact-editor-icons {
   display: flex;
   flex: 0 0 auto;
@@ -8203,9 +8214,7 @@ dialog.ui-dialog.manual-entry-dialog {
 .calendar-compact-icon-action:focus-visible,
 .calendar-compact-category-menu .category-picker-options > button:focus-visible,
 .calendar-compact-save:focus-visible,
-.calendar-compact-cancel:focus-visible,
-.calendar-compact-discard-back:focus-visible,
-.calendar-compact-discard-confirm:focus-visible {
+.calendar-compact-cancel:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
@@ -8354,14 +8363,6 @@ dialog.ui-dialog.manual-entry-dialog {
   gap: 8px;
 }
 
-/* 12-hour times ("11:00 PM") need more room than "23:00"; Duration ("01:30") gives some back.
-   Narrower editors keep their two- and one-column layouts below. */
-@container time-entry-editor (min-width: 381px) {
-  .calendar-compact-temporal-fields[data-clock="12h"] {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) minmax(0, 0.7fr);
-  }
-}
-
 .calendar-compact-moment-field {
   display: grid;
   min-width: 0;
@@ -8477,9 +8478,17 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-duration-field,
+/* The field's own width, never the input's intrinsic one: an input's minimum content width had
+   pushed it 7 px into the card's right padding (owner, 16 Oct 2026). */
 .calendar-compact-duration-input {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
+}
+
+.calendar-compact-duration-input > input {
+  min-width: 0;
 }
 
 .calendar-compact-duration {
@@ -8515,18 +8524,6 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 21px;
 }
 
-.calendar-compact-editor-footer {
-  display: grid;
-  width: 100%;
-  height: var(--calendar-compact-feedback-height);
-  min-height: var(--calendar-compact-feedback-height);
-  max-height: var(--calendar-compact-feedback-height);
-  grid-template-columns: minmax(0, 1fr);
-  overflow: hidden;
-  border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
-}
-
 .manual-entry-dialog .ui-dialog-actions {
   height: var(--calendar-compact-feedback-height);
   min-height: var(--calendar-compact-feedback-height);
@@ -8546,38 +8543,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact p {
   overflow-wrap: anywhere;
-}
-
-.calendar-compact-editor-default-actions,
-.calendar-compact-feedback-actions,
-.calendar-compact-discard-confirmation {
-  grid-area: 1 / 1;
-  width: 100%;
-  height: 100%;
-}
-
-.calendar-compact-editor-default-actions,
-.calendar-compact-feedback-actions {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  transition: opacity 120ms ease-out, visibility 0s linear 0s;
-}
-
-.calendar-compact-editor-default-actions {
-  opacity: 1;
-  visibility: visible;
-}
-
-.calendar-compact-feedback-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transition-delay: 0s, 120ms;
 }
 
 .calendar-compact-feedback-copy {
@@ -8616,32 +8581,8 @@ dialog.ui-dialog.manual-entry-dialog {
   overflow-wrap: anywhere;
 }
 
-.calendar-compact-discard-confirmation {
-  display: grid;
-  min-width: 0;
-  min-height: 44px;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease-out, visibility 0s linear 120ms;
-  visibility: hidden;
-}
-
-.calendar-compact-discard-confirmation strong {
-  min-width: 0;
-  color: var(--danger-text);
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
 .calendar-compact-save,
-.calendar-compact-cancel,
-.calendar-compact-discard-back,
-.calendar-compact-discard-confirm {
+.calendar-compact-cancel {
   display: inline-flex;
   box-sizing: border-box;
   height: var(--web-control-height);
@@ -8657,17 +8598,14 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 1.2;
 }
 
+/* At least the shared width, wider for a longer label ("Add block"), never wrapping: a footer note
+   (an overlap, an error) wraps in its own column instead (owner, 16 Oct 2026). */
 .calendar-compact-save,
 .calendar-compact-cancel {
-  width: var(--calendar-compact-action-width);
+  width: max-content;
   min-width: var(--calendar-compact-action-width);
-  max-width: var(--calendar-compact-action-width);
-  flex: 0 0 var(--calendar-compact-action-width);
-}
-
-.calendar-compact-discard-back {
-  background: var(--surface-muted);
-  color: var(--foreground);
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .calendar-compact-cancel {
@@ -8677,41 +8615,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
 .calendar-compact-cancel:hover:not(:disabled) {
   background: var(--surface-muted);
-}
-
-.calendar-compact-editor-footer.is-confirming-discard .calendar-compact-editor-default-actions {
-  opacity: 0;
-  pointer-events: none;
-  transition-delay: 0s, 120ms;
-  visibility: hidden;
-}
-
-.calendar-compact-editor-footer.is-showing-feedback .calendar-compact-editor-default-actions {
-  opacity: 0;
-  pointer-events: none;
-  transition-delay: 0s, 120ms;
-  visibility: hidden;
-}
-
-.calendar-compact-editor-footer.is-showing-feedback .calendar-compact-feedback-actions {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  transition-delay: 0s, 0s;
-}
-
-.calendar-compact-editor-footer.is-confirming-discard .calendar-compact-feedback-actions {
-  opacity: 0;
-  pointer-events: none;
-  transition-delay: 0s, 120ms;
-  visibility: hidden;
-}
-
-.calendar-compact-editor-footer.is-confirming-discard .calendar-compact-discard-confirmation {
-  opacity: 1;
-  pointer-events: auto;
-  visibility: visible;
-  transition-delay: 0s, 0s;
 }
 
 .calendar-compact-save {
@@ -8782,30 +8685,6 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
-@container time-entry-editor (max-width: 380px) {
-  .calendar-compact-temporal-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .calendar-compact-duration,
-  .calendar-compact-duration-field,
-  .calendar-compact-duration-input {
-    grid-column: 1 / -1;
-  }
-}
-
-@container time-entry-editor (max-width: 340px) {
-  .calendar-compact-temporal-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .calendar-compact-duration,
-  .calendar-compact-duration-field,
-  .calendar-compact-duration-input {
-    grid-column: auto;
-  }
-}
-
 @media (max-width: 430px) {
   dialog.ui-dialog.manual-entry-dialog {
     --calendar-compact-feedback-height: 104px;
@@ -8852,63 +8731,6 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
-@media (max-width: 350px) {
-  .calendar-compact-editor,
-  .time-entry-quick-editor-modal {
-    --calendar-compact-feedback-height: 104px;
-  }
-
-  .calendar-compact-editor-default-actions,
-  .calendar-compact-feedback-actions {
-    display: grid;
-    grid-template-areas:
-      "message message message"
-      "spacer cancel action";
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    row-gap: 6px;
-  }
-
-  .calendar-compact-feedback-copy {
-    grid-area: message;
-  }
-
-  .calendar-compact-editor-default-actions .calendar-compact-save,
-  .calendar-compact-feedback-actions .calendar-compact-save {
-    grid-area: action;
-  }
-
-  .calendar-compact-editor-default-actions .calendar-compact-cancel,
-  .calendar-compact-feedback-actions .calendar-compact-cancel {
-    grid-area: cancel;
-  }
-
-  .calendar-compact-feedback-copy {
-    max-height: 32px;
-  }
-
-  .calendar-compact-discard-confirmation {
-    grid-template-areas:
-      "prompt prompt"
-      "back discard";
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 6px;
-  }
-
-  .calendar-compact-discard-confirmation strong {
-    grid-area: prompt;
-    white-space: normal;
-  }
-
-  .calendar-compact-discard-back {
-    grid-area: back;
-    justify-self: end;
-  }
-
-  .calendar-compact-discard-confirm {
-    grid-area: discard;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .calendar-draft-slot-anchor {
     animation-duration: 1ms;
@@ -8916,9 +8738,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .calendar-compact-editor,
   .time-entry-quick-editor-modal,
-  .calendar-compact-editor-default-actions,
-  .calendar-compact-feedback-actions,
-  .calendar-compact-discard-confirmation,
   .timeline-delete-error {
     animation: none;
     transition: opacity 1ms linear;
@@ -14181,11 +14000,15 @@ dialog.ui-dialog.df-rf-dialog {
   background: transparent;
 }
 
+/* The #391 eyebrow: small uppercase ("FRIDAY 16 OCTOBER", "RECORDING"), as the iPhone sheet's. */
 .df-ed-eyebrow {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 /* "Logged automatically · {place}" under an auto-logged block's heading (PRD D17). */
@@ -14269,27 +14092,394 @@ dialog.ui-dialog.df-rf-dialog {
   outline-offset: 2px;
 }
 
+/* Editor shell (audit WUI-007, owner 16 Oct 2026): one 16 px inset on every side, a head and foot
+   that size to their content with no tinted band, and the close glyph lined up with the text edge. */
+.calendar-compact-editor,
+.time-entry-quick-editor-modal {
+  --calendar-compact-horizontal-inset: 16px;
+}
+
+.calendar-compact-editor-header.df-ed-head {
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  align-items: flex-start;
+  padding: 16px var(--calendar-compact-horizontal-inset) 4px;
+}
+
+.df-ed-head .calendar-compact-editor-icons {
+  margin: -10px -12px 0 0;
+}
+
+.calendar-compact-editor-panel .calendar-compact-editor-fields {
+  gap: 12px;
+  padding: 12px var(--calendar-compact-horizontal-inset);
+}
+
+/* Time boxes (WUI-001; prototype `.times`): one inset box per field, its 11 px label inside above
+   the value, about 56 px tall, the date glyph at its trailing edge and the focus ring on the box. */
+.calendar-compact-editor-panel .calendar-compact-temporal-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(84px, 0.7fr);
+}
+
 .calendar-compact-editor-panel .calendar-compact-temporal-fields > * {
-  border-radius: 14px;
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 2px;
+  border-radius: 12px;
+  padding: 7px 12px 6px;
   background: var(--surface-inset);
-  padding: 8px 10px;
+  box-shadow: inset 0 0 0 2px transparent;
 }
 
-/* UIA-205: discarding changes is destructive, so its confirm reads as danger, not coral. */
-.calendar-compact-discard-confirm {
+.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:focus-within {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:focus-within:has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls,
+.calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within,
+.calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]) {
+  min-height: 28px;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.calendar-compact-editor-panel .calendar-compact-temporal-fields input,
+.calendar-compact-editor-panel .calendar-compact-temporal-fields input:focus,
+.calendar-compact-editor-panel .calendar-compact-temporal-fields input[aria-invalid="true"]:focus {
+  min-height: 28px;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls > input,
+.calendar-compact-editor-panel .calendar-compact-duration-input input,
+.calendar-compact-editor-panel .calendar-compact-duration > .tabular,
+.calendar-compact-editor-panel .calendar-compact-running-value {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The date glyph keeps a 44 × 44 px target that overhangs the box's padding, not its height. */
+.calendar-compact-editor-panel .calendar-compact-date-trigger {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: -8px -12px -8px -6px;
+  color: var(--muted);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-trigger:hover,
+.calendar-compact-editor-panel .calendar-compact-date-trigger[aria-expanded="true"] {
+  color: var(--foreground);
+}
+
+.calendar-compact-editor-panel .calendar-compact-duration,
+.calendar-compact-editor-panel .calendar-compact-running-value {
+  min-height: 28px;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.calendar-compact-editor-panel .calendar-compact-running-value {
+  color: var(--text-secondary);
+}
+
+/* Footer (WUI-004/WUI-006): a note on its own line that opens above the actions, then the block's
+   own actions (Delete or Discard, Start again) on the left and Cancel and Save on the right. */
+.calendar-compact-editor-footer.df-ed-foot {
+  display: grid;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  padding: 4px var(--calendar-compact-horizontal-inset) 16px;
+  border-top: 0;
+  background: transparent;
+}
+
+.df-ed-note {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 160ms ease-out, opacity 120ms ease-out, margin 160ms ease-out;
+}
+
+.df-ed-note.is-shown {
+  grid-template-rows: 1fr;
+  margin-bottom: 10px;
+  opacity: 1;
+}
+
+.df-ed-note > .calendar-compact-feedback-copy {
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.df-ed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.df-ed-actions-start,
+.df-ed-actions-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.df-ed-actions-end {
+  margin-left: auto;
+  gap: 8px;
+}
+
+.df-ed-actions-start:empty {
+  display: none;
+}
+
+.df-ed-pill {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.df-ed-pill:hover:not(:disabled) {
   background: var(--surface-muted);
+}
+
+.df-ed-pill.is-danger {
+  background: transparent;
   color: var(--danger-text);
 }
 
-.calendar-compact-icon-action.is-danger {
-  color: var(--danger-text);
+.df-ed-pill.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
-/* The editor's chips are 44 px wherever touch is the input, whatever the viewport width. */
+.df-ed-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.df-ed-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.calendar-compact-editor-panel .calendar-compact-save,
+.calendar-compact-editor-panel .calendar-compact-cancel {
+  min-width: 76px;
+}
+
+/* Narrow editors (phones): Start and End share a row and Duration takes the next; very narrow
+   ones stack all three. */
+@container time-entry-editor (max-width: 380px) {
+  .calendar-compact-editor-panel .calendar-compact-temporal-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-compact-editor-panel .calendar-compact-temporal-fields > :last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@container time-entry-editor (max-width: 280px) {
+  .calendar-compact-editor-panel .calendar-compact-temporal-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .calendar-compact-editor-panel .calendar-compact-temporal-fields > :last-child {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .calendar-compact-editor {
+    --calendar-compact-horizontal-inset: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-ed-note {
+    transition: opacity 120ms linear;
+  }
+}
+
+/* The chosen chip keeps its activity's colour: a swatch of the block colour ringed in the on-block
+   colour, instead of an on-block (often black) square (owner, 16 Oct 2026). */
+.df-ed-chips .df-rchip.is-checked > i {
+  background: var(--block);
+  box-shadow: 0 0 0 2px var(--on-block);
+}
+
+/* "All activities" is one more chip at the end of the flow, the chips' height and shape, not a
+   44 px inset field on a row of its own (owner, 16 Oct 2026). */
+.df-ed-chips .calendar-compact-category-field {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.df-ed-chips .calendar-compact-category-field > .df-rchip--more {
+  display: inline-flex;
+  width: auto;
+  min-height: 32px;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* The editor's chips and pills are 44 px wherever touch is the input, whatever the viewport width
+   (after the "All activities" chip's own 32 px, which it overrides; Codex r1 on #465). */
 @media (any-pointer: coarse) {
-  .df-ed-chips .df-rchip {
+  .df-ed-chips .df-rchip,
+  .df-ed-chips .calendar-compact-category-field > .df-rchip--more,
+  .df-ed-pill {
     min-height: 44px;
   }
+}
+
+/* Confirmation (WUI-005/WUI-009; `ConfirmDialog`): a centred card over a scrim, a question, one
+   line of body, a neutral way back and the confirming action. Phone-safe by width. */
+.df-confirm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+/* Closed, it stays mounted but hidden once its 90 ms fade has run, and takes no presses. */
+.df-confirm-layer:not(.is-open) {
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0s linear 90ms;
+}
+
+.df-confirm-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay);
+  opacity: 0;
+  transition: opacity 90ms ease-in;
+}
+
+.df-confirm {
+  position: relative;
+  display: grid;
+  width: min(400px, calc(100vw - 24px));
+  box-sizing: border-box;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: 20px;
+  padding: 20px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
+  color: var(--foreground);
+  opacity: 0;
+  transform: scale(0.98);
+  /* 90 ms, the editor's own exit, so a Discard that closes both never cuts this fade. */
+  transition: opacity 90ms ease-in, transform 90ms ease-in;
+}
+
+.df-confirm-layer.is-entered .df-confirm-scrim {
+  opacity: 1;
+  transition: opacity 160ms ease-out;
+}
+
+.df-confirm-layer.is-entered .df-confirm {
+  opacity: 1;
+  transform: none;
+  transition: opacity 160ms ease-out, transform 160ms ease-out;
+}
+
+.df-confirm-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.df-confirm-body {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.df-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+@media (max-width: 560px) {
+  .df-confirm-actions > .df-rbtn {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-confirm,
+  .df-confirm-layer.is-entered .df-confirm {
+    transform: none;
+  }
+}
+
+/* Confirming a destructive action: solid danger (WUI-010), never coral. */
+.df-rbtn--danger {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.df-rbtn--danger:hover {
+  background: color-mix(in oklab, var(--danger) 88%, var(--text-primary));
+}
+
+/* Neutral Done / confirm for a reversible action (the date sheets' Done look). */
+.df-rbtn--inverse {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.df-rbtn--inverse:hover {
+  background: color-mix(in oklab, var(--foreground) 88%, var(--background));
 }
 
 .category-picker-search {

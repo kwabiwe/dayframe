@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from "@dayframe/shared";
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
@@ -684,11 +684,13 @@ export function TimeEntryQuickEditorPanel({
       <button
         type="button"
         className="calendar-compact-save"
+        // "Add" on the button (it never wraps, WUI-004); the name keeps what is added.
+        aria-label={entry ? undefined : "Add block"}
         aria-busy={busyAction === "save" || undefined}
         disabled={isBusy || saveBlockedByTimer || !preview.plan}
         onClick={() => void controller.save()}
       >
-        {entry ? "Save" : "Add block"}
+        {entry ? "Save" : "Add"}
       </button>
     );
   }
@@ -716,6 +718,8 @@ export function TimeEntryQuickEditorPanel({
       aria-label={entry ? `Edit ${title}` : "New block"}
       aria-busy={isBusy || undefined}
       aria-modal={surface === "modal"}
+      // While "Discard unsaved changes?" asks, only its two buttons can be reached.
+      inert={discardPrompt || undefined}
     >
       {busyAction ? (
         <span className="sr-only" role="status" aria-live="polite">
@@ -733,43 +737,16 @@ export function TimeEntryQuickEditorPanel({
             </p>
           ) : null}
         </div>
-        {/* Start again and Delete sit in the head (not beside Save as in the prototype), so the
-            footer keeps its full width for errors, overlap and the discard prompt, and both stay
-            usable — and keep focus — while an error shows. */}
         <div className="calendar-compact-editor-icons">
-          {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
-            <button
-              className="calendar-compact-icon-action"
-              type="button"
-              aria-label={`Start ${title} again`}
-              aria-busy={busyAction === "start" || undefined}
-              disabled={controlsDisabled || props.isTimerBusy}
-              onClick={() => void controller.startAgain()}
-            >
-              <DayframeIcon glyph="rotate-ccw" size={17} />
-            </button>
-          ) : null}
-          {props.mode === "entry" && props.onDelete ? (
-            <button
-              className="calendar-compact-icon-action is-danger"
-              type="button"
-              aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
-              aria-busy={busyAction === "delete" || undefined}
-              disabled={controlsDisabled}
-              onClick={() => void controller.deleteEntry()}
-            >
-              <DayframeIcon glyph="trash-2" size={17} />
-            </button>
-          ) : null}
-        <button
-          className="calendar-compact-icon-action"
-          type="button"
-          aria-label="Close editor"
-          disabled={controlsDisabled}
-          onClick={() => controller.attemptDismiss(true)}
-        >
-          <X size={18} aria-hidden="true" />
-        </button>
+          <button
+            className="calendar-compact-icon-action"
+            type="button"
+            aria-label="Close editor"
+            disabled={controlsDisabled}
+            onClick={() => controller.attemptDismiss(true)}
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -820,6 +797,7 @@ export function TimeEntryQuickEditorPanel({
 
         <ActivityChipGroup
           categories={editorChipCategories(props.categories, chipAnchorId)}
+          maxRows={2}
           disabled={controlsDisabled}
           onSelect={(categoryId) => controller.updateField("categoryId", categoryId)}
           selectedId={draft.categoryId}
@@ -940,12 +918,12 @@ export function TimeEntryQuickEditorPanel({
               <input
                 aria-describedby={feedbackMode === "error" && controller.durationIsInvalid ? temporalErrorId : undefined}
                 aria-invalid={controller.durationIsInvalid || undefined}
-                aria-label="Duration in hours and minutes"
+                aria-label="Duration"
                 disabled={controlsDisabled}
-                inputMode="numeric"
+                inputMode="text"
                 onBlur={() => commitTemporalField("duration")}
                 onChange={(event) => controller.updateTemporalField("duration", event.target.value.replace(/[^\dhm:\s]/gi, ""), "duration")}
-                placeholder="00:30"
+                placeholder="30m"
                 type="text"
                 value={draft.duration}
               />
@@ -954,22 +932,13 @@ export function TimeEntryQuickEditorPanel({
         </div>
       </div>
 
-      <div
-        className={[
-          "calendar-compact-editor-footer",
-          feedbackMode === "discard" ? "is-confirming-discard" : "",
-          feedbackMode === "error" || feedbackMode === "overlap" ? "is-showing-feedback" : ""
-        ].join(" ")}
-        data-feedback-mode={feedbackMode}
-      >
-        <div className="calendar-compact-editor-default-actions" aria-hidden={feedbackMode !== "default"} inert={feedbackMode !== "default"}>
-          {cancelButton()}
-          {saveButton()}
-        </div>
+      {/* Footer (prototype "Edit block", audit WUI-004/WUI-006): a note (an error or an overlap) on
+          its own line above the actions, never squeezing them; the block's own actions as labelled
+          pills on the left (Delete or Discard, Start again), Cancel and Save on the right. */}
+      <div className="calendar-compact-editor-footer df-ed-foot" data-feedback-mode={feedbackMode}>
         <div
-          className="calendar-compact-feedback-actions"
+          className={`df-ed-note${feedbackMode === "error" || feedbackMode === "overlap" ? " is-shown" : ""}`}
           aria-hidden={feedbackMode !== "error" && feedbackMode !== "overlap"}
-          inert={feedbackMode !== "error" && feedbackMode !== "overlap"}
         >
           <div className={`calendar-compact-feedback-copy${feedbackMode === "error" ? " is-error" : ""}`}>
             {feedbackMode === "error" && displayError ? (
@@ -987,26 +956,54 @@ export function TimeEntryQuickEditorPanel({
               />
             ) : null}
           </div>
-          {cancelButton()}
-          {saveButton()}
         </div>
-        <div
-          className="calendar-compact-discard-confirmation"
-          role="alertdialog"
-          aria-label="Discard changes?"
-          aria-hidden={!discardPrompt}
-          aria-modal="false"
-          inert={!discardPrompt}
-        >
-          <strong>Discard changes?</strong>
-          <button ref={discardBackRef} type="button" className="calendar-compact-discard-back" onClick={controller.cancelDiscardPrompt}>
-            Go back
-          </button>
-          <button type="button" className="calendar-compact-discard-confirm" onClick={controller.confirmDiscard}>
-            Discard
-          </button>
+        <div className="df-ed-actions">
+          <div className="df-ed-actions-start">
+            {props.mode === "entry" && props.onDelete ? (
+              <button
+                className="df-ed-pill is-danger"
+                type="button"
+                // The visible word leads the name (WCAG 2.5.3), then which block.
+                aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
+                aria-busy={busyAction === "delete" || undefined}
+                disabled={controlsDisabled}
+                onClick={() => void controller.deleteEntry()}
+              >
+                {isRunning ? "Discard" : "Delete"}
+              </button>
+            ) : null}
+            {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
+              <button
+                className="df-ed-pill"
+                type="button"
+                aria-label={`Start again: ${title}`}
+                aria-busy={busyAction === "start" || undefined}
+                disabled={controlsDisabled || props.isTimerBusy}
+                onClick={() => void controller.startAgain()}
+              >
+                Start again
+              </button>
+            ) : null}
+          </div>
+          <div className="df-ed-actions-end">
+            {cancelButton()}
+            {saveButton()}
+          </div>
         </div>
       </div>
+      {/* Unsaved changes ask once, in the shared confirmation (WUI-005); it is part of the editor's
+          interaction boundary, so pressing it never counts as a press outside the editor. */}
+      <ConfirmDialog
+        body="Your changes to this block will be lost."
+        cancelLabel="Go back"
+        cancelRef={discardBackRef}
+        confirmLabel="Discard"
+        onCancel={controller.cancelDiscardPrompt}
+        onConfirm={controller.confirmDiscard}
+        open={discardPrompt}
+        surfaceClassName="time-entry-quick-editor-nested-surface"
+        title="Discard unsaved changes?"
+      />
     </div>
   );
 }
@@ -1036,7 +1033,7 @@ export function TimeEntryQuickEditorModal(props: Omit<Extract<TimeEntryQuickEdit
       ].filter((root): root is HTMLElement => Boolean(root));
       const focusable = roots.flatMap((root) => [...root.querySelectorAll<HTMLElement>(
         'button:not([disabled]):not([inert] *), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-      )]).filter((element) => element.offsetParent !== null);
+      )]).filter((element) => element.offsetParent !== null && !element.closest("[inert]"));
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
