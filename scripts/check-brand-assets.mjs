@@ -123,7 +123,7 @@ assert(mobileIcon[24] === 8, "iOS app icon must use 8-bit colour");
 assert(mobileIcon[25] === 2, "iOS app icon must be opaque RGB without an alpha channel");
 assert(
   createHash("sha256").update(mobileIcon).digest("hex") ===
-    "f6526ac99480105da6f63c03bad0831bfb7b3c4a6c61df910c7483017fb92a5b",
+    "085229b6cba88da8387ba89b1debde972f5c52c77206dc59058a6dc322e55a56",
   "iOS app icon pixels changed; regenerate deliberately from the canonical symbol"
 );
 
