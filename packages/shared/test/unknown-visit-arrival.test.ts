@@ -101,7 +101,7 @@ describe("unknown native Visit arrival uncertainty", () => {
     expect(stay).not.toHaveProperty("approximateArrival");
   });
 
-  it("keeps a high-quality 11m33 internal Visit exact and below the unchanged Review gate", () => {
+  it("keeps a high-quality 11m33 internal Visit exact, and at 10 minutes or more it reaches Review (PRD D19)", () => {
     const input = unknownVisitArrivalFixture();
     input.evidence = input.evidence.map((item) => item.clientEvidenceId === "visit-completed"
       ? { ...item, horizontalAccuracyMeters: 54, endedAt: "2026-09-27T10:39:36.000Z" }
@@ -115,7 +115,7 @@ describe("unknown native Visit arrival uncertainty", () => {
     });
     expect(stay).not.toHaveProperty("approximateArrival");
     expect(Date.parse(stay!.stoppedAt!) - Date.parse(stay!.startedAt)).toBe(693_000);
-    expect(Date.parse(stay!.stoppedAt!) - Date.parse(stay!.startedAt)).toBeLessThan(input.config.unknownStayReviewDwellMs);
+    expect(Date.parse(stay!.stoppedAt!) - Date.parse(stay!.startedAt)).toBeGreaterThanOrEqual(input.config.unknownStayReviewDwellMs);
   });
 
   it("requires recent accurate non-simulated native movement, not slow traffic or spatial noise", () => {

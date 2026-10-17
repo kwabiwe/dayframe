@@ -250,9 +250,10 @@ async function retireHealthCoveredMoveCardPage(
 const PAGE = 250;
 
 /**
- * Retires the open cards of these candidate Moves (client event IDs) a Health workout covers by
- * their current window and mode, which can differ from what an open card still holds (late Motion
- * evidence giving a mode; Codex r2 on #457).
+ * Retires the open cards of these segments (client event IDs) as replay's own: candidate Moves a
+ * Health workout covers by their current window and mode, which can differ from what an open card
+ * still holds (late Motion evidence giving a mode; Codex r2 on #457), and stays now too short to offer
+ * (Codex r1 on #461). Decided cards are never touched.
  */
 export async function retireCoveredCandidateCards(client: Pick<pg.PoolClient, "query">, session: RequestSession, clientEventIds: readonly string[]) {
   const reviewIds: string[] = [];

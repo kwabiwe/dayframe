@@ -180,6 +180,12 @@ export type CommuteSegment = {
    * only when protected history blocks the trip itself.
    */
   legs?: CommuteSegment[];
+  /**
+   * Set on a leg that stands only because its whole outing qualified (PRD D19, `outingLegsAround`):
+   * the outing's stays in order, its two anchors first and last. Never persisted; replay re-checks the
+   * outing against decided boundaries before rebuilding the leg.
+   */
+  outingStayIds?: string[];
   evidenceIds: string[];
 };
 

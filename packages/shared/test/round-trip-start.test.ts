@@ -644,10 +644,11 @@ describe("departures after a finished walk (review round 9)", () => {
     const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"), still("last-home", 49, 0, { horizontalAccuracyMeters: 100 }),
       e("out-a", 49.1, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 49.2, 400), still("out-accurate-2", 49.3, 500),
       e("out-b", 49.5, 750, { horizontalAccuracyMeters: null }), e("out-c", 49.8, 1_000, { horizontalAccuracyMeters: null }),
-      visit("stop-visit", 50, 1_000, { endedAt: at(60), metadata: {} }),
-      e("back-a", 60.2, 900, { horizontalAccuracyMeters: null }), e("back-b", 60.5, 600, { horizontalAccuracyMeters: null }),
-      still("back-accurate", 60.7, 400), e("back-c", 60.9, 200, { horizontalAccuracyMeters: null }),
-      geofence("last-return", 61.2, "geofence_enter"), still("final-a", 61.5, 0), still("final-b", 71.5, 0), still("final-c", 81.5, 0)];
+      // A 9-minute stop: under the 10-minute Review threshold (PRD D19), so it stays inside the trip.
+      visit("stop-visit", 50, 1_000, { endedAt: at(59), metadata: {} }),
+      e("back-a", 59.2, 900, { horizontalAccuracyMeters: null }), e("back-b", 59.5, 600, { horizontalAccuracyMeters: null }),
+      still("back-accurate", 59.7, 400), e("back-c", 59.9, 200, { horizontalAccuracyMeters: null }),
+      geofence("last-return", 60.2, "geofence_enter"), still("final-a", 60.5, 0), still("final-b", 70.5, 0), still("final-c", 80.5, 0)];
     const trips = commutes(withWork(evidence, false)).sort((a, b) => a.startedAt.localeCompare(b.startedAt));
     expect(trips.length).toBeGreaterThan(0);
     for (let index = 1; index < trips.length; index += 1) {
@@ -680,7 +681,7 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(49) })]);
   });
 
-  it("keeps a trip through a stop after the walk's return whole, with consistent leg and trip starts", () => {
+  it("splits an outing at a 10-minute stop after the walk's return, keeping both legs from the return (PRD D19)", () => {
     const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"),
       e("out-a", 39.6, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 39.7, 400), still("out-accurate-2", 39.8, 500),
       e("out-b", 40, 750, { horizontalAccuracyMeters: null }), e("out-c", 40.3, 1_000, { horizontalAccuracyMeters: null }),
@@ -688,7 +689,16 @@ describe("departures after a finished walk (review round 9)", () => {
       e("back-a", 51, 900, { horizontalAccuracyMeters: null }), e("back-b", 51.2, 600, { horizontalAccuracyMeters: null }),
       still("back-accurate", 51.4, 400), e("back-c", 51.6, 200, { horizontalAccuracyMeters: null }),
       geofence("last-return", 52, "geofence_enter"), still("final-a", 52.5, 0), still("final-b", 62.5, 0), still("final-c", 72.5, 0)];
-    expect(commutes(withWork(evidence, false))).toEqual([expect.objectContaining({ startedAt: at(39), stoppedAt: at(52), stops: [expect.anything()] })]);
+    // A 10-minute stop is a visit of its own (PRD D19): the outing is a Move there, the visit and a Move
+    // home. Neither sparse leg qualifies alone, but the outing through the visit does, so both stand at
+    // low confidence (Codex r1 on #461), and the first still starts at the walk's return.
+    const output = runLocationEngine(withWork(evidence, false));
+    const visit = output.segmentUpserts.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown");
+    expect(visit).toBeDefined();
+    expect(commutes(withWork(evidence, false))).toEqual([
+      expect.objectContaining({ startedAt: at(39), stoppedAt: visit!.startedAt, confidence: "low" }),
+      expect.objectContaining({ startedAt: visit!.stoppedAt, stoppedAt: at(52), confidence: "low" })
+    ]);
   });
 
   // Review round 12: a mirror of the last approach fix or a broad reading must not hide the approach.
@@ -1044,4 +1054,67 @@ describe("the capture simulator", () => {
   it("is deterministic for a seed", () => {
     expect(simulate(outing, 7).input()).toEqual(simulate(outing, 7).input());
   });
+});
+
+describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex r2 on #461)", () => {
+  // Two places 750 m from Home and 400 m apart: every leg is short, the whole outing is not.
+  const A = { x: 750, y: 0 };
+  const B = { x: 643, y: 386 };
+  const twoVisits = (firstMinutes: number): Scenario => ({ start: "2026-03-09T12:00:00Z", origin: HOME.at, places: [HOME], legs: [
+    { kind: "stay", minutes: 60 }, { kind: "drive", to: A }, { kind: "stay", minutes: firstMinutes },
+    { kind: "drive", to: B }, { kind: "stay", minutes: 12 }, { kind: "drive", to: HOME.at }, { kind: "stay", minutes: 90 }
+  ] });
+  // Each drive between the truth stays is covered by a Move, so none of the outing's travel is lost.
+  const drivesCovered = (scenario: Scenario, seed: number, motion: boolean) => {
+    const sim = simulate(scenario, seed, { motion });
+    const moves = allCommutes(sim.input());
+    const stays = sim.truth.stays;
+    return stays.slice(1).map((stay, index) => {
+      const [from, to] = [stays[index].to, stay.from];
+      const middle = (from + to) / 2;
+      return moves.some((move) => Date.parse(move.startedAt) <= middle && Date.parse(move.stoppedAt!) >= middle);
+    });
+  };
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])("keeps every Move of Home → A → B → Home with two 12-minute visits (seed %i)", (seed) => {
+    for (const motion of [false, true]) expect(drivesCovered(twoVisits(12), seed, motion)).toEqual([true, true, true]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])("keeps the Moves when the first stop is a 6-minute stop inside the trip (seed %i)", (seed) => {
+    for (const motion of [false, true]) expect(drivesCovered(twoVisits(6), seed, motion)).toEqual([true, true, true]);
+  });
+
+  // Home → A → B, still at B: the ongoing stay at B anchors the outing (Codex r3 on #461: seed 38 lost both Moves).
+  it.each([38])("keeps both Moves of Home → A → B while still at B (seed %i)", (seed) => {
+    const endingAtB: Scenario = { ...twoVisits(12), legs: twoVisits(12).legs.slice(0, 5) };
+    for (const motion of [false, true]) expect(drivesCovered(endingAtB, seed, motion)).toEqual([true, true]);
+  });
+
+  it("costs no more with 12-minute visits to recover legs for than with 9-minute stops (Codex r2 on #461)", () => {
+    // Four days of six such outings a day. Recovery used to derive each visit over all the evidence
+    // (about 3× the run with stops instead of visits); over its own window it costs about the same.
+    const week = (minutes: number) => {
+      const day = (start: string): Scenario => ({ start, origin: HOME.at, places: [HOME], legs: [
+        { kind: "stay", minutes: 60 },
+        ...Array.from({ length: 6 }, (): Scenario["legs"] => [{ kind: "drive", to: A }, { kind: "stay", minutes },
+          { kind: "drive", to: B }, { kind: "stay", minutes }, { kind: "drive", to: HOME.at }, { kind: "stay", minutes: 40 }]).flat(),
+        { kind: "stay", minutes: 300 }] });
+      const inputs = Array.from({ length: 4 }, (_, index) =>
+        simulate(day(new Date(Date.parse("2026-03-09T06:00:00Z") + index * 86_400_000).toISOString()), index + 1, { motion: true }).input());
+      // The simulator's IDs restart each day: prefix them so every day's visits stay distinct (Codex r3 on #461).
+      return { ...inputs[3], evidence: inputs.flatMap((value, index) =>
+        value.evidence.map((item) => ({ ...item, clientEvidenceId: `d${index}-${item.clientEvidenceId}` }))) };
+    };
+    const fastest = (value: LocationEngineInput) => {
+      runLocationEngine(value);
+      let best = Number.POSITIVE_INFINITY;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const started = performance.now();
+        runLocationEngine(value);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    expect(fastest(week(12)) / fastest(week(9))).toBeLessThan(2);
+  }, 60_000);
 });

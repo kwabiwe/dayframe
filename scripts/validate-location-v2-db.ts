@@ -1450,19 +1450,62 @@ async function validateSupersededReviewReactivation() {
     const [shortBefore] = await currentStays();
     assert.equal((await reviewOf(shortBefore.clientSegmentId)).reviewStatus, "open", "The twenty-minute stop was not offered.");
     await ingest("short-enter", [callback("short-enter", 400, "geofence_enter")]);
-    // Back as the same segment but under twenty minutes, so not offered: its Review stays retired by replay.
+    // Back as the same segment, shortened to about 15 minutes. Unknown stays reach Review from 10 minutes
+    // (PRD D19; an unknown stay under that is no stay at all), so it is offered again.
     await ingest("short-exit", [callback("short-exit", 450, "geofence_exit"), fix("o1", 960, 900, 10)]);
     const [short] = await currentStays();
     assert.equal(short.clientSegmentId, shortBefore.clientSegmentId, "The shortened stay did not keep its segment.");
     assert.deepEqual(await stayState(short.clientSegmentId),
-      { status: "finalised", reviewStatus: "ignored", scope: "superseded", eventStatus: "ignored" },
-      "A restored stay under the Review threshold changed its retired Review.");
+      { status: "finalised", reviewStatus: "open", scope: null, eventStatus: "needs_review" },
+      "A restored stay of 10 minutes or more was not offered again.");
     // A later genuine entry must still make it the saved place: the retired Review is not a decision. The restored
     // unknown segment is gone from current output, so it must not linger as a second current stay.
     await ingest("short-enter-again", [callback("short-enter-again", 850, "geofence_enter")]);
     const afterReplacement = await currentStays();
     assert.equal(afterReplacement.length, 1, "A replay-retired restored stay lingered beside its replacement.");
     assert.equal(afterReplacement[0].placeId, placeId, "A restored stay with a retired Review blocked its saved-place replacement.");
+
+    // A stay shrinking under the 10-minute offer threshold and growing back (Codex r2/r3 on #461): an earlier
+    // departure fix moves its end from 607.5 to 597.5 seconds, so it is no longer a stay of its own and its open
+    // card is retired as replay's own (never a decision); a repeated replay changes nothing; a later still fix
+    // brings it back to 607.5 seconds and it is offered once again. A card the person ignored stays
+    // ignored through the same shrink.
+    for (const decided of [false, true]) {
+      await clearDerivedLocationState();
+      const tag = decided ? "decided" : "replay";
+      await ingest(`shrink-${tag}`, [fix(`k0-${tag}`, 0, 126), fix(`k1-${tag}`, 300, 126), fix(`k2-${tag}`, 585, 126),
+        fix(`j0-${tag}`, 630, 600, 10), fix(`j1-${tag}`, 640, 700, 10)]);
+      const [tenMinutes] = await currentStays();
+      assert.equal((await reviewOf(tenMinutes.clientSegmentId))?.stoppedAt.getTime(), startMs + 607_500, "Unexpected 10-minute boundary.");
+      assert.equal((await stayState(tenMinutes.clientSegmentId)).reviewStatus, "open", "A 10-minute unknown stay was not offered.");
+      if (decided) {
+        const card = await pool.query<{ id: string }>(
+          `select ri.id from review_items ri join stay_segments s on s.id = ri.location_segment_id
+           where s.workspace_id = $1 and s.user_id = $2 and s.client_segment_id = $3`, [WORKSPACE_ID, USER_ID, tenMinutes.clientSegmentId]);
+        await resolveLocationReviewAction(card.rows[0].id, { action: "ignore_once_location" }, session);
+      }
+      await ingest(`shrink-${tag}-early`, [fix(`j-early-${tag}`, 610, 900, 10)]);
+      const shrunk = tenMinutes;
+      const shrunkState = await stayState(shrunk.clientSegmentId);
+      if (decided) {
+        assert.equal(shrunkState.reviewStatus, "ignored", "A person's Ignore did not survive the stay shrinking.");
+        assert.notEqual(shrunkState.scope, "superseded", "A person's Ignore became replay's own retirement.");
+        continue;
+      }
+      assert.deepEqual({ reviewStatus: shrunkState.reviewStatus, scope: shrunkState.scope },
+        { reviewStatus: "ignored", scope: "superseded" }, "A stay shrunk under 10 minutes kept its open card, or lost it as a decision.");
+      await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+        rolloutMode: "v2_review", semanticModeAcknowledgedAt: cutoverAt }, session, PROCESSING_AT);
+      assert.deepEqual(await stayState(shrunk.clientSegmentId), shrunkState, "A repeated replay changed the shrunk stay's retired card.");
+      await ingest(`shrink-${tag}-still`, [fix(`k3-${tag}`, 605, 126)]);
+      const grown = await currentStays();
+      assert.equal(grown.length, 1, "The stay growing back is not one stay.");
+      assert.equal((await stayState(grown[0].clientSegmentId)).reviewStatus, "open", "A stay back over 10 minutes was not offered.");
+      if (grown[0].clientSegmentId !== tenMinutes.clientSegmentId) {
+        // Its evidence changed, so it returns as a new segment: the old card stays replay's own retirement.
+        assert.deepEqual(await stayState(tenMinutes.clientSegmentId), shrunkState, "The shrunk stay's retired card changed.");
+      }
+    }
 
     // An Ignore the user queued offline can arrive after replay retired the proposal. It is acknowledged and
     // recorded as the user's decision, so the proposal stays ignored when its segment returns.
