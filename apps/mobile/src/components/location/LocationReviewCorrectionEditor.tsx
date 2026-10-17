@@ -1,4 +1,4 @@
-import { formatClockTime, formatClockValue, formatDuration, type ClockFormat } from "@dayframe/shared";
+import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat } from "@dayframe/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -64,7 +64,6 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
-import { SavePlaceSheet, type SavePlaceRequest } from "./SavePlaceSheet";
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { TimeWheelPanel } from "../TimeWheelPanel";
 import { useClockFormat } from "../../lib/clockFormat";
@@ -98,8 +97,6 @@ export function LocationReviewCorrectionEditor({
   isFocused,
   onCreateActivity,
   onResolve,
-  onPlaceSaved,
-  onSavePlace,
   places,
   recentActivityIds = [],
   reviewItem,
@@ -113,13 +110,6 @@ export function LocationReviewCorrectionEditor({
   /** All activities' Create: resolves to the new activity's id, or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
-  /**
-   * "Save this place" (PRD D19): saves where the visit was as a place without logging it; resolves
-   * to null once saved on this iPhone, or a message to show in the sheet.
-   */
-  onSavePlace?: (request: SavePlaceRequest & { categoryId: string | null }) => Promise<string | null>;
-  /** The sheet has gone after a save: the screen raises its toast. */
-  onPlaceSaved?: (name: string) => void;
   places: Place[];
   /** Activities used most recently first, for the chips and the picker's Recent. */
   recentActivityIds?: readonly string[];
@@ -186,16 +176,6 @@ export function LocationReviewCorrectionEditor({
   const [searchState, setSearchState] = useState<PlaceSearchState>(emptySearchState);
   const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
   const [saveForFuture, setSaveForFuture] = useState(false);
-  // "Save this place": the sheet, and the place this visit was saved as (shown until Review refreshes).
-  const [savePlaceOpen, setSavePlaceOpen] = useState(false);
-  const [savedPlaceName, setSavedPlaceName] = useState<string | null>(null);
-  // Once the evidence refreshes with the saved place as its match, the row is that match, chosen as
-  // before, so recording never reads as removing it (Codex r1 on #460).
-  useEffect(() => {
-    if (!savedPlaceName || !baselinePlaceId || newPlace) return;
-    setSavedPlaceName(null);
-    setSelectedSavedPlaceId((current) => current ?? baselinePlaceId);
-  }, [baselinePlaceId, newPlace, savedPlaceName]);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   // Each nearby or search pick takes a token; any later place or search interaction takes a new
   // one, so a pick that resolves late never overwrites newer input (Codex r1 on #358).
@@ -712,33 +692,20 @@ export function LocationReviewCorrectionEditor({
     );
   }
 
-  async function recordOnce() {
-    if (saving) return;
-    supersedePlacePick();
-    const edit = parsedEdit();
-    if (!edit) return;
-    await onResolve(
-      {
-        action: "record_once",
-        edit: {
-          ...edit,
-          ...(newPlace ? {} : { placeId: selectedSavedPlaceId })
-        }
-      },
-      "This time was recorded once without saving a new place."
-    );
-  }
-
   const primaryLabel = saving
     ? "Saving…"
     : journeyCopy
       ? journeyCopy.primaryLabel
       : newPlace
-        ? saveForFuture ? "Save place and record" : "Use once and record"
+        ? saveForFuture ? "Save place and record" : "Record"
         : selectedSavedPlaceId !== baselinePlaceId
           ? "Use place and record"
           : "Record visit";
-  const placeRowCount = (newPlace ? 1 : 0) + (savedPlaceName ? 1 : 0) +
+  // The short line under a place row's name: what it is and how far from the visit (owner, 17 Oct 2026).
+  const centre = pointFromEvidence(evidence);
+  const newPlaceDistance = newPlace && centre ? distanceMeters(centre, newPlace) : null;
+  const baselineDistance = evidence.map.nearbySavedPlaces.find((place) => place.id === baselinePlaceId)?.distanceMeters ?? null;
+  const placeRowCount = (newPlace ? 1 : 0) +
     (baselinePlaceId ? 1 : 0) +
     evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).length;
   // Nearby shows under an empty (or one-letter) field once a search has started, unless every
@@ -877,33 +844,19 @@ export function LocationReviewCorrectionEditor({
                         layout={localLayoutTransition(reduceMotion)}
                       >
                         <PlaceChoice
-                          detail={newPlace.formattedAddress || "Pinned on the map"}
+                          detail={placeDistanceDetail("New place", newPlaceDistance)}
                           name={newPlace.name}
                           onPress={() => undefined}
                           onRemove={saving ? undefined : () => chooseSavedPlace(baselinePlaceId)}
-                          onSave={onSavePlace && !baselinePlaceId && !saving ? () => {
-                            Keyboard.dismiss();
-                            setSavePlaceOpen(true);
-                          } : undefined}
                           selected
                           theme={theme}
                         />
                       </Reanimated.View>
                     ) : null}
-                    {savedPlaceName && !newPlace ? (
-                      <Reanimated.View
-                        entering={localPresenceEntering(reduceMotion)}
-                        exiting={localPresenceExiting(reduceMotion)}
-                        key="saved-new-place"
-                        layout={localLayoutTransition(reduceMotion)}
-                      >
-                        <PlaceChoice detail="New saved place" name={savedPlaceName} onPress={() => undefined} selected theme={theme} />
-                      </Reanimated.View>
-                    ) : null}
                     {baselinePlaceId ? (
                       <Reanimated.View key={`saved-${baselinePlaceId}`} layout={localLayoutTransition(reduceMotion)}>
                         <PlaceChoice
-                          detail="Matched place"
+                          detail={placeDistanceDetail("Matched place", baselineDistance)}
                           name={baselinePlaceName}
                           onPress={() => toggleSavedPlace(baselinePlaceId)}
                           selected={!newPlace && selectedSavedPlaceId === baselinePlaceId}
@@ -914,9 +867,11 @@ export function LocationReviewCorrectionEditor({
                     {evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).map((place) => (
                       <Reanimated.View key={`saved-${place.id}`} layout={localLayoutTransition(reduceMotion)}>
                         <PlaceChoice
-                          detail={`Saved place · ${formatNearbyDistance(place.distanceMeters)}`}
+                          detail={placeDistanceDetail("Saved place", place.distanceMeters)}
                           name={place.name}
                           onPress={() => toggleSavedPlace(place.id)}
+                          // Chosen instead of the matched place: its ✕ goes back to it.
+                          onRemove={!newPlace && selectedSavedPlaceId === place.id && !saving ? () => chooseSavedPlace(baselinePlaceId) : undefined}
                           selected={!newPlace && selectedSavedPlaceId === place.id}
                           theme={theme}
                         />
@@ -1184,8 +1139,10 @@ export function LocationReviewCorrectionEditor({
                   )}
                 </View>
                 <View style={editorStyles.timeGroup}>
-                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>
-                    {durationLabel}
+                  {/* "Duration" on screen, so the three boxes align; VoiceOver hears "Estimated duration"
+                      for an approximate arrival (owner, 17 Oct 2026). */}
+                  <Text {...mobileTextProps("metadata")} importantForAccessibility="no" accessibilityElementsHidden style={editorStyles.fieldLabel}>
+                    Duration
                   </Text>
                   <View
                     accessible
@@ -1358,21 +1315,12 @@ export function LocationReviewCorrectionEditor({
                 </Reanimated.View>
               ) : null}
 
+              {/* Skip is a quiet choice, not a destructive one: neutral text (owner, 17 Oct 2026). The
+                  primary button already records once, so More options has no "Record once". */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockRow
                 disabled={saving}
                 divider={evidence.segment.kind === "stay" || evidence.suggestedSplitPoints.length > 0 || Boolean(adjacentReview)}
-                onPress={() => void recordOnce()}
-                subtitle="Logs this time without changing or saving a place"
-                testID="location-evidence-record-once"
-                theme={theme}
-                title="Record once"
-              />
-              </Reanimated.View>
-              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
-              <SettingsBlockRow
-                danger
-                disabled={saving}
                 onPress={() => void onResolve({ action: "ignore_once_location" }, "This suggestion was ignored.")}
                 subtitle="Nothing is logged"
                 testID="location-evidence-skip"
@@ -1401,46 +1349,27 @@ export function LocationReviewCorrectionEditor({
           theme={theme}
         />
       ) : null}
-      {savePlaceOpen && newPlace && onSavePlace ? (
-        <SavePlaceSheet
-          centre={pointFromEvidence(evidence)}
-          initialName={newPlace.name}
-          logsAs={categories.find((category) => category.id === selectedCategoryId)?.name ?? null}
-          onClose={() => setSavePlaceOpen(false)}
-          onSave={(request) => onSavePlace({ ...request, categoryId: selectedCategoryId })}
-          onSaved={(request) => {
-            // The sheet has gone: the chosen row becomes the saved place in place, then the toast.
-            supersedePlacePick();
-            setNewPlace(null);
-            setSaveForFuture(false);
-            setSavedPlaceName(request.name);
-            onPlaceSaved?.(request.name);
-          }}
-          reduceMotion={reduceMotion}
-          styles={styles}
-          theme={theme}
-        />
-      ) : null}
     </>
   );
 }
 
+/**
+ * A place row: the name and one short line ("Matched place · 20 m"). The chosen row is raised; a
+ * chosen place that replaced the matched one has a single ✕ to clear it (owner, 17 Oct 2026).
+ */
 function PlaceChoice({
   detail,
   name,
   onPress,
   onRemove,
-  onSave,
   selected,
   theme
 }: {
   detail: string;
   name: string;
   onPress: () => void;
-  /** A chosen new place can be removed, which goes back to the matched place (or none). */
+  /** Clears the choice, going back to the matched place (or none). */
   onRemove?: () => void;
-  /** "Save place" (PRD D19): a quiet pill on an unsaved visit's chosen place. */
-  onSave?: () => void;
   selected: boolean;
   theme: MobileTheme;
 }) {
@@ -1461,25 +1390,12 @@ function PlaceChoice({
       >
         <View style={placeChoiceStyles.text}>
           <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
-          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
         </View>
-        {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
       </Pressable>
-      {onSave ? (
-        <Pressable
-          accessibilityLabel={`Save ${name} as a place`}
-          accessibilityRole="button"
-          hitSlop={{ top: 6, bottom: 6 }}
-          onPress={onSave}
-          style={({ pressed }) => [placeChoiceStyles.savePill, { backgroundColor: theme.surfaceInset }, pressed ? { opacity: 0.72 } : null]}
-          testID="location-evidence-save-place"
-        >
-          <Text {...mobileTextProps("control")} style={[placeChoiceStyles.savePillText, { color: theme.textPrimary }]}>Save place</Text>
-        </Pressable>
-      ) : null}
       {onRemove ? (
         <Pressable
-          accessibilityLabel={`Remove ${name}`}
+          accessibilityLabel={`Clear ${name}`}
           accessibilityRole="button"
           hitSlop={4}
           onPress={onRemove}
@@ -1533,6 +1449,12 @@ function ResultRow({
       </View>
     </Pressable>
   );
+}
+
+/** A place row's short line: what it is and how far from the visit ("Matched place · 20 m"). */
+function placeDistanceDetail(kind: string, meters: number | null) {
+  if (meters === null || !Number.isFinite(meters) || meters < 0) return kind;
+  return `${kind} · ${meters < 1000 ? `${Math.max(10, Math.round(meters / 10) * 10)} m` : `${(meters / 1000).toFixed(1)} km`}`;
 }
 
 /** "40 m away", "1.2 km away": distances from the visit, rounded for reading. */
@@ -1757,8 +1679,7 @@ const placeChoiceStyles = StyleSheet.create({
   name: { fontSize: 14, lineHeight: 18, fontWeight: "700" },
   detail: { fontSize: 12, lineHeight: 16 },
   remove: { width: 44, height: 44, marginRight: 4, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
-  savePill: { minHeight: 32, paddingHorizontal: 12, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
-  savePillText: { fontSize: 13, fontWeight: "700" }
+
 });
 
 const resultRowStyles = StyleSheet.create({

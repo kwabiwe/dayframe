@@ -584,7 +584,9 @@ Block pull-to-refresh:
 - Reduce Motion: the panel and chevron transitions are `none`, so expand and collapse are immediate.
 - Evidence: `reportFilters.dom.test.tsx` (stays open after the only source or description is cleared, inert after a user collapse, rapid toggles) and `reports.contract.test.ts` (one transition owner, Reduce Motion CSS).
 
-## Save this place sheet (location v3 PR 9b, PRD D19)
+## Save this place sheet (location v3 PR 9b, PRD D19) — removed 17 Oct 2026
+
+The owner removed the row's Save place pill and this sheet (Location evidence polish); "Save for future visits" with "Save place and record" saves the place as the visit is recorded. The contract below is kept for history.
 
 - Trigger: the Save place pill on an unsaved visit's chosen place in Location evidence; Save; Cancel, the backdrop or a swipe down.
 - Owner: `SwipeDismissSheet` owns the sheet's entrance and exit (the place-role sheet's pattern). The editor's place rows keep their existing local presence/layout owners (`localPresenceEntering`/`Exiting`, `localLayoutTransition`); the screen's `BlocksToast` owns the notice.
