@@ -6,6 +6,7 @@ import { authErrorResponse } from "@/lib/api-errors";
 import { isLockNotAvailableError, isStatementTimeoutError } from "@/lib/db";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { wantsReviewCardCount } from "@/lib/review-card-count";
 import { REVIEW_COUNT_REQUEST_HEADER, SEMANTIC_CHANGE_COUNT_REQUEST_HEADER } from "@dayframe/shared";
 import {
   LOCATION_EVIDENCE_BODY_LIMIT_BYTES,
@@ -64,8 +65,8 @@ export async function POST(request: Request) {
     });
     // The phone schedules its evening Review reminder from this count. Only clients that ask get it:
     // older iPhone builds parse this reply strictly and would reject an extra field.
-    const reviewCount = request.headers.get(REVIEW_COUNT_REQUEST_HEADER) === "1"
-      ? await openReviewCountFor(session)
+    const reviewCount = request.headers.get(REVIEW_COUNT_REQUEST_HEADER) === "1" || wantsReviewCardCount(request)
+      ? await openReviewCountFor(session, { cards: wantsReviewCardCount(request) })
       : undefined;
     // Likewise only clients that ask get the change count; older builds would reject the field.
     const { semanticChangeCount, ...reply } = result;

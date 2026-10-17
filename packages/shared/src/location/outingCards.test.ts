@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupOutings, outingKeyOf, outingRoleOf, outingTravelWords } from "./outingCards";
+import { foldedOutingMemberIds, groupOutings, outingKeyOf, outingRoleOf, outingTravelWords, reviewCardCount, reviewCardsRemoved, reviewCardsRemovedByOutings } from "./outingCards";
 
 const card = (id: string, start: string, payload: Record<string, unknown> | null) => ({
   id, suggestedStartedAt: start, rawPayload: payload
@@ -55,5 +55,47 @@ describe("outingTravelWords", () => {
     expect(outingTravelWords([move("b", "k", "in", "x", "walking")])).toBe("Walks there");
     expect(outingTravelWords([move("b", "k", "in", "x", "walking"), move("c", "k", "out", "y")])).toBe("Travel there and back");
     expect(outingTravelWords([move("c", "k", "out", "y", "unknown")])).toBe("Travel on");
+  });
+});
+
+describe("one count per outing (PR 12c)", () => {
+  const items = [stay("s", "outing:a"), move("b", "outing:a", "in", "2026-10-17T10:05:00.000Z"),
+    move("c", "outing:a", "out", "2026-10-17T10:30:00.000Z"), card("x", "2026-10-17T12:00:00.000Z", null),
+    move("orphan", "outing:z", "in", "2026-10-17T13:00:00.000Z")];
+
+  it("counts an outing once and a Move without its Stay on its own", () => {
+    expect([...foldedOutingMemberIds(items)]).toEqual(["b", "c"]);
+    expect(reviewCardCount(items)).toBe(3);
+    expect(reviewCardCount(items, (item) => item.id !== "x")).toBe(2);
+  });
+
+  it("moves the count as the server would when cards leave", () => {
+    // The whole outing decided: one card leaves.
+    expect(reviewCardsRemoved(items, new Set(["s", "b", "c"]))).toBe(1);
+    // The Stay decided on its own: its two Moves come back as cards.
+    expect(reviewCardsRemoved(items, new Set(["s"]))).toBe(-1);
+    // A folded Move decided on its own: the outing card stays.
+    expect(reviewCardsRemoved(items, new Set(["b"]))).toBe(0);
+    expect(reviewCardsRemoved(items, new Set(["x"]))).toBe(1);
+  });
+});
+
+describe("reviewCardsRemovedByOutings (Codex r1 on #475)", () => {
+  // The server's map: Moves b and c are folded into Stay s.
+  const map = { b: "s", c: "s" };
+
+  it("moves the count exactly, whatever is loaded", () => {
+    expect(reviewCardsRemovedByOutings(map, ["s", "b", "c"])).toBe(1);
+    expect(reviewCardsRemovedByOutings(map, ["s"])).toBe(-1);
+    expect(reviewCardsRemovedByOutings(map, ["s", "b"])).toBe(0);
+    expect(reviewCardsRemovedByOutings(map, ["b"])).toBe(0);
+    expect(reviewCardsRemovedByOutings(map, ["x"])).toBe(1);
+    expect(reviewCardsRemovedByOutings({}, ["x", "y"])).toBe(2);
+  });
+
+  it("counts only within a part (today's ids)", () => {
+    // The Stay is earlier; its Move c is today: deciding the Stay alone adds c to today's count.
+    expect(reviewCardsRemovedByOutings(map, ["s"], (id) => id === "c")).toBe(-1);
+    expect(reviewCardsRemovedByOutings(map, ["s", "b", "c"], (id) => id === "c")).toBe(0);
   });
 });

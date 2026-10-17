@@ -72,14 +72,17 @@ export function projectReviewScreenData(input: {
     workspace: projection.workspace,
     categories,
     reviewItems: stableItems,
-    stats: base.stats ? { ...base.stats, reviewCount } : projection.stats
+    stats: base.stats ? withProjectionCounts(base.stats, reviewCount, projection.stats) : projection.stats
   };
   if (
     current && current === base &&
     stableItems === current.reviewItems &&
     categories === current.categories &&
     sameJson(current.workspace, next.workspace) &&
-    current.stats?.reviewCount === next.stats?.reviewCount
+    current.stats?.reviewCount === next.stats?.reviewCount &&
+    current.stats?.reviewCardCount === next.stats?.reviewCardCount &&
+    current.stats?.reviewCardCountApproximate === next.stats?.reviewCardCountApproximate &&
+    sameJson(current.stats?.reviewOutingStays, next.stats?.reviewOutingStays)
   ) {
     return current;
   }
@@ -104,6 +107,31 @@ function withCachedOuting(item: MobileReviewItem, cached: MobileReviewItem): Mob
       ...(key !== undefined ? { [OUTING_KEY_PAYLOAD_KEY]: key } : {}),
       ...(role !== undefined ? { [OUTING_ROLE_PAYLOAD_KEY]: role } : {})
     }
+  };
+}
+
+/**
+ * The projection's Review counts over `base`'s other stats: the count of cards with its map,
+ * exactness and applied decisions together, a field the projection lacks cleared, never left
+ * over from `base` (Codex r2/r3 on #475).
+ */
+function withProjectionCounts(
+  base: NonNullable<MobileBootstrap["stats"]>,
+  reviewCount: number,
+  projected: MobileBootstrap["stats"]
+): NonNullable<MobileBootstrap["stats"]> {
+  const {
+    reviewCardCount: _count, reviewOutingStays: _stays, reviewOutingStaysOverflow: _overflow,
+    reviewCardCountApproximate: _approximate, reviewCardCountAppliedIds: _applied, ...rest
+  } = base;
+  return {
+    ...rest,
+    reviewCount,
+    ...(typeof projected?.reviewCardCount === "number" ? { reviewCardCount: projected.reviewCardCount } : {}),
+    ...(projected?.reviewOutingStays ? { reviewOutingStays: projected.reviewOutingStays } : {}),
+    ...(projected?.reviewOutingStaysOverflow ? { reviewOutingStaysOverflow: true } : {}),
+    ...(projected?.reviewCardCountApproximate ? { reviewCardCountApproximate: true } : {}),
+    ...(projected?.reviewCardCountAppliedIds ? { reviewCardCountAppliedIds: projected.reviewCardCountAppliedIds } : {})
   };
 }
 

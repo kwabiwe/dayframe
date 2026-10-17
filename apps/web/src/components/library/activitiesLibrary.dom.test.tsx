@@ -320,7 +320,7 @@ function bootstrap(categories: CategoryRow[]): BootstrapData {
     tags: [],
     taskSuggestions: [],
     reviewItems: [],
-    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0 },
+    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0, reviewCardCount: 0 },
     activityEvents: [],
     entries: [],
     historyEntries: [],

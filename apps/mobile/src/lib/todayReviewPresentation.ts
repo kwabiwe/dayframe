@@ -3,6 +3,7 @@ import type {
   ReviewPresentationSnapshot,
   ReviewProposalPresentation
 } from "@dayframe/shared";
+import { reviewCardsRemovedByOutings } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
@@ -432,9 +433,17 @@ function adjustedCounts(
     effect.localEffect === "hidden" && effect.resolution !== "rejected" && openIds.has(effect.reviewItemId)
   );
   const globalExact = response.completeness.outstandingCounts;
+  // Counts of cards (an outing once, PRD D19, PR 12c) move by the server's outing map, exactly
+  // whatever the snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
+  const outingStays = response.outstanding.outingStays;
+  const excludedIds = excluded.map((effect) => effect.reviewItemId);
+  // Without the map (beyond its limit) a local decision moves the counts by an unknown amount.
+  const countsExact = !response.outstanding.countsApproximate &&
+    !(response.outstanding.outingStaysOverflow && excludedIds.length > 0);
   const global = {
-    value: Math.max(0, response.outstanding.globalCount - excluded.length),
-    exact: globalExact
+    value: Math.max(0, response.outstanding.globalCount -
+      (outingStays ? reviewCardsRemovedByOutings(outingStays, excludedIds) : excludedIds.length)),
+    exact: globalExact && countsExact
   };
   // A local decision leaves today's count by the server's own `todayCount` rule (and the Review
   // deck's Today segment): overlapping the whole local day, or detected today without a complete
@@ -447,12 +456,14 @@ function adjustedCounts(
       detectedAt: candidate.record.createdAt
     }, day))
     .map((candidate) => candidate.record.reviewItemId));
-  const todayExcluded = excluded.filter((effect) => todayEffectIds.has(effect.reviewItemId)).length;
+  const todayExcluded = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, excludedIds, (id) => todayEffectIds.has(id))
+    : excludedIds.filter((id) => todayEffectIds.has(id)).length;
   return {
     global,
     today: {
       value: Math.max(0, response.outstanding.todayCount - todayExcluded),
-      exact: globalExact && response.completeness.records
+      exact: globalExact && countsExact && response.completeness.records
     }
   };
 }

@@ -7,6 +7,7 @@ import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-servic
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
+import { wantsReviewCardCount } from "@/lib/review-card-count";
 import { reconcileHealthCoveredMoveCardsNow } from "@/lib/location/health-coverage";
 
 export async function POST(request: Request) {
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
     }
     scheduleLiveActivityNotification(session);
     // The phone schedules its evening Review reminder from this count.
-    const reviewCount = await openReviewCountFor(session);
+    const reviewCount = await openReviewCountFor(session, { cards: wantsReviewCardCount(request) });
     return NextResponse.json(withReviewCount({ ...result,
       ...(typeof body?.clientEventId === "string" ? { clientEventId: body.clientEventId } : {})
     }, reviewCount), { status: result.duplicate ? 200 : 201 });

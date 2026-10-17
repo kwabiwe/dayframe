@@ -19,6 +19,8 @@ export const REVIEW_PRESENTATION_TIME_AWAY_FEATURE = "time-away";
 export const REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE = "move-route";
 /** Feature: an outing's Review items (PRD D19) carry `outing`, so the client shows them as one card. */
 export const REVIEW_PRESENTATION_OUTING_FEATURE = "outing";
+/** Feature: `outstanding` counts Review cards, an outing once (PRD D19, PR 12c). */
+export const REVIEW_PRESENTATION_OUTING_COUNT_FEATURE = "outing-count";
 /** Feature: a Review item named by a learned name carries `learnedName: true` (Location evidence offers it). */
 export const REVIEW_PRESENTATION_LEARNED_NAME_FEATURE = "learned-name";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
@@ -297,7 +299,16 @@ export const ReviewPresentationResponseSchema = z
       .object({
         globalCount: z.number().int().nonnegative(),
         todayCount: z.number().int().nonnegative(),
-        openReviewItemIds: z.array(uuid).max(5_000)
+        openReviewItemIds: z.array(uuid).max(5_000),
+        /**
+         * Only for clients sending the outing-count feature: each open Move folded into its outing's
+         * open Stay card (member → Stay), so a local decision moves the counts of cards exactly.
+         */
+        outingStays: z.record(uuid, uuid).refine((map) => Object.keys(map).length <= 200).optional(),
+        /** Outing-count feature: more open outing Moves than the map holds, so no map was sent. */
+        outingStaysOverflow: z.literal(true).optional(),
+        /** Set on the phone when a local adjustment moved the counts without the map: not exact. */
+        countsApproximate: z.literal(true).optional()
       })
       .strict(),
     records: z.array(ReviewPresentationRecordSchema).max(REVIEW_PRESENTATION_MAX_LIMIT),

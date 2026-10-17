@@ -68,3 +68,59 @@ export function outingTravelWords(members: readonly Pick<OutingCard, "rawPayload
   const where = roles.has("in") && roles.has("out") ? "there and back" : roles.has("in") ? "there" : "on";
   return `${verb} ${where}`;
 }
+
+/**
+ * One count per outing (PRD D19, PR 12c): the open items that do not count as cards of their own, an
+ * outing's Moves whose Stay is open among them. The server counts the same way
+ * (apps/web/src/lib/review-card-count.ts), so a local decision moves a count as the server would.
+ */
+export function foldedOutingMemberIds<T extends Pick<OutingCard, "id" | "rawPayload">>(items: readonly T[]) {
+  const stayKeys = new Set(items.filter((item) => outingRoleOf(item) === "stay").map(outingKeyOf));
+  const folded = new Set<string>();
+  for (const item of items) {
+    const role = outingRoleOf(item);
+    const key = outingKeyOf(item);
+    if ((role === "in" || role === "out") && key && stayKeys.has(key)) folded.add(item.id);
+  }
+  return folded;
+}
+
+/** How many Review cards these open items show as: an outing counts once. */
+export function reviewCardCount<T extends Pick<OutingCard, "id" | "rawPayload">>(items: readonly T[], within: (item: T) => boolean = () => true) {
+  const folded = foldedOutingMemberIds(items);
+  return items.filter((item) => !folded.has(item.id) && within(item)).length;
+}
+
+/**
+ * How many cards leave the count when `removed` leave these open items (`within` limits it, e.g. to
+ * today's): deciding a Stay on its own can bring its Moves back as cards, so this can be negative.
+ */
+export function reviewCardsRemoved<T extends Pick<OutingCard, "id" | "rawPayload">>(
+  items: readonly T[],
+  removed: ReadonlySet<string>,
+  within: (item: T) => boolean = () => true
+) {
+  return reviewCardCount(items, within) - reviewCardCount(items.filter((item) => !removed.has(item.id)), within);
+}
+
+/**
+ * How many cards leave a count when the open review items `removed` are decided, read from the
+ * server's outing map (each open Move folded into its outing → that open Stay card; Codex r1 on
+ * #475): a folded Move leaves no card; a Stay decided without its Moves brings them back as cards,
+ * so this can be negative. Exact whatever the client has loaded. `within` limits it (today's ids).
+ */
+export function reviewCardsRemovedByOutings(
+  outingStays: Readonly<Record<string, string>>,
+  removed: Iterable<string>,
+  within: (id: string) => boolean = () => true
+) {
+  const gone = new Set(removed);
+  let cards = 0;
+  for (const id of gone) {
+    if (within(id) && !Object.hasOwn(outingStays, id)) cards += 1;
+  }
+  for (const [member, stay] of Object.entries(outingStays)) {
+    if (gone.has(stay) && !gone.has(member) && within(member)) cards -= 1;
+  }
+  return cards;
+}
