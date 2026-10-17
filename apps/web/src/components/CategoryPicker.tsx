@@ -118,6 +118,9 @@ export function CategoryPicker({
   // implementation with the typed `@` list): a search field, "No activity", every activity in the
   // bootstrap order (pinned first, then A–Z) and Create.
   const blockPanel = variant === "block";
+  // The editors' "All activities" chip opens the same FloatingList (web UI audit WUI-024, owner
+  // 17 Oct 2026): search field, "No activity", the #391 activity rows with a neutral check, Create.
+  const listPanel = blockPanel || variant === "more";
   // The editor's "All activities" menu and the block's Activities list search; the others list every activity.
   const searchable = variant === "more" || blockPanel;
   const [query, setQuery] = useState("");
@@ -127,13 +130,13 @@ export function CategoryPicker({
   const listedCategories = useMemo(() => {
     // The block's list filters with the `@` list's resolver: the exact name, then names starting
     // with the query, then names containing it.
-    if (blockPanel) return activitiesForMention(query.trim(), categories);
+    if (listPanel) return activitiesForMention(query.trim(), categories);
     const needle = query.trim().toLocaleLowerCase();
     return searchable && needle ? categories.filter((category) => category.name.toLocaleLowerCase().includes(needle)) : categories;
-  }, [blockPanel, categories, query, searchable]);
+  }, [categories, listPanel, query, searchable]);
   // The block's list: "No activity" while nothing is searched; Create unless the name exists.
-  const blockShowsNone = !blockPanel || !trimmedQuery;
-  const blockShowsCreate = Boolean(onCreateCategory) && (!blockPanel || !categories.some(
+  const blockShowsNone = !listPanel || !trimmedQuery;
+  const blockShowsCreate = Boolean(onCreateCategory) && (!listPanel || !categories.some(
     (category) => category.name.trim().toLocaleLowerCase() === trimmedQuery.toLocaleLowerCase()
   ));
   const optionValues = useMemo(
@@ -307,7 +310,7 @@ export function CategoryPicker({
         availableWidth
       );
       // The typed lists' 19rem plus the search field (22.5rem), so as many rows show; they scroll inside.
-      const heightCap = blockPanel ? 360 : 220;
+      const heightCap = listPanel ? 360 : 220;
       const left = Math.min(
         Math.max(viewportLeft + margin, rootRect.left),
         Math.max(viewportLeft + margin, viewportLeft + viewportWidth - width - margin)
@@ -349,7 +352,7 @@ export function CategoryPicker({
       window.visualViewport?.removeEventListener("resize", updatePosition);
       window.visualViewport?.removeEventListener("scroll", updatePosition);
     };
-  }, [anchorRef, blockPanel, open, portal, searchable, triggerRef]);
+  }, [anchorRef, blockPanel, listPanel, open, portal, searchable, triggerRef]);
 
   function assignTrigger(node: HTMLButtonElement | null) {
     localTriggerRef.current = node;
@@ -366,7 +369,7 @@ export function CategoryPicker({
     }
     // The block's Activities list fades out where it stood (#391: opacity only, at its final
     // position and width), so its measured geometry stays through the exit; opening measures anew.
-    if (!blockPanel) setPortalPosition(null);
+    if (!listPanel) setPortalPosition(null);
     setColorMenuPosition(null);
     onOpenChange(false);
     if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
@@ -387,12 +390,12 @@ export function CategoryPicker({
     // Reopening clears the search, so the selected activity is found in the full list.
     const fullIndex = Math.max(0, ["", ...categories.map((category) => category.id)].indexOf(selectedId));
     const fullCount = 1 + categories.length + (onCreateCategory ? 1 : 0);
-    setActiveIndex(focus === "last" ? (blockPanel ? fullCount : optionValues.length) - 1 : searchable ? fullIndex : selectedIndex);
+    setActiveIndex(focus === "last" ? (listPanel ? fullCount : optionValues.length) - 1 : searchable ? fullIndex : selectedIndex);
     setQuery("");
     onOpenChange(true);
     // The block's list keeps focus in its search field (the combobox); ↑/↓ move the highlight.
-    if (searchable && (!focus || blockPanel)) window.requestAnimationFrame(() => searchRef.current?.focus());
-    if (focus && !blockPanel) {
+    if (searchable && (!focus || listPanel)) window.requestAnimationFrame(() => searchRef.current?.focus());
+    if (focus && !listPanel) {
       window.requestAnimationFrame(() => {
         const options = categoryOptions();
         options[focus === "last" ? options.length - 1 : searchable ? fullIndex : selectedIndex]?.focus();
@@ -545,7 +548,7 @@ export function CategoryPicker({
     setCreateColor(null);
     setIsColorMenuOpen(false);
     setCreateError(null);
-    window.requestAnimationFrame(() => (blockPanel ? searchRef : createOptionRef).current?.focus());
+    window.requestAnimationFrame(() => (listPanel ? searchRef : createOptionRef).current?.focus());
   }
 
   async function submitCreate() {
@@ -834,11 +837,14 @@ export function CategoryPicker({
         <ChevronDown aria-hidden="true" size={menuVariant === "timer" ? 16 : 15} />
       </button>
       )}
-      {blockPanel ? mountMenu(<FloatingList
+      {listPanel ? mountMenu(<FloatingList
         activeId={optionValues.length ? `${menuId}-option-${Math.min(activeIndex, optionValues.length - 1)}` : undefined}
-        anchorRef={anchorRef}
+        anchorRef={blockPanel ? anchorRef : rootRef}
         body={isCreating ? createForm : undefined}
-        className={`df-cmd-activity-panel${portal ? " is-portalled" : ""}`}
+        className={blockPanel
+          ? `df-cmd-activity-panel${portal ? " is-portalled" : ""}`
+          // Inside the editor's outside-press and Tab boundary, as every editor surface is.
+          : "df-more-activity-panel is-portalled time-entry-quick-editor-nested-surface"}
         heading="Activities"
         hints={FLOATING_LIST_HINTS.activities}
         id={menuId}
@@ -915,10 +921,10 @@ export function CategoryPicker({
           );
         })}
       </FloatingList>) : null}
-      {!blockPanel ? mountMenu(<div
+      {!listPanel ? mountMenu(<div
         aria-hidden={!open}
         className={`${menuClass} category-picker-menu${portal ? " is-portalled time-entry-quick-editor-nested-surface" : ""}`}
-        hidden={(variant === "quick" || variant === "more") && !open}
+        hidden={variant === "quick" && !open}
         id={menuId}
         inert={!open}
         onBlur={closeOnFocusLeave}

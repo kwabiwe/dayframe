@@ -11605,6 +11605,10 @@ dialog.ui-dialog.df-palette {
   gap: 6px;
 }
 
+/* Activity chip (web UI audit WUI-002, owner option a, 17 Oct 2026; `ActivityChipFace`): a neutral
+   pill led by the activity's coloured tile with its icon, as the #391 lists draw an activity. The
+   chosen chip takes a neutral fill, a 2 px ring in the primary text colour and a check; its colour
+   stays on the tile. Hosts set the resting fill for their surface. */
 .df-rchip {
   display: inline-flex;
   min-height: 32px;
@@ -11612,27 +11616,55 @@ dialog.ui-dialog.df-palette {
   gap: 6px;
   border: 0;
   border-radius: 999px;
-  padding: 0 12px 0 10px;
+  padding: 0 12px 0 6px;
   background: var(--surface);
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 650;
 }
 
-.df-rchip > i {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--block);
+.df-rchip-block {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--activity-marker-radius, 30%);
+}
+
+.df-rchip-block.is-none {
+  background: var(--surface-inset);
+  color: var(--muted);
+}
+
+.df-rchip-name {
+  min-width: 0;
+}
+
+/* A chip with no activity tile (a place or source in the Reports filter): even padding. */
+.df-rchip--text {
+  padding: 0 12px;
 }
 
 .df-rchip.is-checked {
-  background: var(--block);
-  color: var(--on-block);
+  background: var(--surface-muted);
+  box-shadow: inset 0 0 0 2px var(--text-primary);
 }
 
-.df-rchip.is-checked > i {
-  background: var(--on-block);
+.df-rchip-check {
+  flex: 0 0 auto;
+  margin-right: -2px;
+}
+
+/* Many-of filters (Reports) start with everything chosen: the fill and check carry the choice
+   without a ring on every chip. */
+.df-rf-chips .df-rchip.is-checked {
+  box-shadow: none;
+}
+
+.df-rf-chips .df-rchip:not(.is-checked) {
+  background: var(--surface-inset);
+  color: var(--text-secondary);
 }
 
 .df-rreason {
@@ -13251,11 +13283,6 @@ dialog.ui-dialog.df-rf-dialog {
   text-align: left;
 }
 
-.df-rchip.is-neutral {
-  background: var(--text-primary);
-  color: var(--surface);
-}
-
 .df-rf-description {
   display: grid;
   gap: 6px;
@@ -14060,10 +14087,6 @@ dialog.ui-dialog.df-rf-dialog {
   text-align: start;
 }
 
-.df-ed-chips .df-rchip > i {
-  flex: none;
-}
-
 .df-rchip--more {
   background: var(--surface-muted);
   color: var(--text-secondary);
@@ -14335,13 +14358,6 @@ dialog.ui-dialog.df-rf-dialog {
   }
 }
 
-/* The chosen chip keeps its activity's colour: a swatch of the block colour ringed in the on-block
-   colour, instead of an on-block (often black) square (owner, 16 Oct 2026). */
-.df-ed-chips .df-rchip.is-checked > i {
-  background: var(--block);
-  box-shadow: 0 0 0 2px var(--on-block);
-}
-
 /* "All activities" is one more chip at the end of the flow, the chips' height and shape, not a
    44 px inset field on a row of its own (owner, 16 Oct 2026). */
 .df-ed-chips .calendar-compact-category-field {
@@ -14490,7 +14506,10 @@ dialog.ui-dialog.df-rf-dialog {
 /* The command timer's activity block opens the Activities list (owner, 14 Oct 2026): the same
    FloatingList as the typed @ list, portalled and lined up with the Description field (JS sets
    its left, top, width and max-height), the rows scrolling inside. */
-.df-cmd-activity-panel.is-portalled {
+.df-cmd-activity-panel.is-portalled,
+/* The editors' "All activities" chip opens the same list (WUI-024), under the chip at its own
+   width (at least 300 px); above the editor (z 75) and its modal (z 90). */
+.df-more-activity-panel.is-portalled {
   position: fixed;
   top: auto;
   right: auto;
@@ -14502,7 +14521,8 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 /* Its Create form (name and colour) replaces the search and rows inside the same surface. */
-.df-cmd-activity-panel .category-picker-create-form {
+.df-cmd-activity-panel .category-picker-create-form,
+.df-more-activity-panel .category-picker-create-form {
   min-height: 0;
   overflow-y: auto;
 }
@@ -15225,17 +15245,6 @@ dialog.ui-dialog.df-rf-dialog {
 
 .df-rf-note {
   margin: 0;
-}
-
-.df-rf-activity > i.is-none {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--activity-marker-radius);
-  background: var(--uncategorized-color, var(--text-muted));
-}
-
-.df-rf-activity.is-checked.is-neutral > i.is-none {
-  background: var(--surface);
 }
 
 .df-rf-more {

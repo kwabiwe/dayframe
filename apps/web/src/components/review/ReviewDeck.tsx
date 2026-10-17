@@ -9,6 +9,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
+import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
 import { OverlapLine } from "@/components/OverlapNotice";
@@ -780,7 +781,7 @@ function CardFace({
                   return (
                     <button
                       aria-checked={checked}
-                      className={`df-rchip${checked ? " is-checked df-block" : ""}`}
+                      className={`df-rchip${checked ? " is-checked" : ""}`}
                       key={category.id}
                       disabled={locked}
                       onClick={() => onDraft?.({ categoryId: category.id })}
@@ -793,8 +794,7 @@ function CardFace({
                       tabIndex={index === checkedIndex ? 0 : -1}
                       type="button"
                     >
-                      <i aria-hidden="true" />
-                      {category.name}
+                      <ActivityChipFace activity={category} checked={checked} />
                     </button>
                   );
                 })}

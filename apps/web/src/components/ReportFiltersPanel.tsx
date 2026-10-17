@@ -4,8 +4,7 @@ import { useId, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Funnel, X } from "lucide-react";
-import { resolveActivityIcon } from "@dayframe/shared";
-import { DayframeIcon } from "@/components/blocks/DayframeIcon";
+import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { ModalDialog } from "@/components/ui/Primitives";
 import { blockStyle } from "@/lib/block-style";
 import { formatSourceLabel } from "@/lib/format";
@@ -227,20 +226,16 @@ function ReportFilterDialog({
           <div className="df-rf-chips">
             {categories.map((option) => {
               const on = chosen.includes(option.id);
-              const glyph = option.color
-                ? resolveActivityIcon({ icon: option.icon ?? null, name: option.name }).glyph
-                : null;
               return (
                 <button
                   aria-pressed={on}
-                  className={`df-rchip df-rf-activity${on ? ` is-checked${option.color ? " df-block" : " is-neutral"}` : ""}`}
+                  className={`df-rchip df-rf-activity${on ? " is-checked" : ""}`}
                   key={option.id}
                   onClick={() => setChosen((current) => (current.includes(option.id) ? current.filter((id) => id !== option.id) : [...current, option.id]))}
                   style={option.color ? blockStyle(option.color, option.name) : undefined}
                   type="button"
                 >
-                  {glyph ? <DayframeIcon glyph={glyph} size={14} /> : <i aria-hidden="true" className="is-none" />}
-                  {option.name}
+                  <ActivityChipFace activity={option.color ? option : { name: option.name }} checked={on} />
                 </button>
               );
             })}
@@ -339,7 +334,7 @@ function ChipGroup({
           return (
             <button
               aria-pressed={on}
-              className={`df-rchip${on ? " is-checked is-neutral" : ""}`}
+              className={`df-rchip df-rchip--text${on ? " is-checked" : ""}`}
               key={option.id}
               onClick={() => onToggle(option.id)}
               type="button"

@@ -98,7 +98,9 @@ describe("Reports filters", () => {
     expect(within(dialog).getByText("Choose at least one activity.")).toBeTruthy();
     expect((within(dialog).getByRole("button", { name: "Show 0 blocks" }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(within(dialog).getByRole("button", { name: "Work" }));
-    expect(within(dialog).getByRole("button", { name: "Work" }).className).toContain("df-block");
+    // A chosen activity is the neutral chosen chip with its colour on the tile (WUI-002).
+    expect(within(dialog).getByRole("button", { name: "Work" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByRole("button", { name: "Work" }).className).toContain("is-checked");
     await user.click(within(dialog).getByRole("button", { name: "Show 5 blocks" }));
     expect(new URL(push.mock.calls[0][0], "http://localhost").searchParams.get("categories")).toBe(WORK);
   });

@@ -139,3 +139,21 @@ describe("fitted chips (Codex r1 on #465)", () => {
     }
   });
 });
+
+describe("Activity chip face (WUI-002, owner option a)", () => {
+  it("leads with the activity's coloured tile, and the chosen chip adds a neutral check without flooding the chip", () => {
+    render(<ActivityChipGroup categories={all.slice(0, 3)} onSelect={() => {}} selectedId="gym" />);
+    const gym = screen.getByRole("radio", { name: "Gym" });
+    const work = screen.getByRole("radio", { name: "Work" });
+    // The colour stays on the tile; the chip itself never becomes a solid block.
+    expect(gym.className).toContain("is-checked");
+    expect(gym.className).not.toContain("df-block");
+    expect(gym.querySelector(".df-rchip-block.df-block")).not.toBeNull();
+    expect(gym.querySelector(".df-rchip-check")).not.toBeNull();
+    expect(work.querySelector(".df-rchip-block.df-block")).not.toBeNull();
+    expect(work.querySelector(".df-rchip-check")).toBeNull();
+    // The tile and the check are decorative: the name is the chip's whole accessible name.
+    expect(gym.querySelector(".df-rchip-block")?.getAttribute("aria-hidden")).toBe("true");
+    expect(gym.querySelector(".df-rchip-check")?.getAttribute("aria-hidden")).toBe("true");
+  });
+});
