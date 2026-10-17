@@ -128,12 +128,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // (no landing on reconciliation).
   useEffect(() => {
     if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
-    if (!window.location.pathname.startsWith("/reports")) return;
+    // Elsewhere the shell's data was drawn for the old zone (or none): fetch it again with the
+    // cookie, so its day and week ranges are the viewer's (#484).
+    if (!window.location.pathname.startsWith("/reports")) {
+      void refresh();
+      return;
+    }
     // Marked with the route the refresh will render, in the router's terms (the panel compares
     // `usePathname()`/`useSearchParams()`, never the address bar).
     markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
     router.refresh();
-  }, [router]);
+  }, [refresh, router]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -276,7 +281,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             type="button"
             className="df-profile"
             aria-label={profileLabel}
-            data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}
+            data-profile-trigger="" onClick={() => setOverlay("profile")}
           >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
@@ -293,7 +298,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label={profileLabel} data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}>
+          <button type="button" className="df-mtop-avatar" aria-label={profileLabel} data-profile-trigger="" onClick={() => setOverlay("profile")}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>

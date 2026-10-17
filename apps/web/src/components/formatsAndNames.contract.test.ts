@@ -29,7 +29,11 @@ describe("formats (WUI-032, WUI-033)", () => {
     expect(formatDuration).toBe(sharedFormatDuration);
     const offenders = files(root).filter((path) => {
       const text = readFileSync(path, "utf8");
-      return /function (formatDuration|formatShortDuration|compactDuration|formatReviewDuration|formatGoalHours)\b/.test(text)
+      // Only the clock (H:MM:SS) and the CSV export have formats of their own.
+      const wrappers = [...text.matchAll(/function (format\w*Duration|compactDuration|formatGoalHours)\b/g)]
+        .map((match) => match[1])
+        .filter((name) => name !== "formatClockDuration" && name !== "formatExportDuration");
+      return wrappers.length > 0
         || /const formatDuration\s*=/.test(text);
     }).map((path) => relative(root, path));
     expect(offenders).toEqual([]);
@@ -48,7 +52,7 @@ describe("accessible names (WUI-034, WUI-044)", () => {
 });
 
 describe("touch targets (WUI-035)", () => {
-  it("makes Today's Review now and This week rows and the range controls 44 px on touch and up to 860 px", () => {
+  it("makes Today's Review now and This week rows 44 px on touch and up to 860 px, and the range controls up to 860 px", () => {
     const coarse = styles.slice(styles.lastIndexOf("/* Touch screens: every segment"));
     expect(coarse).toMatch(/\.df-pill-action,\s*\.df-mw-row \{\s*min-height: 44px;/);
     expect(styles).toMatch(/@media \(max-width: 860px\) \{\s*\.df-pill-action,\s*\.df-mw-row,\s*\.df-range-nav,\s*\.df-range-trigger \{\s*min-height: 44px;/);

@@ -38,10 +38,13 @@ describe("command timer placement (H2)", () => {
     const frame = [...css.matchAll(/\n\.swiss-main-frame\.is-timeline \{([^}]*)\}/g)].at(-1)?.[1] ?? "";
     expect(frame).toContain("padding-top: 0;");
     expect(frame).toContain("padding-inline: var(--df-cmd-inset-x);");
-    // That last frame rule must come after every responsive frame padding so it wins at all widths.
+    // That last frame rule must come after every responsive frame padding so it wins at all widths
+    // (a responsive frame rule that sets no padding, such as the phone Calendar's overflow, may follow).
     const lastFrame = css.lastIndexOf("\n.swiss-main-frame.is-timeline {");
-    const lastResponsiveFrame = css.lastIndexOf("\n  .swiss-main-frame.is-timeline {");
-    expect(lastFrame).toBeGreaterThan(lastResponsiveFrame);
+    const responsivePaddings = [...css.matchAll(/\n {2}\.swiss-main-frame\.is-timeline \{([^}]*)\}/g)]
+      .filter((match) => /padding/.test(match[1]))
+      .map((match) => match.index ?? -1);
+    expect(lastFrame).toBeGreaterThan(Math.max(...responsivePaddings));
     // No page-specific padding around the bar itself, and no fixed shell paddings left behind.
     expect(css).not.toContain(".swiss-timeline-surface .df-cmd-wrap {");
     for (const match of css.matchAll(/\.swiss-persistent-timer-shell \{([^}]*)\}/g)) {

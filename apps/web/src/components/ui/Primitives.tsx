@@ -15,6 +15,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -244,6 +245,21 @@ export function SettingsRow({
 type DialogRole = "dialog" | "alertdialog";
 /** Anchored popovers, menus and lists become bottom sheets at this width (WUI-026). */
 export const POPOVER_SHEET_QUERY = "(max-width: 560px)";
+
+function isPopoverSheet() {
+  return typeof window.matchMedia === "function" && window.matchMedia(POPOVER_SHEET_QUERY).matches;
+}
+
+function subscribeToPopoverSheet(onChange: () => void) {
+  if (typeof window.matchMedia !== "function") return () => undefined;
+  const media = window.matchMedia(POPOVER_SHEET_QUERY);
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }
+  media.addListener?.(onChange);
+  return () => media.removeListener?.(onChange);
+}
 /** Width tiers (web UI audit WUI-021): confirm 400, compact 520, form 620, wide 720. */
 export type DialogSize = "confirm" | "compact" | "form" | "wide";
 
@@ -267,7 +283,7 @@ export function captureDialogScroll(dialog: HTMLElement): DialogScrollSnapshot {
   return snapshot;
 }
 
-export function playDialogExit(dialog: HTMLDialogElement, scroll: DialogScrollSnapshot = []) {
+export function playDialogExit(dialog: HTMLDialogElement, scroll: DialogScrollSnapshot = [], withScrim = true) {
   if (typeof document === "undefined" || !dialog.hasAttribute("open")) return;
   const ghost = dialog.cloneNode(true) as HTMLDialogElement;
   // Typed values are properties, not attributes: carry them over so fields do not blank.
@@ -293,7 +309,9 @@ export function playDialogExit(dialog: HTMLDialogElement, scroll: DialogScrollSn
   layer.className = "ui-dialog-ghost-layer";
   layer.setAttribute("aria-hidden", "true");
   layer.inert = true;
-  layer.append(scrim, ghost);
+  // A non-modal popover had no scrim, so its copy fades alone (Codex r1 on #492).
+  if (withScrim) layer.append(scrim);
+  layer.append(ghost);
   document.body.append(layer);
   if (typeof layer.showPopover === "function") {
     layer.popover = "manual";
@@ -377,10 +395,19 @@ export function ModalDialog({
     const closeFromOutside = () => {
       if (!busyRef.current) closeRef.current();
     };
+    const isOpener = (target: EventTarget | null) =>
+      Boolean(outsidePressIgnore && target instanceof Element && target.closest(outsidePressIgnore));
     const onOutsidePress = (event: PointerEvent) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (!target || dialog.contains(target)) return;
-      if (outsidePressIgnore && target.closest(outsidePressIgnore)) return;
+      if (!target || dialog.contains(target) || isOpener(target)) return;
+      closeFromOutside();
+    };
+    // The opener closes the popover itself (busy-aware) and its own click never reaches the page,
+    // so a press on it never closes and reopens it (Codex r1 on #492).
+    const onOpenerClick = (event: MouseEvent) => {
+      if (!isOpener(event.target)) return;
+      event.preventDefault();
+      event.stopPropagation();
       closeFromOutside();
     };
     const onDocumentKey = (event: KeyboardEvent) => {
@@ -388,7 +415,7 @@ export function ModalDialog({
     };
     const onFocusOut = (event: FocusEvent) => {
       const next = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-      if (next && !dialog.contains(next)) closeFromOutside();
+      if (next && !dialog.contains(next) && !isOpener(next)) closeFromOutside();
     };
     if (modal) {
       if (!dialog.open) dialog.showModal();
@@ -397,6 +424,7 @@ export function ModalDialog({
     } else {
       if (!dialog.open) dialog.show();
       document.addEventListener("pointerdown", onOutsidePress, true);
+      document.addEventListener("click", onOpenerClick, true);
       document.addEventListener("keydown", onDocumentKey);
       dialog.addEventListener("focusout", onFocusOut);
     }
@@ -413,7 +441,7 @@ export function ModalDialog({
       window.cancelAnimationFrame(focusHandle);
       // A real close (the host unmounted it) fades out; a re-run while still mounted does not.
       // jsdom draws nothing, so there the copy would only duplicate the dialog for DOM queries.
-      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog, exitScrollRef.current);
+      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog, exitScrollRef.current, modal);
       if (dialog.open) dialog.close();
       if (modal) {
         openDialogCount = Math.max(0, openDialogCount - 1);
@@ -422,6 +450,7 @@ export function ModalDialog({
         return;
       }
       document.removeEventListener("pointerdown", onOutsidePress, true);
+      document.removeEventListener("click", onOpenerClick, true);
       document.removeEventListener("keydown", onDocumentKey);
       dialog.removeEventListener("focusout", onFocusOut);
       // A press elsewhere put focus where it landed; only lost focus goes back to the opener.
@@ -500,7 +529,9 @@ export function PopoverPanel({
   outsidePressIgnore?: string;
   title: string;
 }) {
-  const [sheet] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(POPOVER_SHEET_QUERY).matches);
+  // Follows the viewport while open: crossing 560 px swaps the anchored popover and the sheet
+  // (Codex r1 on #492).
+  const sheet = useSyncExternalStore(subscribeToPopoverSheet, isPopoverSheet, () => false);
   return (
     <ModalDialog
       busy={busy}
