@@ -26,8 +26,18 @@ function themeTokens(header: string) {
 
 /** The value of the last `property` declared for `selector` at top level: the one that wins. */
 function lastDeclaration(selector: string, property: string) {
-  const values = [...rule(selector).replace(/\/\*[\s\S]*?\*\//g, " ").matchAll(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+);`, "g"))];
-  return values.at(-1)?.[1].trim();
+  return lastDeclarationIn(rule(selector), property);
+}
+
+/** Declarations split one by one, so adjacent duplicates are each seen (Codex r1 on #497). */
+function lastDeclarationIn(body: string, property: string) {
+  const values = body
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .split(";")
+    .map((declaration) => declaration.match(/^\s*([\w-]+)\s*:\s*([\s\S]+?)\s*$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match) && match?.[1] === property)
+    .map((match) => match[2]);
+  return values.at(-1);
 }
 
 const toLinear = (channel: number) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
@@ -149,6 +159,12 @@ describe("Reports sections (WUI-031)", () => {
 });
 
 describe("row sub-line contrast (WCAG 1.4.3, Codex r2 on #495)", () => {
+  it("reads the declaration that wins, adjacent duplicates included", () => {
+    expect(lastDeclarationIn("color: red; color: var(--text-muted);", "color")).toBe("var(--text-muted)");
+    expect(lastDeclarationIn("color: red; /* color: blue; */ background: x;", "color")).toBe("red");
+    expect(lastDeclarationIn("background-color: red;", "color")).toBeUndefined();
+  });
+
   it("keeps 12 px sub-lines over 4.5:1 on the card and the hover/focus fill in both themes", () => {
     for (const header of [':root,\n:root[data-theme="light"]', ':root[data-theme="dark"]']) {
       const tokens = themeTokens(header);

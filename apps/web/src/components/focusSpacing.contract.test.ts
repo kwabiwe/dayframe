@@ -29,7 +29,8 @@ describe("web focus and control contracts", () => {
     expect(styles).toContain("--web-control-border-width: 1px;");
     expect(styles).toMatch(/input:not\(:is\([^}]*\)\):focus,[\s\S]*border-color: var\(--web-focus-border\);\s*outline: 0;\s*box-shadow: inset 0 0 0 1px var\(--web-focus-border\);/s);
     expect(styles).toMatch(/input\[aria-invalid="true"\]:focus,[\s\S]*box-shadow: inset 0 0 0 1px var\(--web-focus-border\), inset 0 -2px 0 var\(--danger\);/);
-    expect(styles).toMatch(/\.report-multi-select-trigger:focus-visible,[^{]*\{[^}]*outline: 2px solid var\(--focus\);[^}]*outline-offset: 2px;/s);
+    // The old Reports multi-select (and its focus rule) went in the dead-CSS sweep (WUI-038); Reports'
+    // filters are the shared ui-control.
     expect(reports).toContain('className="ui-control"');
   });
 
