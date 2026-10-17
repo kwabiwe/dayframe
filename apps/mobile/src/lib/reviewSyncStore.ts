@@ -3219,9 +3219,14 @@ export function projectReviewBootstrap(
   const cardCount = stats?.reviewCardCount;
   const listedOpen = new Set(openBefore.map((item) => item.id));
   const hiddenListed = [...hiddenIds].filter((id) => listedOpen.has(id));
-  const hiddenCards = outingStays ? reviewCardsRemovedByOutings(outingStays, hiddenListed) : reviewCardsRemoved(openBefore, hiddenIds);
-  // What this phone has taken off the count already, so a re-projection never calls it unknown.
-  const applied = new Set([...stats?.reviewCardCountAppliedIds ?? [], ...hiddenListed]);
+  // What this phone has taken off the count already: a new decision moves the count by what it
+  // adds to those (a decided Stay no longer folds its Moves; Codex r4 on #475), and a re-projection
+  // never calls them unknown.
+  const appliedBefore = stats?.reviewCardCountAppliedIds ?? [];
+  const applied = new Set([...appliedBefore, ...hiddenListed]);
+  const hiddenCards = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, applied) - reviewCardsRemovedByOutings(outingStays, appliedBefore)
+    : reviewCardsRemoved(openBefore, hiddenIds);
   const outingParts = new Set(Object.entries(outingStays ?? {}).flat());
   // Not exact: a decided outing card the capped list does not show (the map knows it changes the
   // count, the list cannot say by how much), or any decision while the server sent no map.

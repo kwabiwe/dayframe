@@ -104,6 +104,19 @@ describe("Review sync store contracts", () => {
     expect(projectReviewBootstrap(once, new Set(["stay"])).stats).not.toHaveProperty("reviewCardCountApproximate");
     // A later decision on one of its unlisted Moves: the map knows it counts, the list can't take it off.
     expect(projectReviewBootstrap(once, new Set(["stay", "there"])).stats).toMatchObject({ reviewCardCount: 101, reviewCardCountApproximate: true });
+    // Decisions one after another, in either order, each projected onto the last (Codex r4 on #475).
+    const fourCards = { ...bootstrap([outing("stay", "stay"), outing("there", "in"), outing("back", "out"), reviewItem({ id: "walk" })]),
+      stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 4, reviewCardCount: 2, reviewOutingStays: { there: "stay", back: "stay" } } };
+    const afterStay = projectReviewBootstrap(fourCards, new Set(["stay"]));
+    expect(afterStay.stats?.reviewCardCount).toBe(3);
+    const afterThere = projectReviewBootstrap(afterStay, new Set(["stay", "there"]));
+    expect(afterThere.stats?.reviewCardCount).toBe(2);
+    const afterBack = projectReviewBootstrap(afterThere, new Set(["stay", "there", "back"]));
+    expect(afterBack.stats?.reviewCardCount).toBe(1);
+    expect(afterBack.stats).not.toHaveProperty("reviewCardCountApproximate");
+    const movesFirst = projectReviewBootstrap(projectReviewBootstrap(fourCards, new Set(["there"])), new Set(["there", "back"]));
+    expect(movesFirst.stats?.reviewCardCount).toBe(2);
+    expect(projectReviewBootstrap(movesFirst, new Set(["there", "back", "stay"])).stats?.reviewCardCount).toBe(1);
     // The whole outing listed and decided: one card off, once.
     const listed = { ...bootstrap([...Array.from({ length: 97 }, (_, index) => reviewItem({ id: `other-${index}` })),
       outing("stay", "stay"), outing("there", "in"), outing("back", "out")]),
