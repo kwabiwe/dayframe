@@ -11,6 +11,7 @@ import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
+import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -390,6 +391,8 @@ export function TimeReviewViews({
     hiddenEntryIds,
     pendingNotice,
     requestDelete,
+    retryFailedDelete,
+    dismissDeleteError,
     undoPendingDelete
   } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
@@ -527,11 +530,6 @@ export function TimeReviewViews({
           {dateLoadError ?? "Loading period…"}
         </p>
       ) : null}
-      {deleteError ? (
-        <p className="timeline-delete-error" role="alert">
-          {deleteError}
-        </p>
-      ) : null}
 
       <div className="timeline-view-stage">
         {state.view === "calendar" ? (
@@ -578,6 +576,15 @@ export function TimeReviewViews({
           secondary={tripOptOut}
           swatchStyle={deletedEntrySwatch}
         />
+      ) : deleteError ? (
+        // A refused delete is the toast's error variant, with Try again (WUI-027).
+        <BlocksToast
+          actionLabel="Try again"
+          message={deleteError}
+          onAction={retryFailedDelete}
+          secondary={{ label: "Dismiss", onAction: dismissDeleteError }}
+          tone="error"
+        />
       ) : null}
     </section>
   );
@@ -585,12 +592,7 @@ export function TimeReviewViews({
 
 
 function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
-  const entry = entries[0];
-  if (!entry) return "Block deleted";
-  const title = `“${timeEntryTitle(entry)}”`;
-  return entries.length > 1
-    ? `${entries.length} ${title} occurrences deleted`
-    : `${title} deleted`;
+  return deletedToastLabel(entries.length, entries[0] ? timeEntryTitle(entries[0]) : null);
 }
 
 type TimelineScrollPosition = { left: number; top: number };
@@ -1853,16 +1855,14 @@ export function CalendarReview({
         </p>
       ) : null}
       {actionError ? (
-        <p className="timeline-delete-error" role="alert" aria-atomic="true" aria-live="assertive">
-          {actionError}
-        </p>
+        <BlocksToast actionLabel="Dismiss" message={actionError} onAction={() => setActionError(null)} tone="error" />
       ) : null}
       {/* Announces a notice the Delete Undo toast kept off screen; empty otherwise, so a visible
           toast (its own polite status) is never read twice. */}
       <p aria-atomic="true" aria-live="polite" className="sr-only" role="status">
         {createNotice?.announcedOnly ? CALENDAR_FUTURE_CREATE_NOTICE : ""}
       </p>
-      {createNotice && !createNotice.announcedOnly ? (
+      {createNotice && !createNotice.announcedOnly && !actionError ? (
         <BlocksToast
           exiting={createNotice.exiting}
           key={createNotice.token}

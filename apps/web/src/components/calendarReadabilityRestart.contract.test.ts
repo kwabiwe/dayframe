@@ -39,8 +39,10 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain("if (!outcome.ok)");
     expect(timeline).toContain("clearTimerError();");
     expect(timeline).toContain('if (surface === "inline") setActionError(outcome.error)');
-    expect(timeline).toMatch(/actionError \? \([\s\S]*className="timeline-delete-error"[\s\S]*role="alert"[\s\S]*aria-live="assertive"/s);
-    expect(styles).toMatch(/\.timeline-delete-error \{[^}]*position:\s*fixed;/s);
+    // The error is the BlocksToast error variant (an alert, fixed in the toast host), never a second
+    // kind of toast (web UI audit WUI-027).
+    expect(timeline).toMatch(/actionError \? \(\s*<BlocksToast actionLabel="Dismiss" message=\{actionError\}[\s\S]*?tone="error"/s);
+    expect(styles).not.toContain(".timeline-delete-error");
   });
 
   it("keeps tiny blocks readable while isolating the portalled compact editor", () => {

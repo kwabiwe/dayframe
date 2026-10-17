@@ -49,6 +49,8 @@ export class TimelineDeleteUndoController {
   private active = new Map<number, ActiveTransaction>();
   private disposed = false;
   private error: string | null = null;
+  /** The delete the server refused, so the error toast can offer Try again (WUI-027). */
+  private failed: TimelineDeleteRequest | null = null;
   private notice: TimelineDeleteNotice | null = null;
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   private pending: TimelineDeleteTransaction | null = null;
@@ -100,6 +102,7 @@ export class TimelineDeleteUndoController {
       token: ++this.sequence
     };
     this.error = null;
+    this.failed = null;
     this.pending = transaction;
     this.clearNoticeTimer();
     this.notice = { label: transaction.label, token: transaction.token, isExiting: false };
@@ -107,6 +110,21 @@ export class TimelineDeleteUndoController {
       if (this.pending?.token !== transaction.token) return;
       this.startCommit(transaction, { keepalive: false });
     }, TIMELINE_DELETE_UNDO_DELAY_MS);
+    this.emit();
+  }
+
+  /** Deletes again what the server refused (it is on screen again), with its own Undo. */
+  retryFailedDelete() {
+    const failed = this.failed;
+    if (!failed) return;
+    this.requestDelete(failed);
+  }
+
+  /** Puts the error away without retrying. */
+  dismissError() {
+    if (this.error === null && this.failed === null) return;
+    this.error = null;
+    this.failed = null;
     this.emit();
   }
 
@@ -183,6 +201,7 @@ export class TimelineDeleteUndoController {
         if (this.disposed || !this.active.has(transaction.token)) return;
         this.active.delete(transaction.token);
         this.error = friendlyDeleteError(error);
+        this.failed = { entries: transaction.entries, label: transaction.label };
         this.emit();
       });
   }

@@ -18,7 +18,8 @@ export function BlocksToast({
   message,
   onAction,
   secondary,
-  swatchStyle
+  swatchStyle,
+  tone = "notice"
 }: {
   actionLabel?: string;
   /** Move focus to the action when the toast appears (when the surface that was focused just went away). */
@@ -34,6 +35,11 @@ export function BlocksToast({
    */
   secondary?: { label: string; onAction: () => void; done?: string | null; busy?: boolean } | null;
   swatchStyle?: CSSProperties;
+  /**
+   * `error` (WUI-027): the same inverse pill with a danger swatch, announced assertively (an alert),
+   * for a failure the user can act on (Try again) — never a second kind of toast.
+   */
+  tone?: "notice" | "error";
 }) {
   const pop = springTransition("pop");
   const actionRef = useRef<HTMLButtonElement | null>(null);
@@ -56,9 +62,9 @@ export function BlocksToast({
   return (
     <div className="df-toast-host">
       <div
-        className={`df-toast${detail ? " has-detail" : ""}${secondary ? " has-secondary" : ""}${exiting ? " is-exiting" : ""}`}
-        role="status"
-        aria-live="polite"
+        className={`df-toast${detail ? " has-detail" : ""}${secondary ? " has-secondary" : ""}${tone === "error" ? " is-error" : ""}${exiting ? " is-exiting" : ""}`}
+        role={tone === "error" ? "alert" : "status"}
+        aria-live={tone === "error" ? "assertive" : "polite"}
         aria-atomic="true"
         style={{ "--df-toast-pop": pop.easing, "--df-toast-pop-ms": `${pop.durationMs}ms` } as CSSProperties}
       >

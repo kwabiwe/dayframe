@@ -167,6 +167,38 @@ describe("TimelineDeleteUndoController", () => {
     expect(controller.getState().error).toBe("Delete service unavailable");
   });
 
+  it("offers Try again for a refused delete and lets the error be put away (web UI audit WUI-027)", async () => {
+    vi.useFakeTimers();
+    let refuse = true;
+    const commit = vi.fn(() => (refuse ? Promise.reject(new Error("Delete service unavailable")) : Promise.resolve()));
+    const controller = new TimelineDeleteUndoController(commit, () => undefined);
+
+    controller.requestDelete(request([entry("block")]));
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().error).toBe("Delete service unavailable");
+    expect(controller.getState().hiddenEntryIds).toEqual(new Set());
+
+    // Try again deletes the same block once more, with its own Undo window and no error.
+    refuse = false;
+    controller.retryFailedDelete();
+    expect(controller.getState().error).toBeNull();
+    expect(controller.getState().pending?.ids).toEqual(["block"]);
+    expect(controller.getState().hiddenEntryIds).toEqual(new Set(["block"]));
+
+    // Dismiss puts a later error away; nothing is left to retry.
+    refuse = true;
+    controller.finalizePendingDelete();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(controller.getState().error).toBe("Delete service unavailable");
+    controller.dismissError();
+    expect(controller.getState().error).toBeNull();
+    controller.retryFailedDelete();
+    expect(controller.getState().pending).toBeNull();
+  });
+
   it("ignores a stale timeout after a replacement", async () => {
     vi.useFakeTimers();
     const commit = successfulCommit();
