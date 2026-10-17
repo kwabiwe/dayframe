@@ -9439,11 +9439,13 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-muted);
 }
 
+/* One avatar (web UI audit WUI-039, owner 17 Oct 2026): a circle — 36 px in the bars, 40 px in
+   menus, 56 px in Settings (48 px on phones). */
 .df-profile > span:first-child,
 .df-mtop-avatar > span {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
@@ -10854,11 +10856,9 @@ dialog.ui-dialog.df-palette {
   text-align: right;
 }
 
-.df-erow.is-live .df-erow-dur {
-  color: var(--accent-text);
-}
-
-/* Reports never paints data coral (UIA-302): a running block's duration stays neutral there. */
+/* A running block's duration is neutral everywhere (web UI audit WUI-047, owner 17 Oct 2026; as
+   Reports already was, UIA-302): its row's "– now" and the live block carry the state. */
+.df-erow.is-live .df-erow-dur,
 .df-report-row.df-erow.is-live .df-erow-dur {
   color: var(--text-primary);
 }
@@ -12083,6 +12083,46 @@ dialog.ui-dialog.df-palette {
   padding: 20px 32px 96px;
 }
 
+/* A missing page or a failure (WUI-048): one card, centred in the content area. */
+.df-status-page {
+  display: grid;
+  min-height: min(70dvh, 560px);
+  place-items: center;
+  padding: 24px 0;
+}
+
+.df-status-card {
+  display: grid;
+  width: min(100%, 440px);
+  justify-items: center;
+  gap: 12px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.df-status-card h1 {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  text-wrap: balance;
+}
+
+.df-status-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.df-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .df-page-head {
   display: flex;
   flex-wrap: wrap;
@@ -12969,6 +13009,7 @@ dialog.ui-dialog.df-palette {
   .df-av-lg {
     width: 48px;
     height: 48px;
+    font-size: 16px;
   }
 
   .df-set-acts {
@@ -13826,7 +13867,7 @@ dialog.ui-dialog.df-palette {
   height: 40px;
   flex: none;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 50%;
   background: var(--surface-muted);
   color: var(--foreground);
   font-weight: 750;

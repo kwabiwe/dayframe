@@ -1010,6 +1010,11 @@ function isOptimisticTimerId(id: string | null) {
   return id?.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) ?? false;
 }
 
+/** True inside the signed-in shell (which supplies the page's <main>), false on bare pages. */
+export function useInsideAppShell() {
+  return useContext(AppShellRuntimeContext) !== null;
+}
+
 export function useAppShellRuntime() {
   const context = useContext(AppShellRuntimeContext);
   if (!context) throw new Error("useAppShellRuntime must be used inside AppShellRuntimeProvider.");

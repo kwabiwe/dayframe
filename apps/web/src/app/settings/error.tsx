@@ -1,34 +1,21 @@
 "use client";
 
-import { Button } from "@/components/ui/Primitives";
-import { PageHeader } from "@/components/PageHeader";
+import { StatusPage, useErrorRetry } from "@/components/blocks/StatusPage";
 
-export default function SettingsError({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function SettingsError({
+  reset,
+  unstable_retry: unstableRetry
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+  unstable_retry?: () => void;
+}) {
+  const retry = useErrorRetry(reset, unstableRetry);
   return (
-    <>
-      <PageHeader
-        title="Settings"
-        description="Manage how Dayframe looks, tracks goals, uses location and protects your account."
-      />
-      <div className="settings-page">
-        <section className="settings-section" aria-labelledby="settings-error-title">
-          <header className="settings-section-header">
-            <h2 id="settings-error-title">Settings are unavailable</h2>
-            <p>Dayframe could not load your settings. Your saved preferences have not changed.</p>
-          </header>
-          <div className="settings-group">
-            <div className="ui-settings-row">
-              <div>
-                <strong>Try again</strong>
-                <span>Check your connection, then retry. You can also sign out and back in.</span>
-              </div>
-              <div className="ui-settings-row-action">
-                <Button variant="primary" onClick={reset}>Retry</Button>
-              </div>
-            </div>
-          </div>
-        </section>
-      </div>
-    </>
+    <StatusPage
+      action={<button className="df-rbtn df-rbtn--inverse" onClick={retry} type="button">Try again</button>}
+      explanation="Dayframe could not load your settings. Your saved preferences have not changed."
+      title="Settings are unavailable"
+    />
   );
 }
