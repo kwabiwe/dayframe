@@ -10735,7 +10735,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-text span {
   overflow: hidden;
-  color: var(--text-muted);
+  /* As List's secondary line: over 4.5:1 on the card and the hover/focus fill in both themes. */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14935,7 +14936,10 @@ dialog.ui-dialog.df-palette {
   align-items: baseline;
   gap: 6px;
   overflow: hidden;
-  color: var(--text-muted);
+  /* textSecondary nudged 15 % toward textPrimary: 12 px text stays over 4.5:1 on the card and on the
+     hover/focus fill in both themes (textMuted 4.05:1, plain textSecondary 4.39:1 on Daylight's
+     surfaceMuted; Codex r1/r2 on #495). */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
   font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
@@ -14946,6 +14950,12 @@ dialog.ui-dialog.df-palette {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: baseline;
+  color: inherit;
+}
+
+.timeline-task-secondary-line .tag-metadata.is-compact {
+  font-size: 12px;
+  font-weight: inherit;
 }
 
 .timeline-list-actions {
@@ -14958,7 +14968,9 @@ dialog.ui-dialog.df-palette {
   opacity: 1;
 }
 
-@media (hover: none), (max-width: 860px) {
+/* Shown where hover can't be relied on: touch-only screens, any touch screen (a hybrid laptop's
+   primary pointer may still hover) and the narrow layouts. */
+@media (hover: none), (any-pointer: coarse), (max-width: 860px) {
   .timeline-list-actions {
     opacity: 1;
   }
