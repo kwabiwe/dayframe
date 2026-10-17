@@ -14,8 +14,18 @@ type BrandAccessibilityProps = {
 };
 
 export type BrandMarkProps = BrandAccessibilityProps & {
+  /** The canvas size the blocks are drawn at. */
   size?: number;
+  /**
+   * Crop to the blocks (`logos/dayframe-colour-mark.svg`): the canvas has more space below and right
+   * of them, so a full-canvas mark sits about 1 pt high and left beside the wordmark. The blocks keep
+   * their size; the view shrinks to them.
+   */
+  trimmed?: boolean;
 };
+
+/** The blocks' bounds on the 1024 canvas (170,145 → 825,830). */
+const MARK_TRIM = { x: 170, y: 145, width: 655, height: 685, right: 1024 - 825, bottom: 1024 - 830 } as const;
 
 export type BrandWordmarkProps = BrandAccessibilityProps & {
   width?: number;
@@ -38,15 +48,16 @@ const BRAND_SIZES = {
 export function BrandMark({
   accessibilityLabel = "Dayframe",
   decorative = false,
-  size = 36
+  size = 36,
+  trimmed = false
 }: BrandMarkProps) {
   return (
     <Svg
       accessibilityLabel={decorative ? undefined : accessibilityLabel}
       accessible={!decorative}
-      height={size}
-      viewBox="0 0 1024 1024"
-      width={size}
+      height={trimmed ? (size * MARK_TRIM.height) / 1024 : size}
+      viewBox={trimmed ? "170 145 655 685" : "0 0 1024 1024"}
+      width={trimmed ? (size * MARK_TRIM.width) / 1024 : size}
     >
       <Defs>
         <LinearGradient id="dayframe-grey" x1="0" y1="0" x2="1" y2="1">
@@ -145,11 +156,21 @@ export function DayframeBrand({
         brandStyles.lockup,
         {
           flexDirection: layout === "compact" ? "column" : "row",
-          gap: metrics.gap
+          // The cropped mark: the gap gains the canvas margin it dropped, so the wordmark keeps its
+          // distance from the blocks.
+          gap: metrics.gap + (metrics.mark * (layout === "compact" ? MARK_TRIM.bottom : MARK_TRIM.right)) / 1024
         }
       ]}
     >
-      <BrandMark decorative size={metrics.mark} />
+      {/* The canvas's left margin and an even share of its height stay around the cropped mark (its
+          top margin when stacked), so the blocks keep their place and the lockup its size. */}
+      <View
+        style={layout === "compact"
+          ? { marginTop: (metrics.mark * MARK_TRIM.y) / 1024 }
+          : { marginLeft: (metrics.mark * MARK_TRIM.x) / 1024, marginVertical: (metrics.mark * (1024 - MARK_TRIM.height)) / 2048 }}
+      >
+        <BrandMark decorative size={metrics.mark} trimmed />
+      </View>
       <BrandWordmark
         decorative
         tone={tone}

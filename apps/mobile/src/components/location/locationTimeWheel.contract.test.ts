@@ -52,7 +52,8 @@ describe("Location evidence time wheel (A11b)", () => {
     expect(editor).toMatch(/function supersedePlacePick\(\) \{[\s\S]*?setTimeWheel\(null\);/);
     expect(editor).toMatch(/setTimeWheel\(null\);\s*setActivityPickerOpen\(true\);/);
     expect(editor).toMatch(/if \(isFocused \|\| !timeWheelRef\.current\) return;\s*setTimeWheel\(null\);/);
-    expect(editor).toContain("onFocus={() => setTimeWheel(null)}");
+    // The map pin's name closes the wheel and is revealed above the pinned bar (Codex r2 on #480).
+    expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);[\s\S]{0,200}?focusRevealControl\(pinNameInputRef\.current\);/);
     expect(editor).toMatch(/async function chooseNearbyPlace[\s\S]*?setTimeWheel\(null\);\s*const token = \+\+placePickTokenRef\.current;/);
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(searchInputRef\.current\);/);
     expect(editor).toMatch(/onFocus=\{\(\) => \{\s*setTimeWheel\(null\);\s*focusRevealControl\(activityInputRef\.current\);/);

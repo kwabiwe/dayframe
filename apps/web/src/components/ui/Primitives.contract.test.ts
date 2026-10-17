@@ -55,7 +55,7 @@ describe("web UI foundation contracts", () => {
   });
 
   it("gives fields one in-perimeter focus owner and standalone actions one external ring", () => {
-    expect(globalStyles).toContain("--web-control-border-width: 2px;");
+    expect(globalStyles).toContain("--web-control-border-width: 1px;");
     expect(globalStyles).toContain("border-color: var(--web-focus-border);");
     expect(globalStyles).toMatch(/\.ui-compound-control:focus-within \{[^}]*border-color: var\(--web-focus-border\);/s);
     expect(globalStyles).toMatch(/\.ui-compound-control > input \{[^}]*border: 0;[^}]*outline: 0;/s);

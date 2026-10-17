@@ -1,4 +1,6 @@
-import { formatClockTime, formatClockValue, formatDuration, type ClockFormat } from "@dayframe/shared";
+import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph } from "@dayframe/shared";
+import { formatPlaceDistance, nearbyPlaceCategory } from "../../lib/placeCategories";
+import { learnedLocationName, locationEvidenceDetails, locationEvidenceLine } from "../../lib/locationEvidenceSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -13,7 +15,8 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import Reanimated from "react-native-reanimated";
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   DAYFRAME_BLOCKS,
@@ -54,9 +57,9 @@ import {
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton, SettingsSwitch } from "../settings/SettingsBlocks";
-import { ActivityChip, ActivityChipRow, AllActivitiesChip } from "../ActivityChips";
+import { ACTIVITY_CHIP_GAP, ActivityChip, ActivityChipRow, AllActivitiesChip, activityChipStyles } from "../ActivityChips";
 import { ActivityPickerSheet } from "../ActivityPickerSheet";
-import { activityChips } from "../../lib/activityChoice";
+import { activityChips, fitActivityChips } from "../../lib/activityChoice";
 import {
   localLayoutTransition,
   localPresenceEntering,
@@ -64,7 +67,6 @@ import {
   useReduceMotionPreference
 } from "@/lib/motion";
 import { LocationEvidenceMap } from "./LocationEvidenceMap";
-import { SavePlaceSheet, type SavePlaceRequest } from "./SavePlaceSheet";
 import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-wheel";
 import { TimeWheelPanel } from "../TimeWheelPanel";
 import { useClockFormat } from "../../lib/clockFormat";
@@ -98,8 +100,6 @@ export function LocationReviewCorrectionEditor({
   isFocused,
   onCreateActivity,
   onResolve,
-  onPlaceSaved,
-  onSavePlace,
   places,
   recentActivityIds = [],
   reviewItem,
@@ -113,13 +113,6 @@ export function LocationReviewCorrectionEditor({
   /** All activities' Create: resolves to the new activity's id, or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
-  /**
-   * "Save this place" (PRD D19): saves where the visit was as a place without logging it; resolves
-   * to null once saved on this iPhone, or a message to show in the sheet.
-   */
-  onSavePlace?: (request: SavePlaceRequest & { categoryId: string | null }) => Promise<string | null>;
-  /** The sheet has gone after a save: the screen raises its toast. */
-  onPlaceSaved?: (name: string) => void;
   places: Place[];
   /** Activities used most recently first, for the chips and the picker's Recent. */
   recentActivityIds?: readonly string[];
@@ -139,6 +132,7 @@ export function LocationReviewCorrectionEditor({
   const scrollViewRef = useRef<ScrollView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const activityInputRef = useRef<TextInput>(null);
+  const pinNameInputRef = useRef<TextInput>(null);
   const activeRevealControlRef = useRef<TextInput | null>(null);
   const scrollOffsetRef = useRef(0);
   const keyboardTopRef = useRef<number | null>(null);
@@ -161,6 +155,18 @@ export function LocationReviewCorrectionEditor({
   const baselineCategoryId = reviewItem?.suggestedCategoryId ?? null;
   const journeyCopy = locationReviewJourneyCopy(evidence.segment);
   const isJourney = journeyCopy?.journey === true;
+  const learnedName = learnedLocationName(reviewItem);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  // The disclosure's chevron turns (down to up) with the details; Reduce Motion turns it at once.
+  const evidenceChevronTurn = useSharedValue(90);
+  const evidenceChevronStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${evidenceChevronTurn.value}deg` }] }));
+  useEffect(() => {
+    evidenceChevronTurn.value = reduceMotion ? (evidenceOpen ? -90 : 90) : withTiming(evidenceOpen ? -90 : 90, { duration: 180 });
+    // The shared value is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evidenceOpen, reduceMotion]);
+  const evidenceLine = locationEvidenceLine(evidence);
+  const evidenceDetails = locationEvidenceDetails(evidence, (value) => formatTime(value, clockFormat));
   // Whether the person changed the name field: only then is a name "typed" (Codex r3 on #456).
   const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [description, setDescription] = useState(() => initialLocationReviewDescription({
@@ -177,6 +183,8 @@ export function LocationReviewCorrectionEditor({
   const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState<string | null>(baselinePlaceId);
   const [newPlace, setNewPlace] = useState<LocationReviewNewPlace | null>(null);
   const [selectedPoint, setSelectedPoint] = useState(() => pointFromEvidence(evidence));
+  // Bumped once per place chosen from a list, so the map shows it with the stay (never for a map tap).
+  const [mapRevealToken, setMapRevealToken] = useState(0);
   const [editingCentre, setEditingCentre] = useState(false);
   const [manualPlaceName, setManualPlaceName] = useState("");
   // The pin's name field and Use this pin stay open from the first tap until the pin is used,
@@ -186,16 +194,6 @@ export function LocationReviewCorrectionEditor({
   const [searchState, setSearchState] = useState<PlaceSearchState>(emptySearchState);
   const [nearbyState, setNearbyState] = useState<NearbyPointOfInterestState>(emptyNearbyState);
   const [saveForFuture, setSaveForFuture] = useState(false);
-  // "Save this place": the sheet, and the place this visit was saved as (shown until Review refreshes).
-  const [savePlaceOpen, setSavePlaceOpen] = useState(false);
-  const [savedPlaceName, setSavedPlaceName] = useState<string | null>(null);
-  // Once the evidence refreshes with the saved place as its match, the row is that match, chosen as
-  // before, so recording never reads as removing it (Codex r1 on #460).
-  useEffect(() => {
-    if (!savedPlaceName || !baselinePlaceId || newPlace) return;
-    setSavedPlaceName(null);
-    setSelectedSavedPlaceId((current) => current ?? baselinePlaceId);
-  }, [baselinePlaceId, newPlace, savedPlaceName]);
   const [resolvingSuggestion, setResolvingSuggestion] = useState(false);
   // Each nearby or search pick takes a token; any later place or search interaction takes a new
   // one, so a pick that resolves late never overwrites newer input (Codex r1 on #358).
@@ -233,8 +231,30 @@ export function LocationReviewCorrectionEditor({
   const savingRef = useRef(saving);
   savingRef.current = saving;
 
+  // The pinned primary bar rides above the keyboard (Codex r1 on #480): the editor owns the keyboard
+  // space (the scroll view shrinks above the bar), so a focused field is revealed above the bar.
+  const keyboardLift = useSharedValue(0);
+  const primaryBarLiftStyle = useAnimatedStyle(() => ({ marginBottom: keyboardLift.value }));
+  const primaryBarHeightRef = useRef(0);
+  const safeAreaInsets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardGeometryRef = useRef({ bottomInset: safeAreaInsets.bottom, windowHeight });
+  keyboardGeometryRef.current = { bottomInset: safeAreaInsets.bottom, windowHeight };
+  /** How far the keyboard (top at `screenY`) reaches above the bar's resting place. */
+  const keyboardOverlap = (screenY: number) => {
+    const { bottomInset, windowHeight: height } = keyboardGeometryRef.current;
+    return Math.max(0, Math.round(height - bottomInset - screenY));
+  };
+  // The safe area or window changing under an open keyboard re-measures the lift (Codex r2 on #480).
+  useEffect(() => {
+    if (keyboardTopRef.current === null) return;
+    keyboardLift.value = keyboardOverlap(keyboardTopRef.current);
+    // keyboardOverlap reads the refreshed geometry ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeAreaInsets.bottom, windowHeight]);
+
   const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
-    const keyboardTop = keyboardTopRef.current;
+    const keyboardTop = keyboardTopRef.current === null ? null : keyboardTopRef.current - primaryBarHeightRef.current;
     if (!control || keyboardTop === null) return;
     const generation = ++revealGenerationRef.current;
     requestAnimationFrame(() => {
@@ -293,8 +313,23 @@ export function LocationReviewCorrectionEditor({
   }, [saving]);
 
   useEffect(() => {
-    const updateKeyboardFrame = (event: { endCoordinates: { screenY: number } }) => {
+    // The bar follows the keyboard with the keyboard's own duration (one Reanimated owner);
+    // Reduce Motion places it at once.
+    const liftTo = (lift: number, duration: number | undefined) => {
+      keyboardLift.value = reduceMotionRef.current || !duration
+        ? lift
+        : withTiming(lift, { duration, easing: Easing.out(Easing.cubic) });
+    };
+    const updateKeyboardFrame = (event: { duration?: number; endCoordinates: { height?: number; screenY: number } }) => {
+      // With Prefer Cross-Fade Transitions iOS can report a zero frame: no keyboard space to make
+      // (Codex r2 on #480; React Native's KeyboardAvoidingView guards the same).
+      if (event.endCoordinates.screenY <= 0 || event.endCoordinates.height === 0) {
+        keyboardTopRef.current = null;
+        liftTo(0, event.duration);
+        return;
+      }
       keyboardTopRef.current = event.endCoordinates.screenY;
+      liftTo(keyboardOverlap(event.endCoordinates.screenY), event.duration);
       revealFocusedControl();
     };
     const keyboardChanged = Keyboard.addListener(
@@ -306,9 +341,10 @@ export function LocationReviewCorrectionEditor({
       : null;
     const keyboardHidden = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => {
+      (event?: { duration?: number }) => {
         keyboardTopRef.current = null;
         revealGenerationRef.current += 1;
+        liftTo(0, event?.duration);
       }
     );
     return () => {
@@ -370,10 +406,25 @@ export function LocationReviewCorrectionEditor({
     nearbyState.places,
     newPlace ? [...listedSavedPlaceNames, newPlace.name] : listedSavedPlaceNames
   );
-  const chipActivities = useMemo(
+  const chipCandidates = useMemo(
     () => activityChips(categories, chipAnchorId, recentActivityIds),
     [categories, chipAnchorId, recentActivityIds]
   );
+  // The chips and All activities fit into two rows, the pill never alone on a third (owner, 17 Oct
+  // 2026, as web's WUI-002): chips drop from the end, never the chosen one. Until every candidate
+  // is measured, all show.
+  const [chipWidths, setChipWidths] = useState<Record<string, number>>({});
+  const [chipRowWidth, setChipRowWidth] = useState(0);
+  const [chipPillWidth, setChipPillWidth] = useState(0);
+  const chipActivities = useMemo(() => fitActivityChips({
+    candidates: chipCandidates,
+    gap: ACTIVITY_CHIP_GAP,
+    maxRows: 2,
+    pillWidth: chipPillWidth,
+    rowWidth: chipRowWidth,
+    selectedId: selectedCategoryId,
+    widthOf: (category) => chipWidths[category.id]
+  }), [chipCandidates, chipPillWidth, chipRowWidth, chipWidths, selectedCategoryId]);
   // A journey with no suggested activity is filed as Commute unless the person picks one.
   const automaticCommute = isJourney && baselineCategoryId === null && !categoryTouched;
 
@@ -534,6 +585,7 @@ export function LocationReviewCorrectionEditor({
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
+      setMapRevealToken((token) => token + 1);
       // The chosen place is now the selected row above; the field empties so nearby places return.
       setSearchQuery("");
       setSearchState(emptySearchState);
@@ -567,6 +619,7 @@ export function LocationReviewCorrectionEditor({
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
+      setMapRevealToken((token) => token + 1);
       setSearchQuery("");
       setSearchState(emptySearchState);
       void controllerRef.current?.cancel();
@@ -588,7 +641,8 @@ export function LocationReviewCorrectionEditor({
     void controllerRef.current?.cancel();
   }
 
-  function chooseSavedPlace(placeId: string | null) {
+  /** `fromMap`: a tap on the place's own marker, which is on screen, so the map stays put. */
+  function chooseSavedPlace(placeId: string | null, fromMap = false) {
     setSelectedSavedPlaceId(placeId);
     setNewPlace(null);
     setSaveForFuture(false);
@@ -598,7 +652,10 @@ export function LocationReviewCorrectionEditor({
     const point = place
       ? { longitude: place.point.coordinates[0], latitude: place.point.coordinates[1] }
       : pointFromEvidence(evidence);
-    if (point) setSelectedPoint(point);
+    if (point) {
+      setSelectedPoint(point);
+      if (!fromMap) setMapRevealToken((token) => token + 1);
+    }
   }
 
   /** A saved place row: picks it, or (tapped again) goes back to the matched place. */
@@ -643,6 +700,7 @@ export function LocationReviewCorrectionEditor({
   function parsedEdit() {
     if (!evidence.segment.stoppedAt || !stopAt) {
       setValidationError("This suggestion does not have a complete time range.");
+      AccessibilityInfo.announceForAccessibility("This suggestion does not have a complete time range.");
       return null;
     }
     const parsed = parseLocationReviewWindow({
@@ -657,6 +715,8 @@ export function LocationReviewCorrectionEditor({
     });
     if (!parsed.value) {
       setValidationError(parsed.error);
+      // iOS has no live regions: the reason beside Record is announced (Codex r1 on #480).
+      if (parsed.error) AccessibilityInfo.announceForAccessibility(parsed.error);
       return null;
     }
     setValidationError(null);
@@ -712,33 +772,20 @@ export function LocationReviewCorrectionEditor({
     );
   }
 
-  async function recordOnce() {
-    if (saving) return;
-    supersedePlacePick();
-    const edit = parsedEdit();
-    if (!edit) return;
-    await onResolve(
-      {
-        action: "record_once",
-        edit: {
-          ...edit,
-          ...(newPlace ? {} : { placeId: selectedSavedPlaceId })
-        }
-      },
-      "This time was recorded once without saving a new place."
-    );
-  }
-
   const primaryLabel = saving
     ? "Saving…"
     : journeyCopy
       ? journeyCopy.primaryLabel
       : newPlace
-        ? saveForFuture ? "Save place and record" : "Use once and record"
+        ? saveForFuture ? "Save place and record" : "Record"
         : selectedSavedPlaceId !== baselinePlaceId
           ? "Use place and record"
           : "Record visit";
-  const placeRowCount = (newPlace ? 1 : 0) + (savedPlaceName ? 1 : 0) +
+  // The short line under a place row's name: what it is and how far from the visit (owner, 17 Oct 2026).
+  const centre = pointFromEvidence(evidence);
+  const newPlaceDistance = newPlace && centre ? distanceMeters(centre, newPlace) : null;
+  const baselineDistance = evidence.map.nearbySavedPlaces.find((place) => place.id === baselinePlaceId)?.distanceMeters ?? null;
+  const placeRowCount = (newPlace ? 1 : 0) +
     (baselinePlaceId ? 1 : 0) +
     evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).length;
   // Nearby shows under an empty (or one-letter) field once a search has started, unless every
@@ -750,7 +797,8 @@ export function LocationReviewCorrectionEditor({
     <>
       <ScrollView
         ref={scrollViewRef}
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        // The editor owns the keyboard space: the bar rises and the scroll view shrinks above it.
+        automaticallyAdjustKeyboardInsets={false}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => revealFocusedControl()}
@@ -853,10 +901,47 @@ export function LocationReviewCorrectionEditor({
               selectedPointRadiusMeters={evidence.segment.kind === "stay" ? 80 : undefined}
               selectedSavedPlaceId={selectedSavedPlaceId}
               showDetails={false}
+              reduceMotion={reduceMotion}
+              revealChoiceToken={evidence.segment.kind === "stay" ? mapRevealToken : undefined}
               onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? moveMapPin : undefined}
-              onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
+              onSelectSavedPlace={evidence.segment.kind === "stay" ? (placeId) => chooseSavedPlace(placeId, true) : undefined}
             />
           </Reanimated.View>
+
+          {/* What the suggestion rests on, in one line that opens to the details (owner, 17 Oct 2026). */}
+          {evidenceLine ? (
+            <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.evidenceLine}>
+              <Pressable
+                accessibilityHint={evidenceDetails.length ? (evidenceOpen ? "Hides the details" : "Shows the details") : undefined}
+                accessibilityRole={evidenceDetails.length ? "button" : "text"}
+                accessibilityState={evidenceDetails.length ? { expanded: evidenceOpen } : undefined}
+                disabled={!evidenceDetails.length}
+                hitSlop={{ top: 8, bottom: 8 }}
+                onPress={() => setEvidenceOpen((open) => !open)}
+                style={({ pressed }) => [editorStyles.evidenceLineRow, pressed ? { opacity: 0.72 } : null]}
+                testID="location-evidence-line"
+              >
+                <Text {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>{evidenceLine}</Text>
+                {evidenceDetails.length ? (
+                  <Reanimated.View style={evidenceChevronStyle}>
+                    <DayframeIcon color={theme.textSecondary} glyph="chevron-right" size={16} />
+                  </Reanimated.View>
+                ) : null}
+              </Pressable>
+              {evidenceOpen && evidenceDetails.length ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  style={editorStyles.evidenceDetails}
+                  testID="location-evidence-details"
+                >
+                  {evidenceDetails.map((line) => (
+                    <Text key={line} {...mobileTextProps("metadata")} style={editorStyles.answerMeta}>{line}</Text>
+                  ))}
+                </Reanimated.View>
+              ) : null}
+            </Reanimated.View>
+          ) : null}
 
           {evidence.segment.kind === "stay" ? (
             <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
@@ -877,33 +962,19 @@ export function LocationReviewCorrectionEditor({
                         layout={localLayoutTransition(reduceMotion)}
                       >
                         <PlaceChoice
-                          detail={newPlace.formattedAddress || "Pinned on the map"}
+                          detail={placeDistanceDetail("New place", newPlaceDistance)}
                           name={newPlace.name}
                           onPress={() => undefined}
                           onRemove={saving ? undefined : () => chooseSavedPlace(baselinePlaceId)}
-                          onSave={onSavePlace && !baselinePlaceId && !saving ? () => {
-                            Keyboard.dismiss();
-                            setSavePlaceOpen(true);
-                          } : undefined}
                           selected
                           theme={theme}
                         />
                       </Reanimated.View>
                     ) : null}
-                    {savedPlaceName && !newPlace ? (
-                      <Reanimated.View
-                        entering={localPresenceEntering(reduceMotion)}
-                        exiting={localPresenceExiting(reduceMotion)}
-                        key="saved-new-place"
-                        layout={localLayoutTransition(reduceMotion)}
-                      >
-                        <PlaceChoice detail="New saved place" name={savedPlaceName} onPress={() => undefined} selected theme={theme} />
-                      </Reanimated.View>
-                    ) : null}
                     {baselinePlaceId ? (
                       <Reanimated.View key={`saved-${baselinePlaceId}`} layout={localLayoutTransition(reduceMotion)}>
                         <PlaceChoice
-                          detail="Matched place"
+                          detail={placeDistanceDetail("Matched place", baselineDistance)}
                           name={baselinePlaceName}
                           onPress={() => toggleSavedPlace(baselinePlaceId)}
                           selected={!newPlace && selectedSavedPlaceId === baselinePlaceId}
@@ -914,9 +985,11 @@ export function LocationReviewCorrectionEditor({
                     {evidence.map.nearbySavedPlaces.filter((place) => place.id !== baselinePlaceId).map((place) => (
                       <Reanimated.View key={`saved-${place.id}`} layout={localLayoutTransition(reduceMotion)}>
                         <PlaceChoice
-                          detail={`Saved place · ${formatNearbyDistance(place.distanceMeters)}`}
+                          detail={placeDistanceDetail("Saved place", place.distanceMeters)}
                           name={place.name}
                           onPress={() => toggleSavedPlace(place.id)}
+                          // Chosen instead of the matched place: its ✕ goes back to it.
+                          onRemove={!newPlace && selectedSavedPlaceId === place.id && !saving ? () => chooseSavedPlace(baselinePlaceId) : undefined}
                           selected={!newPlace && selectedSavedPlaceId === place.id}
                           theme={theme}
                         />
@@ -1003,7 +1076,9 @@ export function LocationReviewCorrectionEditor({
                         <View accessibilityLabel={`${nearbyChoices.length} places nearby`} style={editorStyles.suggestionList}>
                           {nearbyChoices.map((place, index) => (
                             <ResultRow
-                              detail={[formatNearbyDistance(place.distanceMeters), place.subtitle].filter(Boolean).join(" · ")}
+                              // Its kind and distance, not the long address (owner, 17 Oct 2026).
+                              detail={[nearbyPlaceCategory(place.category).label, formatPlaceDistance(place.distanceMeters)].filter(Boolean).join(" · ")}
+                              glyph={nearbyPlaceCategory(place.category).glyph}
                               disabled={resolvingSuggestion || saving}
                               divider={index > 0}
                               key={place.id}
@@ -1076,9 +1151,62 @@ export function LocationReviewCorrectionEditor({
                 style={styles.textInput}
                 value={description}
               />
+              {/* A name Dayframe learned for this kind of visit or trip, one tap away when the field
+                  doesn't hold it (owner, 17 Oct 2026). Using it is the person's own choice. */}
+              {learnedName && description.trim() !== learnedName ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={editorStyles.learnedNameRow}
+                >
+                  <Pressable
+                    accessibilityHint="Fills in the name"
+                    accessibilityLabel={`Use the name ${learnedName}`}
+                    accessibilityRole="button"
+                    disabled={saving}
+                    hitSlop={{ top: 6, bottom: 6 }}
+                    onPress={() => {
+                      setDescription(learnedName);
+                      setDescriptionTouched(true);
+                    }}
+                    style={({ pressed }) => [editorStyles.learnedNameChip, pressed ? { opacity: 0.72 } : null]}
+                    testID="location-evidence-learned-name"
+                  >
+                    <Text {...mobileTextProps("control")} numberOfLines={1} style={editorStyles.learnedNameText}>Use “{learnedName}”</Text>
+                  </Pressable>
+                </Reanimated.View>
+              ) : null}
               {/* D1: the entry sheet's Blocks chips (chosen, pinned, recent; wrapped, never a
                   sideways scroller), then All activities with search and Create. */}
-              <ActivityChipRow testID="location-evidence-activity-chips">
+              {/* The chips move with the group's layout transition when the learned-name chip above
+                  comes or goes (Codex r1 on #481). */}
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <ActivityChipRow
+                onLayout={(event) => {
+                  const width = Math.floor(event.nativeEvent.layout.width);
+                  setChipRowWidth((current) => (current === width ? current : width));
+                }}
+                testID="location-evidence-activity-chips"
+              >
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  pointerEvents="none"
+                  style={activityChipStyles.measure}
+                >
+                  {chipCandidates.map((category) => (
+                    <View
+                      key={category.id}
+                      onLayout={(event) => {
+                        const width = Math.ceil(event.nativeEvent.layout.width);
+                        setChipWidths((current) => (current[category.id] === width ? current : { ...current, [category.id]: width }));
+                      }}
+                    >
+                      <ActivityChip activity={category} onPress={() => undefined} selected={selectedCategoryId === category.id} theme={theme} />
+                    </View>
+                  ))}
+                </View>
                 {chipActivities.map((category) => (
                   <ActivityChip
                     activity={category}
@@ -1092,6 +1220,10 @@ export function LocationReviewCorrectionEditor({
                 <AllActivitiesChip
                   count={categories.length}
                   disabled={saving}
+                  onLayout={(event) => {
+                    const width = Math.ceil(event.nativeEvent.layout.width);
+                    setChipPillWidth((current) => (current === width ? current : width));
+                  }}
                   onPress={() => {
                     Keyboard.dismiss();
                     setTimeWheel(null);
@@ -1102,6 +1234,7 @@ export function LocationReviewCorrectionEditor({
                   theme={theme}
                 />
               </ActivityChipRow>
+              </Reanimated.View>
               {automaticCommute ? (
                 <Reanimated.View
                   entering={localPresenceEntering(reduceMotion)}
@@ -1184,8 +1317,10 @@ export function LocationReviewCorrectionEditor({
                   )}
                 </View>
                 <View style={editorStyles.timeGroup}>
-                  <Text {...mobileTextProps("metadata")} style={editorStyles.fieldLabel}>
-                    {durationLabel}
+                  {/* "Duration" on screen, so the three boxes align; VoiceOver hears "Estimated duration"
+                      for an approximate arrival (owner, 17 Oct 2026). */}
+                  <Text {...mobileTextProps("metadata")} importantForAccessibility="no" accessibilityElementsHidden style={editorStyles.fieldLabel}>
+                    Duration
                   </Text>
                   <View
                     accessible
@@ -1222,25 +1357,9 @@ export function LocationReviewCorrectionEditor({
                   wheelHeight={180}
                 />
               ) : null}
-              {validationError ? (
-                <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{validationError}</Text>
-              ) : null}
             </View>
             </SettingsBlockGroup>
           </Reanimated.View>
-
-          <Pressable
-            accessibilityRole="button"
-            disabled={saving}
-            onPress={() => void recordSuggestion()}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && !saving ? styles.buttonPressed : null,
-              saving ? styles.buttonDisabled : null
-            ]}
-          >
-            <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
-          </Pressable>
 
           {/* More options is a plain list of the other ways to resolve this moment (D7). */}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
@@ -1265,11 +1384,17 @@ export function LocationReviewCorrectionEditor({
                       style={editorStyles.inlineRow}
                     >
                       <TextInput
+                        ref={pinNameInputRef}
                         accessibilityLabel="New saved place name"
                         {...mobileTextProps("input")}
                         editable={!saving}
+                        onBlur={() => blurRevealControl(pinNameInputRef.current)}
                         onChangeText={renameMapPin}
-                        onFocus={() => setTimeWheel(null)}
+                        onFocus={() => {
+                          setTimeWheel(null);
+                          // The editor owns the keyboard space: the pin's name is revealed above the bar too (Codex r2 on #480).
+                          focusRevealControl(pinNameInputRef.current);
+                        }}
                         placeholder="Place name"
                         placeholderTextColor={theme.textSecondary}
                         style={editorStyles.inlineInput}
@@ -1358,21 +1483,12 @@ export function LocationReviewCorrectionEditor({
                 </Reanimated.View>
               ) : null}
 
+              {/* Skip is a quiet choice, not a destructive one: neutral text (owner, 17 Oct 2026). The
+                  primary button already records once, so More options has no "Record once". */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
               <SettingsBlockRow
                 disabled={saving}
                 divider={evidence.segment.kind === "stay" || evidence.suggestedSplitPoints.length > 0 || Boolean(adjacentReview)}
-                onPress={() => void recordOnce()}
-                subtitle="Logs this time without changing or saving a place"
-                testID="location-evidence-record-once"
-                theme={theme}
-                title="Record once"
-              />
-              </Reanimated.View>
-              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
-              <SettingsBlockRow
-                danger
-                disabled={saving}
                 onPress={() => void onResolve({ action: "ignore_once_location" }, "This suggestion was ignored.")}
                 subtitle="Nothing is logged"
                 testID="location-evidence-skip"
@@ -1384,6 +1500,36 @@ export function LocationReviewCorrectionEditor({
           </Reanimated.View>
         </View>
       </ScrollView>
+      {/* The primary action stays at the bottom of the screen, under the scroll view, so recording
+          is one tap from anywhere on the page (owner, 17 Oct 2026). It is part of the layout from
+          the first frame and never moves; the screen's safe area keeps it above the home indicator. */}
+      <Reanimated.View
+        onLayout={(event) => {
+          primaryBarHeightRef.current = event.nativeEvent.layout.height;
+        }}
+        style={[editorStyles.primaryBar, primaryBarLiftStyle]}
+        testID="location-evidence-primary-bar"
+      >
+        {/* Why Record did nothing is said beside it, wherever the page is scrolled (Codex r1 on #480). */}
+        {validationError ? (
+          <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" accessibilityRole="alert" style={editorStyles.errorText}>{validationError}</Text>
+          </Reanimated.View>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          disabled={saving}
+          onPress={() => void recordSuggestion()}
+          style={({ pressed }) => [
+            styles.primaryButton,
+            editorStyles.primaryBarButton,
+            pressed && !saving ? styles.buttonPressed : null,
+            saving ? styles.buttonDisabled : null
+          ]}
+        >
+          <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
+        </Pressable>
+      </Reanimated.View>
       {activityPickerOpen ? (
         <ActivityPickerSheet
           activities={categories}
@@ -1401,46 +1547,27 @@ export function LocationReviewCorrectionEditor({
           theme={theme}
         />
       ) : null}
-      {savePlaceOpen && newPlace && onSavePlace ? (
-        <SavePlaceSheet
-          centre={pointFromEvidence(evidence)}
-          initialName={newPlace.name}
-          logsAs={categories.find((category) => category.id === selectedCategoryId)?.name ?? null}
-          onClose={() => setSavePlaceOpen(false)}
-          onSave={(request) => onSavePlace({ ...request, categoryId: selectedCategoryId })}
-          onSaved={(request) => {
-            // The sheet has gone: the chosen row becomes the saved place in place, then the toast.
-            supersedePlacePick();
-            setNewPlace(null);
-            setSaveForFuture(false);
-            setSavedPlaceName(request.name);
-            onPlaceSaved?.(request.name);
-          }}
-          reduceMotion={reduceMotion}
-          styles={styles}
-          theme={theme}
-        />
-      ) : null}
     </>
   );
 }
 
+/**
+ * A place row: the name and one short line ("Matched place · 20 m"). The chosen row is raised; a
+ * chosen place that replaced the matched one has a single ✕ to clear it (owner, 17 Oct 2026).
+ */
 function PlaceChoice({
   detail,
   name,
   onPress,
   onRemove,
-  onSave,
   selected,
   theme
 }: {
   detail: string;
   name: string;
   onPress: () => void;
-  /** A chosen new place can be removed, which goes back to the matched place (or none). */
+  /** Clears the choice, going back to the matched place (or none). */
   onRemove?: () => void;
-  /** "Save place" (PRD D19): a quiet pill on an unsaved visit's chosen place. */
-  onSave?: () => void;
   selected: boolean;
   theme: MobileTheme;
 }) {
@@ -1461,25 +1588,12 @@ function PlaceChoice({
       >
         <View style={placeChoiceStyles.text}>
           <Text {...mobileTextProps("itemTitle")} style={[placeChoiceStyles.name, { color: theme.textPrimary }]}>{name}</Text>
-          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[placeChoiceStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
         </View>
-        {selected ? <DayframeIcon color={theme.textPrimary} glyph="check" size={17} strokeWidth={2.2} /> : null}
       </Pressable>
-      {onSave ? (
-        <Pressable
-          accessibilityLabel={`Save ${name} as a place`}
-          accessibilityRole="button"
-          hitSlop={{ top: 6, bottom: 6 }}
-          onPress={onSave}
-          style={({ pressed }) => [placeChoiceStyles.savePill, { backgroundColor: theme.surfaceInset }, pressed ? { opacity: 0.72 } : null]}
-          testID="location-evidence-save-place"
-        >
-          <Text {...mobileTextProps("control")} style={[placeChoiceStyles.savePillText, { color: theme.textPrimary }]}>Save place</Text>
-        </Pressable>
-      ) : null}
       {onRemove ? (
         <Pressable
-          accessibilityLabel={`Remove ${name}`}
+          accessibilityLabel={`Clear ${name}`}
           accessibilityRole="button"
           hitSlop={4}
           onPress={onRemove}
@@ -1498,6 +1612,7 @@ function ResultRow({
   detail,
   disabled,
   divider,
+  glyph,
   onPress,
   testID,
   theme,
@@ -1506,6 +1621,8 @@ function ResultRow({
   detail: string | null;
   disabled: boolean;
   divider: boolean;
+  /** A nearby place's kind (Gym, Café); search results keep the place glyph. */
+  glyph?: DayframeGlyph;
   onPress: () => void;
   testID?: string;
   theme: MobileTheme;
@@ -1524,7 +1641,11 @@ function ResultRow({
       ]}
       testID={testID}
     >
-      <ActivityGlyph name="place" color={theme.textPrimary} />
+      {glyph ? (
+        <View style={resultRowStyles.glyph}>
+          <DayframeIcon color={theme.textPrimary} glyph={glyph} size={20} />
+        </View>
+      ) : <ActivityGlyph name="place" color={theme.textPrimary} />}
       <View style={resultRowStyles.text}>
         <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[resultRowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
         {detail ? (
@@ -1535,11 +1656,10 @@ function ResultRow({
   );
 }
 
-/** "40 m away", "1.2 km away": distances from the visit, rounded for reading. */
-function formatNearbyDistance(meters: number) {
-  if (!Number.isFinite(meters) || meters < 0) return "";
-  if (meters < 1000) return `${Math.max(10, Math.round(meters / 10) * 10)} m away`;
-  return `${(meters / 1000).toFixed(1)} km away`;
+/** A place row's short line: what it is and how far from the visit ("Matched place · 20 m"). */
+function placeDistanceDetail(kind: string, meters: number | null) {
+  const distance = meters === null ? "" : formatPlaceDistance(meters);
+  return distance ? `${kind} · ${distance}` : kind;
 }
 
 function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color: string }) {
@@ -1621,6 +1741,17 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
+    evidenceLine: { paddingHorizontal: 4, gap: 6 },
+    evidenceLineRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 6 },
+    evidenceDetails: { gap: 4 },
+    learnedNameRow: { flexDirection: "row" },
+    learnedNameChip: {
+      minHeight: 38, maxWidth: "100%", paddingHorizontal: 14, borderRadius: DAYFRAME_BLOCKS.radius.pill,
+      alignItems: "center", justifyContent: "center", backgroundColor: theme.surfaceInset
+    },
+    learnedNameText: { color: theme.textPrimary, fontSize: 13.5, fontWeight: "600" },
+    primaryBar: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 8, backgroundColor: theme.background },
+    primaryBarButton: { marginTop: 0 },
     hero: { gap: 4, paddingHorizontal: 4 },
     heroTitle: { color: theme.textPrimary, fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, letterSpacing: -0.6, lineHeight: 34 },
     section: { padding: 16, gap: 12 },
@@ -1757,15 +1888,15 @@ const placeChoiceStyles = StyleSheet.create({
   name: { fontSize: 14, lineHeight: 18, fontWeight: "700" },
   detail: { fontSize: 12, lineHeight: 16 },
   remove: { width: 44, height: 44, marginRight: 4, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
-  savePill: { minHeight: 32, paddingHorizontal: 12, borderRadius: DAYFRAME_BLOCKS.radius.pill, alignItems: "center", justifyContent: "center" },
-  savePillText: { fontSize: 13, fontWeight: "700" }
+
 });
 
 const resultRowStyles = StyleSheet.create({
   row: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 9 },
   text: { flex: 1, minWidth: 0, gap: 2 },
   title: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
-  detail: { fontSize: 12, lineHeight: 16 }
+  detail: { fontSize: 12, lineHeight: 16 },
+  glyph: { width: 20, height: 20, alignItems: "center", justifyContent: "center" }
 });
 
 /** How far a touch may move and still be a tap (points); more is a scroll. */

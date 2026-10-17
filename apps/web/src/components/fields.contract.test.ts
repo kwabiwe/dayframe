@@ -14,12 +14,19 @@ function rule(selector: string) {
 }
 
 describe("fields (web UI audit P4)", () => {
-  it("draws every field with an inset fill and no idle outline (WUI-017)", () => {
-    for (const selector of ["input,\nselect,\ntextarea", ".ui-control", ".ui-compound-control", ".df-ce-field input"]) {
+  it("draws every field with an inset fill and one 1 px idle line of at least 3:1 (WUI-017, Codex r1 on #472)", () => {
+    expect(styles).toMatch(/--web-control-border-width: 1px;/);
+    for (const selector of ["input,\nselect,\ntextarea", ".ui-control", ".ui-compound-control", ".df-ce-field input", ".place-search-control"]) {
       const body = rule(selector);
       expect(body, selector).not.toBe("");
-      expect(body, selector).toMatch(/border: var\(--web-control-border-width\) solid transparent;/);
+      expect(body, selector).toMatch(/border: var\(--web-control-border-width\) solid var\(--control-border\);/);
     }
+    // Composites draw the same line as an inset shadow.
+    for (const selector of [".df-palette-input", ".df-flist-search"]) {
+      expect(rule(selector), selector).toMatch(/box-shadow: inset 0 0 0 1px var\(--control-border\);/);
+    }
+    // No field hides its line at rest any more (the sign-in card included).
+    expect(styles).not.toMatch(/\.auth-card \.(ui-control|auth-password-field) \{[^}]*border-color: transparent/);
     expect(rule(".df-ce-field input")).toMatch(/background: var\(--surface-inset\);/);
     expect(styles).not.toMatch(/\.df-ce-field input \{[^}]*1px solid/);
   });
@@ -32,6 +39,7 @@ describe("fields (web UI audit P4)", () => {
   it("rings the palette search and List inline edits on focus instead of an underline or nothing", () => {
     expect(rule(".df-palette-input")).toMatch(/background: var\(--surface-inset\);/);
     expect(rule(".df-palette-input")).not.toMatch(/inset 0 -1px/);
+    expect(rule(".df-flist-search:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
     expect(rule(".df-palette-input:focus-within")).toMatch(/box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/);
     expect(rule(".timeline-inline-time:has(.timeline-inline-time-input:focus-visible)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
     expect(rule(".timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus)")).toMatch(/inset 0 0 0 2px var\(--web-focus-border\)/);
@@ -55,8 +63,11 @@ describe("fields (web UI audit P4)", () => {
     expect(styles).not.toMatch(/\.(settings-appearance-row|timeline-range-controls|df-set-card)[^{]*\.ui-segmented-control button\[aria-pressed="true"\]/);
   });
 
-  it("makes segments and text fields 44 px on touch screens (WUI-019, WUI-046)", () => {
+  it("makes segments and text fields 44 px on touch screens, last in the cascade (WUI-019, WUI-046)", () => {
     const coarse = styles.match(/@media \(any-pointer: coarse\) \{\s*\.df-seg a,[\s\S]*?\n\}/)?.[0] ?? "";
+    // After every base size it overrides (Codex r1 on #472: `.df-pe-seg span` came later and won).
+    expect(styles.lastIndexOf(coarse)).toBeGreaterThan(styles.lastIndexOf(".df-pe-seg span {"));
+    expect(styles.trimEnd().endsWith(coarse.trimEnd())).toBe(true);
     for (const selector of [".ui-segmented-control button", ".df-pe-seg span", ".df-flist-search input", ".df-logas input"]) {
       expect(coarse, selector).toContain(selector);
     }

@@ -25,13 +25,15 @@ export function DayframeBrand({
       role={decorative ? undefined : "img"}
     >
       {layout !== "wordmark" ? (
+        // The mark cropped to its blocks (logos/dayframe-colour-mark.svg), so it centres beside the
+        // wordmark; its CSS keeps the blocks' size and their distance from the wordmark.
         <Image
           className="dayframe-brand-mark"
-          src="/logos/dayframe-colour-logo-transparent.svg"
+          src="/logos/dayframe-colour-mark.svg"
           alt=""
           aria-hidden="true"
-          width={1024}
-          height={1024}
+          width={655}
+          height={685}
           priority
         />
       ) : null}

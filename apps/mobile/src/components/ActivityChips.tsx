@@ -108,9 +108,18 @@ export function AllActivitiesChip({
 }
 
 /** The wrapped row the chips sit in (never a sideways scroller). */
-export function ActivityChipRow({ children, testID }: { children: ReactNode; testID?: string }) {
+export function ActivityChipRow({
+  children,
+  onLayout,
+  testID
+}: {
+  children: ReactNode;
+  /** The row's width, for fitting the chips into their rows. */
+  onLayout?: (event: LayoutChangeEvent) => void;
+  testID?: string;
+}) {
   return (
-    <View accessibilityLabel="Activity" style={activityChipStyles.wrap} testID={testID}>
+    <View accessibilityLabel="Activity" onLayout={onLayout} style={activityChipStyles.wrap} testID={testID}>
       {children}
     </View>
   );
@@ -132,5 +141,7 @@ export const activityChipStyles = StyleSheet.create({
   },
   chipMore: { paddingLeft: 11 },
   chipText: { flexShrink: 1, fontSize: 13.5, fontWeight: "600" },
-  chipCount: { fontSize: 12, fontWeight: "600" }
+  chipCount: { fontSize: 12, fontWeight: "600" },
+  /** Measures candidate chips off screen, so the visible row can be fitted. */
+  measure: { flexDirection: "row", left: 0, opacity: 0, position: "absolute", top: 0 }
 });

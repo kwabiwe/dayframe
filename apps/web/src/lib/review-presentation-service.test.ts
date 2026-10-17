@@ -74,6 +74,89 @@ describe("getReviewPresentation", () => {
     expect(older.records[0]).not.toHaveProperty("routeLabel");
   });
 
+  it("tells only clients that ask which outing a card belongs to (PRD D19, PR 12b)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Drive",
+      eventType: "commute_detected", timeAwayStopCount: null, routeLabel: null,
+      outingKey: "outing:70000000-0000-4000-8000-000000000002", outingRole: "in", outingTravelMode: "automotive" };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain(`ae.raw_payload ->> 'outingKey'`);
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { timeAway: true, moveRoute: true, outing: true });
+    expect(asked.records[0]).toMatchObject({ outing: { key: "outing:70000000-0000-4000-8000-000000000002", role: "in", travelMode: "automotive" } });
+    expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
+    // Older iPhone builds parse records strictly: they never receive the field.
+    const older = await getReviewPresentation(session, request, {}, { timeAway: true, moveRoute: true });
+    expect(older.records[0]).not.toHaveProperty("outing");
+    // A role the client would not know is left out.
+    query.mockImplementation(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) return { rows: [{ ...raw, outingRole: "elsewhere" }] };
+      return { rows: [] };
+    });
+    const odd = await getReviewPresentation(session, request, {}, { outing: true });
+    expect(odd.records[0]).not.toHaveProperty("outing");
+  });
+
+  it("says a title is a learned name only to clients that ask (Codex r1 on #481)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Swimming",
+      eventType: "commute_detected", timeAwayStopCount: null, routeLabel: null, learnedName: true };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        expect(sql).toContain(`ae.raw_payload ->> 'nameSource' = 'learned'`);
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { learnedName: true });
+    expect(asked.records[0]).toMatchObject({ learnedName: true });
+    expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
+    expect((await getReviewPresentation(session, request, {}, {})).records[0]).not.toHaveProperty("learnedName");
+  });
+
+  it("counts cards and sends the outing map only to clients that ask; beyond its limit the counts are not exact (PR 12c)", async () => {
+    let stays = [{ member: "71000000-0000-4000-8000-000000000002", stay: "71000000-0000-4000-8000-000000000001" }];
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("open_outing_cards")) return { rows: stays };
+      if (sql.includes("with open_reviews")) {
+        return { rows: [{ globalCount: sql.includes("outingRole") ? 1 : 2, todayCount: 0, openReviewItemIds: [] }] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const cards = await getReviewPresentation(session, request, {}, { outingCount: true });
+    expect(cards.outstanding).toMatchObject({ globalCount: 1, outingStays: { [stays[0].member]: stays[0].stay } });
+    expect(cards.completeness.outstandingCounts).toBe(true);
+    const plain = await getReviewPresentation(session, request, {}, {});
+    expect(plain.outstanding.globalCount).toBe(2);
+    expect(plain.outstanding).not.toHaveProperty("outingStays");
+    stays = Array.from({ length: 201 }, (_, index) => ({
+      member: `72000000-0000-4000-8000-${String(index).padStart(12, "0")}`, stay: "71000000-0000-4000-8000-000000000001" }));
+    const beyond = await getReviewPresentation(session, request, {}, { outingCount: true });
+    expect(beyond.outstanding).not.toHaveProperty("outingStays");
+    // Membership stays complete (eviction relies on it); the missing map is said separately (Codex r3 on #475).
+    expect(beyond.completeness.outstandingCounts).toBe(true);
+    expect(beyond.outstanding.outingStaysOverflow).toBe(true);
+    expect(cards.outstanding).not.toHaveProperty("outingStaysOverflow");
+  });
+
   it("marks time away only for clients that ask for it (review finding 3)", async () => {
     const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Time away from Home",
       eventType: "commute_detected", timeAwayStopCount: 1 };

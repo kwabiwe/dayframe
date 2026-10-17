@@ -15,10 +15,6 @@ import type {
   LocationReviewEvidenceDto
 } from "@dayframe/shared";
 import { LocationReviewCorrectionEditor } from "@/components/location/LocationReviewCorrectionEditor";
-import type { SavePlaceRequest } from "@/components/location/SavePlaceSheet";
-import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
-import { refreshGeofencesForPlaces } from "@/lib/geofence";
-import { useReduceMotionPreference } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { blocksNavOrigin, evidenceBackLabel } from "@/lib/blocksNav";
@@ -384,38 +380,6 @@ export default function LocationReviewDetailScreen() {
   useEffect(() => () => reconnectControllerRef.current?.abort(), []);
 
   const actionInFlightRef = useRef(false);
-  const reduceMotion = useReduceMotionPreference();
-  const saveNotice = useBlocksNotice();
-
-  /**
-   * "Save this place" (PRD D19, design §7): one durable Review outbox commit that keeps this card open,
-   * so the screen stays. Once the server has it, the places and their geofences are refreshed so the
-   * phone recognises the next visit there.
-   */
-  async function savePlace(request: SavePlaceRequest & { categoryId: string | null }): Promise<string | null> {
-    if (!id || !data || !reviewItem) return "This visit isn't available in the saved account data. Go back and refresh Review.";
-    try {
-      const command = buildDurableLocationReviewCommand({ action: "save_place", ...request }, reviewItem, data);
-      if (!command) return "Saving a place isn't available for this visit.";
-      await enqueueReviewMutation({
-        bootstrap: data,
-        item: reviewItem,
-        mutation: command.mutation,
-        affectedItems: command.affectedItems,
-        clientMutationId: createReviewClientMutationId()
-      });
-    } catch (error) {
-      return error instanceof Error && error.message ? error.message : "Couldn't save this place on this iPhone. Try again.";
-    }
-    const owner = { userId: data.user.id, workspaceId: data.workspace.id };
-    void synchroniseReviewMutations().then(async (result) => {
-      if (!result.acknowledgedCount) return;
-      const refreshed = await fetchBootstrap();
-      await refreshGeofencesForPlaces(refreshed.places, owner);
-    }).catch(() => undefined);
-    return null;
-  }
-
   async function perform(
     action: LocationReviewAction,
     _successMessage: string
@@ -536,25 +500,12 @@ export default function LocationReviewDetailScreen() {
           evidence={evidence}
           isFocused={isFocused}
           onCreateActivity={createActivity}
-          onPlaceSaved={(name) => saveNotice.show({ message: `Saved ${name}`, detail: "This visit is still in Review." })}
           onResolve={perform}
-          onSavePlace={savePlace}
           places={data?.places ?? []}
           recentActivityIds={recentActivities}
           reviewItem={reviewItem}
           saving={saving}
           statusMessage={actionMessage ?? screenState.refreshMessage}
-        />
-      ) : null}
-      {saveNotice.notice ? (
-        <BlocksToast
-          detail={saveNotice.notice.detail}
-          key={saveNotice.notice.token}
-          message={saveNotice.notice.message}
-          reduceMotion={reduceMotion}
-          style={styles.blocksToastOverlay}
-          testID="location-evidence-save-notice"
-          theme={theme}
         />
       ) : null}
     </SafeAreaView>

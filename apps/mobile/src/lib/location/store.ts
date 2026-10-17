@@ -12,6 +12,7 @@ import {
   LocationEvidenceBatchRequestSchema,
   LocationEvidenceSchema,
   LocationReplayResponseSchema,
+  REVIEW_COUNT_CARDS,
   REVIEW_COUNT_REQUEST_HEADER,
   SEMANTIC_CHANGE_COUNT_REQUEST_HEADER,
   LocationReplayRequestSchema,
@@ -1129,7 +1130,9 @@ async function uploadLocationEvidenceBatch(
         method: "POST",
         headers: {
           Authorization: `Bearer ${session.token}`,
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          // The reply's Review count counts cards, an outing once (PR 12c).
+          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS
         },
         body: batch.body_json,signal:options.signal
       },Math.max(1,Math.min(15_000,(options.deadlineAt??Date.now()+15_000)-Date.now())),()=>isLocationSyncOwnershipCurrent(owner,session))
@@ -1303,7 +1306,8 @@ async function requestServerLocationReplay(
           Authorization: `Bearer ${session.token}`,
           "Content-Type": "application/json",
           // The reply then carries the Review count for the evening reminder, and what the replay changed.
-          [REVIEW_COUNT_REQUEST_HEADER]: "1",
+          // Counted in cards, an outing once (PR 12c).
+          [REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,
           [SEMANTIC_CHANGE_COUNT_REQUEST_HEADER]: "1"
         },
         signal:options.signal,

@@ -1,3 +1,4 @@
+import { OUTING_KEY_PAYLOAD_KEY, OUTING_ROLE_PAYLOAD_KEY } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "./api";
 
 // The Review screen has one owner for its items: the SQLite projection (the cache with local
@@ -51,11 +52,12 @@ export function projectReviewScreenData(input: {
     const liveItem = live.get(cached.id);
     // The live copy adds what is never cached (visit titles); fields only the store holds (a time-away
     // subtype from a presentation read) stay underneath, so the card keeps its kind.
-    const chosen = liveItem && sameReviewProposal(liveItem, cached)
+    const merged = liveItem && sameReviewProposal(liveItem, cached)
       ? cached.rawPayload && Object.keys(cached.rawPayload).some((key) => !(key in (liveItem.rawPayload ?? {})))
         ? { ...liveItem, rawPayload: { ...cached.rawPayload, ...(liveItem.rawPayload ?? {}) } }
         : liveItem
       : cached;
+    const chosen = merged === cached ? cached : withCachedOuting(merged, cached);
     const shown = previous.get(chosen.id);
     return shown && sameJson(shown, chosen) ? shown : chosen;
   });
@@ -70,18 +72,67 @@ export function projectReviewScreenData(input: {
     workspace: projection.workspace,
     categories,
     reviewItems: stableItems,
-    stats: base.stats ? { ...base.stats, reviewCount } : projection.stats
+    stats: base.stats ? withProjectionCounts(base.stats, reviewCount, projection.stats) : projection.stats
   };
   if (
     current && current === base &&
     stableItems === current.reviewItems &&
     categories === current.categories &&
     sameJson(current.workspace, next.workspace) &&
-    current.stats?.reviewCount === next.stats?.reviewCount
+    current.stats?.reviewCount === next.stats?.reviewCount &&
+    current.stats?.reviewCardCount === next.stats?.reviewCardCount &&
+    current.stats?.reviewCardCountApproximate === next.stats?.reviewCardCountApproximate &&
+    sameJson(current.stats?.reviewOutingStays, next.stats?.reviewOutingStays)
   ) {
     return current;
   }
   return next;
+}
+
+/**
+ * One card per outing (PRD D19): which outing a card is in comes from the store alone, which takes
+ * each read as it lands (a presentation read after a replay clears or moves an outing an earlier
+ * bootstrap gave), never from the live bootstrap copy (Codex r1 on #473).
+ */
+function withCachedOuting(item: MobileReviewItem, cached: MobileReviewItem): MobileReviewItem {
+  const key = cached.rawPayload?.[OUTING_KEY_PAYLOAD_KEY];
+  const role = cached.rawPayload?.[OUTING_ROLE_PAYLOAD_KEY];
+  const payload = item.rawPayload ?? {};
+  if (payload[OUTING_KEY_PAYLOAD_KEY] === key && payload[OUTING_ROLE_PAYLOAD_KEY] === role) return item;
+  const { [OUTING_KEY_PAYLOAD_KEY]: _key, [OUTING_ROLE_PAYLOAD_KEY]: _role, ...rest } = payload;
+  return {
+    ...item,
+    rawPayload: {
+      ...rest,
+      ...(key !== undefined ? { [OUTING_KEY_PAYLOAD_KEY]: key } : {}),
+      ...(role !== undefined ? { [OUTING_ROLE_PAYLOAD_KEY]: role } : {})
+    }
+  };
+}
+
+/**
+ * The projection's Review counts over `base`'s other stats: the count of cards with its map,
+ * exactness and applied decisions together, a field the projection lacks cleared, never left
+ * over from `base` (Codex r2/r3 on #475).
+ */
+function withProjectionCounts(
+  base: NonNullable<MobileBootstrap["stats"]>,
+  reviewCount: number,
+  projected: MobileBootstrap["stats"]
+): NonNullable<MobileBootstrap["stats"]> {
+  const {
+    reviewCardCount: _count, reviewOutingStays: _stays, reviewOutingStaysOverflow: _overflow,
+    reviewCardCountApproximate: _approximate, reviewCardCountAppliedIds: _applied, ...rest
+  } = base;
+  return {
+    ...rest,
+    reviewCount,
+    ...(typeof projected?.reviewCardCount === "number" ? { reviewCardCount: projected.reviewCardCount } : {}),
+    ...(projected?.reviewOutingStays ? { reviewOutingStays: projected.reviewOutingStays } : {}),
+    ...(projected?.reviewOutingStaysOverflow ? { reviewOutingStaysOverflow: true } : {}),
+    ...(projected?.reviewCardCountApproximate ? { reviewCardCountApproximate: true } : {}),
+    ...(projected?.reviewCardCountAppliedIds ? { reviewCardCountAppliedIds: projected.reviewCardCountAppliedIds } : {})
+  };
 }
 
 export function liveReviewItems(bootstrap: MobileBootstrap) {

@@ -64,14 +64,16 @@ struct NearbyPointOfInterestValue: Equatable {
 }
 
 /// What crosses the bridge for one nearby place: an opaque id for the current generation, the
-/// title, an address line and the rounded distance. The coordinate stays in the native registry
-/// until the person picks the place (`NearbyPointOfInterestCoordinator.resolve`).
+/// title, an address line, the rounded distance and its kind of place (the Apple category without
+/// its prefix, e.g. "FitnessCenter"; the row says "Gym · 40 m"). The coordinate stays in the native
+/// registry until the person picks the place (`NearbyPointOfInterestCoordinator.resolve`).
 struct NearbyPointOfInterestSuggestionValue: Equatable {
   let id: String
   let requestId: String
   let title: String
   let subtitle: String?
   let distanceMeters: Int
+  var category: String? = nil
 
   var dictionary: [String: Any] {
     [
@@ -79,8 +81,16 @@ struct NearbyPointOfInterestSuggestionValue: Equatable {
       "requestId": requestId,
       "title": title,
       "subtitle": subtitle as Any,
-      "distanceMeters": distanceMeters
+      "distanceMeters": distanceMeters,
+      "category": category as Any
     ]
+  }
+
+  /// A stable key for an Apple point-of-interest category: its raw value without "MKPOICategory".
+  static func categoryKey(_ category: MKPointOfInterestCategory?) -> String? {
+    guard let raw = category?.rawValue, !raw.isEmpty else { return nil }
+    let key = raw.hasPrefix("MKPOICategory") ? String(raw.dropFirst("MKPOICategory".count)) : raw
+    return key.isEmpty ? nil : key
   }
 }
 
@@ -169,7 +179,8 @@ final class NearbyPointOfInterestCoordinator {
         requestId: requestId,
         title: place.name,
         subtitle: place.formattedAddress,
-        distanceMeters: place.distanceMeters
+        distanceMeters: place.distanceMeters,
+        category: NearbyPointOfInterestSuggestionValue.categoryKey(place.category)
       )
     }
   }

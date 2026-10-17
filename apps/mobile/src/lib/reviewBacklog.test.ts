@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewPresentationResponse } from "@dayframe/shared";
 import {
+  loadedReviewBacklogCards,
   mergeReviewBacklogPage,
   projectReviewBacklogPage
 } from "./reviewBacklog";
@@ -20,6 +21,15 @@ describe("Review backlog pages", () => {
       reviewItemIds: [reviewId]
     });
     expect(first.legacyEntries).toMatchObject([{ id: legacyId, description: "Imported walk" }]);
+  });
+
+  it("counts loaded cards as the server counts them, an outing once (PR 12c)", () => {
+    expect(loadedReviewBacklogCards({ recordKeys: ["review:stay", "review:there", "review:walk", "legacy:entry"],
+      outings: [{ id: "stay", rawPayload: { outingKey: "outing:a", outingRole: "stay" } },
+        { id: "there", rawPayload: { outingKey: "outing:a", outingRole: "in" } }] })).toBe(3);
+    // A Move counts on its own until the page with its Stay is loaded.
+    expect(loadedReviewBacklogCards({ recordKeys: ["review:there"],
+      outings: [{ id: "there", rawPayload: { outingKey: "outing:a", outingRole: "in" } }] })).toBe(1);
   });
 
   it("does not append a page from a changed snapshot", () => {

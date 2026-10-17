@@ -54,8 +54,9 @@ export type NearbyPointOfInterestQuery = {
 
 /**
  * One nearby point of interest as it crosses the bridge: an opaque id for this generation, the
- * title, an address line and the rounded distance. The coordinate stays native until the place
- * is picked (`resolveNearby`).
+ * title, an address line, the rounded distance and its kind of place (Apple's category without its
+ * prefix, e.g. "FitnessCenter"; absent from older native builds). The coordinate stays native until
+ * the place is picked (`resolveNearby`).
  */
 export type NearbyPointOfInterest = {
   id: string;
@@ -63,6 +64,7 @@ export type NearbyPointOfInterest = {
   title: string;
   subtitle: string | null;
   distanceMeters: number;
+  category?: string | null;
 };
 
 export type NearbyPointOfInterestResult = {

@@ -41,12 +41,31 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("keeps a saved decision out of the deck until its projection lands (r2 A)", () => {
     expect(screen).toContain("committingDeckKeys.has(key)");
-    expect(screen).toContain("setDeckKeyCommitting(held.key, true);");
+    // An outing's Moves stay out with its Stay's card (PRD D19, PR 12b).
+    expect(screen).toContain("const committingKeys = [held.key, ...memberKeys];");
+    expect(screen).toContain("setDeckKeysCommitting(committingKeys, true);");
     expect(screen).toMatch(/started = resolveItem\(item, \{ action: "edit_and_confirm", edit \}, [^\n]*settled, failed, \{ unlisted \}\);/);
     expect(screen).toMatch(/started = resolveItem\([^\n]*ignore_once[^\n]*settled, failed, \{ unlisted \}\);/);
     expect(screen).toContain("if (!started) failed();");
-    expect(screen).toContain("if (reviewMutations.current.has(item.id)) return false;");
+    expect(screen).toContain("const claimed = () => affected.some((candidate) => reviewMutations.current.has(candidate.id));");
+    expect(screen).toContain("if (claimed()) return false;");
     expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');
+  });
+
+  it("folds an outing's Moves into its Stay's card and decides them together (PRD D19, PR 12b)", () => {
+    expect(screen).toContain('const folded = (source: DeckSource) => source.kind === "review" && deckOutings.anchorByMember.has(source.item.id);');
+    expect(screen).toContain("sources = sources.filter((source) => !folded(source));");
+    // A Today ribbon focus on a folded Move leads with its outing's card.
+    expect(screen).toContain('const focusTarget = focusedAnchor ? reviewFocusKey("review", focusedAnchor) : highlightedFocusKey;');
+    // One outbox row on the Stay's card hides every part; Undo and a failed save bring every part back.
+    expect(screen).toContain("{ unlisted, affectedItems: [item, ...members] }");
+    expect(screen).toContain("for (const member of held.outing?.members ?? []) restorePagedOutDeckItem(member.itemId);");
+    expect(screen).toMatch(/const failed = \(\) => \{[\s\S]*?restoreMembers\(\);[\s\S]*?undoCount\(\);/);
+    expect(deck).toContain('testID="review-deck-outing"');
+    // A focused Move opens its outing in the Stay's segment (a trip after midnight; Codex r1 on #473).
+    expect(screen).toContain("beginExactFocus(focusKey, reviewDeckSegmentFor(reviewItemMoment(shown), reviewDeckToday(Date.now())));");
+    // The outing is one decision of this visit: its Moves never count toward "N of M".
+    expect(screen).not.toMatch(/ownDeckDecisionKeys\.current\.(add|delete)\(member/);
   });
 
   it("does not count the held card in flight toward \"N of M\" (r2 B)", () => {
@@ -115,8 +134,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   });
 
   it("retires a cut-short flight on the save outcome and flushes a held card on any decision (r3 3, 4)", () => {
-    expect(screen).toMatch(/const settled = \(\) => \{\s*setDeckKeyCommitting\(held\.key, false\);[\s\S]*?setFlyingDeckKey/);
-    expect(screen).toMatch(/if \(reviewMutations\.current\.has\(item\.id\)\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
+    expect(screen).toMatch(/const settled = \(\) => \{\s*setDeckKeysCommitting\(committingKeys, false\);[\s\S]*?setFlyingDeckKey/);
+    expect(screen).toMatch(/if \(claimed\(\)\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
     expect(screen).toMatch(/if \(!editTarget\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
   });
 
@@ -127,7 +146,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
   it("restores a failed save as a fresh card and never saves a changed proposal (r4 1, 2)", () => {
     expect(screen).toMatch(/const failed = \(\) => \{[^}]*deferGenerations\.current\.set\(held\.key/);
     expect(screen).toContain("proposal: reviewDeckProposalSignature(item)");
-    expect(screen).toContain("if (reviewDeckProposalSignature(item) !== held.proposal) {");
+    // A held outing saves nothing when any of its Moves changed too (PRD D19, PR 12b).
+    expect(screen).toContain("if (reviewDeckProposalSignature(item) !== held.proposal || members === null) {");
   });
 
   it("saves a throw reported after leaving at once, and Undo beats a ribbon focus (r4 3, 4)", () => {
@@ -228,7 +248,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(screen).toContain("return knownDeckItems.get(itemId, dataRef.current);");
     expect(screen).not.toMatch(/knownDeckItems\.current/);
     // A single decision whose flush saved the same item through a batch stops there.
-    expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(reviewMutations\.current\.has\(item\.id\)\) return false;/);
+    expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(claimed\(\)\) return false;/);
     // The longer menu stays inside the screen with a visible Cancel.
     expect(menu).toContain("maxHeight: windowHeight - insets.top");
     expect(menu).toContain(">Cancel</Text>");

@@ -75,7 +75,8 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain('return evidence.display.title?.trim() || "Trip";');
     expect(evidenceEditorSource).toContain('action: "split"');
     expect(evidenceEditorSource).toContain('action: "merge"');
-    expect(evidenceEditorSource).toContain('action: "record_once"');
+    // The primary button records once; More options has no duplicate "Record once" (owner, 17 Oct 2026).
+    expect(evidenceEditorSource).not.toContain('title="Record once"');
     expect(evidenceSource).not.toContain("Time and uncertainty");
     expect(evidenceSource).not.toContain("Raw evidence is retained until");
     expect(evidenceMapSource).toContain("showDetails = true");
@@ -107,7 +108,12 @@ describe("mobile Review action contracts", () => {
 
   it("keeps evidence fields visible above the keyboard and uses the shared activity chips", () => {
     const chipsSource = source("./ActivityChips.tsx");
-    expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
+    // The editor owns the keyboard space so the pinned Record bar rides above it (Codex r1 on #480).
+    expect(evidenceEditorSource).toContain("automaticallyAdjustKeyboardInsets={false}");
+    // Every field the keyboard can cover is revealed by the editor itself, the map pin's name too (Codex r2 on #480).
+    expect(evidenceEditorSource).toContain("focusRevealControl(pinNameInputRef.current);");
+    expect(evidenceEditorSource).toContain("onBlur={() => blurRevealControl(pinNameInputRef.current)}");
+    expect(evidenceEditorSource).toContain("withTiming(lift, { duration, easing: Easing.out(Easing.cubic) })");
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");
     expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add a name (optional)"}');
@@ -137,7 +143,7 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain("useState(false)");
     expect(evidenceEditorSource).toContain('action: "record_poi_once"');
     expect(evidenceEditorSource).toContain("Save for future visits");
-    expect(evidenceEditorSource).toContain('saveForFuture ? "Save place and record" : "Use once and record"');
+    expect(evidenceEditorSource).toContain('saveForFuture ? "Save place and record" : "Record"');
     expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
   });
 
