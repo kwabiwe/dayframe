@@ -123,12 +123,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // (no landing on reconciliation).
   useEffect(() => {
     if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
-    if (!window.location.pathname.startsWith("/reports")) return;
+    // Elsewhere the shell's data was drawn for the old zone (or none): fetch it again with the
+    // cookie, so its day and week ranges are the viewer's (#484).
+    if (!window.location.pathname.startsWith("/reports")) {
+      void refresh();
+      return;
+    }
     // Marked with the route the refresh will render, in the router's terms (the panel compares
     // `usePathname()`/`useSearchParams()`, never the address bar).
     markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
     router.refresh();
-  }, [router]);
+  }, [refresh, router]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");

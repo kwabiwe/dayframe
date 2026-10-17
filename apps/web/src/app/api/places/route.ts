@@ -13,6 +13,7 @@ import {
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { PlaceRoleConflictError } from "@/lib/place-role-service";
 import { getBootstrapData } from "@/lib/queries";
+import { viewerTimeZoneIfSentForRequest } from "@/lib/viewer-time-zone-server";
 
 const placeFieldsSchema = z.object({
   name: z.string().trim().min(1, "Place name is required."),
@@ -44,7 +45,7 @@ const placeUpdateSchema = placeFieldsSchema.partial().extend({
 export async function GET(request: Request) {
   try {
     const session = await resolveRequestSession(request);
-    const data = await getBootstrapData(session);
+    const data = await getBootstrapData(session, { timeZone: viewerTimeZoneIfSentForRequest(request) });
     return NextResponse.json({ places: data.places });
   } catch (error) {
     const response = authErrorResponse(error);

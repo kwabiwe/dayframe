@@ -5,8 +5,12 @@ import {
   syncViewerTimeZoneCookie,
   viewerTimeZoneCookie,
   viewerTimeZoneFromCookieHeader,
+  addDaysToDateKey,
+  snapshotFitsViewerZone,
+  mondayOfDateKey,
   zonedDateKey,
-  zonedStartOfDay
+  zonedStartOfDay,
+  zonedWallHour
 } from "./viewer-time-zone";
 
 const originalTimeZone = process.env.TZ;
@@ -80,5 +84,41 @@ describe("calendar days in a zone, whatever the server's own zone", () => {
 
   it("refuses a malformed date key", () => {
     expect(() => zonedStartOfDay("12/10/2026", "UTC")).toThrow();
+  });
+});
+
+describe("date-key arithmetic and wall hours in a zone", () => {
+  it("adds days and finds the Monday across month and year ends", () => {
+    expect(addDaysToDateKey("2026-12-31", 1)).toBe("2027-01-01");
+    expect(addDaysToDateKey("2026-03-01", -1)).toBe("2026-02-28");
+    expect(mondayOfDateKey("2026-10-18")).toBe("2026-10-12");
+    expect(mondayOfDateKey("2026-10-12")).toBe("2026-10-12");
+    expect(mondayOfDateKey("2027-01-01")).toBe("2026-12-28");
+  });
+
+  it("reads the wall clock's hour, the clock-change days included", () => {
+    process.env.TZ = "UTC";
+    expect(zonedWallHour("2026-10-12", 8, "Europe/London").toISOString()).toBe("2026-10-12T07:00:00.000Z");
+    // 29 March: 01:00 GMT jumps to 02:00 BST, so 01:00 does not exist; 02:00 is the first instant after.
+    expect(zonedWallHour("2026-03-29", 1, "Europe/London").toISOString()).toBe("2026-03-29T01:00:00.000Z");
+    expect(zonedWallHour("2026-03-29", 8, "Europe/London").toISOString()).toBe("2026-03-29T07:00:00.000Z");
+    // 25 October: 01:00 happens twice; the first one (BST) is the hour.
+    expect(zonedWallHour("2026-10-25", 1, "Europe/London").toISOString()).toBe("2026-10-25T00:00:00.000Z");
+    expect(zonedWallHour("2026-10-25", 8, "Europe/London").toISOString()).toBe("2026-10-25T08:00:00.000Z");
+    expect(zonedWallHour("2026-10-25", 24, "Europe/London").toISOString()).toBe("2026-10-26T00:00:00.000Z");
+  });
+});
+
+describe("which cached bootstrap fits the browser's zone (Codex r1 on #484)", () => {
+  it("matches a snapshot's zone to the cookie the browser sends now", () => {
+    expect(snapshotFitsViewerZone(null, "")).toBe(true);
+    expect(snapshotFitsViewerZone(undefined, "other=1")).toBe(true);
+    // Built before the cookie existed: fetched again once it does.
+    expect(snapshotFitsViewerZone(null, "dayframe_tz=Europe/London")).toBe(false);
+    expect(snapshotFitsViewerZone("Europe/London", "a=b; dayframe_tz=Europe/London")).toBe(true);
+    expect(snapshotFitsViewerZone("Europe/London", "dayframe_tz=America/New_York")).toBe(false);
+    expect(snapshotFitsViewerZone("Europe/London", "")).toBe(false);
+    // An unknown zone is UTC on both sides.
+    expect(snapshotFitsViewerZone("UTC", "dayframe_tz=Mars/Base")).toBe(true);
   });
 });
