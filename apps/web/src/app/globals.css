@@ -8908,6 +8908,20 @@ dialog.ui-dialog.df-range-custom {
   white-space: nowrap;
 }
 
+/* Calendar phone layout (owner-approved 17 Oct 2026): a 104 px gutter and 130 px day columns on wider
+   screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Short
+   blocks stay data marks; List is the phone path for detail (WUI-045). */
+.timeline-calendar-workspace {
+  --calendar-axis-width: 104px;
+  --calendar-day-min-width: 130px;
+  position: relative;
+}
+
+.calendar-phone-zoom {
+  display: none;
+}
+
+
 .calendar-corner-zoom {
   display: grid;
   grid-template-columns: repeat(2, 44px);
@@ -15522,6 +15536,92 @@ dialog.ui-dialog.df-palette {
 
   .df-report-row {
     animation: none;
+  }
+}
+
+/* Calendar phone layout, last in the file so it wins over the phone shell's fixed-height frame: the
+   Calendar page scrolls as a page and the card takes nearly a screen of its own, so one scroll puts a
+   full-height grid (sticky day headings inside) on screen instead of a ~120 px sliver under the
+   timer, quick start, week strip and toolbar. The grid hands a scroll past its ends to the page. */
+@media (max-width: 560px) {
+  .swiss-app-shell.is-timeline {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline {
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline .timeline-calendar-workspace,
+  .swiss-main-frame.is-timeline .timeline-list-workspace {
+    /* Its row parent (.timeline-view-stage) gives it the full width; this fixes its height. */
+    height: calc(100dvh - var(--df-tabbar-space) - 24px);
+    min-height: 420px;
+  }
+
+  .calendar-grid-scroller,
+  .timeline-list-scroll {
+    overscroll-behavior: auto;
+  }
+
+  .timeline-calendar-workspace {
+    --calendar-axis-width: 60px;
+    --calendar-day-min-width: 118px;
+  }
+
+  /* "12:00 PM" fits the narrow gutter on one line. */
+  .calendar-now-pill {
+    right: 2px;
+    padding: 2px 5px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .calendar-grid-corner .calendar-corner-zoom {
+    display: none;
+  }
+
+  .calendar-grid-corner {
+    padding: 4px;
+  }
+
+  .calendar-time-axis .tabular {
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .calendar-phone-zoom {
+    position: absolute;
+    z-index: 45;
+    right: 12px;
+    bottom: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    border-radius: 999px;
+    padding: 2px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-floating);
+  }
+
+  .calendar-phone-zoom button {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 17px;
+  }
+
+  .calendar-phone-zoom button:hover:not(:disabled) {
+    background: var(--surface-muted);
+  }
+
+  .calendar-phone-zoom button:disabled {
+    color: var(--muted);
+    opacity: 0.42;
   }
 }
 

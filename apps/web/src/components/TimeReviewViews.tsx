@@ -1341,6 +1341,26 @@ export function CalendarReview({
 
   return (
     <section className="timeline-calendar-workspace">
+      {/* Phones: the narrow time gutter has no room for the corner's zoom, so it floats over the
+          grid's lower right corner instead (CSS shows one or the other). */}
+      <span className="calendar-phone-zoom" role="group" aria-label="Calendar zoom">
+        <button
+          type="button"
+          disabled={zoomIndex === 0}
+          aria-label="Zoom calendar out"
+          onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          disabled={zoomIndex === zoomKeys.length - 1}
+          aria-label="Zoom calendar in"
+          onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+        >
+          +
+        </button>
+      </span>
       <div
         aria-busy={localTimeReady ? undefined : true}
         aria-label="Calendar time grid"
@@ -1351,7 +1371,9 @@ export function CalendarReview({
       >
         <div
           className="timeline-calendar-grid"
-          style={{ gridTemplateColumns: `104px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
+          // The time gutter and the narrowest day column come from CSS (--calendar-axis-width,
+          // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
+          style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
         >
           <div className="calendar-grid-corner">
             <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">

@@ -66,6 +66,16 @@ export function timelineStateFromSearchParams(
   return { date, scope, view };
 }
 
+/**
+ * The preference a first visit uses when the browser has no Calendar cookie yet: a phone (its user
+ * agent says "Mobi", as MDN recommends) opens Day, since a week of seven columns leaves each day
+ * too narrow to read at phone width; everything else keeps the usual Week. Once the user picks a
+ * view or scope, the cookie decides.
+ */
+export function firstVisitTimelinePreference(userAgent: string | null | undefined): TimelinePreference | null {
+  return userAgent && /Mobi/.test(userAgent) ? { lastView: DEFAULT_TIMELINE_PREFERENCE.lastView, preferredScope: "day" } : null;
+}
+
 export function timelinePreferenceFromCookieValue(value?: string | null): TimelinePreference | null {
   if (!value) return null;
   const [lastView, preferredScope] = value.split(":");
