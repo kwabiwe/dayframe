@@ -53,7 +53,7 @@ describe("PersistentTimerBar block suggestions", () => {
     await userEvent.click(await screen.findByRole("option", { name: /Deep planning/ }));
     expect(description.value).toBe("Deep planning");
     expect(within(editor).getByRole("radio", { name: "Focus" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Deep work, remove tag" })).not.toBeNull();
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
   });
 

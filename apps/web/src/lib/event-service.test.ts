@@ -950,9 +950,9 @@ describe("category persistence", () => {
         rawPayload: {
           candidateName: "Regular place near 51.610, -0.220",
           address: {
-            street: "Springfield Road",
-            city: "Chelmsford",
-            postalCode: "CM2 6QT"
+            street: "Example Road",
+            city: "Exampleton",
+            postalCode: "ZZ1 1AA"
           },
           clusterKey: "51.610,-0.220",
           latitude: 51.61,
@@ -991,10 +991,10 @@ describe("category persistence", () => {
       type: "learned_place_visit",
       occurredAt: new Date("2026-07-06T10:15:00.000Z"),
       rawPayload: {
-        candidateName: "Near Rainsford Road",
-        clusterKey: "51.740,0.456",
-        latitude: 51.739532,
-        longitude: 0.45631,
+        candidateName: "Near Synthetic Lane",
+        clusterKey: "10.740,20.456",
+        latitude: 10.739532,
+        longitude: 20.45631,
         startedAt: "2026-07-06T09:00:00.000Z",
         stoppedAt: "2026-07-06T10:15:00.000Z",
         durationSeconds: 4500,
@@ -1037,11 +1037,11 @@ describe("category persistence", () => {
       occurredAt: new Date("2026-07-07T09:25:00.000Z"),
       rawPayload: {
         address: {
-          name: "Tesco Springfield",
-          street: "Springfield Road",
-          city: "Chelmsford",
-          postalCode: "CM2 6QT",
-          formattedAddress: "Springfield Road, Chelmsford, CM2 6QT"
+          name: "Example Grocer",
+          street: "Example Road",
+          city: "Exampleton",
+          postalCode: "ZZ1 1AA",
+          formattedAddress: "Example Road, Exampleton, ZZ1 1AA"
         },
         clusterKey: "51.610,-0.220",
         latitude: 51.61,
@@ -1065,7 +1065,7 @@ describe("category persistence", () => {
       action: "create_review_item",
       reviewStatus: "needs_review",
       confidence: "medium",
-      title: "Tesco Springfield"
+      title: "Example Grocer"
     });
     const learnedPlaceInsert = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("insert into learned_places")
@@ -1075,7 +1075,7 @@ describe("category persistence", () => {
       session.userId,
       null,
       "51.610,-0.220",
-      "Tesco Springfield",
+      "Example Grocer",
       51.61,
       -0.22,
       160,
@@ -1090,8 +1090,8 @@ describe("category persistence", () => {
       "2026-07-07T09:25:00.000Z",
       "medium",
       expect.any(String),
-      "Tesco Springfield",
-      "Springfield Road, Chelmsford, CM2 6QT",
+      "Example Grocer",
+      "Example Road, Exampleton, ZZ1 1AA",
       expect.any(String)
     ]);
   });
@@ -1276,25 +1276,25 @@ describe("place persistence", () => {
 
   it("caches a lazy geocode only for a scoped saveable candidate", async () => {
     const address = {
-      name: "PureGym Chelmsford",
-      street: "New London Road",
-      city: "Chelmsford",
-      postalCode: "CM2 0SW",
-      formattedAddress: "New London Road, Chelmsford, CM2 0SW"
+      name: "Example Gym Exampleton",
+      street: "Sample Street",
+      city: "Exampleton",
+      postalCode: "ZZ2 2BB",
+      formattedAddress: "Sample Street, Exampleton, ZZ2 2BB"
     };
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
         void values;
         if (statement.includes("select latitude, longitude")) {
-          return { rows: [{ latitude: 51.735, longitude: 0.47 }] };
+          return { rows: [{ latitude: 10.735, longitude: 20.47 }] };
         }
         if (statement.includes("update learned_places")) {
           return {
             rows: [{
               id: "40000000-0000-4000-8000-000000000001",
-              name: "PureGym Chelmsford",
+              name: "Example Gym Exampleton",
               address,
-              poiName: "PureGym Chelmsford",
+              poiName: "Example Gym Exampleton",
               formattedAddress: address.formattedAddress,
               geocodedAt: "2026-07-14T10:00:00.000Z"
             }]
@@ -1312,7 +1312,7 @@ describe("place persistence", () => {
       session
     );
 
-    expect(result).toMatchObject({ name: "PureGym Chelmsford", formattedAddress: address.formattedAddress });
+    expect(result).toMatchObject({ name: "Example Gym Exampleton", formattedAddress: address.formattedAddress });
     const scopedSelect = client.query.mock.calls.find(([statement]) =>
       String(statement).includes("select latitude, longitude")
     );
@@ -3181,7 +3181,7 @@ describe("review item resolution", () => {
             rows: [{
               id: "review-one-off",
               eventId: "event-one-off",
-              title: "Tesco Springfield",
+              title: "Example Grocer",
               status: "open",
               suggestedProjectId: null,
               suggestedCategoryId: null,

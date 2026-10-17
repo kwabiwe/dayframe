@@ -217,6 +217,7 @@ export function AccountSettings({
 
       {dialog === "profile" ? (
         <ModalDialog
+          size="compact"
           busy={busyAction === "profile"}
           description={user.email}
           // The action sits in the dialog's footer, like every confirmation (UIA-301).
@@ -247,13 +248,13 @@ export function AccountSettings({
       ) : null}
 
       {dialog === "workspace" ? (
-        <ModalDialog busy={Boolean(busyAction)} description={`Currently using ${workspace.name}`} onClose={closeDialog} title="Workspace">
+        <ModalDialog size="compact" busy={Boolean(busyAction)} description={`Currently using ${workspace.name}`} onClose={closeDialog} title="Workspace">
           <div className="settings-workspace-actions df-set-dialog-workspace">
             <div className="settings-workspace-toolbar">
               <label className="settings-workspace-select">
                 <span className="sr-only">Active workspace</span>
                 <select
-                  aria-label="Active workspace"
+                  aria-label="Workspace"
                   className="ui-control"
                   disabled={Boolean(busyAction)}
                   value={workspace.id}
@@ -323,6 +324,7 @@ export function AccountSettings({
 
       {dialog === "password" && canChangePassword ? (
         <ModalDialog
+          size="compact"
           busy={busyAction === "password"}
           description={securitySummary(authMode)}
           footer={(

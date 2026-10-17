@@ -16,7 +16,7 @@ let package = Package(
         "DayframePlaceSearchModule.swift",
         "Tests"
       ],
-      sources: ["PlaceSearchCoordinator.swift"],
+      sources: ["PlaceSearchCoordinator.swift", "MapKitProbe.swift"],
       linkerSettings: [.linkedFramework("MapKit")]
     ),
     .testTarget(

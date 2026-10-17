@@ -11,7 +11,8 @@ import type {
   NearbyPointOfInterestQuery,
   NearbyPointOfInterestResolutionRequest,
   NearbyPointOfInterestResult,
-  ResolvedPlaceSearchResult
+  ResolvedPlaceSearchResult,
+  MapKitProbeReport
 } from "./src/DayframePlaceSearch.types";
 
 type DayframePlaceSearchEvents = {
@@ -29,6 +30,7 @@ declare class DayframePlaceSearchNativeModule extends NativeModule<DayframePlace
   searchNearby(request: NearbyPointOfInterestQuery): Promise<NearbyPointOfInterestResult>;
   resolveNearby(id: string, requestId: string): Promise<ResolvedPlaceSearchResult>;
   cancelNearby(): Promise<void>;
+  probeMapKit(latitude: number, longitude: number): Promise<MapKitProbeReport>;
 }
 
 const nativeModule = requireOptionalNativeModule<DayframePlaceSearchNativeModule>(
@@ -77,6 +79,16 @@ export const resolveNearby = (request: NearbyPointOfInterestResolutionRequest) =
 
 export const cancelNearby = () => nativeModule?.cancelNearby() ?? Promise.resolve();
 
+/** The MapKit checks (Settings › Sync help): counts and yes/no answers around one point. */
+export const probeMapKit = (latitude: number, longitude: number) => {
+  if (!nativeModule) {
+    return Promise.reject(Object.assign(new Error("Apple Maps checks are unavailable."), {
+      code: "search_unavailable"
+    }));
+  }
+  return nativeModule.probeMapKit(latitude, longitude);
+};
+
 export const addSuggestionsListener = (
   listener: (result: PlaceSearchSuggestionsResult) => void
 ): EventSubscription | null =>
@@ -87,6 +99,8 @@ export const addSearchErrorListener = (
 ): EventSubscription | null => nativeModule?.addListener("onSearchError", listener) ?? null;
 
 export type {
+  MapKitProbeLookupRound,
+  MapKitProbeReport,
   PlaceSearchBias,
   NearbyPointOfInterest,
   NearbyPointOfInterestQuery,

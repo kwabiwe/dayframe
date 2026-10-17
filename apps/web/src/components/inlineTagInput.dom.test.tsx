@@ -27,7 +27,7 @@ describe("InlineTagInput rendered geometry", () => {
       value: "Plan release"
     }));
 
-    const target = screen.getByRole("button", { name: "Remove tag Planning" });
+    const target = screen.getByRole("button", { name: "#Planning, remove tag" });
     const visible = target.querySelector<HTMLElement>(".inline-selected-tag-visual") as HTMLElement;
     const visibleLabel = visible.querySelector<HTMLElement>(":scope > span") as HTMLElement;
     const visibleIcon = visible.querySelector<SVGElement>(":scope > svg") as SVGElement;

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { DayframeCalendar } from "@/components/DayframeCalendar";
 import { ModalDialog } from "@/components/ui/Primitives";
 import { formatLocalDate } from "@/lib/calendar-grid";
@@ -216,10 +216,13 @@ export function ReportRangeControls({
             <button aria-label="Close date ranges" className="df-range-menu-close" onClick={() => closeMenu({ restoreFocus: true })} tabIndex={-1} type="button">
               <X aria-hidden="true" size={20} />
             </button>
+            {/* The #391 list head (WUI-023); the menu's own name stays "Choose a date range". */}
+            <div aria-hidden="true" className="df-range-menu-head" role="presentation">Date range</div>
             {REPORT_RANGE_PRESETS.map((preset) =>
               preset === "custom" ? (
                 <button aria-checked={filters.range === "custom"} key={preset} onClick={openCustom} role="menuitemradio" type="button">
-                  {filters.range === "custom" ? "Edit dates…" : "Custom…"}
+                  <span>{filters.range === "custom" ? "Edit dates…" : "Custom…"}</span>
+                  {filters.range === "custom" ? <Check aria-hidden="true" size={16} /> : null}
                 </button>
               ) : (
                 <button
@@ -236,7 +239,8 @@ export function ReportRangeControls({
                   role="menuitemradio"
                   type="button"
                 >
-                  {reportRangePresetLabel(preset)}
+                  <span>{reportRangePresetLabel(preset)}</span>
+                  {filters.range === preset ? <Check aria-hidden="true" size={16} /> : null}
                 </button>
               )
             )}

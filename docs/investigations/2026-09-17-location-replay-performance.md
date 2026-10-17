@@ -144,7 +144,7 @@ logging.
 
 The historical 17-item Review comparison remains unreconstructed. This evidence
 does not establish production deployment or production performance, and does
-not claim that missing-return capture or the saved-place/PureGym arrival and
+not claim that missing-return capture or the saved-place/Example Gym arrival and
 boundary issue is fixed.
 
 ## Post-production evidence

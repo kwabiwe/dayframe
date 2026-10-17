@@ -38,7 +38,8 @@ describe("web UI foundation contracts", () => {
     expect(primitiveSource).toContain('event.key !== "Escape"');
     expect(primitiveSource).toContain("previouslyFocused?.focus()");
     expect(primitiveSource).toContain('role?: DialogRole');
-    expect(primitiveSource).toContain('aria-modal="true"');
+    // Modal unless a popover asks otherwise (WUI-022).
+    expect(primitiveSource).toContain('aria-modal={modal ? "true" : undefined}');
   });
 
   it("keeps icon actions centred in the shared accessible target", () => {
@@ -55,7 +56,7 @@ describe("web UI foundation contracts", () => {
   });
 
   it("gives fields one in-perimeter focus owner and standalone actions one external ring", () => {
-    expect(globalStyles).toContain("--web-control-border-width: 2px;");
+    expect(globalStyles).toContain("--web-control-border-width: 1px;");
     expect(globalStyles).toContain("border-color: var(--web-focus-border);");
     expect(globalStyles).toMatch(/\.ui-compound-control:focus-within \{[^}]*border-color: var\(--web-focus-border\);/s);
     expect(globalStyles).toMatch(/\.ui-compound-control > input \{[^}]*border: 0;[^}]*outline: 0;/s);

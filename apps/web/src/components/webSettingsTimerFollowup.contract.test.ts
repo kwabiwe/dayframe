@@ -49,7 +49,7 @@ describe("web Settings and running-timer follow-up", () => {
   });
 
   it("uses a compact workspace selector with on-demand rename and create controls", () => {
-    expect(settings).toContain('aria-label="Active workspace"');
+    expect(settings).toContain('aria-label="Workspace"');
     expect(settings).toContain("<select");
     expect(settings).toContain('workspaceAction === "rename"');
     expect(settings).toContain('workspaceAction === "create"');
@@ -57,14 +57,16 @@ describe("web Settings and running-timer follow-up", () => {
     expect(styles).toMatch(/\.settings-workspace-detail-form \{[^}]*background: var\(--surface-inset\);/s);
   });
 
-  it("provides one icon-only sidebar theme toggle and dark selected Appearance text", () => {
+  it("provides one icon-only sidebar theme toggle and neutral selected Appearance text", () => {
     expect(shell).toContain("<ThemeToggleButton />");
     expect(themeToggle).toContain('aria-label={label}');
     expect(themeToggle).toContain("setThemeChoice(nextTheme)");
     expect(themeToggle).not.toContain(">Light<");
     expect(themeToggle).not.toContain(">Dark<");
     expect(themeSettings).toContain("getResolvedThemeChoice");
-    expect(styles).toMatch(/\.settings-appearance-row \.ui-segmented-control button\[aria-pressed="true"\][\s\S]*color: var\(--on-accent\);/s);
+    // The one segmented control (WUI-019): the chosen item is surfaceMuted with primary text.
+    expect(styles).not.toMatch(/\.settings-appearance-row \.ui-segmented-control button\[aria-pressed="true"\]/);
+    expect(styles).toMatch(/\.ui-segmented-control button\[aria-pressed="true"\] \{[^}]*background: var\(--surface-muted\);[^}]*color: var\(--text-primary\);/s);
   });
 
   it("uses flat workspace rows", () => {

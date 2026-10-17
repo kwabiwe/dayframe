@@ -451,6 +451,7 @@ function ActivityEditor({
     <ModalDialog
       busy={busy}
       className="df-ce-dialog"
+      size="compact"
       footer={(
         <>
           {target ? (

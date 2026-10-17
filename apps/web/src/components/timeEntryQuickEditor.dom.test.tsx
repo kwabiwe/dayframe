@@ -69,7 +69,7 @@ describe("TimeEntryQuickEditorModal", () => {
       await userEvent.keyboard("{Enter}");
 
       expect(description.value).toBe("Deep planning");
-      expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
+      expect(screen.getByRole("button", { name: "#Deep work, remove tag" })).not.toBeNull();
       expect(screen.getByRole("radio", { name: /Focus/ }).getAttribute("aria-checked")).toBe("true");
       await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
       view.unmount();
@@ -121,11 +121,11 @@ describe("TimeEntryQuickEditorModal", () => {
     renderModal({ onClose, onSave });
 
     expect(await screen.findByTestId("time-entry-quick-editor-modal")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Planning, remove tag" })).not.toBeNull();
     expect(screen.getByRole("button", { name: /Choose Start date/ }).textContent).toBe("");
     expect(screen.getByRole("button", { name: /Choose End date/ }).textContent).toBe("");
 
-    await userEvent.click(screen.getByRole("button", { name: "Remove tag Planning" }));
+    await userEvent.click(screen.getByRole("button", { name: "#Planning, remove tag" }));
     await userEvent.click(screen.getByRole("button", { name: "Add or filter tags" }));
     const picker = await screen.findByRole("listbox", { name: "Tags" });
     await userEvent.click(within(picker).getByRole("option", { name: "#Deep work" }));
@@ -309,7 +309,7 @@ describe("TimeEntryQuickEditorModal", () => {
     fireEvent.keyUp(description, { key: "a" });
     await screen.findByRole("listbox");
     fireEvent.keyDown(description, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Planning, remove tag" })).not.toBeNull();
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -344,7 +344,7 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(editor.getAttribute("aria-busy")).toBe("true");
     expect(screen.getByRole("status").textContent).toBe("Saving block…");
     expect(description.disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Remove tag Planning" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "#Planning, remove tag" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Add or filter tags" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: /All activities/ }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByLabelText("Start time") as HTMLInputElement).disabled).toBe(true);
@@ -355,9 +355,9 @@ describe("TimeEntryQuickEditorModal", () => {
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
 
     await user.type(description, " late edit");
-    await user.click(screen.getByRole("button", { name: "Remove tag Planning" }));
+    await user.click(screen.getByRole("button", { name: "#Planning, remove tag" }));
     expect(description.value).toBe("Captured before save");
-    expect(screen.getByRole("button", { name: "Remove tag Planning" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "#Planning, remove tag" })).not.toBeNull();
 
     await act(async () => deferred.resolve({ ok: false, error: "Save failed safely." }));
     expect((await screen.findByRole("alert")).textContent).toContain("Save failed safely");

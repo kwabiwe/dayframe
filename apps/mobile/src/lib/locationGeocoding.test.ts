@@ -29,20 +29,20 @@ describe("learned-place geocoding", () => {
   it("lazily resolves and caches a legacy coordinate-only candidate once", async () => {
     const candidate = learnedPlace();
     mocks.reverseGeocodeAsync.mockResolvedValue([{
-      name: "PureGym Chelmsford",
-      street: "New London Road",
-      city: "Chelmsford",
-      postalCode: "CM2 0SW",
-      formattedAddress: "New London Road, Chelmsford, CM2 0SW"
+      name: "Example Gym Exampleton",
+      street: "Sample Street",
+      city: "Exampleton",
+      postalCode: "ZZ2 2BB",
+      formattedAddress: "Sample Street, Exampleton, ZZ2 2BB"
     }]);
     mocks.resolveLearnedPlaceLocation.mockResolvedValue({
       ok: true,
       learnedPlace: {
         id: candidate.id,
-        name: "PureGym Chelmsford",
-        address: { name: "PureGym Chelmsford" },
-        poiName: "PureGym Chelmsford",
-        formattedAddress: "New London Road, Chelmsford, CM2 0SW",
+        name: "Example Gym Exampleton",
+        address: { name: "Example Gym Exampleton" },
+        poiName: "Example Gym Exampleton",
+        formattedAddress: "Sample Street, Exampleton, ZZ2 2BB",
         geocodedAt: "2026-07-14T10:00:00.000Z"
       }
     });
@@ -56,8 +56,8 @@ describe("learned-place geocoding", () => {
 
   it("does not geocode a candidate that already has cached readable location data", () => {
     expect(learnedPlaceNeedsLocationResolution(learnedPlace({
-      name: "PureGym Chelmsford",
-      address: { formattedAddress: "New London Road, Chelmsford, CM2 0SW" }
+      name: "Example Gym Exampleton",
+      address: { formattedAddress: "Sample Street, Exampleton, ZZ2 2BB" }
     }))).toBe(false);
   });
 });
@@ -65,9 +65,9 @@ describe("learned-place geocoding", () => {
 function learnedPlace(overrides: Partial<MobileLearnedPlace> = {}): MobileLearnedPlace {
   return {
     id: "40000000-0000-4000-8000-000000000001",
-    name: "Regular place near 51.748, 0.438",
-    latitude: 51.748,
-    longitude: 0.438,
+    name: "Regular place near 10.748, 20.438",
+    latitude: 10.748,
+    longitude: 20.438,
     radiusMeters: 160,
     visitCount: 2,
     distinctDayCount: 2,

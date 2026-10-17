@@ -165,16 +165,7 @@ export function normalizeCalendarEntryCompactDuration(raw: string) {
   }
   const seconds = minutes * 60;
   if (!Number.isSafeInteger(seconds)) throw new Error(DURATION_INPUT_ERROR);
-  return { seconds, value: formatCalendarEntryCompactDuration(seconds) };
-}
-
-/**
- * The editor's Duration in the app's one duration format (WUI-003, owner 16 Oct 2026): "8m",
- * "1h 3m", "2h" — never the clock-like "00:08", which read as seconds. Typing still accepts
- * "1h 3m", "63m", "63" and "1:03" (`normalizeCalendarEntryCompactDuration`).
- */
-export function formatCalendarEntryCompactDuration(totalSeconds: number) {
-  return formatDuration(Math.max(0, Math.floor(totalSeconds)));
+  return { seconds, value: formatDuration(seconds) };
 }
 
 /** An optional AM/PM at the end of a typed time (`9:30 pm`, `930p`, `9 AM`). */
@@ -277,7 +268,7 @@ export function synchronizeCalendarEntryCompactDraft({
     next.stoppedAtDate = normalizedFinish.date;
     next.stoppedAtTime = normalizedFinish.time;
     next.durationSeconds = elapsedSeconds(window.startedAt, window.stoppedAt);
-    next.duration = formatCalendarEntryCompactDuration(next.durationSeconds);
+    next.duration = formatDuration(next.durationSeconds);
     return next;
   }
 
@@ -303,7 +294,7 @@ export function synchronizeCalendarEntryCompactDraft({
   next.stoppedAtDate = normalizedFinish.date;
   next.stoppedAtTime = normalizedFinish.time;
   next.durationSeconds = durationSeconds;
-  next.duration = formatCalendarEntryCompactDuration(durationSeconds);
+  next.duration = formatDuration(durationSeconds);
   return next;
 }
 
@@ -411,7 +402,7 @@ function initialDraft({
     startedAtTime: start.time,
     stoppedAtDate: finish.date,
     stoppedAtTime: finish.time,
-    duration: formatCalendarEntryCompactDuration(durationSeconds),
+    duration: formatDuration(durationSeconds),
     durationSeconds,
     temporalOwner: "source"
   };
@@ -630,7 +621,8 @@ export function calculateCalendarEditorPosition({
   const width = Math.min(panelWidth, Math.max(0, viewportWidth - margin * 2));
   const maxHeight = Math.max(0, viewportHeight - margin * 2);
 
-  if (viewportWidth <= 640) {
+  // Phones (≤560 px, the one sheet breakpoint; WUI-026): the editor is a bottom sheet.
+  if (viewportWidth <= 560) {
     return {
       left: margin,
       maxHeight,

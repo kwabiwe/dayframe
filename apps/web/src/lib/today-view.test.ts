@@ -1,3 +1,4 @@
+import { formatDuration } from "@dayframe/shared";
 import { describe, expect, it } from "vitest";
 import type { ReviewItemRow } from "@/lib/queries";
 import {
@@ -5,7 +6,6 @@ import {
   blockRowHeight,
   buildGoalFrame,
   coveredActivityTotals,
-  formatGoalHours,
   hourPercent,
   isUnsavedEntryId,
   localDayEnd,
@@ -102,10 +102,9 @@ describe("goal frame", () => {
   it("falls back to an 8 hour goal and names it", () => {
     const frame = buildGoalFrame({ entries: [], goalMinutes: 0, nowMs: at(10, 9) });
     expect(frame.cells).toHaveLength(8);
-    expect(formatGoalHours(frame.goalMinutes)).toBe("8h");
-    expect(formatGoalHours(450)).toBe("7h 30m");
-    expect(formatGoalHours(30)).toBe("30m");
-    expect(formatGoalHours(45)).toBe("45m");
+    // The goal reads like every other duration, through the shared formatter (WUI-033).
+    expect(formatDuration(frame.goalMinutes * 60)).toBe("8h");
+    expect(formatDuration(450 * 60)).toBe("7h 30m");
   });
 });
 

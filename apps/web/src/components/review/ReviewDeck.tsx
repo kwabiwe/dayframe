@@ -1,7 +1,7 @@
 "use client";
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { formatClockTime, reviewCardCount, type DayframeGlyph } from "@dayframe/shared";
+import { formatClockTime, formatDuration, reviewCardCount, type DayframeGlyph } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
@@ -29,7 +29,6 @@ import {
 import {
   activeDraft,
   adjacentV2StayReviewId,
-  formatReviewDuration,
   hasV2Evidence,
   nextAfterDecision,
   reviewCardCategory,
@@ -571,7 +570,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
                   <b>{reviewTitle(item)}</b>
                   <span className="df-tnum">{reviewWhen(item, nowMs, clock) ?? "No times"}</span>
                 </span>
-                {itemWindow ? <small className="df-tnum">{formatReviewDuration(itemWindow.stopMs - itemWindow.startMs)}</small> : null}
+                {itemWindow ? <small className="df-tnum">{formatDuration((itemWindow.stopMs - itemWindow.startMs) / 1000)}</small> : null}
               </button>
             );
           })}
@@ -810,7 +809,7 @@ function CardFace({
         {when ? (
           <p className="df-rwhen df-tnum">
             {when}
-            {span ? ` · ${formatReviewDuration(span.stopMs - span.startMs)}` : ""}
+            {span ? ` · ${formatDuration((span.stopMs - span.startMs) / 1000)}` : ""}
             {route ? ` · ${route}` : ""}
           </p>
         ) : null}
@@ -1011,7 +1010,7 @@ function AllFramed({
       <h2 id="df-done-title" ref={headingRef} tabIndex={-1}>All framed</h2>
       <p>
         {decided.length
-          ? `${logged.length} moment${logged.length === 1 ? "" : "s"} logged${loggedMs >= 60_000 ? `, ${formatReviewDuration(loggedMs)} added to your days` : ""}. New suggestions will appear here.`
+          ? `${logged.length} moment${logged.length === 1 ? "" : "s"} logged${loggedMs >= 60_000 ? `, ${formatDuration(loggedMs / 1000)} added to your days` : ""}. New suggestions will appear here.`
           : "Nothing to review. New suggestions from Location and Apple Health will appear here."}
       </p>
       <Link className="df-rbtn df-rbtn--live" href="/">Back to Today</Link>

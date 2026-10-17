@@ -223,7 +223,7 @@ describe("location review confirmation semantics", () => {
               algorithmVersion: "location-v2.0",
               learnedPlaceId: null,
               placeMatchKind: null,
-              centreLatitude: 51.73,
+              centreLatitude: 10.73,
               centreLongitude: 0.47
             }]
           };
@@ -289,7 +289,7 @@ describe("location review confirmation semantics", () => {
     await expect(resolveLocationReviewActionWithClient(
       client,
       "review-1",
-      { action: "record_poi_once", name: "  Wagamama  " },
+      { action: "record_poi_once", name: "  Noodle House  " },
       session
     )).resolves.toMatchObject({ action: "record_poi_once", entryId: "entry-poi" });
 
@@ -302,7 +302,7 @@ describe("location review confirmation semantics", () => {
       session.userId,
       null,
       null,
-      "Wagamama",
+      "Noodle House",
       "high",
       "Visit unknown place",
       "2026-08-12T08:08:23.126Z",
@@ -323,7 +323,7 @@ describe("location review confirmation semantics", () => {
             id: "entry-poi",
             categoryId: null,
             placeId: null,
-            placeLabel: "Wagamama",
+            placeLabel: "Noodle House",
             description: "Visit unknown place",
             startedAt: "2026-08-12T08:08:23.126Z",
             stoppedAt: "2026-08-12T08:22:30.004Z"
@@ -337,7 +337,7 @@ describe("location review confirmation semantics", () => {
     await expect(resolveLocationReviewActionWithClient(
       client,
       "review-1",
-      { action: "record_poi_once", name: "Wagamama" },
+      { action: "record_poi_once", name: "Noodle House" },
       session
     )).resolves.toMatchObject({ alreadyResolved: true, equivalent: true });
   });
@@ -382,7 +382,7 @@ function lockedStay() {
     algorithmVersion: "location-v2.0",
     learnedPlaceId: null,
     placeMatchKind: null,
-    centreLatitude: 51.73,
+    centreLatitude: 10.73,
     centreLongitude: 0.47
   };
 }
@@ -443,23 +443,23 @@ describe("owner-authored Review signal through the Review service (E1, Codex r4)
   }
 
   it.each([
-    ["sharp s and SS", "Visit Weißensee", "VISIT WEISSENSEE"],
+    ["sharp s and SS", "Visit Großpark", "VISIT GROSSPARK"],
     ["capital sharp s", "Visit ẞtraße", "visit sstrasse"],
     ["NFC and NFD accents", "Visit Café Exemple".normalize("NFC"), "visit café exemple".normalize("NFD")],
     ["fullwidth letters", "Visit Example", "Ｖｉｓｉｔ　Ｅｘａｍｐｌｅ"],
     ["the fi ligature", "Visit Sample Field", "visit sample ﬁeld"],
-    ["the dotted capital I", "Visit İzmir Park", "visit izmir park"],
-    ["the dotless i", "Visit Izmir Park", "VISIT ızmir park"]
+    ["the dotted capital I", "Visit İnlet Park", "visit inlet park"],
+    ["the dotless i", "Visit Inlet Park", "VISIT ınlet park"]
   ])("never marks a suggested title edited only by %s", async (_label, title, description) => {
     expect(await marked(title, description)).toBe(false);
   });
 
   it("folds the replay title history the same way", async () => {
     // Replay retitled the item; the stale editor submits a case variant of the older title.
-    expect(await marked("Visit New Park", "VISIT WEISSENSEE", ["Visit Weißensee", "Visit New Park"])).toBe(false);
+    expect(await marked("Visit New Park", "VISIT GROSSPARK", ["Visit Großpark", "Visit New Park"])).toBe(false);
   });
 
   it("marks the owner's own words, non-ASCII included", async () => {
-    expect(await marked("Visit Weißensee", "Schwimmen im Weißensee")).toBe(true);
+    expect(await marked("Visit Großpark", "Schwimmen im Großpark")).toBe(true);
   });
 });

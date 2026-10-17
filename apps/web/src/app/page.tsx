@@ -2,6 +2,7 @@ import { LandingPage } from "@/components/LandingPage";
 import { TodayView } from "@/components/today/TodayView";
 import { getOptionalPageSession, isAuthenticatedPageSession } from "@/lib/auth/server";
 import { getBootstrapData } from "@/lib/queries";
+import { getViewerTimeZoneIfSent } from "@/lib/viewer-time-zone-server";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export default async function TodayPage({
 
   const params = searchParams ? await searchParams : {};
   const date = Array.isArray(params.date) ? params.date[0] : params.date;
-  const data = await getBootstrapData(session, { selectedDate: date });
+  const data = await getBootstrapData(session, { selectedDate: date, timeZone: await getViewerTimeZoneIfSent() });
 
   return <TodayView key={`${data.workspace.id}:${data.dateRange.selectedDate}`} initialData={data} renderedAt={new Date().toISOString()} />;
 }

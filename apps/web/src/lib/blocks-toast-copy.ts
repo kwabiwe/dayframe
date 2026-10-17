@@ -21,10 +21,6 @@ export function toastBlockName(entry: Pick<ToastEntry, "categoryName" | "descrip
   return (description && description !== "Start activity" ? description : null) || entry.categoryName || "No activity";
 }
 
-function compactDuration(seconds: number) {
-  return formatSharedDuration(seconds);
-}
-
 /**
  * "Switched to Work" over a muted "42m logged to Client Work" (owner decision 15 Oct 2026: back to
  * TestFlight 120's two lines, #400, on iPhone and web): what is recording now on the first line,
@@ -41,7 +37,7 @@ export function switchedToastCopy(
   const seconds = Number.isFinite(startedMs) ? Math.max(1, (nowMs - startedMs) / 1000) : 1;
   return {
     message: `Switched to ${nextName}`,
-    detail: `${compactDuration(seconds)} logged to ${toastBlockName(previous)}`
+    detail: `${formatSharedDuration(seconds)} logged to ${toastBlockName(previous)}`
   };
 }
 
@@ -67,4 +63,15 @@ export function startMatchesRunning(
   return (active.categoryId ?? null) === request.categoryId &&
     (active.description?.trim() ?? "").toLowerCase() === description.toLowerCase() &&
     tagKey(active.tagNames) === tagKey(request.tagNames);
+}
+
+/**
+ * One toast grammar (web UI audit WUI-043, owner 17 Oct 2026): verb first, no quotes, as every other
+ * toast ("Skipped Visit to Gym", "Discarded App testing"): "Deleted Shop run", "Deleted 3 Shop run
+ * blocks", and "Deleted block" when nothing names it.
+ */
+export function deletedToastLabel(count: number, title: string | null | undefined) {
+  const name = title?.trim();
+  if (!name) return count > 1 ? `Deleted ${count} blocks` : "Deleted block";
+  return count > 1 ? `Deleted ${count} ${name} blocks` : `Deleted ${name}`;
 }

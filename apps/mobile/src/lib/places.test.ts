@@ -11,8 +11,8 @@ describe("mobile place helpers", () => {
     expect(
       validatePlaceForm({
         name: "  Gym  ",
-        latitude: "51.5074",
-        longitude: "-0.1278",
+        latitude: "10.5074",
+        longitude: "20.1278",
         radiusMeters: "100.4",
         defaultCategoryId: "20000000-0000-4000-8000-000000000001",
         defaultActivityDescription: "  School drop-off/pickup  "
@@ -21,8 +21,8 @@ describe("mobile place helpers", () => {
       ok: true,
       value: {
         name: "Gym",
-        latitude: 51.5074,
-        longitude: -0.1278,
+        latitude: 10.5074,
+        longitude: 20.1278,
         radiusMeters: 100,
         defaultCategoryId: "20000000-0000-4000-8000-000000000001",
         defaultActivityDescription: "School drop-off/pickup"
@@ -74,8 +74,8 @@ describe("mobile place helpers", () => {
   });
 
   it("uses low-risk reverse geocode labels", () => {
-    expect(suggestedPlaceNameFromGeocode({ name: "Town Centre", city: "London" })).toBe("Town Centre");
-    expect(suggestedPlaceNameFromGeocode({ street: "High Street", city: "London" })).toBe("High Street");
+    expect(suggestedPlaceNameFromGeocode({ name: "Town Centre", city: "Exampleton" })).toBe("Town Centre");
+    expect(suggestedPlaceNameFromGeocode({ street: "High Street", city: "Exampleton" })).toBe("High Street");
     expect(suggestedPlaceNameFromGeocode({})).toBe("");
   });
 });

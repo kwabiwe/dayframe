@@ -424,10 +424,28 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web popovers and sheets (web UI audit WUI-022/WUI-026, 17 Oct 2026)
+
+- Trigger: opening an anchored popover, menu or list; at ≤560 px they open as bottom sheets.
+- Owner: CSS on the surface (`ui-sheet-in` for the profile sheet, `df-range-sheet-in` for the range sheet, the floating list's `.is-open` transition for list sheets).
+- Entrance/exit: sheets rise 8 px as they fade in and sink as they fade out (the floating list sheets transition `transform` with their opacity); anchored surfaces keep their own entrance; exits fade (the profile popover through the dialog exit copy, which never replays the entrance and has no scrim when the popover had none).
+- Interruption and async: unchanged from each surface's own contract.
+- Accessibility: Reduce Motion keeps the fades without the movement; the non-modal profile popover returns focus to its opener only when focus would be lost.
+
+## Web dialogs (web UI audit WUI-020, 17 Oct 2026)
+
+- Trigger: a host renders `ModalDialog` (opening) or stops rendering it (closing: Cancel, Save, ✕, Escape, the scrim, navigation).
+- Owner: CSS on the native `<dialog>` for the entrance (`ui-dialog-in`, its `::backdrop` fade); `playDialogExit` for the exit, because the host's unmount removes the real dialog at once.
+- Entrance/update/exit: opacity 0→1 and scale .98→1 over 160 ms with the scrim; content updates in place; on close an inert, `aria-hidden` copy of the last frame (scrolled where it was) and a scrim copy fade (and scale to .98) over 120 ms inside one top-layer popover, above any dialog still open, and are removed after 160 ms.
+- Surrounding layout: the dialog is fixed over the page; nothing reflows.
+- Interruption: a reopen during the exit draws the new dialog over the fading copy; a re-run of the effect while still mounted (StrictMode, a new `initialFocusRef`) plays no exit.
+- Async outcome: busy dialogs stay open (Escape and the scrim do nothing); the exit plays only when the host unmounts.
+- Accessibility: Reduce Motion keeps the fades without the scale, at 160/120 ms (scoped exceptions to the global 1 ms rule); focus returns to the opener immediately because the real dialog has closed; the copy is never focusable or announced.
+
 ## Web Reports range menu (audit W8, UIA-304)
 
 - Trigger: the range text button under the Reports title (‹ range ›). Single owner: `ReportRangeControls`' `menu` state (`closed` / `open` / `closing`); nothing else animates it.
-- Entrance: opacity 0 → 1 over 120ms (ease-out). Desktop: a popover under the trigger; under 640px a bottom sheet above the phone tab bar (z-index 70 over the bar's 40, `bottom: calc(12px + env(safe-area-inset-bottom))`, 44px items, visible 44px close control).
+- Entrance: opacity 0 → 1 over 120ms (ease-out). Desktop: the shared floating surface under the trigger with a "Date range" head (WUI-023); at ≤560 px (the one sheet breakpoint, WUI-026) a bottom sheet above the phone tab bar (z-index 70 over the bar's 40, `bottom: calc(12px + env(safe-area-inset-bottom))`, 44px items, the head beside a visible 44px close control) that also rises 8 px as it fades in.
 - Update: choosing a preset closes the menu and navigates; the head row and the page around the trigger never move.
 - Exit: state `closing` keeps it mounted while it fades 1 → 0 over 120ms (ease-in, pointer-events off), then unmounts on `animationend` with a timer fallback. The closing menu is `inert`, so its items leave the tab order as the fade starts. Escape and the close control return focus to the trigger; Tab moves focus to the next focusable element after the trigger and Shift+Tab to the trigger; outside clicks close without moving focus. "Custom…" closes it and opens the dates dialog, whose ✕/Escape return focus to the trigger; Done does too, and when its navigation remounts the controls the new instance focuses its trigger on mount (a module flag keyed to the applied range; an unchanged custom range closes without navigating). Inside the dialog the range calendar has no motion of its own: each tap redraws the first/last circles and the band in the same frame, and the caption keeps one line's height so the grid never moves.
 - Interruption: reopening mid-exit returns to `open` and cancels the pending unmount; rapid toggles never leave a stale menu.

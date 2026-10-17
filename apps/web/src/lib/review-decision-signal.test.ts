@@ -27,18 +27,18 @@ describe("owner-authored Review description signal (E1)", () => {
 
   it("folds Unicode case, compatibility forms and spacing before comparing (Codex r4)", () => {
     const same = [
-      ["Visit Weißensee", "VISIT WEISSENSEE"],
+      ["Visit Großpark", "VISIT GROSSPARK"],
       ["Visit ẞtraße", "visit sstrasse"],
       ["Café".normalize("NFC"), "CAFÉ".normalize("NFD")],
       ["Ｖｉｓｉｔ　Ｅｘａｍｐｌｅ", "visit example"],
       ["ﬁeld", "FIELD"],
-      ["İzmir", "izmir"],
-      ["ızmir", "IZMIR"],
+      ["İnlet", "inlet"],
+      ["ınlet", "INLET"],
       ["  Visit\tSample   Park ", "visit sample park"]
     ];
     for (const [left, right] of same) expect(foldReviewText(left)).toBe(foldReviewText(right));
     expect(foldReviewText("Café")).not.toBe(foldReviewText("Cafe"));
-    expect(isOwnerAuthoredReviewDescription("VISIT WEISSENSEE", ["Visit Weißensee"])).toBe(false);
+    expect(isOwnerAuthoredReviewDescription("VISIT GROSSPARK", ["Visit Großpark"])).toBe(false);
   });
 
   it("compares with the full suggested-title history, never a correction part's own title", () => {

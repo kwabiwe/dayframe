@@ -1,11 +1,10 @@
-import { formatClockTime, formatDuration as formatSharedDuration, type ClockFormat } from "@dayframe/shared";
+import { formatClockTime, type ClockFormat } from "@dayframe/shared";
 /**
  * Every web duration ("6h 25m", "35m", "<1m", "0m") is the shared `formatDuration` (audit
- * UIA-207, the same as iPhone's UIA-042); only running clocks use `formatClockDuration`.
+ * UIA-207, the same as iPhone's UIA-042), re-exported here and never wrapped (web UI audit WUI-033);
+ * only running clocks use `formatClockDuration`.
  */
-export function formatDuration(seconds: number) {
-  return formatSharedDuration(seconds);
-}
+export { formatDuration } from "@dayframe/shared";
 
 /**
  * The report CSV's duration cell ("1h 05m", "59m"), unchanged so existing spreadsheets keep
@@ -19,21 +18,13 @@ export function formatExportDuration(seconds: number) {
   return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
 }
 
+/** A running clock, always H:MM:SS ("0:08:05"; web UI audit WUI-032, as the iPhone's live block). */
 export function formatClockDuration(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(safe / 3600);
   const minutes = Math.floor((safe % 3600) / 60);
   const remainingSeconds = safe % 60;
-
-  if (hours === 0) {
-    return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
-      .toString()
-      .padStart(2, "0")}`;
-  }
-
-  return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds
-    .toString()
-    .padStart(2, "0")}`;
+  return `${hours}:${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
 /**

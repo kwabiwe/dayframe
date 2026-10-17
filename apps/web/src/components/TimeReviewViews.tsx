@@ -11,6 +11,7 @@ import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
+import { deletedToastLabel } from "@/lib/blocks-toast-copy";
 import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { OverlapNotice } from "@/components/OverlapNotice";
@@ -390,6 +391,8 @@ export function TimeReviewViews({
     hiddenEntryIds,
     pendingNotice,
     requestDelete,
+    failedDelete,
+    dismissDeleteError,
     undoPendingDelete
   } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
@@ -527,11 +530,6 @@ export function TimeReviewViews({
           {dateLoadError ?? "Loading period…"}
         </p>
       ) : null}
-      {deleteError ? (
-        <p className="timeline-delete-error" role="alert">
-          {deleteError}
-        </p>
-      ) : null}
 
       <div className="timeline-view-stage">
         {state.view === "calendar" ? (
@@ -548,7 +546,8 @@ export function TimeReviewViews({
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
             todayKeyHint={initialTodayKey}
-            undoToastVisible={Boolean(pendingNotice)}
+            // Any toast of this view (Undo, a refused delete) outranks the Calendar's own.
+            undoToastVisible={Boolean(pendingNotice) || Boolean(deleteError)}
             visibleDays={state.scope === "day" ? [ranges.day.start] : ranges.weekDays}
           />
         ) : null}
@@ -578,19 +577,43 @@ export function TimeReviewViews({
           secondary={tripOptOut}
           swatchStyle={deletedEntrySwatch}
         />
+      ) : deleteError ? (
+        // A refused delete is the toast's error variant (WUI-027). Try again goes through this
+        // view's own delete, so the swatch and the trip opt-out are the retried blocks' own (Codex
+        // r1 on #491); it is offered only while some of those blocks are still there.
+        <BlocksToast
+          actionLabel={failedDelete ? "Try again" : "Dismiss"}
+          focusActionIfLost
+          message={deleteError}
+          onAction={failedDelete ? () => requestTimelineDelete(failedDelete.entries) : () => {
+            dismissDeleteError();
+            focusTimelineAfterToast();
+          }}
+          secondary={failedDelete ? { label: "Dismiss", onAction: () => {
+            dismissDeleteError();
+            focusTimelineAfterToast();
+          } } : null}
+          tone="error"
+        />
       ) : null}
     </section>
   );
 }
 
 
+/** After a toast's last action, a lost focus lands on the Calendar grid, or the chosen view. */
+function focusTimelineAfterToast() {
+  window.requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const target = document.querySelector<HTMLElement>(".calendar-grid-scroller")
+      ?? document.querySelector<HTMLElement>('.timeline-range-controls button[aria-pressed="true"]');
+    target?.focus({ preventScroll: true });
+  });
+}
+
 function timelineDeleteNoticeLabel(entries: readonly TimeEntryRow[]) {
-  const entry = entries[0];
-  if (!entry) return "Block deleted";
-  const title = `“${timeEntryTitle(entry)}”`;
-  return entries.length > 1
-    ? `${entries.length} ${title} occurrences deleted`
-    : `${title} deleted`;
+  return deletedToastLabel(entries.length, entries[0] ? timeEntryTitle(entries[0]) : null);
 }
 
 type TimelineScrollPosition = { left: number; top: number };
@@ -861,10 +884,16 @@ export function CalendarReview({
     setSelectedTarget(nextTarget);
   }, []);
 
+  // An error replaces a visible notice for good (it is not shown again after Dismiss).
+  function showActionError(message: string) {
+    setCreateNotice(null);
+    setActionError(message);
+  }
+
   async function continueCalendarEntry(entry: TimeEntryRow, surface: "editor" | "inline" = "editor") {
     if (continuingEntryId || isTimerBusy || !entry.stoppedAt) {
       const outcome = { ok: false, error: "A block update is already in progress." } as const;
-      if (surface === "inline") setActionError(outcome.error);
+      if (surface === "inline") showActionError(outcome.error);
       return outcome;
     }
     setContinuingEntryId(entry.id);
@@ -873,7 +902,7 @@ export function CalendarReview({
       const outcome = await startEntryAgain(entry);
       if (!outcome.ok) {
         clearTimerError();
-        if (surface === "inline") setActionError(outcome.error);
+        if (surface === "inline") showActionError(outcome.error);
       }
       return outcome;
     } finally {
@@ -1312,6 +1341,26 @@ export function CalendarReview({
 
   return (
     <section className="timeline-calendar-workspace">
+      {/* Phones: the narrow time gutter has no room for the corner's zoom, so it floats over the
+          grid's lower right corner instead (CSS shows one or the other). */}
+      <span className="calendar-phone-zoom" role="group" aria-label="Calendar zoom">
+        <button
+          type="button"
+          disabled={zoomIndex === 0}
+          aria-label="Zoom calendar out"
+          onClick={() => setZoomLevel(zoomKeys[Math.max(0, zoomIndex - 1)])}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          disabled={zoomIndex === zoomKeys.length - 1}
+          aria-label="Zoom calendar in"
+          onClick={() => setZoomLevel(zoomKeys[Math.min(zoomKeys.length - 1, zoomIndex + 1)])}
+        >
+          +
+        </button>
+      </span>
       <div
         aria-busy={localTimeReady ? undefined : true}
         aria-label="Calendar time grid"
@@ -1322,7 +1371,9 @@ export function CalendarReview({
       >
         <div
           className="timeline-calendar-grid"
-          style={{ gridTemplateColumns: `104px repeat(${visibleDays.length}, minmax(130px, 1fr))` }}
+          // The time gutter and the narrowest day column come from CSS (--calendar-axis-width,
+          // --calendar-day-min-width), so phones get a narrow gutter (Calendar phone layout).
+          style={{ gridTemplateColumns: `var(--calendar-axis-width) repeat(${visibleDays.length}, minmax(var(--calendar-day-min-width), 1fr))` }}
         >
           <div className="calendar-grid-corner">
             <span className="calendar-corner-zoom" role="group" aria-label="Calendar zoom">
@@ -1852,17 +1903,24 @@ export function CalendarReview({
           {resizeError}
         </p>
       ) : null}
-      {actionError ? (
-        <p className="timeline-delete-error" role="alert" aria-atomic="true" aria-live="assertive">
-          {actionError}
-        </p>
+      {actionError && !undoToastVisible ? (
+        <BlocksToast
+          actionLabel="Dismiss"
+          focusActionIfLost
+          message={actionError}
+          onAction={() => {
+            setActionError(null);
+            focusTimelineAfterToast();
+          }}
+          tone="error"
+        />
       ) : null}
       {/* Announces a notice the Delete Undo toast kept off screen; empty otherwise, so a visible
           toast (its own polite status) is never read twice. */}
       <p aria-atomic="true" aria-live="polite" className="sr-only" role="status">
         {createNotice?.announcedOnly ? CALENDAR_FUTURE_CREATE_NOTICE : ""}
       </p>
-      {createNotice && !createNotice.announcedOnly ? (
+      {createNotice && !createNotice.announcedOnly && !actionError ? (
         <BlocksToast
           exiting={createNotice.exiting}
           key={createNotice.token}

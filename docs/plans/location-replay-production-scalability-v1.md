@@ -115,7 +115,7 @@ This authorises the dedicated batch bounds below. It does **not** authorise incr
 
 ### 2.2 Explicit non-goals
 
-No changes to the shared Location engine, saved/unknown-place thresholds, arrival inference, cluster radius, traffic policy, passive walk/motion capture, POI ranking, map provider, Health import, Today UI, categories/tags, Review decision policy or mobile scheduling. Do not resume the Chelmer feature work in this branch.
+No changes to the shared Location engine, saved/unknown-place thresholds, arrival inference, cluster radius, traffic policy, passive walk/motion capture, POI ranking, map provider, Health import, Today UI, categories/tags, Review decision policy or mobile scheduling. Do not resume the river-path feature work in this branch.
 
 No extra replay queue, background worker, incremental checkpoint, cross-request cache, detached transaction, parallel queries on the checked-out client, persisted partial-progress state, reduced evidence retention, input truncation, newer-only replay window, raw-evidence deduplication policy change or automatic queue clearing.
 
@@ -556,7 +556,7 @@ Update:
 - this plan copy at the specified repository path;
 - proposed `docs/investigations/2026-09-20-location-replay-production-scalability.md`: base/head, synthetic schema/workload, before/after numbers, limitations and stop decisions.
 
-Do not rewrite the old #202 ledger's historical NOT RUN statements. Do not claim 29 owner-scoped attempts, reconstruction of the missing 17-item staging comparison, a Chelmer fix or historical data recovery.
+Do not rewrite the old #202 ledger's historical NOT RUN statements. Do not claim 29 owner-scoped attempts, reconstruction of the missing 17-item staging comparison, a river-path stop fix or historical data recovery.
 
 Use valid Markdown command formatting such as `` `npm run lint` — PASS ``; do not place the trailing colon inside an npm-script token. Keep transient PR/build state out of permanent product/architecture documents. The PRD should state no product change unless a real contract conflict is discovered and escalated. [R10]
 
@@ -703,7 +703,7 @@ After the operator says the exact approved server is ready:
 - Check an existing confirmed item still has its original time/category/place, and that no new duplicate or automatic Location entry appears.
 - Perform one simple timer start/stop and check it persists/syncs normally when the operator schedules that separate regression step.
 
-The Chelmer stop, passive walking, venue suggestions, traffic-jam policy, global automation rollout and missing native return capture remain separate future tasks. This PR does not claim to fix those detection behaviours.
+The river-path stop, passive walking, venue suggestions, traffic-jam policy, global automation rollout and missing native return capture remain separate future tasks. This PR does not claim to fix those detection behaviours.
 
 ## 21. Source register and evidence provenance
 

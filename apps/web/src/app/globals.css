@@ -356,6 +356,9 @@ button:disabled {
   opacity: 0.58;
 }
 
+/* One field (web UI audit WUI-017, owner 17 Oct 2026): an inset fill, radius 10, a 1 px
+   --control-border line at rest (Codex r1 on #472: a fill alone is about 1.05:1, under WCAG 1.4.11's
+   3:1) that turns the neutral focus colour and thickens to 2 px inside on focus. */
 input,
 select,
 textarea {
@@ -414,7 +417,7 @@ select:focus,
 textarea:focus {
   border-color: var(--web-focus-border);
   outline: 0;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 input[aria-invalid="true"],
@@ -427,7 +430,21 @@ input[aria-invalid="true"]:focus,
 select[aria-invalid="true"]:focus,
 textarea[aria-invalid="true"]:focus {
   border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+/* Inputs whose wrapper owns the field line and ring never draw their own (Codex r2 on #472): the
+   rules above would otherwise add an inner rectangle inside the wrapper's ring. */
+:is(
+  .ui-compound-control > input,
+  .category-picker-create-name-control > input,
+  .df-palette-input input,
+  .df-logas input,
+  .timeline-inline-description-input,
+  .timeline-inline-time-input,
+  .inline-tag-input-anchor .inline-tag-description-input
+):focus {
+  box-shadow: none;
 }
 
 html.ui-dialog-open {
@@ -608,6 +625,7 @@ html.ui-dialog-open {
 
 .ui-compound-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .ui-compound-control > input {
@@ -648,21 +666,26 @@ textarea.ui-control {
   color: var(--danger-text);
 }
 
+/* One segmented control (web UI audit WUI-019, owner 17 Oct 2026; the Reports and Library `df-seg`):
+   a `surface` track with an inset 1 px border, 36 px items (44 px on touch screens) in 13/650
+   secondary text, and the chosen item on `surfaceMuted` in primary text. Selection is neutral
+   (UIA-205): coral stays for the primary action and recording. */
 .ui-segmented-control {
   display: inline-grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
-  gap: 4px;
+  gap: 2px;
   border-radius: 999px;
-  background: var(--surface-inset);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
   padding: 4px;
   overflow: visible;
 }
 
 .ui-segmented-control button {
   display: inline-flex;
-  min-width: var(--web-control-height);
-  min-height: var(--web-control-height);
+  min-width: 36px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -670,15 +693,18 @@ textarea.ui-control {
   border-radius: 999px;
   background: transparent;
   padding: 0 14px;
-  color: var(--foreground);
-  font-size: 14px;
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
 }
 
-/* UIA-205: selection is neutral in the shared controls; coral stays for the primary action and recording. */
+.ui-segmented-control button:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
 .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 
 .ui-segmented-control button:disabled {
@@ -856,12 +882,6 @@ textarea.ui-control {
 
 .settings-appearance-row .ui-segmented-control {
   width: 100%;
-}
-
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
-.settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
-  color: var(--on-accent);
 }
 
 .settings-inline-form > .ui-button {
@@ -1050,6 +1070,12 @@ textarea.ui-control {
   outline: 0;
 }
 
+/* An inline edit shows the shared neutral field ring while it has focus (WUI-017). */
+.timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus) {
+  border-radius: var(--web-radius-control);
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
 .timeline-inline-time {
   box-sizing: border-box;
   display: inline-grid;
@@ -1062,7 +1088,7 @@ textarea.ui-control {
   gap: 0;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--web-radius-control);
   outline: 0;
   padding: 0 8px;
   box-shadow: none;
@@ -1120,11 +1146,16 @@ textarea.ui-control {
   box-shadow: none;
 }
 
-.timeline-inline-time:has(.timeline-inline-time-input:focus-visible),
 .timeline-inline-time .timeline-inline-time-input:focus-visible {
   border: 0;
   outline: 0;
   box-shadow: none;
+}
+
+.timeline-inline-time:has(.timeline-inline-time-input:focus-visible) {
+  border: 0;
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .timeline-inline-time-separator {
@@ -1450,16 +1481,20 @@ textarea.ui-control {
   gap: 8px;
 }
 
+/* Dialogs (web UI audit WUI-020/WUI-021, owner 17 Oct 2026): width tiers — confirm 400, compact
+   520, form 620 (the default), wide 720 — radius 20 (24 on phones); they fade and scale in from
+   .98 over 160 ms with the scrim, and fade out over 120 ms (`playDialogExit`); Reduce Motion keeps
+   the fades only. */
 dialog.ui-dialog {
   position: fixed;
   inset: 0;
   display: none;
-  width: min(720px, calc(100vw - 24px));
+  width: min(620px, calc(100vw - 24px));
   max-width: none;
   max-height: calc(100dvh - 24px);
   margin: auto;
   border: 0;
-  border-radius: 24px;
+  border-radius: 20px;
   background: var(--surface-raised);
   padding: 0;
   color: var(--foreground);
@@ -1470,6 +1505,120 @@ dialog.ui-dialog {
 dialog.ui-dialog[open] {
   display: flex;
   flex-direction: column;
+  animation: ui-dialog-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+dialog.ui-dialog.ui-dialog--confirm {
+  width: min(400px, calc(100vw - 24px));
+}
+
+dialog.ui-dialog.ui-dialog--compact {
+  width: min(520px, calc(100vw - 24px));
+}
+
+dialog.ui-dialog.ui-dialog--wide {
+  width: min(720px, calc(100vw - 24px));
+}
+
+/* The closed dialog's fading twin (see playDialogExit): a top-layer popover holding the scrim and
+   the copy, above every dialog still open, never interactive. */
+.ui-dialog-ghost-layer {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+dialog.ui-dialog.ui-dialog-ghost {
+  z-index: 1000;
+  pointer-events: none;
+  animation: ui-dialog-out 120ms ease-in forwards;
+}
+
+.ui-dialog-ghost-scrim {
+  position: fixed;
+  z-index: 999;
+  inset: 0;
+  background: var(--overlay);
+  pointer-events: none;
+  animation: ui-dialog-scrim-out 120ms ease-in forwards;
+}
+
+@keyframes ui-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ui-dialog-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes ui-dialog-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reduce Motion keeps the fades at their own lengths: these outrank the global 1 ms rule. */
+@media (prefers-reduced-motion: reduce) {
+  dialog.ui-dialog[open] {
+    animation-name: ui-dialog-fade-in;
+    animation-duration: 160ms !important;
+  }
+
+  dialog.ui-dialog::backdrop {
+    animation-duration: 160ms !important;
+  }
+
+  dialog.ui-dialog.ui-dialog-ghost {
+    animation-name: ui-dialog-fade-out;
+    animation-duration: 120ms !important;
+  }
+
+  .ui-dialog-ghost-layer .ui-dialog-ghost-scrim {
+    animation-duration: 120ms !important;
+  }
 }
 
 dialog.ui-dialog:focus {
@@ -1479,6 +1628,12 @@ dialog.ui-dialog:focus {
 dialog.ui-dialog::backdrop {
   background: var(--overlay);
   backdrop-filter: none;
+  animation: ui-dialog-scrim-in 160ms ease-out;
+}
+
+/* One quiet close: a 44 px circle with no fill at rest, the neutral fill on hover. */
+.ui-dialog-header .ui-icon-button {
+  background: transparent;
 }
 
 .ui-dialog-header {
@@ -1531,10 +1686,6 @@ dialog.ui-dialog::backdrop {
   padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
-dialog.ui-dialog.ui-confirm-dialog {
-  width: min(420px, calc(100vw - 24px));
-}
-
 dialog.ui-dialog.ui-popover-panel {
   width: min(380px, calc(100vw - 24px));
   max-height: calc(100dvh - 36px);
@@ -1552,10 +1703,15 @@ dialog.ui-popover-panel.bottom-left {
   margin: auto auto 18px 18px;
 }
 
+/* The #391 surface's 6 px inside padding (WUI-022): rows never touch the panel's edge. */
 .ui-popover-content {
   display: grid;
-  /* Popover rows lay out their own edges. */
-  padding: 0;
+  padding: 6px;
+}
+
+/* Beside its opener (not modal): above the page and the tab bar, below sheets and dialogs. */
+dialog.ui-dialog.ui-popover-panel.is-anchored {
+  z-index: 90;
 }
 
 @media (max-width: 1180px) {
@@ -1565,20 +1721,76 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 @media (max-width: 760px) {
-  dialog.ui-dialog,
-  dialog.ui-dialog.ui-confirm-dialog,
-  dialog.ui-dialog.ui-popover-panel {
-    width: min(100% - 24px, 720px);
-    max-height: calc(100dvh - 24px);
-    margin: auto;
-  }
-
-  .ui-dialog-actions > .ui-button {
-    flex: 1 1 0;
-  }
-
   .ui-segmented-control {
     width: 100%;
+  }
+}
+
+/* Phones (WUI-026): an anchored popover is a bottom sheet over the scrim, with a grabber and ✕,
+   rising 8 px as it fades in (fade only under Reduce Motion). */
+@media (max-width: 560px) {
+  dialog.ui-dialog.ui-popover-panel.is-sheet {
+    width: auto;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px));
+    margin: auto 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    border-radius: 24px;
+  }
+
+  /* The entrance only: the exit copy keeps its fade-out (Codex r1 on #492). */
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
+    animation-name: ui-sheet-in;
+  }
+
+  dialog.ui-dialog.ui-popover-panel.is-sheet .ui-dialog-header {
+    position: relative;
+    padding-top: 18px;
+  }
+
+  dialog.ui-dialog.ui-popover-panel.is-sheet .ui-dialog-header::before {
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
+    content: "";
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes ui-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 560px) {
+  dialog.ui-dialog.ui-popover-panel.is-sheet:not(.ui-dialog-ghost) {
+    animation-name: ui-dialog-fade-in;
+  }
+}
+
+/* Phones: radius 24, and the footer's buttons share the row equally whatever their family. */
+@media (max-width: 560px) {
+  dialog.ui-dialog {
+    border-radius: 24px;
+  }
+
+  .ui-dialog-actions > :is(button, a) {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  /* Spacers would take a share of the row too. */
+  .ui-dialog-actions > .df-spacer {
+    display: none;
   }
 }
 
@@ -3289,22 +3501,20 @@ kbd {
 }
 
 /* The inset surface keeps placeholders at AA contrast in both themes. */
+/* The sign-in fields are the one field too (WUI-017): the shared idle line and radius. */
 .auth-card .ui-control {
   min-height: 48px;
-  border-color: transparent;
-  border-radius: 12px;
   background: var(--surface-inset);
 }
 
 .auth-card .auth-password-field {
-  border-color: transparent;
-  border-radius: 12px;
   background: var(--surface-inset);
 }
 
 /* The password field's focus cue is its wrapper's shared neutral border. */
 .auth-card .auth-password-field:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .auth-card form > button[type="submit"] {
@@ -4887,13 +5097,16 @@ dialog.ui-dialog.df-range-custom {
 
 :root {
   --uncategorized-color: var(--muted);
-  --web-radius-control: 16px;
+  /* Fields and field-like triggers: radius 10 at every width (WUI-017). */
+  --web-radius-control: 10px;
   --web-radius-group: 24px;
   --web-radius-floating: 24px;
   --web-control-height: 44px;
   --web-control-height-compact: 44px;
   --web-control-padding-inline: 12px;
-  --web-control-border-width: 2px;
+  /* One 1 px idle field line in --control-border (3:1 or more on every surface, both themes;
+     WCAG 1.4.11); focus adds a 1 px inset so the ring reads 2 px with no layout shift. */
+  --web-control-border-width: 1px;
   --web-focus-border: var(--focus);
   --web-icon-button-size: 44px;
   --web-field-gap: 6px;
@@ -5242,6 +5455,7 @@ dialog.ui-dialog.df-range-custom {
 
 .place-search-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -5683,6 +5897,7 @@ dialog.ui-dialog.df-range-custom {
 
 .timeline-period-trigger:focus-visible {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -6081,6 +6296,7 @@ dialog.ui-dialog.df-range-custom {
  */
 .swiss-timer-description-control .ui-compound-control:focus-within {
   border-color: transparent;
+  box-shadow: none;
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]) {
@@ -6095,6 +6311,12 @@ dialog.ui-dialog.df-range-custom {
 .swiss-timer-description-control .inline-tag-picker-search:focus-within,
 .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
   border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+/* Keyboard focus on an invalid Description keeps the danger underline with the ring (Codex r3). */
+.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--focus), inset 0 -2px 0 var(--danger);
 }
 
 .edit-time-entry-dialog .ui-control:focus-visible,
@@ -6155,6 +6377,7 @@ dialog.ui-dialog.df-range-custom {
 
 .swiss-category-trigger:focus-visible {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -6192,7 +6415,7 @@ dialog.ui-dialog.df-range-custom {
   overscroll-behavior: contain;
 }
 
-@media (max-width: 560px), (pointer: coarse) {
+@media (max-width: 560px), (any-pointer: coarse) {
   .df-flist {
     --df-flist-row: 44px;
   }
@@ -6258,6 +6481,32 @@ dialog.ui-dialog.df-range-custom {
   z-index: var(--df-layer-sheet);
   max-width: calc(100vw - 24px);
   overflow: hidden;
+}
+
+/* Sheets rise 8 px into place as they fade in, and sink as they fade out (WUI-026); anchored
+   lists fade in place. Reduce Motion keeps the fade only. */
+.df-flist.ui-floating-surface.is-sheet {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 160ms;
+}
+
+.df-flist.ui-floating-surface.is-sheet.is-open {
+  transition:
+    opacity 120ms ease-out,
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+
+.df-flist.ui-floating-surface.is-sheet:not(.is-open) {
+  transform: translateY(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-flist.ui-floating-surface.is-sheet:not(.is-open) {
+    transform: none;
+  }
 }
 
 .df-flist.is-sheet .df-flist-head {
@@ -6437,6 +6686,7 @@ dialog.ui-dialog.df-range-custom {
   margin: 2px 4px 6px;
   border-radius: var(--web-radius-control);
   padding: 0 10px;
+  background: var(--surface-inset);
   color: var(--muted);
 }
 
@@ -6655,7 +6905,7 @@ dialog.ui-dialog.df-range-custom {
   display: grid;
   box-sizing: border-box;
   grid-template-columns: 44px minmax(0, 1fr);
-  border: 2px solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   overflow: hidden;
@@ -6663,11 +6913,12 @@ dialog.ui-dialog.df-range-custom {
 
 .category-picker-create-name-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .category-picker-create-name-control:has(input[aria-invalid="true"]):focus-within {
   border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 .category-picker-create-form .category-picker-color-trigger {
@@ -7539,25 +7790,31 @@ dialog.ui-dialog.df-range-custom {
   min-height: 44px;
 }
 
+/* The date sheet's quick picks are the one segmented control (WUI-019), 44 px on this phone sheet. */
 .date-sheet-segments {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 2px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 4px;
 }
 
 .date-sheet-segments button {
   min-height: 44px;
   border: 0;
-  border-radius: 12px;
-  background: var(--surface-muted);
-  color: var(--foreground);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
   font: inherit;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .date-sheet-segments button[aria-pressed="true"] {
-  background: var(--foreground);
-  color: var(--background);
+  background: var(--surface-muted);
+  color: var(--text-primary);
 }
 
 .date-sheet-segments button:disabled {
@@ -7903,7 +8160,6 @@ dialog.ui-dialog.df-range-custom {
   }
 
   :root {
-    --web-radius-control: 12px;
     --web-radius-group: 18px;
     --web-radius-floating: 18px;
     /* One control scale with the Blocks controls (web UI audit WUI-015): 44 px, compact 36 px. */
@@ -8520,48 +8776,7 @@ dialog.ui-dialog.df-range-custom {
   opacity: 0.58;
 }
 
-.timeline-delete-error {
-  position: fixed;
-  right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 79;
-  width: min(420px, calc(100vw - 24px));
-  margin: 0;
-  border-radius: 12px;
-  padding: 12px 14px;
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-floating);
-  color: var(--danger-text);
-  animation: timeline-delete-notice-enter 160ms ease-out both;
-}
 
-.timeline-workspace:has(.df-toast-host) .timeline-delete-error {
-  bottom: max(80px, calc(env(safe-area-inset-bottom) + 68px));
-}
-
-@keyframes timeline-delete-notice-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes timeline-delete-notice-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  to {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
 
 @media (max-width: 640px) {
   .calendar-compact-editor {
@@ -8583,8 +8798,7 @@ dialog.ui-dialog.df-range-custom {
   }
 
   .calendar-compact-editor,
-  .time-entry-quick-editor-modal,
-  .timeline-delete-error {
+  .time-entry-quick-editor-modal {
     animation: none;
     transition: opacity 1ms linear;
     transform: none;
@@ -8693,6 +8907,20 @@ dialog.ui-dialog.df-range-custom {
 .calendar-day-total {
   white-space: nowrap;
 }
+
+/* Calendar phone layout (owner-approved 17 Oct 2026): a 104 px gutter and 130 px day columns on wider
+   screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Short
+   blocks stay data marks; List is the phone path for detail (WUI-045). */
+.timeline-calendar-workspace {
+  --calendar-axis-width: 104px;
+  --calendar-day-min-width: 130px;
+  position: relative;
+}
+
+.calendar-phone-zoom {
+  display: none;
+}
+
 
 .calendar-corner-zoom {
   display: grid;
@@ -9211,11 +9439,13 @@ dialog.ui-dialog.df-range-custom {
   background: var(--surface-muted);
 }
 
+/* One avatar (web UI audit WUI-039, owner 17 Oct 2026): a circle — 36 px in the bars, 40 px in
+   menus, 56 px in Settings (48 px on phones). */
 .df-profile > span:first-child,
 .df-mtop-avatar > span {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
@@ -9862,12 +10092,16 @@ dialog.ui-dialog.df-palette {
   padding: 0;
 }
 
+/* The search is the one field (WUI-017): an inset fill, radius 10, the neutral ring on focus. */
 .df-palette-input {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 4px 10px 10px;
-  box-shadow: inset 0 -1px 0 var(--border);
+  margin: 8px 8px 4px;
+  border-radius: 10px;
+  padding: 0 6px 0 12px;
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--text-muted);
 }
 
@@ -9883,7 +10117,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .df-palette-input:focus-within {
-  box-shadow: inset 0 -2px 0 var(--focus);
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .df-palette-input kbd {
@@ -10622,11 +10856,9 @@ dialog.ui-dialog.df-palette {
   text-align: right;
 }
 
-.df-erow.is-live .df-erow-dur {
-  color: var(--accent-text);
-}
-
-/* Reports never paints data coral (UIA-302): a running block's duration stays neutral there. */
+/* A running block's duration is neutral everywhere (web UI audit WUI-047, owner 17 Oct 2026; as
+   Reports already was, UIA-302): its row's "– now" and the live block carry the state. */
+.df-erow.is-live .df-erow-dur,
 .df-report-row.df-erow.is-live .df-erow-dur {
   color: var(--text-primary);
 }
@@ -10753,6 +10985,11 @@ dialog.ui-dialog.df-palette {
   flex: none;
   border-radius: 4px;
   background: var(--block, var(--text-muted));
+}
+
+/* The error variant (WUI-027): the same pill with a danger swatch. */
+.df-toast.is-error .df-toast-swatch {
+  background: var(--danger);
 }
 
 .df-toast-message {
@@ -10983,12 +11220,6 @@ dialog.ui-dialog.df-palette {
  * weekday / date / total day headings, a coral now line, hatched Review suggestions in a
  * right-hand lane and neutral view switches. Geometry, drag-to-create and resize are unchanged.
  */
-.timeline-range-controls .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--surface);
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 14%, transparent);
-}
-
 .swiss-timeline-surface .timeline-range-navigation:has(.timeline-today-button) {
   grid-template-columns: var(--web-icon-button-size) max-content var(--web-icon-button-size) auto;
 }
@@ -11852,6 +12083,46 @@ dialog.ui-dialog.df-palette {
   padding: 20px 32px 96px;
 }
 
+/* A missing page or a failure (WUI-048): one card, centred in the content area. */
+.df-status-page {
+  display: grid;
+  min-height: min(70dvh, 560px);
+  place-items: center;
+  padding: 24px 0;
+}
+
+.df-status-card {
+  display: grid;
+  width: min(100%, 440px);
+  justify-items: center;
+  gap: 12px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.df-status-card h1 {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 800;
+  text-wrap: balance;
+}
+
+.df-status-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.df-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .df-page-head {
   display: flex;
   flex-wrap: wrap;
@@ -11913,6 +12184,7 @@ dialog.ui-dialog.df-palette {
 .df-seg a[aria-current="page"] {
   background: var(--surface-muted);
 }
+
 
 .df-library-pins {
   margin: 0;
@@ -12169,10 +12441,10 @@ dialog.ui-dialog.df-palette {
 
 .df-ce-field input {
   min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
   padding: 0 12px;
-  background: var(--surface);
+  background: var(--surface-inset);
   color: var(--text-primary);
   font-size: 16px;
 }
@@ -12222,10 +12494,6 @@ dialog.ui-dialog.df-palette {
 
 .df-ce-swatch[aria-checked="true"] {
   box-shadow: inset 0 0 0 3px var(--on-block);
-}
-
-dialog.ui-dialog.df-ce-dialog {
-  width: min(560px, calc(100vw - 24px));
 }
 
 .df-ce-dialog .ui-dialog-actions {
@@ -12629,7 +12897,7 @@ dialog.ui-dialog.df-ce-dialog {
   display: none;
 }
 
-@media (pointer: coarse) {
+@media (any-pointer: coarse) {
   .df-stepper-btn {
     /* The circle stays 36 px; the touch target is 44 px. */
     width: 44px;
@@ -12644,7 +12912,9 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 16px 4px 8px;
 }
 
-.df-set-card h2 {
+/* The card's own title only: a dialog opened from a card keeps its own header (it used to pick up
+   this 16 px indent, WUI-020). */
+.df-set-card > h2 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -12683,19 +12953,6 @@ dialog.ui-dialog.df-ce-dialog {
 
 .df-set-card .ui-settings-row-action {
   margin-left: auto;
-}
-
-/* Selection is neutral in Blocks: coral stays for recording and the one primary action. */
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"],
-.df-set-card .ui-segmented-control button[aria-pressed="true"] {
-  background: var(--surface-muted);
-  color: var(--text-primary);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] span,
-.df-set-card .settings-appearance-row .ui-segmented-control button[aria-pressed="true"] svg {
-  color: var(--text-primary);
 }
 
 .df-set-card .ui-settings-row + .ui-settings-row::before {
@@ -12752,6 +13009,7 @@ dialog.ui-dialog.df-ce-dialog {
   .df-av-lg {
     width: 48px;
     height: 48px;
+    font-size: 16px;
   }
 
   .df-set-acts {
@@ -13129,10 +13387,6 @@ dialog.ui-dialog.df-ce-dialog {
 }
 
 /* Matches the base dialog.ui-dialog rule's specificity so the narrower width applies. */
-dialog.ui-dialog.df-rf-dialog {
-  width: min(620px, calc(100vw - 24px));
-}
-
 .df-rf-dialog .ui-dialog-actions {
   display: flex;
   flex-wrap: wrap;
@@ -13584,7 +13838,7 @@ dialog.ui-dialog.df-rf-dialog {
 
 /* UIA-204: between the phone layout and the sidebar (761-860 px) the avatar sits in the top bar,
    so the profile popover opens under it, top right, instead of bottom left over the tab bar. */
-@media (min-width: 761px) and (max-width: 860px) {
+@media (min-width: 561px) and (max-width: 860px) {
   dialog.ui-popover-panel.bottom-left {
     max-height: calc(100dvh - 64px - 12px);
     margin: 64px 12px auto auto;
@@ -13595,7 +13849,7 @@ dialog.ui-dialog.df-rf-dialog {
    Settings and Sign out as rows. */
 .df-profile-pop {
   display: grid;
-  gap: 14px;
+  gap: 6px;
 }
 
 .df-profile-pop-card {
@@ -13613,7 +13867,7 @@ dialog.ui-dialog.df-rf-dialog {
   height: 40px;
   flex: none;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 50%;
   background: var(--surface-muted);
   color: var(--foreground);
   font-weight: 750;
@@ -13638,11 +13892,16 @@ dialog.ui-dialog.df-rf-dialog {
   white-space: nowrap;
 }
 
+/* The #391 list head (WUI-018/WUI-022): 11 px uppercase, muted, tracked. */
 .df-profile-pop h3 {
-  margin: 0 0 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 700;
+  margin: 0;
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
 }
 
 .df-profile-pop-rows {
@@ -13659,7 +13918,7 @@ dialog.ui-dialog.df-rf-dialog {
   align-items: center;
   gap: 10px;
   border: 0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   padding: 0 10px;
   color: var(--foreground);
@@ -14505,7 +14764,7 @@ dialog.ui-dialog.df-rf-dialog {
   border: 0;
   border-radius: 10px;
   background: var(--surface-inset);
-  box-shadow: inset 0 0 0 2px transparent;
+  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--foreground);
 }
 
@@ -14544,7 +14803,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-start-time-input[aria-invalid="true"] {
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--control-border), inset 0 -2px 0 var(--danger);
 }
 
 .df-start-time-input[aria-invalid="true"]:focus {
@@ -14749,13 +15008,6 @@ dialog.ui-dialog.df-rf-dialog {
   text-transform: uppercase;
 }
 
-/* Inset fields without idle outlines (UIA-308); focus keeps its neutral border and an invalid
-   field its danger border. */
-.df-pe .ui-control:not(:focus):not([aria-invalid="true"]),
-.df-pe .place-search-control:not(:focus-within) {
-  border-color: transparent;
-}
-
 .df-pe .place-selected-result {
   background: var(--surface-inset);
 }
@@ -14775,7 +15027,8 @@ dialog.ui-dialog.df-rf-dialog {
   gap: 2px;
   border-radius: 999px;
   padding: 4px;
-  background: var(--surface-inset);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .df-pe-seg label {
@@ -14811,7 +15064,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-pe-seg input:checked + span {
-  background: var(--surface-raised);
+  background: var(--surface-muted);
 }
 
 .df-pe-seg input:focus-visible + span {
@@ -14923,28 +15176,46 @@ dialog.ui-dialog.df-rf-dialog {
   position: relative;
 }
 
+/* The Reports range menu on the shared floating surface (web UI audit WUI-023): the #391 surface
+   (1 px line, radius 16, floating shadow, 6 px padding), a "Date range" head, 36 px rows (44 px on
+   phones and touch screens) with an inset neutral highlight and a neutral check on the chosen one. */
 .df-range-menu {
   position: absolute;
   z-index: 40;
   top: calc(100% + 6px);
   left: 0;
   display: grid;
-  min-width: 200px;
+  min-width: 220px;
   max-width: calc(100vw - 24px);
   max-height: min(420px, 70vh);
   overflow-y: auto;
-  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
   padding: 6px;
-  background: var(--surface-raised, var(--surface));
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-floating);
   animation: df-range-menu-in 120ms ease-out both;
 }
 
+.df-range-menu-head {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
 .df-range-menu button {
+  display: flex;
   min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border: 0;
-  border-radius: 9px;
-  padding: 0 12px;
+  border-radius: 10px;
+  padding: 0 10px;
   background: transparent;
   color: var(--text-primary);
   font: inherit;
@@ -14958,13 +15229,30 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-range-menu button[aria-checked="true"] {
-  background: var(--surface-muted);
-  font-weight: 700;
+  font-weight: 650;
+}
+
+.df-range-menu button > svg {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+@media (any-pointer: coarse) {
+  .df-range-menu button {
+    min-height: 44px;
+  }
 }
 
 @keyframes df-range-menu-in {
   from {
     opacity: 0;
+  }
+}
+
+@keyframes df-range-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
   }
 }
 
@@ -15020,8 +15308,11 @@ dialog.ui-dialog.df-rf-dialog {
   .df-range-nav {
     width: 44px;
   }
+}
 
-  /* A bottom sheet above the phone tab bar (z-index 40), clear of the home indicator. */
+/* Phones (WUI-026: anchored menus become bottom sheets at ≤560 px): a sheet above the phone tab
+   bar (z-index 40), clear of the home indicator, rising 8 px as it fades in. */
+@media (max-width: 560px) {
   .df-range-menu {
     position: fixed;
     z-index: 70;
@@ -15031,7 +15322,16 @@ dialog.ui-dialog.df-rf-dialog {
     left: 12px;
     max-width: calc(100vw - 24px);
     max-height: min(520px, calc(100dvh - 24px - env(safe-area-inset-bottom, 0px)));
-    padding-top: 52px;
+    border-radius: 24px;
+    animation-name: df-range-sheet-in;
+  }
+
+  /* The head shares its row with the sheet's 44 px Close. */
+  .df-range-menu-head {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    padding-right: 52px;
   }
 
   .df-range-menu-close {
@@ -15277,5 +15577,124 @@ dialog.ui-dialog.df-rf-dialog {
 
   .df-report-row {
     animation: none;
+  }
+}
+
+/* Calendar phone layout, last in the file so it wins over the phone shell's fixed-height frame: the
+   Calendar page scrolls as a page and the card takes nearly a screen of its own, so one scroll puts a
+   full-height grid (sticky day headings inside) on screen instead of a ~120 px sliver under the
+   timer, quick start, week strip and toolbar. The grid hands a scroll past its ends to the page. */
+@media (max-width: 560px) {
+  .swiss-app-shell.is-timeline {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline {
+    overflow: visible;
+  }
+
+  .swiss-main-frame.is-timeline .timeline-calendar-workspace,
+  .swiss-main-frame.is-timeline .timeline-list-workspace {
+    /* Its row parent (.timeline-view-stage) gives it the full width; this fixes its height. */
+    height: calc(100dvh - var(--df-tabbar-space) - 24px);
+    min-height: 420px;
+  }
+
+  .calendar-grid-scroller,
+  .timeline-list-scroll {
+    overscroll-behavior: auto;
+  }
+
+  .timeline-calendar-workspace {
+    --calendar-axis-width: 60px;
+    --calendar-day-min-width: 118px;
+  }
+
+  /* "12:00 PM" fits the narrow gutter on one line. */
+  .calendar-now-pill {
+    right: 2px;
+    padding: 2px 5px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .calendar-grid-corner .calendar-corner-zoom {
+    display: none;
+  }
+
+  .calendar-grid-corner {
+    padding: 4px;
+  }
+
+  .calendar-time-axis .tabular {
+    padding-inline: 6px;
+    font-size: 11px;
+  }
+
+  .calendar-phone-zoom {
+    position: absolute;
+    z-index: 45;
+    right: 12px;
+    bottom: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    border-radius: 999px;
+    padding: 2px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-floating);
+  }
+
+  .calendar-phone-zoom button {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--foreground);
+    font-size: 17px;
+  }
+
+  .calendar-phone-zoom button:hover:not(:disabled) {
+    background: var(--surface-muted);
+  }
+
+  .calendar-phone-zoom button:disabled {
+    color: var(--muted);
+    opacity: 0.42;
+  }
+}
+
+/* Up to the sidebar layout (≤860 px), small actions are 44 px targets whatever the pointer
+   (WUI-035): Today's Review now and This week rows, and the Reports range controls. */
+@media (max-width: 860px) {
+  .df-pill-action,
+  .df-mw-row,
+  .df-range-nav,
+  .df-range-trigger {
+    min-height: 44px;
+  }
+
+  .df-range-nav {
+    width: 44px;
+  }
+}
+
+/* Touch screens: every segment, text field and small action is a 44 px target (WUI-019, WUI-035,
+   WUI-046). Last in the file, so no base size declared later wins the cascade (Codex r1 on #472). */
+@media (any-pointer: coarse) {
+  .df-seg a,
+  .ui-segmented-control button,
+  .df-pe-seg span,
+  .df-flist-search input,
+  .df-logas input,
+  .df-pill-action,
+  .df-mw-row {
+    min-height: 44px;
+  }
+
+  .df-flist-search {
+    height: auto;
   }
 }

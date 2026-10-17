@@ -39,7 +39,9 @@ describe("Timeline inline row layout contract", () => {
     expect(entries).not.toContain("timeline-inline-date-trigger");
     expect(styles).toMatch(/\.timeline-inline-time \{[^}]*box-sizing: border-box;[^}]*display: inline-grid;[^}]*width: max-content;[^}]*max-width: 100%;[^}]*height: var\(--web-control-height\);[^}]*grid-template-columns: 5ch 16px 5ch;[^}]*flex: 0 0 auto;[^}]*border: 0;[^}]*padding: 0 8px;/s);
     expect(styles).toMatch(/\.timeline-inline-time:hover,[\s\S]*\.timeline-inline-time:focus-within \{[^}]*background: var\(--surface-muted\);/s);
-    expect(styles).toMatch(/\.timeline-inline-time:has\(\.timeline-inline-time-input:focus-visible\),[\s\S]*\.timeline-inline-time \.timeline-inline-time-input:focus-visible \{[^}]*border: 0;[^}]*outline: 0;[^}]*box-shadow: none;/s);
+    expect(styles).toMatch(/\.timeline-inline-time \.timeline-inline-time-input:focus-visible \{[^}]*border: 0;[^}]*outline: 0;[^}]*box-shadow: none;/s);
+    // The pair shows the shared neutral field ring on keyboard focus (WUI-017).
+    expect(styles).toMatch(/\.timeline-inline-time:has\(\.timeline-inline-time-input:focus-visible\) \{[^}]*box-shadow: inset 0 0 0 2px var\(--web-focus-border\);/s);
     expect(styles).toMatch(/\.timeline-inline-time-input \{[^}]*width: 100%;[^}]*height: var\(--web-control-height\);[^}]*min-width: 0;[^}]*padding: 0;[^}]*text-align: center;/s);
     expect(styles).toMatch(/\.timeline-inline-time-input:focus \{[^}]*border: 0;[^}]*background: transparent;[^}]*outline: 0;[^}]*box-shadow: none;/s);
     expect(styles).toMatch(/\.timeline-inline-time-separator \{[^}]*width: 16px;[^}]*height: var\(--web-control-height\);[^}]*align-items: center;[^}]*justify-content: center;/s);

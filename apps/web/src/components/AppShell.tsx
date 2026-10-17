@@ -80,6 +80,10 @@ function AppShellContent({ children }: { children: ReactNode }) {
     toggleTimer
   } = useAppShellRuntime();
   const shellIdentity = data ? { userName: data.user.name, workspaceName: data.workspace.name } : null;
+  // The account button's name starts with what it shows: the name and the workspace (WUI-044).
+  const profileLabel = shellIdentity
+    ? `${shellIdentity.userName}, ${shellIdentity.workspaceName}: profile and settings`
+    : "Profile and settings";
   const [overlay, setOverlay] = useState<Overlay>(null);
   const goToPending = useRef(false);
   const goToTimer = useRef<number | undefined>(undefined);
@@ -123,12 +127,17 @@ function AppShellContent({ children }: { children: ReactNode }) {
   // (no landing on reconciliation).
   useEffect(() => {
     if (!syncViewerTimeZoneCookie(document, window.location.protocol === "https:")) return;
-    if (!window.location.pathname.startsWith("/reports")) return;
+    // Elsewhere the shell's data was drawn for the old zone (or none): fetch it again with the
+    // cookie, so its day and week ranges are the viewer's (#484).
+    if (!window.location.pathname.startsWith("/reports")) {
+      void refresh();
+      return;
+    }
     // Marked with the route the refresh will render, in the router's terms (the panel compares
     // `usePathname()`/`useSearchParams()`, never the address bar).
     markReportsZoneSyncRefresh(reportsRouteHref(window.location.pathname, window.location.search));
     router.refresh();
-  }, [router]);
+  }, [refresh, router]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -270,8 +279,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="df-profile"
-            aria-label="Profile, workspace and settings"
-            onClick={() => setOverlay("profile")}
+            aria-label={profileLabel}
+            data-profile-trigger="" onClick={() => setOverlay("profile")}
           >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
@@ -288,7 +297,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" onClick={() => setOverlay("profile")}>
+          <button type="button" className="df-mtop-avatar" aria-label={profileLabel} data-profile-trigger="" onClick={() => setOverlay("profile")}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>
@@ -405,7 +414,7 @@ function ProfileWorkspacePopover({
   }
 
   return (
-    <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy}>
+    <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy} outsidePressIgnore="[data-profile-trigger]">
       <div className="df-profile-pop">
         <div className="df-profile-pop-card">
           <span aria-hidden="true">{initials(data.user.name)}</span>
@@ -446,7 +455,7 @@ function ProfileWorkspacePopover({
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
-    <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
+    <ModalDialog size="compact" description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
       <div className="df-shortcuts">
         {shortcuts.map(([keys, action]) => <div key={keys}><span>{action}</span><kbd>{keys}</kbd></div>)}
       </div>

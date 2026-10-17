@@ -129,7 +129,7 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
         categoryName: null,
         categoryColor: null,
         placeId: null,
-        placeName: "Wagamama",
+        placeName: "Noodle House",
         placeKind: "one_time",
         source: "location_learning",
         confidence: "high",
@@ -146,7 +146,7 @@ describe("getIntegrationTimeCurrentSnapshot", () => {
     const snapshot = await getIntegrationTimeCurrentSnapshot(session);
     expect(snapshot.activeEntry?.place).toEqual({
       id: null,
-      name: "Wagamama",
+      name: "Noodle House",
       kind: "one_time"
     });
   });

@@ -13,8 +13,8 @@ const suggestion = {
   title: "Synthetic School",
   subtitle: "Example Road",
   formattedAddress: "Synthetic School, Example Road",
-  latitude: 51.7,
-  longitude: 0.4,
+  latitude: 10.7,
+  longitude: 20.4,
   resultType: "amenity"
 };
 
@@ -23,7 +23,7 @@ describe("web place editor state", () => {
     const selected = { latitude: 51, longitude: 0.1 };
     const existing = { latitude: 52, longitude: 0.2 };
     const browser = { latitude: 53, longitude: 0.3 };
-    const saved = [{ latitude: 54, longitude: 0.4 }];
+    const saved = [{ latitude: 54, longitude: 20.4 }];
 
     expect(selectWebPlaceSearchBias({
       selectedCoordinate: selected,
@@ -56,13 +56,13 @@ describe("web place editor state", () => {
     expect(applyWebPlaceSuggestion(suggestion, "", false).name).toBe("Synthetic School");
     expect(applyWebPlaceSuggestion(suggestion, "My school", true).name).toBe("My school");
     expect(applyWebPlaceSuggestion(suggestion, "My school", true)).toMatchObject({
-      latitude: "51.7",
-      longitude: "0.4"
+      latitude: "10.7",
+      longitude: "20.4"
     });
   });
 
   it("keeps Log automatically only while visits are suggested (owner decision 14 Oct 2026)", () => {
-    const base = { name: "Gym", latitude: "51.7", longitude: "0.4", radiusMeters: "100", defaultCategoryId: "", defaultActivityDescription: "" };
+    const base = { name: "Gym", latitude: "10.7", longitude: "20.4", radiusMeters: "100", defaultCategoryId: "", defaultActivityDescription: "" };
     expect(validateWebPlaceForm({ ...base, loggingEnabled: true, autoLog: true })).toMatchObject({ ok: true, value: { autoLog: true } });
     expect(validateWebPlaceForm({ ...base, loggingEnabled: false, autoLog: true })).toMatchObject({ ok: true, value: { autoLog: false } });
     expect(validateWebPlaceForm({ ...base, loggingEnabled: true, autoLog: false })).toMatchObject({ ok: true, value: { autoLog: false } });
@@ -71,8 +71,8 @@ describe("web place editor state", () => {
   it("validates coordinates, radius and visit-suggestion defaults", () => {
     const valid = validateWebPlaceForm({
       name: " Synthetic School ",
-      latitude: "51.7",
-      longitude: "0.4",
+      latitude: "10.7",
+      longitude: "20.4",
       radiusMeters: "100",
       loggingEnabled: true,
       autoLog: true,
@@ -83,8 +83,8 @@ describe("web place editor state", () => {
       ok: true,
       value: {
         name: "Synthetic School",
-        latitude: 51.7,
-        longitude: 0.4,
+        latitude: 10.7,
+        longitude: 20.4,
         radiusMeters: 100,
         loggingEnabled: true,
         autoLog: true,
@@ -106,8 +106,8 @@ describe("web place editor state", () => {
 
     expect(validateWebPlaceForm({
       name: "Synthetic",
-      latitude: "51.7",
-      longitude: "0.4",
+      latitude: "10.7",
+      longitude: "20.4",
       radiusMeters: "24",
       loggingEnabled: true,
       autoLog: true,
@@ -117,8 +117,8 @@ describe("web place editor state", () => {
 
     expect(validateWebPlaceForm({
       name: "Synthetic",
-      latitude: "51.7",
-      longitude: "0.4",
+      latitude: "10.7",
+      longitude: "20.4",
       radiusMeters: "2001",
       loggingEnabled: true,
       autoLog: true,
@@ -128,8 +128,8 @@ describe("web place editor state", () => {
 
     expect(validateWebPlaceForm({
       name: "Synthetic",
-      latitude: "51.7",
-      longitude: "0.4",
+      latitude: "10.7",
+      longitude: "20.4",
       radiusMeters: "100",
       loggingEnabled: false,
       autoLog: true,
@@ -160,11 +160,11 @@ describe("web place editor state", () => {
       permissions: { query: vi.fn(async () => ({ state: "granted" as const })) },
       geolocation: {
         getCurrentPosition(success) {
-          success({ coords: { latitude: 51.75, longitude: 0.45 } });
+          success({ coords: { latitude: 10.75, longitude: 20.45 } });
         }
       }
     });
-    expect(coordinate).toEqual({ latitude: 51.75, longitude: 0.45 });
+    expect(coordinate).toEqual({ latitude: 10.75, longitude: 20.45 });
     expect(friendlyBrowserLocationError(1)).toContain("denied");
     expect(friendlyBrowserLocationError(3)).toContain("too long");
   });
