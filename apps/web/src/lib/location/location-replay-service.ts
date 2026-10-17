@@ -10,6 +10,7 @@ import {
 } from "./location-replay-batching";
 import {
   deriveCommutes,
+  outingQualifies,
   isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -529,8 +530,14 @@ function rebuildLegWithinDecidedStops(
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
-  return deriveCommutes([from, to], acceptedEvidence,
-    { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion }, options.processingAt, places)
+  const config = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
+  // A leg that stood only because its outing qualified keeps that support only while the outing,
+  // with every decided boundary in it, still qualifies (Codex r2 on #461).
+  const outing = leg.outingStayIds?.map((id) => stayWithDecidedBounds(id, decided, segments));
+  const outingLeg = outing && outing.every((stay): stay is StaySegment => stay != null) &&
+    outingQualifies(outing, acceptedEvidence, config, options.processingAt, places);
+  return deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
+    { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
     .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
 }

@@ -1254,12 +1254,51 @@ function stopFromStay(stay: StaySegment): CommuteStop {
  * blocks the trip. Pairs whose trip does not qualify keep their legs, and
  * saved/learned or visit-length stops still split journeys.
  */
+/** Whether a stay is an unknown visit long enough to be its own Stay (PRD D19: 10 minutes or more). */
+function isOutingVisit(stay: StaySegment, config: LocationEngineConfig) {
+  return stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
+    Date.parse(locationOnlyStayEnd(stay) ?? stay.stoppedAt) - Date.parse(stay.startedAt) >= config.unknownStayReviewDwellMs;
+}
+
 /**
- * The legs of outings an unknown visit splits (PRD D19, A3): a visit of 10 minutes or more is its own
- * Stay, so the outing through it is two Moves. Where either Move does not qualify on its own (short,
- * sparse or nearby legs) but the outing through the visit would have qualified as one trip with a stop,
- * both legs stand, at low confidence (always offered in Review, never logged automatically), so the
- * outing's travel is never lost (Codex r1 on #461). Legs that already qualified are kept as they are.
+ * The evidence an outing's derivation can use: from its first stay's start to its last stay's end.
+ * Every reading derivation looks at for these stays (their gaps, the first stay's own departure
+ * support, motion in between) lies inside, so the result is the same as over all evidence, at the
+ * cost of the outing rather than of the whole replay (Codex r2 on #461).
+ */
+function outingWindow(chain: readonly StaySegment[], evidence: ClassifiedEvidence[], times: readonly number[]) {
+  const from = Date.parse(chain[0].startedAt);
+  const last = chain[chain.length - 1];
+  const to = last.stoppedAt ? Date.parse(last.stoppedAt) : Number.POSITIVE_INFINITY;
+  return evidence.filter((_item, index) => times[index] >= from && times[index] <= to);
+}
+
+/**
+ * Whether an outing — `chain`, its two anchor stays first and last and the stays between them in
+ * order — qualifies as one trip with its stays as stops, without help from its legs: the test that
+ * lets the legs an unknown visit splits it into stand (`outingLegsAround`). Replay asks it again with
+ * decided boundaries before rebuilding such a leg (Codex r2 on #461).
+ */
+export function outingQualifies(
+  chain: readonly StaySegment[], evidence: ClassifiedEvidence[], config: LocationEngineConfig, processingAt: string,
+  options: CommuteDerivationOptions = {}
+) {
+  if (chain.length < 3 || !chain[0].stoppedAt) return false;
+  return deriveCommutes([chain[0], chain[chain.length - 1]], evidence, config, processingAt, {
+    ...options, interiorStops: chain.slice(1, -1), qualifiedLegChainConfidence: () => null, outingLeg: undefined
+  }).some((trip) => Boolean(trip.stops?.length) && trip.qualificationReason !== "same_place_outing" && !trip.motionSupported);
+}
+
+/**
+ * The legs of outings unknown visits split (PRD D19, A3): a visit of 10 minutes or more is its own
+ * Stay, so the outing through it is a Move to it and a Move on. Where a Move does not qualify on its
+ * own (short, sparse or nearby legs) but the outing would have qualified as one trip with its visits
+ * as stops, its legs stand at low confidence (always offered in Review, never logged automatically),
+ * so the outing's travel is never lost (Codex r1 on #461). An outing runs between the known (or
+ * short-unknown-visit-free) stays either side of consecutive visits, with any short stops inside it
+ * left as stops, so Home → A → B → Home is judged as a whole (Codex r2 on #461); where the whole run
+ * does not qualify (a day of visits, say), each visit is judged with its own neighbours. Legs that
+ * already qualified are kept as they are; each added leg carries its outing (`outingStayIds`).
  */
 function outingLegsAround(
   legs: readonly CommuteSegment[],
@@ -1270,26 +1309,40 @@ function outingLegsAround(
   options: CommuteDerivationOptions
 ): CommuteSegment[] {
   const added: CommuteSegment[] = [];
-  const hasLeg = (from: StaySegment, to: StaySegment) =>
-    legs.some((leg) => leg.fromStaySegmentId === from.clientSegmentId && leg.toStaySegmentId === to.clientSegmentId);
-  for (let index = 1; index + 1 < stays.length; index += 1) {
-    const [before, visit, after] = [stays[index - 1], stays[index], stays[index + 1]];
-    if (visit.placeMatchKind !== "unknown" || !visit.stoppedAt || !before.stoppedAt) continue;
-    if (Date.parse(locationOnlyStayEnd(visit) ?? visit.stoppedAt) - Date.parse(visit.startedAt) < config.unknownStayReviewDwellMs) continue;
-    if (hasLeg(before, visit) && hasLeg(visit, after)) continue;
-    // The outing through the visit, as one trip with it as a stop and no help from its legs.
-    const whole = deriveCommutes([before, after], acceptedEvidence, config, processingAt, {
-      ...options, interiorStops: [visit], qualifiedLegChainConfidence: () => null, outingLeg: undefined
-    }).find((trip) => trip.stops?.length && trip.qualificationReason !== "same_place_outing" && !trip.motionSupported);
-    if (!whole) continue;
-    const pair = new Set([`${before.clientSegmentId}>${visit.clientSegmentId}`, `${visit.clientSegmentId}>${after.clientSegmentId}`]);
-    for (const leg of deriveCommutes([before, visit, after], acceptedEvidence, config, processingAt, {
-      ...options, outingLeg: (fromId, toId) => pair.has(`${fromId}>${toId}`)
+  const key = (fromId: string, toId: string) => `${fromId}>${toId}`;
+  const existing = new Set(legs.map((leg) => key(leg.fromStaySegmentId, leg.toStaySegmentId)));
+  const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && !isOutingVisit(stay, config);
+  const majors = stays.flatMap((stay, index) => minorStop(stay) ? [] : [index]);
+  if (!majors.some((index) => isOutingVisit(stays[index], config))) return added;
+  const times = acceptedEvidence.map((item) => Date.parse(item.evidence.occurredAt));
+  // Recovers the missing legs of `chain` if it qualifies as one outing.
+  const recover = (chain: StaySegment[]) => {
+    const pairs = chain.slice(1).map((to, index) => key(chain[index].clientSegmentId, to.clientSegmentId));
+    if (pairs.every((pair) => existing.has(pair))) return true;
+    const evidence = outingWindow(chain, acceptedEvidence, times);
+    if (!outingQualifies(chain, evidence, config, processingAt, options)) return false;
+    const missing = new Set(pairs.filter((pair) => !existing.has(pair)));
+    const outingStayIds = chain.map((stay) => stay.clientSegmentId);
+    for (const leg of deriveCommutes(chain, evidence, config, processingAt, {
+      ...options, outingLeg: (fromId, toId) => missing.has(key(fromId, toId))
     })) {
-      const from = leg.fromStaySegmentId === before.clientSegmentId ? before : visit;
-      const to = leg.toStaySegmentId === visit.clientSegmentId ? visit : after;
-      if (!hasLeg(from, to) && !added.some((other) => other.clientSegmentId === leg.clientSegmentId)) added.push(leg);
+      const pair = key(leg.fromStaySegmentId, leg.toStaySegmentId);
+      if (!missing.has(pair)) continue;
+      existing.add(pair);
+      added.push({ ...leg, outingStayIds });
     }
+    return true;
+  };
+  for (let run = 1; run < majors.length - 1; run += 1) {
+    if (!isOutingVisit(stays[majors[run]], config)) continue;
+    let last = run;
+    while (last + 1 < majors.length - 1 && isOutingVisit(stays[majors[last + 1]], config)) last += 1;
+    const whole = stays.slice(majors[run - 1], majors[last + 1] + 1);
+    if (!recover(whole) && last > run) {
+      // The run as a whole is not one outing: each visit with the stays either side of it.
+      for (let visit = run; visit <= last; visit += 1) recover(stays.slice(majors[visit - 1], majors[visit + 1] + 1));
+    }
+    run = last;
   }
   return added;
 }

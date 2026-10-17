@@ -1055,3 +1055,58 @@ describe("the capture simulator", () => {
     expect(simulate(outing, 7).input()).toEqual(simulate(outing, 7).input());
   });
 });
+
+describe("outings that 10-minute unknown visits split into Moves (PRD D19, Codex r2 on #461)", () => {
+  // Two places 750 m from Home and 400 m apart: every leg is short, the whole outing is not.
+  const A = { x: 750, y: 0 };
+  const B = { x: 643, y: 386 };
+  const twoVisits = (firstMinutes: number): Scenario => ({ start: "2026-03-09T12:00:00Z", origin: HOME.at, places: [HOME], legs: [
+    { kind: "stay", minutes: 60 }, { kind: "drive", to: A }, { kind: "stay", minutes: firstMinutes },
+    { kind: "drive", to: B }, { kind: "stay", minutes: 12 }, { kind: "drive", to: HOME.at }, { kind: "stay", minutes: 90 }
+  ] });
+  // Each drive between the truth stays is covered by a Move, so none of the outing's travel is lost.
+  const drivesCovered = (scenario: Scenario, seed: number, motion: boolean) => {
+    const sim = simulate(scenario, seed, { motion });
+    const moves = allCommutes(sim.input());
+    const stays = sim.truth.stays;
+    return stays.slice(1).map((stay, index) => {
+      const [from, to] = [stays[index].to, stay.from];
+      const middle = (from + to) / 2;
+      return moves.some((move) => Date.parse(move.startedAt) <= middle && Date.parse(move.stoppedAt!) >= middle);
+    });
+  };
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])("keeps every Move of Home → A → B → Home with two 12-minute visits (seed %i)", (seed) => {
+    for (const motion of [false, true]) expect(drivesCovered(twoVisits(12), seed, motion)).toEqual([true, true, true]);
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])("keeps the Moves when the first stop is a 6-minute stop inside the trip (seed %i)", (seed) => {
+    for (const motion of [false, true]) expect(drivesCovered(twoVisits(6), seed, motion)).toEqual([true, true, true]);
+  });
+
+  it("costs no more with 12-minute visits to recover legs for than with 9-minute stops (Codex r2 on #461)", () => {
+    // A week of six such outings a day. Recovery used to derive each visit over all the evidence
+    // (about 3× the run with stops instead of visits); over its own window it costs about the same.
+    const week = (minutes: number) => {
+      const day = (start: string): Scenario => ({ start, origin: HOME.at, places: [HOME], legs: [
+        { kind: "stay", minutes: 60 },
+        ...Array.from({ length: 6 }, (): Scenario["legs"] => [{ kind: "drive", to: A }, { kind: "stay", minutes },
+          { kind: "drive", to: B }, { kind: "stay", minutes }, { kind: "drive", to: HOME.at }, { kind: "stay", minutes: 40 }]).flat(),
+        { kind: "stay", minutes: 300 }] });
+      const inputs = Array.from({ length: 7 }, (_, index) =>
+        simulate(day(new Date(Date.parse("2026-03-09T06:00:00Z") + index * 86_400_000).toISOString()), index + 1, { motion: true }).input());
+      return { ...inputs[6], evidence: inputs.flatMap((value) => value.evidence) };
+    };
+    const fastest = (value: LocationEngineInput) => {
+      runLocationEngine(value);
+      let best = Number.POSITIVE_INFINITY;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const started = performance.now();
+        runLocationEngine(value);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    expect(fastest(week(12)) / fastest(week(9))).toBeLessThan(2);
+  });
+});
