@@ -814,7 +814,7 @@ describe("commute learning normalization", () => {
         rawPayload: {
           fromPlaceId: placeId("home"),
           fromPlaceName: "Home",
-          toPlaceName: "Near Springfield Road",
+          toPlaceName: "Near Example Road",
           startedAt: "2026-07-13T08:00:00.000Z",
           stoppedAt: "2026-07-13T08:25:00.000Z",
           reviewFirst: true
@@ -829,7 +829,7 @@ describe("commute learning normalization", () => {
         reviewStatus: "needs_review",
         confidence: "medium",
         categoryId: categoryId("commute"),
-        title: "Possible commute from Home to Near Springfield Road"
+        title: "Possible commute from Home to Near Example Road"
       })
     );
   });
@@ -894,7 +894,7 @@ describe("automation rule normalization", () => {
         places: [
           {
             id: placeId("station"),
-            name: "Chelmsford Station",
+            name: "Exampleton Station",
             radiusMeters: 100,
             priority: 5,
             defaultProjectId: null,
@@ -906,7 +906,7 @@ describe("automation rule normalization", () => {
         automationRules: [
           {
             id: "rule-station",
-            name: "Chelmsford Station pickup/drop-off",
+            name: "Exampleton Station pickup/drop-off",
             triggerSource: "geofence_specific",
             triggerType: "geofence_exit",
             placeId: placeId("station"),

@@ -52,7 +52,7 @@ This is a server transaction-owner correction. It does not change the operation,
 statement, lock, idle, cleanup, isolation, cancellation, advisory-lock,
 savepoint, rollout, semantic, evidence-retention or retry budgets. It does not
 change Location segmentation, automatic policy, mobile scheduling, capture
-frequency, geofences, permissions or the PureGym incident outcome.
+frequency, geofences, permissions or the Example Gym incident outcome.
 
 ## 2. Baseline and evidence
 
@@ -300,12 +300,12 @@ Report:
 
 No claim may exceed the evidence. A local synthetic performance result is not a
 hosted latency claim and no replay-performance fix proves missing native
-capture or PureGym arrival accuracy.
+capture or Example Gym arrival accuracy.
 
 ## 16. Later jobs — not instructions for this implementation session
 
 Independent review, exact-head CI/Preview observation, staging promotion,
 hosted replay, production checks, iOS/TestFlight build or installation,
 physical-device acceptance, automatic-mode scheduling/capture investigation,
-PureGym accuracy assessment and merge are separate jobs requiring their own
+Example Gym accuracy assessment and merge are separate jobs requiring their own
 explicit authorization. Do not perform or poll them from this session.

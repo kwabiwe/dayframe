@@ -16,16 +16,16 @@ final class DayframePlaceSearchTests: XCTestCase {
 
   func testNearbySearchReturnsTopThreeDeduplicatedInProviderOrder() {
     let values = [
-      nearby("Vue", distance: 140, relevance: 0),
-      nearby("Wagamama", distance: 90, relevance: 1),
-      nearby("vue", distance: 145, relevance: 2),
-      nearby("Next", distance: 120, relevance: 3),
-      nearby("Lakeside", distance: 60, relevance: 4)
+      nearby("Starlight", distance: 140, relevance: 0),
+      nearby("Noodle House", distance: 90, relevance: 1),
+      nearby("starlight", distance: 145, relevance: 2),
+      nearby("Thread", distance: 120, relevance: 3),
+      nearby("Examplegate", distance: 60, relevance: 4)
     ]
 
     XCTAssertEqual(
       NearbyPointOfInterestCoordinator.normalized(values).map(\.name),
-      ["Vue", "Wagamama", "Next"]
+      ["Starlight", "Noodle House", "Thread"]
     )
   }
 
@@ -41,16 +41,16 @@ final class DayframePlaceSearchTests: XCTestCase {
   }
 
   func testContextQueryUsesRepeatedDistinctiveNameButRejectsLocalityAndGenericWords() {
-    let lakeside = [
-      nearby("Lakeside Parking", distance: 40, relevance: 0, category: .parking),
-      nearby("Apple Lakeside", distance: 90, relevance: 1, category: .store),
-      nearby("Vue Cinema Thurrock", distance: 130, relevance: 2, category: .movieTheater)
+    let examplegate = [
+      nearby("Examplegate Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Gadget Examplegate", distance: 90, relevance: 1, category: .store),
+      nearby("Starlight Cinema Sampleton", distance: 130, relevance: 2, category: .movieTheater)
     ]
-    XCTAssertEqual(NearbyPointOfInterestCoordinator.contextQuery(from: lakeside), "lakeside")
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.contextQuery(from: examplegate), "examplegate")
 
     let localityOnly = [
-      nearby("Thurrock Cinema", distance: 40, relevance: 0, localityNames: ["Thurrock"]),
-      nearby("Thurrock Store", distance: 60, relevance: 1, localityNames: ["Thurrock"])
+      nearby("Sampleton Cinema", distance: 40, relevance: 0, localityNames: ["Sampleton"]),
+      nearby("Sampleton Store", distance: 60, relevance: 1, localityNames: ["Sampleton"])
     ]
     XCTAssertNil(NearbyPointOfInterestCoordinator.contextQuery(from: localityOnly))
 
@@ -63,18 +63,18 @@ final class DayframePlaceSearchTests: XCTestCase {
 
   func testContextualRankingPromotesSiteThenDiningAndActivity() {
     let values = [
-      nearby("Mr Simms Sweet Shop", distance: 14, relevance: 0, category: .store),
-      nearby("Brother2Brother", distance: 14, relevance: 1, category: .store),
-      nearby("Charlie's Sweet Emporium", distance: 14, relevance: 2, category: .store),
-      nearby("Lakeside Shopping Centre", distance: 378, relevance: 0, category: .store, source: .contextual(anchor: "lakeside")),
-      nearby("IKEA", distance: 523, relevance: 1, category: .store, source: .contextual(anchor: "lakeside")),
-      nearby("Vue Cinema Thurrock", distance: 496, relevance: 6, category: .movieTheater, source: .contextual(anchor: "lakeside")),
-      nearby("wagamama", distance: 429, relevance: 12, category: .restaurant, source: .contextual(anchor: "lakeside"))
+      nearby("Sweet Corner", distance: 14, relevance: 0, category: .store),
+      nearby("Barber Duo", distance: 14, relevance: 1, category: .store),
+      nearby("Candy Emporium", distance: 14, relevance: 2, category: .store),
+      nearby("Examplegate Shopping Centre", distance: 378, relevance: 0, category: .store, source: .contextual(anchor: "examplegate")),
+      nearby("Homestore", distance: 523, relevance: 1, category: .store, source: .contextual(anchor: "examplegate")),
+      nearby("Starlight Cinema Sampleton", distance: 496, relevance: 6, category: .movieTheater, source: .contextual(anchor: "examplegate")),
+      nearby("noodle house", distance: 429, relevance: 12, category: .restaurant, source: .contextual(anchor: "examplegate"))
     ]
 
     XCTAssertEqual(
       NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 750).map(\.name),
-      ["Lakeside Shopping Centre", "wagamama", "Vue Cinema Thurrock"]
+      ["Examplegate Shopping Centre", "noodle house", "Starlight Cinema Sampleton"]
     )
   }
 
@@ -127,8 +127,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
@@ -145,8 +145,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
@@ -164,8 +164,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
@@ -182,25 +182,25 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
     await Task.yield()
     searcher.completeNearby(.success([
-      nearby("Lakeside Parking", distance: 40, relevance: 0, category: .parking),
-      nearby("Apple Lakeside", distance: 90, relevance: 1, category: .store)
+      nearby("Examplegate Parking", distance: 40, relevance: 0, category: .parking),
+      nearby("Gadget Examplegate", distance: 90, relevance: 1, category: .store)
     ]))
     await Task.yield()
-    XCTAssertEqual(searcher.contextQuery, "lakeside")
+    XCTAssertEqual(searcher.contextQuery, "examplegate")
     searcher.completeContext(.success([
-      nearby("Lakeside Shopping Centre", distance: 300, relevance: 0, category: .store, source: .contextual(anchor: "lakeside")),
-      nearby("wagamama", distance: 320, relevance: 4, category: .restaurant, source: .contextual(anchor: "lakeside"))
+      nearby("Examplegate Shopping Centre", distance: 300, relevance: 0, category: .store, source: .contextual(anchor: "examplegate")),
+      nearby("noodle house", distance: 320, relevance: 4, category: .restaurant, source: .contextual(anchor: "examplegate"))
     ]))
     let result = try await task.value
     // The same three places as before, now nearest first.
-    XCTAssertEqual(result.map(\.name), ["Apple Lakeside", "Lakeside Shopping Centre", "wagamama"])
+    XCTAssertEqual(result.map(\.name), ["Gadget Examplegate", "Examplegate Shopping Centre", "noodle house"])
   }
 
   func testContextFailureFallsBackToBaseNearbyResults() async throws {
@@ -209,8 +209,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
@@ -231,8 +231,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let task = Task {
       try await coordinator.search(
         requestId: "nearby-1",
-        latitude: 51.5,
-        longitude: 0.4,
+        latitude: 10.5,
+        longitude: 20.4,
         radiusMeters: 750
       )
     }
@@ -278,7 +278,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     let resolved = try coordinator.resolve(id: "poi-2", requestId: "nearby-1")
     XCTAssertEqual(resolved.name, "Far bakery")
     XCTAssertEqual(resolved.formattedAddress, "1 Example Road")
-    XCTAssertEqual(resolved.latitude, 51.5)
+    XCTAssertEqual(resolved.latitude, 10.5)
     // Another place from the same list can still be picked.
     XCTAssertEqual(try coordinator.resolve(id: "poi-1", requestId: "nearby-1").name, "Near cafe")
   }
@@ -375,7 +375,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     harness.coordinator.onSuggestionsChanged = { received = ($0, $1) }
 
     harness.coordinator.setQuery(requestId: "request-7", query: "Home", bias: nil)
-    harness.source.emit(requestId: "request-7", completions: [completion("Home", "Chelmsford")])
+    harness.source.emit(requestId: "request-7", completions: [completion("Home", "Exampleton")])
 
     XCTAssertEqual(harness.source.lastRequestId, "request-7")
     XCTAssertEqual(received?.0, "request-7")
@@ -383,7 +383,7 @@ final class DayframePlaceSearchTests: XCTestCase {
       id: "opaque-1",
       requestId: "request-7",
       title: "Home",
-      subtitle: "Chelmsford"
+      subtitle: "Exampleton"
     ))
     XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: received!.1[0].dictionary))
   }
@@ -395,7 +395,7 @@ final class DayframePlaceSearchTests: XCTestCase {
       received.append(requestId)
     }
 
-    harness.coordinator.setQuery(requestId: "old", query: "Cher", bias: nil)
+    harness.coordinator.setQuery(requestId: "old", query: "Elm", bias: nil)
     harness.coordinator.setQuery(requestId: "new", query: "Home", bias: nil)
     harness.source.emit(requestId: "old", completions: [completion("Old")])
     harness.source.emit(requestId: "new", completions: [completion("New")])
@@ -405,16 +405,16 @@ final class DayframePlaceSearchTests: XCTestCase {
 
   func testOpaqueIdentifierResolvesCurrentSuggestion() async throws {
     let expected = ResolvedPlaceSearchValue(
-      title: "The King's Church",
-      subtitle: "Chelmsford",
-      name: "The King's Church",
-      formattedAddress: "Moulsham Street, Chelmsford",
-      latitude: 51.73,
-      longitude: 0.47
+      title: "Example Chapel",
+      subtitle: "Exampleton",
+      name: "Example Chapel",
+      formattedAddress: "Example Street, Exampleton",
+      latitude: 10.73,
+      longitude: 20.47
     )
     let harness = Harness(ids: ["short-lived"], resolution: .success(expected))
-    harness.coordinator.setQuery(requestId: "current", query: "Kings", bias: nil)
-    harness.source.emit(requestId: "current", completions: [completion("The King's Church")])
+    harness.coordinator.setQuery(requestId: "current", query: "Chapel", bias: nil)
+    harness.source.emit(requestId: "current", completions: [completion("Example Chapel")])
 
     let result = try await harness.coordinator.resolve(
       suggestionId: "short-lived",
@@ -483,14 +483,14 @@ final class DayframePlaceSearchTests: XCTestCase {
       latitude: 51,
       longitude: 0
     )
-    let harness = Harness(ids: ["cher-id", "home-id"], resolution: .success(resolved))
-    harness.coordinator.setQuery(requestId: "cher", query: "Cher", bias: nil)
-    harness.source.emit(requestId: "cher", completions: [completion("Cherwell")])
+    let harness = Harness(ids: ["elm-id", "home-id"], resolution: .success(resolved))
+    harness.coordinator.setQuery(requestId: "elm", query: "Elm", bias: nil)
+    harness.source.emit(requestId: "elm", completions: [completion("Elmwood")])
     harness.coordinator.setQuery(requestId: "home", query: "Home", bias: nil)
     harness.source.emit(requestId: "home", completions: [completion("Home")])
 
     await XCTAssertThrowsErrorAsync(
-      try await harness.coordinator.resolve(suggestionId: "cher-id", requestId: "cher")
+      try await harness.coordinator.resolve(suggestionId: "elm-id", requestId: "elm")
     ) { error in
       XCTAssertEqual(error as? PlaceSearchCoordinatorError, .staleSuggestion)
     }
@@ -622,8 +622,8 @@ private func nearby(
   NearbyPointOfInterestValue(
     name: name,
     formattedAddress: address,
-    latitude: 51.5,
-    longitude: 0.4,
+    latitude: 10.5,
+    longitude: 20.4,
     distanceMeters: distance,
     relevanceIndex: relevance,
     category: category,

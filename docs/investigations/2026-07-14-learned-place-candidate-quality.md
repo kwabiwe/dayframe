@@ -2,8 +2,8 @@
 
 ## Report
 
-- TestFlight build `0.1.0 (32)` showed a saveable learned-place candidate near Rainsford Road with only one visit and three samples.
-- Another one-visit candidate used coordinate-first copy: `Regular place near 51.748, 0.438`.
+- TestFlight build `0.1.0 (32)` showed a saveable learned-place candidate near Synthetic Lane with only one visit and three samples.
+- Another one-visit candidate used coordinate-first copy: `Regular place near 10.748, 20.438`.
 - A single meaningful stay should be reviewable as time spent there, while weak/pass-through evidence should stay out of Learned places.
 
 ## Version and data path

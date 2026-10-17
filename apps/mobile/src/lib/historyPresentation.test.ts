@@ -101,7 +101,7 @@ describe("mobile history presentation", () => {
   it("keeps matching activities at different one-time locations separate", () => {
     const base = entry("visit-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 30));
     const grouped = groupHistoryDayEntries([
-      { entry: { ...base, id: "visit-one", placeName: "Wagamama", placeKind: "one_time" }, overlapSeconds: 1800 },
+      { entry: { ...base, id: "visit-one", placeName: "Noodle House", placeKind: "one_time" }, overlapSeconds: 1800 },
       { entry: { ...base, id: "visit-two", placeName: "Vue", placeKind: "one_time" }, overlapSeconds: 1800 }
     ]);
 

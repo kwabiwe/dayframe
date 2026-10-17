@@ -223,7 +223,7 @@ describe("location review confirmation semantics", () => {
               algorithmVersion: "location-v2.0",
               learnedPlaceId: null,
               placeMatchKind: null,
-              centreLatitude: 51.73,
+              centreLatitude: 10.73,
               centreLongitude: 0.47
             }]
           };
@@ -289,7 +289,7 @@ describe("location review confirmation semantics", () => {
     await expect(resolveLocationReviewActionWithClient(
       client,
       "review-1",
-      { action: "record_poi_once", name: "  Wagamama  " },
+      { action: "record_poi_once", name: "  Noodle House  " },
       session
     )).resolves.toMatchObject({ action: "record_poi_once", entryId: "entry-poi" });
 
@@ -302,7 +302,7 @@ describe("location review confirmation semantics", () => {
       session.userId,
       null,
       null,
-      "Wagamama",
+      "Noodle House",
       "high",
       "Visit unknown place",
       "2026-08-12T08:08:23.126Z",
@@ -323,7 +323,7 @@ describe("location review confirmation semantics", () => {
             id: "entry-poi",
             categoryId: null,
             placeId: null,
-            placeLabel: "Wagamama",
+            placeLabel: "Noodle House",
             description: "Visit unknown place",
             startedAt: "2026-08-12T08:08:23.126Z",
             stoppedAt: "2026-08-12T08:22:30.004Z"
@@ -337,7 +337,7 @@ describe("location review confirmation semantics", () => {
     await expect(resolveLocationReviewActionWithClient(
       client,
       "review-1",
-      { action: "record_poi_once", name: "Wagamama" },
+      { action: "record_poi_once", name: "Noodle House" },
       session
     )).resolves.toMatchObject({ alreadyResolved: true, equivalent: true });
   });
@@ -382,7 +382,7 @@ function lockedStay() {
     algorithmVersion: "location-v2.0",
     learnedPlaceId: null,
     placeMatchKind: null,
-    centreLatitude: 51.73,
+    centreLatitude: 10.73,
     centreLongitude: 0.47
   };
 }

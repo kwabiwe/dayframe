@@ -96,7 +96,7 @@ Official platform references used:
 - Rehydrates saved regions after authenticated bootstrap/foreground load, persists a region fingerprint, and skips unchanged re-registration. This removes the repeated-start path that can surface iOS initial-state callbacks as apparent new enters.
 - Keeps configured radii within the existing 25-2,000m product bounds, selects the first 20 regions deterministically by priority/radius/id, and exposes selected/excluded place names plus live task state in Settings diagnostics.
 - Persists privacy-safe enter/exit evidence summaries on device. A recent accurate fix can reject an enter only when it is conclusively beyond the configured radius plus a conservative 100m boundary buffer; missing/stale fixes do not block transitions.
-- The PureGym false enter is consistent with unconditional re-registration plus uncorroborated initial-state handling, but build 43 did not retain enough historical evidence to prove that single callback. The missed School visit is consistent with registration being refreshed only from Settings/Places or an opaque 20-region exclusion; the new lifecycle rehydration and diagnostics cover both failure modes.
+- The Example Gym false enter is consistent with unconditional re-registration plus uncorroborated initial-state handling, but build 43 did not retain enough historical evidence to prove that single callback. The missed School visit is consistent with registration being refreshed only from Settings/Places or an opaque 20-region exclusion; the new lifecycle rehydration and diagnostics cover both failure modes.
 
 ### Calendar
 
@@ -107,7 +107,7 @@ Official platform references used:
 ## Residual device risks
 
 - Core Location boundary delivery still depends on real-device radio/location conditions and iOS scheduling. Simulator/unit checks can validate registration and evidence logic but cannot prove background entry/exit delivery.
-- The exact PureGym and School incidents cannot be replayed because build 43 stored only the last high-level transition status, not the new evidence history.
+- The exact Example Gym and School incidents cannot be replayed because build 43 stored only the last high-level transition status, not the new evidence history.
 - The schema cannot distinguish a manual Health Review acceptance from automated Health reprocess acceptance, so Health history remains conservatively excluded from task training.
 
 ## Validation evidence

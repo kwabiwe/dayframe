@@ -11,8 +11,8 @@ const resolved = {
   subtitle: "Victoria Road, Exampleton",
   name: "Riverside Sports Centre",
   formattedAddress: "Victoria Road, Exampleton, EX1 2AB",
-  latitude: 51.73123449,
-  longitude: 0.47123449
+  latitude: 10.73123449,
+  longitude: 20.47123449
 };
 
 describe("place editor selection state", () => {
@@ -21,8 +21,8 @@ describe("place editor selection state", () => {
       searchQuery: resolved.title,
       selectedResult: resolved,
       placeName: resolved.name,
-      latitudeText: "51.731234",
-      longitudeText: "0.471234"
+      latitudeText: "10.731234",
+      longitudeText: "20.471234"
     });
   });
 
@@ -37,8 +37,8 @@ describe("place editor selection state", () => {
   });
 
   it("uses the same normalized coordinate text for every editor input path", () => {
-    expect(canonicalPlaceCoordinateText(51.7, -0.1)).toEqual({
-      latitudeText: "51.7",
+    expect(canonicalPlaceCoordinateText(10.7, -0.1)).toEqual({
+      latitudeText: "10.7",
       longitudeText: "-0.1"
     });
   });

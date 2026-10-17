@@ -30,11 +30,11 @@ const locationMocks = vi.hoisted(() => ({
   requestBackgroundPermissionsAsync: vi.fn(() => Promise.resolve({ status: "granted", granted: true })),
   reverseGeocodeAsync: vi.fn(() => Promise.resolve([
     {
-      name: "Tesco Springfield",
-      street: "Springfield Road",
-      city: "Chelmsford",
-      postalCode: "CM2 6QT",
-      formattedAddress: "Springfield Road, Chelmsford CM2 6QT"
+      name: "Example Grocer",
+      street: "Example Road",
+      city: "Exampleton",
+      postalCode: "EX1 1AA",
+      formattedAddress: "Example Road, Exampleton EX1 1AA"
     }
   ]))
 }));
@@ -554,7 +554,7 @@ describe("mobile geofence visit candidates", () => {
     expect(learned).toEqual(
       expect.objectContaining({
         source: "location_learning",
-        description: "Tesco Springfield"
+        description: "Example Grocer"
       })
     );
     expect(locationMocks.reverseGeocodeAsync).toHaveBeenCalledWith({
@@ -563,11 +563,11 @@ describe("mobile geofence visit candidates", () => {
     });
     expect(learned?.rawPayload).toMatchObject({
       evidenceKind: "learned_place_visit",
-      candidateName: "Tesco Springfield",
+      candidateName: "Example Grocer",
       address: expect.objectContaining({
-        name: "Tesco Springfield",
-        street: "Springfield Road",
-        postalCode: "CM2 6QT"
+        name: "Example Grocer",
+        street: "Example Road",
+        postalCode: "EX1 1AA"
       }),
       latitude: 51.61,
       longitude: -0.22,
@@ -620,7 +620,7 @@ describe("mobile geofence visit candidates", () => {
     expect(oneOff).toMatchObject({
       source: "location_learning",
       type: "unknown_stay",
-      description: "Tesco Springfield",
+      description: "Example Grocer",
       rawPayload: expect.objectContaining({
         classification: "one_off_activity",
         visitCount: 1,

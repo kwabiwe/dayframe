@@ -334,13 +334,13 @@ describe("native Calendar presentation boundary", () => {
   it("presents one-time place labels as Calendar locations", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({
-      placeName: "Wagamama",
+      placeName: "Noodle House",
       placeKind: "one_time"
     })]));
 
     expect(state.model.entries[0]).toMatchObject({
-      placeText: "Wagamama",
-      accessibilityLabel: expect.stringContaining("Place: Wagamama")
+      placeText: "Noodle House",
+      accessibilityLabel: expect.stringContaining("Place: Noodle House")
     });
   });
 
@@ -457,11 +457,11 @@ describe("native Calendar presentation boundary", () => {
 
     it("the owner's Gym block and a 07:00–07:05 manual block sit side by side, the Gym block on the left", () => {
       const state = build(now, bootstrap([
-        block("gym", at(6, 59), at(8, 4), { categoryName: "Gym", categoryColor: "green", placeName: "PureGym" }),
+        block("gym", at(6, 59), at(8, 4), { categoryName: "Gym", categoryColor: "green", placeName: "Example Gym" }),
         block("manual", at(7, 0), at(7, 5), { categoryColor: "green" })
       ]));
       const items = byId(state);
-      expect(items.get("gym")).toMatchObject({ laneIndex: 0, laneCount: 2, offsetFraction: 0, widthFraction: 0.5, textDensity: "full", placeText: "PureGym" });
+      expect(items.get("gym")).toMatchObject({ laneIndex: 0, laneCount: 2, offsetFraction: 0, widthFraction: 0.5, textDensity: "full", placeText: "Example Gym" });
       expect(items.get("manual")).toMatchObject({ laneIndex: 1, laneCount: 2, offsetFraction: 0.5, widthFraction: 0.5, textDensity: "full" });
       // Apart, so the short block keeps its 44-point target inside its own column.
       expect(items.get("manual")?.overlapCount).toBe(0);

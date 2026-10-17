@@ -5,11 +5,11 @@ describe("LocationReviewActionSchema", () => {
   it("accepts a trimmed one-time POI name and entry edits", () => {
     expect(LocationReviewActionSchema.parse({
       action: "record_poi_once",
-      name: "  Wagamama  ",
+      name: "  Noodle House  ",
       edit: { description: "Dinner" }
     })).toEqual({
       action: "record_poi_once",
-      name: "Wagamama",
+      name: "Noodle House",
       edit: { description: "Dinner" }
     });
   });
@@ -21,7 +21,7 @@ describe("LocationReviewActionSchema", () => {
     }).success).toBe(false);
     expect(LocationReviewActionSchema.safeParse({
       action: "record_poi_once",
-      name: "Wagamama",
+      name: "Noodle House",
       latitude: 51.5,
       appleIdentifier: "provider-secret"
     }).success).toBe(false);

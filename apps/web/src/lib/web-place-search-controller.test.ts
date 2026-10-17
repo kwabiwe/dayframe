@@ -9,8 +9,8 @@ const result = {
   title: "Synthetic Church",
   subtitle: "Example Road",
   formattedAddress: "Synthetic Church, Example Road",
-  latitude: 51.7,
-  longitude: 0.4,
+  latitude: 10.7,
+  longitude: 20.4,
   resultType: "amenity"
 };
 

@@ -276,7 +276,7 @@ Passed:
   horizontal overflow and zero runtime overlays;
 - direct edit URL, hard refresh, Back, Forward and Cancel;
 - mouse actions, keyboard-only search/selection and 390px touch layout;
-- Cherwell, nearby school/church/sports-centre style queries, Heathrow Airport,
+- Elmwood, nearby school/church/sports-centre style queries, a major airport,
   Edinburgh Castle, a synthetic postcode, explicit remote search, no result,
   rapid typing, clear/retype and provider unavailable;
 - result count announcement, Arrow selection, Enter selection, name suggestion,

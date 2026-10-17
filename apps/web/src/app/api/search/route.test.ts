@@ -28,8 +28,8 @@ describe("/api/search", () => {
     const session = { workspaceId: "workspace-1", userId: "user-1" };
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.searchDayframe.mockResolvedValue([{ id: "entry:1", kind: "entry" }]);
-    const response = await GET(new Request("https://dayframe.test/api/search?q=Lakeside"));
-    expect(mocks.searchDayframe).toHaveBeenCalledWith("Lakeside", session);
+    const response = await GET(new Request("https://dayframe.test/api/search?q=Examplegate"));
+    expect(mocks.searchDayframe).toHaveBeenCalledWith("Examplegate", session);
     await expect(response.json()).resolves.toEqual({
       results: [{ id: "entry:1", kind: "entry" }]
     });

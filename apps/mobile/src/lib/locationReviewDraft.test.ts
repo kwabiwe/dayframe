@@ -170,8 +170,8 @@ describe("Location Review editor draft", () => {
       newPlace: {
         name: "Melbourne Sports Centre",
         formattedAddress: "Salerno Way",
-        latitude: 51.735,
-        longitude: 0.45
+        latitude: 10.735,
+        longitude: 20.45
       },
       selectedSavedPlaceId: null
     })).toMatchObject({
