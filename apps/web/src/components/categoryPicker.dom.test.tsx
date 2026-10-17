@@ -38,12 +38,12 @@ describe("CategoryPicker", () => {
     expect(input.closest(".category-picker-create-name-control")?.contains(colorTrigger)).toBe(true);
     expect(within(dialog).queryByText("Colour")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect((await within(dialog).findByRole("alert", { timeout: 3000 })).textContent).toContain("Enter an activity name.");
+    expect((await within(dialog).findByRole("alert", undefined, { timeout: 3000 })).textContent).toContain("Enter an activity name.");
     expect(create).not.toHaveBeenCalled();
 
     await user.type(input, "work");
     await user.keyboard("{Enter}");
-    expect((await within(dialog).findByRole("alert", { timeout: 3000 })).textContent).toContain("already exists");
+    expect((await within(dialog).findByRole("alert", undefined, { timeout: 3000 })).textContent).toContain("already exists");
     expect(create).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
@@ -90,7 +90,7 @@ describe("CategoryPicker", () => {
     await user.type(input, "  Writing  ");
     await user.keyboard("{Enter}");
 
-    expect((await screen.findByRole("alert", { timeout: 3000 })).textContent).toContain("Category creation failed");
+    expect((await screen.findByRole("alert", undefined, { timeout: 3000 })).textContent).toContain("Category creation failed");
     expect(input.value).toBe("  Writing  ");
     expect(document.activeElement).toBe(input);
     expect(description.value).toBe("Draft proposal");
@@ -139,7 +139,7 @@ describe("CategoryPicker", () => {
     expect(colorTrigger.getAttribute("aria-label")).toContain("currently Blue");
 
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect((await within(dialog).findByRole("alert", { timeout: 3000 })).textContent).toContain("Category creation failed");
+    expect((await within(dialog).findByRole("alert", undefined, { timeout: 3000 })).textContent).toContain("Category creation failed");
     expect((input as HTMLInputElement).value).toBe("Deep Work");
     expect(colorTrigger.getAttribute("aria-label")).toContain("currently Blue");
     expect(create).toHaveBeenNthCalledWith(1, "Deep Work", "blue");
