@@ -69,7 +69,8 @@ describe("Blocks shell contract", () => {
   const styles = readFileSync(`${process.cwd()}/src/app/globals.css`, "utf8");
 
   it("keeps workspace switching, Settings and Log out one tap from the profile on every width", () => {
-    expect(shell.match(/onClick=\{\(\) => setOverlay\("profile"\)\}/g)).toHaveLength(2);
+    // Both avatars toggle it (WUI-022: a non-modal popover's opener is its toggle).
+    expect(shell.match(/data-profile-trigger="" onClick=\{\(\) => setOverlay\(\(current\) => \(current === "profile" \? null : "profile"\)\)\}/g)).toHaveLength(2);
     expect(shell).toContain('href="/settings#account"');
     expect(shell).toContain("<SignOutControl");
   });

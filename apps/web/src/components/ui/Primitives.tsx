@@ -242,6 +242,8 @@ export function SettingsRow({
 }
 
 type DialogRole = "dialog" | "alertdialog";
+/** Anchored popovers, menus and lists become bottom sheets at this width (WUI-026). */
+export const POPOVER_SHEET_QUERY = "(max-width: 560px)";
 /** Width tiers (web UI audit WUI-021): confirm 400, compact 520, form 620, wide 720. */
 export type DialogSize = "confirm" | "compact" | "form" | "wide";
 
@@ -317,7 +319,9 @@ export function ModalDialog({
   description,
   footer,
   initialFocusRef,
+  modal = true,
   onClose,
+  outsidePressIgnore,
   role = "dialog",
   showClose = true,
   size,
@@ -331,7 +335,15 @@ export function ModalDialog({
   description?: ReactNode;
   footer?: ReactNode;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * false: a non-modal popover (web UI audit WUI-022): no scrim, the page stays usable, and a press
+   * outside it, Escape or focus leaving it closes it; focus returns to the opener only when it
+   * would otherwise be lost.
+   */
+  modal?: boolean;
   onClose: () => void;
+  /** A non-modal popover's opener: a press on it is the opener's own toggle, not an outside press. */
+  outsidePressIgnore?: string;
   role?: DialogRole;
   showClose?: boolean;
   /** Defaults to `confirm` for an alert dialog and `form` otherwise. */
@@ -340,6 +352,12 @@ export function ModalDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const exitScrollRef = useRef<DialogScrollSnapshot>([]);
+  const closeRef = useRef(onClose);
+  const busyRef = useRef(busy);
+  useLayoutEffect(() => {
+    closeRef.current = onClose;
+    busyRef.current = busy;
+  });
   const titleId = useId();
   const descriptionId = useId();
 
@@ -356,9 +374,32 @@ export function ModalDialog({
     const dialog = dialogRef.current;
     if (!dialog) return undefined;
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    if (!dialog.open) dialog.showModal();
-    openDialogCount += 1;
-    document.documentElement.classList.add("ui-dialog-open");
+    const closeFromOutside = () => {
+      if (!busyRef.current) closeRef.current();
+    };
+    const onOutsidePress = (event: PointerEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target || dialog.contains(target)) return;
+      if (outsidePressIgnore && target.closest(outsidePressIgnore)) return;
+      closeFromOutside();
+    };
+    const onDocumentKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) closeFromOutside();
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+      if (next && !dialog.contains(next)) closeFromOutside();
+    };
+    if (modal) {
+      if (!dialog.open) dialog.showModal();
+      openDialogCount += 1;
+      document.documentElement.classList.add("ui-dialog-open");
+    } else {
+      if (!dialog.open) dialog.show();
+      document.addEventListener("pointerdown", onOutsidePress, true);
+      document.addEventListener("keydown", onDocumentKey);
+      dialog.addEventListener("focusout", onFocusOut);
+    }
 
     const focusHandle = window.requestAnimationFrame(() => {
       const preferred = initialFocusRef?.current;
@@ -374,11 +415,20 @@ export function ModalDialog({
       // jsdom draws nothing, so there the copy would only duplicate the dialog for DOM queries.
       if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog, exitScrollRef.current);
       if (dialog.open) dialog.close();
-      openDialogCount = Math.max(0, openDialogCount - 1);
-      if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");
-      previouslyFocused?.focus();
+      if (modal) {
+        openDialogCount = Math.max(0, openDialogCount - 1);
+        if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");
+        previouslyFocused?.focus();
+        return;
+      }
+      document.removeEventListener("pointerdown", onOutsidePress, true);
+      document.removeEventListener("keydown", onDocumentKey);
+      dialog.removeEventListener("focusout", onFocusOut);
+      // A press elsewhere put focus where it landed; only lost focus goes back to the opener.
+      const active = document.activeElement;
+      if (!active || active === document.body || dialog.contains(active)) previouslyFocused?.focus();
     };
-  }, [initialFocusRef]);
+  }, [initialFocusRef, modal, outsidePressIgnore]);
 
   function requestClose() {
     if (!busy) onClose();
@@ -389,7 +439,7 @@ export function ModalDialog({
       ref={dialogRef}
       className={classNames("ui-dialog", `ui-dialog--${size ?? (role === "alertdialog" ? "confirm" : "form")}`, className)}
       role={role}
-      aria-modal="true"
+      aria-modal={modal ? "true" : undefined}
       aria-label={title ? undefined : ariaLabel}
       aria-labelledby={title ? titleId : undefined}
       aria-describedby={description ? descriptionId : undefined}
@@ -430,25 +480,35 @@ export function ModalDialog({
   );
 }
 
+/**
+ * An anchored popover (web UI audit WUI-022/WUI-026): non-modal beside its opener on wider
+ * screens (no scrim; a press outside, Escape or focus leaving closes it); at ≤560 px a modal bottom
+ * sheet over the scrim with a grabber and ✕. Decided when it opens.
+ */
 export function PopoverPanel({
   align,
   busy = false,
   children,
   onClose,
+  outsidePressIgnore,
   title
 }: {
   align: "top-left" | "top-right" | "bottom-left";
   busy?: boolean;
   children: ReactNode;
   onClose: () => void;
+  outsidePressIgnore?: string;
   title: string;
 }) {
+  const [sheet] = useState(() => typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(POPOVER_SHEET_QUERY).matches);
   return (
     <ModalDialog
       busy={busy}
-      className={classNames("ui-popover-panel", align)}
+      className={classNames("ui-popover-panel", align, sheet ? "is-sheet" : "is-anchored")}
       contentClassName="ui-popover-content"
+      modal={sheet}
       onClose={onClose}
+      outsidePressIgnore={outsidePressIgnore}
       title={title}
     >
       {children}

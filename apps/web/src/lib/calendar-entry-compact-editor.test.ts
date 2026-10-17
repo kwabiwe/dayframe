@@ -407,6 +407,11 @@ describe("Calendar compact editor portal geometry and dismissal", () => {
     })).toEqual({ left: 268, maxHeight: 776, placement: "below", top: 168, width: 420 });
   });
 
+  it("is a phone sheet at 560 px and below, and anchored above that (one breakpoint, WUI-026)", () => {
+    expect(calculateCalendarEditorPosition({ anchor, panelHeight: 400, panelWidth: 420, viewportHeight: 800, viewportWidth: 560 }).placement).toBe("phone");
+    expect(calculateCalendarEditorPosition({ anchor, panelHeight: 400, panelWidth: 420, viewportHeight: 800, viewportWidth: 600 }).placement).not.toBe("phone");
+  });
+
   it("flips above and falls back to a twelve-pixel phone card", () => {
     expect(calculateCalendarEditorPosition({
       anchor: { ...anchor, top: 620, bottom: 680 }, panelHeight: 240, panelWidth: 420,

@@ -424,6 +424,14 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web popovers and sheets (web UI audit WUI-022/WUI-026, 17 Oct 2026)
+
+- Trigger: opening an anchored popover, menu or list; at ≤560 px they open as bottom sheets.
+- Owner: CSS on the surface (`ui-sheet-in` for the profile sheet, `df-range-sheet-in` for the range sheet, the floating list's `.is-open` transition for list sheets).
+- Entrance/exit: sheets rise 8 px as they fade in; anchored surfaces drop 4 px from their trigger as before; exits fade (the profile popover through the dialog exit copy).
+- Interruption and async: unchanged from each surface's own contract.
+- Accessibility: Reduce Motion keeps the fades without the movement; the non-modal profile popover returns focus to its opener only when focus would be lost.
+
 ## Web dialogs (web UI audit WUI-020, 17 Oct 2026)
 
 - Trigger: a host renders `ModalDialog` (opening) or stops rendering it (closing: Cancel, Save, ✕, Escape, the scrim, navigation).

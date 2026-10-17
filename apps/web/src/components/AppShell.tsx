@@ -271,7 +271,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             type="button"
             className="df-profile"
             aria-label="Profile, workspace and settings"
-            onClick={() => setOverlay("profile")}
+            data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}
           >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
@@ -288,7 +288,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" onClick={() => setOverlay("profile")}>
+          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>
@@ -405,7 +405,7 @@ function ProfileWorkspacePopover({
   }
 
   return (
-    <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy}>
+    <PopoverPanel title="Profile & workspace" onClose={onClose} align="bottom-left" busy={isBusy} outsidePressIgnore="[data-profile-trigger]">
       <div className="df-profile-pop">
         <div className="df-profile-pop-card">
           <span aria-hidden="true">{initials(data.user.name)}</span>
