@@ -114,6 +114,9 @@ export function LocationReviewPanel({
       onResolved?.();
       startTransition(() => router.refresh());
       onClose();
+    } catch {
+      // A network failure keeps every field as it is (Codex r1 on #459).
+      setError("Couldn't reach Dayframe. Check your connection and try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -141,12 +144,21 @@ export function LocationReviewPanel({
       }
       setSaveStatus(savedPlaceStatus(name, body.rematchedCount ?? 0));
       setPlaceName("");
-      // The card now shows the place; reload what it says without touching the fields being edited.
-      const reloaded = await clientFetch(`/api/review/${reviewItemId}/location-evidence`, { cache: "no-store" });
-      if (reloaded.ok) setEvidence(await reloaded.json() as LocationReviewEvidenceDto);
-      startTransition(() => router.refresh());
+    } catch {
+      // Nothing was saved that we know of: every field stays (Codex r1 on #459).
+      setError("Couldn't reach Dayframe. Check your connection and try again.");
+      return;
     } finally {
       setIsSubmitting(false);
+    }
+    // Saved: Review refreshes whatever happens next, and the card's evidence reloads without
+    // touching the fields being edited (a failed reload keeps the shown evidence).
+    startTransition(() => router.refresh());
+    try {
+      const reloaded = await clientFetch(`/api/review/${reviewItemId}/location-evidence`, { cache: "no-store" });
+      if (reloaded.ok) setEvidence(await reloaded.json() as LocationReviewEvidenceDto);
+    } catch {
+      // The saved place shows once the panel is opened again.
     }
   }
 
@@ -334,7 +346,9 @@ export function LocationReviewPanel({
                       name: placeName.trim(),
                       latitude: stayCentre.latitude,
                       longitude: stayCentre.longitude,
-                      radiusMeters: Math.min(160, SAVE_PLACE_RADIUS_METERS[placeSize]),
+                      radiusMeters: SAVE_PLACE_RADIUS_METERS[placeSize],
+                      suggestVisits,
+                      autoLog: suggestVisits && placeAutoLog,
                       edit: resolveEdit()
                     })}
                   >

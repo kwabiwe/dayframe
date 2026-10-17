@@ -138,6 +138,35 @@ async function displayContext(
 }
 
 /**
+ * A Stay its person corrected (Change place, Save this place: its persisted row is `manual`) keeps the
+ * place it was corrected to when replay re-emits its card, so the card, its activity and its reason
+ * follow the correction rather than the engine's match (Codex r1 on #459).
+ */
+async function withCorrectedStayPlaces(
+  client: pg.PoolClient, session: RequestSession, segments: LocationSegment[], stayIds: ReadonlyMap<string, string>
+): Promise<LocationSegment[]> {
+  const ids = [...new Set(segments.flatMap((segment) => segment.kind === "stay" ? stayIds.get(segment.clientSegmentId) ?? [] : []))].sort();
+  const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
+  for (const batch of chunks(ids)) {
+    const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null }>(
+      `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+      [session.workspaceId, session.userId, batch]);
+    for (const row of result.rows) {
+      const placeMatchKind = row.kind === "saved" && row.placeId ? "saved" : row.kind === "learned" && row.learnedPlaceId ? "learned"
+        : row.placeId ? "saved" : row.learnedPlaceId ? "learned" : "unknown";
+      corrected.set(row.id, { placeId: row.placeId, learnedPlaceId: row.learnedPlaceId, placeMatchKind });
+    }
+  }
+  if (corrected.size === 0) return segments;
+  return segments.map((segment) => {
+    if (segment.kind !== "stay") return segment;
+    const identity = corrected.get(stayIds.get(segment.clientSegmentId) ?? "");
+    return identity ? { ...segment, ...identity } : segment;
+  });
+}
+
+/**
  * Counts what a replay changed that the app shows: Review items inserted, reopened, retired by replay, or
  * with a changed title, place, category, time, confidence or note; existing events whose time, confidence,
  * suggestions or payload changed (Review renders the payload); and a created Commute activity. A replay re-emits every finalised segment, so the
@@ -158,6 +187,7 @@ export async function emitReviewSemanticSegments(
     locked: ReadonlySet<string>;
   } = { orphans: [], used: new Set(), locked: new Set() }
 ): Promise<number> {
+  segments = await withCorrectedStayPlaces(client, session, segments, stayIds);
   const candidates = segments.flatMap(segment => {
     if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
         !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)) return [];

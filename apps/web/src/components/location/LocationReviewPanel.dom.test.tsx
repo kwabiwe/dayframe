@@ -141,8 +141,27 @@ describe("LocationReviewPanel", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(JSON.parse(String((mocks.clientFetch.mock.calls[1]?.[1] as RequestInit).body))).toMatchObject({
       action: "save_place_and_confirm", name: "Swim club", latitude: 0.001, longitude: 0.002, radiusMeters: 110,
+      suggestVisits: false, autoLog: false,
       edit: { categoryId: categories[1].id, description: "Lessons", descriptionTyped: true }
     });
+  });
+
+  it("keeps every field and says so when Dayframe can't be reached (Codex r1 on #459)", async () => {
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(unsavedStay())).mockRejectedValueOnce(new TypeError("Network request failed"));
+    const onClose = vi.fn();
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[1].id} onClose={onClose} />
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Place name"), "Swim club");
+    await user.click(screen.getByRole("radio", { name: "Large" }));
+    await user.click(screen.getByRole("button", { name: "Save place" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Couldn't reach Dayframe");
+    expect((screen.getByLabelText("Place name") as HTMLInputElement).value).toBe("Swim club");
+    expect((screen.getByRole("radio", { name: "Large" }) as HTMLInputElement).checked).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("keeps a failed evidence panel open and retries in place", async () => {

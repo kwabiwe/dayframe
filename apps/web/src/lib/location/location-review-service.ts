@@ -726,11 +726,16 @@ async function savePlaceAndConfirm(
   if (item.segmentKind !== "stay") {
     throw new ReviewResolutionError("invalid_action", "Only a visit can be saved as a place.", { status: 422 });
   }
-  const place = await client.query<{ id: string }>(
-    `insert into places (workspace_id, name, latitude, longitude, radius_meters, priority, logging_enabled)
-     values ($1, $2, $3, $4, $5, 5, true) returning id`,
-    [session.workspaceId, action.name, action.latitude, action.longitude, action.radiusMeters]
-  );
+  // The place logs as this visit's activity and keeps the box's switches (PRD D19, Codex r1 on #459).
+  const defaultCategoryId = action.edit && Object.prototype.hasOwnProperty.call(action.edit, "categoryId")
+    ? action.edit.categoryId ?? null : item.suggestedCategoryId;
+  await validateReferences(client, session, defaultCategoryId, null);
+  const suggestVisits = action.suggestVisits ?? true;
+  const created = await insertPlaceWith(client, {
+    name: action.name, latitude: action.latitude, longitude: action.longitude, radiusMeters: action.radiusMeters, priority: 5,
+    defaultCategoryId, loggingEnabled: suggestVisits, autoLog: suggestVisits && (action.autoLog ?? false)
+  }, session);
+  const place = { rows: [{ id: created.id }] };
   await client.query(
     `update stay_segments set place_id = $1, learned_place_id = null,
        continuity_status = 'manual', metadata = metadata || '{"placeMatchKind":"saved"}'::jsonb,
@@ -779,7 +784,8 @@ async function savePlace(
   if (item.centreLatitude == null || item.centreLongitude == null) {
     throw new ReviewResolutionError("invalid_action", "This visit has no location to save.", { status: 422 });
   }
-  const categoryId = action.categoryId ?? null;
+  // An omitted activity is the visit's own; an explicit null clears it (Codex r1 on #459).
+  const categoryId = action.categoryId === undefined ? item.suggestedCategoryId : action.categoryId;
   await validateReferences(client, session, categoryId, null);
   const place = await insertPlaceWith(client, {
     name: action.name, latitude: item.centreLatitude, longitude: item.centreLongitude, radiusMeters: action.radiusMeters,
@@ -803,11 +809,12 @@ async function savePlace(
     await client.query(
       `update review_items ri set suggested_place_id = $1,
          title = (select ${placeDisplayNameSql("p")} from places p where p.id = $1),
-         suggested_category_id = case when $5 then coalesce($6::uuid, ri.suggested_category_id) else coalesce(ri.suggested_category_id, $6::uuid) end
+         suggested_category_id = case when $5 then $6::uuid else coalesce(ri.suggested_category_id, $6::uuid) end
        where ri.id = $2 and ri.workspace_id = $3 and ri.user_id = $4`,
       [place.id, target.reviewId, session.workspaceId, session.userId, target.own, categoryId]);
+    // The card's reason was about the place it did not have; replay gives the saved place's (Codex r1 on #459).
     await client.query(
-      `update activity_events set suggested_place_id = $1
+      `update activity_events set suggested_place_id = $1, raw_payload = raw_payload - 'semanticReason'
        where id = $2 and workspace_id = $3 and user_id = $4`,
       [place.id, target.eventId, session.workspaceId, session.userId]);
     await client.query(
