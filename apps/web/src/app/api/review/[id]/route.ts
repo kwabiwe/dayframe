@@ -64,7 +64,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         "split",
         "split_and_confirm",
         "merge",
-        "merge_and_confirm"
+        "merge_and_confirm",
+        "confirm_outing",
+        "ignore_outing"
       ].includes(locationAction.data.action)
     ) {
       const result = await resolveLocationReviewAction(id, locationAction.data, session, operation);

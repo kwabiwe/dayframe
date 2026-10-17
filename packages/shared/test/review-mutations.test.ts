@@ -80,3 +80,24 @@ describe("Save this place (PRD D19, design §7)", () => {
     expect(ReviewMutationSchema.safeParse({ ...base, radiusMeters: 201 }).success).toBe(false);
   });
 });
+
+describe("one card per outing acknowledgements (PRD D19)", () => {
+  const anchor = "30000000-0000-4000-8000-0000000000a2";
+  const members = ["30000000-0000-4000-8000-0000000000a1", "30000000-0000-4000-8000-0000000000a3"];
+  const envelope = (action: "confirm_outing" | "ignore_outing") => ReviewMutationEnvelopeSchema.parse({
+    clientMutationId: "40000000-0000-4000-8000-000000000001", mutation: { action, memberReviewItemIds: members }
+  });
+  it("needs every member decided, each logged member with its block", () => {
+    const ids = [anchor, ...members];
+    expect(validReviewAcknowledgement({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids,
+      entryIds: ["e1", "e2", "e3"] }, envelope("confirm_outing"), anchor)).toBe(true);
+    expect(validReviewAcknowledgement({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids,
+      entryIds: ["e1", "e2"] }, envelope("confirm_outing"), anchor)).toBe(false);
+    expect(validReviewAcknowledgement({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: [anchor],
+      entryIds: ["e1", "e2", "e3"] }, envelope("confirm_outing"), anchor)).toBe(false);
+    expect(validReviewAcknowledgement({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids,
+      alreadyResolved: true, equivalent: true }, envelope("confirm_outing"), anchor)).toBe(true);
+    expect(validReviewAcknowledgement({ ok: true, action: "ignore_outing", status: "ignored", reviewItemIds: ids },
+      envelope("ignore_outing"), anchor)).toBe(true);
+  });
+});

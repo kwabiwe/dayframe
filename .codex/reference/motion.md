@@ -604,3 +604,11 @@ Block pull-to-refresh:
 - Accessibility: the toast is a polite live region, so the outcome is announced; both controls keep 44 px targets; Reduce Motion uses the toast's opacity-only path.
 - Places › Trips ("Trips you log yourself") appears once its list arrives, below the other sections (nothing above it moves); "Log automatically again" removes the row with the list's ordinary re-render and announces the result.
 - iPhone (PR 11d): `BlocksToast`'s `secondary` row sits under the message and Undo (the toast becomes a column only when it has one, so every other toast keeps its layout) at 44 points; its outcome replaces the button in the same row and is announced. Places › "Trips you log yourself" enters and leaves with the shared presence fades and its rows reflow with `localLayoutTransition`; "Log again" removes a row at once and a refusal brings it back with an announced line under the group. The Settings switch row enters with the shared presence fade when the server first sends the value. Reduce Motion uses the opacity-only paths.
+
+## One Review card per outing on web (location v3 PR 12a, PRD D19)
+
+- Trigger: the Review deck receives an unknown Stay's card and the Move cards that share its outing key; Log it, Skip and Undo on that card.
+- Owner: the existing deck card and queue transitions; the folded Move cards are simply not in the queue (no motion of their own), and the travel line is part of the card's layout from its first frame.
+- Entrance/update/exit: the grouped card enters, leaves and returns on Undo exactly as one card does; deciding it removes it once (its Moves never flash as separate cards, also while the decision is held for Undo). When the Stay is decided on its own (Edit before logging), the Moves arrive as ordinary cards with the queue's usual presence.
+- Interruption and async: a refused outing (a member changed) comes back as the card it was, with the deck's existing error line; nothing is partly logged.
+- Reduce Motion: the deck's existing opacity-only paths.
