@@ -13,14 +13,64 @@ function rule(selector: string) {
   return [...styles.matchAll(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`, "g"))].map((match) => match[1]).join("\n");
 }
 
+/** A theme block's hex tokens (`:root,\n:root[data-theme="light"]` or `:root[data-theme="dark"]`). */
+function themeTokens(header: string) {
+  const start = styles.indexOf(`${header} {`);
+  const body = styles.slice(start, styles.indexOf("}", start));
+  return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6});/gi)].map(([, name, value]) => [name, value]));
+}
+
+const toLinear = (channel: number) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+const toSrgb = (channel: number) => {
+  const clamped = Math.min(1, Math.max(0, channel));
+  return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055;
+};
+const rgb = (hex: string) => [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255);
+
+function luminance(color: number[]) {
+  const [r, g, b] = color.map(toLinear);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(a: number[], b: number[]) {
+  const [light, dark] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/** CSS `color-mix(in oklab, a p, b)`. */
+function mixOklab(a: number[], b: number[], p: number) {
+  const toLab = (color: number[]) => {
+    const [r, g, bl] = color.map(toLinear);
+    const [l, m, s] = [
+      0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * bl,
+      0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * bl,
+      0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * bl
+    ].map(Math.cbrt);
+    return [
+      0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+    ];
+  };
+  const [x, y] = [toLab(a), toLab(b)];
+  const [L, A, B] = x.map((value, index) => value * p + y[index] * (1 - p));
+  const [l, m, s] = [L + 0.3963377774 * A + 0.2158037573 * B, L - 0.1055613458 * A - 0.0638541728 * B, L - 0.0894841775 * A - 1.291485548 * B].map((value) => value ** 3);
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s
+  ].map(toSrgb);
+}
+
 describe("rows (WUI-028, WUI-029)", () => {
   it("draws List rows as Today's: transparent with hairlines, a 36 px X3 block, two lines, quiet actions", () => {
     const entries = source("components/EntriesTable.tsx");
     // Grouped rows and their expanded occurrences share the anatomy (Codex r1 on #495).
     expect(entries.match(/className="timeline-task-secondary-line"/g)).toHaveLength(2);
     // Secondary text passes 4.5:1 on Midnight and Daylight cards and their hover fill.
-    expect(rule(".timeline-task-secondary-line")).toContain("color: var(--text-secondary);");
-    expect(rule(".df-erow-text span")).toContain("color: var(--text-secondary);");
+    const subline = "color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));";
+    expect(rule(".timeline-task-secondary-line")).toContain(subline);
+    expect(rule(".df-erow-text span")).toContain(subline);
     expect(rule(".timeline-task-secondary-line .tag-metadata.is-compact")).toContain("font-size: 12px;");
     expect(rule(".timeline-task-block")).toMatch(/width: 36px;[\s\S]*height: 36px;[\s\S]*border-radius: calc\(36px \* 0\.3\);/);
     expect(rule(".df-erow-block")).toContain("border-radius: calc(36px * 0.3);");
@@ -83,5 +133,17 @@ describe("Reports sections (WUI-031)", () => {
     expect(overview).toContain('<li className="df-erow df-rank-row">');
     expect(overview).toContain('<section className="df-card report-trend"');
     expect(styles).not.toMatch(/\.(fill-group-surface|report-ranked-[\w-]+|report-secondary-[\w-]+|report-section-header)\b/);
+  });
+});
+
+describe("row sub-line contrast (WCAG 1.4.3, Codex r2 on #495)", () => {
+  it("keeps 12 px sub-lines over 4.5:1 on the card and the hover/focus fill in both themes", () => {
+    for (const header of [':root,\n:root[data-theme="light"]', ':root[data-theme="dark"]']) {
+      const tokens = themeTokens(header);
+      const subline = mixOklab(rgb(tokens["--text-secondary"]), rgb(tokens["--text-primary"]), 0.85);
+      for (const fill of ["--surface", "--surface-muted"]) {
+        expect(contrast(subline, rgb(tokens[fill])), `${header} on ${fill}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 });

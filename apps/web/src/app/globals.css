@@ -10719,8 +10719,8 @@ dialog.ui-dialog.df-palette {
 
 .df-erow-text span {
   overflow: hidden;
-  /* textSecondary: textMuted measures 4.05:1 for this 12 px line on a Midnight card (WCAG 1.4.3). */
-  color: var(--text-secondary);
+  /* As List's secondary line: over 4.5:1 on the card and the hover/focus fill in both themes. */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -14931,8 +14931,10 @@ dialog.ui-dialog.df-palette {
   align-items: baseline;
   gap: 6px;
   overflow: hidden;
-  /* textSecondary: textMuted is under 4.5:1 for 12 px text on a Midnight card (Codex r1 on #495). */
-  color: var(--text-secondary);
+  /* textSecondary nudged 15 % toward textPrimary: 12 px text stays over 4.5:1 on the card and on the
+     hover/focus fill in both themes (textMuted 4.05:1, plain textSecondary 4.39:1 on Daylight's
+     surfaceMuted; Codex r1/r2 on #495). */
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
   font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
@@ -14943,6 +14945,7 @@ dialog.ui-dialog.df-palette {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: baseline;
+  color: inherit;
 }
 
 .timeline-task-secondary-line .tag-metadata.is-compact {
