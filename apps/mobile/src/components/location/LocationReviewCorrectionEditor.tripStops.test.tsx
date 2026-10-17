@@ -10,7 +10,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
+  AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Easing: { cubic: () => 0, out: (easing: unknown) => easing },
   Alert: { alert: vi.fn() },
@@ -21,7 +21,17 @@ vi.mock("react-native", () => ({
   StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 },
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 47 }) }));
+vi.mock("react-native-reanimated", async () => {
+  const { useRef } = await import("react");
+  return {
+    default: { View: "AnimatedView" },
+    Easing: { out: (curve: unknown) => curve, cubic: "cubic" },
+    useAnimatedStyle: (style: () => object) => style(),
+    useSharedValue: (value: number) => useRef({ value }).current,
+    withTiming: (value: number) => value
+  };
+});
 // The Blocks groups (SettingsBlocks) bring DayframeIcon, which draws ellipses, lines and polylines too.
 vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
