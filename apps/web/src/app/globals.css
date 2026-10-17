@@ -7267,96 +7267,6 @@ dialog.ui-dialog.df-range-custom {
   gap: 4px;
 }
 
-dialog.ui-dialog.manual-entry-dialog {
-  width: min(420px, calc(100vw - 24px));
-  max-height: calc(100dvh - 24px);
-  overflow: visible;
-}
-
-.manual-entry-dialog .ui-dialog-header {
-  border-radius: 16px 16px 0 0;
-}
-
-.manual-entry-dialog .ui-dialog-header .ui-icon-button {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
-  background: transparent;
-  color: var(--muted);
-}
-
-.manual-entry-dialog .ui-dialog-header .ui-icon-button:hover:not(:disabled) {
-  background: var(--surface-muted);
-  color: var(--foreground);
-}
-
-.manual-entry-dialog .ui-dialog-actions {
-  flex-wrap: nowrap;
-  gap: 12px;
-  border-radius: 0 0 16px 16px;
-}
-
-.manual-entry-dialog .ui-dialog-actions > .ui-button {
-  flex: 0 0 auto;
-}
-
-.manual-entry-dialog-content {
-  overflow: visible;
-  /* The manual entry form lays out its own edges. */
-  padding: 0;
-}
-
-.manual-entry-dialog .manual-entry-form {
-  border-radius: 0;
-  background: var(--surface-raised);
-}
-
-.dayframe-date-time-trigger {
-  border-color: transparent;
-}
-
-.manual-entry-category .swiss-category-menu {
-  z-index: 85;
-}
-
-.dayframe-date-time {
-  position: relative;
-}
-
-.dayframe-date-time-trigger {
-  display: flex;
-  width: 100%;
-  min-height: var(--web-control-height);
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border: 0;
-  border-radius: var(--web-radius-control);
-  background: var(--surface-inset);
-  padding: 0 var(--web-control-padding-inline);
-  color: var(--foreground);
-  font: inherit;
-  font-variant-numeric: tabular-nums;
-  text-align: left;
-}
-
-.dayframe-date-time-trigger:hover {
-  background: var(--surface-muted);
-}
-
-.dayframe-date-time-panel {
-  position: absolute;
-  top: auto;
-  bottom: calc(100% + var(--web-field-gap));
-  left: 0;
-  z-index: 90;
-  display: grid;
-  width: min(19rem, calc(100vw - 24px));
-  gap: 10px;
-  padding: 12px;
-}
-
 .dayframe-calendar header,
 .dayframe-time-row {
   display: grid;
@@ -7378,36 +7288,6 @@ dialog.ui-dialog.manual-entry-dialog {
   border-radius: 999px;
   background: transparent;
   color: var(--foreground);
-}
-
-.dayframe-date-time.is-compact .dayframe-date-time-trigger {
-  min-height: 44px;
-  border-radius: 10px;
-  padding: 0 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-.dayframe-date-time-compact-value {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 15px;
-  font-weight: 400;
-  line-height: 21px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dayframe-date-time-day-offset {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 650;
-}
-
-.dayframe-date-time.is-compact .dayframe-date-time-trigger > svg {
-  flex: 0 0 auto;
 }
 
 .dayframe-calendar header button:hover,
@@ -7548,7 +7428,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
 /* Neutral, as every date sheet's Done (date-picker audit, 14 Oct 2026): coral is for recording and
    the one primary action of a screen. */
-.dayframe-date-time-done,
 .date-sheet-done {
   min-height: 44px;
   border: 0;
@@ -7623,16 +7502,6 @@ dialog.ui-dialog.manual-entry-dialog {
   min-height: 44px;
 }
 
-.dayframe-date-time-sheet-head {
-  display: none;
-}
-
-@media (max-width: 560px) {
-  .dayframe-date-time-sheet-head {
-    display: flex;
-  }
-}
-
 .date-sheet-segments {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -7664,26 +7533,8 @@ dialog.ui-dialog.manual-entry-dialog {
   }
 }
 
-.manual-entry-description {
-  position: relative;
-  min-width: 0;
-}
-
-.manual-entry-description > label,
 .time-entry-quick-description > label {
   width: fit-content;
-}
-
-.manual-entry-description .swiss-task-suggestions {
-  top: calc(100% + var(--web-field-gap));
-  right: 0;
-  bottom: auto;
-  left: 0;
-  z-index: 75;
-}
-
-.manual-entry-inline-tags .inline-tag-description-input {
-  padding-left: 11px;
 }
 
 .time-entry-quick-description-control {
@@ -7725,34 +7576,9 @@ dialog.ui-dialog.manual-entry-dialog {
     max-height: min(26rem, calc(100dvh - 24px));
     translate: none;
   }
-
-  .manual-entry-description .swiss-task-suggestions,
-  .dayframe-date-time-panel {
-    position: fixed;
-    top: auto;
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
-    width: auto;
-    max-width: none;
-    max-height: calc(100dvh - 24px);
-    overflow-y: auto;
-  }
 }
 
 @media (min-width: 561px) and (max-width: 840px) and (max-height: 560px) {
-  .manual-entry-description .swiss-task-suggestions,
-  .dayframe-date-time-panel {
-    position: fixed;
-    top: auto;
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
-    width: auto;
-    max-width: none;
-    max-height: calc(100dvh - 24px);
-    overflow-y: auto;
-  }
 
   .swiss-category-menu {
     max-height: min(180px, calc(100dvh - 308px));
@@ -8028,8 +7854,7 @@ dialog.ui-dialog.manual-entry-dialog {
   font-size: 11px;
 }
 .calendar-compact-editor,
-.time-entry-quick-editor-modal,
-dialog.ui-dialog.manual-entry-dialog {
+.time-entry-quick-editor-modal {
   --web-control-height: 44px;
   --calendar-compact-action-width: 92px;
   --calendar-compact-horizontal-inset: 12px;
@@ -8116,9 +7941,7 @@ dialog.ui-dialog.manual-entry-dialog {
 }
 
 .calendar-compact-editor-header,
-.calendar-compact-editor-footer,
-.manual-entry-dialog .ui-dialog-header,
-.manual-entry-dialog .ui-dialog-actions {
+.calendar-compact-editor-footer {
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -8127,8 +7950,7 @@ dialog.ui-dialog.manual-entry-dialog {
   padding: 10px var(--calendar-compact-horizontal-inset);
 }
 
-.calendar-compact-editor-header,
-.manual-entry-dialog .ui-dialog-header {
+.calendar-compact-editor-header {
   height: 64px;
   min-height: 64px;
   max-height: 64px;
@@ -8142,8 +7964,7 @@ dialog.ui-dialog.manual-entry-dialog {
   gap: 2px;
 }
 
-.calendar-compact-editor-header strong,
-.manual-entry-dialog .ui-dialog-header h2 {
+.calendar-compact-editor-header strong {
   margin: 0;
   overflow: hidden;
   color: var(--foreground);
@@ -8524,27 +8345,6 @@ dialog.ui-dialog.manual-entry-dialog {
   line-height: 21px;
 }
 
-.manual-entry-dialog .ui-dialog-actions {
-  height: var(--calendar-compact-feedback-height);
-  min-height: var(--calendar-compact-feedback-height);
-  max-height: var(--calendar-compact-feedback-height);
-  justify-content: flex-end;
-  border-top: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface-raised) 94%, var(--surface-inset));
-}
-
-.manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact {
-  flex: 1 1 auto;
-  margin-right: auto;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact p {
-  overflow-wrap: anywhere;
-}
-
 .calendar-compact-feedback-copy {
   min-width: 0;
   max-height: 44px;
@@ -8682,52 +8482,6 @@ dialog.ui-dialog.manual-entry-dialog {
 
   .calendar-compact-editor.is-entered {
     transform: translateY(0);
-  }
-}
-
-@media (max-width: 430px) {
-  dialog.ui-dialog.manual-entry-dialog {
-    --calendar-compact-feedback-height: 104px;
-  }
-
-  .manual-entry-temporal-fields {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .manual-entry-temporal-fields .calendar-compact-duration-field {
-    grid-column: 1 / -1;
-  }
-
-  .manual-entry-dialog .ui-dialog-actions {
-    display: grid;
-    grid-template-areas:
-      "message message message"
-      "spacer cancel action";
-    grid-template-columns: minmax(0, 1fr) var(--calendar-compact-action-width) var(--calendar-compact-action-width);
-    row-gap: 6px;
-  }
-
-  .manual-entry-dialog .ui-dialog-actions > .overlap-notice.is-compact {
-    grid-area: message;
-    margin-right: 0;
-  }
-
-  .manual-entry-dialog .ui-dialog-actions > .calendar-compact-cancel {
-    grid-area: cancel;
-  }
-
-  .manual-entry-dialog .ui-dialog-actions > .calendar-compact-save {
-    grid-area: action;
-  }
-}
-
-@media (max-width: 360px) {
-  .manual-entry-temporal-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .manual-entry-temporal-fields .calendar-compact-duration-field {
-    grid-column: auto;
   }
 }
 
@@ -14471,10 +14225,21 @@ dialog.ui-dialog.df-rf-dialog {
   }
 }
 
+/* Reduce Motion follows the block editor's own path (opacity in 1 ms), so a Discard that closes
+   both never leaves the dialog fading after the editor has gone (Codex r2 on #465). */
 @media (prefers-reduced-motion: reduce) {
   .df-confirm,
   .df-confirm-layer.is-entered .df-confirm {
     transform: none;
+  }
+
+  .df-confirm,
+  .df-confirm-scrim,
+  .df-confirm-layer.is-entered .df-confirm,
+  .df-confirm-layer.is-entered .df-confirm-scrim,
+  .df-confirm-layer:not(.is-open) {
+    transition-duration: 1ms;
+    transition-delay: 0s;
   }
 }
 

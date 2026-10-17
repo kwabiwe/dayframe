@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor , within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
@@ -38,19 +38,21 @@ describe("PersistentTimerBar block suggestions", () => {
     runtime = runtimeFixture({ isManualEntryOpen: true });
     render(<PersistentTimerBar />);
 
-    const description = await screen.findByLabelText("Manual block description") as HTMLInputElement;
+    // Add time is the shared New block editor (WUI-025); the timer bar keeps its own Description.
+    const editor = await screen.findByRole("dialog", { name: "New block" });
+    const description = within(editor).getByLabelText("Description") as HTMLInputElement;
     expect(await screen.findByRole("listbox", { name: "Suggestions" })).not.toBeNull();
     expect(description.value).toBe("");
 
-    const field = description.closest(".manual-entry-description");
-    if (!field) throw new Error("Missing Add Time description field");
+    const field = description.closest(".time-entry-quick-description");
+    if (!field) throw new Error("Missing the New block description field");
     await userEvent.click(field);
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
 
     await userEvent.click(description);
     await userEvent.click(await screen.findByRole("option", { name: /Deep planning/ }));
     expect(description.value).toBe("Deep planning");
-    expect(screen.getByRole("button", { name: /Focus/ })).not.toBeNull();
+    expect(within(editor).getByRole("radio", { name: "Focus" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Remove tag Deep work" })).not.toBeNull();
     await waitFor(() => expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull());
   });
