@@ -67,7 +67,7 @@ describe("/api/bootstrap", () => {
     expect(response.status).toBe(200);
     expect(payload.places[0].defaultActivityDescription).toBe("School drop-off/pickup");
     expect(payload.locationRolloutMode).toBe("v2_shadow");
-    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { selectedDate: null });
+    expect(mocks.getBootstrapData).toHaveBeenCalledWith(session, { selectedDate: null, timeZone: null });
     expect(mocks.scheduleLiveActivityRetry).toHaveBeenCalledWith(session);
   });
 
@@ -82,5 +82,20 @@ describe("/api/bootstrap", () => {
     }));
     expect(payload.activeEntry.tags[0].normalizedName).toBe("planning");
     expect(payload.activeEntry.tagNames).toEqual(["Planning"]);
+  });
+  it("uses the web viewer's zone only when the browser sent the zone cookie (the iPhone never does)", async () => {
+    await GET(new Request("https://dayframe.test/api/bootstrap?date=2026-10-12", {
+      headers: { cookie: "dayframe_session=abc; dayframe_tz=Europe/London" }
+    }));
+    expect(mocks.getBootstrapData).toHaveBeenLastCalledWith(session, { selectedDate: "2026-10-12", timeZone: "Europe/London" });
+
+    await GET(new Request("https://dayframe.test/api/bootstrap?date=2026-10-12", {
+      headers: { authorization: "Bearer app-session" }
+    }));
+    expect(mocks.getBootstrapData).toHaveBeenLastCalledWith(session, { selectedDate: "2026-10-12", timeZone: null });
+
+    // An unknown zone falls back to UTC rather than the server's own zone.
+    await GET(new Request("https://dayframe.test/api/bootstrap", { headers: { cookie: "dayframe_tz=Mars/Base" } }));
+    expect(mocks.getBootstrapData).toHaveBeenLastCalledWith(session, { selectedDate: null, timeZone: "UTC" });
   });
 });
