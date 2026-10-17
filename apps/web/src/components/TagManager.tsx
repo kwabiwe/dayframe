@@ -12,6 +12,9 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<TagRow | null>(null);
+  // The last tag asked about stays mounted, so the question fades out when it closes (Codex r1 on #469).
+  const [shownDelete, setShownDelete] = useState<TagRow | null>(null);
+  if (pendingDelete && pendingDelete !== shownDelete) setShownDelete(pendingDelete);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -141,9 +144,9 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
       )}
       {isPending ? <p className="df-faint" role="status">Updating tags…</p> : null}
 
-      {pendingDelete ? (
+      {shownDelete ? (
         <DestructiveConfirmationDialog
-          body={`#${pendingDelete.name} will be removed from ${pendingDelete.usageCount} ${pendingDelete.usageCount === 1 ? "block" : "blocks"}. The blocks stay.`}
+          body={`#${shownDelete.name} will be removed from ${shownDelete.usageCount} ${shownDelete.usageCount === 1 ? "block" : "blocks"}. The blocks stay.`}
           dialogId="delete-tag"
           error={error}
           isBusy={deleting || isPending}
@@ -151,7 +154,10 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
             setPendingDelete(null);
             setError(null);
           }}
-          onConfirm={() => void removeTag(pendingDelete)}
+          onConfirm={() => {
+            if (pendingDelete) void removeTag(pendingDelete);
+          }}
+          open={Boolean(pendingDelete)}
           title="Delete tag?"
         />
       ) : null}

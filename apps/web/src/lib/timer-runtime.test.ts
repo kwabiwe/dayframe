@@ -7,6 +7,8 @@ import {
   applyOptimisticTimerStart,
   applyOptimisticTimerStop,
   createTimerMutationGate,
+  DISCARD_RESTORE_REFUSALS,
+  discardedBlockRestoreBlocker,
   entryContinuationDecision,
   quickActionTimerDraft,
   reconcileTimerDraft,
@@ -68,6 +70,74 @@ describe("shell timer runtime", () => {
       await expect(start).resolves.toMatchObject({ ok: false });
       expect(draft).toEqual(typedMeanwhile ?? { categoryId: "focus", description: "Plan", tagNames: [] });
     }
+  });
+
+  it("starts at a given instant when asked (Undo of a discarded running block, WUI-008), and at now otherwise", async () => {
+    for (const startAt of ["2026-08-24T09:15:00.000Z", undefined]) {
+      const gate = createTimerMutationGate();
+      const payloads: TimerStartRequestPayload[] = [];
+      let committed: BootstrapData | null = null;
+      const start = runTimerStartMutation({
+        gate,
+        snapshot: bootstrapData(null),
+        currentDraft: timerDraftForEntry(null),
+        input: { categoryId: "focus", description: "Plan", tagNames: ["deep"] },
+        now: () => "2026-08-24T16:00:00.000Z",
+        createOptimisticId: () => "optimistic",
+        commit: (next) => { committed = next; },
+        setDraft: () => undefined,
+        setBusy: () => undefined,
+        setError: () => undefined,
+        send: async (payload) => { payloads.push(payload); },
+        refresh: async () => undefined,
+        startAt
+      });
+      await expect(start).resolves.toMatchObject({ ok: true, switchedAt: startAt ?? "2026-08-24T16:00:00.000Z" });
+      expect(payloads[0]).toEqual({
+        mode: "start",
+        categoryId: "focus",
+        description: "Plan",
+        tagNames: ["deep"],
+        ...(startAt ? { startedAt: startAt } : {})
+      });
+      expect((committed as BootstrapData | null)?.activeEntry?.startedAt).toBe(startAt ?? "2026-08-24T16:00:00.000Z");
+    }
+  });
+
+  it("refuses a guarded Start inside the gate before showing or sending anything (Codex r1 on #469)", async () => {
+    const gate = createTimerMutationGate();
+    const commit = vi.fn();
+    const send = vi.fn();
+    const start = runTimerStartMutation({
+      gate,
+      snapshot: bootstrapData(null),
+      currentDraft: timerDraftForEntry(null),
+      input: { description: "Plan" },
+      now: () => "2026-08-24T16:00:00.000Z",
+      createOptimisticId: () => "optimistic",
+      commit,
+      setDraft: () => undefined,
+      setBusy: () => undefined,
+      setError: () => undefined,
+      send,
+      refresh: async () => undefined,
+      guard: () => "No, not now.",
+      startAt: "2026-08-24T09:00:00.000Z"
+    });
+    await expect(start).resolves.toEqual({ ok: false, error: "No, not now." });
+    expect(commit).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("lets a discarded block back only while nothing runs and nothing else covers its time", () => {
+    const now = Date.parse("2026-08-24T10:00:00.000Z");
+    const discarded = { id: "gone", startedAt: "2026-08-24T09:00:00.000Z" };
+    const earlier = entry({ id: "earlier", startedAt: "2026-08-24T08:00:00.000Z", stoppedAt: "2026-08-24T09:00:00.000Z" });
+    const covering = entry({ id: "b", startedAt: "2026-08-24T09:30:00.000Z", stoppedAt: "2026-08-24T09:40:00.000Z" });
+    const stale = entry({ id: "gone", startedAt: discarded.startedAt, stoppedAt: null });
+    expect(discardedBlockRestoreBlocker({ ...bootstrapData(null), entries: [earlier, stale] }, discarded, now)).toBeNull();
+    expect(discardedBlockRestoreBlocker({ ...bootstrapData(null), entries: [earlier, covering] }, discarded, now)).toBe(DISCARD_RESTORE_REFUSALS[1]);
+    expect(discardedBlockRestoreBlocker(bootstrapData(entry({ id: "running" })), discarded, now)).toBe(DISCARD_RESTORE_REFUSALS[0]);
   });
 
   it("returns a rejected switch to the still-running entry's own details", async () => {

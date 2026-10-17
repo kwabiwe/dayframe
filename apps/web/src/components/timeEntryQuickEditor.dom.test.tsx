@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { createElement } from "react";
+import { createElement, useState, type ComponentProps } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -148,6 +148,43 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" }, { timeout: 3000 })).not.toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("returns focus to its opener after a Discard under Reduce Motion, past the confirmation's inert page (Codex r2 on #469)", async () => {
+    // jsdom ignores inert when focusing; browsers refuse focus inside an inert subtree.
+    // (user-event may already have turned focus into an accessor.)
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "focus")!;
+    const inertAware = (focus: HTMLElement["focus"]) => function inertAwareFocus(this: HTMLElement, options?: FocusOptions) {
+      if (this.closest("[inert]")) return;
+      focus.call(this, options);
+    };
+    Object.defineProperty(HTMLElement.prototype, "focus", "value" in original
+      ? { ...original, value: inertAware(original.value as HTMLElement["focus"]) }
+      : { ...original, get(this: HTMLElement) { return inertAware(original.get!.call(this) as HTMLElement["focus"]); } });
+    try {
+      function Host() {
+        const [open, setOpen] = useState(false);
+        return createElement("div", null,
+          createElement("button", { onClick: () => setOpen(true), type: "button" }, "Open editor"),
+          open ? createElement(TimeEntryQuickEditorModal, modalProps({ onClose: () => setOpen(false) })) : null
+        );
+      }
+      render(createElement(Host));
+      const opener = screen.getByRole("button", { name: "Open editor" });
+      opener.focus();
+      fireEvent.click(opener);
+      const description = await screen.findByLabelText("Description");
+      await userEvent.type(description, " updated");
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await screen.findByRole("alertdialog", { name: "Discard unsaved changes?" }, { timeout: 3000 });
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+      await waitFor(() => expect(screen.queryByTestId("time-entry-quick-editor-modal")).toBeNull());
+      expect(document.body.querySelector("[inert]:not(.df-confirm-layer)")).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "focus", original);
+    }
   });
 
   it("saves the complete valid draft once from plain Enter in Description and exits", async () => {
@@ -423,7 +460,23 @@ function renderModal({
   onSave?: SaveHandler;
   sourceEntry?: TimeEntryRow;
 } = {}) {
-  return render(createElement(TimeEntryQuickEditorModal, {
+  return render(createElement(TimeEntryQuickEditorModal, modalProps({ categories, onClose, onDelete, onSave, sourceEntry })));
+}
+
+function modalProps({
+  categories = [{ id: "focus", name: "Focus", color: "mint", isPinned: false }],
+  onClose = vi.fn(),
+  onDelete,
+  onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
+  sourceEntry = timeEntry()
+}: {
+  categories?: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
+  onClose?: () => void;
+  onDelete?: DeleteHandler;
+  onSave?: SaveHandler;
+  sourceEntry?: TimeEntryRow;
+} = {}): ComponentProps<typeof TimeEntryQuickEditorModal> {
+  return {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
     categories,
     entry: sourceEntry,
@@ -449,7 +502,7 @@ function renderModal({
       { id: "planning", name: "Planning", normalizedName: "planning", usageCount: 2 },
       { id: "deep-work", name: "Deep work", normalizedName: "deep work", usageCount: 1 }
     ]
-  }));
+  };
 }
 
 function promiseController<Value>() {

@@ -43,7 +43,9 @@ describe("persistent block shell contract", () => {
     expect(styles).not.toContain(".swiss-entrybar-actions");
     expect(timer).toContain('label="More block actions"');
     expect(timer).toContain("Discard running block");
-    expect(timer).toContain("void deleteActiveTimer()");
+    // Discard goes through the Undo-able path (WUI-008), which deletes and offers Undo.
+    expect(timer).toContain("void discardRunningBlock()");
+    expect(timer).toContain("const outcome = await deleteActiveTimer();");
   });
 
   it("keeps tags inside the block compound control and exposes the row to assistive technology", () => {

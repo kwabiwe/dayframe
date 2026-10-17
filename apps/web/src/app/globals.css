@@ -483,13 +483,25 @@ html.ui-dialog-open {
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-muted));
 }
 
+/* Destructive buttons (web UI audit WUI-010, owner 17 Oct 2026; never the old pink fill): one that
+   opens a confirmation is quiet red text; the confirming one inside a dialog is solid red, as
+   ConfirmDialog's df-rbtn--danger. */
 .ui-button-danger {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  background: transparent;
   color: var(--danger-text);
 }
 
-.ui-button-danger:hover {
-  background: color-mix(in srgb, var(--danger) 20%, var(--surface-muted));
+.ui-button-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.ui-dialog .ui-button-danger {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+
+.ui-dialog .ui-button-danger:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--danger) 86%, white);
 }
 
 .ui-button-ghost {
@@ -535,7 +547,7 @@ html.ui-dialog-open {
 
 .ui-icon-button-danger,
 .ui-icon-button-danger:hover {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger-text);
 }
 
@@ -4967,7 +4979,7 @@ dialog.ui-dialog.df-range-custom {
 
 .fill-icon-danger,
 .fill-icon-danger:hover {
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
   color: var(--danger-text);
 }
 
@@ -5904,7 +5916,8 @@ dialog.ui-dialog.df-range-custom {
   border-radius: var(--web-radius-control);
   background: transparent;
   padding: 8px 10px;
-  color: var(--danger);
+  /* Small danger copy uses the contrast-safe token (WUI-040). */
+  color: var(--danger-text);
   font: inherit;
   font-weight: 600;
   text-align: left;
@@ -6838,7 +6851,7 @@ dialog.ui-dialog.df-range-custom {
 
 .industrial-button-danger {
   border: 0;
-  background: color-mix(in srgb, var(--danger) 14%, var(--surface-muted));
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .swiss-panel-label {
@@ -14204,6 +14217,14 @@ dialog.ui-dialog.df-rf-dialog {
   line-height: 1.3;
 }
 
+.df-confirm-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .df-confirm-body {
   margin: 0;
   color: var(--text-secondary);
@@ -14249,8 +14270,16 @@ dialog.ui-dialog.df-rf-dialog {
   color: var(--on-danger);
 }
 
+/* Hover lightens, so the dark onDanger label keeps at least its rest contrast in both themes
+   (darkening fell below 4.5:1 in Daylight; Codex r1 on #469). */
 .df-rbtn--danger:hover {
-  background: color-mix(in oklab, var(--danger) 88%, var(--text-primary));
+  background: color-mix(in oklab, var(--danger) 86%, white);
+}
+
+/* A busy confirmation keeps its buttons focusable (aria-disabled), drawn as unavailable. */
+.df-confirm .df-rbtn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 /* Neutral Done / confirm for a reversible action (the date sheets' Done look). */
