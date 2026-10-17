@@ -1353,7 +1353,7 @@ export async function cacheReviewPresentation(input: {
     // Records, looked-up items or links that show a saved card's place or its decision (Codex r2 on #460).
     await retireSavedPlaceOverlays(transaction, key, [...new Set([
       ...[...response.records, ...response.lookup.reviewItems].flatMap((record) =>
-        record.kind === "review" && (record.status !== "open" || record.place.id) ? [record.reviewItemId] : []),
+        record.kind === "missing_review" || (record.kind === "review" && (record.status !== "open" || record.place.id)) ? [record.reviewItemId] : []),
       ...response.links.flatMap((link) => link.status !== "open" ? [link.reviewItemId] : [])
     ])]);
     await transaction.runAsync(
@@ -2969,13 +2969,16 @@ function parseReviewSnapshot(value: string) {
  * sync pass's selection, so blocked decisions never use up its 25 rows (Codex r2 on #460).
  */
 function saveBlockedSql(alias: string) {
-  return `not (${alias}.action_kind <> 'save_place' and exists (
-    select 1 from review_mutation_outbox s
-    where s.account_key = ${alias}.account_key and s.action_kind = 'save_place' and s.state <> 'acknowledged'
-      and s.created_at <= ${alias}.created_at and s.client_mutation_id <> ${alias}.client_mutation_id
-      and (s.review_item_id = ${alias}.review_item_id or s.review_item_id in (
-        select e.review_item_id from review_mutation_effects e
-        where e.account_key = ${alias}.account_key and e.client_mutation_id = ${alias}.client_mutation_id))))`;
+  // Two indexed probes per row (Codex r3 on #460): the row's own card, then each of its effect cards,
+  // each through the partial save index (account, card) where action_kind = 'save_place'.
+  const unresolvedSave = (card: string) => `select 1 from review_mutation_outbox s
+    where s.account_key = ${alias}.account_key and s.review_item_id = ${card} and s.action_kind = 'save_place'
+      and s.state <> 'acknowledged' and s.created_at <= ${alias}.created_at and s.client_mutation_id <> ${alias}.client_mutation_id`;
+  return `not (${alias}.action_kind <> 'save_place' and (
+    exists (${unresolvedSave(`${alias}.review_item_id`)}) or
+    exists (select 1 from review_mutation_effects e
+      where e.client_mutation_id = ${alias}.client_mutation_id and e.account_key = ${alias}.account_key
+        and exists (${unresolvedSave("e.review_item_id")}))))`;
 }
 
 /**
@@ -2992,13 +2995,21 @@ async function writeSavedPlaceIntoPresentations(
   for (const context of contexts) {
     let response: ReviewPresentationSnapshot;
     try { response = ReviewPresentationSnapshotSchema.parse(JSON.parse(context.context_json)); } catch { continue; }
+    // The place goes in without the proposal hash it was shown with, which no longer describes the
+    // card: Quick Confirm waits for a fresh proposal (Codex r3 on #460).
     const patch = <T extends { kind: string }>(record: T): T => record.kind === "review" && (record as unknown as { reviewItemId: string }).reviewItemId === reviewItemId
-      ? { ...record, title: place.name, place: { id: place.placeId ?? (record as unknown as { place: { id: string | null } }).place.id, label: place.name } }
+      ? { ...record, title: place.name, proposalHash: null,
+          place: { id: place.placeId ?? (record as unknown as { place: { id: string | null } }).place.id, label: place.name } }
       : record;
-    const next = { ...response, records: response.records.map(patch),
-      lookup: { ...response.lookup, reviewItems: response.lookup.reviewItems.map(patch) } };
+    const next = JSON.stringify({ ...response, records: response.records.map(patch),
+      lookup: { ...response.lookup, reviewItems: response.lookup.reviewItems.map(patch) } });
+    // Over the display cache's budget, the context goes; the next read fetches it again.
+    if (new TextEncoder().encode(next).byteLength > REVIEW_PRESENTATION_DISPLAY_CACHE_MAX_BYTES) {
+      await transaction.runAsync("delete from review_presentation_context where account_key = ? and scope_key = ?", accountKeyValue, context.scope_key);
+      continue;
+    }
     await transaction.runAsync("update review_presentation_context set context_json = ? where account_key = ? and scope_key = ?",
-      JSON.stringify(next), accountKeyValue, context.scope_key);
+      next, accountKeyValue, context.scope_key);
   }
 }
 

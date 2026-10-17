@@ -860,7 +860,8 @@ describe("Review real SQLite transactions", () => {
       ? { ...candidate, title: "Synthetic pool", placeName: "Synthetic pool", suggestedPlaceId: syntheticId(152) } : candidate) });
     expect(count("review_mutation_outbox")).toBe(0);
     const after = await store.readReviewPresentationSnapshot({ owner, response: today });
-    expect(after!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" } });
+    // The place stays, without the old proposal hash: Quick Confirm waits for a fresh one (Codex r3 on #460).
+    expect(after!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" }, proposalHash: null });
   });
   it("ends an acknowledged save's overlay on terminal proof from a lookup (Codex r2 on #460)", async () => {
     const data = bootstrap();
@@ -871,6 +872,40 @@ describe("Review real SQLite transactions", () => {
     await store.cacheReviewPresentation({ owner: { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" },
       response: terminalPresentation(data, [item.id]) });
     expect(count("review_mutation_outbox")).toBe(0);
+  });
+  it("ends an acknowledged save's overlay on proof that its card is missing (Codex r3 on #460)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(145), mutation: savePlace });
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(154), rematchedCount: 0 }) });
+    await store.synchroniseReviewMutations();
+    const missing = terminalPresentation(data, []);
+    await store.cacheReviewPresentation({ owner: { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" },
+      response: { ...missing, snapshotToken: "missing", lookup: { reviewItems: [{ kind: "missing_review" as const, reviewItemId: item.id }], entries: [] } } });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+  it("finds blocked decisions through the save index, staying quick at hundreds of them (Codex r3 on #460)", async () => {
+    const data = bootstrap();
+    const items = Array.from({ length: 400 }, (_, index) => ({ id: syntheticId(7000 + index) }));
+    db.exec("BEGIN");
+    const insert = db.prepare(`insert into review_mutation_outbox (client_mutation_id, account_key, workspace_id, user_id, review_item_id,
+      action_kind, request_json, original_snapshot_json, original_position, preceding_ids_json, following_ids_json, state, local_effect, created_at, updated_at)
+      select ?, account_key, ?, ?, ?, ?, '{}', '{}', 0, '[]', '[]', ?, ?, ?, ? from review_account_context limit 1`);
+    const effect = db.prepare(`insert into review_mutation_effects (client_mutation_id, account_key, review_item_id, snapshot_json, original_position,
+      preceding_ids_json, following_ids_json, local_effect) select ?, account_key, ?, '{}', 0, '[]', '[]', 'hidden' from review_account_context limit 1`);
+    items.forEach((item, index) => {
+      insert.run(syntheticId(5000 + index), data.workspace.id, data.user.id, item.id, "save_place", "needs_attention", "restore", "2026-08-28T10:00:00.000Z", "2026-08-28T10:00:00.000Z");
+      insert.run(syntheticId(6000 + index), data.workspace.id, data.user.id, item.id, "confirm", "pending", "hidden", "2026-08-28T10:00:01.000Z", "2026-08-28T10:00:01.000Z");
+      effect.run(syntheticId(6000 + index), item.id);
+    });
+    db.exec("COMMIT");
+    const started = performance.now();
+    await store.synchroniseReviewMutations();
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    const plan = (db.prepare(`explain query plan select 1 from review_mutation_outbox s where s.account_key = ? and s.review_item_id = ?
+      and s.action_kind = 'save_place' and s.state <> 'acknowledged'`).all("k", "i") as Array<{ detail: string }>).map((row) => row.detail).join(" ");
+    expect(plan).toContain("review_mutation_save_place_idx");
   });
   it("leaves decisions held behind rejected saves out of a pass, so later work still goes (Codex r2 on #460)", async () => {
     const data = syntheticReviewBootstrap(40);
