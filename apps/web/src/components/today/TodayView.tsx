@@ -184,7 +184,8 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const bars = whereTodayWentBars(totals);
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
   const week = previousDays(entries, nowMs);
-  const reviewCount = data.stats.reviewCount;
+  // Review cards: an outing counts once (PRD D19, PR 12c).
+  const reviewCount = data.stats.reviewCardCount;
 
   return (
     <div className="df-today">

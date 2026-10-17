@@ -67,19 +67,24 @@ export function projectReviewScreenData(input: {
     : reviewItems;
   const categories = current && sameJson(current.categories, projection.categories) ? current.categories : projection.categories;
   const reviewCount = projection.stats?.reviewCount ?? projection.reviewItems.length;
+  // The projection's count of cards has local decisions applied (an outing once, PR 12c).
+  const reviewCardCount = projection.stats?.reviewCardCount;
   const next: MobileBootstrap = {
     ...base,
     workspace: projection.workspace,
     categories,
     reviewItems: stableItems,
-    stats: base.stats ? { ...base.stats, reviewCount } : projection.stats
+    stats: base.stats
+      ? { ...base.stats, reviewCount, ...(typeof reviewCardCount === "number" ? { reviewCardCount } : {}) }
+      : projection.stats
   };
   if (
     current && current === base &&
     stableItems === current.reviewItems &&
     categories === current.categories &&
     sameJson(current.workspace, next.workspace) &&
-    current.stats?.reviewCount === next.stats?.reviewCount
+    current.stats?.reviewCount === next.stats?.reviewCount &&
+    current.stats?.reviewCardCount === next.stats?.reviewCardCount
   ) {
     return current;
   }

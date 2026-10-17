@@ -20,6 +20,7 @@ const {
   mobileReviewItemFromPresentation,
   nextReviewRetryAt,
   projectReviewBootstrap,
+  withNewerTerminalEvidence,
   sanitiseDashboardBootstrapForCache,
   reviewSyncDisposition,
   restoreReviewItemsWithAnchors,
@@ -73,6 +74,36 @@ describe("Review sync store contracts", () => {
     const projected = projectReviewBootstrap(data, new Set(["review-1"]));
     expect(projected.reviewItems.map((item) => item.id)).toEqual(["review-2"]);
     expect(projected.stats?.reviewCount).toBe(1);
+  });
+
+  it("moves the count of cards by the cards that leave, an outing once (PRD D19, PR 12c)", () => {
+    const outing = (id: string, role: string) => reviewItem({ id, rawPayload: { outingKey: "outing:a", outingRole: role } });
+    const items = [outing("stay", "stay"), outing("there", "in"), outing("back", "out"), reviewItem({ id: "walk" })];
+    const data = { ...bootstrap(items), stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 4, reviewCardCount: 2 } };
+    const whole = projectReviewBootstrap(data, new Set(["stay", "there", "back"]));
+    expect(whole.stats).toMatchObject({ reviewCount: 1, reviewCardCount: 1 });
+    // The Stay decided on its own: its Moves come back as cards of their own.
+    expect(projectReviewBootstrap(data, new Set(["stay"])).stats).toMatchObject({ reviewCount: 3, reviewCardCount: 3 });
+    // An older server sends no count of cards: none is made up.
+    expect(projectReviewBootstrap(bootstrap(items), new Set(["walk"])).stats).not.toHaveProperty("reviewCardCount");
+  });
+
+  it("drops a cached snapshot's counts of cards by the cards settled elsewhere (PR 12c)", () => {
+    const record = (id: string, role?: "stay" | "in" | "out") => ({
+      kind: "review", reviewItemId: id, status: "open", createdAt: "2026-09-12T09:00:00.000Z",
+      interval: { start: "2026-09-12T10:00:00.000Z", end: "2026-09-12T10:30:00.000Z" },
+      ...(role ? { outing: { key: "outing:a", role } } : {})
+    });
+    const snapshot = {
+      scope: { mode: "window", timeZone: "Etc/UTC", today: { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" } },
+      outstanding: { globalCount: 2, todayCount: 2, openReviewItemIds: ["stay", "there", "back", "walk"] },
+      records: [record("stay", "stay"), record("there", "in"), record("back", "out"), record("walk")],
+      links: []
+    } as never;
+    const settled = withNewerTerminalEvidence(snapshot, new Set(["stay", "there", "back"])) as { outstanding: { globalCount: number; todayCount: number } };
+    expect(settled.outstanding).toMatchObject({ globalCount: 1, todayCount: 1 });
+    const stayAlone = withNewerTerminalEvidence(snapshot, new Set(["stay"])) as { outstanding: { globalCount: number; todayCount: number } };
+    expect(stayAlone.outstanding).toMatchObject({ globalCount: 3, todayCount: 3 });
   });
 
   it("does not cache coordinates, raw Health payloads or secrets", () => {

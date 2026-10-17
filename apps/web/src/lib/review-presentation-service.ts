@@ -14,6 +14,7 @@ import type pg from "pg";
 import { withSyncTransaction, type SyncTransactionOptions } from "./sync-transaction";
 import { canonicalJson, isoOrNull, reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
+import { foldedOutingMemberSql } from "./review-card-count";
 import { placeDisplayNameSql } from "./place-display";
 
 const COLLECTION_LIMIT = 5_000;
@@ -132,7 +133,7 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean };
+export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean };
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -149,7 +150,7 @@ export async function getReviewPresentation(
     // transaction owner at BEGIN, before its configuration SELECTs.
 
     const [counts, reviewRows, legacyRows, entryRows, lookup] = await Promise.all([
-      loadCounts(client, session, input),
+      loadCounts(client, session, input, features),
       input.mode === "lookup" ? Promise.resolve([]) : loadReviewRows(client, session, input),
       input.mode === "lookup" ? Promise.resolve([]) : loadLegacyRows(client, session, input),
       input.mode === "window" ? loadCompletedTodayRows(client, session, input) : Promise.resolve([]),
@@ -241,7 +242,9 @@ export async function getReviewPresentation(
   });
 }
 
-async function loadCounts(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {
+async function loadCounts(
+  client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest, features: ReviewPresentationFeatures
+) {
   const todayStart = input.today?.start ?? null;
   const todayEnd = input.today?.end ?? null;
   const result = await client.query<CountsRow>(
@@ -249,6 +252,14 @@ async function loadCounts(client: pg.PoolClient, session: RequestSession, input:
        select ri.id, ri.event_id, ri.suggested_started_at, ri.suggested_stopped_at, ri.created_at
        from review_items ri
        where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+     ), counted_reviews as (
+       -- Cards for clients that ask (an outing once, PRD D19, PR 12c); every open suggestion otherwise.
+       select ri.id, ri.suggested_started_at, ri.suggested_stopped_at, ri.created_at
+       from review_items ri
+       ${features.outingCount ? `left join activity_events ae
+         on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id` : ""}
+       where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+         ${features.outingCount ? `and not ${foldedOutingMemberSql("ri", "ae")}` : ""}
      ), unlinked_legacy as (
        select te.id, te.started_at, te.stopped_at, te.created_at
        from time_entries te
@@ -263,9 +274,9 @@ async function loadCounts(client: pg.PoolClient, session: RequestSession, input:
          )
      )
      select
-       ((select count(*) from open_reviews) + (select count(*) from unlinked_legacy))::int as "globalCount",
+       ((select count(*) from counted_reviews) + (select count(*) from unlinked_legacy))::int as "globalCount",
        (
-         (select count(*) from open_reviews
+         (select count(*) from counted_reviews
           where ($3::timestamptz is not null and $4::timestamptz is not null)
             and ((suggested_started_at is not null and suggested_stopped_at is not null
                   and suggested_started_at < $4::timestamptz and suggested_stopped_at > $3::timestamptz)

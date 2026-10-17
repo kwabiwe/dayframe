@@ -19,6 +19,8 @@ export const REVIEW_PRESENTATION_TIME_AWAY_FEATURE = "time-away";
 export const REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE = "move-route";
 /** Feature: an outing's Review items (PRD D19) carry `outing`, so the client shows them as one card. */
 export const REVIEW_PRESENTATION_OUTING_FEATURE = "outing";
+/** Feature: `outstanding` counts Review cards, an outing once (PRD D19, PR 12c). */
+export const REVIEW_PRESENTATION_OUTING_COUNT_FEATURE = "outing-count";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;

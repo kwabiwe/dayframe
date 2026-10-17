@@ -7,6 +7,8 @@ import {
   LocationReviewEvidenceDtoSchema,
   OUTING_KEY_PAYLOAD_KEY,
   OUTING_ROLE_PAYLOAD_KEY,
+  reviewCardCount,
+  reviewCardsRemoved,
   REVIEW_PRESENTATION_MAX_IDS,
   ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
@@ -20,6 +22,7 @@ import {
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
+import { presentationOutingItems } from "./reviewCards";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import { reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 import {
@@ -916,7 +919,9 @@ export async function loadCachedReviewBootstrap(): Promise<{
       stats: {
         todaySeconds: 0,
         weekSeconds: 0,
-        reviewCount: reviewItems.length
+        reviewCount: reviewItems.length,
+        // Cards, an outing once (PRD D19, PR 12c).
+        reviewCardCount: reviewCardCount(reviewItems)
       }
     }
   };
@@ -1622,21 +1627,26 @@ export function withNewerTerminalEvidence(
   const today = response.scope.today;
   const todayStart = today ? Date.parse(today.start) : NaN;
   const todayEnd = today ? Date.parse(today.end) : NaN;
-  const removedToday = response.records.filter((record) => {
-    if (record.kind !== "review" || record.status !== "open" || !closed.has(record.reviewItemId)) return false;
+  const inToday = (record: ReviewProposalPresentation) => {
     const start = Date.parse(record.interval.start ?? "");
     const end = Date.parse(record.interval.end ?? "");
     return Number.isFinite(start) && Number.isFinite(end)
       ? start < todayEnd && end > todayStart
       : Date.parse(record.createdAt) >= todayStart && Date.parse(record.createdAt) < todayEnd;
-  }).length;
+  };
+  // The counts are of cards (an outing once, PRD D19, PR 12c): they drop by the cards that leave,
+  // read from the records' outings; a source this snapshot lists no record for counts as one card.
+  const openRecords = presentationOutingItems(response);
+  const listed = new Set(openRecords.map((item) => item.id));
+  const removedCards = reviewCardsRemoved(openRecords, closed) + removedOpen.filter((id) => !listed.has(id)).length;
+  const removedToday = reviewCardsRemoved(openRecords, closed, (item) => inToday(item.record));
   return {
     ...response,
     records: response.records.filter((record) => !(record.kind === "review" && record.status === "open" && closed.has(record.reviewItemId))),
     links: response.links.filter((link) => !(link.status === "open" && closed.has(link.reviewItemId))),
     outstanding: {
       ...response.outstanding,
-      globalCount: Math.max(0, response.outstanding.globalCount - removedOpen.length),
+      globalCount: Math.max(0, response.outstanding.globalCount - removedCards),
       todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
       openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id))
     }
@@ -3190,9 +3200,11 @@ export function projectReviewBootstrap(
 ) {
   if (hiddenIds.size === 0 && savedPlaceNames.size === 0) return bootstrap;
   const reviewItems = bootstrap.reviewItems.filter((item) => !hiddenIds.has(item.id)).map((item) => withSavedPlace(item, savedPlaceNames));
-  const hiddenOpenCount =
-    bootstrap.reviewItems.filter((item) => item.status === "open").length -
-    reviewItems.filter((item) => item.status === "open").length;
+  const openBefore = bootstrap.reviewItems.filter((item) => item.status === "open");
+  const hiddenOpenCount = openBefore.length - reviewItems.filter((item) => item.status === "open").length;
+  // Cards leave by the shared rule (an outing once, PRD D19, PR 12c).
+  const hiddenCards = reviewCardsRemoved(openBefore, hiddenIds);
+  const cardCount = bootstrap.stats?.reviewCardCount;
   return {
     ...bootstrap,
     reviewItems,
@@ -3200,7 +3212,8 @@ export function projectReviewBootstrap(
       ? {
           stats: {
             ...bootstrap.stats,
-            reviewCount: Math.max(0, bootstrap.stats.reviewCount - hiddenOpenCount)
+            reviewCount: Math.max(0, bootstrap.stats.reviewCount - hiddenOpenCount),
+            ...(typeof cardCount === "number" ? { reviewCardCount: Math.max(0, cardCount - hiddenCards) } : {})
           }
         }
       : {})

@@ -1,4 +1,4 @@
-import type { ReviewPresentationResponse } from "@dayframe/shared";
+import { foldedOutingMemberIds, type ReviewPresentationResponse } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 import { legacyReviewPresentationToMobileEntry } from "./reviewFocus";
 
@@ -10,6 +10,8 @@ export type ReviewBacklogPage = {
   recordKeys: string[];
   reviewItemIds: string[];
   legacyEntries: MobileTimeEntry[];
+  /** The loaded records' outings (PRD D19), so "Loaded N of M" counts cards as `globalCount` does. */
+  outings?: { id: string; rawPayload: { outingKey: string; outingRole: string } }[];
 };
 
 export type ReviewBacklogState = ReviewBacklogPage;
@@ -28,10 +30,12 @@ export function projectReviewBacklogPage(
   const legacyById = new Map<string, MobileTimeEntry>();
   const recordKeys: string[] = [];
   const reviewItemIds: string[] = [];
+  const outings: NonNullable<ReviewBacklogPage["outings"]> = [];
   for (const record of response.records) {
     if (record.kind === "review") {
       recordKeys.push(`review:${record.reviewItemId}`);
       reviewItemIds.push(record.reviewItemId);
+      if (record.outing) outings.push({ id: record.reviewItemId, rawPayload: { outingKey: record.outing.key, outingRole: record.outing.role } });
       continue;
     }
     if (record.kind === "legacy_review_entry") {
@@ -47,7 +51,8 @@ export function projectReviewBacklogPage(
     recordsComplete: response.completeness.records,
     recordKeys: [...new Set(recordKeys)],
     reviewItemIds: [...new Set(reviewItemIds)],
-    legacyEntries: [...legacyById.values()]
+    legacyEntries: [...legacyById.values()],
+    outings
   };
 }
 
@@ -77,6 +82,12 @@ export function mergeReviewBacklogPage(
     recordsComplete: page.recordsComplete,
     recordKeys: [...new Set([...current.recordKeys, ...page.recordKeys])],
     reviewItemIds: [...new Set([...current.reviewItemIds, ...page.reviewItemIds])],
-    legacyEntries: [...legacyById.values()]
+    legacyEntries: [...legacyById.values()],
+    outings: [...new Map([...current.outings ?? [], ...page.outings ?? []].map((outing) => [outing.id, outing])).values()]
   };
+}
+
+/** How many cards the loaded records show as: an outing once (PRD D19, PR 12c), like `globalCount`. */
+export function loadedReviewBacklogCards(backlog: Pick<ReviewBacklogState, "recordKeys" | "outings">) {
+  return backlog.recordKeys.length - foldedOutingMemberIds(backlog.outings ?? []).size;
 }

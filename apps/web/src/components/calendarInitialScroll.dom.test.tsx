@@ -192,7 +192,7 @@ function bootstrap(active: ReturnType<typeof running> | null = null): BootstrapD
     historyEntries: entries,
     dayEntries: entries,
     weekEntries: entries,
-    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0 },
+    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount: 0, reviewCardCount: 0 },
     todaySeries: [],
     weekSeries: [],
     dateRange: {

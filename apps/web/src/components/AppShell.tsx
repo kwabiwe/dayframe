@@ -84,7 +84,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const goToTimer = useRef<number | undefined>(undefined);
   const isTimeline = pathname === "/timeline";
   const activeSection = activeShellSection(pathname);
-  const reviewCount = data?.stats.reviewCount ?? 0;
+  // Review cards: an outing counts once (PRD D19, PR 12c).
+  const reviewCount = data?.stats.reviewCardCount ?? 0;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),

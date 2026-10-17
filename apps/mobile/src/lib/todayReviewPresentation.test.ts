@@ -147,6 +147,22 @@ describe("projectTodayReviewPresentation", () => {
     expect(presentation.todayReviewCount).toEqual({ value: 3, exact: false });
   });
 
+  it("counts an outing once: deciding it takes one card off, deciding its Stay alone brings its Moves back (PR 12c)", () => {
+    const part = (id: string, role: "stay" | "in" | "out", startedAt: string, stoppedAt: string) =>
+      ({ ...review(id, "Outing", startedAt, stoppedAt), outing: { key: "outing:a", role } });
+    const records = [part("stay", "stay", "2026-09-12T10:10:00.000Z", "2026-09-12T10:25:00.000Z"),
+      part("there", "in", "2026-09-12T10:00:00.000Z", "2026-09-12T10:10:00.000Z"),
+      part("back", "out", "2026-09-12T10:25:00.000Z", "2026-09-12T10:35:00.000Z"),
+      review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z")];
+    // The server counts cards: the outing and the walk.
+    const whole = project({ response: response(records, 2, 2), effects: ["stay", "there", "back"].map((id) => effect(id, "pending")) });
+    expect(whole.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(whole.todayReviewCount).toEqual({ value: 1, exact: true });
+    const stayAlone = project({ response: response(records, 2, 2), effects: [effect("stay", "pending")] });
+    expect(stayAlone.globalReviewCount).toEqual({ value: 3, exact: true });
+    expect(stayAlone.todayReviewCount).toEqual({ value: 3, exact: true });
+  });
+
   it("keeps an unknown saved outcome out of both logged and pending accounting", () => {
     const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");
     const presentation = project({

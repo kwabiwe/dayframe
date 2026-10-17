@@ -10,6 +10,7 @@ import type {
   RecentActivitySuggestionCandidate
 } from "@dayframe/shared";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
+import { foldedOutingMemberSql } from "./review-card-count";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
@@ -205,6 +206,8 @@ export type DashboardStats = {
   todayAdditionalOverlapSeconds: number;
   weekAdditionalOverlapSeconds: number;
   reviewCount: number;
+  /** Review cards (an outing once, PRD D19); `reviewCount` stays every open suggestion for older iPhones. */
+  reviewCardCount: number;
 };
 
 export type DashboardDateRange = {
@@ -1276,7 +1279,13 @@ async function getDashboardStats(
           where started_at < $5::timestamptz
             and coalesce(stopped_at, $7::timestamptz) > $4::timestamptz
         ), 0)::int as "weekSeconds",
-        (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount"
+        (select count(*)::int from review_items where workspace_id = $1 and user_id = $6 and status = 'open') as "reviewCount",
+        -- One count per outing (PRD D19, PR 12c): the cards Review shows; older iPhones read reviewCount.
+        (select count(*)::int
+         from review_items ri
+         left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+         where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
+           and not ${foldedOutingMemberSql("ri", "ae")}) as "reviewCardCount"
      from time_entries
       where workspace_id = $1
         and user_id = $6
@@ -1299,7 +1308,8 @@ async function getDashboardStats(
     weekCoveredSeconds: 0,
     todayAdditionalOverlapSeconds: 0,
     weekAdditionalOverlapSeconds: 0,
-    reviewCount: 0
+    reviewCount: 0,
+    reviewCardCount: 0
   };
 }
 

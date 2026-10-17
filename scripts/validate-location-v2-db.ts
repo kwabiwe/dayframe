@@ -27,7 +27,9 @@ import {
 import { reconcileReviewMutations, resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
 import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
-import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
+import { buildTimeEntriesQuery, getBootstrapData } from "../apps/web/src/lib/queries";
+import { openReviewCountFor } from "../apps/web/src/lib/review-count";
+import { getReviewPresentation } from "../apps/web/src/lib/review-presentation-service";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -1964,6 +1966,24 @@ async function validateOutingCards() {
       anchor: group.find((row) => row.role === "stay")!.id, members: group.filter((row) => row.role !== "stay").map((row) => row.id)
     });
 
+    // One count per outing (PR 12c): every count of cards leaves out each open outing's Moves, while the
+    // plain counts older iPhones read stay every open suggestion.
+    const counts = async () => {
+      const reader = { ...session, authMode: "dev" as const };
+      const presentation = async (outingCount: boolean) => (await getReviewPresentation(reader,
+        { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 1 }, {}, { outingCount })).outstanding.globalCount;
+      const stats = (await getBootstrapData(reader)).stats;
+      return { plain: await openReviewCountFor(reader), cards: await openReviewCountFor(reader, { cards: true }),
+        presentationPlain: await presentation(false), presentationCards: await presentation(true),
+        bootstrapPlain: stats.reviewCount, bootstrapCards: stats.reviewCardCount };
+    };
+    const foldedMembers = groups.reduce((sum, group) => sum + group.filter((row) => row.role !== "stay").length, 0);
+    const before = await counts();
+    assert(before.plain !== undefined && before.cards !== undefined, "The Review counts were not read.");
+    assert.equal(before.plain - before.cards, foldedMembers, "The count of cards did not count each outing once.");
+    assert.deepEqual([before.presentationPlain, before.bootstrapPlain], [before.plain, before.plain], "A plain Review count changed.");
+    assert.deepEqual([before.presentationCards, before.bootstrapCards], [before.cards, before.cards], "The counts of cards disagree.");
+
     // Log it: every member accepted with its own block, in one go; a retry replays the receipt.
     const logged = parts(groups[0]);
     const envelope = { clientMutationId: "18800000-0000-4000-8000-000000000001",
@@ -1977,6 +1997,9 @@ async function validateOutingCards() {
     assert.equal(Number((await pool.query("select count(*) from time_entries where id = any($1::uuid[])", [result.entryIds])).rows[0].count),
       result.entryIds.length, "An outing member's block is missing.");
     assert.deepEqual(await resolveIdempotentReviewMutation(logged.anchor, envelope, session), result, "A retried outing did not replay its receipt.");
+    const afterLog = await counts();
+    assert.equal(before.cards! - afterLog.cards!, 1, "Logging an outing did not take one card off the count.");
+    assert.equal(before.plain! - afterLog.plain!, logged.members.length + 1, "Logging an outing did not take its suggestions off the plain count.");
     // Without its receipt (another device's identical decision): each member is proved logged as asked,
     // and a Skip of the logged outing is a conflict (Codex r1 on #466).
     const again = await resolveIdempotentReviewMutation(logged.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000011",

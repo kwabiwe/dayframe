@@ -3,7 +3,9 @@ import type {
   ReviewPresentationSnapshot,
   ReviewProposalPresentation
 } from "@dayframe/shared";
+import { reviewCardsRemoved } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
+import { presentationOutingItems } from "./reviewCards";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
@@ -432,8 +434,14 @@ function adjustedCounts(
     effect.localEffect === "hidden" && effect.resolution !== "rejected" && openIds.has(effect.reviewItemId)
   );
   const globalExact = response.completeness.outstandingCounts;
+  // The counts are of cards (an outing once, PRD D19, PR 12c): a local decision takes off the cards
+  // that leave, read from the records' outings; a source with no record counts as one card.
+  const items = presentationOutingItems(response);
+  const listed = new Set(items.map((item) => item.id));
+  const excludedIds = new Set(excluded.map((effect) => effect.reviewItemId));
+  const unlisted = excluded.filter((effect) => !listed.has(effect.reviewItemId));
   const global = {
-    value: Math.max(0, response.outstanding.globalCount - excluded.length),
+    value: Math.max(0, response.outstanding.globalCount - reviewCardsRemoved(items, excludedIds) - unlisted.length),
     exact: globalExact
   };
   // A local decision leaves today's count by the server's own `todayCount` rule (and the Review
@@ -447,7 +455,8 @@ function adjustedCounts(
       detectedAt: candidate.record.createdAt
     }, day))
     .map((candidate) => candidate.record.reviewItemId));
-  const todayExcluded = excluded.filter((effect) => todayEffectIds.has(effect.reviewItemId)).length;
+  const todayExcluded = reviewCardsRemoved(items, excludedIds, (item) => todayEffectIds.has(item.id)) +
+    unlisted.filter((effect) => todayEffectIds.has(effect.reviewItemId)).length;
   return {
     global,
     today: {
