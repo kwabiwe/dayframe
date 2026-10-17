@@ -2,6 +2,7 @@ import {
   REVIEW_PRESENTATION_FEATURES_HEADER,
   REVIEW_PRESENTATION_MAX_SNAPSHOT_RECORDS,
   REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE,
+  REVIEW_PRESENTATION_OUTING_FEATURE,
   REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
   ReviewPresentationResponseSchema,
   ReviewPresentationSnapshotSchema,
@@ -67,7 +68,7 @@ export async function fetchReviewPresentationPage(input: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.snapshot.token}`,
-        [REVIEW_PRESENTATION_FEATURES_HEADER]: `${REVIEW_PRESENTATION_TIME_AWAY_FEATURE},${REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE}`
+        [REVIEW_PRESENTATION_FEATURES_HEADER]: `${REVIEW_PRESENTATION_TIME_AWAY_FEATURE},${REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE},${REVIEW_PRESENTATION_OUTING_FEATURE}`
       },
       body: JSON.stringify(input.request)
     },

@@ -612,3 +612,11 @@ Block pull-to-refresh:
 - Entrance/update/exit: the grouped card enters, leaves and returns on Undo exactly as one card does; deciding it removes it once (its Moves never flash as separate cards, also while the decision is held for Undo). When the Stay is decided on its own (Edit before logging), the Moves arrive as ordinary cards with the queue's usual presence.
 - Interruption and async: a refused outing (a member changed) comes back as the card it was, with the deck's existing error line; nothing is partly logged.
 - Reduce Motion: the deck's existing opacity-only paths.
+
+## One Review card per outing on iPhone (location v3 PR 12b, PRD D19)
+
+- Trigger: the iPhone Review deck receives an unknown Stay's card and the Move cards that share its outing key; swipe or Log it / Skip, and Undo, on that card.
+- Owner: the deck's existing card stack, throw and hold. The folded Move cards are not deck sources (no motion of their own); the travel line is part of the card's body from its first frame, so the card measures once.
+- Entrance/update/exit: the grouped card enters, flies out and returns on Undo exactly as one card does; while its decision is held or saving, every Move's key is held or committing with the Stay's, so no Move flashes in as its own card. When the Stay is decided on its own (Edit before logging), the Moves arrive as ordinary cards with the deck's usual presence.
+- Interruption and async: a held outing whose Move changed saves nothing and comes back as a fresh card (announced, as a changed single card); a refused save comes back the same way; a refusal from the server after it was saved settles quietly through the next data.
+- Reduce Motion: the deck's existing opacity-only paths.

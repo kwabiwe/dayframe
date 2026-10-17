@@ -20,6 +20,12 @@ const mergeInput = () => {
   return { bootstrap: data, item: data.reviewItems[2], affectedItems: data.reviewItems.slice(2),
     clientMutationId: syntheticId(10), mutation: { action: "merge" as const, adjacentReviewItemId: data.reviewItems[3].id, acknowledgeContradictoryEvidence: false } };
 };
+/** One card per outing (PRD D19): the unknown Stay (item 3) with the Moves either side (items 1 and 2). */
+const outingInput = (action: "confirm_outing" | "ignore_outing" = "confirm_outing") => {
+  const data = bootstrap();
+  return { bootstrap: data, item: data.reviewItems[3], affectedItems: [data.reviewItems[3], data.reviewItems[1], data.reviewItems[2]],
+    clientMutationId: syntheticId(12), mutation: { action, memberReviewItemIds: [data.reviewItems[1].id, data.reviewItems[2].id] } };
+};
 /** Runs a scripted step before (or, with `after`, after) the first query matching it. */
 async function interleaved<Result>(sql: string, query: () => Result) {
   const index = mocks.interleave.findIndex(({ match }) => sql.includes(match));
@@ -466,6 +472,66 @@ describe("Review real SQLite transactions", () => {
     expect(diagnostics.needsAttentionCount).toBe(0);
     expect(diagnostics.settledElsewhereCount).toBe(1);
   });
+  it("hides an outing's Stay and Moves together under one durable row (PRD D19, PR 12b)", async () => {
+    await store.enqueueReviewMutation(outingInput());
+    expect(count("review_mutation_outbox")).toBe(1); expect(count("review_mutation_effects")).toBe(3);
+    await reopen();
+    expect((await store.loadCachedReviewBootstrap())?.bootstrap.reviewItems.map(x => x.id)).toEqual([bootstrap().reviewItems[0].id]);
+  });
+  it("refuses an outing unless every part is there, and never a Health card in one", async () => {
+    const input = outingInput();
+    await expect(store.enqueueReviewMutation({ ...input, affectedItems: input.affectedItems.slice(0, 2) })).rejects.toThrow("Every part of this outing");
+    await expect(store.enqueueReviewMutation({ ...input, mutation: { ...input.mutation, memberReviewItemIds: [input.affectedItems[1].id, input.affectedItems[1].id] } })).rejects.toThrow();
+    const data = bootstrap();
+    await expect(store.enqueueReviewMutation({ ...input, affectedItems: [data.reviewItems[3], data.reviewItems[0], data.reviewItems[2]],
+      mutation: { ...input.mutation, memberReviewItemIds: [data.reviewItems[0].id, data.reviewItems[2].id] } })).rejects.toThrow("Only Location Review");
+    expect(count("review_mutation_outbox")).toBe(0); expect(count("review_mutation_effects")).toBe(0);
+  });
+  it("acknowledges an outing only with every part decided and logged", async () => {
+    const input = outingInput(); await store.enqueueReviewMutation(input);
+    const ids = input.affectedItems.map(x => x.id);
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids, entryIds: [syntheticId(91)] }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).not.toBe("acknowledged");
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "confirm_outing", status: "accepted", reviewItemIds: ids, entryIds: [syntheticId(91), syntheticId(92), syntheticId(93)] }) });
+    await store.synchroniseReviewMutations({ force: true });
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+  });
+  it("settles a refused outing whose Stay is still open: decided parts leave, open ones come back, nothing waits", async () => {
+    const input = outingInput(); await store.enqueueReviewMutation(input);
+    const [stay, decided, open] = input.affectedItems;
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "open", [decided.id]: "accepted", [open.id]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    const ids = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map(x => x.id);
+    expect(ids).toContain(stay.id); expect(ids).toContain(open.id); expect(ids).not.toContain(decided.id);
+    expect(count("review_mutation_outbox")).toBe(0);
+    expect((await store.getReviewSyncDiagnostics()).needsAttentionCount).toBe(0);
+    expect(await store.listReviewSyncIssues()).toEqual([]);
+  });
+  it("keeps a refused outing whose parts' statuses are not all known", async () => {
+    const input = outingInput(); await store.enqueueReviewMutation(input);
+    const [stay, decided] = input.affectedItems;
+    mocks.fetch.mockResolvedValue({ status: 409, json: async () => ({ code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "open", [decided.id]: "accepted" } }) });
+    await store.synchroniseReviewMutations();
+    expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("re-sends an outing a re-check found decided differently, and settles it from that answer", async () => {
+    const input = outingInput("ignore_outing"); await store.enqueueReviewMutation(input);
+    db.prepare("update review_mutation_outbox set state = 'in_flight'").run();
+    const [stay, decided, open] = input.affectedItems;
+    mocks.fetch.mockImplementation(async (url: string) => url.includes("/reconcile")
+      ? { status: 200, json: async () => ({ ok: true, results: [{ clientMutationId: input.clientMutationId, reviewItemId: stay.id,
+          checkedAt: new Date().toISOString(), state: "conflict", reason: "different_final_decision" }] }) }
+      : { status: 409, json: async () => ({ code: "resolution_conflict",
+          canonicalReviewStatuses: { [stay.id]: "open", [decided.id]: "accepted", [open.id]: "open" } }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch.mock.calls.map(([url]) => String(url).includes("/reconcile"))).toEqual([true, false]);
+    expect(count("review_mutation_outbox")).toBe(0);
+    const ids = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.map(x => x.id);
+    expect(ids).toContain(stay.id); expect(ids).not.toContain(decided.id);
+  });
   it("does not use absence from a capped bootstrap as merge handover proof", async () => {
     const input = mergeInput(); await store.enqueueReviewMutation(input);
     mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "merge", status: "accepted", mergedSegmentId: syntheticId(99) }) });
@@ -505,6 +571,19 @@ describe("Review real SQLite transactions", () => {
     });
     expect(count("review_mutation_outbox")).toBe(0);
     expect(count("review_mutation_effects")).toBe(0);
+  });
+  it("hands an equivalent outing over only once every part's block is linked (PR 12b)", async () => {
+    const input = outingInput(); await store.enqueueReviewMutation(input);
+    const ids = input.affectedItems.map(x => x.id);
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "confirm_outing", status: "accepted",
+      reviewItemIds: ids, alreadyResolved: true, equivalent: true }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    const owner = { workspaceId: input.bootstrap.workspace.id, userId: input.bootstrap.user.id, backendId: "staging-fixture" };
+    await store.cacheReviewPresentation({ owner, response: terminalPresentation(input.bootstrap, ids) });
+    expect(count("review_mutation_outbox")).toBe(1);
+    await store.cacheReviewPresentation({ owner, response: terminalPresentation(input.bootstrap, ids, syntheticId(95)) });
+    expect(count("review_mutation_outbox")).toBe(0);
   });
   it("selects one complete acknowledged structural action for a bounded handover lookup", async () => {
     const input = mergeInput();

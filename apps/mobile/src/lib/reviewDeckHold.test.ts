@@ -114,6 +114,14 @@ describe("review deck hold with a bulk skip (5f)", () => {
     expect(committed).toEqual([]);
   });
 
+  it("keeps an outing's Moves out of the deck with its Stay while the decision is held (PRD D19)", () => {
+    const { hold } = harness();
+    hold.hold({ ...decision(9, "review:stay"), outing: { key: "outing:a", members: [
+      { key: "review:in", itemId: "in", proposal: "[]" }, { key: "review:out", itemId: "out", proposal: "[]" }
+    ] } });
+    expect(reviewDeckHeldKeys(hold.current())).toEqual(["review:stay", "review:in", "review:out"]);
+  });
+
   it("saves a held batch first when a card is thrown, and a held card first when a batch is held", () => {
     const { committed, hold } = harness();
     hold.hold(batch(7));

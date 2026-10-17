@@ -68,6 +68,8 @@ export type ReviewDeckCardModel = {
   confidence: { score: number; label: string } | null;
   title: string;
   when: string | null;
+  /** One card per outing (PRD D19): the travel line of the Moves folded into this Stay's card. */
+  outing?: string | null;
   logAsName: string;
   /** Step 5c-1: the name and activity can be changed on the card before logging. */
   logAsEditable: boolean;
@@ -546,6 +548,11 @@ function ReviewDeckCardView({
           {card.when ? (
             <Text {...mobileTextProps("metadata")} style={[deckStyles.when, { color: theme.textSecondary }]}>
               {card.when}
+            </Text>
+          ) : null}
+          {card.outing ? (
+            <Text {...mobileTextProps("metadata")} style={[deckStyles.when, { color: theme.textSecondary }]} testID="review-deck-outing">
+              {card.outing}
             </Text>
           ) : null}
           {card.logAsEditable && top ? (
