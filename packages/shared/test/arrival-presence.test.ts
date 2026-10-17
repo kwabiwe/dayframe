@@ -31,11 +31,13 @@ describe("corroborated arrival presence at saved places", () => {
     const home = homeStays(stays).find((stay) => stay.startedAt === at("07:43:15"));
     expect(home).toMatchObject({ stoppedAt: null, status: "open" });
     expect(home!.evidenceIds).toEqual(expect.arrayContaining(["arrive-3", "home-later-0", "home-later-4"]));
-    // Owner option A: the unsaved school stop sits inside one Home trip.
-    expect(trips.filter((trip) => trip.startedAt >= at("07:26:00"))).toEqual([expect.objectContaining({
-      startedAt: at("07:26:56"), stoppedAt: at("07:43:15"), qualificationReason: "same_place_meaningful_round_trip",
-      stops: [expect.objectContaining({ startedAt: at("07:27:57"), stoppedAt: at("07:41:57") })]
-    })]);
+    // The unsaved 14-minute school stop is a visit of its own from 10 minutes (PRD D19; before, under
+    // 20 minutes, it sat inside one Home trip): a Move there, the visit, a Move home ending at the arrival.
+    expect(trips.filter((trip) => trip.startedAt >= at("07:26:00"))).toEqual([
+      expect.objectContaining({ startedAt: at("07:26:56"), stoppedAt: at("07:27:57") }),
+      expect.objectContaining({ startedAt: at("07:41:57"), stoppedAt: at("07:43:15") })
+    ]);
+    expect(stays.find((stay) => stay.startedAt === at("07:27:57"))).toMatchObject({ placeMatchKind: "unknown", stoppedAt: at("07:41:57") });
   });
 
   it("recognises the arrival from the Visit and geofence entry before buffered fixes reach the server", () => {
@@ -109,7 +111,8 @@ describe("corroborated arrival presence at saved places", () => {
     expect(homeStays(stays).find((stay) => stay.startedAt === at("07:43:15"))).toMatchObject({
       stoppedAt: at("08:10:00"), stopLowerBoundAt: at("07:46:51"), stopUpperBoundAt: at("08:10:00")
     });
-    expect(trips.some((trip) => trip.startedAt === at("07:26:56") && trip.stoppedAt === at("07:43:15"))).toBe(true);
+    // The Move home still ends at the recognised arrival.
+    expect(trips.some((trip) => trip.startedAt === at("07:41:57") && trip.stoppedAt === at("07:43:15"))).toBe(true);
   });
 
   it("bounds presence at the earliest credible departure before judging dwell (re-review finding 1)", () => {

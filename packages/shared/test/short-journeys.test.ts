@@ -177,7 +177,7 @@ describe("strong-evidence short journeys", () => {
   });
   it("does not join across a retained intermediate Home or infer a stop from traffic pauses",()=>{
     const input=shortJourneysFixture();
-    const duplicate=input.evidence.map(e=>({...e,clientEvidenceId:`second-${e.clientEvidenceId}`,occurredAt:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_965_496),sourceTimestamp:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_965_496),endedAt:e.endedAt?shortAt(Date.parse(e.endedAt)-Date.parse(shortAt(0))+1_965_496):null}));
+    const duplicate=input.evidence.map(e=>({...e,clientEvidenceId:`second-${e.clientEvidenceId}`,occurredAt:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_935_496),sourceTimestamp:shortAt(Date.parse(e.occurredAt)-Date.parse(shortAt(0))+1_935_496),endedAt:e.endedAt?shortAt(Date.parse(e.endedAt)-Date.parse(shortAt(0))+1_935_496):null}));
     input.evidence.push(...duplicate);input.processingAt=shortAt(6_000_000);
     const result=runLocationEngine(input);
     const trips=result.segmentUpserts.filter((s): s is CommuteSegment => s.kind==='commute');

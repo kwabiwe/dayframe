@@ -123,7 +123,9 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   savedPlaceArrivalMinimumStrongPointCount: 2,
   savedArrivalWitnessMinimumSpanMs: 120_000,
   unknownStayCandidateDwellMs: 600_000,
-  unknownStayReviewDwellMs: 1_200_000,
+  // Location v3 (PRD D19, A3): an unknown stay reaches Review from 10 minutes; shorter ones stay
+  // inside their Move as a stop.
+  unknownStayReviewDwellMs: 600_000,
   minimumGpsSamplesForUnanchoredStay: 3,
   outsideConfirmationCount: 2,
   movementSpeedThresholdMps: 1.5,

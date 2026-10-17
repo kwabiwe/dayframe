@@ -239,14 +239,22 @@ export async function emitReviewSemanticSegments(
 ): Promise<number> {
   const corrections = await withCorrectedStayPlaces(client, session, segments, stayIds);
   segments = corrections.segments;
+  const clientEventIdOf = (segment: LocationSegment) => `location-segment:${segment.clientSegmentId}`.slice(0, 160);
+  // A stay too short to offer (an unknown stay under 10 minutes, PRD D19; a known place under its
+  // window). One that shrank there while its card is open loses that card, as replay retires a card
+  // whose segment vanished; it reopens if the stay grows back (Codex r1 on #461).
+  const tooShort = (segment: LocationSegment) => segment.kind === "stay" && (
+    (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned")
+      ? !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)
+      : segment.placeMatchKind === "unknown" &&
+        Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt) < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs);
+  changes.count += await retireCoveredCandidateCards(client, session,
+    segments.filter((segment) => tooShort(segment) && stayIds.has(segment.clientSegmentId)).map(clientEventIdOf));
   const candidates = segments.flatMap(segment => {
-    if (segment.kind === "stay" && (segment.placeMatchKind === "saved" || segment.placeMatchKind === "learned") &&
-        !hasMeaningfulKnownPlaceWindow(segment.startedAt, segment.stoppedAt)) return [];
+    if (tooShort(segment)) return [];
     const segmentId = (segment.kind === "stay" ? stayIds : commuteIds).get(segment.clientSegmentId);
     if (!segmentId) return [];
-    if (segment.kind === "stay" && segment.placeMatchKind === "unknown" &&
-      Date.parse(segment.stoppedAt ?? segment.startedAt) - Date.parse(segment.startedAt) < LOCATION_ENGINE_V2_CONFIG.unknownStayReviewDwellMs) return [];
-    return [{ segment, segmentId, clientEventId: `location-segment:${segment.clientSegmentId}`.slice(0, 160) }];
+    return [{ segment, segmentId, clientEventId: clientEventIdOf(segment) }];
   }).sort((a, b) => a.clientEventId < b.clientEventId ? -1 : a.clientEventId > b.clientEventId ? 1 : 0);
   if (!candidates.length) return 0;
   const context = await displayContext(client, session, candidates.map(row => row.segment), stayIds, corrections.correctedMoves);

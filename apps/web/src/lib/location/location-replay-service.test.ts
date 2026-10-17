@@ -570,3 +570,39 @@ describe("Location replay re-derivation never increases eligibility (review roun
     expect(withinEngineEligibility({ ...engine, confidence: "low" }, { ...engine, confidence: "high" }).confidence).toBe("low");
   });
 });
+
+describe("Location replay outing legs (PRD D19, Codex r2 on #461)", () => {
+  // The sparse 12-minute outing: two fast fixes on each leg, too few for either leg alone.
+  const sparseOuting = () => {
+    const fixture = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP,
+      visit: [670_000, 1_390_000], slowAt: [860_000, 1_000_000, 1_200_000], departAt: 1_394_000, returnAt: 1_478_000 });
+    fixture.evidence = fixture.evidence.filter((item) => item.clientEvidenceId !== "out-2" && item.clientEvidenceId !== "back-2");
+    return fixture;
+  };
+
+  it("rebuilds an outing's legs against a decided visit whose arrival bound moved, while the outing still qualifies", async () => {
+    const fixture = sparseOuting();
+    const local = runLocationEngine(fixture);
+    const visit = local.segmentUpserts.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown");
+    const legs = local.segmentUpserts.filter((segment) => segment.kind === "commute");
+    if (visit?.kind !== "stay" || legs.length !== 2) throw new Error("fixture must produce a visit and its two outing legs");
+    expect(legs.every((leg) => leg.kind === "commute" && leg.confidence === "low" && leg.outingStayIds?.includes(visit.clientSegmentId))).toBe(true);
+    // The decided row keeps its times; only its arrival bound moves five seconds (a late duplicate fix).
+    const canonical = { clientSegmentId: visit.clientSegmentId, startedAt: visit.startedAt, stoppedAt: visit.stoppedAt,
+      startLowerBoundAt: new Date(Date.parse(visit.startLowerBoundAt!) + 5_000).toISOString(), startUpperBoundAt: visit.startUpperBoundAt,
+      stopLowerBoundAt: visit.stopLowerBoundAt, stopUpperBoundAt: visit.stopUpperBoundAt };
+    const base = journeyReplayQuery(fixture as unknown as ReturnType<typeof journeyIdentityFixture>, [], [{
+      id: "decided-visit-row", clientSegmentId: visit.clientSegmentId, continuityStatus: "supported_by_visit", preservesManualCorrection: true
+    }]);
+    const stayRows = local.segmentUpserts.filter((segment) => segment.kind === "stay" && segment.clientSegmentId !== visit.clientSegmentId)
+      .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId }));
+    const query = vi.fn(async (sql: string, params?: unknown[]) =>
+      sql.includes("decided stay bounds") ? { rows: [canonical] }
+        : sql.includes("insert into stay_segments") ? { rows: stayRows } : base(sql, params));
+    const server = await replayLocationEvidence({ query } as never, {
+      workspaceId: "workspace-private", userId: "user-private", authMode: "provider", scopes: []
+    }, { deviceId: fixture.evidence[0].deviceId, algorithmVersion: fixture.config.algorithmVersion, processingAt: fixture.processingAt });
+    const ids = server.segments.filter((segment) => segment.kind === "commute").map((segment) => segment.clientSegmentId);
+    expect(ids).toEqual(expect.arrayContaining(legs.map((leg) => leg.clientSegmentId)));
+  });
+});
