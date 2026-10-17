@@ -63,6 +63,27 @@ describe("TooltipHost", () => {
     expect(tip()).toBeNull();
   });
 
+  it("keeps a focus tip through a scroll (Tab scrolls the button into view) but hides a hover tip", () => {
+    const view = setup();
+    const button = view.getByRole("button", { name: "Edit block" });
+
+    act(() => button.focus());
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+      vi.advanceTimersByTime(32);
+    });
+    expect(tip()?.textContent).toBe("Edit");
+
+    act(() => button.blur());
+    pointer("pointerover", button, "mouse");
+    act(() => vi.advanceTimersByTime(400));
+    expect(tip()).not.toBeNull();
+    act(() => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    expect(tip()).toBeNull();
+  });
+
   it("shows a text field's tip on hover only, never while it has focus", () => {
     const view = render(
       <>

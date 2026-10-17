@@ -11,27 +11,46 @@ type Tip = { text: string; left: number; top: number; placement: "above" | "belo
 /**
  * The one web tooltip (web UI audit WUI-014, owner 17 Oct 2026): any element with `data-tip` shows
  * that short text in an inverse pill after 400 ms of hover, or at once on keyboard focus, and hides
- * on leave, blur, Escape, a press or a scroll. Icon-only buttons set it from their label
- * (`IconButton`) or a short verb ("Edit", "Start again"); the accessible name stays on the button,
- * so the tip itself is hidden from assistive technology. It is a manual popover in the top layer,
- * fixed to the viewport and clamped inside it, so no dialog covers it, no scrolling container clips
- * it and it never widens the page.
+ * on leave, blur, Escape or a press; a scroll hides a hover tip and moves a focus tip with its
+ * button. Icon-only buttons set it from their label (`IconButton`) or a short verb ("Edit", "Start
+ * again"); the accessible name stays on the button, so the tip itself is hidden from assistive
+ * technology. It is a manual popover in the top layer, fixed to the viewport and clamped inside it,
+ * so no dialog covers it, no scrolling container clips it and it never widens the page.
  */
 export function TooltipHost() {
   const [tip, setTip] = useState<Tip | null>(null);
   const pillRef = useRef<HTMLDivElement | null>(null);
   const targetRef = useRef<HTMLElement | null>(null);
   const timerRef = useRef<number | null>(null);
+  // A keyboard-focus tip follows its button through a scroll (Tab often scrolls the button into
+  // view); a hover tip hides, since the pointer is no longer over the same spot.
+  const fromFocusRef = useRef(false);
 
   useEffect(() => {
     function clear() {
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    let reposition: number | null = null;
     function hide() {
       clear();
+      if (reposition !== null) window.cancelAnimationFrame(reposition);
+      reposition = null;
       targetRef.current = null;
+      fromFocusRef.current = false;
       setTip(null);
+    }
+    function onViewportChange() {
+      const target = targetRef.current;
+      if (!fromFocusRef.current || !target || target !== document.activeElement || !target.isConnected) {
+        hide();
+        return;
+      }
+      if (reposition !== null) return;
+      reposition = window.requestAnimationFrame(() => {
+        reposition = null;
+        if (targetRef.current === target && document.activeElement === target) showFor(target);
+      });
     }
     function showFor(target: HTMLElement) {
       const text = target.dataset.tip?.trim();
@@ -72,6 +91,7 @@ export function TooltipHost() {
       // shows on hover only, so it never covers what is being typed.
       if (!target.matches(":focus-visible") || target.matches("input, textarea, [contenteditable]")) return;
       hide();
+      fromFocusRef.current = true;
       showFor(target);
     }
     function onKeyDown(event: KeyboardEvent) {
@@ -83,8 +103,8 @@ export function TooltipHost() {
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("scroll", hide, true);
-    window.addEventListener("resize", hide);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
     return () => {
       clear();
       document.removeEventListener("pointerover", onPointerOver);
@@ -93,8 +113,9 @@ export function TooltipHost() {
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("scroll", hide, true);
-      window.removeEventListener("resize", hide);
+      if (reposition !== null) window.cancelAnimationFrame(reposition);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
     };
   }, []);
 
