@@ -1660,11 +1660,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // The bootstrap's Review list is capped (100), so only the server's total counts as exact (its
   // count of cards; an older server's count of suggestions).
   const serverReviewCount = data?.stats?.reviewCardCount ?? data?.stats?.reviewCount;
+  const serverReviewCountExact = !data?.stats?.reviewCardCountApproximate;
   const todayReviewFallback = useMemo(
     () => typeof serverReviewCount === "number"
-      ? { value: serverReviewCount, exact: true }
+      ? { value: serverReviewCount, exact: serverReviewCountExact }
       : { value: openReviewCount, exact: false },
-    [openReviewCount, serverReviewCount]
+    [openReviewCount, serverReviewCount, serverReviewCountExact]
   );
   // Whole minutes only, so the goal frame reads the per-minute clock (investigation 2026-10-07).
   const todayGoalFrame = useMemo(

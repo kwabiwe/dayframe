@@ -75,7 +75,14 @@ export function projectReviewScreenData(input: {
     categories,
     reviewItems: stableItems,
     stats: base.stats
-      ? { ...base.stats, reviewCount, ...(typeof reviewCardCount === "number" ? { reviewCardCount } : {}) }
+      ? {
+          ...base.stats,
+          reviewCount,
+          ...(typeof reviewCardCount === "number" ? { reviewCardCount } : {}),
+          // The projection's map and exactness go with its count (Codex r2 on #475).
+          ...(projection.stats?.reviewOutingStays ? { reviewOutingStays: projection.stats.reviewOutingStays } : {}),
+          ...(projection.stats?.reviewCardCountApproximate ? { reviewCardCountApproximate: true } : {})
+        }
       : projection.stats
   };
   if (
@@ -84,7 +91,9 @@ export function projectReviewScreenData(input: {
     categories === current.categories &&
     sameJson(current.workspace, next.workspace) &&
     current.stats?.reviewCount === next.stats?.reviewCount &&
-    current.stats?.reviewCardCount === next.stats?.reviewCardCount
+    current.stats?.reviewCardCount === next.stats?.reviewCardCount &&
+    current.stats?.reviewCardCountApproximate === next.stats?.reviewCardCountApproximate &&
+    sameJson(current.stats?.reviewOutingStays, next.stats?.reviewOutingStays)
   ) {
     return current;
   }

@@ -92,6 +92,16 @@ describe("Review sync store contracts", () => {
     expect(projectReviewBootstrap(capped, new Set(["other-0"])).stats?.reviewCardCount).toBe(98);
     // Its unlisted Stay decided on its own: both Moves come back as cards.
     expect(projectReviewBootstrap(capped, new Set(["stay"])).stats?.reviewCardCount).toBe(100);
+    // Projecting a projected bootstrap again changes nothing (Codex r2 on #475).
+    const once = projectReviewBootstrap(capped, new Set(["stay"]));
+    expect(projectReviewBootstrap(once, new Set(["stay"])).stats?.reviewCardCount).toBe(100);
+    const outingDecided = projectReviewBootstrap(capped, new Set(["stay", "there", "back"]));
+    expect(outingDecided.stats?.reviewCardCount).toBe(98);
+    expect(projectReviewBootstrap(outingDecided, new Set(["stay", "there", "back"])).stats?.reviewCardCount).toBe(98);
+    // A server that counts cards but sent no map (beyond its limit): a local decision makes the count approximate.
+    const unmapped = { ...capped, stats: { ...capped.stats, reviewOutingStays: undefined } };
+    expect(projectReviewBootstrap(unmapped, new Set(["there"])).stats?.reviewCardCountApproximate).toBe(true);
+    expect(projectReviewBootstrap(unmapped, new Set()).stats?.reviewCardCountApproximate).toBeUndefined();
     // An older server sends no count of cards: none is made up.
     expect(projectReviewBootstrap(bootstrap(items), new Set(["walk"])).stats).not.toHaveProperty("reviewCardCount");
   });

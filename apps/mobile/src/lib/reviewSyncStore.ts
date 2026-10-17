@@ -3215,6 +3215,16 @@ export function projectReviewBootstrap(
   const hiddenOpen = [...hiddenIds].filter((id) => knownOpen.has(id));
   const hiddenCards = outingStays ? reviewCardsRemovedByOutings(outingStays, hiddenOpen) : reviewCardsRemoved(openBefore, hiddenIds);
   const cardCount = bootstrap.stats?.reviewCardCount;
+  // The map leaves with the cards it counted, so projecting an already projected bootstrap again
+  // never takes them off twice (Codex r2 on #475).
+  const hidden = new Set(hiddenOpen);
+  const remainingStays = outingStays
+    ? Object.fromEntries(Object.entries(outingStays).filter(([member, stay]) => !hidden.has(member) && !hidden.has(stay)))
+    : undefined;
+  // A server that counts cards but sent no map (more open outing Moves than it maps) leaves a local
+  // decision's effect on the count unknown: the count is then approximate (Codex r2 on #475).
+  const approximate = Boolean(bootstrap.stats?.reviewCardCountApproximate) ||
+    (typeof cardCount === "number" && !outingStays && hiddenOpen.length > 0);
   return {
     ...bootstrap,
     reviewItems,
@@ -3223,7 +3233,9 @@ export function projectReviewBootstrap(
           stats: {
             ...bootstrap.stats,
             reviewCount: Math.max(0, bootstrap.stats.reviewCount - hiddenOpenCount),
-            ...(typeof cardCount === "number" ? { reviewCardCount: Math.max(0, cardCount - hiddenCards) } : {})
+            ...(typeof cardCount === "number" ? { reviewCardCount: Math.max(0, cardCount - hiddenCards) } : {}),
+            ...(remainingStays ? { reviewOutingStays: remainingStays } : {}),
+            ...(approximate ? { reviewCardCountApproximate: true } : {})
           }
         }
       : {})
