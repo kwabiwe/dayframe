@@ -491,7 +491,7 @@ function renderModal({
   sourceEntry?: TimeEntryRow;
   withSuggestions?: boolean;
 } = {}) {
-  return render(createElement(TimeEntryQuickEditorModal, modalProps({ categories, onClose, onDelete, onSave, sourceEntry })));
+  return render(createElement(TimeEntryQuickEditorModal, modalProps({ categories, onClose, onDelete, onSave, sourceEntry, withSuggestions })));
 }
 
 function modalProps({
@@ -499,13 +499,15 @@ function modalProps({
   onClose = vi.fn(),
   onDelete,
   onSave = vi.fn<SaveHandler>().mockResolvedValue({ ok: true }),
-  sourceEntry = timeEntry()
+  sourceEntry = timeEntry(),
+  withSuggestions = true
 }: {
   categories?: Array<{ id: string; name: string; color: string; isPinned: boolean }>;
   onClose?: () => void;
   onDelete?: DeleteHandler;
   onSave?: SaveHandler;
   sourceEntry?: TimeEntryRow;
+  withSuggestions?: boolean;
 } = {}): ComponentProps<typeof TimeEntryQuickEditorModal> {
   return {
     capturedNow: new Date("2026-08-04T12:00:00.000Z"),
