@@ -26,7 +26,10 @@ describe("offline-first Review screen contracts", () => {
   });
 
   it("hides mutations after the local transaction and preserves restore anchors", () => {
-    expect(storeSource).toContain("'pending', 'hidden'");
+    // Every action hides its card in the same local transaction, except "Save this place" (PRD D19),
+    // which keeps it open and owns no source effect.
+    expect(storeSource).toContain(`keepsCardOpen ? "restore" : "hidden"`);
+    expect(storeSource).toContain("if (keepsCardOpen) return;");
     expect(storeSource).toContain("preceding_ids_json");
     expect(storeSource).toContain("following_ids_json");
     expect(storeSource).toContain("restoreReviewItemsWithAnchors");

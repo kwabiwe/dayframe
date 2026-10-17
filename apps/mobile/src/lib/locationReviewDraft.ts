@@ -218,7 +218,8 @@ export type DurableLocationReviewCommand = {
   mutation: ReviewMutation;
   affectedReviewItemIds: string[];
   affectedItems: MobileReviewItem[];
-  completion: "resolve_current" | "replace_current" | "resolve_current_and_adjacent";
+  /** "keep_current": "Save this place" leaves the card open (PRD D19). */
+  completion: "resolve_current" | "replace_current" | "resolve_current_and_adjacent" | "keep_current";
   catalogueRefreshRequired: boolean;
 };
 
@@ -237,7 +238,8 @@ export function assertLocationReviewActionCompatible(
   }
   if (
     (mutation.action === "record_poi_once" ||
-      mutation.action === "save_place_and_confirm") &&
+      mutation.action === "save_place_and_confirm" ||
+      mutation.action === "save_place") &&
     isCommute
   ) {
     throw new LocationReviewDraftError("This place correction is only available for a detected visit.");
@@ -264,8 +266,9 @@ export function buildDurableLocationReviewCommand(
   });
   return {
     mutation, affectedReviewItemIds: [...ids].sort(), affectedItems,
-    completion: merge ? "resolve_current_and_adjacent" : mutation.action === "split" ? "replace_current" : "resolve_current",
-    catalogueRefreshRequired: mutation.action === "save_place_and_confirm"
+    completion: merge ? "resolve_current_and_adjacent" : mutation.action === "split" ? "replace_current"
+      : mutation.action === "save_place" ? "keep_current" : "resolve_current",
+    catalogueRefreshRequired: mutation.action === "save_place_and_confirm" || mutation.action === "save_place"
   };
 }
 

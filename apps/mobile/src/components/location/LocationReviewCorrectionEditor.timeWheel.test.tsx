@@ -80,6 +80,8 @@ vi.mock("../ActivityPickerSheet", () => ({
   }
 }));
 const map = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
+// The Save place sheet draws a native map; these tests never open it.
+vi.mock("./SavePlaceSheet", () => ({ SavePlaceSheet: () => null }));
 vi.mock("./LocationEvidenceMap", () => ({
   LocationEvidenceMap: (props: Record<string, unknown>) => {
     map.props = props;
