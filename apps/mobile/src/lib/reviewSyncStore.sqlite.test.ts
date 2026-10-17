@@ -766,7 +766,7 @@ describe("Review real SQLite transactions", () => {
     for (const column of ["contention_count","reconciliation_attempt_count","last_reconciled_at","resolution_status","acknowledgement_json"]) db.exec(`alter table review_mutation_outbox drop column ${column}`);
     db.exec("drop table review_mutation_effects; drop index review_mutation_owner_idx; pragma user_version=4;");
     await reopen(); await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_mutation_effects")).toBe(1);
     expect(db.prepare("select request_json from review_mutation_outbox").get()!.request_json).toBe(request);
   });
@@ -774,7 +774,7 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_presentation_terminal_source; drop table review_presentation_context; pragma user_version=6;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_presentation_context")).toBe(0);
     expect(count("review_presentation_terminal_source")).toBe(0);
   });
@@ -783,9 +783,166 @@ describe("Review real SQLite transactions", () => {
     db.exec("drop table review_source_open_observation; pragma user_version=7;");
     await reopen();
     await store.loadCachedReviewBootstrap();
-    expect(db.prepare("pragma user_version").get()!.user_version).toBe(8);
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
     expect(count("review_source_open_observation")).toBe(0);
     expect(count("review_mutation_outbox")).toBe(1);
+  });
+  it("upgrades a v8 database to v9 Save this place indexes without touching queued work", async () => {
+    await store.enqueueReviewMutation(mergeInput());
+    db.exec(`drop index review_mutation_item_active_idx; drop index review_mutation_save_place_idx;
+      create unique index review_mutation_item_active_idx on review_mutation_outbox(account_key, review_item_id); pragma user_version=8;`);
+    await reopen();
+    await store.loadCachedReviewBootstrap();
+    expect(db.prepare("pragma user_version").get()!.user_version).toBe(9);
+    const indexes = db.prepare("select name, sql from sqlite_master where type = 'index' and name like 'review_mutation_%_idx'").all() as Array<{ name: string; sql: string }>;
+    expect(indexes.find((index) => index.name === "review_mutation_item_active_idx")?.sql).toContain("action_kind <> 'save_place'");
+    expect(indexes.find((index) => index.name === "review_mutation_save_place_idx")?.sql).toContain("action_kind = 'save_place'");
+    expect(count("review_mutation_outbox")).toBe(1);
+    expect(count("review_mutation_effects")).toBe(2);
+  });
+  const savePlace = { action: "save_place" as const, name: "Synthetic pool", radiusMeters: 110, categoryId: syntheticId(7), suggestVisits: true, autoLog: false };
+  const unsavedItem = (data: ReturnType<typeof bootstrap>) => data.reviewItems.find((candidate) => !candidate.suggestedPlaceId)!;
+  it("keeps a card shown under the place being saved, then sends its own decision, as what was seen, after the save (PRD D19)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(140), mutation: savePlace });
+    expect(count("review_mutation_effects")).toBe(0);
+    const shown = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id);
+    expect(shown).toMatchObject({ title: "Synthetic pool", placeName: "Synthetic pool" });
+    // The card's own confirmation, made while the save waits: its times and the save's activity, no hash (Codex r1 on #460).
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(141),
+      mutation: { action: "confirm", expectedProposalHash: "a".repeat(64) }, presentation: { backendId: "dayframe-staging", scope: { kind: "today" } as never } });
+    const decision = JSON.parse(String(db.prepare("select request_json from review_mutation_outbox where action_kind = 'edit_and_confirm'").get()!.request_json));
+    expect(decision.mutation).toEqual({ action: "edit_and_confirm", edit: {
+      startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt, categoryId: syntheticId(7) } });
+    expect(count("review_mutation_effects")).toBe(1);
+    // The save is busy: the decision waits for it on later passes too, not only in the pass that selected both.
+    mocks.fetch.mockResolvedValueOnce({ status: 503, json: async () => ({ code: "event_sync_deferred" }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(db.prepare("select action_kind, state from review_mutation_outbox order by created_at").all())
+      .toEqual([{ action_kind: "save_place", state: "retry_wait" }, { action_kind: "edit_and_confirm", state: "pending" }]);
+    mocks.fetch
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(150), rematchedCount: 0 }) })
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "edit_and_confirm", status: "accepted", entryId: syntheticId(151) }) });
+    await store.synchroniseReviewMutations({ force: true });
+    expect(JSON.parse(String((mocks.fetch.mock.calls[1][1] as RequestInit).body)).mutation.action).toBe("save_place");
+    await store.synchroniseReviewMutations();
+    expect(JSON.parse(String((mocks.fetch.mock.calls[2][1] as RequestInit).body)).mutation.action).toBe("edit_and_confirm");
+  });
+  it("keeps an acknowledged save's place on the card until Review data shows it, in Review and on Today (Codex r1 on #460)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(142), mutation: savePlace });
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(152), rematchedCount: 1 }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("acknowledged");
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id))
+      .toMatchObject({ title: "Synthetic pool", suggestedPlaceId: syntheticId(152) });
+    const owner = { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" };
+    const today = { version: 1 as const, scope: { mode: "lookup" as const, timeZone: "Europe/London" }, snapshotToken: "today-open",
+      capturedAt: "2026-08-28T18:00:00.000Z", nextCursor: null,
+      completeness: { records: true, outstandingCounts: true, completedToday: false, partialReason: null },
+      outstanding: { globalCount: 1, todayCount: 0, openReviewItemIds: [item.id] },
+      records: [{ ...presentationReview(item), status: "open" as const }], links: [], lookup: { reviewItems: [], entries: [] } };
+    await store.cacheReviewPresentation({ owner, response: today });
+    const read = await store.readReviewPresentationSnapshot({ owner, response: today });
+    expect(read!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" } });
+    // A quick confirmation made now states what was seen, not the hash the save changed (Codex r2 on #460).
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(143),
+      mutation: { action: "confirm", expectedProposalHash: "b".repeat(64) }, presentation: { backendId: "staging-fixture", scope: today.scope as never } });
+    expect(db.prepare("select action_kind from review_mutation_outbox where client_mutation_id = ?").get(syntheticId(143))!.action_kind).toBe("edit_and_confirm");
+    db.prepare("delete from review_mutation_outbox where client_mutation_id = ?").run(syntheticId(143));
+    // Server data with the place ends the overlay, and Today keeps the place (Codex r2 on #460).
+    await store.processReviewBootstrap({ ...data, reviewItems: data.reviewItems.map((candidate) => candidate.id === item.id
+      ? { ...candidate, title: "Synthetic pool", placeName: "Synthetic pool", suggestedPlaceId: syntheticId(152) } : candidate) });
+    expect(count("review_mutation_outbox")).toBe(0);
+    const after = await store.readReviewPresentationSnapshot({ owner, response: today });
+    // The place stays, without the old proposal hash: Quick Confirm waits for a fresh one (Codex r3 on #460).
+    expect(after!.response.records[0]).toMatchObject({ title: "Synthetic pool", place: { id: syntheticId(152), label: "Synthetic pool" }, proposalHash: null });
+  });
+  it("ends an acknowledged save's overlay on terminal proof from a lookup (Codex r2 on #460)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(144), mutation: savePlace });
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(153), rematchedCount: 0 }) });
+    await store.synchroniseReviewMutations();
+    await store.cacheReviewPresentation({ owner: { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" },
+      response: terminalPresentation(data, [item.id]) });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+  it("ends an acknowledged save's overlay on proof that its card is missing (Codex r3 on #460)", async () => {
+    const data = bootstrap();
+    const item = unsavedItem(data);
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(145), mutation: savePlace });
+    mocks.fetch.mockResolvedValueOnce({ status: 200, json: async () => ({ ok: true, action: "save_place", status: "open", placeId: syntheticId(154), rematchedCount: 0 }) });
+    await store.synchroniseReviewMutations();
+    const missing = terminalPresentation(data, []);
+    await store.cacheReviewPresentation({ owner: { workspaceId: data.workspace.id, userId: data.user.id, backendId: "staging-fixture" },
+      response: { ...missing, snapshotToken: "missing", lookup: { reviewItems: [{ kind: "missing_review" as const, reviewItemId: item.id }], entries: [] } } });
+    expect(count("review_mutation_outbox")).toBe(0);
+  });
+  it("finds blocked decisions through the save index, staying quick at hundreds of them (Codex r3 on #460)", async () => {
+    const data = bootstrap();
+    // Each decision holds two cards (like a merge); its card's save sits on the second (Codex r4 on #460).
+    const pairs = Array.from({ length: 2_400 }, (_, index) => ({ own: syntheticId(40000 + index), second: syntheticId(50000 + index) }));
+    db.exec("BEGIN");
+    const insert = db.prepare(`insert into review_mutation_outbox (client_mutation_id, account_key, workspace_id, user_id, review_item_id,
+      action_kind, request_json, original_snapshot_json, original_position, preceding_ids_json, following_ids_json, state, local_effect, created_at, updated_at)
+      select ?, account_key, ?, ?, ?, ?, '{}', '{}', 0, '[]', '[]', ?, ?, ?, ? from review_account_context limit 1`);
+    const effect = db.prepare(`insert into review_mutation_effects (client_mutation_id, account_key, review_item_id, snapshot_json, original_position,
+      preceding_ids_json, following_ids_json, local_effect) select ?, account_key, ?, '{}', 0, '[]', '[]', 'hidden' from review_account_context limit 1`);
+    pairs.forEach(({ own, second }, index) => {
+      insert.run(syntheticId(20000 + index), data.workspace.id, data.user.id, second, "save_place", "needs_attention", "restore", "2026-08-28T10:00:00.000Z", "2026-08-28T10:00:00.000Z");
+      insert.run(syntheticId(30000 + index), data.workspace.id, data.user.id, own, "merge", "pending", "hidden", "2026-08-28T10:00:01.000Z", "2026-08-28T10:00:01.000Z");
+      effect.run(syntheticId(30000 + index), own);
+      effect.run(syntheticId(30000 + index), second);
+    });
+    db.exec("COMMIT");
+    const started = performance.now();
+    await store.synchroniseReviewMutations();
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    const plan = (db.prepare(`explain query plan select 1 from review_mutation_outbox s where s.account_key = ? and s.review_item_id = ?
+      and s.action_kind = 'save_place' and s.state <> 'acknowledged'`).all("k", "i") as Array<{ detail: string }>).map((row) => row.detail).join(" ");
+    expect(plan).toContain("review_mutation_save_place_idx");
+    const effectsPlan = (db.prepare("explain query plan select 1 from review_mutation_effects e where e.client_mutation_id = ?").all("m") as Array<{ detail: string }>)
+      .map((row) => row.detail).join(" ");
+    expect(effectsPlan).not.toMatch(/SCAN/);
+  });
+  it("leaves decisions held behind rejected saves out of a pass, so later work still goes (Codex r2 on #460)", async () => {
+    const data = syntheticReviewBootstrap(40);
+    await store.processReviewBootstrap(data);
+    const items = data.reviewItems.filter((candidate) => !candidate.suggestedPlaceId).slice(0, 26);
+    expect(items.length).toBe(26);
+    for (const [index, item] of items.slice(0, 25).entries()) {
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(2000 + index), mutation: savePlace });
+      await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(2100 + index), mutation: { action: "ignore_once_location" } });
+    }
+    db.prepare("update review_mutation_outbox set state = 'needs_attention', last_http_status = 422 where action_kind = 'save_place'").run();
+    await store.enqueueReviewMutation({ bootstrap: data, item: items[25], clientMutationId: syntheticId(2200), mutation: { action: "ignore_once_location" } });
+    mocks.fetch.mockResolvedValue({ status: 200, json: async () => ({ ok: true, action: "ignore_once_location", status: "ignored" }) });
+    await store.synchroniseReviewMutations();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(String((mocks.fetch.mock.calls[0][0]))).toContain(items[25].id);
+  });
+  it("keeps one Save this place per card, retries it idempotently, and discards a rejected one without hiding the card", async () => {
+    const data = bootstrap();
+    const item = data.reviewItems[1];
+    const save = { action: "save_place" as const, name: "Synthetic pool", radiusMeters: 110, categoryId: null, suggestVisits: true, autoLog: false };
+    await store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(160), mutation: save });
+    await expect(store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(161), mutation: save })).resolves.toMatchObject({ idempotent: true });
+    await expect(store.enqueueReviewMutation({ bootstrap: data, item, clientMutationId: syntheticId(162), mutation: { ...save, name: "Other" } }))
+      .rejects.toThrow("already being saved");
+    mocks.fetch.mockResolvedValueOnce({ status: 422, json: async () => ({ ok: false, code: "invalid_action", message: "This visit already has a saved place." }) });
+    await store.synchroniseReviewMutations();
+    expect(db.prepare("select state from review_mutation_outbox").get()!.state).toBe("needs_attention");
+    const afterRejection = (await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.find((candidate) => candidate.id === item.id);
+    expect(afterRejection?.title).toBe(item.title);
+    expect(await store.discardReviewSyncIssue(syntheticId(160))).toBe(true);
+    expect((await store.loadCachedReviewBootstrap())!.bootstrap.reviewItems.some((candidate) => candidate.id === item.id)).toBe(true);
   });
   it("rejects cross-account effects and clears sensitive intent on account replacement", async () => {
     await store.enqueueReviewMutation(mergeInput());
