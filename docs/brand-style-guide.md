@@ -239,6 +239,8 @@ Do not add Sofia Pro or any other font. The Dayframe wordmark is outline geometr
 | Timer numerals | Live block odometer 58 on iPhone (scaled to the numeric Dynamic Type cap, shrunk only to fit the card); duration dial up to 38 | 700–800 | Odometer: each digit is laid out on a 1.2 em native text line, centred inside a 1.04 em visual digit cell (0.62 em wide); dial and web timers 1.0–1.15 | `-0.02em` |
 | Report headline | Reports hero total 52 on iPhone; other report and goal totals 24–30 | 700–800 | 1.05–1.2 | `-0.04em` to `-0.02em` |
 
+Web type tokens (audit WUI-036, 17 October 2026) carry these roles in px, never rem (the root is 14 px on desktop and 16 px on phones, so rem sizes drifted between them): `--type-label` 11, `--type-meta` 12, `--type-body` 14, `--type-panel` 17 and `--type-panel-lg` 18, `--type-sheet` 20, `--type-screen` 30. Web screen titles (Calendar, Reports, Review, Library, Settings) are 30 px at every width. New Blocks rules size type with the tokens; existing literal sizes move to them as each family is touched.
+
 Use `font-variant-numeric: tabular-nums` on timers, durations, clock labels and report figures. Write every duration one way, with the shared `formatDuration` (`packages/shared`): "6h 25m", "6h", "35m", "<1m" for a positive amount under a minute and "0m" for nothing (audit UIA-042/UIA-207); only a running clock ("0:04:09") and the duration dial keep the clock form. (Still to move: web's own duration helper and the native Calendar's block labels, which round to the nearest minute.) What people read or hear says block and activity — never timer, entry, time entry or task (UIA-100; guarded by `blockWording.contract.test.ts` on iPhone) — counts inside Review say moments ("Loaded 12 of 30 moments."), and paths read "Settings › Sync help" with a single-character ellipsis "…". Do not force monospace typography across the interface. Allow Dynamic Type to grow without clipping; labels may wrap before touch targets shrink.
 
 ### iOS Dynamic Type roles
@@ -316,7 +318,7 @@ At narrow widths, keep the same type roles, insets and minimum targets. Clamp th
 
 ### Spacing and shape
 
-Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Prefer 20–24 px/pt grouped surfaces, 14–18 compact cards and controls, and 24–28 floating navigation. Pills may be fully rounded. Keep interactive targets at least 44×44 px/pt.
+Use the shared spacing scale `4, 8, 12, 16, 20, 24, 32`. Web radius tokens (audit WUI-037): `--r-chip` 10 (controls and chips), `--r-block` the X3 30 % (`--activity-marker-radius`), `--r-card` 22, `--r-sheet` 24, `--r-pill` 999; new Blocks rules use them. Prefer 20–24 px/pt grouped surfaces, 14–18 compact cards and controls, and 24–28 floating navigation. Pills may be fully rounded. Keep interactive targets at least 44×44 px/pt.
 
 Across signed-in web and iOS surfaces, icon-only buttons are circular and compact text buttons are pills. Avoid rounded-square button silhouettes. Separate panels from the canvas with `surface`/`surfaceRaised` fill, and use inset fills or hairline dividers for structure inside a panel.
 
