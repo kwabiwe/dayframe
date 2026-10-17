@@ -19,7 +19,7 @@ import {
   replayRetainedLocationEvidence
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
-import { forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor } from "../apps/web/src/lib/location/name-patterns";
+import { forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName } from "../apps/web/src/lib/location/name-patterns";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
@@ -2120,6 +2120,15 @@ async function validateLearnedNameCorrections() {
     const independent = await learnedNamesFor(pool, session, new Map([["card", { key: "db-independent-bands", band: "afternoon" as const }]]));
     assert.deepEqual(independent.get("card"), { name: "Morning name", categoryId: chosenId, uses: 3, categoryUses: 1 },
       "An activity-only band hid another band's learned name.");
+
+    // Keeping another band's name in this band never makes it less trusted (Codex r4 on #458).
+    await forgetAll();
+    await seed("db-kept-fallback", "School run", 2, null, 0, ["morning"]);
+    const fallbackPattern = { key: "db-kept-fallback", band: "afternoon" as const };
+    assert.equal((await learnedNamesFor(pool, session, new Map([["card", fallbackPattern]]))).get("card")?.uses, 2);
+    await recordLearnedName(pool, session, fallbackPattern, { name: "school  RUN", categoryId: null });
+    assert.equal((await learnedNamesFor(pool, session, new Map([["card", fallbackPattern]]))).get("card")?.uses, 2,
+      "Keeping a fallback name in its own band demoted it below the automatic-name threshold.");
   } finally {
     await clearDerivedLocationState();
     await forgetAll();

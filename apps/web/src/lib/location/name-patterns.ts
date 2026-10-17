@@ -188,11 +188,20 @@ export async function learnedNamesFor(client: Pick<pg.PoolClient, "query">, sess
     const name = pick(rows, pattern.band, "name", (row) => row.uses);
     const activity = pick(rows, pattern.band, "categoryId", (row) => row.categoryUses);
     if (name || activity) {
-      learned.set(clientEventId, { name: name?.name ?? null, categoryId: activity?.categoryId ?? null,
-        uses: name?.uses ?? 0, categoryUses: activity?.categoryUses ?? 0 });
+      // A name counts every use it has in any band: keeping a name another band suggested never makes
+      // it less trusted (Codex r4 on #458).
+      const uses = name ? Math.max(...rows.filter((row) => sameName(row.name, name.name)).map((row) => row.uses)) : 0;
+      const categoryUses = activity ? Math.max(...rows.filter((row) => row.categoryId === activity.categoryId).map((row) => row.categoryUses)) : 0;
+      learned.set(clientEventId, { name: name?.name ?? null, categoryId: activity?.categoryId ?? null, uses, categoryUses });
     }
   }
   return learned;
+}
+
+/** Two learned names are the same name with case and spacing aside (as `recordLearnedName` counts them). */
+function sameName(left: string | null, right: string | null) {
+  const fold = (value: string | null) => value?.trim().replace(/\s+/g, " ").toLowerCase() ?? "";
+  return Boolean(fold(left)) && fold(left) === fold(right);
 }
 
 /**

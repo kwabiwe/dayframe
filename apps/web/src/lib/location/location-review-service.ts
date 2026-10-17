@@ -1288,13 +1288,20 @@ async function resultPattern(
   result: { segmentId: string; startedAt: string; place?: PatternPlace }
 ) {
   if (!isNameBand(item.namePatternBand)) return null;
+  // The time zone of the device's first reading from the result's start (as the emitter keys a
+  // segment by its first reading), else its last one before: a split part with no reading of its own
+  // still gets its own start's band (Codex r4 on #458). Seeks idx_location_evidence_user_time.
   const evidence = await client.query<{ timeZone: string }>(
-    `select le.time_zone as "timeZone"
-     from location_segment_evidence lse
-     join location_evidence le on le.id = lse.evidence_id and le.workspace_id = lse.workspace_id and le.user_id = lse.user_id
-     where lse.workspace_id = $1 and lse.user_id = $2 and (lse.stay_segment_id = $3 or lse.commute_segment_id = $3)
-     order by le.occurred_at, le.client_evidence_id limit 1`,
-    [session.workspaceId, session.userId, result.segmentId]);
+    `select "timeZone" from (
+       (select time_zone as "timeZone", 0 as rank from location_evidence
+        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4) and occurred_at >= $3::timestamptz
+        order by occurred_at limit 1)
+       union all
+       (select time_zone as "timeZone", 1 as rank from location_evidence
+        where workspace_id = $1 and user_id = $2 and ($4::text is null or device_id = $4) and occurred_at < $3::timestamptz
+        order by occurred_at desc limit 1)
+     ) nearest order by rank limit 1`,
+    [session.workspaceId, session.userId, result.startedAt, item.deviceId]);
   const timeZone = evidence.rows[0]?.timeZone;
   const band = timeZone ? nameBand(result.startedAt, timeZone) : item.namePatternBand;
   if (item.segmentKind !== "stay") return item.namePatternKey ? { key: item.namePatternKey, band } : null;
@@ -1356,7 +1363,7 @@ function childProvenance(item: LockedReview, edit?: ReviewEntryEdit) {
 async function persistPattern(
   client: pg.PoolClient, session: RequestSession, item: LockedReview, eventId: string, pattern: { key: string; band: NameBand } | null
 ) {
-  if (!pattern || (eventId === item.eventId && pattern.key === item.namePatternKey)) return;
+  if (!pattern || (eventId === item.eventId && pattern.key === item.namePatternKey && pattern.band === item.namePatternBand)) return;
   await client.query(
     `update activity_events set raw_payload = raw_payload || jsonb_build_object('namePatternKey', $4::text, 'namePatternBand', $5::text)
      where workspace_id = $1 and user_id = $2 and id = $3`,
