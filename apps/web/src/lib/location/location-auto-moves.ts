@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { assessAutomaticMove, type CommuteSegment, type LocationSegment } from "@dayframe/shared";
+import { assessAutomaticMove, LOCATION_ENGINE_V2_CONFIG, type CommuteSegment, type LocationSegment } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { AUTO_LOG_SUPERSEDED_PAYLOAD_KEY, LOCATION_AUTO_LOG_SOURCE } from "./location-auto-log";
 
@@ -24,8 +24,8 @@ type MoveWindow = { key: string; startedAt: string; stoppedAt: string; eventId?:
  * Why each Move window must not log itself, in order, or nothing: it overlaps a block (not ignored, not
  * its own, not a retired Move's) by more than five minutes or any running timer; another Move here was
  * logged automatically and is still a decision (its block deleted or edited; a retired one is no longer
- * confirmed); or a Move card was offered here before under another ID, whatever became of it (Codex r1
- * on #462, as visits do). One bounded read per 250 windows; `checks` limits it to the overlap read.
+ * confirmed); or another Move here did not log itself (a card offered under another ID, whatever became
+ * of it; Codex r1 on #462, as visits do). One bounded read per 250 windows; `checks` limits it to the overlap read.
  */
 export async function movesBlocked(
   client: Pick<pg.PoolClient, "query">, session: RequestSession, windows: readonly MoveWindow[],
@@ -42,23 +42,30 @@ export async function movesBlocked(
              and te.started_at < r.stopped_at and coalesce(te.stopped_at, 'infinity'::timestamptz) > r.started_at
              and (te.stopped_at is null
                or least(te.stopped_at, r.stopped_at) - greatest(te.started_at, r.started_at) > make_interval(secs => $5))) then 'overlap'
+         -- History reads are bounded by the longest Move ($7 seconds), so they range-scan
+         -- idx_activity_events_workspace_occurred however long the history (Codex r2 on #462).
          when $6 and exists (
            select 1 from activity_events ae
            where ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected'
+             and ae.occurred_at < r.stopped_at and ae.occurred_at > r.started_at - make_interval(secs => $7)
              and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
              and ae.client_event_id <> r.key and (r.event_id is null or ae.id <> r.event_id)
-             and ae.occurred_at < r.stopped_at and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) then 'logged'
+             and (ae.raw_payload ->> 'stoppedAt')::timestamptz > r.started_at) then 'logged'
+         -- Any other Move here that did not log itself was a card (or, before Review mode, logged by
+         -- the automatic rules): offered before, whatever became of it.
          when $6 and exists (
-           select 1 from review_items ri
-           join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
-           where ri.workspace_id = $1 and ri.user_id = $2 and ae.event_type = 'commute_detected'
-             and (r.event_id is null or ae.id <> r.event_id)
-             and ri.suggested_started_at < r.stopped_at and ri.suggested_stopped_at > r.started_at) then 'offered'
+           select 1 from activity_events ae
+           where ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected'
+             and ae.occurred_at < r.stopped_at and ae.occurred_at > r.started_at - make_interval(secs => $7)
+             and coalesce(ae.raw_payload ->> 'semanticDisposition', '') <> 'auto_logged'
+             and ae.client_event_id <> r.key and (r.event_id is null or ae.id <> r.event_id)
+             and coalesce((ae.raw_payload ->> 'stoppedAt')::timestamptz, ae.occurred_at + interval '1 second') > r.started_at) then 'offered'
        end as reason
        from jsonb_to_recordset($3::jsonb) as r(key text, started_at timestamptz, stopped_at timestamptz, event_id uuid)`,
       [session.workspaceId, session.userId,
         JSON.stringify(batch.map((window) => ({ key: window.key, started_at: window.startedAt, stopped_at: window.stoppedAt, event_id: window.eventId ?? null }))),
-        [...excludedEntryIds], MOVE_OVERLAP_TOLERANCE_MS / 1_000, checks === "all"]);
+        [...excludedEntryIds], MOVE_OVERLAP_TOLERANCE_MS / 1_000, checks === "all",
+        LOCATION_ENGINE_V2_CONFIG.commuteMaximumDurationMs / 1_000]);
     for (const row of result.rows) if (row.reason) blocked.set(row.key, row.reason);
   }
   return blocked;
@@ -184,13 +191,28 @@ export async function retireCoveredAutoMoves(
          and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null and te.id = any($4::uuid[])
        order by te.id`,
       [session.workspaceId, session.userId, batch, [...locked]])).rows;
-    if (covered.length === 0) continue;
-    const deleted = await client.query(
-      `delete from time_entries where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
-         and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null`,
-      [session.workspaceId, session.userId, covered.map((row) => row.entryId)]);
-    removed += deleted.rowCount ?? 0;
-    const eventIds = [...new Set(covered.map((row) => row.eventId))];
+    removed += await removeAutoMoveBlocks(client, session, covered);
+  }
+  return removed;
+}
+
+/**
+ * Removes these automatic Move blocks (already locked by the caller, or locked here in entry-id order)
+ * while still unedited, and retires their Moves' events as replay's own: ignored with
+ * `autoLogSuperseded` and detached from their Moves, so a Move whose covering workout goes comes back
+ * as new. Returns the number of blocks removed.
+ */
+export async function removeAutoMoveBlocks(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession, rows: ReadonlyArray<{ entryId: string; eventId: string }>
+) {
+  if (rows.length === 0) return 0;
+  const deleted = await client.query<{ eventId: string }>(
+    `delete from time_entries where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+       and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
+     returning created_from_event_id as "eventId"`,
+    [session.workspaceId, session.userId, [...new Set(rows.map((row) => row.entryId))].sort()]);
+  const eventIds = [...new Set(deleted.rows.map((row) => row.eventId).filter(Boolean))];
+  if (eventIds.length) {
     await client.query(
       `update activity_events
        set review_status = 'ignored', raw_payload = raw_payload || jsonb_build_object('${AUTO_LOG_SUPERSEDED_PAYLOAD_KEY}', true)
@@ -201,5 +223,5 @@ export async function retireCoveredAutoMoves(
        where workspace_id = $1 and user_id = $2 and created_from_event_id = any($3::uuid[]) and continuity_status <> 'manual'`,
       [session.workspaceId, session.userId, eventIds]);
   }
-  return removed;
+  return deleted.rowCount ?? 0;
 }

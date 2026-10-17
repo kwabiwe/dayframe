@@ -2578,19 +2578,28 @@ async function validateReviewModeAutoMoves() {
     const walkBatch = batch("db-auto-walk", walk, "v2_review", walk[0].occurredAt);
     await ingestLocationEvidence(walkBatch, session, PROCESSING_AT);
     assert.equal((await moveBlocks()).length, 1, "A clear walk between two saved places did not log itself.");
-    const workout = (await pool.query<{ id: string }>(
+    const addWalkWorkout = async (id: string) => (await pool.query<{ id: string }>(
       `insert into health_workouts (workspace_id, user_id, external_sample_id, workout_type, started_at, stopped_at, duration_seconds, raw_payload)
-       values ($1, $2, 'db-auto-walk-workout', 'walking', $3::timestamptz - interval '3 minutes', $4::timestamptz + interval '3 minutes', 1200,
+       values ($1, $2, $3, 'walking', $4::timestamptz - interval '3 minutes', $5::timestamptz + interval '3 minutes', 1200,
          '{"workoutType":"walking"}'::jsonb) returning id`,
-      [WORKSPACE_ID, USER_ID, walk[2].occurredAt, walk[6].occurredAt])).rows[0].id;
-    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      [WORKSPACE_ID, USER_ID, `db-auto-walk-${id}`, walk[2].occurredAt, walk[6].occurredAt])).rows[0].id;
+    const replayWalk = () => replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
       rolloutMode: "v2_review", semanticModeAcknowledgedAt: walk[0].occurredAt }, session, PROCESSING_AT);
+    // The import alone (no location call) removes it, by the Move's own window (Codex r2 on #462).
+    const imported = await addWalkWorkout("imported");
+    assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 1, "A Health import did not remove the walk's own block.");
     assert.equal((await moveBlocks()).length, 0, "A later Health walk left the walk's own block.");
-    assert.equal((await moveCards()).length, 0, "A walk a Health workout covers was offered in Review.");
-    await pool.query("delete from health_workouts where id = $1", [workout]);
-    await replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
-      rolloutMode: "v2_review", semanticModeAcknowledgedAt: walk[0].occurredAt }, session, PROCESSING_AT);
+    await pool.query("delete from health_workouts where id = $1", [imported]);
+    await replayWalk();
     assert.equal((await moveBlocks()).length, 1, "The walk did not log itself again when its Health workout went.");
+    // Replay does the same when the workout arrived without an import reconciling it.
+    const replayed = await addWalkWorkout("replayed");
+    await replayWalk();
+    assert.equal((await moveBlocks()).length, 0, "Replay left a walk's own block under a later Health walk.");
+    assert.equal((await moveCards()).length, 0, "A walk a Health workout covers was offered in Review.");
+    await pool.query("delete from health_workouts where id = $1", [replayed]);
+    await replayWalk();
+    assert.equal((await moveBlocks()).length, 1, "The walk did not log itself again after the replayed case.");
     console.info("Automatic Moves validated");
   } finally {
     await clearDerivedLocationState();

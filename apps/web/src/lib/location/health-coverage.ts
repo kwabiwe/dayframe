@@ -3,6 +3,8 @@ import { withSyncTransaction, type SyncTransactionOptions } from "../sync-transa
 import { normalizeHealthWorkoutType, type MotionTravelMode } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+import { LOCATION_AUTO_LOG_SOURCE } from "./location-auto-log";
+import { removeAutoMoveBlocks } from "./location-auto-moves";
 
 /**
  * Health walks win (PRD D19, design §9): a walk, run or ride Move that an Apple Health workout of
@@ -125,9 +127,75 @@ export async function retireHealthCoveredMoveCards(
   for (;;) {
     const page = await retireHealthCoveredMoveCardPage(client, session, { ...options, cursor });
     retired += page.retired;
+    if (!page.next) break;
+    cursor = page.next;
+  }
+  // And the blocks of Moves that logged themselves before the workout arrived (Codex r2 on #462).
+  cursor = null;
+  for (;;) {
+    const page = await retireHealthCoveredAutoMovePage(client, session, { ...options, cursor });
+    retired += page.retired;
     if (!page.next) return retired;
     cursor = page.next;
   }
+}
+
+/**
+ * One page of the Moves that logged themselves (PRD D19) whose unedited block a Health workout covers,
+ * judged by the Move's own window and mode from its event, so it is reconciled however old its
+ * evidence (Codex r2 on #462): newest first, within `window` (an imported workout) or the last 30 days.
+ * Locks the covered blocks in entry-id order, removes those still unedited and retires their events
+ * (`removeAutoMoveBlocks`). Returns how many blocks it removed and the next cursor.
+ */
+async function retireHealthCoveredAutoMovePage(
+  client: Pick<pg.PoolClient, "query">, session: RequestSession,
+  options: { now?: string | number; window?: { startedAt: string; stoppedAt: string }; cursor: PageCursor | null }
+): Promise<{ retired: number; next: PageCursor | null }> {
+  const modes = new Set(["walking", "running", "cycling", "automotive"]);
+  const cursor = options.cursor;
+  const page = await client.query<{ entryId: string; eventId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }>(
+    `select te.id as "entryId", ae.id as "eventId", ae.occurred_at as "startedAt",
+            (ae.raw_payload ->> 'stoppedAt')::timestamptz as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
+     from activity_events ae
+     join time_entries te on te.created_from_event_id = ae.id and te.workspace_id = ae.workspace_id and te.user_id = ae.user_id
+     where ae.workspace_id = $1 and ae.user_id = $2 and ae.source = 'location_learning' and ae.event_type = 'commute_detected'
+       and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+       and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
+       and ae.raw_payload ->> 'stoppedAt' is not null
+       and ($4::timestamptz is not null
+         and ae.occurred_at < $5::timestamptz + interval '5 minutes' and (ae.raw_payload ->> 'stoppedAt')::timestamptz > $4::timestamptz - interval '5 minutes'
+         or $4::timestamptz is null and ae.occurred_at > $3::timestamptz - interval '30 days')
+       and coalesce(ae.raw_payload ->> 'travelMode', '') <> 'automotive'
+       and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
+         and hw.started_at < (ae.raw_payload ->> 'stoppedAt')::timestamptz + interval '5 minutes'
+         and hw.stopped_at > ae.occurred_at - interval '5 minutes' and hw.stopped_at > hw.started_at)
+       and ($6::timestamptz is null or (ae.occurred_at, ae.id) < ($6::timestamptz, $7::uuid))
+     order by ae.occurred_at desc, ae.id desc
+     limit ${PAGE}`,
+    [session.workspaceId, session.userId, new Date(options.now ?? Date.now()).toISOString(),
+      options.window?.startedAt ?? null, options.window?.stoppedAt ?? null,
+      cursor?.startedAt.toISOString() ?? null, cursor?.id ?? null]);
+  if (page.rows.length === 0) return { retired: 0, next: null };
+  const valid = page.rows.filter((row) => row.stoppedAt > row.startedAt);
+  const covered = await coveredMoveKeys(client, session, valid.map((row) => ({
+    key: row.eventId, startedAt: row.startedAt.toISOString(), stoppedAt: row.stoppedAt.toISOString(),
+    travelMode: row.travelMode && modes.has(row.travelMode) ? row.travelMode as MotionTravelMode : null
+  })));
+  const targets = valid.filter((row) => covered.has(row.eventId));
+  let retired = 0;
+  if (targets.length) {
+    // Never waits on a block: replay runs this after its own ordered block locks, so a block someone
+    // is editing is skipped now and reconciled by a later sweep. Only blocks still unedited go.
+    const locked = await client.query<{ id: string }>(
+      `select id from time_entries where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+         and source = '${LOCATION_AUTO_LOG_SOURCE}' and user_edited_at is null
+       order by id for update skip locked`,
+      [session.workspaceId, session.userId, [...new Set(targets.map((row) => row.entryId))].sort()]);
+    const stillUnedited = new Set(locked.rows.map((row) => row.id));
+    retired = await removeAutoMoveBlocks(client, session, targets.filter((row) => stillUnedited.has(row.entryId)));
+  }
+  const last = page.rows[page.rows.length - 1];
+  return { retired, next: page.rows.length < PAGE ? null : { startedAt: last.startedAt, id: last.eventId } };
 }
 
 type PageCursor = { startedAt: Date; id: string };
@@ -252,6 +320,26 @@ export async function reconcileHealthCoveredMoveCardsNow(
           if (!window) return { retired: 0, next: null };
         }
         return retireHealthCoveredMoveCardPage(client, session, { now: options.now, window, cursor });
+      }, { deadlineAt, signal: options.signal, cleanupReserveMs: 300, databasePool: options.databasePool });
+    } catch {
+      break;
+    }
+    if (!page) break;
+    retired = (retired ?? 0) + page.retired;
+    if (!page.next) break;
+    cursor = page.next;
+  }
+  // Then the blocks of Moves that logged themselves before the workout arrived (Codex r2 on #462).
+  cursor = null;
+  for (; window !== undefined || !options.workout; ) {
+    if (deadlineAt - Date.now() < 800) break;
+    let page: { retired: number; next: PageCursor | null } | null;
+    try {
+      page = await withSyncTransaction("location_health_reconcile_blocks", async ({ client }) => {
+        const lock = await client.query<{ acquired: boolean }>(
+          "select pg_try_advisory_xact_lock(hashtext($1), hashtext($2)) as acquired", [session.workspaceId, session.userId]);
+        if (!lock.rows[0]?.acquired) return null;
+        return retireHealthCoveredAutoMovePage(client, session, { now: options.now, window, cursor });
       }, { deadlineAt, signal: options.signal, cleanupReserveMs: 300, databasePool: options.databasePool });
     } catch {
       break;

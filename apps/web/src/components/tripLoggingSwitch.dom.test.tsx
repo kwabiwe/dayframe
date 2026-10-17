@@ -21,7 +21,7 @@ describe("Log trips automatically (PRD D19, A4)", () => {
   it("shows the value the server stored even when the refresh after it fails (Codex r1 on #462)", async () => {
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ ok: true, logTripsAutomatically: false }), { status: 200 }));
     const refresh = vi.fn(async () => { throw new Error("offline"); });
-    render(<TripLoggingSwitch refresh={refresh} stored userId="user-1" />);
+    render(<TripLoggingSwitch refresh={refresh} snapshot={{}} stored userId="user-1" />);
     const toggle = screen.getByRole("switch", { name: "Log trips automatically" }) as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     await userEvent.setup().click(toggle);
@@ -35,21 +35,24 @@ describe("Log trips automatically (PRD D19, A4)", () => {
 
   it("puts the switch back and says why when the save is refused", async () => {
     mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ error: "You're signed in to a different account now. Reload Settings." }), { status: 409 }));
-    render(<TripLoggingSwitch refresh={vi.fn(async () => null)} stored={false} userId="user-1" />);
+    render(<TripLoggingSwitch refresh={vi.fn(async () => null)} snapshot={{}} stored={false} userId="user-1" />);
     const toggle = screen.getByRole("switch", { name: "Log trips automatically" }) as HTMLInputElement;
     await userEvent.setup().click(toggle);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("different account"));
     expect(toggle.checked).toBe(false);
   });
 
-  it("takes a newer value from the server over the one it saved", async () => {
-    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ ok: true, logTripsAutomatically: true }), { status: 200 }));
-    const { rerender } = render(<TripLoggingSwitch refresh={vi.fn(async () => null)} stored={false} userId="user-1" />);
+  it("shows any newer bootstrap as it is, even one with the value from before the save (Codex r2 on #462)", async () => {
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ ok: true, logTripsAutomatically: false }), { status: 200 }));
+    const failing = vi.fn(async () => { throw new Error("offline"); });
+    const first = {};
+    const { rerender } = render(<TripLoggingSwitch refresh={failing} snapshot={first} stored userId="user-1" />);
     const toggle = screen.getByRole("switch", { name: "Log trips automatically" }) as HTMLInputElement;
     await userEvent.setup().click(toggle);
-    await waitFor(() => expect(toggle.checked).toBe(true));
-    rerender(<TripLoggingSwitch refresh={vi.fn(async () => null)} stored={true} userId="user-1" />);
-    rerender(<TripLoggingSwitch refresh={vi.fn(async () => null)} stored={false} userId="user-1" />);
+    await waitFor(() => expect(toggle.disabled).toBe(false));
     expect(toggle.checked).toBe(false);
+    // Another tab turned it back on; a later bootstrap says so with the same boolean as before the save.
+    rerender(<TripLoggingSwitch refresh={failing} snapshot={{}} stored userId="user-1" />);
+    expect(toggle.checked).toBe(true);
   });
 });
