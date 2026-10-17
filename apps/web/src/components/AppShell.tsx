@@ -271,7 +271,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
             type="button"
             className="df-profile"
             aria-label="Profile, workspace and settings"
-            data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}
+            data-profile-trigger="" onClick={() => setOverlay("profile")}
           >
             <ShellProfileInitials identity={shellIdentity} />
             <ShellProfileIdentity identity={shellIdentity} />
@@ -288,7 +288,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <button type="button" className="df-mtop-button" aria-label="Search" onClick={() => setOverlay("search")}>
             <DayframeIcon glyph="search" size={20} />
           </button>
-          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" data-profile-trigger="" onClick={() => setOverlay((current) => (current === "profile" ? null : "profile"))}>
+          <button type="button" className="df-mtop-avatar" aria-label="Profile, workspace and settings" data-profile-trigger="" onClick={() => setOverlay("profile")}>
             <ShellProfileInitials identity={shellIdentity} />
           </button>
         </div>
