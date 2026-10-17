@@ -446,7 +446,7 @@ function ProfileWorkspacePopover({
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
-    <ModalDialog description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
+    <ModalDialog size="compact" description="Use these shortcuts from Dayframe screens when you are not typing in a field." onClose={onClose} title="Keyboard shortcuts">
       <div className="df-shortcuts">
         {shortcuts.map(([keys, action]) => <div key={keys}><span>{action}</span><kbd>{keys}</kbd></div>)}
       </div>

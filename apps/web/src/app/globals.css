@@ -1481,16 +1481,20 @@ textarea.ui-control {
   gap: 8px;
 }
 
+/* Dialogs (web UI audit WUI-020/WUI-021, owner 17 Oct 2026): width tiers — confirm 400, compact
+   520, form 620 (the default), wide 720 — radius 20 (24 on phones); they fade and scale in from
+   .98 over 160 ms with the scrim, and fade out over 120 ms (`playDialogExit`); Reduce Motion keeps
+   the fades only. */
 dialog.ui-dialog {
   position: fixed;
   inset: 0;
   display: none;
-  width: min(720px, calc(100vw - 24px));
+  width: min(620px, calc(100vw - 24px));
   max-width: none;
   max-height: calc(100dvh - 24px);
   margin: auto;
   border: 0;
-  border-radius: 24px;
+  border-radius: 20px;
   background: var(--surface-raised);
   padding: 0;
   color: var(--foreground);
@@ -1501,6 +1505,120 @@ dialog.ui-dialog {
 dialog.ui-dialog[open] {
   display: flex;
   flex-direction: column;
+  animation: ui-dialog-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+dialog.ui-dialog.ui-dialog--confirm {
+  width: min(400px, calc(100vw - 24px));
+}
+
+dialog.ui-dialog.ui-dialog--compact {
+  width: min(520px, calc(100vw - 24px));
+}
+
+dialog.ui-dialog.ui-dialog--wide {
+  width: min(720px, calc(100vw - 24px));
+}
+
+/* The closed dialog's fading twin (see playDialogExit): a top-layer popover holding the scrim and
+   the copy, above every dialog still open, never interactive. */
+.ui-dialog-ghost-layer {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+dialog.ui-dialog.ui-dialog-ghost {
+  z-index: 1000;
+  pointer-events: none;
+  animation: ui-dialog-out 120ms ease-in forwards;
+}
+
+.ui-dialog-ghost-scrim {
+  position: fixed;
+  z-index: 999;
+  inset: 0;
+  background: var(--overlay);
+  pointer-events: none;
+  animation: ui-dialog-scrim-out 120ms ease-in forwards;
+}
+
+@keyframes ui-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes ui-dialog-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes ui-dialog-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes ui-dialog-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reduce Motion keeps the fades at their own lengths: these outrank the global 1 ms rule. */
+@media (prefers-reduced-motion: reduce) {
+  dialog.ui-dialog[open] {
+    animation-name: ui-dialog-fade-in;
+    animation-duration: 160ms !important;
+  }
+
+  dialog.ui-dialog::backdrop {
+    animation-duration: 160ms !important;
+  }
+
+  dialog.ui-dialog.ui-dialog-ghost {
+    animation-name: ui-dialog-fade-out;
+    animation-duration: 120ms !important;
+  }
+
+  .ui-dialog-ghost-layer .ui-dialog-ghost-scrim {
+    animation-duration: 120ms !important;
+  }
 }
 
 dialog.ui-dialog:focus {
@@ -1510,6 +1628,12 @@ dialog.ui-dialog:focus {
 dialog.ui-dialog::backdrop {
   background: var(--overlay);
   backdrop-filter: none;
+  animation: ui-dialog-scrim-in 160ms ease-out;
+}
+
+/* One quiet close: a 44 px circle with no fill at rest, the neutral fill on hover. */
+.ui-dialog-header .ui-icon-button {
+  background: transparent;
 }
 
 .ui-dialog-header {
@@ -1562,10 +1686,6 @@ dialog.ui-dialog::backdrop {
   padding: var(--web-gap-md) var(--web-dialog-padding-inline);
 }
 
-dialog.ui-dialog.ui-confirm-dialog {
-  width: min(420px, calc(100vw - 24px));
-}
-
 dialog.ui-dialog.ui-popover-panel {
   width: min(380px, calc(100vw - 24px));
   max-height: calc(100dvh - 36px);
@@ -1596,20 +1716,32 @@ dialog.ui-popover-panel.bottom-left {
 }
 
 @media (max-width: 760px) {
-  dialog.ui-dialog,
-  dialog.ui-dialog.ui-confirm-dialog,
+  /* Popover panels go full width; dialogs keep their tier (each is already min(tier, 100vw − 24px)). */
   dialog.ui-dialog.ui-popover-panel {
     width: min(100% - 24px, 720px);
     max-height: calc(100dvh - 24px);
     margin: auto;
   }
 
-  .ui-dialog-actions > .ui-button {
-    flex: 1 1 0;
-  }
-
   .ui-segmented-control {
     width: 100%;
+  }
+}
+
+/* Phones: radius 24, and the footer's buttons share the row equally whatever their family. */
+@media (max-width: 560px) {
+  dialog.ui-dialog {
+    border-radius: 24px;
+  }
+
+  .ui-dialog-actions > :is(button, a) {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  /* Spacers would take a share of the row too. */
+  .ui-dialog-actions > .df-spacer {
+    display: none;
   }
 }
 
@@ -12272,10 +12404,6 @@ dialog.ui-dialog.df-palette {
   box-shadow: inset 0 0 0 3px var(--on-block);
 }
 
-dialog.ui-dialog.df-ce-dialog {
-  width: min(560px, calc(100vw - 24px));
-}
-
 .df-ce-dialog .ui-dialog-actions {
   display: flex;
   flex-wrap: wrap;
@@ -12692,7 +12820,9 @@ dialog.ui-dialog.df-ce-dialog {
   padding: 16px 4px 8px;
 }
 
-.df-set-card h2 {
+/* The card's own title only: a dialog opened from a card keeps its own header (it used to pick up
+   this 16 px indent, WUI-020). */
+.df-set-card > h2 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -13164,10 +13294,6 @@ dialog.ui-dialog.df-ce-dialog {
 }
 
 /* Matches the base dialog.ui-dialog rule's specificity so the narrower width applies. */
-dialog.ui-dialog.df-rf-dialog {
-  width: min(620px, calc(100vw - 24px));
-}
-
 .df-rf-dialog .ui-dialog-actions {
   display: flex;
   flex-wrap: wrap;
