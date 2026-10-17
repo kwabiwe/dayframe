@@ -19,7 +19,9 @@ import {
   replayRetainedLocationEvidence
 } from "../apps/web/src/lib/location/location-ingest-service";
 import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/web/src/lib/location/location-review-service";
-import { forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName } from "../apps/web/src/lib/location/name-patterns";
+import {
+  forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName, resumeLoggingTrips, stopLoggingTripsLike, stoppedTripPatterns
+} from "../apps/web/src/lib/location/name-patterns";
 import { resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
 import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
@@ -2602,17 +2604,38 @@ async function validateReviewModeAutoMoves() {
     const overlapCards = await moveCards();
     assert.deepEqual(overlapCards.map((card) => card.reason), ["auto_log_overlap"], "The overlapping Move's card did not say why.");
 
-    // "Don't log trips like this": its pattern stopped, it stays a card.
+    // "Don't log trips like this" (PR 11c): the person deletes an automatic Move's block and stops its
+    // pattern from the toast; the block's row names its Move's event, which outlives the block. A later
+    // Move like it stays a card saying so, Places › Trips lists the pattern, and resuming clears it.
     await clearDerivedLocationState();
-    const patternKey = overlapCards[0].patternKey;
-    assert(patternKey, "The Move had no learned-name pattern to stop.");
-    await pool.query(
-      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, auto_log_opt_out)
-       select $1, $2, $3, band, true from unnest(array['morning', 'afternoon', 'evening', 'weekend']) as band`,
-      [WORKSPACE_ID, USER_ID, patternKey]);
+    await ingest();
+    const [stoppable] = await moveBlocks();
+    assert(stoppable, "No automatic Move to stop.");
+    const listed = await pool.query<{ id: string; automaticMoveEventId: string | null }>(
+      buildTimeEntriesQuery(session, { entryId: stoppable.id }));
+    assert.equal(listed.rows.find((row) => row.id === stoppable.id)?.automaticMoveEventId, stoppable.eventId,
+      "The automatic Move's block did not name its Move's event.");
+    await pool.query("delete from time_entries where id = $1", [stoppable.id]);
+    assert.equal(await stopLoggingTripsLike(pool, session, stoppable.eventId), true, "Don't log trips like this found no pattern.");
+    const stopped = await stoppedTripPatterns(pool, session);
+    assert.equal(stopped.length, 1, "Places › Trips did not list the stopped trip.");
+    assert(stopped[0].label.trim(), "The stopped trip has no label.");
+    // The deleted block's own Move is a decision and never comes back; a later Move like it does. Keep
+    // the stop the API wrote across a fresh run of the same evidence, which stands in for that Move.
+    const stops = (await pool.query<{ key: string; band: string }>(
+      `select pattern_key as key, band from location_name_patterns where workspace_id = $1 and user_id = $2 and auto_log_opt_out`,
+      [WORKSPACE_ID, USER_ID])).rows;
+    assert.deepEqual(stops.map((row) => row.key), [stopped[0].patternKey], "The stop was not written for the trip's pattern.");
+    await clearDerivedLocationState();
+    for (const row of stops) {
+      await pool.query(`insert into location_name_patterns (workspace_id, user_id, pattern_key, band, auto_log_opt_out)
+        values ($1, $2, $3, $4, true)`, [WORKSPACE_ID, USER_ID, row.key, row.band]);
+    }
     await ingest();
     assert.equal((await moveBlocks()).length, 0, "A Move whose pattern was stopped logged itself.");
     assert.deepEqual((await moveCards()).map((card) => card.reason), ["trip_logging_opted_out"], "The stopped Move's card did not say why.");
+    await resumeLoggingTrips(pool, session, stopped[0].patternKey);
+    assert.deepEqual(await stoppedTripPatterns(pool, session), [], "Resuming left the trip stopped.");
     // A Health walk that arrives after a walk logged itself takes the walk's block; when it goes, the
     // walk comes back and logs itself again (Codex r1 on #462).
     await clearDerivedLocationState();

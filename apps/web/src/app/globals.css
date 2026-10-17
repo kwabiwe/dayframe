@@ -11092,6 +11092,38 @@ dialog.ui-dialog.df-palette {
   font-weight: 750;
 }
 
+/* A second action ("Don't log trips like this", PRD D19) on its own row under the message and Undo;
+   its outcome replaces it in the same 44 px row, so the toast keeps its height. */
+.df-toast.has-secondary {
+  flex-wrap: wrap;
+  border-radius: 24px;
+  row-gap: 0;
+}
+
+.df-toast-secondary {
+  display: flex;
+  min-height: 44px;
+  flex-basis: 100%;
+  align-items: center;
+  padding-left: 24px;
+}
+
+.df-toast-action--secondary {
+  background: transparent;
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.df-toast-secondary-done {
+  padding: 0 12px;
+  color: color-mix(in oklab, var(--surface) 72%, transparent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 @keyframes df-toast-in {
   from {
     opacity: 0;

@@ -9,6 +9,7 @@ import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/
 import type { LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { PlaceRoleSlots } from "./PlaceRoleSlots";
+import { StoppedTripsSection } from "./StoppedTripsSection";
 import { Button, ModalDialog } from "./ui/Primitives";
 
 export function PlacesManager({
@@ -223,6 +224,8 @@ export function PlacesManager({
           ) : null}
         </div>
       </section>
+
+      <StoppedTripsSection />
 
       {deletingPlace ? (
         <ModalDialog

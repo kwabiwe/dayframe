@@ -17,6 +17,7 @@ export function BlocksToast({
   exiting = false,
   message,
   onAction,
+  secondary,
   swatchStyle
 }: {
   actionLabel?: string;
@@ -27,6 +28,11 @@ export function BlocksToast({
   exiting?: boolean;
   message: string;
   onAction?: () => void;
+  /**
+   * A second, less common action on its own row under the message ("Don't log trips like this"),
+   * replaced in the same row by its outcome (`done`) so the toast never changes height.
+   */
+  secondary?: { label: string; onAction: () => void; done?: string | null; busy?: boolean } | null;
   swatchStyle?: CSSProperties;
 }) {
   const pop = springTransition("pop");
@@ -39,7 +45,7 @@ export function BlocksToast({
   return (
     <div className="df-toast-host">
       <div
-        className={`df-toast${detail ? " has-detail" : ""}${exiting ? " is-exiting" : ""}`}
+        className={`df-toast${detail ? " has-detail" : ""}${secondary ? " has-secondary" : ""}${exiting ? " is-exiting" : ""}`}
         role="status"
         aria-live="polite"
         aria-atomic="true"
@@ -59,6 +65,22 @@ export function BlocksToast({
           <button className="df-toast-action" disabled={exiting} onClick={onAction} ref={actionRef} type="button">
             {actionLabel}
           </button>
+        ) : null}
+        {secondary ? (
+          <span className="df-toast-secondary">
+            {secondary.done ? (
+              <span className="df-toast-secondary-done">{secondary.done}</span>
+            ) : (
+              <button
+                className="df-toast-action df-toast-action--secondary"
+                disabled={exiting || secondary.busy}
+                onClick={secondary.onAction}
+                type="button"
+              >
+                {secondary.label}
+              </button>
+            )}
+          </span>
         ) : null}
       </div>
     </div>

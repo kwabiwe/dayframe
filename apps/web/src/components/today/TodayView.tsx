@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveActivityIcon, withGoalExclusions } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
+import { useTripOptOut } from "@/components/blocks/useTripOptOut";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
@@ -101,6 +102,8 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const [startingId, setStartingId] = useState<string | null>(null);
   const [leavingIds, setLeavingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [toastEntry, setToastEntry] = useState<TimeEntryRow | null>(null);
+  // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
+  const tripOptOut = useTripOptOut(toastEntry?.automaticMoveEventId, pendingNotice?.token);
   const leaveTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
 
@@ -352,6 +355,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           key={pendingNotice.token}
           message={pendingNotice.label}
           onAction={undoPendingDelete}
+          secondary={tripOptOut}
           swatchStyle={toastEntry?.categoryId ? blockStyle(toastEntry.categoryColor, toastEntry.categoryName ?? "") : undefined}
         />
       ) : null}
