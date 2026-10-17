@@ -17,3 +17,4 @@ export * from "./travelModePresentation";
 export * from "./tripStopPresentation";
 export * from "./types";
 export * from "./moveNaming";
+export * from "./namePatterns";

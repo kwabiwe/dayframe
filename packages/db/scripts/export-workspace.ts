@@ -20,6 +20,7 @@ const tables = [
   "time_entry_tags",
   "review_items",
   "health_sleep_segments",
+  "location_name_patterns",
   "import_runs"
 ];
 
