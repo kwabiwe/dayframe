@@ -518,6 +518,26 @@ export async function emitReviewSemanticSegments(
         [session.workspaceId, session.userId, bounds, [...autoLog.locked]]);
       changes.count += moved.rowCount ?? 0;
     }
+    // A Move that logged itself keeps its event in step with the Move replay re-emits under the same
+    // ID — its window when its unedited block followed, and its current travel mode — so checks that
+    // read the event (Health coverage, "logged before") judge the Move as it now is (Codex r4 on #462).
+    const followedIds = new Set(followed.map((row) => row.client_event_id));
+    for (const batch of chunks(moves)) {
+      await client.query(
+        `update activity_events ae
+         set raw_payload = (ae.raw_payload - 'travelMode')
+           || case when r.travel_mode is null then '{}'::jsonb else jsonb_build_object('travelMode', r.travel_mode) end
+           || case when r.followed then jsonb_build_object('startedAt', r.started_at, 'stoppedAt', r.stopped_at) else '{}'::jsonb end
+         from jsonb_to_recordset($3::jsonb) as r(event_id uuid, travel_mode text, followed boolean, started_at text, stopped_at text)
+         where ae.workspace_id = $1 and ae.user_id = $2 and ae.id = r.event_id
+           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+           and exists (select 1 from time_entries te where te.workspace_id = $1 and te.user_id = $2
+             and te.created_from_event_id = ae.id and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null)`,
+        [session.workspaceId, session.userId, JSON.stringify(batch.map((row) => ({
+          event_id: row.event_id, travel_mode: (row.raw_payload as { travelMode?: string }).travelMode ?? null,
+          followed: followedIds.has(row.client_event_id), started_at: row.occurred_at, stopped_at: row.stopped_at
+        })))]);
+    }
   }
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {
     const parameters = [session.workspaceId, session.userId, JSON.stringify(batch)];

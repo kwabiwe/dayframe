@@ -2628,6 +2628,19 @@ async function validateReviewModeAutoMoves() {
       [WORKSPACE_ID, USER_ID, `db-auto-walk-${id}`, walk[2].occurredAt, walk[6].occurredAt])).rows[0].id;
     const replayWalk = () => replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
       rolloutMode: "v2_review", semanticModeAcknowledgedAt: walk[0].occurredAt }, session, PROCESSING_AT);
+    // Replay keeps the logged walk's event in step with the walk it re-emits (mode and window), so
+    // later checks never judge a stale copy (Codex r4 on #462).
+    await pool.query(`update activity_events set raw_payload = raw_payload || '{"travelMode":"running","startedAt":"2000-01-01T00:00:00.000Z"}'::jsonb
+      where workspace_id = $1 and user_id = $2 and event_type = 'commute_detected' and review_status = 'confirmed'`, [WORKSPACE_ID, USER_ID]);
+    await replayWalk();
+    const aligned = (await pool.query<{ mode: string | null; startedAt: string | null; blockStart: Date }>(
+      `select ae.raw_payload ->> 'travelMode' as mode, ae.raw_payload ->> 'startedAt' as "startedAt", te.started_at as "blockStart"
+       from activity_events ae join time_entries te on te.created_from_event_id = ae.id
+       where ae.workspace_id = $1 and ae.user_id = $2 and ae.event_type = 'commute_detected' and te.source = 'location_auto_log'`,
+      [WORKSPACE_ID, USER_ID])).rows;
+    assert.equal(aligned.length, 1, "The logged walk lost its block.");
+    assert.equal(aligned[0].mode, "walking", "Replay left a stale mode on the logged walk's event.");
+    assert.equal(Date.parse(aligned[0].startedAt!), aligned[0].blockStart.getTime(), "Replay left a stale window on the logged walk's event.");
     // The import alone (no location call) removes it, by the Move's own window (Codex r2 on #462).
     const imported = await addWalkWorkout("imported");
     assert.equal(await reconcileHealthCoveredMoveCardsNow(session, { now: PROCESSING_AT }), 1, "A Health import did not remove the walk's own block.");

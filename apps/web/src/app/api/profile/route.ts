@@ -118,16 +118,20 @@ export async function PATCH(request: Request) {
       if (row) goals = { ...row, goalsRevision: Number(row.goalsRevision) };
     }
 
-    let logTripsAutomatically: boolean | undefined;
+    let trips: { logTripsAutomatically: boolean; settingsRevision: number } | undefined;
     if (body.logTripsAutomatically !== undefined) {
-      const updated = await query<{ value: boolean }>(
-        `update users set log_trips_automatically = $1 where id = $2 returning log_trips_automatically as value`,
+      // The same server order as the goals (goals_revision orders every Settings value on the user
+      // row), so a client can tell a bootstrap read before this write from one read after it.
+      const updated = await query<{ value: boolean; revision: string | number }>(
+        `update users set log_trips_automatically = $1, goals_revision = goals_revision + 1 where id = $2
+         returning log_trips_automatically as value, goals_revision as revision`,
         [body.logTripsAutomatically, session.userId]
       );
-      logTripsAutomatically = updated.rows[0]?.value;
+      const row = updated.rows[0];
+      if (row) trips = { logTripsAutomatically: row.value, settingsRevision: Number(row.revision) };
     }
 
-    return NextResponse.json({ ok: true, ...(goals ? { goals } : {}), ...(logTripsAutomatically !== undefined ? { logTripsAutomatically } : {}) });
+    return NextResponse.json({ ok: true, ...(goals ? { goals } : {}), ...(trips ?? {}) });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

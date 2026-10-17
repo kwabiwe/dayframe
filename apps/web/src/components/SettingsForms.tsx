@@ -405,7 +405,7 @@ function TripLoggingSetting() {
     <TripLoggingSwitch
       key={data.user.id}
       refresh={refresh}
-      snapshot={data.user}
+      revision={data.user.goalsRevision ?? 0}
       stored={data.user.logTripsAutomatically ?? false}
       userId={data.user.id}
     />
@@ -415,29 +415,24 @@ function TripLoggingSetting() {
 /**
  * "Log trips automatically" (PRD D19, A4; on by default): a Move between two known places with a clear
  * way of travelling becomes a block without a Review card. The switch moves at once; once the server
- * stores it, that value shows over the bootstrap it was saved against (so a failed refresh after it
- * changes nothing), and any newer bootstrap shows as it is (Codex r1/r2 on #462); a refused save puts
- * it back and says why.
+ * stores it, that value shows until a bootstrap read after the write arrives: the server orders the
+ * switch with the goals (`goalsRevision`), so a copy read before the save, or kept by a local timer
+ * update, never replaces it (Codex r1–r4 on #462). A refused save puts it back and says why.
  */
-export function TripLoggingSwitch({ refresh, snapshot, stored, userId }: {
+export function TripLoggingSwitch({ refresh, revision, stored, userId }: {
   refresh: (options?: { force?: boolean }) => Promise<unknown>;
-  /**
-   * The bootstrap user `stored` came from: a server copy brings a new one, while local (optimistic)
-   * timer updates keep it, so only a newer server copy replaces the saved value (Codex r3 on #462).
-   */
-  snapshot: unknown;
+  /** The server revision of the bootstrap `stored` came from (`user.goalsRevision`). */
+  revision: number;
   stored: boolean;
   userId: string;
 }) {
   const [pending, setPending] = useState<boolean | null>(null);
-  const [saved, setSaved] = useState<{ value: boolean; over: unknown } | null>(null);
+  const [saved, setSaved] = useState<{ value: boolean; revision: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const checked = pending ?? (saved && saved.over === snapshot ? saved.value : stored);
+  const checked = pending ?? (saved && revision < saved.revision ? saved.value : stored);
 
   async function save(next: boolean) {
     if (pending !== null) return;
-    // The bootstrap this save is made over: a newer one arriving meanwhile wins over the saved value.
-    const over = snapshot;
     setPending(next);
     setError(null);
     try {
@@ -447,8 +442,12 @@ export function TripLoggingSwitch({ refresh, snapshot, stored, userId }: {
         body: JSON.stringify({ logTripsAutomatically: next, expectedUserId: userId })
       });
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to save this setting."));
-      const body = (await response.json().catch(() => ({}))) as { logTripsAutomatically?: unknown };
-      setSaved({ value: typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : next, over });
+      const body = (await response.json().catch(() => ({}))) as { logTripsAutomatically?: unknown; settingsRevision?: unknown };
+      setSaved({
+        value: typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : next,
+        // Without a revision (an older server) the saved value holds until any newer revision.
+        revision: typeof body.settingsRevision === "number" ? body.settingsRevision : revision + 1
+      });
       try {
         await refresh({ force: true });
       } catch {
