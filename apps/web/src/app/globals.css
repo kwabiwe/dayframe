@@ -356,13 +356,14 @@ button:disabled {
   opacity: 0.58;
 }
 
-/* One field (web UI audit WUI-017, owner 17 Oct 2026; the #442 start panel's): an inset fill with no
-   idle outline, and a stable 2 px perimeter that turns the neutral focus colour on focus. */
+/* One field (web UI audit WUI-017, owner 17 Oct 2026): an inset fill, radius 10, a 1 px
+   --control-border line at rest (Codex r1 on #472: a fill alone is about 1.05:1, under WCAG 1.4.11's
+   3:1) that turns the neutral focus colour and thickens to 2 px inside on focus. */
 input,
 select,
 textarea {
   min-height: 38px;
-  border: var(--web-control-border-width) solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   background: var(--surface-inset);
   color: var(--foreground);
 }
@@ -416,7 +417,7 @@ select:focus,
 textarea:focus {
   border-color: var(--web-focus-border);
   outline: 0;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 input[aria-invalid="true"],
@@ -429,7 +430,7 @@ input[aria-invalid="true"]:focus,
 select[aria-invalid="true"]:focus,
 textarea[aria-invalid="true"]:focus {
   border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 html.ui-dialog-open {
@@ -570,7 +571,7 @@ html.ui-dialog-open {
 .ui-control {
   width: 100%;
   min-height: var(--web-control-height);
-  border: var(--web-control-border-width) solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 var(--web-control-padding-inline);
@@ -600,7 +601,7 @@ html.ui-dialog-open {
 
 .ui-compound-control {
   min-width: 0;
-  border: var(--web-control-border-width) solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   transition:
@@ -610,6 +611,7 @@ html.ui-dialog-open {
 
 .ui-compound-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .ui-compound-control > input {
@@ -1056,7 +1058,7 @@ textarea.ui-control {
 
 /* An inline edit shows the shared neutral field ring while it has focus (WUI-017). */
 .timeline-inline-description.is-editing:has(.timeline-inline-description-input:focus) {
-  border-radius: 8px;
+  border-radius: var(--web-radius-control);
   box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
@@ -1072,7 +1074,7 @@ textarea.ui-control {
   gap: 0;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--web-radius-control);
   outline: 0;
   padding: 0 8px;
   box-shadow: none;
@@ -3293,22 +3295,20 @@ kbd {
 }
 
 /* The inset surface keeps placeholders at AA contrast in both themes. */
+/* The sign-in fields are the one field too (WUI-017): the shared idle line and radius. */
 .auth-card .ui-control {
   min-height: 48px;
-  border-color: transparent;
-  border-radius: 12px;
   background: var(--surface-inset);
 }
 
 .auth-card .auth-password-field {
-  border-color: transparent;
-  border-radius: 12px;
   background: var(--surface-inset);
 }
 
 /* The password field's focus cue is its wrapper's shared neutral border. */
 .auth-card .auth-password-field:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .auth-card form > button[type="submit"] {
@@ -4892,7 +4892,9 @@ dialog.ui-dialog.df-range-custom {
   --web-control-height: 44px;
   --web-control-height-compact: 44px;
   --web-control-padding-inline: 12px;
-  --web-control-border-width: 2px;
+  /* One 1 px idle field line in --control-border (3:1 or more on every surface, both themes;
+     WCAG 1.4.11); focus adds a 1 px inset so the ring reads 2 px with no layout shift. */
+  --web-control-border-width: 1px;
   --web-focus-border: var(--focus);
   --web-icon-button-size: 44px;
   --web-field-gap: 6px;
@@ -5232,7 +5234,7 @@ dialog.ui-dialog.df-range-custom {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  border: var(--web-control-border-width) solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   padding: 0 4px 0 13px;
@@ -5241,6 +5243,7 @@ dialog.ui-dialog.df-range-custom {
 
 .place-search-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -5682,6 +5685,7 @@ dialog.ui-dialog.df-range-custom {
 
 .timeline-period-trigger:focus-visible {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -6154,6 +6158,7 @@ dialog.ui-dialog.df-range-custom {
 
 .swiss-category-trigger:focus-visible {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
   outline: 0;
 }
 
@@ -6436,7 +6441,13 @@ dialog.ui-dialog.df-range-custom {
   margin: 2px 4px 6px;
   border-radius: var(--web-radius-control);
   padding: 0 10px;
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--muted);
+}
+
+.df-flist-search:focus-within {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .df-flist-search input {
@@ -6662,11 +6673,12 @@ dialog.ui-dialog.df-range-custom {
 
 .category-picker-create-name-control:focus-within {
   border-color: var(--web-focus-border);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border);
 }
 
 .category-picker-create-name-control:has(input[aria-invalid="true"]):focus-within {
   border-color: var(--web-focus-border);
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
 .category-picker-create-form .category-picker-color-trigger {
@@ -9821,7 +9833,7 @@ dialog.ui-dialog.df-palette {
   border-radius: 10px;
   padding: 0 6px 0 12px;
   background: var(--surface-inset);
-  box-shadow: inset 0 0 0 2px transparent;
+  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--text-muted);
 }
 
@@ -11862,20 +11874,6 @@ dialog.ui-dialog.df-palette {
   background: var(--surface-muted);
 }
 
-/* Touch screens: every segment and every text field is a 44 px target (WUI-019, WUI-046). */
-@media (any-pointer: coarse) {
-  .df-seg a,
-  .ui-segmented-control button,
-  .df-pe-seg span,
-  .df-flist-search input,
-  .df-logas input {
-    min-height: 44px;
-  }
-
-  .df-flist-search {
-    height: auto;
-  }
-}
 
 .df-library-pins {
   margin: 0;
@@ -12132,7 +12130,7 @@ dialog.ui-dialog.df-palette {
 
 .df-ce-field input {
   min-height: 44px;
-  border: var(--web-control-border-width) solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: 10px;
   padding: 0 12px;
   background: var(--surface-inset);
@@ -14455,7 +14453,7 @@ dialog.ui-dialog.df-rf-dialog {
   border: 0;
   border-radius: 10px;
   background: var(--surface-inset);
-  box-shadow: inset 0 0 0 2px transparent;
+  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--foreground);
 }
 
@@ -14494,7 +14492,7 @@ dialog.ui-dialog.df-rf-dialog {
 }
 
 .df-start-time-input[aria-invalid="true"] {
-  box-shadow: inset 0 -2px 0 var(--danger);
+  box-shadow: inset 0 0 0 1px var(--control-border), inset 0 -2px 0 var(--danger);
 }
 
 .df-start-time-input[aria-invalid="true"]:focus {
@@ -15228,5 +15226,21 @@ dialog.ui-dialog.df-rf-dialog {
 
   .df-report-row {
     animation: none;
+  }
+}
+
+/* Touch screens: every segment and every text field is a 44 px target (WUI-019, WUI-046). Last in
+   the file, so no base size declared later wins the cascade (Codex r1 on #472). */
+@media (any-pointer: coarse) {
+  .df-seg a,
+  .ui-segmented-control button,
+  .df-pe-seg span,
+  .df-flist-search input,
+  .df-logas input {
+    min-height: 44px;
+  }
+
+  .df-flist-search {
+    height: auto;
   }
 }
