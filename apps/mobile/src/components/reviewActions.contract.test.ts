@@ -110,6 +110,9 @@ describe("mobile Review action contracts", () => {
     const chipsSource = source("./ActivityChips.tsx");
     // The editor owns the keyboard space so the pinned Record bar rides above it (Codex r1 on #480).
     expect(evidenceEditorSource).toContain("automaticallyAdjustKeyboardInsets={false}");
+    // Every field the keyboard can cover is revealed by the editor itself, the map pin's name too (Codex r2 on #480).
+    expect(evidenceEditorSource).toContain("focusRevealControl(pinNameInputRef.current);");
+    expect(evidenceEditorSource).toContain("onBlur={() => blurRevealControl(pinNameInputRef.current)}");
     expect(evidenceEditorSource).toContain("withTiming(lift, { duration, easing: Easing.out(Easing.cubic) })");
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");

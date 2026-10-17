@@ -219,6 +219,9 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
     expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
     await act(async () => keyboard.listeners.get("keyboardWillHide")?.({ duration: 250 }));
     expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
+    // Prefer Cross-Fade Transitions can report a zero frame: no space is made (Codex r2 on #480).
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 0, height: 0 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
   });
 
   it("says beside Record why it did nothing, wherever the page is scrolled (Codex r1 on #480)", async () => {

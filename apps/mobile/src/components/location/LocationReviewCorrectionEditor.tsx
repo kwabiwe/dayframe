@@ -131,6 +131,7 @@ export function LocationReviewCorrectionEditor({
   const scrollViewRef = useRef<ScrollView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const activityInputRef = useRef<TextInput>(null);
+  const pinNameInputRef = useRef<TextInput>(null);
   const activeRevealControlRef = useRef<TextInput | null>(null);
   const scrollOffsetRef = useRef(0);
   const keyboardTopRef = useRef<number | null>(null);
@@ -224,6 +225,18 @@ export function LocationReviewCorrectionEditor({
   const { height: windowHeight } = useWindowDimensions();
   const keyboardGeometryRef = useRef({ bottomInset: safeAreaInsets.bottom, windowHeight });
   keyboardGeometryRef.current = { bottomInset: safeAreaInsets.bottom, windowHeight };
+  /** How far the keyboard (top at `screenY`) reaches above the bar's resting place. */
+  const keyboardOverlap = (screenY: number) => {
+    const { bottomInset, windowHeight: height } = keyboardGeometryRef.current;
+    return Math.max(0, Math.round(height - bottomInset - screenY));
+  };
+  // The safe area or window changing under an open keyboard re-measures the lift (Codex r2 on #480).
+  useEffect(() => {
+    if (keyboardTopRef.current === null) return;
+    keyboardLift.value = keyboardOverlap(keyboardTopRef.current);
+    // keyboardOverlap reads the refreshed geometry ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeAreaInsets.bottom, windowHeight]);
 
   const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
     const keyboardTop = keyboardTopRef.current === null ? null : keyboardTopRef.current - primaryBarHeightRef.current;
@@ -292,10 +305,16 @@ export function LocationReviewCorrectionEditor({
         ? lift
         : withTiming(lift, { duration, easing: Easing.out(Easing.cubic) });
     };
-    const updateKeyboardFrame = (event: { duration?: number; endCoordinates: { screenY: number } }) => {
+    const updateKeyboardFrame = (event: { duration?: number; endCoordinates: { height?: number; screenY: number } }) => {
+      // With Prefer Cross-Fade Transitions iOS can report a zero frame: no keyboard space to make
+      // (Codex r2 on #480; React Native's KeyboardAvoidingView guards the same).
+      if (event.endCoordinates.screenY <= 0 || event.endCoordinates.height === 0) {
+        keyboardTopRef.current = null;
+        liftTo(0, event.duration);
+        return;
+      }
       keyboardTopRef.current = event.endCoordinates.screenY;
-      const { bottomInset, windowHeight: height } = keyboardGeometryRef.current;
-      liftTo(Math.max(0, Math.round(height - bottomInset - event.endCoordinates.screenY)), event.duration);
+      liftTo(keyboardOverlap(event.endCoordinates.screenY), event.duration);
       revealFocusedControl();
     };
     const keyboardChanged = Keyboard.addListener(
@@ -1234,11 +1253,17 @@ export function LocationReviewCorrectionEditor({
                       style={editorStyles.inlineRow}
                     >
                       <TextInput
+                        ref={pinNameInputRef}
                         accessibilityLabel="New saved place name"
                         {...mobileTextProps("input")}
                         editable={!saving}
+                        onBlur={() => blurRevealControl(pinNameInputRef.current)}
                         onChangeText={renameMapPin}
-                        onFocus={() => setTimeWheel(null)}
+                        onFocus={() => {
+                          setTimeWheel(null);
+                          // The editor owns the keyboard space: the pin's name is revealed above the bar too (Codex r2 on #480).
+                          focusRevealControl(pinNameInputRef.current);
+                        }}
                         placeholder="Place name"
                         placeholderTextColor={theme.textSecondary}
                         style={editorStyles.inlineInput}
