@@ -12070,7 +12070,8 @@ dialog.ui-dialog.df-palette {
   display: grid;
   min-height: min(70dvh, 560px);
   place-items: center;
-  padding: 24px 0;
+  /* The phone gutter every page keeps, so the card never meets the screen edge. */
+  padding: 24px 12px;
 }
 
 .df-status-card {
@@ -12085,7 +12086,7 @@ dialog.ui-dialog.df-palette {
 .df-status-card h1 {
   margin: 8px 0 0;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: var(--type-screen);
   font-weight: 800;
   text-wrap: balance;
 }
