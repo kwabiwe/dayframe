@@ -10,6 +10,10 @@ describe("nearbyPlaceCategory (owner, 17 Oct 2026)", () => {
 
   it("reads an unknown kind in plain words, and no kind as Place", () => {
     expect(nearbyPlaceCategory("SkatingRink")).toEqual({ label: "Skating rink", glyph: "map-pin" });
+    // Acronyms stay whole (Codex r1 on #479); known ones read in British English.
+    expect(nearbyPlaceCategory("EVRepair")).toEqual({ label: "EV repair", glyph: "map-pin" });
+    expect(nearbyPlaceCategory("RVPark")).toEqual({ label: "Caravan park", glyph: "tent" });
+    expect(nearbyPlaceCategory("ConventionCenter")).toEqual({ label: "Conference centre", glyph: "building-2" });
     expect(nearbyPlaceCategory(null)).toEqual({ label: "Place", glyph: "map-pin" });
     expect(nearbyPlaceCategory(undefined)).toEqual({ label: "Place", glyph: "map-pin" });
   });

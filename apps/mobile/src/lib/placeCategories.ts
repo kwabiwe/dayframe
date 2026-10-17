@@ -14,6 +14,7 @@ const PLACE_CATEGORIES: Readonly<Record<string, { label: string; glyph: Dayframe
   Brewery: { label: "Brewery", glyph: "utensils" },
   Cafe: { label: "Café", glyph: "coffee" },
   Campground: { label: "Campsite", glyph: "tent" },
+  ConventionCenter: { label: "Conference centre", glyph: "building-2" },
   CarRental: { label: "Car hire", glyph: "car" },
   EVCharger: { label: "Charge point", glyph: "zap" },
   FireStation: { label: "Fire station", glyph: "flame" },
@@ -37,6 +38,7 @@ const PLACE_CATEGORIES: Readonly<Record<string, { label: string; glyph: Dayframe
   PublicTransport: { label: "Station", glyph: "train-front" },
   Restaurant: { label: "Restaurant", glyph: "utensils" },
   Restroom: { label: "Toilets", glyph: "map-pin" },
+  RVPark: { label: "Caravan park", glyph: "tent" },
   School: { label: "School", glyph: "graduation-cap" },
   Stadium: { label: "Stadium", glyph: "users" },
   Store: { label: "Shop", glyph: "shopping-bag" },
@@ -51,9 +53,15 @@ export function nearbyPlaceCategory(key: string | null | undefined): { label: st
   if (!key) return { label: "Place", glyph: "map-pin" };
   const known = PLACE_CATEGORIES[key];
   if (known) return known;
-  // An Apple category this build does not name yet: its words, sentence case ("SkatingRink" → Skating rink).
-  const words = key.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
-  return { label: words.charAt(0).toUpperCase() + words.slice(1), glyph: "map-pin" };
+  // An Apple category this build does not name yet: its words in sentence case, an acronym kept
+  // ("SkatingRink" → Skating rink, "EVRepair" → EV repair; Codex r1 on #479).
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(" ")
+    .map((word, index) => /^[A-Z]{2,}$/.test(word) ? word : index === 0 ? word : word.toLowerCase());
+  const label = words.join(" ");
+  return { label: label.charAt(0).toUpperCase() + label.slice(1), glyph: "map-pin" };
 }
 
 /** "40 m", "1.2 km": a distance from the visit, rounded for reading. */

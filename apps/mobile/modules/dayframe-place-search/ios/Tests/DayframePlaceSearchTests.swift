@@ -266,12 +266,13 @@ final class DayframePlaceSearchTests: XCTestCase {
     ]))
     let suggestions = try await task.value
     XCTAssertEqual(suggestions, [
-      NearbyPointOfInterestSuggestionValue(id: "poi-1", requestId: "nearby-1", title: "Near cafe", subtitle: nil, distanceMeters: 40),
-      NearbyPointOfInterestSuggestionValue(id: "poi-2", requestId: "nearby-1", title: "Far bakery", subtitle: "1 Example Road", distanceMeters: 300)
+      NearbyPointOfInterestSuggestionValue(id: "poi-1", requestId: "nearby-1", title: "Near cafe", subtitle: nil, distanceMeters: 40, category: "Cafe"),
+      NearbyPointOfInterestSuggestionValue(id: "poi-2", requestId: "nearby-1", title: "Far bakery", subtitle: "1 Example Road", distanceMeters: 300, category: "Bakery")
     ])
     for suggestion in suggestions {
       let dictionary = suggestion.dictionary
-      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters"])
+      // The kind of place crosses too; never a coordinate.
+      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters", "category"])
       XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: dictionary))
     }
     let resolved = try coordinator.resolve(id: "poi-2", requestId: "nearby-1")
