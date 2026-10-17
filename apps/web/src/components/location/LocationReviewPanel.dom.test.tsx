@@ -137,6 +137,13 @@ describe("LocationReviewPanel", () => {
     expect(end.value).toBe("");
     const confirm = screen.getByRole("button", { name: "Confirm edits" }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(false);
+    // Focusing the empty End is not an error, and the hint and the gate agree (Codex r2 on #474).
+    await user.click(end);
+    expect(end.getAttribute("aria-invalid")).toBeNull();
+    await user.type(end, ":");
+    await user.clear(end);
+    expect(end.getAttribute("aria-invalid")).toBeNull();
+    expect(confirm.disabled).toBe(false);
     await user.click(screen.getByRole("button", { name: /Choose End date, currently/ }));
     const days = screen.getAllByRole("button").filter((button) => /^\d{1,2}$/.test(button.textContent ?? "") && !(button as HTMLButtonElement).disabled);
     await user.click(days[0]);

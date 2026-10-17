@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import type { ClockFormat } from "@dayframe/shared";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { displayTypedTime, maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { dateTimeLocalInputToIso } from "@/lib/format";
 
 /**
  * Location evidence's Start / End (UI audit WUI-042): the shared date picker plus a typed time that
@@ -32,10 +33,12 @@ export function LocationDateTimeField({
   const time = value.slice(11, 16);
   // What is being typed; null shows the value in the clock setting.
   const [typed, setTyped] = useState<string | null>(null);
-  // A day with no time yet (an End the evidence left open, then a day picked) is not a time either
-  // (Codex r1 on #474): it holds the confirmations and says what to type.
-  const readable = (typed === null || parseTimeInput(typed) !== null) && !(value && !time && typed === null);
+  const status = locationDateTimeStatus(value, typed, today);
+  const readable = status === "ok";
   const errorId = `${id}-error`;
+  // The parent hears the value and whether it can be sent, by the same rule this field shows.
+  const report = (nextValue: string, nextTyped: string | null) =>
+    onChange(nextValue, locationDateTimeStatus(nextValue, nextTyped, today) === "ok");
 
   return (
     <div className="location-resolve-field">
@@ -47,10 +50,7 @@ export function LocationDateTimeField({
           disabled={disabled}
           label={formatShortDate(date)}
           max={today}
-          onChange={(next) => {
-            const nextTime = (typed !== null ? parseTimeInput(typed) : null) ?? time;
-            onChange(`${next}T${nextTime}`, readable && Boolean(nextTime));
-          }}
+          onChange={(next) => report(`${next}T${(typed !== null ? parseTimeInput(typed) : null) ?? time}`, typed)}
           panelLabel={`Choose ${label} date`}
           portal
           today={today}
@@ -71,13 +71,8 @@ export function LocationDateTimeField({
           onChange={(event) => {
             const next = maskTimeInput(event.target.value);
             setTyped(next);
-            const parsed = parseTimeInput(next);
             // Emptying a field that had no time leaves it empty (nothing is sent for it).
-            if (next === "" && !time) {
-              onChange("", true);
-              return;
-            }
-            onChange(`${date}T${parsed ?? time}`, parsed !== null);
+            report(next.trim() === "" && !time ? "" : `${date}T${parseTimeInput(next) ?? time}`, next);
           }}
           onFocus={() => {
             if (typed === null) setTyped(displayTypedTime(time, clock));
@@ -89,11 +84,27 @@ export function LocationDateTimeField({
       </div>
       {readable ? null : (
         <span className="location-resolve-error" id={errorId} role="alert">
-          Enter a time like {displayTypedTime("09:30", clock)}.
+          {status === "nonexistent"
+            ? "That time doesn’t exist on this day (the clocks went forward). Choose another."
+            : `Enter a time like ${displayTypedTime("09:30", clock)}.`}
         </span>
       )}
     </div>
   );
+}
+
+/**
+ * Whether a Start / End field can be sent (Codex r1/r2 on #474): an empty field can (nothing is
+ * sent for it); a day without a time, a time that cannot be read, or a local time the day does not
+ * have (the hour the clocks skip) cannot, and say why.
+ */
+export function locationDateTimeStatus(value: string, typed: string | null, today: string) {
+  const time = value.slice(11, 16);
+  const text = typed ?? time;
+  if (text.trim() === "") return value === "" ? "ok" : time ? "unreadable" : "missing";
+  const parsed = parseTimeInput(text);
+  if (!parsed) return "unreadable";
+  return dateTimeLocalInputToIso(`${value.slice(0, 10) || today}T${parsed}`) ? "ok" : "nonexistent";
 }
 
 function localDate(value: string) {
