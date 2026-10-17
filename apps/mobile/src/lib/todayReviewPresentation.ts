@@ -3,9 +3,8 @@ import type {
   ReviewPresentationSnapshot,
   ReviewProposalPresentation
 } from "@dayframe/shared";
-import { reviewCardsRemoved } from "@dayframe/shared";
+import { reviewCardsRemovedByOutings } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
-import { presentationOutingItems } from "./reviewCards";
 import { reviewMomentOverlapsDay } from "./reviewDeckSegments";
 import { quickConfirmEligibility, type QuickConfirmEligibility } from "./reviewQuickConfirm";
 import type { ReviewPresentationStoreEffect } from "./reviewSyncStore";
@@ -434,14 +433,13 @@ function adjustedCounts(
     effect.localEffect === "hidden" && effect.resolution !== "rejected" && openIds.has(effect.reviewItemId)
   );
   const globalExact = response.completeness.outstandingCounts;
-  // The counts are of cards (an outing once, PRD D19, PR 12c): a local decision takes off the cards
-  // that leave, read from the records' outings; a source with no record counts as one card.
-  const items = presentationOutingItems(response);
-  const listed = new Set(items.map((item) => item.id));
-  const excludedIds = new Set(excluded.map((effect) => effect.reviewItemId));
-  const unlisted = excluded.filter((effect) => !listed.has(effect.reviewItemId));
+  // Counts of cards (an outing once, PRD D19, PR 12c) move by the server's outing map, exactly
+  // whatever the snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
+  const outingStays = response.outstanding.outingStays;
+  const excludedIds = excluded.map((effect) => effect.reviewItemId);
   const global = {
-    value: Math.max(0, response.outstanding.globalCount - reviewCardsRemoved(items, excludedIds) - unlisted.length),
+    value: Math.max(0, response.outstanding.globalCount -
+      (outingStays ? reviewCardsRemovedByOutings(outingStays, excludedIds) : excludedIds.length)),
     exact: globalExact
   };
   // A local decision leaves today's count by the server's own `todayCount` rule (and the Review
@@ -455,8 +453,9 @@ function adjustedCounts(
       detectedAt: candidate.record.createdAt
     }, day))
     .map((candidate) => candidate.record.reviewItemId));
-  const todayExcluded = reviewCardsRemoved(items, excludedIds, (item) => todayEffectIds.has(item.id)) +
-    unlisted.filter((effect) => todayEffectIds.has(effect.reviewItemId)).length;
+  const todayExcluded = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, excludedIds, (id) => todayEffectIds.has(id))
+    : excludedIds.filter((id) => todayEffectIds.has(id)).length;
   return {
     global,
     today: {

@@ -154,13 +154,29 @@ describe("projectTodayReviewPresentation", () => {
       part("there", "in", "2026-09-12T10:00:00.000Z", "2026-09-12T10:10:00.000Z"),
       part("back", "out", "2026-09-12T10:25:00.000Z", "2026-09-12T10:35:00.000Z"),
       review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z")];
-    // The server counts cards: the outing and the walk.
-    const whole = project({ response: response(records, 2, 2), effects: ["stay", "there", "back"].map((id) => effect(id, "pending")) });
+    // The server counts cards (the outing and the walk) and sends its outing map.
+    const withMap = (snapshot: ReviewPresentationSnapshot) =>
+      ({ ...snapshot, outstanding: { ...snapshot.outstanding, outingStays: { there: "stay", back: "stay" } } });
+    const whole = project({ response: withMap(response(records, 2, 2)), effects: ["stay", "there", "back"].map((id) => effect(id, "pending")) });
     expect(whole.globalReviewCount).toEqual({ value: 1, exact: true });
     expect(whole.todayReviewCount).toEqual({ value: 1, exact: true });
-    const stayAlone = project({ response: response(records, 2, 2), effects: [effect("stay", "pending")] });
+    const stayAlone = project({ response: withMap(response(records, 2, 2)), effects: [effect("stay", "pending")] });
     expect(stayAlone.globalReviewCount).toEqual({ value: 3, exact: true });
     expect(stayAlone.todayReviewCount).toEqual({ value: 3, exact: true });
+  });
+
+  it("moves the count exactly for an outing this window does not list (Codex r1 on #475)", () => {
+    // Today's window lists one walk; an earlier outing's three cards are open but not in it.
+    const walk = review("walk", "Walk", "2026-09-12T12:00:00.000Z", "2026-09-12T12:30:00.000Z");
+    const snapshot = response([walk], 2, 1);
+    const ids = ["31000000-0000-4000-8000-000000000001", "31000000-0000-4000-8000-000000000002", "31000000-0000-4000-8000-000000000003"];
+    const presentation = project({
+      response: { ...snapshot, outstanding: { ...snapshot.outstanding, openReviewItemIds: [...snapshot.outstanding.openReviewItemIds, ...ids],
+        outingStays: { [ids[1]]: ids[0], [ids[2]]: ids[0] } } },
+      effects: ids.map((id) => effect(id, "pending"))
+    });
+    expect(presentation.globalReviewCount).toEqual({ value: 1, exact: true });
+    expect(presentation.todayReviewCount).toEqual({ value: 1, exact: true });
   });
 
   it("keeps an unknown saved outcome out of both logged and pending accounting", () => {

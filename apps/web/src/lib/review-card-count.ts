@@ -27,3 +27,32 @@ export function foldedOutingMemberSql(ri = "ri", ae = "ae") {
       and outing_stay_event.raw_payload ->> 'outingKey' = ${ae}.raw_payload ->> 'outingKey'
   ), false)`;
 }
+
+/** At most this many open outing Moves are mapped; beyond it the map is left out. */
+export const OUTING_STAYS_LIMIT = 200;
+
+/**
+ * SQL ($1 workspace, $2 user): each open Move folded into its outing's open Stay card, as
+ * `member` → `stay` review item ids (one row per Move; the rule of `foldedOutingMemberSql`). Clients
+ * move a count of cards exactly with it when they decide cards locally (Codex r1 on #475): deciding a
+ * folded Move changes nothing, deciding its Stay alone brings the Move back as a card.
+ */
+export const OUTING_STAYS_SQL = `with open_outing_cards as (
+    select ri.id, ae.raw_payload ->> 'outingKey' as key, ae.raw_payload ->> 'outingRole' as role
+    from review_items ri
+    join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+    where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open'
+      and ae.raw_payload ->> 'outingRole' in ('stay', 'in', 'out')
+  )
+  select distinct on (m.id) m.id::text as member, s.id::text as stay
+  from open_outing_cards m
+  join open_outing_cards s on s.key = m.key and s.role = 'stay'
+  where m.role in ('in', 'out')
+  order by m.id, s.id
+  limit ${OUTING_STAYS_LIMIT + 1}`;
+
+/** The map, or null when there are more open outing Moves than `OUTING_STAYS_LIMIT`. */
+export function outingStaysFromRows(rows: readonly { member: string; stay: string }[]) {
+  if (rows.length > OUTING_STAYS_LIMIT) return null;
+  return Object.fromEntries(rows.map((row) => [row.member, row.stay])) as Record<string, string>;
+}

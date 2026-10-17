@@ -9,6 +9,7 @@ import {
   OUTING_ROLE_PAYLOAD_KEY,
   reviewCardCount,
   reviewCardsRemoved,
+  reviewCardsRemovedByOutings,
   REVIEW_PRESENTATION_MAX_IDS,
   ReviewPresentationSnapshotSchema,
   ReviewMutationEnvelopeSchema,
@@ -22,7 +23,6 @@ import {
   type ReviewMutationEnvelope
 } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
-import { presentationOutingItems } from "./reviewCards";
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
 import { reviewPresentationRequestedAt } from "./reviewPresentationRequestTime";
 import {
@@ -1634,12 +1634,15 @@ export function withNewerTerminalEvidence(
       ? start < todayEnd && end > todayStart
       : Date.parse(record.createdAt) >= todayStart && Date.parse(record.createdAt) < todayEnd;
   };
-  // The counts are of cards (an outing once, PRD D19, PR 12c): they drop by the cards that leave,
-  // read from the records' outings; a source this snapshot lists no record for counts as one card.
-  const openRecords = presentationOutingItems(response);
-  const listed = new Set(openRecords.map((item) => item.id));
-  const removedCards = reviewCardsRemoved(openRecords, closed) + removedOpen.filter((id) => !listed.has(id)).length;
-  const removedToday = reviewCardsRemoved(openRecords, closed, (item) => inToday(item.record));
+  const todayIds = new Set(response.records.flatMap((record) =>
+    record.kind === "review" && record.status === "open" && inToday(record) ? [record.reviewItemId] : []));
+  // Counts of cards (an outing once, PRD D19, PR 12c) move by the server's outing map, exactly
+  // whatever this snapshot lists (Codex r1 on #475); a snapshot without it counts suggestions.
+  const outingStays = response.outstanding.outingStays;
+  const removedCards = outingStays ? reviewCardsRemovedByOutings(outingStays, removedOpen) : removedOpen.length;
+  const removedToday = outingStays
+    ? reviewCardsRemovedByOutings(outingStays, removedOpen, (id) => todayIds.has(id))
+    : removedOpen.filter((id) => todayIds.has(id)).length;
   return {
     ...response,
     records: response.records.filter((record) => !(record.kind === "review" && record.status === "open" && closed.has(record.reviewItemId))),
@@ -1648,7 +1651,9 @@ export function withNewerTerminalEvidence(
       ...response.outstanding,
       globalCount: Math.max(0, response.outstanding.globalCount - removedCards),
       todayCount: Math.max(0, response.outstanding.todayCount - removedToday),
-      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id))
+      openReviewItemIds: response.outstanding.openReviewItemIds.filter((id) => !closed.has(id)),
+      ...(outingStays ? { outingStays: Object.fromEntries(Object.entries(outingStays)
+        .filter(([member, stay]) => !closed.has(member) && !closed.has(stay))) } : {})
     }
   };
 }
@@ -3202,8 +3207,13 @@ export function projectReviewBootstrap(
   const reviewItems = bootstrap.reviewItems.filter((item) => !hiddenIds.has(item.id)).map((item) => withSavedPlace(item, savedPlaceNames));
   const openBefore = bootstrap.reviewItems.filter((item) => item.status === "open");
   const hiddenOpenCount = openBefore.length - reviewItems.filter((item) => item.status === "open").length;
-  // Cards leave by the shared rule (an outing once, PRD D19, PR 12c).
-  const hiddenCards = reviewCardsRemoved(openBefore, hiddenIds);
+  // Cards leave by the server's outing map, exactly even when the capped list misses part of an
+  // outing (an outing once, PRD D19, PR 12c; Codex r1 on #475); an older server sends none.
+  const outingStays = bootstrap.stats?.reviewOutingStays;
+  // Open: listed open, or in the map (whose Moves and Stays are all open, listed or not).
+  const knownOpen = new Set([...openBefore.map((item) => item.id), ...Object.entries(outingStays ?? {}).flat()]);
+  const hiddenOpen = [...hiddenIds].filter((id) => knownOpen.has(id));
+  const hiddenCards = outingStays ? reviewCardsRemovedByOutings(outingStays, hiddenOpen) : reviewCardsRemoved(openBefore, hiddenIds);
   const cardCount = bootstrap.stats?.reviewCardCount;
   return {
     ...bootstrap,

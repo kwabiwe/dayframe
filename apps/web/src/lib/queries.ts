@@ -10,7 +10,7 @@ import type {
   RecentActivitySuggestionCandidate
 } from "@dayframe/shared";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "./review-decision-signal";
-import { foldedOutingMemberSql } from "./review-card-count";
+import { foldedOutingMemberSql, OUTING_STAYS_SQL, outingStaysFromRows } from "./review-card-count";
 import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
@@ -208,6 +208,11 @@ export type DashboardStats = {
   reviewCount: number;
   /** Review cards (an outing once, PRD D19); `reviewCount` stays every open suggestion for older iPhones. */
   reviewCardCount: number;
+  /**
+   * Each open Move folded into its outing's open Stay card (member → Stay review id), so a client moves
+   * `reviewCardCount` exactly for local decisions; left out beyond `OUTING_STAYS_LIMIT` Moves.
+   */
+  reviewOutingStays?: Record<string, string>;
 };
 
 export type DashboardDateRange = {
@@ -295,7 +300,8 @@ export async function getBootstrapData(
     activityEvents,
     categoryUsage,
     { taskSuggestions, taskSuggestionCandidates },
-    stats
+    stats,
+    reviewOutingStays
   ] = await Promise.all([
     getUser(session),
     getWorkspaces(session),
@@ -331,7 +337,8 @@ export async function getBootstrapData(
     getActivityEvents(session),
     getCategoryUsageRanks(session),
     getTaskSuggestionSets(session),
-    getDashboardStats(session, dateRange, capturedNow)
+    getDashboardStats(session, dateRange, capturedNow),
+    getReviewOutingStays(session)
   ]);
 
   const capturedAt = new Date(capturedNow);
@@ -387,7 +394,8 @@ export async function getBootstrapData(
       todayCoveredSeconds: todayCoverage.coveredSeconds,
       weekCoveredSeconds: weekCoverage.coveredSeconds,
       todayAdditionalOverlapSeconds: todayCoverage.additionalOverlapSeconds,
-      weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds
+      weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds,
+      ...(reviewOutingStays ? { reviewOutingStays } : {})
     },
     todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
     weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))
@@ -1246,6 +1254,11 @@ async function getActivityEvents(session: RequestSession) {
     [session.workspaceId, session.userId]
   );
   return result.rows;
+}
+
+async function getReviewOutingStays(session: RequestSession) {
+  const result = await query<{ member: string; stay: string }>(OUTING_STAYS_SQL, [session.workspaceId, session.userId]);
+  return outingStaysFromRows(result.rows);
 }
 
 async function getDashboardStats(

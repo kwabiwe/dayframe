@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foldedOutingMemberIds, groupOutings, outingKeyOf, outingRoleOf, outingTravelWords, reviewCardCount, reviewCardsRemoved } from "./outingCards";
+import { foldedOutingMemberIds, groupOutings, outingKeyOf, outingRoleOf, outingTravelWords, reviewCardCount, reviewCardsRemoved, reviewCardsRemovedByOutings } from "./outingCards";
 
 const card = (id: string, start: string, payload: Record<string, unknown> | null) => ({
   id, suggestedStartedAt: start, rawPayload: payload
@@ -77,5 +77,25 @@ describe("one count per outing (PR 12c)", () => {
     // A folded Move decided on its own: the outing card stays.
     expect(reviewCardsRemoved(items, new Set(["b"]))).toBe(0);
     expect(reviewCardsRemoved(items, new Set(["x"]))).toBe(1);
+  });
+});
+
+describe("reviewCardsRemovedByOutings (Codex r1 on #475)", () => {
+  // The server's map: Moves b and c are folded into Stay s.
+  const map = { b: "s", c: "s" };
+
+  it("moves the count exactly, whatever is loaded", () => {
+    expect(reviewCardsRemovedByOutings(map, ["s", "b", "c"])).toBe(1);
+    expect(reviewCardsRemovedByOutings(map, ["s"])).toBe(-1);
+    expect(reviewCardsRemovedByOutings(map, ["s", "b"])).toBe(0);
+    expect(reviewCardsRemovedByOutings(map, ["b"])).toBe(0);
+    expect(reviewCardsRemovedByOutings(map, ["x"])).toBe(1);
+    expect(reviewCardsRemovedByOutings({}, ["x", "y"])).toBe(2);
+  });
+
+  it("counts only within a part (today's ids)", () => {
+    // The Stay is earlier; its Move c is today: deciding the Stay alone adds c to today's count.
+    expect(reviewCardsRemovedByOutings(map, ["s"], (id) => id === "c")).toBe(-1);
+    expect(reviewCardsRemovedByOutings(map, ["s", "b", "c"], (id) => id === "c")).toBe(0);
   });
 });

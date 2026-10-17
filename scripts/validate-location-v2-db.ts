@@ -29,6 +29,7 @@ import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery, getBootstrapData } from "../apps/web/src/lib/queries";
 import { openReviewCountFor } from "../apps/web/src/lib/review-count";
+import { foldedOutingMemberSql, OUTING_STAYS_SQL } from "../apps/web/src/lib/review-card-count";
 import { getReviewPresentation } from "../apps/web/src/lib/review-presentation-service";
 import { REVIEW_DECISION_PAYLOAD_KEY } from "../apps/web/src/lib/review-decision-signal";
 
@@ -1924,6 +1925,64 @@ async function validatePlaceDeleteWithSamePlaceJourneys() {
  * outing key, are logged (or skipped) together atomically and idempotently, and a member decided on its
  * own makes the outing a conflict that changes nothing.
  */
+/**
+ * The count of cards and the outing map on a large backlog (Codex r1 on #475): 20,000 events of
+ * history, 1,800 open cards and 90 outings of a Stay and two Moves, inside a transaction rolled back.
+ * Each read is right and stays within its budget.
+ */
+async function validateOutingCountPlans() {
+  const client = await pool.connect();
+  const cardSql = `select count(*)::int as n from review_items ri
+    left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+    where ri.workspace_id = $1 and ri.user_id = $2 and ri.status = 'open' and not ${foldedOutingMemberSql("ri", "ae")}`;
+  try {
+    await client.query("begin");
+    const baseline = (await client.query<{ n: number }>(cardSql, [WORKSPACE_ID, USER_ID])).rows[0].n;
+    const baselineStays = (await client.query(OUTING_STAYS_SQL, [WORKSPACE_ID, USER_ID])).rows.length;
+    await client.query(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       select $1, $2, 'location_learning', 'unknown_stay', now() - make_interval(mins => n), 'low', jsonb_build_object('n', n)
+       from generate_series(1, 20000) n`, [WORKSPACE_ID, USER_ID]);
+    await client.query(
+      `with plain as (
+         insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+         select $1, $2, 'location_learning', 'unknown_stay', now() - make_interval(hours => n), 'low', '{}'::jsonb
+         from generate_series(1, 1800) n returning id
+       )
+       insert into review_items (workspace_id, user_id, event_id, type, title, status)
+       select $1, $2, id, 'location', 'Synthetic', 'open' from plain`, [WORKSPACE_ID, USER_ID]);
+    await client.query(
+      `with parts as (
+         select n, role from generate_series(1, 90) n cross join unnest(array['stay', 'in', 'out']) role
+       ), events as (
+         insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+         select $1, $2, 'location_learning', case when role = 'stay' then 'unknown_stay' else 'commute_detected' end,
+                now() - make_interval(days => n), 'low',
+                jsonb_build_object('outingKey', 'outing:synthetic-' || n, 'outingRole', role)
+         from parts returning id
+       )
+       insert into review_items (workspace_id, user_id, event_id, type, title, status)
+       select $1, $2, id, 'location', 'Synthetic outing', 'open' from events`, [WORKSPACE_ID, USER_ID]);
+    await client.query("analyze activity_events");
+    await client.query("analyze review_items");
+    const timed = async (label: string, sql: string, params: unknown[]) => {
+      const plan = (await client.query<{ "QUERY PLAN": Array<{ "Execution Time": number }> }>(
+        `explain (analyze, buffers, format json) ${sql}`, params)).rows[0]["QUERY PLAN"][0];
+      const rows = (await client.query(sql, params)).rows;
+      assert(plan["Execution Time"] < 250, `${label} took ${plan["Execution Time"]} ms on a large backlog.`);
+      return rows;
+    };
+    const cards = await timed("The count of cards", cardSql, [WORKSPACE_ID, USER_ID]);
+    assert.equal(cards[0].n - baseline, 1800 + 90, "The count of cards did not count each outing once on a large backlog.");
+    const stays = await timed("The outing map", OUTING_STAYS_SQL, [WORKSPACE_ID, USER_ID]);
+    assert.equal(stays.length - baselineStays, 180, "The outing map missed Moves on a large backlog.");
+    console.log("Outing count plans validated", { cards: cards[0].n, mapped: stays.length });
+  } finally {
+    await client.query("rollback").catch(() => undefined);
+    client.release();
+  }
+}
+
 async function validateOutingCards() {
   // The sparse 12-minute outing (two fast fixes each way, PR 11): a saved home, an unknown visit and a
   // low-confidence Move either side, on three recent days.
@@ -1973,9 +2032,11 @@ async function validateOutingCards() {
       const presentation = async (outingCount: boolean) => (await getReviewPresentation(reader,
         { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 1 }, {}, { outingCount })).outstanding.globalCount;
       const stats = (await getBootstrapData(reader)).stats;
+      const presented = await getReviewPresentation(reader, { version: 1, mode: "backlog", timeZone: "Etc/UTC", limit: 1 }, {}, { outingCount: true });
       return { plain: await openReviewCountFor(reader), cards: await openReviewCountFor(reader, { cards: true }),
         presentationPlain: await presentation(false), presentationCards: await presentation(true),
-        bootstrapPlain: stats.reviewCount, bootstrapCards: stats.reviewCardCount };
+        bootstrapPlain: stats.reviewCount, bootstrapCards: stats.reviewCardCount,
+        bootstrapStays: stats.reviewOutingStays, presentationStays: presented.outstanding.outingStays };
     };
     const foldedMembers = groups.reduce((sum, group) => sum + group.filter((row) => row.role !== "stay").length, 0);
     const before = await counts();
@@ -1983,6 +2044,13 @@ async function validateOutingCards() {
     assert.equal(before.plain - before.cards, foldedMembers, "The count of cards did not count each outing once.");
     assert.deepEqual([before.presentationPlain, before.bootstrapPlain], [before.plain, before.plain], "A plain Review count changed.");
     assert.deepEqual([before.presentationCards, before.bootstrapCards], [before.cards, before.cards], "The counts of cards disagree.");
+    // The outing map names each open outing's Moves with their Stay, alike in bootstrap and presentation.
+    const expectedStays = Object.fromEntries(groups.flatMap((group) => {
+      const stay = group.find((row) => row.role === "stay")!.id;
+      return group.filter((row) => row.role !== "stay").map((row) => [row.id, stay]);
+    }));
+    assert.deepEqual(before.bootstrapStays, expectedStays, "Bootstrap's outing map is wrong.");
+    assert.deepEqual(before.presentationStays, expectedStays, "The presentation's outing map is wrong.");
 
     // Log it: every member accepted with its own block, in one go; a retry replays the receipt.
     const logged = parts(groups[0]);
@@ -3286,6 +3354,7 @@ async function main() {
     await validateReviewModeAutoMoves();
     await validateSavePlace();
     await validateOutingCards();
+    await validateOutingCountPlans();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();

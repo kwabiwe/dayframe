@@ -134,6 +134,8 @@ export type MobileStats = {
   reviewCount: number;
   /** Review cards, an outing once (PRD D19, PR 12c); absent from older servers. */
   reviewCardCount?: number;
+  /** Each open Move folded into its outing's open Stay card (member → Stay), to move the count locally. */
+  reviewOutingStays?: Record<string, string>;
 };
 
 export type MobileTag = {

@@ -108,6 +108,31 @@ describe("getReviewPresentation", () => {
     expect(odd.records[0]).not.toHaveProperty("outing");
   });
 
+  it("counts cards and sends the outing map only to clients that ask; beyond its limit the counts are not exact (PR 12c)", async () => {
+    let stays = [{ member: "71000000-0000-4000-8000-000000000002", stay: "71000000-0000-4000-8000-000000000001" }];
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("open_outing_cards")) return { rows: stays };
+      if (sql.includes("with open_reviews")) {
+        return { rows: [{ globalCount: sql.includes("outingRole") ? 1 : 2, todayCount: 0, openReviewItemIds: [] }] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const cards = await getReviewPresentation(session, request, {}, { outingCount: true });
+    expect(cards.outstanding).toMatchObject({ globalCount: 1, outingStays: { [stays[0].member]: stays[0].stay } });
+    expect(cards.completeness.outstandingCounts).toBe(true);
+    const plain = await getReviewPresentation(session, request, {}, {});
+    expect(plain.outstanding.globalCount).toBe(2);
+    expect(plain.outstanding).not.toHaveProperty("outingStays");
+    stays = Array.from({ length: 201 }, (_, index) => ({
+      member: `72000000-0000-4000-8000-${String(index).padStart(12, "0")}`, stay: "71000000-0000-4000-8000-000000000001" }));
+    const beyond = await getReviewPresentation(session, request, {}, { outingCount: true });
+    expect(beyond.outstanding).not.toHaveProperty("outingStays");
+    expect(beyond.completeness.outstandingCounts).toBe(false);
+  });
+
   it("marks time away only for clients that ask for it (review finding 3)", async () => {
     const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Time away from Home",
       eventType: "commute_detected", timeAwayStopCount: 1 };

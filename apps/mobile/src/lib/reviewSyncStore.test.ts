@@ -84,6 +84,14 @@ describe("Review sync store contracts", () => {
     expect(whole.stats).toMatchObject({ reviewCount: 1, reviewCardCount: 1 });
     // The Stay decided on its own: its Moves come back as cards of their own.
     expect(projectReviewBootstrap(data, new Set(["stay"])).stats).toMatchObject({ reviewCount: 3, reviewCardCount: 3 });
+    // The capped list misses the Stay of two loaded Moves (Codex r1 on #475): the server's map keeps it exact.
+    const capped = { ...bootstrap([...Array.from({ length: 98 }, (_, index) => reviewItem({ id: `other-${index}` })),
+      outing("there", "in"), outing("back", "out")]),
+      stats: { todaySeconds: 0, weekSeconds: 0, reviewCount: 101, reviewCardCount: 99, reviewOutingStays: { there: "stay", back: "stay" } } };
+    expect(projectReviewBootstrap(capped, new Set(["there"])).stats?.reviewCardCount).toBe(99);
+    expect(projectReviewBootstrap(capped, new Set(["other-0"])).stats?.reviewCardCount).toBe(98);
+    // Its unlisted Stay decided on its own: both Moves come back as cards.
+    expect(projectReviewBootstrap(capped, new Set(["stay"])).stats?.reviewCardCount).toBe(100);
     // An older server sends no count of cards: none is made up.
     expect(projectReviewBootstrap(bootstrap(items), new Set(["walk"])).stats).not.toHaveProperty("reviewCardCount");
   });
@@ -96,14 +104,15 @@ describe("Review sync store contracts", () => {
     });
     const snapshot = {
       scope: { mode: "window", timeZone: "Etc/UTC", today: { start: "2026-09-12T00:00:00.000Z", end: "2026-09-13T00:00:00.000Z" } },
-      outstanding: { globalCount: 2, todayCount: 2, openReviewItemIds: ["stay", "there", "back", "walk"] },
+      outstanding: { globalCount: 2, todayCount: 2, openReviewItemIds: ["stay", "there", "back", "walk"],
+        outingStays: { there: "stay", back: "stay" } },
       records: [record("stay", "stay"), record("there", "in"), record("back", "out"), record("walk")],
       links: []
     } as never;
     const settled = withNewerTerminalEvidence(snapshot, new Set(["stay", "there", "back"])) as { outstanding: { globalCount: number; todayCount: number } };
     expect(settled.outstanding).toMatchObject({ globalCount: 1, todayCount: 1 });
-    const stayAlone = withNewerTerminalEvidence(snapshot, new Set(["stay"])) as { outstanding: { globalCount: number; todayCount: number } };
-    expect(stayAlone.outstanding).toMatchObject({ globalCount: 3, todayCount: 3 });
+    const stayAlone = withNewerTerminalEvidence(snapshot, new Set(["stay"])) as { outstanding: { globalCount: number; todayCount: number; outingStays: object } };
+    expect(stayAlone.outstanding).toMatchObject({ globalCount: 3, todayCount: 3, outingStays: {} });
   });
 
   it("does not cache coordinates, raw Health payloads or secrets", () => {

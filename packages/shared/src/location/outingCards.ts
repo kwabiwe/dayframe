@@ -102,3 +102,25 @@ export function reviewCardsRemoved<T extends Pick<OutingCard, "id" | "rawPayload
 ) {
   return reviewCardCount(items, within) - reviewCardCount(items.filter((item) => !removed.has(item.id)), within);
 }
+
+/**
+ * How many cards leave a count when the open review items `removed` are decided, read from the
+ * server's outing map (each open Move folded into its outing → that open Stay card; Codex r1 on
+ * #475): a folded Move leaves no card; a Stay decided without its Moves brings them back as cards,
+ * so this can be negative. Exact whatever the client has loaded. `within` limits it (today's ids).
+ */
+export function reviewCardsRemovedByOutings(
+  outingStays: Readonly<Record<string, string>>,
+  removed: Iterable<string>,
+  within: (id: string) => boolean = () => true
+) {
+  const gone = new Set(removed);
+  let cards = 0;
+  for (const id of gone) {
+    if (within(id) && !Object.hasOwn(outingStays, id)) cards += 1;
+  }
+  for (const [member, stay] of Object.entries(outingStays)) {
+    if (gone.has(stay) && !gone.has(member) && within(member)) cards -= 1;
+  }
+  return cards;
+}

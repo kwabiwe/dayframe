@@ -14,7 +14,7 @@ import type pg from "pg";
 import { withSyncTransaction, type SyncTransactionOptions } from "./sync-transaction";
 import { canonicalJson, isoOrNull, reviewProposalHash } from "./review-proposal-hash";
 import type { RequestSession } from "./session";
-import { foldedOutingMemberSql } from "./review-card-count";
+import { foldedOutingMemberSql, OUTING_STAYS_SQL, outingStaysFromRows } from "./review-card-count";
 import { placeDisplayNameSql } from "./place-display";
 
 const COLLECTION_LIMIT = 5_000;
@@ -98,6 +98,8 @@ type CountsRow = {
   globalCount: number | string;
   todayCount: number | string;
   openReviewItemIds: string[] | null;
+  /** With the outing-count feature: the open outing map, or null beyond its limit. */
+  outingStays?: Record<string, string> | null;
 };
 
 type InternalRecord = {
@@ -216,14 +218,17 @@ export async function getReviewPresentation(
         records: !boundedCollection && !page.hasMore,
         // Exact counts remain in the response, but a local client must not
         // subtract hidden effects unless it has this complete membership list.
-        outstandingCounts: (counts.openReviewItemIds?.length ?? 0) <= COLLECTION_LIMIT,
+        // Counts of cards also need the outing map (an outing once, PR 12c).
+        outstandingCounts: (counts.openReviewItemIds?.length ?? 0) <= COLLECTION_LIMIT &&
+          (!features.outingCount || counts.outingStays !== null),
         completedToday: input.mode === "window" && !boundedCollection && !page.hasMore,
         partialReason: boundedCollection ? "bounded_collection" : page.hasMore ? "page" : null
       },
       outstanding: {
         globalCount: Number(counts.globalCount),
         todayCount: Number(counts.todayCount),
-        openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT)
+        openReviewItemIds: (counts.openReviewItemIds ?? []).slice(0, COLLECTION_LIMIT),
+        ...(features.outingCount && counts.outingStays ? { outingStays: counts.outingStays } : {})
       },
       records: page.records.map(({ record }) => forClient(record, features)),
       links,
@@ -294,7 +299,10 @@ async function loadCounts(
         from (select id from open_reviews order by id limit ${SQL_COLLECTION_LIMIT}) bounded) as "openReviewItemIds"`,
     [session.workspaceId, session.userId, todayStart, todayEnd]
   );
-  return result.rows[0] ?? { globalCount: 0, todayCount: 0, openReviewItemIds: [] };
+  const row = result.rows[0] ?? { globalCount: 0, todayCount: 0, openReviewItemIds: [] };
+  if (!features.outingCount) return row;
+  const stays = await client.query<{ member: string; stay: string }>(OUTING_STAYS_SQL, [session.workspaceId, session.userId]);
+  return { ...row, outingStays: outingStaysFromRows(stays.rows) };
 }
 
 async function loadReviewRows(client: pg.PoolClient, session: RequestSession, input: ReviewPresentationRequest) {
@@ -751,7 +759,8 @@ function snapshotFor(
       counts: {
         global: Number(counts.globalCount),
         today: Number(counts.todayCount),
-        openReviewItemIds: counts.openReviewItemIds ?? []
+        openReviewItemIds: counts.openReviewItemIds ?? [],
+        ...(counts.outingStays !== undefined ? { outingStays: counts.outingStays } : {})
       },
       records: records.map(({ record }) => record),
       lookup: {

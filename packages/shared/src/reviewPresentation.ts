@@ -295,7 +295,12 @@ export const ReviewPresentationResponseSchema = z
       .object({
         globalCount: z.number().int().nonnegative(),
         todayCount: z.number().int().nonnegative(),
-        openReviewItemIds: z.array(uuid).max(5_000)
+        openReviewItemIds: z.array(uuid).max(5_000),
+        /**
+         * Only for clients sending the outing-count feature: each open Move folded into its outing's
+         * open Stay card (member → Stay), so a local decision moves the counts of cards exactly.
+         */
+        outingStays: z.record(uuid, uuid).refine((map) => Object.keys(map).length <= 200).optional()
       })
       .strict(),
     records: z.array(ReviewPresentationRecordSchema).max(REVIEW_PRESENTATION_MAX_LIMIT),
