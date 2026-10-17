@@ -802,7 +802,7 @@ function bootstrap(reviewItems: ReviewItemRow[], reviewCount = reviewItems.lengt
     tags: [],
     taskSuggestions: [],
     reviewItems,
-    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount },
+    stats: { todaySeconds: 0, weekSeconds: 0, todayCoveredSeconds: 0, weekCoveredSeconds: 0, todayAdditionalOverlapSeconds: 0, weekAdditionalOverlapSeconds: 0, reviewCount, reviewCardCount: reviewCount },
     activityEvents: [],
     entries: [],
     historyEntries: [],

@@ -23,14 +23,16 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
   });
 
   it("asks for the replay count with a header, because older builds parse the replay reply strictly", () => {
-    expect(locationStore).toContain('[REVIEW_COUNT_REQUEST_HEADER]: "1"');
+    // Counted in cards, an outing once (PR 12c): the replay, evidence and event replies alike.
+    expect(locationStore).toContain("[REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS,");
+    expect(api).toContain("[REVIEW_COUNT_REQUEST_HEADER]: REVIEW_COUNT_CARDS");
     const reply = { ok: true, replayVersion: "v", rolloutMode: "v2_review", clientAcknowledgedMode: true, finalisedSegmentCount: 0, semanticSegmentCount: 0, warnings: [] };
     expect(LocationReplayResponseSchema.safeParse({ ...reply, reviewCount: 2 }).success).toBe(true);
     expect(LocationReplayResponseSchema.safeParse(reply).success).toBe(true);
   });
 
   it("feeds counts from bootstrap, the event queue and location replies, and cancels at sign-out", () => {
-    expect(api).toContain("noteReviewCountQuietly(owner, bootstrap.stats?.reviewCount)");
+    expect(api).toContain("noteReviewCountQuietly(owner, bootstrap.stats?.reviewCardCount ?? bootstrap.stats?.reviewCount)");
     expect(api).toContain("noteReviewCountQuietly(owner, (payload as { reviewCount?: unknown }).reviewCount)");
     expect(api).toContain("cancelReviewNudgeForLogout()");
     expect(locationStore).toContain("noteLocationReviewCount(owner, payload.reviewCount)");

@@ -78,7 +78,7 @@ describe("POST /api/location/replay", () => {
     }));
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, reviewCount: 5 });
-    expect(reviewCountMock).toHaveBeenCalledWith(session);
+    expect(reviewCountMock).toHaveBeenCalledWith(session, { cards: false });
   });
 
   it("keeps the reply unchanged for clients that don't ask for the count (older builds parse it strictly)", async () => {

@@ -86,7 +86,7 @@ export default function SettingsPage() {
             <DataPrivacySettings />
           </SetCard>
           <SetCard glyph="message-circle" id="help" title="Help">
-            <HelpSettings authMode={authMode} reviewCount={data.stats.reviewCount} />
+            <HelpSettings authMode={authMode} reviewCount={data.stats.reviewCardCount} />
           </SetCard>
           <SettingsSignOut />
         </div>

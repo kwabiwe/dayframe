@@ -187,6 +187,11 @@ export const LocationReplayResponseSchema = z.object({
  * gains the field for clients whose strict reply schema accepts it.
  */
 export const REVIEW_COUNT_REQUEST_HEADER = "x-dayframe-review-count";
+/**
+ * `REVIEW_COUNT_REQUEST_HEADER` value asking for the count of Review cards (PRD D19, PR 12c: an outing
+ * counts once). "1" keeps the plain count of suggestions older iPhone builds show as cards.
+ */
+export const REVIEW_COUNT_CARDS = "cards";
 
 /** Asks the location replay reply to carry `semanticChangeCount` (see `LocationReplayResponseSchema`). */
 export const SEMANTIC_CHANGE_COUNT_REQUEST_HEADER = "x-dayframe-semantic-change-count";

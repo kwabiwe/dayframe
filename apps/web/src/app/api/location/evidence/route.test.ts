@@ -80,7 +80,7 @@ describe("POST /api/location/evidence", () => {
     }));
     expect(response.status).toBe(201);
     expect(await response.json()).toMatchObject({ ok: true, reviewCount: 2 });
-    expect(reviewCountMock).toHaveBeenCalledWith(session);
+    expect(reviewCountMock).toHaveBeenCalledWith(session, { cards: false });
   });
 
   it("returns a retryable busy response when owner processing is locked", async () => {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   REVIEW_PRESENTATION_FEATURES_HEADER,
   REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE,
+  REVIEW_PRESENTATION_OUTING_COUNT_FEATURE,
   REVIEW_PRESENTATION_LEARNED_NAME_FEATURE,
   REVIEW_PRESENTATION_OUTING_FEATURE,
   REVIEW_PRESENTATION_TIME_AWAY_FEATURE,
@@ -51,6 +52,7 @@ export async function POST(request: Request) {
       timeAway: features.includes(REVIEW_PRESENTATION_TIME_AWAY_FEATURE),
       moveRoute: features.includes(REVIEW_PRESENTATION_MOVE_ROUTE_FEATURE),
       outing: features.includes(REVIEW_PRESENTATION_OUTING_FEATURE),
+      outingCount: features.includes(REVIEW_PRESENTATION_OUTING_COUNT_FEATURE),
       learnedName: features.includes(REVIEW_PRESENTATION_LEARNED_NAME_FEATURE)
     });
     return privateJson(presentation);
