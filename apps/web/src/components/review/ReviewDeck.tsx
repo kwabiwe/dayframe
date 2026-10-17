@@ -77,9 +77,16 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     [data.entries, data.historyEntries, data.weekEntries]
   );
 
-  // A refused outing's canonical statuses (from the server's conflict answer): only its open cards return.
+  // A refused outing's canonical statuses (from the server's conflict answer): only its open cards return,
+  // and no kept copy of a card the server says is decided stays on the deck (Codex r2/r3 on #466).
   const outingConflictStatuses = useRef(new Map<string, Record<string, string>>());
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, outingConflictStatuses);
+  const [closedByServer, setClosedByServer] = useState<ReadonlySet<string>>(() => new Set());
+  const onOutingConflict = useCallback((stayId: string, statuses: Record<string, string>) => {
+    outingConflictStatuses.current.set(stayId, statuses);
+    const closed = Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id);
+    if (closed.length) setClosedByServer((current) => new Set([...current, ...closed]));
+  }, []);
+  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict);
   // Cards the deck keeps although the loaded data (the newest 100) no longer lists them: the card
   // whose evidence editor is open, and a card Undo or a failed save brought back (iPhone keeps the
   // copy the deck showed the same way).
@@ -93,12 +100,12 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   }
   const deckItems = useMemo(() => {
-    const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id));
+    const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id));
     if (evidenceOpenId && editorSnapshot?.id === evidenceOpenId && !loadedIds.has(evidenceOpenId) && !revived.has(evidenceOpenId)) {
       extra.push(editorSnapshot);
     }
     return extra.length ? [...openItems, ...extra] : openItems;
-  }, [editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
+  }, [closedByServer, editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
   // One card per outing (PRD D19): a Move card that belongs to an unknown Stay's card on the deck is
   // folded into it (also while that card's decision is held), and comes back on its own otherwise.
   const outings = useMemo(() => reviewOutings(deckItems), [deckItems]);
@@ -1014,7 +1021,7 @@ function useMinuteClock(hydrated: boolean) {
 
 function useReviewDecisions(
   openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>,
-  outingConflictStatuses: React.RefObject<Map<string, Record<string, string>>>
+  onOutingConflict: (stayId: string, statuses: Record<string, string>) => void
 ) {
   const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
   const [controller] = useState(() => new ReviewDecisionController(setState));
@@ -1043,8 +1050,8 @@ function useReviewDecisions(
         // gone (its open Moves then show on their own); otherwise the outing comes back, open cards only.
         const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
           ? body.canonicalReviewStatuses as Record<string, string> : null;
+        if (statuses) onOutingConflict(decision.itemId, statuses);
         if (statuses && statuses[decision.itemId] !== undefined && statuses[decision.itemId] !== "open") return "gone";
-        if (statuses) outingConflictStatuses.current.set(decision.itemId, statuses);
         return "changed";
       }
       // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
@@ -1066,7 +1073,7 @@ function useReviewDecisions(
       void refresh().catch(() => undefined);
       return "saved";
     });
-  }, [controller, openItems, outingConflictStatuses, refresh]);
+  }, [controller, onOutingConflict, openItems, refresh]);
 
   useEffect(() => onBeforeSessionChange(() => controller.flushAndSettle()), [controller]);
 

@@ -893,5 +893,25 @@ describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
       { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] }
     ]);
   });
+
+  it("drops a revived Move the server says was decided, so the next Log it sends only open cards (Codex r3 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    answer = (body) => body.mutation.action === "confirm_outing" && (body.mutation.memberReviewItemIds as string[]).includes(THERE)
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(title(container)).toBe("Unknown place");
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => request.body.mutation)).toEqual([
+      { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] },
+      { action: "confirm_outing", memberReviewItemIds: [BACK] }
+    ]);
+  });
 });
 
