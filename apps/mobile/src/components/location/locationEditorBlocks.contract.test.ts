@@ -17,7 +17,10 @@ describe("Location evidence editor in Blocks (UIA-027)", () => {
   // Staging feedback D1: the entry sheet's chips (the chosen one filled in its activity colour,
   // as in the entry sheet; never coral), then All activities with search and Create.
   it("chooses the activity with the shared Blocks chips and All activities picker", () => {
-    expect(editor).toContain('import { ActivityChip, ActivityChipRow, AllActivitiesChip } from "../ActivityChips";');
+    expect(editor).toContain('import { ACTIVITY_CHIP_GAP, ActivityChip, ActivityChipRow, AllActivitiesChip, activityChipStyles } from "../ActivityChips";');
+    // The chips and All activities fit into two rows, never the chosen chip dropped (owner, 17 Oct 2026).
+    expect(editor).toContain("maxRows: 2,");
+    expect(editor).toContain("selectedId: selectedCategoryId,");
     expect(editor).toContain("activityChips(categories, chipAnchorId, recentActivityIds)");
     expect(editor).toContain("<ActivityPickerSheet");
     expect(editor).toContain("onCreate={onCreateActivity}");

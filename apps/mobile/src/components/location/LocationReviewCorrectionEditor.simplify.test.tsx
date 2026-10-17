@@ -344,6 +344,29 @@ describe("Where were you? (D2, D3)", () => {
     expect(texts("Record visit")).toHaveLength(1);
   });
 
+  it("asks the map to show each place chosen from a list, never one chosen on the map (Codex r3 on #482)", async () => {
+    native.resolveNearby.mockResolvedValue({
+      suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
+      formattedAddress: "2 Example Road", latitude: 10.003, longitude: 20.0001
+    });
+    await render(stay({ matched: true }));
+    const token = () => map.props!.revealChoiceToken as number;
+    const opening = token();
+    await press(byTestId("location-evidence-nearby-0")[0]);
+    expect(map.props!.selectedPoint).toEqual({ latitude: 10.003, longitude: 20.0001 });
+    expect(token()).toBe(opening + 1);
+    // Back to the match from its row: shown again, and again for a second tap at the same point.
+    const studio = () => tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string"
+      && String(node.props.accessibilityLabel).startsWith("Example Studio"))[0];
+    await press(studio());
+    expect(token()).toBe(opening + 2);
+    await press(studio());
+    expect(token()).toBe(opening + 3);
+    // A tap on the place's own marker is on the map, so the map stays put.
+    act(() => { (map.props!.onSelectSavedPlace as (id: string) => void)("place-studio"); });
+    expect(token()).toBe(opening + 3);
+  });
+
   // Codex r1 on #358: a pick that resolves late never overwrites what the person did meanwhile.
   function deferNearbyResolution() {
     let finish!: () => void;
@@ -452,9 +475,28 @@ describe("What did you do? (D1)", () => {
     await render(stay({ matched: false }), ["cat-read"]);
     expect(tree!.root.findAll((node) => isHost(node, "ScrollView") && node.props.horizontal)).toHaveLength(0);
     const chips = byTestId("location-evidence-activity-chips")[0];
-    const labels = chips.findAll((node) => isHost(node, "Pressable")).map((node) => node.props.accessibilityLabel);
+    // The visible chips (the off-screen measuring copies are hidden from VoiceOver).
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const labels = chips.findAll((node) => isHost(node, "Pressable") && !hidden(node)).map((node) => node.props.accessibilityLabel);
     expect(labels).toEqual(["Set activity to Desk work", "Set activity to Reading", "All activities, 4"]);
     expect(texts("No activity")).toHaveLength(0);
+  });
+
+  it("fits the chips and All activities into two rows, keeping the chosen chip (owner, 17 Oct 2026)", async () => {
+    await render(stay({ matched: false }), ["cat-read"]);
+    await press(byTestId("location-evidence-activity-cat-read")[0]);
+    const chips = byTestId("location-evidence-activity-chips")[0];
+    const hidden = (node: ReactTestInstance | null): boolean => Boolean(node && (node.props.accessibilityElementsHidden || hidden(node.parent)));
+    const layout = (width: number) => ({ nativeEvent: { layout: { width, height: 38, x: 0, y: 0 } } });
+    await act(async () => {
+      chips.props.onLayout(layout(220));
+      for (const node of chips.findAll((candidate) => typeof candidate.type === "string" && hidden(candidate) && candidate.props.onLayout)) node.props.onLayout(layout(150));
+      byTestId("location-evidence-activity-all")[0].props.onLayout(layout(100));
+    });
+    // 220 wide, 150-wide chips: one chip and the pill take two rows; the chosen Reading stays.
+    const visible = byTestId("location-evidence-activity-chips")[0].findAll((node) => isHost(node, "Pressable") && !hidden(node))
+      .map((node) => node.props.accessibilityLabel);
+    expect(visible).toEqual(["Set activity to Reading", "All activities, 4"]);
   });
 
   it("picks with a tap, clears with a second tap, and sends the choice", async () => {
