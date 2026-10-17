@@ -75,7 +75,8 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain('return evidence.display.title?.trim() || "Trip";');
     expect(evidenceEditorSource).toContain('action: "split"');
     expect(evidenceEditorSource).toContain('action: "merge"');
-    expect(evidenceEditorSource).toContain('action: "record_once"');
+    // The primary button records once; More options has no duplicate "Record once" (owner, 17 Oct 2026).
+    expect(evidenceEditorSource).not.toContain('title="Record once"');
     expect(evidenceSource).not.toContain("Time and uncertainty");
     expect(evidenceSource).not.toContain("Raw evidence is retained until");
     expect(evidenceMapSource).toContain("showDetails = true");
@@ -137,7 +138,7 @@ describe("mobile Review action contracts", () => {
     expect(evidenceEditorSource).toContain("useState(false)");
     expect(evidenceEditorSource).toContain('action: "record_poi_once"');
     expect(evidenceEditorSource).toContain("Save for future visits");
-    expect(evidenceEditorSource).toContain('saveForFuture ? "Save place and record" : "Use once and record"');
+    expect(evidenceEditorSource).toContain('saveForFuture ? "Save place and record" : "Record"');
     expect(evidenceEditorSource).toContain("buildLocationReviewResolutionAction");
   });
 

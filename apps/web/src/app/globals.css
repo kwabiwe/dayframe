@@ -7798,7 +7798,8 @@ dialog.ui-dialog.df-range-custom {
 }
 
 .location-resolve-field > .location-resolve-error {
-  color: var(--danger);
+  /* Small text: the accessible danger text colour (Codex r3 on #474); the underline stays --danger. */
+  color: var(--danger-text);
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0;
