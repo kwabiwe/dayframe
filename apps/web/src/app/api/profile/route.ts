@@ -13,6 +13,8 @@ export async function PATCH(request: Request) {
       workspaceName?: string;
       dailyGoalMinutes?: number;
       weeklyGoalMinutes?: number;
+      /** "Log trips automatically" (PRD D19, A4). */
+      logTripsAutomatically?: boolean;
       currentPassword?: string;
       newPassword?: string;
       /** A change made for one account (Settings › Your day) never lands on another signed in since. */
@@ -41,6 +43,10 @@ export async function PATCH(request: Request) {
       (weeklyGoalMinutes !== undefined && (!Number.isInteger(weeklyGoalMinutes) || weeklyGoalMinutes < 1 || weeklyGoalMinutes > 10080))
     ) {
       return NextResponse.json({ error: "Enter valid daily and weekly goals." }, { status: 400 });
+    }
+
+    if (body.logTripsAutomatically !== undefined && typeof body.logTripsAutomatically !== "boolean") {
+      return NextResponse.json({ error: "Choose whether to log trips automatically." }, { status: 400 });
     }
 
     if (newPassword) {
@@ -112,7 +118,20 @@ export async function PATCH(request: Request) {
       if (row) goals = { ...row, goalsRevision: Number(row.goalsRevision) };
     }
 
-    return NextResponse.json(goals ? { ok: true, goals } : { ok: true });
+    let trips: { logTripsAutomatically: boolean; settingsRevision: number } | undefined;
+    if (body.logTripsAutomatically !== undefined) {
+      // The same server order as the goals (goals_revision orders every Settings value on the user
+      // row), so a client can tell a bootstrap read before this write from one read after it.
+      const updated = await query<{ value: boolean; revision: string | number }>(
+        `update users set log_trips_automatically = $1, goals_revision = goals_revision + 1 where id = $2
+         returning log_trips_automatically as value, goals_revision as revision`,
+        [body.logTripsAutomatically, session.userId]
+      );
+      const row = updated.rows[0];
+      if (row) trips = { logTripsAutomatically: row.value, settingsRevision: Number(row.revision) };
+    }
+
+    return NextResponse.json({ ok: true, ...(goals ? { goals } : {}), ...(trips ?? {}) });
   } catch (error) {
     const response = authErrorResponse(error);
     if (response) return response;

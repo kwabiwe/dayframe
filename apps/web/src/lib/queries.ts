@@ -223,7 +223,11 @@ export type DashboardSeriesPoint = {
 
 export type BootstrapData = {
   authMode?: RequestSession["authMode"];
-  user: { id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: number };
+  user: {
+    id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: number;
+    /** "Log trips automatically" (PRD D19, A4); false where the column is not there yet. */
+    logTripsAutomatically?: boolean;
+  };
   workspace: { id: string; name: string };
   workspaces: Array<{ id: string; name: string }>;
   dateRange: DashboardDateRange;
@@ -442,11 +446,17 @@ export async function getNormalizationContext(
 export async function getUser(session: RequestSession) {
   let result;
   try {
-    result = await query<{ id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: string | number }>(
+    result = await query<{
+      id: string; email: string; name: string; dailyGoalMinutes: number; weeklyGoalMinutes: number; goalsRevision: string | number;
+      logTripsAutomatically: boolean;
+    }>(
+      // "Log trips automatically" through to_jsonb, so a database without the column yet (its
+      // migration runs before this server) reads it as off, as automatic Moves do, and never fails.
       `select id, email, name,
               daily_goal_minutes as "dailyGoalMinutes",
               weekly_goal_minutes as "weeklyGoalMinutes",
-              goals_revision as "goalsRevision"
+              goals_revision as "goalsRevision",
+              coalesce((to_jsonb(users) -> 'log_trips_automatically')::boolean, false) as "logTripsAutomatically"
        from users
        where id = $1`,
       [session.userId]
@@ -466,7 +476,8 @@ export async function getUser(session: RequestSession) {
     name: "Dayframe user",
     dailyGoalMinutes: 480,
     weeklyGoalMinutes: 2400,
-    goalsRevision: 0
+    goalsRevision: 0,
+    logTripsAutomatically: false
   };
 }
 

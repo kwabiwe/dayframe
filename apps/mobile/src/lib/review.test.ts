@@ -255,6 +255,11 @@ describe("mobile review helpers", () => {
     expect(reason("auto_log_logged_before")).toBe("Not logged automatically · this visit was logged once before");
     expect(reason("auto_log_offered_before")).toBe("Not logged automatically · it was offered in Review before");
     expect(reason("auto_log_off")).toBe("Log automatically is off for this place");
+    // Moves that log themselves (PRD D19).
+    expect(reason("travel_mode_unknown", "commute_detected")).toBe("Not logged automatically · how you travelled isn’t clear");
+    expect(reason("log_trips_off", "commute_detected")).toBe("Log trips automatically is off");
+    expect(reason("trip_logged_before", "commute_detected")).toBe("Not logged automatically · this trip was logged once before");
+    expect(reason("trip_logging_opted_out", "commute_detected")).toBe("Not logged automatically · you stopped logging trips like this");
     // Never "automatic location logging is not enabled".
     expect(reason("review_mode", "commute_detected")).toBe("Trips aren’t logged automatically yet");
     expect(reason("review_mode")).toBe("Not logged automatically");

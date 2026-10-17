@@ -240,7 +240,7 @@ export async function replayLocationEvidence(
       const toStayId = stayIds.get(segment.toStaySegmentId);
       return fromStayId && toStayId ? [{...segment, fromStayId, toStayId}] : [];
     });
-  const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds);
+  const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "commute_persistence", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
@@ -384,7 +384,9 @@ async function excludeProtectedReplacements(
        and s.stopped_at > $5::timestamptz - ($6::int * interval '1 day')
        and (s.continuity_status = 'manual' or (s.created_from_event_id is not null and not exists (
          select 1 from review_items ri
-         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})))
+         where ri.workspace_id = $1 and ri.user_id = $2 and ri.location_segment_id = s.id and ${reviewLeavesSegmentToReplay("ri")})
+         -- An unedited Move that logged itself is still replay's to move (PRD D19; Codex r1 on #462).
+         and not ${autoLoggedUneditedSql("s", options.autoLogReconciliation)}))
      order by s.client_segment_id`,
     [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
       LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays + 1])).rows;
@@ -574,7 +576,7 @@ async function supersedeMissingSegments(
   // Before the generic supersession below, which leaves decided rows (an auto-logged visit has an
   // event and no Review) untouched.
   const autoLog = options.autoLogReconciliation
-    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked, autoLogTiming)
+    ? await retireAutoLoggedMissingStays(client, session, { ...options, reconciliation: options.autoLogReconciliation }, stayClientIds, autoLogLocked, autoLogTiming, commuteClientIds)
     : [];
   await retireOpenReviewsForMissingSegments(
     client,
@@ -844,9 +846,10 @@ async function persistCommutes(
   session: RequestSession,
   deviceId: string,
   segments: (CommuteSegment & { fromStayId: string; toStayId: string })[],
-  protectedSegmentIds: Set<string>
+  protectedSegmentIds: Set<string>,
+  autoLogReconciliation?: AutoLogReconciliation
 ): Promise<Map<string, string>> {
-  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "commute_segments", segments, protectedSegmentIds);
+  const {ids, mutable} = await lockAndPartitionSegments(client, session, deviceId, "commute_segments", segments, protectedSegmentIds, autoLogReconciliation);
   for (const chunk of segmentChunks(mutable)) {
     const parameters = chunk.flatMap(segment => [
       session.workspaceId,

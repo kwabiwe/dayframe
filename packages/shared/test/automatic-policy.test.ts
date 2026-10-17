@@ -4,6 +4,7 @@ import {
   LOCATION_ENGINE_V2_CONFIG,
   assessAutomaticLocation,
   assessAutomaticLocationBoundaries,
+  assessAutomaticMove,
   assessAutomaticOverlap,
   classifyAutomaticActivity,
   matchLocationToPlaces,
@@ -168,4 +169,34 @@ it("engine output retains complete bounds, actual commute gaps and replay determ
     expect(segment.maximumObservationGapSeconds).toBe(Math.round(Math.max(...times.slice(1).map((time, index) => time - times[index])) / 1000));
     expect(segment.gapDurationSeconds).toBe(Math.round((Date.parse(segment.stoppedAt) - Date.parse(segment.startedAt)) / 1000));
   }
+});
+
+describe("Moves that log themselves (PRD D19, A3)", () => {
+  const move: CommuteSegment = { ...commute, confidence: "medium_high", travelMode: "automotive" };
+  it("logs a finalised Move between two known places with a clear mode", () => {
+    expect(assessAutomaticMove(move, true)).toEqual({ eligible: true, tier: "standard", reason: "enabled_trusted_commute" });
+    // A Move Motion & Fitness only timed (it did not make it real) still qualifies.
+    expect(assessAutomaticMove({ ...move, motionTimed: true }, true).eligible).toBe(true);
+    // Today's medium saved-route exception, with its extra route readings.
+    expect(assessAutomaticMove({ ...move, confidence: "medium", routeSampleCount: 4 }, true))
+      .toEqual({ eligible: true, tier: "medium_saved_route", reason: "enabled_medium_saved_route_commute" });
+  });
+  it.each([
+    [{ status: "open" }, true, "segment_not_finalised"],
+    [{ qualificationReason: "same_place_outing" }, true, "time_away_review_only"],
+    [{ stops: [{ staySegmentId: "s", startedAt: instant(60_000), stoppedAt: instant(120_000) }] }, true, "journey_contains_stop"],
+    [{ motionSupported: true }, true, "motion_review_only"],
+    [{ stoppedAt: instant(3_600_000 + 59_000), startedAt: instant(3_600_000), startLowerBoundAt: instant(3_600_000),
+      startUpperBoundAt: instant(3_600_000), stopLowerBoundAt: instant(3_600_000 + 59_000), stopUpperBoundAt: instant(3_600_000 + 59_000) },
+      true, "short_journey_review_only"],
+    [{}, false, "untrusted_commute_endpoints"],
+    [{ travelMode: undefined }, true, "travel_mode_unknown"],
+    [{ confidence: "low" }, true, "insufficient_confidence"],
+    [{ continuityStatus: "manual" }, true, "uncertain_boundary"],
+    [{ routeSampleCount: 1 }, true, "insufficient_route_evidence"],
+    [{ maximumObservationGapSeconds: 721 }, true, "internal_route_gap"],
+    [{ stopUpperBoundAt: instant(3_600_000 + tolerance + 1) }, true, "boundary_uncertainty_exceeded"]
+  ] as const)("keeps a Move in Review when %o (ends known %s): %s", (patch, endsKnown, reason) => {
+    expect(assessAutomaticMove({ ...move, ...patch } as CommuteSegment, endsKnown)).toMatchObject({ eligible: false, reason });
+  });
 });

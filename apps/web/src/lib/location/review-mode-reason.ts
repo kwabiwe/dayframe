@@ -1,3 +1,4 @@
+import type { AutoMoveFallback } from "./location-auto-moves";
 import { assessAutomaticLocation, type LocationAutomaticLoggingReason, type LocationSegment } from "@dayframe/shared";
 
 /**
@@ -38,7 +39,7 @@ export function autoLogPolicyFallback(reason: LocationAutomaticLoggingReason): A
 export function reviewModeSemanticReason(
   segment: LocationSegment,
   trusted: { autoLog?: boolean | null } | null,
-  fallback: AutoLogFallbackReason | LocationAutomaticLoggingReason | undefined
+  fallback: AutoLogFallbackReason | LocationAutomaticLoggingReason | AutoMoveFallback | undefined
 ): string {
   if (fallback) return fallback;
   if (segment.kind === "stay") {

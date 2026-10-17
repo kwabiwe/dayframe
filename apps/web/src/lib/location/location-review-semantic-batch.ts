@@ -4,13 +4,14 @@ import {
   AUTOMATIC_LOCATION_POLICY_VERSION, LOCATION_ENGINE_V2_CONFIG, assessAutomaticLocation, assessAutomaticOverlap,
   type CommuteSegment, type LocationSegment, type StaySegment
 } from "@dayframe/shared";
-import { hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
+import { assessAutomaticMove, hasMeaningfulKnownPlaceWindow, isTimeAway, moveName, stayName, type MoveEndpoint, type MoveName } from "@dayframe/shared";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql, placeRoleLabelSql } from "../place-display";
 import { ensureCommuteCategoryId, ensureTravelCategoryId, findErrandsCategoryId } from "../automatic-category-service";
 import { locationSemanticDisposition } from "./location-semantic-policy";
 import { autoLogPolicyFallback, reviewModeSemanticReason, type AutoLogFallbackReason } from "./review-mode-reason";
 import { learnedNamesFor, namePatternsFor } from "./name-patterns";
+import { chooseAutoLoggedMoves, logTripsAutomatically, moveEndsKnown, movesBlocked, optedOutMoves, retireCoveredAutoMoves } from "./location-auto-moves";
 import { reopenSupersededReviews } from "./location-review-supersession";
 import { healthCoveredMoves, retireCoveredCandidateCards } from "./health-coverage";
 import {
@@ -264,6 +265,7 @@ export async function emitReviewSemanticSegments(
   // (retireHealthCoveredMoveCards), and it comes back if the workout goes while its evidence lasts.
   const healthCovered = await healthCoveredMoves(client, session, offerable);
   changes.count += await retireCoveredCandidateCards(client, session, [...healthCovered]);
+  changes.count += await retireCoveredAutoMoves(client, session, [...healthCovered], autoLog.locked);
   const eligible = offerable.filter((row) => !healthCovered.has(row.clientEventId));
   const existing = new Map<string, { id: string; clientEventId: string; reviewStatus: string; autoLogSuperseded: boolean }>();
   for (const batch of chunks(eligible)) {
@@ -313,6 +315,16 @@ export async function emitReviewSemanticSegments(
   // activity the card's activity; after two uses it also names a Log automatically block.
   const patterns = await namePatternsFor(client, session, eligible, stayIds, commuteIds, evidenceTimeZones, corrections.correctedMoves);
   const learnedNames = await learnedNamesFor(client, session, patterns);
+  // Moves log themselves (PRD D19, A3/A4) when the person's switch is on and the evidence is clear.
+  const moveIds = new Set(eligible.flatMap((row) => row.segment.kind === "commute" ? [row.clientEventId] : []));
+  const autoMoves = await chooseAutoLoggedMoves(client, session, eligible, {
+    stays: new Map(segments.flatMap((segment) => segment.kind === "stay" ? [[segment.clientSegmentId, segment] as const] : [])),
+    prior: new Set(existing.keys()),
+    freshAgain,
+    optedOut: moveIds.size ? await optedOutMoves(client, session, patterns, moveIds) : new Set(),
+    orphanEntryIds: lockedOrphans.map((orphan) => orphan.entryId),
+    enabled: moveIds.size > 0 && await logTripsAutomatically(client, session)
+  });
   const rows = eligible.map(({ segment, segmentId, clientEventId }) => {
     const { trusted, title: placeTitle, move } = context(segment);
     const pattern = patterns.get(clientEventId);
@@ -337,7 +349,8 @@ export async function emitReviewSemanticSegments(
     const overlapsConfirmedTime = !overlapDecision.allowed;
     const semanticReason = overlapsConfirmedTime
       ? overlapDecision.reason
-      : reviewModeSemanticReason(segment, trusted, autoLogged.fallback.get(clientEventId));
+      : reviewModeSemanticReason(segment, trusted, segment.kind === "commute"
+        ? autoMoves.fallback.get(clientEventId) : autoLogged.fallback.get(clientEventId));
     const policyEvidence = {
       policyVersion: AUTOMATIC_LOCATION_POLICY_VERSION,
       confidenceTier: disposition.confidenceTier,
@@ -386,10 +399,10 @@ export async function emitReviewSemanticSegments(
         };
     const eventType = segment.kind === "commute" ? "commute_detected" : segment.placeMatchKind === "learned"
       ? "learned_place_visit" : segment.placeMatchKind === "saved" ? "geofence_exit" : "unknown_stay";
-    // Log automatically: confirmed now, never a Review card.
-    const autoLog = autoLogged.logged.has(clientEventId);
+    // Log automatically (a visit) or a Move that logs itself: confirmed now, never a Review card.
+    const autoLog = autoLogged.logged.has(clientEventId) || autoMoves.logged.has(clientEventId);
     const payload: Record<string, unknown> = autoLog
-      ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: "place_auto_log" }
+      ? { ...rawPayload, semanticDisposition: "auto_logged", semanticReason: segment.kind === "commute" ? "move_auto_log" : "place_auto_log" }
       : rawPayload;
     return { client_event_id: clientEventId, segment_id: segmentId, kind: segment.kind,
       event_type: eventType, occurred_at: segment.startedAt, stopped_at: segment.stoppedAt,
@@ -468,12 +481,28 @@ export async function emitReviewSemanticSegments(
   for (const row of linked.filter((candidate) => candidate.auto_log)) {
     changes.count += await writeAutoLoggedBlock(client, session, row, autoLog);
   }
-  // A visit already auto-logged whose stay kept its ID while its boundaries moved (a late fix): its
-  // unedited block follows (Codex r1 on #435). Only within the reconciliation window, where replay
-  // re-persisted the stay; elsewhere the stay is a decision and its block stays put.
+  // A visit (or a Move, PRD D19) already auto-logged whose segment kept its ID while its boundaries
+  // moved (a late fix): its unedited block follows (Codex r1 on #435). Only within the reconciliation
+  // window, where replay re-persisted the segment; elsewhere it is a decision and its block stays put.
   if (autoLog.reconciliation) {
     const since = Date.parse(autoLog.reconciliation.sinceAt);
-    const followed = linked.filter((row) => row.kind === "stay" && !row.auto_log && Date.parse(row.occurred_at) >= since);
+    // A Move's block follows only while the Move, so moved, would still log itself: clear, and over no
+    // tracked time beyond five minutes nor a running timer (its own block aside); otherwise the block
+    // stays where it was logged (Codex r1 on #462).
+    const segmentOf = new Map(eligible.map((row) => [row.clientEventId, row.segment]));
+    const stayById = new Map(segments.flatMap((segment) => segment.kind === "stay" ? [[segment.clientSegmentId, segment] as const] : []));
+    const moves = linked.filter((row) => !row.auto_log && row.kind === "commute" && Date.parse(row.occurred_at) >= since &&
+      existing.get(row.client_event_id)?.reviewStatus === "confirmed");
+    const stillClear = moves.filter((row) => {
+      const segment = segmentOf.get(row.client_event_id);
+      return segment?.kind === "commute" && assessAutomaticMove(segment, moveEndsKnown(segment, stayById)).eligible;
+    });
+    const blockedMoves = await movesBlocked(client, session, stillClear.map((row) => ({
+      key: row.client_event_id, startedAt: row.occurred_at, stoppedAt: row.stopped_at!, eventId: row.event_id
+    })), lockedOrphans.map((orphan) => orphan.entryId), "overlap");
+    const unfollowed = new Set(moves.filter((row) => !stillClear.includes(row) || blockedMoves.has(row.client_event_id))
+      .map((row) => row.client_event_id));
+    const followed = linked.filter((row) => !row.auto_log && Date.parse(row.occurred_at) >= since && !unfollowed.has(row.client_event_id));
     for (const batch of chunks(followed)) {
       const bounds = JSON.stringify(batch.map((row) => ({
         event_id: row.event_id, occurred_at: row.occurred_at, stopped_at: row.stopped_at
@@ -488,6 +517,26 @@ export async function emitReviewSemanticSegments(
            and (te.started_at, te.stopped_at) is distinct from (r.occurred_at, r.stopped_at)`,
         [session.workspaceId, session.userId, bounds, [...autoLog.locked]]);
       changes.count += moved.rowCount ?? 0;
+    }
+    // A Move that logged itself keeps its event in step with the Move replay re-emits under the same
+    // ID — its window when its unedited block followed, and its current travel mode — so checks that
+    // read the event (Health coverage, "logged before") judge the Move as it now is (Codex r4 on #462).
+    const followedIds = new Set(followed.map((row) => row.client_event_id));
+    for (const batch of chunks(moves)) {
+      await client.query(
+        `update activity_events ae
+         set raw_payload = (ae.raw_payload - 'travelMode')
+           || case when r.travel_mode is null then '{}'::jsonb else jsonb_build_object('travelMode', r.travel_mode) end
+           || case when r.followed then jsonb_build_object('startedAt', r.started_at, 'stoppedAt', r.stopped_at) else '{}'::jsonb end
+         from jsonb_to_recordset($3::jsonb) as r(event_id uuid, travel_mode text, followed boolean, started_at text, stopped_at text)
+         where ae.workspace_id = $1 and ae.user_id = $2 and ae.id = r.event_id
+           and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
+           and exists (select 1 from time_entries te where te.workspace_id = $1 and te.user_id = $2
+             and te.created_from_event_id = ae.id and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null)`,
+        [session.workspaceId, session.userId, JSON.stringify(batch.map((row) => ({
+          event_id: row.event_id, travel_mode: (row.raw_payload as { travelMode?: string }).travelMode ?? null,
+          followed: followedIds.has(row.client_event_id), started_at: row.occurred_at, stopped_at: row.stopped_at
+        })))]);
     }
   }
   for (const batch of chunks(linked.filter(row => row.review_status === "needs_review"))) {
@@ -626,20 +675,22 @@ async function chooseAutoLoggedVisits(
 }
 
 /**
- * Writes one auto-logged visit's block: the unedited block of a visit replay just retired at the same
- * place and overlapping time moves to this visit (owner decision 15 Oct 2026: the block follows the
+ * Writes one auto-logged visit's (or Move's) block: the unedited block of a visit (Move) replay just
+ * retired at the same place and overlapping time moves to this one (owner decision 15 Oct 2026: the block follows the
  * visit), otherwise a new block tied to the stay's event, at most one per event. Returns the number
  * of blocks written.
  */
 async function writeAutoLoggedBlock(
   client: pg.PoolClient, session: RequestSession,
-  row: { event_id: string; place_id: string | null; category_id: string | null; description: string | null;
+  row: { event_id: string; kind: string; place_id: string | null; category_id: string | null; description: string | null;
     occurred_at: string; stopped_at?: string | null; confidence: string },
   autoLog: { orphans: AutoLogOrphan[]; used: Set<string>; locked: ReadonlySet<string> }
 ) {
   const start = Date.parse(row.occurred_at);
   const stop = row.stopped_at ? Date.parse(row.stopped_at) : Number.POSITIVE_INFINITY;
   const orphan = autoLog.orphans.find((candidate) => autoLog.locked.has(candidate.entryId) && !autoLog.used.has(candidate.entryId) &&
+    // A visit's block moves only to a visit, a Move's only to a Move (PRD D19).
+    (candidate.kind ?? "stay") === (row.kind === "commute" ? "commute" : "stay") &&
     candidate.placeId === row.place_id && Date.parse(candidate.startedAt) < stop &&
     (candidate.stoppedAt ? Date.parse(candidate.stoppedAt) : Number.POSITIVE_INFINITY) > start);
   if (orphan) {

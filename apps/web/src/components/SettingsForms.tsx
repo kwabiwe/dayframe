@@ -392,6 +392,92 @@ export function PlacesLocationSettings() {
         detail="Places Dayframe recognises, and whether visits there are suggested."
         action={<Link className="df-rbtn df-rbtn--sm" href="/places">Manage</Link>}
       />
+      <TripLoggingSetting />
+    </>
+  );
+}
+
+/** "Log trips automatically" for the signed-in account; a different account gets a fresh switch. */
+function TripLoggingSetting() {
+  const { data, refresh } = useAppShellRuntime();
+  if (!data) return null;
+  return (
+    <TripLoggingSwitch
+      key={data.user.id}
+      refresh={refresh}
+      revision={data.user.goalsRevision ?? 0}
+      stored={data.user.logTripsAutomatically ?? false}
+      userId={data.user.id}
+    />
+  );
+}
+
+/**
+ * "Log trips automatically" (PRD D19, A4; on by default): a Move between two known places with a clear
+ * way of travelling becomes a block without a Review card. The switch moves at once; once the server
+ * stores it, that value shows until a bootstrap read after the write arrives: the server orders the
+ * switch with the goals (`goalsRevision`), so a copy read before the save, or kept by a local timer
+ * update, never replaces it (Codex r1–r4 on #462). A refused save puts it back and says why.
+ */
+export function TripLoggingSwitch({ refresh, revision, stored, userId }: {
+  refresh: (options?: { force?: boolean }) => Promise<unknown>;
+  /** The server revision of the bootstrap `stored` came from (`user.goalsRevision`). */
+  revision: number;
+  stored: boolean;
+  userId: string;
+}) {
+  const [pending, setPending] = useState<boolean | null>(null);
+  const [saved, setSaved] = useState<{ value: boolean; revision: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const checked = pending ?? (saved && revision < saved.revision ? saved.value : stored);
+
+  async function save(next: boolean) {
+    if (pending !== null) return;
+    setPending(next);
+    setError(null);
+    try {
+      const response = await clientFetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logTripsAutomatically: next, expectedUserId: userId })
+      });
+      if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to save this setting."));
+      const body = (await response.json().catch(() => ({}))) as { logTripsAutomatically?: unknown; settingsRevision?: unknown };
+      setSaved({
+        value: typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : next,
+        // Without a revision (an older server) the saved value holds until any newer revision.
+        revision: typeof body.settingsRevision === "number" ? body.settingsRevision : revision + 1
+      });
+      try {
+        await refresh({ force: true });
+      } catch {
+        // The saved value still shows; the next bootstrap brings the rest.
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to save this setting.");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <>
+      <label className="place-suggestion-toggle df-set-trips">
+        <span>
+          <strong>Log trips automatically</strong>
+          <small id="df-set-trips-hint">Trips between your places become blocks when it’s clear how you travelled. Anything unclear waits in Review.</small>
+        </span>
+        <input
+          aria-describedby="df-set-trips-hint"
+          aria-label="Log trips automatically"
+          checked={checked}
+          disabled={pending !== null}
+          onChange={(event) => void save(event.target.checked)}
+          role="switch"
+          type="checkbox"
+        />
+      </label>
+      {error ? <p className="settings-section-feedback is-error" role="alert">{error}</p> : null}
     </>
   );
 }

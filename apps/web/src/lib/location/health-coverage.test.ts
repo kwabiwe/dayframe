@@ -78,6 +78,34 @@ describe("Health walks win (PRD D19)", () => {
     expect(statements).toEqual(["commit", "rollback"]);
   });
 
+  it("judges a Move that logged itself by its block's current bounds, not its event's first window (Codex r3 on #462)", async () => {
+    // Replay moved the walk's block from 12:01–12:11 to 12:00:15–12:11; a walking workout 12:06–12:16
+    // covers the first window but under half of the current one, so the block stays.
+    const statements: string[] = [];
+    const client = {
+      on: vi.fn(), removeListener: vi.fn(), release: vi.fn(),
+      query: vi.fn(async (sql: string) => {
+        const text = sql.trim();
+        statements.push(text);
+        if (text.includes("current_setting('transaction_timeout'")) return { rows: [{ transaction_timeout: null }] };
+        if (text.includes("pg_try_advisory_xact_lock")) return { rows: [{ acquired: true }] };
+        if (text.includes('te.id as "entryId"') && text.includes("health_workouts")) {
+          return { rows: [{ entryId: "00000000-0000-4000-8000-0000000000b1", eventId: "00000000-0000-4000-8000-0000000000e1",
+            startedAt: new Date("2026-10-16T12:00:15.000Z"), stoppedAt: new Date(at(11)), travelMode: "walking" }] };
+        }
+        if (text.includes("jsonb_to_recordset")) {
+          return { rows: [{ key: "00000000-0000-4000-8000-0000000000e1", startedAt: new Date(at(6)), stoppedAt: new Date(at(16)),
+            storedType: "walking", payloadType: null, label: null, activity: null }] };
+        }
+        return { rows: [] };
+      })
+    };
+    expect(await reconcileHealthCoveredMoveCardsNow(session, { now: at(60), databasePool: { connect: vi.fn(async () => client) } as never })).toBe(0);
+    const page = statements.find((text) => text.includes('te.id as "entryId"') && text.includes("health_workouts"))!;
+    expect(page).toContain('te.started_at as "startedAt"');
+    expect(statements.some((text) => text.startsWith("delete from time_entries"))).toBe(false);
+  });
+
   it("does nothing while a replay holds the location owner lock", async () => {
     const client = {
       on: vi.fn(), removeListener: vi.fn(), release: vi.fn(),
