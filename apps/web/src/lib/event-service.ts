@@ -1931,6 +1931,11 @@ export async function deleteLearnedPlace(
   }
 }
 
+/** Creates a place inside the caller's transaction (Review's "Save this place"). */
+export function insertPlaceWith(client: Pick<pg.PoolClient, "query">, input: PlaceMutationFields, session: RequestSession) {
+  return insertPlaceRecord(<T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => client.query<T>(statement, values), input, session);
+}
+
 async function insertPlaceRecord(
   runQuery: QueryRunner,
   input: PlaceMutationFields,

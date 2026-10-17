@@ -201,6 +201,8 @@ export async function reconcileReviewMutations(input: unknown, session: RequestS
         const checkedAt = new Date().toISOString();
         if (!rows.rows.find(row => row.id === envelope.reviewItemId)) return { ...base, checkedAt, state: "missing" };
         if (rows.rows.length === ids.length && rows.rows.every(row => row.status === "open")) return { ...base, checkedAt, state: "open" };
+        // "Save this place" needs its card open: once it was decided, it can no longer apply.
+        if (envelope.mutation.action === "save_place") return { ...base, checkedAt, state: "conflict", reason: "different_final_decision" };
         const wanted = ["ignore_once", "ignore_once_location"].includes(envelope.mutation.action) ? "ignored" : "accepted";
         if (rows.rows.some(row => ["accepted", "ignored"].includes(row.status) && row.status !== wanted)) {
           return { ...base, checkedAt, state: "conflict", reason: "different_final_decision" };

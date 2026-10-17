@@ -28,7 +28,9 @@ export async function namePatternsFor(
   client: Pick<pg.PoolClient, "query">, session: RequestSession,
   candidates: ReadonlyArray<{ clientEventId: string; segment: LocationSegment }>,
   stayIds: ReadonlyMap<string, string>, commuteIds: ReadonlyMap<string, string>,
-  evidenceTimeZones: ReadonlyMap<string, string>
+  evidenceTimeZones: ReadonlyMap<string, string>,
+  /** Moves whose ends their person corrected: a round trip only when the corrected ends are one place (Codex r4 on #459). */
+  correctedMoves: ReadonlySet<string> = new Set()
 ) {
   const patterns = new Map<string, NamePattern>();
   if (candidates.length === 0) return patterns;
@@ -55,7 +57,10 @@ export async function namePatternsFor(
       if (row.latitude != null && row.longitude != null) endCentres.set(row.id, { latitude: row.latitude, longitude: row.longitude });
     }
   }
-  const roundTrips = moves.filter(({ segment }) => isRoundTrip(segment));
+  const roundTripOf = (segment: CommuteSegment) => correctedMoves.has(segment.clientSegmentId)
+    ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
+    : isRoundTrip(segment);
+  const roundTrips = moves.filter(({ segment }) => roundTripOf(segment));
   // A round trip's turnaround: the farthest of its route readings and its stops from where it began
   // (an outing with a stop may have no route links at all; Codex r1 on #458).
   const farthest = new Map<string, { latitude: number; longitude: number; metres: number }>();
@@ -109,7 +114,7 @@ export async function namePatternsFor(
     } else {
       const from = endKeys.get(stayIds.get(segment.fromStaySegmentId) ?? "") ?? null;
       const to = endKeys.get(stayIds.get(segment.toStaySegmentId) ?? "") ?? null;
-      const roundTrip = isRoundTrip(segment);
+      const roundTrip = roundTripOf(segment);
       const turnaround = roundTrip ? turnaroundOf(segment) : null;
       // A round trip whose turnaround is unknown has no pattern: different outings would share one.
       key = roundTrip && !turnaround ? null

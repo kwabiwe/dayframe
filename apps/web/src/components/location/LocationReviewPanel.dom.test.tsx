@@ -91,6 +91,79 @@ describe("LocationReviewPanel", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("saves where you were without logging, keeps the panel and its edits, and says what it matched (design §7)", async () => {
+    const stay = unsavedStay();
+    mocks.clientFetch
+      .mockResolvedValueOnce(jsonResponse(stay))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, action: "save_place", status: "open", placeId: "30000000-0000-4000-8000-000000000001", rematchedCount: 2 }))
+      .mockResolvedValueOnce(jsonResponse({ ...stay, display: { ...stay.display, placeId: "30000000-0000-4000-8000-000000000001", placeName: "Swim club" } }));
+    const onClose = vi.fn();
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[1].id} onClose={onClose} />
+    );
+    const user = userEvent.setup();
+    const description = await screen.findByLabelText("Description") as HTMLInputElement;
+    await user.clear(description);
+    await user.type(description, "Lessons");
+    await user.type(screen.getByLabelText("Place name"), "Swim club");
+    await user.click(screen.getByRole("radio", { name: "Large" }));
+    await user.click(screen.getByRole("switch", { name: "Log automatically" }));
+    await user.click(screen.getByRole("button", { name: "Save place" }));
+
+    expect(await screen.findByRole("status")).toHaveProperty("textContent", "Saved Swim club · 2 more visits now use it");
+    expect(JSON.parse(String((mocks.clientFetch.mock.calls[1]?.[1] as RequestInit).body))).toEqual({
+      action: "save_place", name: "Swim club", radiusMeters: 200, categoryId: categories[1].id, suggestVisits: true, autoLog: true
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect((screen.getByLabelText("Description") as HTMLInputElement).value).toBe("Lessons");
+    // The card now has its place: the box is gone.
+    await waitFor(() => expect(screen.queryByLabelText("Place name")).toBeNull());
+  });
+
+  it("saves and confirms with the Resolve edits, and turning suggestions off turns Log automatically off", async () => {
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(unsavedStay())).mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const onClose = vi.fn();
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[1].id} onClose={onClose} />
+    );
+    const user = userEvent.setup();
+    const description = await screen.findByLabelText("Description") as HTMLInputElement;
+    await user.clear(description);
+    await user.type(description, "Lessons");
+    await user.type(screen.getByLabelText("Place name"), "Swim club");
+    await user.click(screen.getByRole("switch", { name: "Log automatically" }));
+    await user.click(screen.getByRole("switch", { name: "Suggest visits here" }));
+    expect((screen.getByRole("switch", { name: "Log automatically" }) as HTMLInputElement).checked).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Save place and confirm" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(JSON.parse(String((mocks.clientFetch.mock.calls[1]?.[1] as RequestInit).body))).toMatchObject({
+      action: "save_place_and_confirm", name: "Swim club", latitude: 0.001, longitude: 0.002, radiusMeters: 110,
+      suggestVisits: false, autoLog: false,
+      edit: { categoryId: categories[1].id, description: "Lessons", descriptionTyped: true }
+    });
+  });
+
+  it("keeps every field and says so when Dayframe can't be reached (Codex r1 on #459)", async () => {
+    mocks.clientFetch.mockResolvedValueOnce(jsonResponse(unsavedStay())).mockRejectedValueOnce(new TypeError("Network request failed"));
+    const onClose = vi.fn();
+    render(
+      <LocationReviewPanel reviewItemId="10000000-0000-4000-8000-000000000001" categories={categories} entries={[]}
+        initialCategoryId={categories[1].id} onClose={onClose} />
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Place name"), "Swim club");
+    await user.click(screen.getByRole("radio", { name: "Large" }));
+    await user.click(screen.getByRole("button", { name: "Save place" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Couldn't reach Dayframe");
+    expect((screen.getByLabelText("Place name") as HTMLInputElement).value).toBe("Swim club");
+    expect((screen.getByRole("radio", { name: "Large" }) as HTMLInputElement).checked).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("keeps a failed evidence panel open and retries in place", async () => {
     mocks.clientFetch
       .mockResolvedValueOnce(jsonResponse({ error: "Unable to load location evidence." }, 503))
@@ -243,6 +316,17 @@ function evidence(): LocationReviewEvidenceDto {
     evidenceExpired: false,
     rawEvidenceAvailable: false,
     textualSummary: "Only journey endpoints are available."
+  };
+}
+
+/** An unsaved Stay with a centre (synthetic coordinates). */
+function unsavedStay(): LocationReviewEvidenceDto {
+  const base = evidence();
+  return {
+    ...base,
+    segment: { ...base.segment, kind: "stay", travelMode: null, timeAway: false },
+    display: { ...base.display, title: "Visit at an unknown place", placeId: null, placeName: null },
+    map: { ...base.map, centre: { type: "Point", coordinates: [0.002, 0.001] } }
   };
 }
 
