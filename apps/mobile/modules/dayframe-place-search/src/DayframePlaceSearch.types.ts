@@ -76,3 +76,21 @@ export type NearbyPointOfInterestResolutionRequest = {
   id: string;
   requestId: string;
 };
+
+/** What the MapKit checks found: counts, distances, kinds and yes/no only (no names or points). */
+export type MapKitProbeReport = {
+  osVersion: string;
+  radii: { radiusMeters: number; count: number; farthestMeters: number | null; error: string | null }[];
+  kindsWithin400m: Record<string, number>;
+  areasOfInterest: { answered: boolean; count: number; error: string | null };
+  placeIds: {
+    supported: boolean;
+    places: number;
+    withPlaceId: number;
+    found: number;
+    notFound: number;
+    foundAMinuteLater: number | null;
+    notFoundAMinuteLater: number | null;
+  };
+  rapid: { attempts: number; succeeded: number; firstErrorAt: number | null; firstError: string | null };
+};

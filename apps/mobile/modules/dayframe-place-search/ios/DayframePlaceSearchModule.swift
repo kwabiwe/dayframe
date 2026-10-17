@@ -62,6 +62,9 @@ public final class DayframePlaceSearchModule: Module {
     searcher: MapKitNearbyPointOfInterestSearcher()
   )
 
+  @MainActor
+  private lazy var probe = MapKitProbe()
+
   public func definition() -> ModuleDefinition {
     Name("DayframePlaceSearch")
     Events("onSuggestionsChanged", "onSearchError")
@@ -154,6 +157,15 @@ public final class DayframePlaceSearchModule: Module {
     AsyncFunction("cancelNearby") {
       Task { @MainActor in
         self.nearbyCoordinator.cancel()
+      }
+    }.runOnQueue(.main)
+
+    // Settings › Sync help: counts and yes/no answers only (MapKitProbe never returns a name,
+    // address, coordinate or Place ID). Takes a little over a minute.
+    AsyncFunction("probeMapKit") { (latitude: Double, longitude: Double, promise: Promise) in
+      Task { @MainActor in
+        let report = await self.probe.run(latitude: latitude, longitude: longitude)
+        promise.resolve(report.dictionary)
       }
     }.runOnQueue(.main)
 
