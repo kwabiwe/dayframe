@@ -84,7 +84,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(page).toContain("timelinePreferenceFromCookieValue");
     expect(page).toContain("timelineStateFromSearchParams(params, { preference, today: todayKey })");
     expect(page).toContain("if (currentHref !== canonicalHref) redirect(canonicalHref)");
-    expect(page).toContain("getBootstrapData(session, { selectedDate: state.date })");
+    expect(page).toContain("getBootstrapData(session, { selectedDate: state.date, timeZone: await getViewerTimeZoneIfSent() })");
     expect(page).not.toContain("PageHeader");
     // The visible month heading in the Calendar head replaces the screen-reader-only one.
     expect(page).not.toContain('<h1 className="sr-only">Timeline</h1>');

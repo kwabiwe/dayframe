@@ -11,7 +11,7 @@ import {
   timelineStateFromSearchParams
 } from "@/lib/timeline-view";
 import { zonedDateKey } from "@/lib/viewer-time-zone";
-import { getViewerTimeZone } from "@/lib/viewer-time-zone-server";
+import { getViewerTimeZone, getViewerTimeZoneIfSent } from "@/lib/viewer-time-zone-server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,9 @@ export default async function TimelinePage({
   const currentHref = currentSearch ? `/timeline?${currentSearch}` : "/timeline";
   const canonicalHref = timelineHref(params, state);
   if (currentHref !== canonicalHref) redirect(canonicalHref);
-  const data = await getBootstrapData(session, { selectedDate: state.date });
+  // The week's and day's ranges follow the viewer's midnights when the browser sent its zone, so a
+  // block just after local midnight is never cut from a past week (UTC server; follow-up to #367).
+  const data = await getBootstrapData(session, { selectedDate: state.date, timeZone: await getViewerTimeZoneIfSent() });
 
   return (
     <div className="timeline-page">

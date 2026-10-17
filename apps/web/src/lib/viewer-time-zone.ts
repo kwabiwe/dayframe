@@ -122,6 +122,42 @@ export function zonedStartOfDay(dateKey: string, timeZone: string): Date {
   return new Date(candidates[0] ?? wall);
 }
 
+/** The date key `days` after (or before) another, in plain calendar arithmetic. */
+export function addDaysToDateKey(dateKey: string, days: number) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) throw new Error(`Invalid date key: ${dateKey}`);
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + days));
+  return date.toISOString().slice(0, 10);
+}
+
+/** The Monday on or before a date key (the app's weeks start on Monday). */
+export function mondayOfDateKey(dateKey: string) {
+  const weekday = new Date(`${dateKey}T00:00:00Z`).getUTCDay();
+  return addDaysToDateKey(dateKey, weekday === 0 ? -6 : 1 - weekday);
+}
+
+/**
+ * The instant a date's wall clock reads `hour`:00 in a zone; where the clocks skip that hour, the
+ * first instant after the gap.
+ */
+export function zonedWallHour(dateKey: string, hour: number, timeZone: string): Date {
+  if (hour <= 0) return zonedStartOfDay(dateKey, timeZone);
+  if (hour >= 24) return zonedStartOfDay(addDaysToDateKey(dateKey, 1), timeZone);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) throw new Error(`Invalid date key: ${dateKey}`);
+  const wall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), hour);
+  const span = 36 * 3_600_000;
+  const offsets = new Set([wall - span, wall, wall + span].map((probe) => zonedOffsetMs(probe, timeZone)));
+  const candidates = [...offsets]
+    .map((offset) => wall - offset)
+    .filter((candidate) => {
+      const parts = zonedParts(candidate, timeZone);
+      return keyFromParts(parts) === dateKey && parts.hour >= hour;
+    })
+    .sort((left, right) => left - right);
+  return new Date(candidates[0] ?? wall);
+}
+
 /**
  * Writes the browser's zone to the cookie when it is missing or different (client only).
  * Returns true when it changed, so a page the server drew for another zone can redraw.

@@ -27,6 +27,7 @@ import {
 import { placeDisplayNameSql } from "./place-display";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
+import { addDaysToDateKey, mondayOfDateKey, zonedDateKey, zonedStartOfDay, zonedWallHour } from "./viewer-time-zone";
 
 export type ClientRow = {
   id: string;
@@ -277,9 +278,18 @@ export type BootstrapData = {
 
 export async function getBootstrapData(
   session: RequestSession = getDevSession(),
-  options: { selectedDate?: string | Date | null } = {}
+  options: {
+    selectedDate?: string | Date | null;
+    /**
+     * The web viewer's zone (the `dayframe_tz` cookie), when the browser sent it: days, weeks and
+     * series then start at that zone's midnights instead of the server's (UTC on Vercel). Callers
+     * pass it only when the cookie is present, so the iPhone, which never sends it, is unchanged.
+     */
+    timeZone?: string | null;
+  } = {}
 ): Promise<BootstrapData> {
-  const dateRange = buildDashboardDateRange(options.selectedDate);
+  const dateRange = buildDashboardDateRange(options.selectedDate, options.timeZone);
+  const timeZone = options.timeZone ?? null;
   const capturedNow = new Date().toISOString();
   const historyStart = addDays(new Date(dateRange.dayStart), -59).toISOString();
   const [
@@ -399,8 +409,8 @@ export async function getBootstrapData(
       weekAdditionalOverlapSeconds: weekCoverage.additionalOverlapSeconds,
       ...(reviewOutingStays ? { reviewOutingStays } : { reviewOutingStaysOverflow: true })
     },
-    todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow)),
-    weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow))
+    todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow), timeZone),
+    weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow), timeZone)
   };
 }
 
@@ -1328,7 +1338,8 @@ async function getDashboardStats(
   };
 }
 
-function buildDashboardDateRange(input?: string | Date | null): DashboardDateRange {
+export function buildDashboardDateRange(input?: string | Date | null, timeZone?: string | null): DashboardDateRange {
+  if (timeZone) return buildZonedDashboardDateRange(input, timeZone);
   const selected = coerceDate(input);
   selected.setHours(0, 0, 0, 0);
   const dayEnd = addDays(selected, 1);
@@ -1345,6 +1356,23 @@ function buildDashboardDateRange(input?: string | Date | null): DashboardDateRan
     dayEnd: dayEnd.toISOString(),
     weekStart: weekStart.toISOString(),
     weekEnd: weekEnd.toISOString()
+  };
+}
+
+/** The same range with the viewer zone's midnights (DST-safe; date keys do the calendar maths). */
+function buildZonedDashboardDateRange(input: string | Date | null | undefined, timeZone: string): DashboardDateRange {
+  const selectedDate = typeof input === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input)
+    ? input
+    : zonedDateKey(coerceDate(input), timeZone);
+  const weekKey = mondayOfDateKey(selectedDate);
+  return {
+    selectedDate,
+    previousDate: addDaysToDateKey(selectedDate, -1),
+    nextDate: addDaysToDateKey(selectedDate, 1),
+    dayStart: zonedStartOfDay(selectedDate, timeZone).toISOString(),
+    dayEnd: zonedStartOfDay(addDaysToDateKey(selectedDate, 1), timeZone).toISOString(),
+    weekStart: zonedStartOfDay(weekKey, timeZone).toISOString(),
+    weekEnd: zonedStartOfDay(addDaysToDateKey(weekKey, 7), timeZone).toISOString()
   };
 }
 
@@ -1383,39 +1411,47 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function buildHourlySeries(
+export function buildHourlySeries(
   entries: TimeEntryRow[],
   dateRange: DashboardDateRange,
-  capturedNow: Date
+  capturedNow: Date,
+  timeZone: string | null = null
 ): DashboardSeriesPoint[] {
   const hours = Array.from({ length: 8 }, (_, index) => 8 + index * 2);
   const dayStart = new Date(dateRange.dayStart);
+  const at = (hour: number) => {
+    if (timeZone) return zonedWallHour(dateRange.selectedDate, hour, timeZone);
+    const instant = new Date(dayStart);
+    instant.setHours(hour, 0, 0, 0);
+    return instant;
+  };
   return hours.map((hour) => ({
     key: `${hour}`,
     label: `${hour.toString().padStart(2, "0")}:00`,
-    seconds: entries.reduce((sum, entry) => {
-      const start = new Date(dayStart);
-      start.setHours(hour, 0, 0, 0);
-      const end = new Date(dayStart);
-      end.setHours(hour + 2, 0, 0, 0);
-      return sum + entryOverlapSeconds(entry, { start, end }, capturedNow);
-    }, 0)
+    seconds: entries.reduce(
+      (sum, entry) => sum + entryOverlapSeconds(entry, { start: at(hour), end: at(hour + 2) }, capturedNow),
+      0
+    )
   }));
 }
 
-function buildWeekSeries(
+export function buildWeekSeries(
   entries: TimeEntryRow[],
   dateRange: DashboardDateRange,
-  capturedNow: Date
+  capturedNow: Date,
+  timeZone: string | null = null
 ): DashboardSeriesPoint[] {
   const start = new Date(dateRange.weekStart);
+  const weekKey = timeZone ? mondayOfDateKey(dateRange.selectedDate) : null;
   return Array.from({ length: 7 }, (_, index) => {
-    const day = addDays(start, index);
-    const nextDay = addDays(day, 1);
-    const key = toDateKey(day);
+    const dayKey = weekKey ? addDaysToDateKey(weekKey, index) : null;
+    const day = dayKey && timeZone ? zonedStartOfDay(dayKey, timeZone) : addDays(start, index);
+    const nextDay = dayKey && timeZone ? zonedStartOfDay(addDaysToDateKey(dayKey, 1), timeZone) : addDays(day, 1);
+    const key = dayKey ?? toDateKey(day);
     return {
       key,
-      label: new Intl.DateTimeFormat("en-GB", { weekday: "short" }).format(day),
+      label: new Intl.DateTimeFormat("en-GB", { weekday: "short", ...(dayKey ? { timeZone: "UTC" } : {}) })
+        .format(dayKey ? new Date(`${dayKey}T12:00:00Z`) : day),
       seconds: entries.reduce(
         (sum, entry) => sum + entryOverlapSeconds(entry, { start: day, end: nextDay }, capturedNow),
         0
