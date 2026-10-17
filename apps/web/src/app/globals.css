@@ -1662,6 +1662,11 @@ dialog.ui-popover-panel.bottom-left {
   margin: calc(var(--brand-mark-canvas) * 145 / 1024) 0 0;
 }
 
+/* The mark on its own keeps the whole canvas's footprint. */
+.dayframe-brand[data-layout="symbol"] .dayframe-brand-mark {
+  margin-right: calc(var(--brand-mark-canvas) * 199 / 1024);
+}
+
 .dayframe-brand[data-layout="compact"] .dayframe-brand-wordmark {
   width: 104px;
 }
@@ -4853,6 +4858,12 @@ dialog.ui-dialog.df-range-custom {
 
   .landing-brand .dayframe-brand-wordmark-wrap {
     display: none;
+  }
+
+  /* The mark alone keeps the canvas's right margin too, so its footprint and centre are unchanged
+     (Codex r1 on #476). */
+  .landing-brand .dayframe-brand-mark {
+    margin-right: calc(var(--brand-mark-canvas) * 199 / 1024);
   }
 }
 
