@@ -339,10 +339,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => {
-      if (
-        !cachedDateData(selectedDate) &&
-        dataRef.current?.dateRange.selectedDate !== selectedDate
-      ) {
+      const current = dataRef.current;
+      const currentFits = current?.dateRange.selectedDate === selectedDate &&
+        snapshotFitsViewerZone(current.viewerTimeZone, document.cookie);
+      if (!currentFits && !cachedDateData(selectedDate)) {
         void refresh();
       }
     }, 0);
@@ -421,8 +421,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;
     if (nextData.dateRange.selectedDate !== selectedDate) return;
+    // Page props drawn before the zone cookie existed (or for another zone) never replace a copy
+    // built for the zone the browser sends now; shown only when nothing better is there, and then
+    // fetched again (Codex r2 on #484).
+    if (!snapshotFitsViewerZone(nextData.viewerTimeZone, document.cookie)) {
+      const current = dataRef.current;
+      if (current?.dateRange.selectedDate === selectedDate && snapshotFitsViewerZone(current.viewerTimeZone, document.cookie)) return;
+      commitData(nextData, "hydrate");
+      void refresh();
+      return;
+    }
     commitData(nextData, "hydrate");
-  }, [commitData, selectedDate]);
+  }, [commitData, refresh, selectedDate]);
 
   /** The server's id for a block: the real id behind an accepted Start's optimistic block. */
   const serverEntryId = useCallback((entryId: string) => (

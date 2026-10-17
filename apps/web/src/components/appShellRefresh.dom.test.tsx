@@ -32,6 +32,7 @@ const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShell
 afterEach(() => {
   cleanup();
   answers.length = 0;
+  document.cookie = "dayframe_tz=; Max-Age=0; Path=/";
 });
 
 describe("AppShellRuntime refresh", () => {
@@ -65,6 +66,40 @@ describe("AppShellRuntime refresh", () => {
   });
 });
 
+describe("AppShellRuntime and the viewer's zone (Codex r2 on #484)", () => {
+  it("never lets page props drawn for no zone replace data built for the browser's zone", async () => {
+    document.cookie = "dayframe_tz=Europe/London; Path=/";
+    render(<AppShellRuntimeProvider><ZoneHarness /></AppShellRuntimeProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate London" }));
+    await waitFor(() => expect(screen.getByTestId("zone").textContent).toBe("Europe/London"));
+    const requests = answers.length;
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate no zone" }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(screen.getByTestId("zone").textContent).toBe("Europe/London");
+    expect(answers).toHaveLength(requests);
+  });
+
+  it("shows such props when nothing better is there, then fetches the zoned copy", async () => {
+    document.cookie = "dayframe_tz=Europe/London; Path=/";
+    render(<AppShellRuntimeProvider><ZoneHarness /></AppShellRuntimeProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Hydrate no zone" }));
+    await waitFor(() => expect(screen.getByTestId("date").textContent).toBe("2026-08-17"));
+    await waitFor(() => expect(answers.length).toBeGreaterThan(0));
+    await act(async () => answers.at(-1)?.(bootstrap(480, 1, "Europe/London")));
+    await waitFor(() => expect(screen.getByTestId("zone").textContent).toBe("Europe/London"));
+  });
+});
+
+function ZoneHarness() {
+  const { data, hydrate } = useAppShellRuntime();
+  return <>
+    <button onClick={() => hydrate(bootstrap(480, 1, null))}>Hydrate no zone</button>
+    <button onClick={() => hydrate(bootstrap(480, 1, "Europe/London"))}>Hydrate London</button>
+    <output data-testid="date">{data?.dateRange.selectedDate ?? ""}</output>
+    <output data-testid="zone">{data?.viewerTimeZone ?? ""}</output>
+  </>;
+}
+
 function Harness() {
   const { data, hydrate, refresh } = useAppShellRuntime();
   return <>
@@ -74,8 +109,9 @@ function Harness() {
   </>;
 }
 
-function bootstrap(dailyGoalMinutes: number, goalsRevision = 1): BootstrapData {
+function bootstrap(dailyGoalMinutes: number, goalsRevision = 1, viewerTimeZone: string | null = null): BootstrapData {
   return {
+    viewerTimeZone,
     activeEntry: null,
     categories: [],
     tags: [],
