@@ -110,7 +110,9 @@ describe("web Settings contracts", () => {
     expect(settingsPageSource).toContain('aria-busy="true"');
     expect(settingsPageSource).toContain('aria-live="polite"');
     expect(errorSource).toContain("Your saved preferences have not changed.");
-    expect(errorSource).toContain("<Button variant=\"primary\" onClick={reset}>Retry</Button>");
+    // The shared status page (WUI-048): a neutral Try again beside Go to Today, never coral.
+    expect(errorSource).toContain("<StatusPage");
+    expect(errorSource).toContain('<button className="df-rbtn df-rbtn--inverse" onClick={reset} type="button">Try again</button>');
     expect(errorSource).not.toMatch(/stack|sql|api route/i);
   });
 });
