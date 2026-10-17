@@ -109,4 +109,22 @@ describe("Places › Trips you log yourself (PRD D19, A4)", () => {
     await act(async () => { mocks.focus!(); });
     expect(texts()).toContain(trip.label);
   });
+
+  it("never brings back a trip whose Log again is still in flight, nor from a read that started then (Codex r3 on #464)", async () => {
+    mocks.list.mockResolvedValueOnce([trip]);
+    await act(async () => { tree = create(<StoppedTripsGroup reduceMotion={false} styles={styles} theme={theme} />); });
+    let resumeDone!: () => void;
+    mocks.resume.mockReturnValueOnce(new Promise<void>((resolve) => { resumeDone = resolve; }));
+    await act(async () => { pills()[0].props.onPress(); });
+    // Refocus while the POST is pending: the server still lists the trip.
+    mocks.list.mockResolvedValueOnce([trip]);
+    await act(async () => { mocks.focus!(); });
+    expect(texts()).not.toContain(trip.label);
+    let late!: (trips: unknown[]) => void;
+    mocks.list.mockReturnValueOnce(new Promise((resolve) => { late = resolve; }));
+    await act(async () => { mocks.focus!(); });
+    await act(async () => { resumeDone(); });
+    await act(async () => { late([trip]); });
+    expect(texts()).not.toContain(trip.label);
+  });
 });

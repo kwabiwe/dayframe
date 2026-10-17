@@ -25,8 +25,9 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
   const [shown, setShown] = useState<{ epoch: number; trips: StoppedTrip[] }>(() => ({ epoch: currentMobileAccountEpoch(), trips: [] }));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // Each read and each "Log again" takes the next number; a read drops a trip logged again after it
-  // started (it is stale for that trip), in this account lifetime.
+  // Each read and each completed "Log again" takes the next number. A trip is hidden from every read
+  // while its "Log again" is in flight, and afterwards from reads that started before it completed
+  // (stale for that trip); a later read shows it if it was stopped again since (Codex r2/r3 on #464).
   const sequence = useRef(0);
   const resumed = useRef<{ epoch: number; at: Map<string, number> }>({ epoch: currentMobileAccountEpoch(), at: new Map() });
   const resumedIn = (epoch: number) => {
@@ -51,7 +52,7 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
       .then((next) => {
         if (!live || epoch !== currentMobileAccountEpoch()) return;
         const gone = resumedIn(epoch);
-        setShown({ epoch, trips: next.filter((trip) => (gone.get(trip.patternKey) ?? 0) < readAt) });
+        setShown({ epoch, trips: next.filter((trip) => readAt > (gone.get(trip.patternKey) ?? 0)) });
       })
       .catch(() => undefined);
     return () => { live = false; };
@@ -65,12 +66,13 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
     if (busyKey || shown.epoch !== epoch) return;
     setBusyKey(trip.patternKey);
     setProblem(null);
-    resumedIn(epoch).set(trip.patternKey, ++sequence.current);
+    resumedIn(epoch).set(trip.patternKey, Number.POSITIVE_INFINITY);
     setShown((current) => current.epoch === epoch
       ? { epoch, trips: current.trips.filter((other) => other.patternKey !== trip.patternKey) } : current);
     try {
       await resumeLoggingTrips(trip.patternKey);
       if (epoch !== currentMobileAccountEpoch()) return;
+      resumedIn(epoch).set(trip.patternKey, ++sequence.current);
       AccessibilityInfo.announceForAccessibility(`${trip.label} logs itself again when it's clear.`);
     } catch (error) {
       if (epoch !== currentMobileAccountEpoch()) return;
