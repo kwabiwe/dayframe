@@ -66,4 +66,15 @@ describe("useTripOptOut on iPhone (PRD D19, A4)", () => {
     act(() => { tree.update(<Harness eventId="event-9" token={1} />); });
     expect(latest).toMatchObject({ busy: false, done: null });
   });
+
+  it("never announces an answer that lands after the toast's screen is gone (Codex r2 on #464)", async () => {
+    let finish!: () => void;
+    mocks.stop.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(<Harness eventId="event-1" token={4} />); });
+    act(() => { latest!.onAction(); });
+    act(() => { tree.unmount(); });
+    await act(async () => { finish(); });
+    expect(mocks.announce).not.toHaveBeenCalled();
+  });
 });

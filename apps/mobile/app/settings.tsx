@@ -132,7 +132,9 @@ import {
   type MobileTheme
 } from "@/lib/mobileTheme";
 import { isRetryableMobileConnectivityFailure } from "@/lib/mobile-network";
-import { shownTripSwitch, withSavedTripSwitch, type SavedTripSwitch } from "@/lib/tripSwitch";
+import {
+  rememberedSavedTripSwitch, rememberSavedTripSwitch, shownTripSwitch, withSavedTripSwitch, type SavedTripSwitch
+} from "@/lib/tripSwitch";
 import { publishMobileSignedOut, subscribeMobileSignedOut } from "@/lib/mobileSessionTransition";
 import { REVIEW_COPY, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import {
@@ -1019,7 +1021,7 @@ export default function SettingsScreen() {
   // stored value holds until a bootstrap with a newer server revision arrives, so a copy read before
   // the save never replaces it (as on web).
   const [tripsDraft, setTripsDraft] = useState<boolean | null>(null);
-  const [tripsSaved, setTripsSaved] = useState<SavedTripSwitch | null>(null);
+  const [tripsSaved, setTripsSaved] = useState<SavedTripSwitch | null>(() => rememberedSavedTripSwitch());
   async function toggleLogTrips(enabled: boolean) {
     const userId = data?.user.id;
     if (!userId || tripsDraft !== null) return;
@@ -1027,7 +1029,8 @@ export default function SettingsScreen() {
     try {
       const stored = await updateLogTripsAutomatically(enabled, userId);
       const saved = { userId, value: stored.value, revision: stored.revision ?? (data?.user.goalsRevision ?? 0) + 1 };
-      setTripsSaved(saved);
+      rememberSavedTripSwitch(saved);
+      setTripsSaved(rememberedSavedTripSwitch());
       // Never over a copy at this revision or newer (it already has this value, or a later one).
       const withValue = (currentData: MobileBootstrap | null) => withSavedTripSwitch(currentData, saved);
       const snapshotData = readSettingsSnapshot()?.data ?? null;

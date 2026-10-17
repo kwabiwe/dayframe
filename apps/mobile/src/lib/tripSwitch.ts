@@ -19,3 +19,19 @@ export function withSavedTripSwitch(data: MobileBootstrap | null, saved: SavedTr
     ? { ...data, user: { ...data.user, logTripsAutomatically: saved.value, goalsRevision: saved.revision } }
     : data;
 }
+
+// The last value this iPhone saved, kept beyond the Settings screen so a stale copy published while
+// it was closed never wins when it reopens (Codex r2 on #464). One per process; per account by userId.
+let rememberedSave: SavedTripSwitch | null = null;
+
+export function rememberSavedTripSwitch(saved: SavedTripSwitch) {
+  if (!rememberedSave || rememberedSave.userId !== saved.userId || rememberedSave.revision <= saved.revision) rememberedSave = saved;
+}
+
+export function rememberedSavedTripSwitch() {
+  return rememberedSave;
+}
+
+export function __resetSavedTripSwitchForTests() {
+  rememberedSave = null;
+}

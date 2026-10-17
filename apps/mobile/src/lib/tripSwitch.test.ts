@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shownTripSwitch, withSavedTripSwitch } from "./tripSwitch";
+import { __resetSavedTripSwitchForTests, rememberedSavedTripSwitch, rememberSavedTripSwitch, shownTripSwitch, withSavedTripSwitch } from "./tripSwitch";
 
 const user = (logTripsAutomatically: boolean, goalsRevision: number, id = "user-1") => ({ id, email: "", name: "", logTripsAutomatically, goalsRevision });
 const data = (value: boolean, revision: number, id = "user-1") => ({ user: user(value, revision, id) }) as never;
@@ -23,5 +23,15 @@ describe("Log trips automatically on iPhone (PRD D19, A4; Codex r1 on #464)", ()
     expect(withSavedTripSwitch(newer, saved)).toBe(newer);
     const other = data(true, 1, "user-2");
     expect(withSavedTripSwitch(other, saved)).toBe(other);
+  });
+
+  it("remembers the newest save beyond the screen, so reopening Settings still orders copies (Codex r2 on #464)", () => {
+    __resetSavedTripSwitchForTests();
+    rememberSavedTripSwitch(saved);
+    rememberSavedTripSwitch({ ...saved, value: true, revision: 4 });
+    expect(rememberedSavedTripSwitch()).toEqual(saved);
+    expect(shownTripSwitch(user(true, 5), rememberedSavedTripSwitch())).toBe(false);
+    rememberSavedTripSwitch({ userId: "user-2", value: true, revision: 1 });
+    expect(rememberedSavedTripSwitch()?.userId).toBe("user-2");
   });
 });

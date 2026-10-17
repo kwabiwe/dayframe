@@ -6,7 +6,10 @@ vi.mock("react", async () => {
   return import("../../../../../node_modules/react/index.js");
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-const mocks = vi.hoisted(() => ({ announce: vi.fn(), list: vi.fn(), resume: vi.fn(), epoch: 1, listeners: new Set<() => void>() }));
+const mocks = vi.hoisted(() => ({
+  announce: vi.fn(), list: vi.fn(), resume: vi.fn(), epoch: 1, listeners: new Set<() => void>(),
+  focus: null as null | (() => void | (() => void))
+}));
 vi.mock("react-native", () => ({
   AccessibilityInfo: { announceForAccessibility: (message: string) => mocks.announce(message) },
   Text: "Text",
@@ -15,7 +18,7 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" } }));
 vi.mock("expo-router", async () => {
   const React = await import("react");
-  return { useFocusEffect: (effect: () => void | (() => void)) => React.useEffect(effect, [effect]) };
+  return { useFocusEffect: (effect: () => void | (() => void)) => { mocks.focus = effect; React.useEffect(effect, [effect]); } };
 });
 vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
 vi.mock("@/components/settings/SettingsBlocks", async () => {
@@ -96,9 +99,14 @@ describe("Places › Trips you log yourself (PRD D19, A4)", () => {
     mocks.list.mockReturnValueOnce(new Promise((resolve) => { stale = resolve; }));
     mocks.resume.mockResolvedValue(undefined);
     // A focus read starts, then Log again succeeds, then that read lands with the trip still in it.
-    await act(async () => { tree!.update(<StoppedTripsGroup reduceMotion={false} styles={styles} theme={theme} />); });
+    await act(async () => { mocks.focus!(); });
+    expect(mocks.list).toHaveBeenCalledTimes(2);
     await act(async () => { pills()[0].props.onPress(); });
     await act(async () => { stale([trip]); });
     expect(texts()).not.toContain(trip.label);
+    // Stopped again elsewhere since: a read started after Log again shows it again (Codex r2 on #464).
+    mocks.list.mockResolvedValueOnce([{ ...trip, stoppedAt: "2026-10-17T09:00:00.000Z" }]);
+    await act(async () => { mocks.focus!(); });
+    expect(texts()).toContain(trip.label);
   });
 });

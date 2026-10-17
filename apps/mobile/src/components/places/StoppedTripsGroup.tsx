@@ -18,17 +18,20 @@ import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
  * once (presence fade, the rows below reflow) and puts it back with a line under the group, announced,
  * if the server refuses (no system alert: UIA-005). Everything belongs to one account lifetime (the
  * account epoch): another account clears the list, and a read or answer from before is dropped; a read
- * that started before a "Log again" never brings that trip back (Codex r1 on #464).
+ * that started before a "Log again" never brings that trip back, while a later read shows it again
+ * if it was stopped again since (Codex r1/r2 on #464).
  */
 export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotion: boolean; styles: MobileStyles; theme: MobileTheme }) {
   const [shown, setShown] = useState<{ epoch: number; trips: StoppedTrip[] }>(() => ({ epoch: currentMobileAccountEpoch(), trips: [] }));
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  // Trips logged again (or being) in this account lifetime: a read never shows them again.
-  const resumed = useRef<{ epoch: number; keys: Set<string> }>({ epoch: currentMobileAccountEpoch(), keys: new Set() });
+  // Each read and each "Log again" takes the next number; a read drops a trip logged again after it
+  // started (it is stale for that trip), in this account lifetime.
+  const sequence = useRef(0);
+  const resumed = useRef<{ epoch: number; at: Map<string, number> }>({ epoch: currentMobileAccountEpoch(), at: new Map() });
   const resumedIn = (epoch: number) => {
-    if (resumed.current.epoch !== epoch) resumed.current = { epoch, keys: new Set() };
-    return resumed.current.keys;
+    if (resumed.current.epoch !== epoch) resumed.current = { epoch, at: new Map() };
+    return resumed.current.at;
   };
 
   useEffect(() => {
@@ -43,11 +46,12 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
   useFocusEffect(useCallback(() => {
     let live = true;
     const epoch = currentMobileAccountEpoch();
+    const readAt = ++sequence.current;
     listStoppedTrips()
       .then((next) => {
         if (!live || epoch !== currentMobileAccountEpoch()) return;
         const gone = resumedIn(epoch);
-        setShown({ epoch, trips: next.filter((trip) => !gone.has(trip.patternKey)) });
+        setShown({ epoch, trips: next.filter((trip) => (gone.get(trip.patternKey) ?? 0) < readAt) });
       })
       .catch(() => undefined);
     return () => { live = false; };
@@ -61,7 +65,7 @@ export function StoppedTripsGroup({ reduceMotion, styles, theme }: { reduceMotio
     if (busyKey || shown.epoch !== epoch) return;
     setBusyKey(trip.patternKey);
     setProblem(null);
-    resumedIn(epoch).add(trip.patternKey);
+    resumedIn(epoch).set(trip.patternKey, ++sequence.current);
     setShown((current) => current.epoch === epoch
       ? { epoch, trips: current.trips.filter((other) => other.patternKey !== trip.patternKey) } : current);
     try {
