@@ -120,7 +120,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
                 <label className="sr-only" htmlFor={`tag-name-${tag.id}`}>Name</label>
                 <input autoFocus defaultValue={tag.name} id={`tag-name-${tag.id}`} maxLength={48} name="name" required />
                 <button className="df-rbtn df-rbtn--sm df-rbtn--live" disabled={isPending} type="submit">Save</button>
-                <button className="df-rbtn df-rbtn--sm" onClick={() => setEditingId(null)} type="button">Cancel</button>
+                <button className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(null)} type="button">Cancel</button>
               </form>
             </li>
           ) : (
@@ -134,7 +134,7 @@ export function TagManager({ tags }: { tags: TagRow[] }) {
                 <button aria-label={`Rename ${tag.name}`} className="df-rbtn df-rbtn--sm df-rbtn--ghost" onClick={() => setEditingId(tag.id)} type="button">
                   Rename
                 </button>
-                <button aria-label={`Delete ${tag.name}`} className="df-icon-action df-icon-action--44" onClick={() => setPendingDelete(tag)} type="button">
+                <button aria-label={`Delete ${tag.name}`} className="df-icon-action df-icon-action--44" data-tip="Delete" onClick={() => setPendingDelete(tag)} type="button">
                   <DayframeIcon glyph="trash-2" size={16}/>
                 </button>
               </span>
