@@ -183,6 +183,8 @@ export function LocationReviewCorrectionEditor({
   const [selectedSavedPlaceId, setSelectedSavedPlaceId] = useState<string | null>(baselinePlaceId);
   const [newPlace, setNewPlace] = useState<LocationReviewNewPlace | null>(null);
   const [selectedPoint, setSelectedPoint] = useState(() => pointFromEvidence(evidence));
+  // Bumped once per place chosen from a list, so the map shows it with the stay (never for a map tap).
+  const [mapRevealToken, setMapRevealToken] = useState(0);
   const [editingCentre, setEditingCentre] = useState(false);
   const [manualPlaceName, setManualPlaceName] = useState("");
   // The pin's name field and Use this pin stay open from the first tap until the pin is used,
@@ -583,6 +585,7 @@ export function LocationReviewCorrectionEditor({
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
+      setMapRevealToken((token) => token + 1);
       // The chosen place is now the selected row above; the field empties so nearby places return.
       setSearchQuery("");
       setSearchState(emptySearchState);
@@ -616,6 +619,7 @@ export function LocationReviewCorrectionEditor({
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
       setSelectedPoint({ latitude: result.latitude, longitude: result.longitude });
+      setMapRevealToken((token) => token + 1);
       setSearchQuery("");
       setSearchState(emptySearchState);
       void controllerRef.current?.cancel();
@@ -637,7 +641,8 @@ export function LocationReviewCorrectionEditor({
     void controllerRef.current?.cancel();
   }
 
-  function chooseSavedPlace(placeId: string | null) {
+  /** `fromMap`: a tap on the place's own marker, which is on screen, so the map stays put. */
+  function chooseSavedPlace(placeId: string | null, fromMap = false) {
     setSelectedSavedPlaceId(placeId);
     setNewPlace(null);
     setSaveForFuture(false);
@@ -647,7 +652,10 @@ export function LocationReviewCorrectionEditor({
     const point = place
       ? { longitude: place.point.coordinates[0], latitude: place.point.coordinates[1] }
       : pointFromEvidence(evidence);
-    if (point) setSelectedPoint(point);
+    if (point) {
+      setSelectedPoint(point);
+      if (!fromMap) setMapRevealToken((token) => token + 1);
+    }
   }
 
   /** A saved place row: picks it, or (tapped again) goes back to the matched place. */
@@ -894,8 +902,9 @@ export function LocationReviewCorrectionEditor({
               selectedSavedPlaceId={selectedSavedPlaceId}
               showDetails={false}
               reduceMotion={reduceMotion}
+              revealChoiceToken={evidence.segment.kind === "stay" ? mapRevealToken : undefined}
               onSelectPoint={evidence.segment.kind === "stay" && editingCentre ? moveMapPin : undefined}
-              onSelectSavedPlace={evidence.segment.kind === "stay" ? chooseSavedPlace : undefined}
+              onSelectSavedPlace={evidence.segment.kind === "stay" ? (placeId) => chooseSavedPlace(placeId, true) : undefined}
             />
           </Reanimated.View>
 

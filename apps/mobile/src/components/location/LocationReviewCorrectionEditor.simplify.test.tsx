@@ -344,6 +344,29 @@ describe("Where were you? (D2, D3)", () => {
     expect(texts("Record visit")).toHaveLength(1);
   });
 
+  it("asks the map to show each place chosen from a list, never one chosen on the map (Codex r3 on #482)", async () => {
+    native.resolveNearby.mockResolvedValue({
+      suggestionId: "poi-a", title: "Example Bakery", subtitle: "2 Example Road", name: "Example Bakery",
+      formattedAddress: "2 Example Road", latitude: 10.003, longitude: 20.0001
+    });
+    await render(stay({ matched: true }));
+    const token = () => map.props!.revealChoiceToken as number;
+    const opening = token();
+    await press(byTestId("location-evidence-nearby-0")[0]);
+    expect(map.props!.selectedPoint).toEqual({ latitude: 10.003, longitude: 20.0001 });
+    expect(token()).toBe(opening + 1);
+    // Back to the match from its row: shown again, and again for a second tap at the same point.
+    const studio = () => tree!.root.findAll((node) => node.props.accessibilityRole === "radio" && typeof node.type === "string"
+      && String(node.props.accessibilityLabel).startsWith("Example Studio"))[0];
+    await press(studio());
+    expect(token()).toBe(opening + 2);
+    await press(studio());
+    expect(token()).toBe(opening + 3);
+    // A tap on the place's own marker is on the map, so the map stays put.
+    act(() => { (map.props!.onSelectSavedPlace as (id: string) => void)("place-studio"); });
+    expect(token()).toBe(opening + 3);
+  });
+
   // Codex r1 on #358: a pick that resolves late never overwrites what the person did meanwhile.
   function deferNearbyResolution() {
     let finish!: () => void;

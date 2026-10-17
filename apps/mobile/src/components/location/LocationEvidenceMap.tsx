@@ -17,6 +17,8 @@ type Props = {
   showDetails?: boolean;
   /** Reduce Motion: a refit to show the chosen place jumps instead of gliding. */
   reduceMotion?: boolean;
+  /** Changes once per place chosen from a list; each change shows `selectedPoint` with the stay. */
+  revealChoiceToken?: number;
   onSelectPoint?: (point: { latitude: number; longitude: number }) => void;
   onSelectSavedPlace?: (placeId: string) => void;
 };
@@ -33,12 +35,13 @@ export function LocationEvidenceMap({
   selectedSavedPlaceId,
   showDetails = true,
   reduceMotion = false,
+  revealChoiceToken,
   onSelectPoint,
   onSelectSavedPlace
 }: Props) {
   const mapRef = useRef<MapView>(null);
-  // The point a map tap chose: the camera never follows a tap (it is on screen where it was tapped).
-  const tappedPointRef = useRef<Point | null>(null);
+  // The opening token is already shown by the opening view; a replayed effect sees it as handled.
+  const handledRevealRef = useRef(revealChoiceToken);
   const samples = evidence.map.acceptedSamples;
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   // Time away has no route line, so its readings are the evidence to inspect.
@@ -70,35 +73,24 @@ export function LocationEvidenceMap({
 
   // A place chosen from a list (Nearby, Search, the saved rows, back to the match) is shown with
   // the stay's area: the camera returns to the stay's opening view when the pin and its circle fit
-  // in it, and otherwise fits both. One camera call per choice; MapKit retargets a newer one from
-  // where the camera is, and nothing is pending between choices. A map tap never moves the camera.
-  const selectedLatitude = selectedPoint?.latitude;
-  const selectedLongitude = selectedPoint?.longitude;
-  const mountedChoiceRef = useRef(false);
+  // in it, and otherwise fits both. Each choice makes one camera call (MapKit retargets a newer one
+  // from where the camera is); a map tap moves the pin, not the camera, and makes no choice.
   useEffect(() => {
-    if (!mountedChoiceRef.current) {
-      // The opening view already shows the opening choice.
-      mountedChoiceRef.current = true;
-      return;
-    }
-    if (!centre || !initialRegion || selectedLatitude === undefined || selectedLongitude === undefined) return;
-    const point = { latitude: selectedLatitude, longitude: selectedLongitude };
-    const tapped = tappedPointRef.current;
-    tappedPointRef.current = null;
-    if (tapped && samePoint(tapped, point)) return;
+    if (revealChoiceToken === undefined || revealChoiceToken === handledRevealRef.current) return;
+    handledRevealRef.current = revealChoiceToken;
+    if (!centre || !initialRegion || !selectedPoint) return;
     const radius = selectedPointRadiusMeters ?? 0;
-    const duration = reduceMotion ? 0 : CAMERA_DURATION_MS;
-    if (regionContains(initialRegion, point, radius)) {
-      mapRef.current?.animateToRegion(initialRegion, duration);
+    if (regionContains(initialRegion, selectedPoint, radius)) {
+      mapRef.current?.animateToRegion(initialRegion, reduceMotion ? 0 : CAMERA_DURATION_MS);
       return;
     }
     mapRef.current?.fitToCoordinates(
-      [...circleExtent(centre, stayRadiusMeters), ...circleExtent(point, radius)],
+      [...circleExtent(centre, stayRadiusMeters), ...circleExtent(selectedPoint, radius)],
       { animated: !reduceMotion, edgePadding: { top: 40, right: 40, bottom: 40, left: 40 } }
     );
-    // Only a new chosen point moves the camera; the stay's opening view is fixed for this evidence.
+    // Only a new choice moves the camera; the point is the one chosen with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLatitude, selectedLongitude]);
+  }, [revealChoiceToken]);
 
   if (!centre || !initialRegion) {
     return (
@@ -120,10 +112,7 @@ export function LocationEvidenceMap({
     ? commuteLine[commuteLine.length - 1]
     : undefined;
   const usesApproximateFallback = evidence.segment.kind === "commute" && route.length < 2 && straightLineFallback.length >= 2;
-  const handlePress = (event: MapPressEvent) => {
-    tappedPointRef.current = event.nativeEvent.coordinate;
-    onSelectPoint?.(event.nativeEvent.coordinate);
-  };
+  const handlePress = (event: MapPressEvent) => onSelectPoint?.(event.nativeEvent.coordinate);
 
   return (
     <View>
@@ -276,14 +265,8 @@ export function LocationEvidenceMap({
   );
 }
 
-type Point = { latitude: number; longitude: number };
-
 const METRES_PER_DEGREE = 111_320;
 const CAMERA_DURATION_MS = 350;
-
-function samePoint(a: Point, b: Point) {
-  return a.latitude === b.latitude && a.longitude === b.longitude;
-}
 
 /** The four compass points of a circle, so a fit keeps the whole area on screen. */
 function circleExtent(point: { latitude: number; longitude: number }, radiusMeters: number) {

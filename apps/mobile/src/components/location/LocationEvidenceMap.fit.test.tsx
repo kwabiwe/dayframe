@@ -32,12 +32,14 @@ function mount(reduceMotion = false) {
   const fitToCoordinates = vi.fn();
   const animateToRegion = vi.fn();
   let tree: ReactTestRenderer | undefined;
-  const element = (point: { latitude: number; longitude: number }) => (
-    <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={stay} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
-      selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
+  let token = 0;
+  let point = centre;
+  const element = (value: LocationReviewEvidenceDto = stay) => (
+    <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
+      revealChoiceToken={token} selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
   );
   act(() => {
-    tree = create(element(centre), {
+    tree = create(element(), {
       createNodeMock: (node) => node.type === "MapView" ? { animateToRegion, fitToCoordinates } : null
     });
   });
@@ -45,13 +47,11 @@ function mount(reduceMotion = false) {
     animateToRegion,
     fitToCoordinates,
     moves: () => fitToCoordinates.mock.calls.length + animateToRegion.mock.calls.length,
-    choose(point: { latitude: number; longitude: number }) { act(() => tree!.update(element(point))); },
-    tap(point: { latitude: number; longitude: number }) {
-      act(() => {
-        tree!.root.findByType("MapView" as never).props.onPress({ nativeEvent: { coordinate: point } });
-        tree!.update(element(point));
-      });
-    }
+    /** A choice from a list: a new point and a new token. */
+    choose(next: { latitude: number; longitude: number }) { point = next; token += 1; act(() => tree!.update(element())); },
+    /** A map tap: the pin moves with no new token. */
+    tap(next: { latitude: number; longitude: number }) { point = next; act(() => tree!.update(element())); },
+    rerender(value?: LocationReviewEvidenceDto) { act(() => tree!.update(element(value))); }
   };
 }
 
@@ -61,8 +61,11 @@ const near = { latitude: 10.0002, longitude: 20.0002 };
 const opening = { ...centre, latitudeDelta: 0.004, longitudeDelta: 0.004 };
 
 describe("the evidence map shows the chosen place's pin with the stay's area", () => {
-  it("leaves the camera alone for the opening choice", () => {
-    expect(mount().moves()).toBe(0);
+  it("leaves the camera alone for the opening choice, a re-render and new evidence (Codex r3 on #482)", () => {
+    const map = mount();
+    map.rerender();
+    map.rerender({ ...stay, textualSummary: "Synthetic stay, again" } as LocationReviewEvidenceDto);
+    expect(map.moves()).toBe(0);
   });
 
   it("fits a place chosen outside the opening view together with the stay's area", () => {
@@ -70,7 +73,7 @@ describe("the evidence map shows the chosen place's pin with the stay's area", (
     map.choose(far);
     expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
     const [points, options] = map.fitToCoordinates.mock.calls[0];
-    const latitudes = points.map((point: { latitude: number }) => point.latitude);
+    const latitudes = points.map((value: { latitude: number }) => value.latitude);
     expect(Math.min(...latitudes)).toBeLessThan(centre.latitude - 0.0005);
     expect(Math.max(...latitudes)).toBeGreaterThan(far.latitude + 0.0007);
     expect(options).toEqual(expect.objectContaining({ animated: true }));
@@ -84,22 +87,25 @@ describe("the evidence map shows the chosen place's pin with the stay's area", (
     expect(map.animateToRegion.mock.calls[0][1]).toBeGreaterThan(0);
   });
 
-  it("makes one camera call per choice, so the newest choice always wins (Codex r2 on #482)", () => {
+  it("moves for every list choice, the same place again included (Codex r3 on #482)", () => {
     const map = mount();
+    map.choose(centre);
+    map.choose(centre);
+    expect(map.animateToRegion).toHaveBeenCalledTimes(2);
     map.choose(far);
     map.choose({ latitude: 10, longitude: 20.0009 });
     map.choose(far);
-    expect(map.moves()).toBe(3);
+    expect(map.moves()).toBe(5);
     expect(map.fitToCoordinates.mock.lastCall?.[0]).toEqual(map.fitToCoordinates.mock.calls[0][0]);
   });
 
-  it("never moves for a map tap, even one near the edge whose circle runs off screen (Codex r1 on #482)", () => {
+  it("never moves for a map tap, even one near the edge or far away (Codex r1 on #482)", () => {
     const map = mount();
     map.tap({ latitude: 10.0019, longitude: 20.0019 });
     map.tap(far);
     expect(map.moves()).toBe(0);
     // A later list choice still moves it.
-    map.choose({ latitude: 10.0040, longitude: 20 });
+    map.choose({ latitude: 10.004, longitude: 20 });
     expect(map.fitToCoordinates).toHaveBeenCalledTimes(1);
   });
 
