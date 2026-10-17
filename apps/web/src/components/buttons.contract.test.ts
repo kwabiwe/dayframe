@@ -41,6 +41,14 @@ describe("buttons (web UI audit P3)", () => {
     expect(source("components/library/ActivitiesLibrary.tsx")).toMatch(/className="df-rbtn df-rbtn--ghost"[^\n]*>Cancel</);
     expect(source("components/TagManager.tsx")).toMatch(/className="df-rbtn df-rbtn--sm df-rbtn--ghost"[^\n]*>Cancel</);
     expect(source("components/ReportFiltersPanel.tsx")).toMatch(/className="df-rbtn df-rbtn--ghost"[^\n]*>Cancel</);
+    // Every Button that says Cancel is the ghost (Codex r1 on #471).
+    for (const path of ["components/SettingsForms.tsx", "components/PlacesManager.tsx", "components/PlaceRoleSlots.tsx"]) {
+      const lines = source(path).split("\n");
+      lines.forEach((line, index) => {
+        const opensCancel = /<Button\b/.test(line) && (/Cancel<\/Button>/.test(line) || lines[index + 1]?.trim() === "Cancel");
+        if (opensCancel) expect(line, `${path}:${index + 1}`).toContain('variant="ghost"');
+      });
+    }
   });
 
   it("uses one 44 px control scale at every width (WUI-015) and 44 px targets for small icon actions (WUI-013)", () => {
@@ -48,6 +56,8 @@ describe("buttons (web UI audit P3)", () => {
     expect(styles).toMatch(/--web-control-height-compact: 36px;/);
     expect(styles).toMatch(/\.df-icon-action::after,\n\.calendar-start-again::after,\n\.timeline-group-count::after \{[^}]*width: 44px;[^}]*height: 44px;/);
     expect(rule(".df-icon-action")).toMatch(/position: relative;/);
+    // Today's 34 px row actions sit 10 px apart, so the 44 px targets meet without overlapping.
+    expect(rule(".df-erow-acts")).toMatch(/gap: 10px;/);
   });
 
   it("names icon-only actions with a tooltip (WUI-014)", () => {
