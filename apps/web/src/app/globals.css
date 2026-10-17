@@ -4,6 +4,22 @@
    Percentage keeps the Blocks chip proportion (~4px on a 12px marker) at any marker size. */
 :root {
   --activity-marker-radius: 30%;
+
+  /* Type and radius tokens (web UI audit WUI-036/WUI-037, owner 17 Oct 2026). Sizes are px, never
+     rem, so they read the same on the 14 px desktop root and the 16 px phone root. New Blocks rules
+     use these; `typeAndRadius.contract.test.ts` keeps literal values from growing. */
+  --type-label: 11px;
+  --type-meta: 12px;
+  --type-body: 14px;
+  --type-panel: 17px;
+  --type-panel-lg: 18px;
+  --type-sheet: 20px;
+  --type-screen: 30px;
+  --r-chip: 10px;
+  --r-block: var(--activity-marker-radius);
+  --r-card: 22px;
+  --r-sheet: 24px;
+  --r-pill: 999px;
 }
 
 :root,
@@ -3462,7 +3478,7 @@ kbd {
   margin-bottom: 0.25rem;
   display: block;
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
   font-weight: 700;
 }
 
@@ -4015,7 +4031,7 @@ kbd {
   background: var(--surface-inset);
   color: var(--muted);
   padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
 }
 
 .motion-row {
@@ -4317,7 +4333,7 @@ dialog.ui-dialog.df-range-custom {
 .report-metric-explainer {
   margin: -4px 2px 18px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: var(--type-meta);
 }
 
 .report-summary-card {
@@ -4543,7 +4559,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 2px 8px;
   background: color-mix(in srgb, var(--warning) 16%, var(--surface));
   color: var(--warning-text);
-  font-size: 0.72rem;
+  font-size: var(--type-label);
   font-weight: 700;
   line-height: 1.2;
 }
@@ -4556,7 +4572,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 10px 12px;
   background: color-mix(in srgb, var(--warning) 13%, var(--surface-raised));
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--type-meta);
   line-height: 1.45;
 }
 
@@ -4594,7 +4610,7 @@ dialog.ui-dialog.df-range-custom {
 .overlap-notice-badge {
   width: fit-content;
   color: var(--warning-text);
-  font-size: 0.68rem;
+  font-size: var(--type-label);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -5032,7 +5048,7 @@ dialog.ui-dialog.df-range-custom {
 
 .swiss-start-time-editor small {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: var(--type-label);
   line-height: 1.2;
 }
 
@@ -6921,7 +6937,7 @@ dialog.ui-dialog.df-range-custom {
   min-height: 1.15rem;
   margin: 0;
   color: transparent;
-  font-size: 0.72rem;
+  font-size: var(--type-label);
   line-height: 1.15rem;
 }
 
@@ -7337,7 +7353,7 @@ dialog.ui-dialog.df-range-custom {
   align-items: center;
   gap: 0.3rem;
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
   font-weight: 400;
   line-height: 1.2;
 }
@@ -7428,7 +7444,7 @@ dialog.ui-dialog.df-range-custom {
 
 .inline-tag-help {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
 }
 
 .inline-tag-help {
@@ -7813,7 +7829,7 @@ dialog.ui-dialog.df-range-custom {
 .location-evidence-empty span,
 .location-review-loading span {
   max-width: 34rem;
-  font-size: 0.82rem;
+  font-size: var(--type-meta);
   line-height: 1.5;
 }
 
@@ -7833,7 +7849,7 @@ dialog.ui-dialog.df-range-custom {
   left: 10px;
   padding: 6px 10px;
   color: var(--foreground);
-  font-size: 0.72rem;
+  font-size: var(--type-label);
   font-weight: 650;
 }
 
@@ -7845,7 +7861,7 @@ dialog.ui-dialog.df-range-custom {
   max-width: calc(100% - 20px);
   padding: 7px 10px;
   color: var(--muted);
-  font-size: 0.74rem;
+  font-size: var(--type-meta);
   line-height: 1.35;
 }
 
@@ -7859,7 +7875,7 @@ dialog.ui-dialog.df-range-custom {
 .location-evidence-rejected {
   margin: 10px 0 0;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: var(--type-meta);
   line-height: 1.55;
 }
 
@@ -7877,7 +7893,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 10px 12px;
   background: var(--danger-soft);
   color: var(--danger-text);
-  font-size: 0.82rem;
+  font-size: var(--type-meta);
 }
 
 .location-review-resolve {
@@ -7902,7 +7918,7 @@ dialog.ui-dialog.df-range-custom {
 .location-resolve-field > span,
 .location-resolve-category > .calendar-compact-field-label {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--type-label);
   font-weight: 650;
   letter-spacing: 0.02em;
 }
@@ -7956,7 +7972,7 @@ dialog.ui-dialog.df-range-custom {
 .location-resolve-field > .location-resolve-error {
   /* Small text: the accessible danger text colour (Codex r3 on #474); the underline stays --danger. */
   color: var(--danger-text);
-  font-size: 0.75rem;
+  font-size: var(--type-meta);
   font-weight: 600;
   letter-spacing: 0;
 }
@@ -8065,7 +8081,7 @@ dialog.ui-dialog.df-range-custom {
   }
 
   .fill-page-header h1 {
-    font-size: 1.75rem;
+    font-size: var(--type-screen);
   }
 
   .fill-panel-header {
@@ -8198,7 +8214,7 @@ dialog.ui-dialog.df-range-custom {
   margin: 0;
   overflow: hidden;
   color: var(--foreground);
-  font-size: 0.9rem;
+  font-size: var(--type-body);
   font-weight: 690;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -8207,7 +8223,7 @@ dialog.ui-dialog.df-range-custom {
 
 .calendar-compact-running-status {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--type-label);
   font-weight: 400;
   line-height: 1.3;
 }
@@ -8217,7 +8233,7 @@ dialog.ui-dialog.df-range-custom {
 .calendar-compact-editor-fields label > span,
 .calendar-compact-duration-field > span {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: var(--type-label);
   font-weight: 650;
   letter-spacing: 0.02em;
 }
@@ -8482,7 +8498,7 @@ dialog.ui-dialog.df-range-custom {
 
 .calendar-compact-day-offset {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: var(--type-label);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -8603,7 +8619,7 @@ dialog.ui-dialog.df-range-custom {
   padding: 0;
   background: transparent;
   color: var(--warning-text);
-  font-size: 0.74rem;
+  font-size: var(--type-meta);
 }
 
 .calendar-compact-feedback-copy > .overlap-notice.is-compact p {
@@ -11415,7 +11431,7 @@ dialog.ui-dialog.df-palette {
 .df-review-head h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 34px;
+  font-size: var(--type-screen);
   font-weight: 750;
   letter-spacing: -0.03em;
 }
@@ -11948,10 +11964,6 @@ dialog.ui-dialog.df-palette {
     padding: 12px 12px calc(var(--df-tabbar-space) + 72px);
   }
 
-  .df-review-head h1 {
-    font-size: 28px;
-  }
-
   .df-review {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -12058,7 +12070,8 @@ dialog.ui-dialog.df-palette {
   display: grid;
   min-height: min(70dvh, 560px);
   place-items: center;
-  padding: 24px 0;
+  /* The phone gutter every page keeps, so the card never meets the screen edge. */
+  padding: 24px 12px;
 }
 
 .df-status-card {
@@ -12073,7 +12086,7 @@ dialog.ui-dialog.df-palette {
 .df-status-card h1 {
   margin: 8px 0 0;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: var(--type-screen);
   font-weight: 800;
   text-wrap: balance;
 }
@@ -12101,10 +12114,11 @@ dialog.ui-dialog.df-palette {
   gap: 12px 20px;
 }
 
+/* Screen titles are 30 px at every width (WUI-036, owner 17 Oct 2026). */
 .df-page-head h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 34px;
+  font-size: var(--type-screen);
   font-weight: 750;
   letter-spacing: -0.03em;
 }
@@ -12477,10 +12491,6 @@ dialog.ui-dialog.df-palette {
   .df-library {
     gap: 12px;
     padding: 12px 12px calc(var(--df-tabbar-space) + 72px);
-  }
-
-  .df-page-head h1 {
-    font-size: 28px;
   }
 
   .df-lib-grid {
@@ -14112,10 +14122,6 @@ dialog.ui-dialog.df-palette {
 
   .df-cal-head > div:first-child > p {
     grid-area: framed;
-  }
-
-  .df-cal-head h1 {
-    font-size: 24px;
   }
 
   .df-cal-head p {
