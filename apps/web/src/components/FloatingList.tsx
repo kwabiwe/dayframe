@@ -439,15 +439,21 @@ function usePhoneSheet(isOpen: boolean, anchorRef: RefObject<HTMLElement | null>
       const viewportTop = viewport?.offsetTop ?? 0;
       const viewportHeight = viewport?.height ?? window.innerHeight;
       const rect = anchor.getBoundingClientRect();
-      const below = viewportTop + viewportHeight - SHEET_MARGIN - (rect.bottom + SHEET_GAP);
-      const above = rect.top - SHEET_GAP - (viewportTop + SHEET_MARGIN);
+      const visibleTop = viewportTop + SHEET_MARGIN;
+      const visibleBottom = viewportTop + viewportHeight - SHEET_MARGIN;
+      const below = visibleBottom - (rect.bottom + SHEET_GAP);
+      const above = rect.top - SHEET_GAP - visibleTop;
       const placeBelow = below >= SHEET_MIN_BELOW || below >= above;
+      // Clamped to the visible viewport: a page that scrolls (the phone Calendar) can carry the
+      // field away, but the sheet's head, search and Close stay on screen (Codex r1 on #488).
+      const top = Math.min(visibleBottom, Math.max(visibleTop, rect.bottom + SHEET_GAP));
+      const bottomEdge = Math.max(visibleTop, Math.min(visibleBottom, rect.top - SHEET_GAP));
       setPosition({
-        bottom: placeBelow ? "auto" : window.innerHeight - (rect.top - SHEET_GAP),
+        bottom: placeBelow ? "auto" : window.innerHeight - bottomEdge,
         left: viewportLeft + SHEET_MARGIN,
-        maxHeight: Math.max(0, placeBelow ? below : above),
+        maxHeight: Math.max(0, placeBelow ? visibleBottom - top : bottomEdge - visibleTop),
         right: window.innerWidth - (viewportLeft + (viewport?.width ?? window.innerWidth)) + SHEET_MARGIN,
-        top: placeBelow ? rect.bottom + SHEET_GAP : "auto",
+        top: placeBelow ? top : "auto",
         width: "auto"
       });
     }
