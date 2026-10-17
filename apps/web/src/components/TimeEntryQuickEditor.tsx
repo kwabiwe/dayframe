@@ -70,6 +70,8 @@ export type TimeEntryQuickEditorProps = TimeEntryQuickEditorBaseProps & (
     }
   | {
       mode: "create";
+      /** Add time: a window later today may be added (only a later day is refused, D2). */
+      allowLaterToday?: boolean;
       source: CalendarEntryCompactCreateSource;
       onDraftChange: (plan: CalendarEntryCompactCreatePlan | null) => void;
       onSave: (plan: CalendarEntryCompactCreatePlan) => Promise<TimeEntryQuickEditorMutationOutcome>;
@@ -128,6 +130,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     if (!query) return taskSuggestions.slice(0, 5);
     return searchTaskSuggestions(taskSuggestionCandidates, taskSuggestions, query, 5);
   }, [draft.description, taskSuggestionCandidates, taskSuggestions]);
+  const allowLaterToday = props.mode === "create" && Boolean(props.allowLaterToday);
   const preview = useMemo(() => {
     try {
       return {
@@ -135,6 +138,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         plan: entry
           ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
           : buildCalendarEntryCompactCreatePlan({
+              allowLaterToday,
               draft,
               now,
               source: createSource as CalendarEntryCompactCreateSource
@@ -146,7 +150,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         plan: null
       };
     }
-  }, [createSource, dirty, draft, entry, now]);
+  }, [allowLaterToday, createSource, dirty, draft, entry, now]);
   const hasUnsavedChanges = useMemo(
     () => calendarEntryCompactDraftsHaveChanges(initialDraft, draft, { running: Boolean(entry && !entry.stoppedAt) }),
     [draft, entry, initialDraft]
@@ -479,7 +483,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       const committed = normalizeCalendarEntryCompactTypedTimes(draft);
       plan = props.mode === "entry"
         ? buildCalendarEntryCompactSavePlan({ draft: committed, dirty, entry: props.entry, now: saveNow })
-        : buildCalendarEntryCompactCreatePlan({ draft: committed, now: saveNow, source: props.source });
+        : buildCalendarEntryCompactCreatePlan({ allowLaterToday: props.allowLaterToday, draft: committed, now: saveNow, source: props.source });
     } catch (planError) {
       setError(planError instanceof Error ? planError.message : "Check the time values.");
       return;
@@ -1014,16 +1018,55 @@ export function TimeEntryQuickEditorPanel({
 export function TimeEntryQuickEditorModal(props: Omit<Extract<TimeEntryQuickEditorProps, { mode: "entry" }>, "mode" | "onDismiss"> & {
   onClose: () => void;
 }) {
-  const modalProps: TimeEntryQuickEditorProps = { ...props, mode: "entry", onDismiss: props.onClose };
+  return <QuickEditorModal modalProps={{ ...props, mode: "entry", onDismiss: props.onClose }} />;
+}
+
+/**
+ * The same editor opened to add a finished block (web UI audit WUI-025, owner 17 Oct 2026): the
+ * timer's Add time and the palette open this "New block" modal instead of a separate dialog.
+ */
+export function TimeEntryQuickCreateModal({ fallbackFocus, ...props }: Omit<Extract<TimeEntryQuickEditorProps, { mode: "create" }>, "mode" | "onDismiss" | "onDraftChange"> & {
+  /**
+   * Where focus goes on close when what had focus at opening is gone (the palette that opened
+   * Add time closes as it does; Codex r1 on #468).
+   */
+  fallbackFocus?: () => HTMLElement | null;
+  onClose: () => void;
+}) {
+  return (
+    <QuickEditorModal
+      fallbackFocus={fallbackFocus}
+      modalProps={{ ...props, mode: "create", onDismiss: props.onClose, onDraftChange: ignoreDraftChange }}
+    />
+  );
+}
+
+function ignoreDraftChange() {
+  // Only Calendar draws a live create preview.
+}
+
+function QuickEditorModal({
+  fallbackFocus,
+  modalProps
+}: {
+  fallbackFocus?: () => HTMLElement | null;
+  modalProps: TimeEntryQuickEditorProps;
+}) {
   const controller = useTimeEntryQuickEditor(modalProps);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const fallbackFocusRef = useRef(fallbackFocus);
+  useLayoutEffect(() => {
+    fallbackFocusRef.current = fallbackFocus;
+  });
 
   useLayoutEffect(() => {
     previouslyFocusedRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => controller.descriptionRef.current?.focus());
     return () => {
       window.cancelAnimationFrame(frame);
-      previouslyFocusedRef.current?.focus({ preventScroll: true });
+      const previous = previouslyFocusedRef.current;
+      const target = previous && previous.isConnected && previous !== document.body ? previous : fallbackFocusRef.current?.();
+      target?.focus({ preventScroll: true });
     };
   }, [controller.descriptionRef]);
 

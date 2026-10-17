@@ -22,7 +22,8 @@ describe("dialog padding (UIA-301)", () => {
     for (const selector of [".place-dialog-copy", ".place-role-dialog", ".swiss-confirm-body", ".settings-troubleshooting-copy", ".place-learned-details"]) {
       expect(rule(selector)).not.toMatch(/\bpadding:/);
     }
-    for (const selector of [".ui-popover-content", ".df-palette .ui-dialog-content", ".manual-entry-dialog-content"]) {
+    // Add time's dialog is gone: it is the shared editor's modal now (WUI-025).
+    for (const selector of [".ui-popover-content", ".df-palette .ui-dialog-content"]) {
       expect(rule(selector)).toContain("padding: 0;");
     }
   });

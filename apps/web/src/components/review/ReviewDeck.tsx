@@ -43,6 +43,9 @@ import {
   reviewSourceLabel,
   reviewTitle,
   reviewWhen,
+  outingMutationFor,
+  outingSummary,
+  reviewOutings,
   reviewWindow,
   stepSelection,
   type ReviewDecisionKind,
@@ -75,7 +78,23 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     [data.entries, data.historyEntries, data.weekEntries]
   );
 
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh);
+  // A refused outing's canonical statuses (from the server's conflict answer): only its open cards return,
+  // and no kept copy of a card the server says is decided stays on the deck (Codex r2/r3 on #466).
+  const outingConflictStatuses = useRef(new Map<string, Record<string, string>>());
+  // Each mark remembers the data it was made over: only a newer snapshot listing the card open lifts it
+  // (Codex r4/r5 on #466).
+  const [closedByServer, setClosedByServer] = useState<ReadonlyMap<string, unknown>>(() => new Map());
+  const openItemsAtConflict = useRef<unknown>(openItems);
+  useLayoutEffect(() => {
+    openItemsAtConflict.current = openItems;
+  }, [openItems]);
+  const onOutingConflict = useCallback((stayId: string, statuses: Record<string, string>) => {
+    outingConflictStatuses.current.set(stayId, statuses);
+    const closed = Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id);
+    const over = openItemsAtConflict.current;
+    if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
+  }, []);
+  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict);
   // Cards the deck keeps although the loaded data (the newest 100) no longer lists them: the card
   // whose evidence editor is open, and a card Undo or a failed save brought back (iPhone keeps the
   // copy the deck showed the same way).
@@ -88,14 +107,38 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   if ([...revived.keys()].some((id) => loadedIds.has(id))) {
     setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   }
+  // Newer data listing a card open again lifts the server's earlier "decided" for it (Codex r4/r5 on #466).
+  const reopened = (id: string, over: unknown) => over !== openItems && loadedIds.has(id);
+  if ([...closedByServer].some(([id, over]) => reopened(id, over))) {
+    setClosedByServer(new Map([...closedByServer].filter(([id, over]) => !reopened(id, over))));
+  }
   const deckItems = useMemo(() => {
-    const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id));
+    const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id));
     if (evidenceOpenId && editorSnapshot?.id === evidenceOpenId && !loadedIds.has(evidenceOpenId) && !revived.has(evidenceOpenId)) {
       extra.push(editorSnapshot);
     }
     return extra.length ? [...openItems, ...extra] : openItems;
-  }, [editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
-  const visible = useMemo(() => deckItems.filter((item) => !state.hiddenIds.has(item.id)), [deckItems, state.hiddenIds]);
+  }, [closedByServer, editorSnapshot, evidenceOpenId, loadedIds, openItems, revived]);
+  // One card per outing (PRD D19): a Move card that belongs to an unknown Stay's card on the deck is
+  // folded into it (also while that card's decision is held), and comes back on its own otherwise.
+  const outings = useMemo(() => reviewOutings(deckItems), [deckItems]);
+  // An outing's held, saving or saved decision keeps all of its Moves folded away, whatever a refresh
+  // lists meanwhile (Codex r1 on #466): the decision owns every member until it settles.
+  // Each decided outing keeps its members' snapshots, so Undo or a refused save brings the whole
+  // outing back even when a refresh no longer lists some of it (Codex r2 on #466).
+  const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  const heldOutingsRef = useRef(heldOutings);
+  useLayoutEffect(() => {
+    heldOutingsRef.current = heldOutings;
+  }, [heldOutings]);
+  const outingMemberIds = useMemo(() => new Set([
+    ...[...outings.values()].flatMap((outing) => outing.members.map((member) => member.id)),
+    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, members]) => members.map((member) => member.id))
+  ]), [heldOutings, outings, state.hiddenIds]);
+  const visible = useMemo(
+    () => deckItems.filter((item) => !state.hiddenIds.has(item.id) && !outingMemberIds.has(item.id)),
+    [deckItems, outingMemberIds, state.hiddenIds]
+  );
   const visibleIds = useMemo(() => visible.map((item) => item.id), [visible]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -189,8 +232,20 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     lastRestored.current = state.restored.sequence;
     const restoredId = state.restored.itemId;
     const snapshot = decidedSnapshots.current.get(restoredId);
-    if (!openIdsRef.current.has(restoredId) && snapshot) {
-      setRevived((current) => new Map(current).set(restoredId, snapshot));
+    // An outing comes back whole: its Stay and every member the data no longer lists, except cards a
+    // refused save says are no longer open.
+    const statuses = outingConflictStatuses.current.get(restoredId);
+    outingConflictStatuses.current.delete(restoredId);
+    const stillOpen = (id: string) => !statuses || statuses[id] === undefined || statuses[id] === "open";
+    const members = (heldOutingsRef.current.get(restoredId) ?? [])
+      .filter((member) => !openIdsRef.current.has(member.id) && stillOpen(member.id));
+    if ((!openIdsRef.current.has(restoredId) && snapshot) || members.length) {
+      setRevived((current) => {
+        const next = new Map(current);
+        if (!openIdsRef.current.has(restoredId) && snapshot) next.set(restoredId, snapshot);
+        for (const member of members) next.set(member.id, member);
+        return next;
+      });
     }
     if (evidenceOpenRef.current && evidenceOpenRef.current !== restoredId) return;
     setSelectedId(state.restored.itemId);
@@ -271,14 +326,20 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
     const category = reviewCardCategory(item, draft, categories);
     const span = reviewWindow(item);
     const name = draft?.name?.trim() || reviewDefaultName(item);
+    const outing = outings.get(item.id);
+    const outingMs = outing ? outing.members.reduce((sum, member) => {
+      const memberSpan = reviewWindow(member);
+      return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
+    }, 0) : 0;
     decidedSnapshots.current.set(item.id, item);
+    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members));
     const held = decide({
       itemId: item.id,
       kind,
-      mutation: reviewMutationFor(item, kind, draft),
+      mutation: outing ? outingMutationFor(outing, kind, draft) : reviewMutationFor(item, kind, draft),
       signature: reviewProposalSignature(item),
       label: kind === "log" ? `Logged ${name}` : `Skipped ${reviewTitle(item)}`,
-      durationMs: span ? span.stopMs - span.startMs : 0,
+      durationMs: (span ? span.stopMs - span.startMs : 0) + outingMs,
       color: category?.color ?? null,
       colorName: category?.name ?? ""
     });
@@ -314,7 +375,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
       const box = cardRef.current?.getBoundingClientRect();
       setGhost({ key: ++enterSequence.current, item, draft, dir, origin: box ? { top: box.top, left: box.left, width: box.width } : undefined, overEmpty: next === null });
     }
-  }, [categories, decide, drafts, evidenceOpenId, revived, visibleIds]);
+  }, [categories, decide, drafts, evidenceOpenId, outings, revived, visibleIds]);
 
   // An editor's close is fenced to the opening it belongs to. Focus inside the closing editor
   // moves to the card.
@@ -559,6 +620,7 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
               nowMs={nowMs}
               onDecide={decideCurrent}
               onDraft={(patch) => setDraft(selected.id, patch)}
+              outing={outings.get(selected.id) ? outingSummary(outings.get(selected.id)!) : undefined}
               overlap={span ? (
                 <OverlapLine
                   candidate={{ startedAt: new Date(span.startMs).toISOString(), stoppedAt: new Date(span.stopMs).toISOString() }}
@@ -679,6 +741,7 @@ function CardFace({
   nowMs,
   onDecide,
   onDraft,
+  outing,
   overlap,
   titleId
 }: {
@@ -694,6 +757,8 @@ function CardFace({
   onDraft?: (patch: ReviewLogAsDraft) => void;
   /** The top card's overlap line, shown under the time. */
   overlap?: React.ReactNode;
+  /** One card per outing (PRD D19): the travel line of the Moves folded into this Stay's card. */
+  outing?: string;
   titleId?: string;
 }) {
   const clock = useClockFormat();
@@ -749,6 +814,7 @@ function CardFace({
           </p>
         ) : null}
         {overlap}
+        {outing ? <p className="df-rwhen df-routing">{outing}</p> : null}
         {span ? (
           <div className="df-logas">
             <label htmlFor={inert ? undefined : "df-logas-name"}>Log as</label>
@@ -965,7 +1031,10 @@ function useMinuteClock(hydrated: boolean) {
   return nowMs;
 }
 
-function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>) {
+function useReviewDecisions(
+  openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>,
+  onOutingConflict: (stayId: string, statuses: Record<string, string>) => void
+) {
   const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
   const [controller] = useState(() => new ReviewDecisionController(setState));
   // The save reads the newest data: a held suggestion a refresh changed is not what the user
@@ -984,6 +1053,19 @@ function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => 
         method: "POST"
       });
       const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      // An outing that changed (one of its cards decided elsewhere or retired) saved nothing: its Stay
+      // comes back with the reason, and the next data shows whatever is still open (Codex r1 on #466).
+      const outingAction = decision.mutation.action === "confirm_outing" || decision.mutation.action === "ignore_outing";
+      if (outingAction && response.status === 409 && body.code === "resolution_conflict") {
+        void refresh().catch(() => undefined);
+        // The server says which cards are still open (Codex r2 on #466): a Stay decided elsewhere is
+        // gone (its open Moves then show on their own); otherwise the outing comes back, open cards only.
+        const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
+          ? body.canonicalReviewStatuses as Record<string, string> : null;
+        if (statuses) onOutingConflict(decision.itemId, statuses);
+        if (statuses && statuses[decision.itemId] !== undefined && statuses[decision.itemId] !== "open") return "gone";
+        return "changed";
+      }
       // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
       if (
         response.status === 404 ||
@@ -1003,7 +1085,7 @@ function useReviewDecisions(openItems: readonly ReviewItemRow[], refresh: () => 
       void refresh().catch(() => undefined);
       return "saved";
     });
-  }, [controller, openItems, refresh]);
+  }, [controller, onOutingConflict, openItems, refresh]);
 
   useEffect(() => onBeforeSessionChange(() => controller.flushAndSettle()), [controller]);
 

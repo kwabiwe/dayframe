@@ -13,25 +13,17 @@ const datePicker = source("./DatePickerPopover.tsx");
 const styles = source("../app/globals.css");
 
 describe("web manual entry and Timeline control refinement", () => {
-  it("reuses task suggestions in manual entry without starting a timer", () => {
-    const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
-    expect(manual).toContain("data.taskSuggestions");
-    expect(manual).toContain("<TaskSuggestionsPanel");
-    expect(manual).toContain("setDescription(suggestion.description)");
-    expect(manual).toContain("setCategoryId(suggestion.categoryId ??");
-    expect(manual).toContain("setTagNames(suggestion.tagNames)");
-    expect(manual).toContain("suppressSuggestionFocusRef.current");
-    expect(manual).toContain("setSuggestionsOpen(true)");
+  it("reuses task suggestions in Add time (the shared editor) without starting a timer", () => {
+    const manual = timer.slice(timer.indexOf("function ManualEntryEditor"), timer.indexOf("type QuickAction"));
+    expect(manual).toContain("taskSuggestions={data.taskSuggestions}");
+    expect(manual).toContain("taskSuggestionCandidates={data.taskSuggestionCandidates}");
     expect(manual).not.toContain("startTimer(");
   });
 
-  it("anchors manual Tags and Suggestions below their triggers with internal bounds", () => {
-    expect(timer).toContain('className="manual-entry-dialog"');
-    expect(timer).toContain('className="manual-entry-inline-tags time-entry-quick-tags"');
-    expect(styles).toMatch(/\.manual-entry-description \.swiss-task-suggestions \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*bottom: auto;/s);
+  it("anchors Tags and Suggestions below their triggers with internal bounds", () => {
     // The Tags button's list sits under the field at its full width, like the typed lists (14 Oct 2026).
     expect(styles).toMatch(/\.inline-tag-suggestions,\s*\.inline-activity-suggestions,\s*\.inline-tag-picker \{[^}]*top: calc\(100% \+ var\(--web-field-gap\)\);[^}]*left: 0;[^}]*right: 0;[^}]*max-height: min\(19rem, calc\(100dvh - 10rem\)\);/s);
-    expect(styles).not.toContain(".manual-entry-inline-tags .inline-tag-picker");
+    expect(styles).not.toContain(".manual-entry-");
   });
 
   it("hard-limits suggestions to five complete rows", () => {
@@ -42,46 +34,8 @@ describe("web manual entry and Timeline control refinement", () => {
     expect(styles).toMatch(/\.swiss-task-suggestions-list \.df-flist-row \{[^}]*min-height: var\(--task-suggestion-row-height\);/s);
   });
 
-  it("uses the shared quick-editor anatomy and borderless date-time controls", () => {
-    const manual = timer.slice(timer.indexOf("function ManualEntryDialog"));
-    expect(manual).toContain("<CategoryPicker");
-    expect(manual).toContain('className="manual-entry-category"');
-    expect(manual).toContain('variant="quick"');
-    expect(manual).toContain('className="calendar-compact-editor-fields manual-entry-form"');
-    expect(manual).toContain('className="calendar-compact-temporal-fields manual-entry-temporal-fields"');
-    expect(manual).toContain('className="calendar-compact-duration-field"');
-    expect(manual).toContain('title="Add Time"');
-    expect(manual).toContain('className="calendar-compact-cancel"');
-    expect(manual).toContain('className="calendar-compact-save"');
-    expect(manual).toMatch(/footer=\{\([\s\S]*?<OverlapNotice[\s\S]*?compact[\s\S]*?calendar-compact-cancel[\s\S]*?calendar-compact-save[\s\S]*?<\/\>/);
-    expect(manual).toContain('<span className="tabular">{durationLabel}</span>');
-    expect(manual).not.toContain('<strong className="tabular">{durationLabel}</strong>');
-    expect(manual).not.toContain("<SelectField");
-    expect(manual).toContain("<DayframeDateTimePicker");
-    expect(manual).toContain('label="Start"');
-    expect(manual).toContain('label="Finish"');
-    expect(manual).toContain("dayOffset={finishDayOffset}");
-    expect(manual).toContain('contentClassName="manual-entry-dialog-content"');
-    expect(manual).not.toContain('contentClassName="manual-entry-dialog-content calendar-compact-editor-panel"');
-    expect(timer).not.toContain('type="datetime-local"');
-    expect(styles).toMatch(/\.dayframe-date-time-trigger \{[^}]*border-color: transparent;/s);
-    expect(styles).toMatch(/\.calendar-compact-editor,[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-horizontal-inset: 12px;[^}]*border-radius: 16px;[^}]*background: var\(--surface-raised\);[^}]*box-shadow: var\(--shadow-floating\);/s);
-    expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*gap: 12px;[^}]*padding: 10px var\(--calendar-compact-horizontal-inset\);/s);
-    expect(styles).toMatch(/\.calendar-compact-editor-header,[\s\S]*\.manual-entry-dialog \.ui-dialog-header \{[^}]*height: 64px;[^}]*min-height: 64px;[^}]*max-height: 64px;/s);
-    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*height: var\(--calendar-compact-feedback-height\);[^}]*min-height: var\(--calendar-compact-feedback-height\);[^}]*max-height: var\(--calendar-compact-feedback-height\);/s);
-    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions \{[^}]*justify-content:\s*flex-end;/s);
-    expect(styles).toMatch(/\.manual-entry-dialog \.ui-dialog-actions > \.overlap-notice\.is-compact \{[^}]*flex: 1 1 auto;[^}]*margin-right: auto;/s);
-    expect(styles).toMatch(/\.calendar-compact-save,\s*\.calendar-compact-cancel \{[^}]*width: max-content;[^}]*min-width: var\(--calendar-compact-action-width\);[^}]*white-space: nowrap;/s);
-    expect(styles).toMatch(/dialog\.ui-dialog:focus \{[^}]*outline: 0;/s);
-  });
-
   it("uses a neutral text selection globally, never coral (UIA-314)", () => {
     expect(styles).toMatch(/::selection \{[^}]*background: var\(--text-secondary\);[^}]*color: var\(--surface\);/s);
-  });
-
-  it("moves compact Add Time feedback onto its own row at common phone widths", () => {
-    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*dialog\.ui-dialog\.manual-entry-dialog \{[^}]*--calendar-compact-feedback-height: 104px;/s);
-    expect(styles).toMatch(/@media \(max-width: 430px\)[\s\S]*\.manual-entry-dialog \.ui-dialog-actions \{[^}]*grid-template-areas:[^}]*"message message message"[^}]*"spacer cancel action";/s);
   });
 
   it("keeps the running-task menu below the More button and inside the viewport", () => {

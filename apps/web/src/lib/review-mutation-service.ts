@@ -175,6 +175,9 @@ export async function resolveIdempotentReviewMutation(
 }
 
 function affectedReviewIds(reviewItemId: string, mutation: ReviewMutation) {
+  if (mutation.action === "confirm_outing" || mutation.action === "ignore_outing") {
+    return [reviewItemId, ...mutation.memberReviewItemIds];
+  }
   return mutation.action === "merge" || mutation.action === "merge_and_confirm"
     ? [reviewItemId, mutation.adjacentReviewItemId] : [reviewItemId];
 }
@@ -203,7 +206,7 @@ export async function reconcileReviewMutations(input: unknown, session: RequestS
         if (rows.rows.length === ids.length && rows.rows.every(row => row.status === "open")) return { ...base, checkedAt, state: "open" };
         // "Save this place" needs its card open: once it was decided, it can no longer apply.
         if (envelope.mutation.action === "save_place") return { ...base, checkedAt, state: "conflict", reason: "different_final_decision" };
-        const wanted = ["ignore_once", "ignore_once_location"].includes(envelope.mutation.action) ? "ignored" : "accepted";
+        const wanted = ["ignore_once", "ignore_once_location", "ignore_outing"].includes(envelope.mutation.action) ? "ignored" : "accepted";
         if (rows.rows.some(row => ["accepted", "ignored"].includes(row.status) && row.status !== wanted)) {
           return { ...base, checkedAt, state: "conflict", reason: "different_final_decision" };
         }

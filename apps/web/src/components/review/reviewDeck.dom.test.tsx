@@ -45,11 +45,13 @@ const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     const reviewItemId = input.slice("/api/review/".length);
     const action = body.mutation.action as string;
     const ignored = action.startsWith("ignore");
+    const members = Array.isArray(body.mutation.memberReviewItemIds) ? body.mutation.memberReviewItemIds as string[] : null;
     return new Response(JSON.stringify({
       ok: true,
       action,
       status: ignored ? "ignored" : "accepted",
       ...(ignored ? {} : { entryId: "e-1" }),
+      ...(members ? { reviewItemIds: [reviewItemId, ...members], ...(ignored ? {} : { entryIds: [reviewItemId, ...members].map((_, index) => `e-${index}`) }) } : {}),
       clientMutationId: body.clientMutationId,
       reviewItemId
     }), { status: 200 });
@@ -137,6 +139,32 @@ describe("Review", () => {
     expect(queue(container)).toEqual(["Morning walk", "Reading"]);
     await act(async () => vi.advanceTimersByTime(6_000));
     expect(sent).toEqual([]);
+    await act(async () => root.unmount());
+  });
+
+  it("shows an outing as one card and logs all of it together (PRD D19, one card per outing)", async () => {
+    const THERE = "30000000-0000-4000-8000-0000000000a1";
+    const SHOP = "30000000-0000-4000-8000-0000000000a2";
+    const BACK = "30000000-0000-4000-8000-0000000000a3";
+    const part = (id: string, title: string, role: string, from: [number, number], to: [number, number]): ReviewItemRow => ({
+      ...review(id, title, "admin"), eventSource: "location_learning", eventType: role === "stay" ? "unknown_stay" : "commute_detected",
+      suggestedStartedAt: local(...from), suggestedStoppedAt: local(...to),
+      rawPayload: { clientSegmentId: id, outingKey: "outing:shop", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
+    });
+    const { container, root } = await mount([
+      part(THERE, "Trip to the shop", "in", [9, 0], [9, 6]), part(SHOP, "Unknown place", "stay", [9, 6], [9, 40]),
+      part(BACK, "Trip home", "out", [9, 40], [9, 45]), review(READ, "Reading", "admin")
+    ]);
+    expect(queue(container)).toEqual(["Unknown place", "Reading"]);
+    expect(title(container)).toBe("Unknown place");
+    expect(container.querySelector(".df-routing")?.textContent).toBe("Drives there and back · 11m");
+    await key("y");
+    expect(queue(container)).toEqual(["Reading"]);
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => [request.url, request.body.mutation])).toEqual([
+      [`/api/review/${SHOP}`, { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] }]
+    ]);
+    expect(container.textContent).not.toContain("Couldn’t");
     await act(async () => root.unmount());
   });
 
@@ -789,3 +817,136 @@ function bootstrap(reviewItems: ReviewItemRow[], reviewCount = reviewItems.lengt
     }
   } as unknown as BootstrapData;
 }
+
+describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
+  const THERE = "30000000-0000-4000-8000-0000000000b1";
+  const SHOP = "30000000-0000-4000-8000-0000000000b2";
+  const BACK = "30000000-0000-4000-8000-0000000000b3";
+  const part = (id: string, title: string, role: string, from: [number, number], to: [number, number]): ReviewItemRow => ({
+    ...review(id, title, "admin"), eventSource: "location_learning", eventType: role === "stay" ? "unknown_stay" : "commute_detected",
+    suggestedStartedAt: local(...from), suggestedStoppedAt: local(...to),
+    rawPayload: { clientSegmentId: id, outingKey: "outing:shop", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
+  });
+  const there = part(THERE, "Trip to the shop", "in", [9, 0], [9, 6]);
+  const shop = part(SHOP, "Unknown place", "stay", [9, 6], [9, 40]);
+  const back = part(BACK, "Trip home", "out", [9, 40], [9, 45]);
+  async function controllable(items: ReviewItemRow[]) {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    vi.setSystemTime(NOW);
+    fakeFrames();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = trackedRoot(container);
+    const render = (next: ReviewItemRow[]) => act(async () => root.render(
+      <AppShellRuntimeProvider>
+        <ReviewDeck initialData={bootstrap(next)} />
+      </AppShellRuntimeProvider>
+    ));
+    await render(items);
+    return { container, root, render };
+  }
+
+  it("brings the Stay back with the reason when the outing changed on the server", async () => {
+    const { container } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing"
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown." }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(queue(container)).toContain("Unknown place");
+    expect(container.textContent).toContain("changed, so it was not saved");
+  });
+
+  it("keeps a held outing's Moves folded away when a refresh no longer lists its Stay", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    expect(queue(container)).toEqual(["Reading"]);
+    // A capped refresh during the Undo hold drops the Stay but still lists the Move home.
+    await render([back, review(READ, "Reading", "admin")]);
+    expect(queue(container)).toEqual(["Reading"]);
+  });
+
+  it("never revives a Stay decided elsewhere; its open Moves then show on their own (Codex r2 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing"
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "accepted", [THERE]: "open", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(queue(container)).not.toContain("Unknown place");
+    await render([there, back, review(READ, "Reading", "admin")]);
+    expect(queue(container)).toEqual(expect.arrayContaining(["Trip to the shop", "Trip home", "Reading"]));
+  });
+
+  it("brings the whole outing back on Undo after a refresh dropped part of it, and logs all of it again (Codex r2 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    expect(queue(container)).toEqual(expect.arrayContaining(["Unknown place", "Reading"]));
+    expect(queue(container)).not.toContain("Trip home");
+    expect(title(container)).toBe("Unknown place");
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => request.body.mutation)).toEqual([
+      { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] }
+    ]);
+  });
+
+  it("drops a revived Move the server says was decided, so the next Log it sends only open cards (Codex r3 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    answer = (body) => body.mutation.action === "confirm_outing" && (body.mutation.memberReviewItemIds as string[]).includes(THERE)
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(title(container)).toBe("Unknown place");
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.map((request) => request.body.mutation)).toEqual([
+      { action: "confirm_outing", memberReviewItemIds: [THERE, BACK] },
+      { action: "confirm_outing", memberReviewItemIds: [BACK] }
+    ]);
+  });
+
+  it("lets newer data reopen a card the server once called decided (Codex r4 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing" && sent.length === 1
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    // The arrival is open again in newer data; the outing is held, a refresh drops part of it, Undo.
+    await render([there, shop, back, review(READ, "Reading", "admin")]);
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.at(-1)?.body.mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: [THERE, BACK] });
+  });
+
+  it("keeps a card the server called decided suppressed until data newer than the conflict reopens it (Codex r5 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing" && sent.length === 1
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    // Still on the data from before the conflict: hold again, a refresh drops the Stay and the arrival, Undo.
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.at(-1)?.body.mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: [BACK] });
+  });
+});
+

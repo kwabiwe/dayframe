@@ -24,6 +24,15 @@ import {
 } from "./calendar-entry-compact-editor";
 
 describe("Calendar compact editor temporal model", () => {
+  it("lets Add time plan a window later today, never one on a later day (allowLaterToday; Codex r1 on #468)", () => {
+    const now = new Date(2026, 9, 14, 11, 0);
+    const later = { startedAt: new Date(2026, 9, 14, 12, 0).toISOString(), stoppedAt: new Date(2026, 9, 14, 13, 0).toISOString() };
+    const tomorrow = { startedAt: new Date(2026, 9, 15, 9, 0).toISOString(), stoppedAt: new Date(2026, 9, 15, 10, 0).toISOString() };
+    expect(() => buildCalendarEntryCompactCreatePlan({ draft: calendarEntryCompactCreateInitialDraft(later), now, source: later })).toThrow("Start time cannot be in the future.");
+    expect(buildCalendarEntryCompactCreatePlan({ allowLaterToday: true, draft: calendarEntryCompactCreateInitialDraft(later), now, source: later }).input.startedAt).toBe(later.startedAt);
+    expect(() => buildCalendarEntryCompactCreatePlan({ allowLaterToday: true, draft: calendarEntryCompactCreateInitialDraft(tomorrow), now, source: tomorrow })).toThrow("Start can't be on a day after today.");
+  });
+
   it("shows explicit dates, full duration, and no hidden legacy metadata", () => {
     const completed = timeEntry({ stoppedAt: localIso("2026-01-03T09:20", 19) });
     const running = timeEntry({ stoppedAt: null });

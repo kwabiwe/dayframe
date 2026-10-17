@@ -6,6 +6,8 @@ import {
   LOCATION_ENGINE_V2_CONFIG,
   locationAcceptanceFixture,
   nameBand,
+  PHYSICAL_STOP_PICKUP,
+  physicalStopFixture,
   runLocationEngine,
   type CommuteSegment,
   type LocationEvidence,
@@ -22,7 +24,7 @@ import { isLocationSegmentReview, resolveLocationReviewAction } from "../apps/we
 import {
   forgetLearnedNameForEntry, hashedPatternKey, learnedNamesFor, recordLearnedName, resumeLoggingTrips, stopLoggingTripsLike, stoppedTripPatterns
 } from "../apps/web/src/lib/location/name-patterns";
-import { resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
+import { reconcileReviewMutations, resolveIdempotentReviewMutation } from "../apps/web/src/lib/review-mutation-service";
 import { reconcileHealthCoveredMoveCardsNow } from "../apps/web/src/lib/location/health-coverage";
 import type { RequestSession } from "../apps/web/src/lib/session";
 import { buildTimeEntriesQuery } from "../apps/web/src/lib/queries";
@@ -1915,6 +1917,107 @@ async function validatePlaceDeleteWithSamePlaceJourneys() {
  * re-matches the other open unsaved Stays inside the circle from the last seven days; it is durable
  * (the receipt replays), refuses a visit that already has a place, and a decided card stays decided.
  */
+/**
+ * One card per outing (PRD D19): an unknown Stay's card and the Move cards either side of it share an
+ * outing key, are logged (or skipped) together atomically and idempotently, and a member decided on its
+ * own makes the outing a conflict that changes nothing.
+ */
+async function validateOutingCards() {
+  // The sparse 12-minute outing (two fast fixes each way, PR 11): a saved home, an unknown visit and a
+  // low-confidence Move either side, on three recent days.
+  const fixture = physicalStopFixture({ ...PHYSICAL_STOP_PICKUP,
+    visit: [670_000, 1_390_000], slowAt: [860_000, 1_000_000, 1_200_000], departAt: 1_394_000, returnAt: 1_478_000 });
+  const evidence = fixture.evidence.filter((item) => item.clientEvidenceId !== "out-2" && item.clientEvidenceId !== "back-2");
+  const home = fixture.savedPlaces[0];
+  process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
+  await pool.query(
+    `insert into places (id, workspace_id, name, latitude, longitude, radius_meters, priority, logging_enabled)
+     values ($1, $2, 'Synthetic home', $3, $4, $5, 10, true)`,
+    [home.id, WORKSPACE_ID, home.latitude, home.longitude, home.radiusMeters]);
+  try {
+    await clearDerivedLocationState();
+    const base = Date.parse(evidence[0].occurredAt);
+    const today = new Date(); today.setUTCHours(8, 0, 0, 0);
+    const shift = (iso: string, daysBack: number) => new Date(Date.parse(iso) - base + today.getTime() - daysBack * 86_400_000).toISOString();
+    const shifted = [1, 2, 3].flatMap((daysBack) => evidence.map((item) => ({ ...item, deviceId: DEVICE_ID, timeZone: "Europe/London",
+      clientEvidenceId: `${item.clientEvidenceId}-o${daysBack}`, occurredAt: shift(item.occurredAt, daysBack),
+      ...(item.endedAt ? { endedAt: shift(item.endedAt, daysBack) } : {}), receivedAt: shift(item.occurredAt, daysBack) })))
+      .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+    for (let offset = 0; offset < shifted.length; offset += 100) {
+      await ingestLocationEvidence(batch(`db-outing-${offset}`, shifted.slice(offset, offset + 100), "v2_review", shifted[0].occurredAt),
+        session, new Date().toISOString());
+    }
+    const outings = async () => {
+      const rows = (await pool.query<{ id: string; status: string; key: string; role: string }>(
+        `select ri.id, ri.status, ae.raw_payload ->> 'outingKey' as key, ae.raw_payload ->> 'outingRole' as role
+         from review_items ri join activity_events ae on ae.id = ri.event_id
+         where ri.workspace_id = $1 and ri.user_id = $2 and ae.raw_payload ? 'outingKey'
+         order by ri.suggested_started_at, ri.id`, [WORKSPACE_ID, USER_ID])).rows;
+      const byKey = new Map<string, typeof rows>();
+      for (const row of rows) byKey.set(row.key, [...byKey.get(row.key) ?? [], row]);
+      return [...byKey.values()].filter((group) => group.some((row) => row.role === "stay") && group.length > 1 &&
+        group.every((row) => row.status === "open"));
+    };
+    const groups = await outings();
+    assert(groups.length >= 3, `Expected an outing card group per day, found ${groups.length}.`);
+    const parts = (group: Awaited<ReturnType<typeof outings>>[number]) => ({
+      anchor: group.find((row) => row.role === "stay")!.id, members: group.filter((row) => row.role !== "stay").map((row) => row.id)
+    });
+
+    // Log it: every member accepted with its own block, in one go; a retry replays the receipt.
+    const logged = parts(groups[0]);
+    const envelope = { clientMutationId: "18800000-0000-4000-8000-000000000001",
+      mutation: { action: "confirm_outing" as const, memberReviewItemIds: logged.members } };
+    const result = await resolveIdempotentReviewMutation(logged.anchor, envelope, session) as { status: string; entryIds: string[]; reviewItemIds: string[] };
+    assert.equal(result.status, "accepted", "Logging an outing did not accept it.");
+    assert.equal(result.entryIds.length, logged.members.length + 1, "Logging an outing did not log every member.");
+    const statuses = (await pool.query<{ status: string }>("select status from review_items where id = any($1::uuid[])",
+      [[logged.anchor, ...logged.members]])).rows.map((row) => row.status);
+    assert(statuses.every((status) => status === "accepted"), "An outing member stayed open after Log it.");
+    assert.equal(Number((await pool.query("select count(*) from time_entries where id = any($1::uuid[])", [result.entryIds])).rows[0].count),
+      result.entryIds.length, "An outing member's block is missing.");
+    assert.deepEqual(await resolveIdempotentReviewMutation(logged.anchor, envelope, session), result, "A retried outing did not replay its receipt.");
+    // Without its receipt (another device's identical decision): each member is proved logged as asked,
+    // and a Skip of the logged outing is a conflict (Codex r1 on #466).
+    const again = await resolveIdempotentReviewMutation(logged.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000011",
+      mutation: { action: "confirm_outing", memberReviewItemIds: logged.members } }, session) as { alreadyResolved?: boolean };
+    assert.equal(again.alreadyResolved, true, "An identical decided outing was not acknowledged as already resolved.");
+    await assert.rejects(resolveIdempotentReviewMutation(logged.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000012",
+      mutation: { action: "ignore_outing", memberReviewItemIds: logged.members } }, session), /resolved differently|changed/,
+      "Skipping a logged outing was acknowledged.");
+
+    // Skip: every member ignored.
+    const skipped = parts(groups[1]);
+    const ignored = await resolveIdempotentReviewMutation(skipped.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000002",
+      mutation: { action: "ignore_outing", memberReviewItemIds: skipped.members } }, session) as { status: string };
+    assert.equal(ignored.status, "ignored", "Skipping an outing did not ignore it.");
+    assert((await pool.query<{ status: string }>("select status from review_items where id = any($1::uuid[])",
+      [[skipped.anchor, ...skipped.members]])).rows.every((row) => row.status === "ignored"), "An outing member stayed open after Skip.");
+    // Receiptless reconciliation of the same Skip expects every member ignored (Codex r1 on #466).
+    const reconciled = await reconcileReviewMutations({ mutations: [{ clientMutationId: "18800000-0000-4000-8000-000000000013",
+      reviewItemId: skipped.anchor, mutation: { action: "ignore_outing", memberReviewItemIds: skipped.members } }] }, session);
+    assert.notEqual(reconciled.results[0].state, "conflict", "Reconciling a skipped outing called it a different decision.");
+
+    // A member decided on its own: the outing is a conflict and nothing else changes.
+    const changed = parts(groups[2]);
+    await resolveLocationReviewAction(changed.members[0], { action: "ignore_once_location" }, session);
+    await assert.rejects(resolveIdempotentReviewMutation(changed.anchor, { clientMutationId: "18800000-0000-4000-8000-000000000003",
+      mutation: { action: "confirm_outing", memberReviewItemIds: changed.members } }, session), (error: unknown) => {
+      // The answer says which cards are still open, so clients bring back only those (Codex r2 on #466).
+      const statuses = (error as { details?: { canonicalReviewStatuses?: Record<string, string> } }).details?.canonicalReviewStatuses;
+      assert.equal(statuses?.[changed.anchor], "open", "The conflict did not say the Stay is still open.");
+      assert.equal(statuses?.[changed.members[0]], "ignored", "The conflict did not say which member was decided.");
+      return /changed since it was shown/.test((error as Error).message);
+    }, "An outing with a member decided on its own was logged.");
+    assert.equal((await pool.query<{ status: string }>("select status from review_items where id = $1", [changed.anchor])).rows[0].status, "open",
+      "A refused outing changed its Stay card.");
+    console.info("Outing cards validated", { outings: groups.length });
+  } finally {
+    await clearDerivedLocationState();
+    await pool.query("delete from places where id = $1", [home.id]);
+  }
+}
+
 async function validateSavePlace() {
   const fixture = locationAcceptanceFixture();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
@@ -2509,7 +2612,7 @@ async function validateHealthWalksWin() {
  * with its visit and removes it with a vanished visit; edited or deleted blocks are never touched.
  */
 /**
- * Moves that log themselves in Review mode (PRD D19, A3/A4): with "Log trips automatically" on, a clear
+ * one Review card per outing (grouping, log and skip together, retry, conflict), Moves that log themselves in Review mode (PRD D19, A3/A4): with "Log trips automatically" on, a clear
  * Move between two saved places becomes a location_auto_log block, not a Review card; with it off, an
  * overlap over five minutes, or its pattern stopped ("Don't log trips like this"), it stays a card
  * saying why. Replay keeps one block per Move and moves it with a Move whose ID changed.
@@ -3159,6 +3262,7 @@ async function main() {
     await validateReviewModeAutoLogPlaces();
     await validateReviewModeAutoMoves();
     await validateSavePlace();
+    await validateOutingCards();
     await validateEnabledTrustedPlaceAutomation();
     await validateEnabledTrustedCommuteAutomation();
     await validateFinalisationWithoutNewEvidence();

@@ -77,19 +77,17 @@ describe("persistent block shell contract", () => {
     expect(styles).toMatch(/\.swiss-category-trigger > svg \{[^}]*flex: 0 0 auto;/s);
   });
 
-  it("keeps the manual dialog focused and removes the duplicate list form", () => {
-    const manualDialog = timer.slice(timer.indexOf("function ManualEntryDialog"));
-    expect(manualDialog).toContain('initialFocusRef={descriptionInputRef}');
-    expect(manualDialog).toContain('label="Activity"');
-    expect(manualDialog).toContain('>Description</label>');
-    expect(manualDialog).toContain('>Start</span>');
-    expect(manualDialog).toContain('>Finish</span>');
-    expect(manualDialog).toContain('>Duration</span>');
-    expect(manualDialog).toContain('label="Start"');
-    expect(manualDialog).toContain('label="Finish"');
-    expect(manualDialog.indexOf('>Description</label>')).toBeLessThan(manualDialog.indexOf('label="Activity"'));
-    expect(manualDialog.indexOf('label="Activity"')).toBeLessThan(manualDialog.indexOf('>Start</span>'));
-    expect(manualDialog).not.toContain('label="Place"');
+  it("opens Add time as the shared New block editor and keeps the duplicate list form gone (WUI-025)", () => {
+    const manual = timer.slice(timer.indexOf("function ManualEntryEditor"));
+    expect(manual).toContain("<TimeEntryQuickCreateModal");
+    expect(manual).toContain("onCreateCategory={onCreateCategory}");
+    expect(manual).toContain("taskSuggestions={data.taskSuggestions}");
+    // Add time's own rules stay on save: nothing after today (D2) and a valid manual window.
+    expect(manual).toContain("Add time can't go past today.");
+    expect(manual).toContain("validateManualTimeEntryWindow(");
+    expect(timer).not.toContain("function ManualEntryDialog");
+    expect(timer).not.toContain("DayframeDateTimePicker");
+    expect(timer).not.toContain('title="Add Time"');
     expect(entries).not.toContain("submitManual");
     expect(entries).not.toContain("Add manual entry");
   });
