@@ -40,4 +40,24 @@ describe("Places › Trips (PRD D19, A4)", () => {
     await waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
     expect(offline.container.textContent).toBe("");
   });
+
+  it("keeps keyboard focus on the next trip, or the heading, after logging one again (Codex r1 on #463)", async () => {
+    const trips = [
+      { patternKey: "key-1", label: "Synthetic A → Synthetic B", stoppedAt: "2026-10-17T07:00:00.000Z" },
+      { patternKey: "key-2", label: "Synthetic C → Synthetic D", stoppedAt: "2026-10-16T07:00:00.000Z" }
+    ];
+    mocks.fetch.mockImplementation(async (_url: string, init?: RequestInit) => init?.method === "POST"
+      ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+      : new Response(JSON.stringify({ trips }), { status: 200 }));
+    render(<StoppedTripsSection />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Log automatically again" })).toHaveLength(2));
+    const user = userEvent.setup();
+    screen.getAllByRole("button", { name: "Log automatically again" })[0].focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Log automatically again" })).toHaveLength(1));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Log automatically again" }));
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Log automatically again" })).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Trips you log yourself" }));
+  });
 });

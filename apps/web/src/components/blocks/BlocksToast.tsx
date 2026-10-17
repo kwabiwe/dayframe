@@ -37,6 +37,17 @@ export function BlocksToast({
 }) {
   const pop = springTransition("pop");
   const actionRef = useRef<HTMLButtonElement | null>(null);
+  // The second action's button had focus when it was replaced by its outcome: focus moves to the
+  // main action (Undo), unless focus has gone somewhere else meanwhile (Codex r1 on #463).
+  const secondaryRef = useRef<HTMLButtonElement | null>(null);
+  const secondaryHadFocus = useRef(false);
+  const secondaryDone = secondary?.done ?? null;
+  useEffect(() => {
+    if (!secondaryDone || !secondaryHadFocus.current) return;
+    secondaryHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) actionRef.current?.focus();
+  }, [secondaryDone]);
   useEffect(() => {
     if (!autoFocusAction || exiting) return;
     const frame = window.requestAnimationFrame(() => actionRef.current?.focus());
@@ -74,7 +85,10 @@ export function BlocksToast({
               <button
                 className="df-toast-action df-toast-action--secondary"
                 disabled={exiting || secondary.busy}
+                onBlur={() => { if (!secondary.busy) secondaryHadFocus.current = false; }}
                 onClick={secondary.onAction}
+                onFocus={() => { secondaryHadFocus.current = true; }}
+                ref={secondaryRef}
                 type="button"
               >
                 {secondary.label}

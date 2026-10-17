@@ -2620,6 +2620,15 @@ async function validateReviewModeAutoMoves() {
     const stopped = await stoppedTripPatterns(pool, session);
     assert.equal(stopped.length, 1, "Places › Trips did not list the stopped trip.");
     assert(stopped[0].label.trim(), "The stopped trip has no label.");
+    // The deleted block is a decision: replay never recreates it, stopped or resumed (Codex r1 on #463).
+    const replayMoves = () => replayRetainedLocationEvidence({ deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+      rolloutMode: "v2_review", semanticModeAcknowledgedAt: fixture.evidence[0].occurredAt }, session, PROCESSING_AT);
+    await replayMoves();
+    assert.equal((await moveBlocks()).length, 0, "Replay recreated a deleted automatic Move.");
+    await resumeLoggingTrips(pool, session, stopped[0].patternKey);
+    await replayMoves();
+    assert.equal((await moveBlocks()).length, 0, "Resuming brought a deleted automatic Move back.");
+    assert.equal(await stopLoggingTripsLike(pool, session, stoppable.eventId), true, "Stopping the trip again failed.");
     // The deleted block's own Move is a decision and never comes back; a later Move like it does. Keep
     // the stop the API wrote across a fresh run of the same evidence, which stands in for that Move.
     const stops = (await pool.query<{ key: string; band: string }>(

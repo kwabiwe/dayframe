@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { clientFetch } from "@/lib/client-auth-fetch";
 
@@ -15,6 +15,21 @@ export function StoppedTripsSection() {
   const [trips, setTrips] = useState<StoppedTrip[] | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  // Where focus goes once a resumed row (whose button had it) is gone: the next row's button, else
+  // the previous one's, else the section heading (Codex r1 on #463).
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const refocus = useRef<{ next: string | null } | null>(null);
+  useEffect(() => {
+    const target = refocus.current;
+    if (!target) return;
+    refocus.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const next = target.next ? buttonRefs.current.get(target.next) : undefined;
+    if (next) next.focus();
+    else headingRef.current?.focus();
+  }, [trips]);
 
   useEffect(() => {
     let live = true;
@@ -42,6 +57,10 @@ export function StoppedTripsSection() {
         body: JSON.stringify({ action: "resume_trips", patternKey: trip.patternKey })
       });
       if (!response.ok) throw new Error();
+      const list = trips ?? [];
+      const index = list.findIndex((other) => other.patternKey === trip.patternKey);
+      const neighbour = list[index + 1] ?? list[index - 1] ?? null;
+      refocus.current = { next: neighbour?.patternKey ?? null };
       setTrips((current) => current?.filter((other) => other.patternKey !== trip.patternKey) ?? null);
       setMessage({ text: `${trip.label} logs itself again when it’s clear.`, error: false });
     } catch {
@@ -56,7 +75,7 @@ export function StoppedTripsSection() {
     <section className="places-list-section" aria-labelledby="stopped-trips-title">
       <header>
         <div>
-          <h2 id="stopped-trips-title">Trips you log yourself</h2>
+          <h2 id="stopped-trips-title" ref={headingRef} tabIndex={-1}>Trips you log yourself</h2>
           <p>Trips like these wait in Review instead of logging themselves.</p>
         </div>
         <span>{trips?.length ?? 0}</span>
@@ -72,6 +91,7 @@ export function StoppedTripsSection() {
               <button
                 className="df-rbtn df-rbtn--sm df-rbtn--ghost"
                 disabled={busyKey !== null}
+                ref={(node) => { if (node) buttonRefs.current.set(trip.patternKey, node); else buttonRefs.current.delete(trip.patternKey); }}
                 onClick={() => void resume(trip)}
                 type="button"
               >

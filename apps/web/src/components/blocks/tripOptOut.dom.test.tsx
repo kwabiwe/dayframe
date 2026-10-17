@@ -46,4 +46,18 @@ describe("Don't log trips like this (PRD D19, A4)", () => {
     rerender({ token: 2 });
     expect(result.current).toMatchObject({ busy: false, done: null });
   });
+
+  it("moves focus to Undo when its focused action is replaced by the outcome (Codex r1 on #463)", async () => {
+    mocks.fetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    function Harness() {
+      const secondary = useTripOptOut("00000000-0000-4000-8000-0000000000e1", 9);
+      return <BlocksToast actionLabel="Undo" message="“Commute” deleted" onAction={vi.fn()} secondary={secondary} />;
+    }
+    render(<Harness />);
+    const button = screen.getByRole("button", { name: "Don’t log trips like this" });
+    button.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByText("Trips like this will wait in Review.")).toBeTruthy());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Undo" }));
+  });
 });
