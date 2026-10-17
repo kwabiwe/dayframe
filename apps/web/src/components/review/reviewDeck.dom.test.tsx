@@ -931,5 +931,22 @@ describe("one card per outing — round 1 fixes (Codex r1 on #466)", () => {
     await act(async () => vi.advanceTimersByTimeAsync(5_000));
     expect(sent.at(-1)?.body.mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: [THERE, BACK] });
   });
+
+  it("keeps a card the server called decided suppressed until data newer than the conflict reopens it (Codex r5 on #466)", async () => {
+    const { container, render } = await controllable([there, shop, back, review(READ, "Reading", "admin")]);
+    answer = (body) => body.mutation.action === "confirm_outing" && sent.length === 1
+      ? new Response(JSON.stringify({ ok: false, code: "resolution_conflict", message: "This outing changed since it was shown.",
+        canonicalReviewStatuses: { [SHOP]: "open", [THERE]: "ignored", [BACK]: "open" } }), { status: 409 })
+      : undefined;
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    // Still on the data from before the conflict: hold again, a refresh drops the Stay and the arrival, Undo.
+    await key("y");
+    await render([back, review(READ, "Reading", "admin")]);
+    await act(async () => container.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+    await key("y");
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(sent.at(-1)?.body.mutation).toEqual({ action: "confirm_outing", memberReviewItemIds: [BACK] });
+  });
 });
 

@@ -80,11 +80,18 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   // A refused outing's canonical statuses (from the server's conflict answer): only its open cards return,
   // and no kept copy of a card the server says is decided stays on the deck (Codex r2/r3 on #466).
   const outingConflictStatuses = useRef(new Map<string, Record<string, string>>());
-  const [closedByServer, setClosedByServer] = useState<ReadonlySet<string>>(() => new Set());
+  // Each mark remembers the data it was made over: only a newer snapshot listing the card open lifts it
+  // (Codex r4/r5 on #466).
+  const [closedByServer, setClosedByServer] = useState<ReadonlyMap<string, unknown>>(() => new Map());
+  const openItemsAtConflict = useRef<unknown>(openItems);
+  useLayoutEffect(() => {
+    openItemsAtConflict.current = openItems;
+  }, [openItems]);
   const onOutingConflict = useCallback((stayId: string, statuses: Record<string, string>) => {
     outingConflictStatuses.current.set(stayId, statuses);
     const closed = Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id);
-    if (closed.length) setClosedByServer((current) => new Set([...current, ...closed]));
+    const over = openItemsAtConflict.current;
+    if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
   }, []);
   const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict);
   // Cards the deck keeps although the loaded data (the newest 100) no longer lists them: the card
@@ -99,9 +106,10 @@ export function ReviewDeck({ initialData }: { initialData: BootstrapData }) {
   if ([...revived.keys()].some((id) => loadedIds.has(id))) {
     setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
   }
-  // Newer data listing a card open again lifts the server's earlier "decided" for it (Codex r4 on #466).
-  if ([...closedByServer].some((id) => loadedIds.has(id))) {
-    setClosedByServer(new Set([...closedByServer].filter((id) => !loadedIds.has(id))));
+  // Newer data listing a card open again lifts the server's earlier "decided" for it (Codex r4/r5 on #466).
+  const reopened = (id: string, over: unknown) => over !== openItems && loadedIds.has(id);
+  if ([...closedByServer].some(([id, over]) => reopened(id, over))) {
+    setClosedByServer(new Map([...closedByServer].filter(([id, over]) => !reopened(id, over))));
   }
   const deckItems = useMemo(() => {
     const extra = [...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id));
