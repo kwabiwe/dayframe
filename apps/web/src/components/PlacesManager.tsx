@@ -258,6 +258,7 @@ export function PlacesManager({
 
       {selectedLearnedPlace ? (
         <ModalDialog
+          size="wide"
           busy={busyId === selectedLearnedPlace.id}
           description="Review the saved evidence before deciding what to do."
           footer={(

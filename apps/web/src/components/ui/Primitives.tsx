@@ -241,8 +241,43 @@ export function SettingsRow({
 }
 
 type DialogRole = "dialog" | "alertdialog";
+/** Width tiers (web UI audit WUI-021): confirm 400, compact 520, form 620, wide 720. */
+export type DialogSize = "confirm" | "compact" | "form" | "wide";
 
 let openDialogCount = 0;
+
+/**
+ * The dialog's exit (WUI-020): hosts unmount a ModalDialog to close it, so its last frame is
+ * copied into an inert, hidden-from-assistive-technology twin that fades out over the page in
+ * 120 ms (opacity only under Reduce Motion, in the same 120 ms) and is then removed. The real
+ * dialog has already closed, so focus and the page's interactivity return at once.
+ */
+export function playDialogExit(dialog: HTMLDialogElement) {
+  if (typeof document === "undefined" || !dialog.hasAttribute("open")) return;
+  const ghost = dialog.cloneNode(true) as HTMLDialogElement;
+  // Typed values are properties, not attributes: carry them over so fields do not blank.
+  const sources = dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+  const copies = ghost.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+  sources.forEach((source, index) => {
+    const copy = copies[index];
+    if (!copy) return;
+    if (copy instanceof HTMLInputElement && source instanceof HTMLInputElement && (source.type === "checkbox" || source.type === "radio")) copy.checked = source.checked;
+    else copy.value = source.value;
+  });
+  for (const element of [ghost, ...ghost.querySelectorAll("[id]")]) element.removeAttribute("id");
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.inert = true;
+  ghost.classList.add("ui-dialog-ghost");
+  ghost.setAttribute("open", "");
+  const scrim = document.createElement("div");
+  scrim.className = "ui-dialog-ghost-scrim";
+  scrim.setAttribute("aria-hidden", "true");
+  document.body.append(scrim, ghost);
+  window.setTimeout(() => {
+    scrim.remove();
+    ghost.remove();
+  }, 160);
+}
 
 export function ModalDialog({
   ariaLabel,
@@ -256,6 +291,7 @@ export function ModalDialog({
   onClose,
   role = "dialog",
   showClose = true,
+  size,
   title
 }: {
   ariaLabel?: string;
@@ -269,6 +305,8 @@ export function ModalDialog({
   onClose: () => void;
   role?: DialogRole;
   showClose?: boolean;
+  /** Defaults to `confirm` for an alert dialog and `form` otherwise. */
+  size?: DialogSize;
   title?: string;
 }) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
@@ -293,6 +331,9 @@ export function ModalDialog({
 
     return () => {
       window.cancelAnimationFrame(focusHandle);
+      // A real close (the host unmounted it) fades out; a re-run while still mounted does not.
+      // jsdom draws nothing, so there the copy would only duplicate the dialog for DOM queries.
+      if (!dialog.isConnected && !navigator.userAgent.includes("jsdom")) playDialogExit(dialog);
       if (dialog.open) dialog.close();
       openDialogCount = Math.max(0, openDialogCount - 1);
       if (openDialogCount === 0) document.documentElement.classList.remove("ui-dialog-open");
@@ -307,7 +348,7 @@ export function ModalDialog({
   return (
     <dialog
       ref={dialogRef}
-      className={classNames("ui-dialog", className)}
+      className={classNames("ui-dialog", `ui-dialog--${size ?? (role === "alertdialog" ? "confirm" : "form")}`, className)}
       role={role}
       aria-modal="true"
       aria-label={title ? undefined : ariaLabel}
