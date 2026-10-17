@@ -156,7 +156,7 @@ afterEach(() => {
   tree = undefined;
 });
 
-function editor(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
+function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem: object = { suggestedCategoryId: null }) {
   return (
     <LocationReviewCorrectionEditor
       adjacentReview={undefined}
@@ -167,14 +167,14 @@ function editor(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
       onResolve={onResolve}
       places={[]}
       recentActivityIds={recent}
-      reviewItem={{ suggestedCategoryId: null } as never}
+      reviewItem={reviewItem as never}
       saving={false}
     />
   );
 }
 
-async function render(evidence: LocationReviewEvidenceDto, recent: string[] = []) {
-  await act(async () => { tree = create(editor(evidence, recent)); });
+async function render(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem?: object) {
+  await act(async () => { tree = create(editor(evidence, recent, reviewItem)); });
 }
 
 const isHost = (node: ReactTestInstance, type: string) => (node.type as unknown) === type;
@@ -234,6 +234,33 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
     expect(bar.findAll((node) => typeof node.type === "string" && text(node) === "This suggestion does not have a complete time range.")).not.toHaveLength(0);
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("This suggestion does not have a complete time range.");
     expect(onResolve).not.toHaveBeenCalled();
+  });
+
+  it("offers a learned name one tap away in Name, and only while the field doesn't hold it", async () => {
+    await render(stay({ matched: false }), [], { suggestedCategoryId: null, title: "Swimming", rawPayload: { nameSource: "learned" } });
+    const chip = () => tree!.root.findAll((node) => node.props.testID === "location-evidence-learned-name" && typeof node.type === "string");
+    expect(chip()).toHaveLength(1);
+    expect(chip()[0].props.accessibilityLabel).toBe("Use the name Swimming");
+    await press(chip()[0]);
+    expect(tree!.root.findAll((node) => isHost(node, "TextInput") && node.props.value === "Swimming")).toHaveLength(1);
+    expect(chip()).toHaveLength(0);
+    await press(primary());
+    expect((onResolve.mock.calls[0][0] as { edit?: { description?: string } }).edit?.description).toBe("Swimming");
+  });
+
+  it("says what the suggestion rests on in one line under the map that opens to the details", async () => {
+    const evidence = stay({ matched: true });
+    (evidence.map as { gaps: unknown[] }).gaps = [{ startedAt: "2026-08-14T09:20:00Z", stoppedAt: "2026-08-14T09:45:00Z", durationSeconds: 1500, fromPoint: null, toPoint: null }];
+    (evidence.map as { acceptedSamples: unknown[] }).acceptedSamples = ["a", "b"].map((id) => ({ id, point: { type: "Point", coordinates: [20, 10] },
+      occurredAt: "2026-08-14T09:10:00Z", accuracyMeters: 10, kind: "fix", role: null }));
+    await render(evidence);
+    const line = tree!.root.findAll((node) => node.props.testID === "location-evidence-line" && typeof node.type === "string")[0];
+    expect(text(line)).toBe("Based on 2 readings · 25-min gap");
+    expect(line.props.accessibilityState).toEqual({ expanded: false });
+    expect(byTestId("location-evidence-details")).toHaveLength(0);
+    await press(line);
+    expect(byTestId("location-evidence-details")).toHaveLength(1);
+    expect(texts("Synthetic test visit")).toHaveLength(1);
   });
 
   it("offers Skip in neutral text and no second Record once", async () => {

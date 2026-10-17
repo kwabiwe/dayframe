@@ -2978,6 +2978,8 @@ function sanitiseRawPayload(rawPayload: Record<string, unknown> | null) {
     "travelMode",
     // A Move's second line ("Home → Gym"; PRD D19).
     "routeLabel",
+    // A learned name (the card's title then), offered in Location evidence's Name.
+    "nameSource",
     // One card per outing (PRD D19): an opaque outing id and the card's part in it.
     OUTING_KEY_PAYLOAD_KEY,
     OUTING_ROLE_PAYLOAD_KEY
