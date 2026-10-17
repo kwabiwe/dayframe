@@ -952,7 +952,7 @@ describe("category persistence", () => {
           address: {
             street: "Example Road",
             city: "Exampleton",
-            postalCode: "EX1 1AA"
+            postalCode: "ZZ1 1AA"
           },
           clusterKey: "51.610,-0.220",
           latitude: 51.61,
@@ -1040,8 +1040,8 @@ describe("category persistence", () => {
           name: "Example Grocer",
           street: "Example Road",
           city: "Exampleton",
-          postalCode: "EX1 1AA",
-          formattedAddress: "Example Road, Exampleton, EX1 1AA"
+          postalCode: "ZZ1 1AA",
+          formattedAddress: "Example Road, Exampleton, ZZ1 1AA"
         },
         clusterKey: "51.610,-0.220",
         latitude: 51.61,
@@ -1091,7 +1091,7 @@ describe("category persistence", () => {
       "medium",
       expect.any(String),
       "Example Grocer",
-      "Example Road, Exampleton, EX1 1AA",
+      "Example Road, Exampleton, ZZ1 1AA",
       expect.any(String)
     ]);
   });
@@ -1279,8 +1279,8 @@ describe("place persistence", () => {
       name: "Example Gym Exampleton",
       street: "Sample Street",
       city: "Exampleton",
-      postalCode: "EX2 2BB",
-      formattedAddress: "Sample Street, Exampleton, EX2 2BB"
+      postalCode: "ZZ2 2BB",
+      formattedAddress: "Sample Street, Exampleton, ZZ2 2BB"
     };
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {

@@ -34,9 +34,9 @@ describe("/api/learned-places", () => {
     mocks.resolveLearnedPlaceLocation.mockResolvedValue({
       id: learnedPlaceId(),
       name: "Example Grocer",
-      address: { name: "Example Grocer", formattedAddress: "Example Road, Exampleton, EX1 1AA" },
+      address: { name: "Example Grocer", formattedAddress: "Example Road, Exampleton, ZZ1 1AA" },
       poiName: "Example Grocer",
-      formattedAddress: "Example Road, Exampleton, EX1 1AA",
+      formattedAddress: "Example Road, Exampleton, ZZ1 1AA",
       geocodedAt: "2026-07-14T10:00:00.000Z"
     });
     mocks.updateLearnedPlaceStatus.mockResolvedValue({ id: learnedPlaceId() });
@@ -47,8 +47,8 @@ describe("/api/learned-places", () => {
       name: "Example Grocer",
       street: "Example Road",
       city: "Exampleton",
-      postalCode: "EX1 1AA",
-      formattedAddress: "Example Road, Exampleton, EX1 1AA"
+      postalCode: "ZZ1 1AA",
+      formattedAddress: "Example Road, Exampleton, ZZ1 1AA"
     };
     const response = await PATCH(jsonRequest({
       id: learnedPlaceId(),

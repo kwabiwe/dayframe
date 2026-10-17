@@ -374,7 +374,7 @@ describe("event normalization", () => {
           candidateName: "Regular place near 51.501, -0.120",
           address: {
             street: "Sample Street",
-            postalCode: "EX3 3CC"
+            postalCode: "ZZ3 3CC"
           },
           latitude: 51.501,
           longitude: -0.12,
@@ -401,12 +401,12 @@ describe("event normalization", () => {
 
   it("formats readable location names without promoting coordinates to primary copy", () => {
     expect(readableLocationNameFromParts({
-      address: { name: "Example Grocer", street: "Example Road", postalCode: "EX1 1AA" },
+      address: { name: "Example Grocer", street: "Example Road", postalCode: "ZZ1 1AA" },
       latitude: 10.7484,
       longitude: 20.4381
     })).toBe("Example Grocer");
     expect(readableLocationNameFromParts({
-      address: { name: "12 Sample Street", streetNumber: "12", street: "Sample Street", postalCode: "EX3 3CC" },
+      address: { name: "12 Sample Street", streetNumber: "12", street: "Sample Street", postalCode: "ZZ3 3CC" },
       latitude: 10.7484,
       longitude: 20.4381
     })).toBe("Near Sample Street");
@@ -415,14 +415,14 @@ describe("event normalization", () => {
       latitude: 10.7484,
       longitude: 20.4381
     })).toBe("Unknown place near 10.748, 20.438");
-    expect(locationAddressSummary({ street: "Sample Street", city: "Exampleton", postalCode: "EX3 3CC" }))
-      .toBe("Sample Street, Exampleton, EX3 3CC");
+    expect(locationAddressSummary({ street: "Sample Street", city: "Exampleton", postalCode: "ZZ3 3CC" }))
+      .toBe("Sample Street, Exampleton, ZZ3 3CC");
     expect(locationAddressSummary({
       streetNumber: "206",
       street: "Synthetic Lane",
       district: "Example District",
-      postalCode: "EX4 4DD"
-    })).toBe("206 Synthetic Lane, Example District, EX4 4DD");
+      postalCode: "ZZ4 4DD"
+    })).toBe("206 Synthetic Lane, Example District, ZZ4 4DD");
     expect(formatLocationCoordinates(10.7484, 20.4381)).toBe("10.748, 20.438");
   });
 

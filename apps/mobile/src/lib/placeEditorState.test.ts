@@ -10,7 +10,7 @@ const resolved = {
   title: "Riverside Sports Centre",
   subtitle: "Victoria Road, Exampleton",
   name: "Riverside Sports Centre",
-  formattedAddress: "Victoria Road, Exampleton, EX1 2AB",
+  formattedAddress: "Victoria Road, Exampleton, ZZ5 5EE",
   latitude: 10.73123449,
   longitude: 20.47123449
 };

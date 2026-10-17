@@ -9,7 +9,7 @@ describe("learned-place detail helpers", () => {
   it("prefers a POI name and a complete cached address over coordinates", () => {
     expect(learnedPlaceDetailValues(learnedPlace())).toEqual({
       name: "Example Grocer",
-      address: "Example Road, Exampleton, EX1 1AA",
+      address: "Example Road, Exampleton, ZZ1 1AA",
       coordinates: "10.739532, 20.456310"
     });
   });
@@ -17,12 +17,12 @@ describe("learned-place detail helpers", () => {
   it("copies the exact address shown in the detail sheet", async () => {
     const writeClipboard = vi.fn(async () => undefined);
     const copied = await copyLearnedPlaceDetail(
-      "206 Synthetic Lane, Example District, EX4 4DD",
+      "206 Synthetic Lane, Example District, ZZ4 4DD",
       writeClipboard
     );
 
     expect(copied).toBe(true);
-    expect(writeClipboard).toHaveBeenCalledWith("206 Synthetic Lane, Example District, EX4 4DD");
+    expect(writeClipboard).toHaveBeenCalledWith("206 Synthetic Lane, Example District, ZZ4 4DD");
   });
 
   it("does not offer an empty value to the clipboard", async () => {
@@ -57,10 +57,10 @@ function learnedPlace(): MobileLearnedPlace {
       name: "Example Grocer",
       street: "Example Road",
       city: "Exampleton",
-      postalCode: "EX1 1AA"
+      postalCode: "ZZ1 1AA"
     },
     poiName: "Example Grocer",
-    formattedAddress: "Example Road, Exampleton, EX1 1AA",
+    formattedAddress: "Example Road, Exampleton, ZZ1 1AA",
     geocodedAt: "2026-07-14T10:01:00.000Z",
     rawPayload: null
   };

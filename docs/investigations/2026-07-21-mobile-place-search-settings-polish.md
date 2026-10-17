@@ -113,7 +113,7 @@ Final focused results:
 - A clean `xcodebuild` Debug build for that resolved simulator completed with `CODE_SIGNING_ALLOWED=NO` after stale Metro, Simulator, and Xcode processes were stopped.
 - `npm run ios -w @dayframe/mobile -- --no-build-cache` then completed a clean locally signed build, installed it, launched it, and connected it to Metro.
 - The authenticated app loaded the hosted bootstrap without a route/schema error.
-- A public `Edinburgh Castle` query produced six live native suggestions; selecting the current result resolved a map centre, formatted address, and editable Dayframe name. The draft was cancelled and not saved.
+- A public `a well-known castle` query produced six live native suggestions; selecting the current result resolved a map centre, formatted address, and editable Dayframe name. The draft was cancelled and not saved.
 - The compact Places & Location screen, both information sheets, closed-by-default troubleshooting disclosure, support actions, list-only Places screen, dedicated editor, coordinate disclosure, and category-keyboard -> location-settings recovery were exercised.
 - The active-timer category row rendered as one uncropped horizontal 44pt chip row in its fixed viewport. A draft category changed during a simulator drag and was explicitly cancelled, so no timer mutation was persisted.
 

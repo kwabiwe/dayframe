@@ -59,10 +59,10 @@ describe("Geoapify web place-search provider", () => {
       return Response.json({
         results: [{
           place_id: "remote",
-          name: "Edinburgh Castle",
-          formatted: "Edinburgh Castle, Scotland",
-          lat: 55.9486,
-          lon: -3.1999
+          name: "Example Castle",
+          formatted: "Example Castle, Exampleshire",
+          lat: 10.9486,
+          lon: 20.1999
         }]
       });
     });
@@ -71,9 +71,9 @@ describe("Geoapify web place-search provider", () => {
       fetchImpl: fetchMock as typeof fetch
     });
 
-    const suggestions = await provider.suggest({ query: "Edinburgh Castle" });
+    const suggestions = await provider.suggest({ query: "Example Castle" });
 
-    expect(suggestions[0]?.title).toBe("Edinburgh Castle");
+    expect(suggestions[0]?.title).toBe("Example Castle");
     const providerUrl = String(fetchMock.mock.calls[0]?.[0]);
     expect(providerUrl).toContain("bias=countrycode%3Agb");
     expect(providerUrl).not.toContain("filter=");

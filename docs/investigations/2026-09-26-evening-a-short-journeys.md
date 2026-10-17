@@ -18,7 +18,7 @@ Expo capture IDs contain device/kind/source milliseconds, and the capture path s
 
 Native speed takes existing precedence over implied speed. All sources in the exception are checked against the existing 120m/s plausibility ceiling; implied proof additionally needs the real preceding coordinate point to be accurate GPS with `isSimulated: false` from the same device, subject to the iOS provenance limit above. A broad/Visit/explicitly simulated predecessor cannot manufacture a qualifying speed. Existing ordinary-duration handling is unchanged.
 
-## Retained Morrisons evidence (25 September)
+## Retained supermarket evidence (25 September)
 
 A read-only offline invocation of PR #209's `deriveCommutes` over the owner-only staging capture's retained accepted observations and stays produced both actual short journeys. The sanitised predicate check below uses their strict candidate windows. The outbound saved-to-unknown leg lasted 84.496s with approximately 992m endpoint displacement; the return unknown-to-saved leg lasted 81s with approximately 963m displacement. Both existing candidate summaries pass the significant-displacement gate. Rows are in occurrence order within each strict window; labels are local to this table and are not source IDs. No map service supplied these observations.
 
@@ -36,7 +36,7 @@ The retained database replay has **no `sourceTimestamp` field** on these rows, a
 | Return | 3 | `standard_location` | `false` | Absent; `occurredAt` fallback, millisecond format | 2.15m | Native 14.53m/s | Yes |
 | Return | 4 | `standard_location` | `false` | Absent; `occurredAt` fallback, millisecond format | 2.28m | Native 10.27m/s | Yes |
 
-**Independent surviving observations: outbound 3; return 3.** The captured Morrisons evidence itself meets the implemented short-trip predicate for both legs, using the retained replay's `occurredAt` fallback. This establishes evidence eligibility under the field-level rule, not genuine non-simulated iOS provenance or exact-head staging/device acceptance. The separate synthetic fixture proves deterministic engine behaviour and the former duration rejection with invented coordinates and IDs; it does not establish what the Morrisons device captured. Exact-head staging replay and signed physical-device validation remain acceptance gates.
+**Independent surviving observations: outbound 3; return 3.** The captured supermarket evidence itself meets the implemented short-trip predicate for both legs, using the retained replay's `occurredAt` fallback. This establishes evidence eligibility under the field-level rule, not genuine non-simulated iOS provenance or exact-head staging/device acceptance. The separate synthetic fixture proves deterministic engine behaviour and the former duration rejection with invented coordinates and IDs; it does not establish what the supermarket trip's device captured. Exact-head staging replay and signed physical-device validation remain acceptance gates.
 
 ## Validation evidence
 

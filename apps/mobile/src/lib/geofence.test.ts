@@ -33,8 +33,8 @@ const locationMocks = vi.hoisted(() => ({
       name: "Example Grocer",
       street: "Example Road",
       city: "Exampleton",
-      postalCode: "EX1 1AA",
-      formattedAddress: "Example Road, Exampleton EX1 1AA"
+      postalCode: "ZZ1 1AA",
+      formattedAddress: "Example Road, Exampleton ZZ1 1AA"
     }
   ]))
 }));
@@ -567,7 +567,7 @@ describe("mobile geofence visit candidates", () => {
       address: expect.objectContaining({
         name: "Example Grocer",
         street: "Example Road",
-        postalCode: "EX1 1AA"
+        postalCode: "ZZ1 1AA"
       }),
       latitude: 51.61,
       longitude: -0.22,

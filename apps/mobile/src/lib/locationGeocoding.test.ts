@@ -32,8 +32,8 @@ describe("learned-place geocoding", () => {
       name: "Example Gym Exampleton",
       street: "Sample Street",
       city: "Exampleton",
-      postalCode: "EX2 2BB",
-      formattedAddress: "Sample Street, Exampleton, EX2 2BB"
+      postalCode: "ZZ2 2BB",
+      formattedAddress: "Sample Street, Exampleton, ZZ2 2BB"
     }]);
     mocks.resolveLearnedPlaceLocation.mockResolvedValue({
       ok: true,
@@ -42,7 +42,7 @@ describe("learned-place geocoding", () => {
         name: "Example Gym Exampleton",
         address: { name: "Example Gym Exampleton" },
         poiName: "Example Gym Exampleton",
-        formattedAddress: "Sample Street, Exampleton, EX2 2BB",
+        formattedAddress: "Sample Street, Exampleton, ZZ2 2BB",
         geocodedAt: "2026-07-14T10:00:00.000Z"
       }
     });
@@ -57,7 +57,7 @@ describe("learned-place geocoding", () => {
   it("does not geocode a candidate that already has cached readable location data", () => {
     expect(learnedPlaceNeedsLocationResolution(learnedPlace({
       name: "Example Gym Exampleton",
-      address: { formattedAddress: "Sample Street, Exampleton, EX2 2BB" }
+      address: { formattedAddress: "Sample Street, Exampleton, ZZ2 2BB" }
     }))).toBe(false);
   });
 });
