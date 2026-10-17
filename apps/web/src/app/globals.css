@@ -433,6 +433,20 @@ textarea[aria-invalid="true"]:focus {
   box-shadow: inset 0 0 0 1px var(--web-focus-border), inset 0 -2px 0 var(--danger);
 }
 
+/* Inputs whose wrapper owns the field line and ring never draw their own (Codex r2 on #472): the
+   rules above would otherwise add an inner rectangle inside the wrapper's ring. */
+:is(
+  .ui-compound-control > input,
+  .category-picker-create-name-control > input,
+  .df-palette-input input,
+  .df-logas input,
+  .timeline-inline-description-input,
+  .timeline-inline-time-input,
+  .inline-tag-input-anchor .inline-tag-description-input
+):focus {
+  box-shadow: none;
+}
+
 html.ui-dialog-open {
   overflow: hidden;
 }
@@ -6233,6 +6247,7 @@ dialog.ui-dialog.df-range-custom {
  */
 .swiss-timer-description-control .ui-compound-control:focus-within {
   border-color: transparent;
+  box-shadow: none;
 }
 
 .swiss-timer-description-control .ui-compound-control:has(input[aria-invalid="true"]) {
@@ -6247,6 +6262,12 @@ dialog.ui-dialog.df-range-custom {
 .swiss-timer-description-control .inline-tag-picker-search:focus-within,
 .swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus) {
   border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
+}
+
+/* Keyboard focus on an invalid Description keeps the danger underline with the ring (Codex r3). */
+.swiss-timer-description-control[data-focus-ring="keyboard"] .inline-tag-input-anchor:has(.inline-tag-description-input:focus):has(input[aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--focus), inset 0 -2px 0 var(--danger);
 }
 
 .edit-time-entry-dialog .ui-control:focus-visible,
@@ -6591,12 +6612,7 @@ dialog.ui-dialog.df-range-custom {
   border-radius: var(--web-radius-control);
   padding: 0 10px;
   background: var(--surface-inset);
-  box-shadow: inset 0 0 0 1px var(--control-border);
   color: var(--muted);
-}
-
-.df-flist-search:focus-within {
-  box-shadow: inset 0 0 0 2px var(--web-focus-border);
 }
 
 .df-flist-search input {
@@ -6814,7 +6830,7 @@ dialog.ui-dialog.df-range-custom {
   display: grid;
   box-sizing: border-box;
   grid-template-columns: 44px minmax(0, 1fr);
-  border: 2px solid transparent;
+  border: var(--web-control-border-width) solid var(--control-border);
   border-radius: var(--web-radius-control);
   background: var(--surface-inset);
   overflow: hidden;
@@ -14892,13 +14908,6 @@ dialog.ui-dialog.df-palette {
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-/* Inset fields without idle outlines (UIA-308); focus keeps its neutral border and an invalid
-   field its danger border. */
-.df-pe .ui-control:not(:focus):not([aria-invalid="true"]),
-.df-pe .place-search-control:not(:focus-within) {
-  border-color: transparent;
 }
 
 .df-pe .place-selected-result {
