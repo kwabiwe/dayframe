@@ -681,7 +681,7 @@ describe("departures after a finished walk (review round 9)", () => {
     expect(commutes(value)).toEqual([expect.objectContaining({ startedAt: at(49) })]);
   });
 
-  it("makes a 10-minute stop after the walk's return a visit, with no Move before the return (PRD D19)", () => {
+  it("splits an outing at a 10-minute stop after the walk's return, keeping both legs from the return (PRD D19)", () => {
     const evidence = [...walk(), geofence("walk-return", 39, "geofence_enter"),
       e("out-a", 39.6, 200, { horizontalAccuracyMeters: null }), still("out-accurate", 39.7, 400), still("out-accurate-2", 39.8, 500),
       e("out-b", 40, 750, { horizontalAccuracyMeters: null }), e("out-c", 40.3, 1_000, { horizontalAccuracyMeters: null }),
@@ -689,12 +689,16 @@ describe("departures after a finished walk (review round 9)", () => {
       e("back-a", 51, 900, { horizontalAccuracyMeters: null }), e("back-b", 51.2, 600, { horizontalAccuracyMeters: null }),
       still("back-accurate", 51.4, 400), e("back-c", 51.6, 200, { horizontalAccuracyMeters: null }),
       geofence("last-return", 52, "geofence_enter"), still("final-a", 52.5, 0), still("final-b", 62.5, 0), still("final-c", 72.5, 0)];
-    // A 10-minute stop is a visit of its own (PRD D19), so no trip runs through it. Its legs here carry no
-    // accuracy, so neither qualifies on its own; whatever does never starts before the walk's return.
+    // A 10-minute stop is a visit of its own (PRD D19): the outing is a Move there, the visit and a Move
+    // home. Neither sparse leg qualifies alone, but the outing through the visit does, so both stand at
+    // low confidence (Codex r1 on #461), and the first still starts at the walk's return.
     const output = runLocationEngine(withWork(evidence, false));
-    expect(output.segmentUpserts.some((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown" &&
-      segment.startedAt >= at(40) && segment.startedAt <= at(41) && segment.stoppedAt != null && segment.stoppedAt >= at(50.5))).toBe(true);
-    for (const trip of commutes(withWork(evidence, false))) expect(Date.parse(trip.startedAt)).toBeGreaterThanOrEqual(Date.parse(at(39)));
+    const visit = output.segmentUpserts.find((segment) => segment.kind === "stay" && segment.placeMatchKind === "unknown");
+    expect(visit).toBeDefined();
+    expect(commutes(withWork(evidence, false))).toEqual([
+      expect.objectContaining({ startedAt: at(39), stoppedAt: visit!.startedAt, confidence: "low" }),
+      expect.objectContaining({ startedAt: visit!.stoppedAt, stoppedAt: at(52), confidence: "low" })
+    ]);
   });
 
   // Review round 12: a mirror of the last approach fix or a broad reading must not hide the approach.

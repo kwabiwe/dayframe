@@ -153,6 +153,22 @@ describe("physical stops", () => {
     expect(trips[0]).toMatchObject({ continuityStatus: "continuous", confidence: "medium_high" });
   });
 
+  it("keeps an outing's legs around a 12-minute visit when only the outing as a whole qualifies (Codex r1 on #461)", () => {
+    // Two fast fixes on each leg: too few for either short leg on its own, enough for the round trip.
+    const input = physicalStopFixture(shape({
+      visit: [670_000, 1_390_000], slowAt: [860_000, 1_000_000, 1_200_000], departAt: 1_394_000, returnAt: 1_478_000
+    }));
+    input.evidence = input.evidence.filter((item) => item.clientEvidenceId !== "out-2" && item.clientEvidenceId !== "back-2");
+    const { stays, trips } = run(input);
+    const visit = stays.find((stay) => stay.placeMatchKind === "unknown");
+    expect(visit).toBeDefined();
+    expect(trips).toEqual([
+      expect.objectContaining({ toStaySegmentId: visit!.clientSegmentId, confidence: "low" }),
+      expect.objectContaining({ fromStaySegmentId: visit!.clientSegmentId, confidence: "low" })
+    ]);
+    expect(trips.every((trip) => !trip.stops?.length)).toBe(true);
+  });
+
   it("reports a real unobserved route gap beside a stop", () => {
     const input = physicalStopFixture(shape({
       visit: [670_000, 1_210_000], slowAt: [860_000, 900_000, 1_150_000], departAt: 1_214_000, returnAt: 2_380_000

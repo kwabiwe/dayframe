@@ -740,6 +740,12 @@ export type CommuteDerivationOptions = {
    * these stays through interior stops, or null when no such chain exists.
    */
   qualifiedLegChainConfidence?: (fromStayId: string, toStayId: string) => CommuteSegment["confidence"] | null;
+  /**
+   * Whether these two stays are a leg of an outing whose whole round trip through an unknown visit
+   * qualified (PRD D19): such a leg stands even where it would not qualify on its own, at low
+   * confidence, so it is always offered in Review (`outingLegsAround`).
+   */
+  outingLeg?: (fromStayId: string, toStayId: string) => boolean;
   arrivalWitnesses?: readonly SavedPlaceArrivalWitness[];
   savedPlaces?: readonly SavedPlaceForMatching[];
   /** Accepted learned places, so time away is measured from a learned place's own centre. */
@@ -1054,7 +1060,9 @@ export function deriveCommutes(
         ? null
         : motionJourneyBlock(motion, presentUntilMs, stoppedAtMs, summary.straightLineDistanceMeters, config);
       let motionSupported = false;
-      if (attempt === "journey" && portionsShowMovement && duration < config.commuteMinimumDurationMs) {
+      // A leg of an outing whose round trip qualified as a whole (PRD D19): it needs no proof of its own.
+      const outingLeg = attempt === "journey" && (options.outingLeg?.(from.clientSegmentId, to.clientSegmentId) ?? false);
+      if (attempt === "journey" && portionsShowMovement && duration < config.commuteMinimumDurationMs && !outingLeg) {
         if (summary.sameKnownPlace || summary.straightLineDistanceMeters == null ||
           summary.straightLineDistanceMeters < config.commuteMinimumEndpointDistanceMeters) continue;
         shortProof ??= shortJourneyProof(acceptedEvidence, config, occurredAtMs);
@@ -1090,6 +1098,9 @@ export function deriveCommutes(
           reason: summary.sameKnownPlace ? "same_place_meaningful_round_trip" : "significant_route_distance",
           confidence: chainConfidence
         };
+      }
+      if (!qualification.qualifies && outingLeg) {
+        qualification = { qualifies: true, reason: summary.sameKnownPlace ? "same_place_meaningful_round_trip" : "significant_route_distance", confidence: "low" };
       }
       if (!qualification.qualifies && timeAway()) qualification = outing;
       if (!qualification.qualifies) continue;
@@ -1171,7 +1182,7 @@ export function deriveCommutes(
         gapDurationSeconds: Math.round((endedMs - beganMs) / 1_000),
         maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
         continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-        confidence: anyEndpointHasInferredBoundary || motionSupported
+        confidence: anyEndpointHasInferredBoundary || motionSupported || outingLeg
           ? "low"
           : uncertainBoundary && qualification.confidence === "medium_high"
             ? "medium"
@@ -1243,6 +1254,46 @@ function stopFromStay(stay: StaySegment): CommuteStop {
  * blocks the trip. Pairs whose trip does not qualify keep their legs, and
  * saved/learned or visit-length stops still split journeys.
  */
+/**
+ * The legs of outings an unknown visit splits (PRD D19, A3): a visit of 10 minutes or more is its own
+ * Stay, so the outing through it is two Moves. Where either Move does not qualify on its own (short,
+ * sparse or nearby legs) but the outing through the visit would have qualified as one trip with a stop,
+ * both legs stand, at low confidence (always offered in Review, never logged automatically), so the
+ * outing's travel is never lost (Codex r1 on #461). Legs that already qualified are kept as they are.
+ */
+function outingLegsAround(
+  legs: readonly CommuteSegment[],
+  stays: readonly StaySegment[],
+  acceptedEvidence: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  processingAt: string,
+  options: CommuteDerivationOptions
+): CommuteSegment[] {
+  const added: CommuteSegment[] = [];
+  const hasLeg = (from: StaySegment, to: StaySegment) =>
+    legs.some((leg) => leg.fromStaySegmentId === from.clientSegmentId && leg.toStaySegmentId === to.clientSegmentId);
+  for (let index = 1; index + 1 < stays.length; index += 1) {
+    const [before, visit, after] = [stays[index - 1], stays[index], stays[index + 1]];
+    if (visit.placeMatchKind !== "unknown" || !visit.stoppedAt || !before.stoppedAt) continue;
+    if (Date.parse(locationOnlyStayEnd(visit) ?? visit.stoppedAt) - Date.parse(visit.startedAt) < config.unknownStayReviewDwellMs) continue;
+    if (hasLeg(before, visit) && hasLeg(visit, after)) continue;
+    // The outing through the visit, as one trip with it as a stop and no help from its legs.
+    const whole = deriveCommutes([before, after], acceptedEvidence, config, processingAt, {
+      ...options, interiorStops: [visit], qualifiedLegChainConfidence: () => null, outingLeg: undefined
+    }).find((trip) => trip.stops?.length && trip.qualificationReason !== "same_place_outing" && !trip.motionSupported);
+    if (!whole) continue;
+    const pair = new Set([`${before.clientSegmentId}>${visit.clientSegmentId}`, `${visit.clientSegmentId}>${after.clientSegmentId}`]);
+    for (const leg of deriveCommutes([before, visit, after], acceptedEvidence, config, processingAt, {
+      ...options, outingLeg: (fromId, toId) => pair.has(`${fromId}>${toId}`)
+    })) {
+      const from = leg.fromStaySegmentId === before.clientSegmentId ? before : visit;
+      const to = leg.toStaySegmentId === visit.clientSegmentId ? visit : after;
+      if (!hasLeg(from, to) && !added.some((other) => other.clientSegmentId === leg.clientSegmentId)) added.push(leg);
+    }
+  }
+  return added;
+}
+
 export function assembleTripsThroughStops(
   legs: CommuteSegment[],
   stays: StaySegment[],
@@ -1251,6 +1302,8 @@ export function assembleTripsThroughStops(
   processingAt: string,
   options: CommuteDerivationOptions = {}
 ) {
+  legs = [...legs, ...outingLegsAround(legs, stays, acceptedEvidence, config, processingAt, options)]
+    .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   // Membership uses location evidence alone: motion never turns a stop into a visit or back.
   const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
     Date.parse(locationOnlyStayEnd(stay) ?? stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
