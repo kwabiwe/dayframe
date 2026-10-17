@@ -615,7 +615,8 @@ export function InlineTagInput({
         <span className="inline-selected-tags" aria-label="Selected tags">
           {tagDisplay.visible.map((tagName) => (
             <button
-              aria-label={`Remove tag ${tagName}`}
+              // The visible "#name" first, then what pressing it does (WUI-034, WCAG 2.5.3).
+              aria-label={`#${tagName}, remove tag`}
               className="inline-selected-tag"
               disabled={disabled}
               key={normalizeTagName(tagName).normalizedName}

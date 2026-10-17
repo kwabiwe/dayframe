@@ -2,7 +2,6 @@ import {
   COVERED_ACTIVITY_OTHER_KEY,
   coveredActivityBars,
   coveredActivityTotals as sharedCoveredActivityTotals,
-  formatDuration,
   goalCountingEntries,
   type CoveredActivityBar,
   type GoalCountingCategory
@@ -133,10 +132,6 @@ export function buildGoalFrame({
   };
 }
 
-/** The goal reads like every other duration ("8h", "7h 30m", "30m"; UIA-207). */
-export function formatGoalHours(minutes: number) {
-  return formatDuration(minutes * 60);
-}
 
 /** Entries that overlap the day, newest first, with their clipped interval. */
 export function todayBlocks<T extends TodayEntry>(entries: readonly T[], dayStartMs: number, nowMs: number) {

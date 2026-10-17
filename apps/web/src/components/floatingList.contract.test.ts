@@ -37,7 +37,7 @@ describe("one floating list (FloatingList)", () => {
     expect(head).not.toContain("border");
     // 36 px rows, 44 px on phones and touch screens (AGENTS touch targets).
     expect(rule(".df-flist")).toMatch(/--df-flist-row: 36px;/);
-    expect(css).toMatch(/@media \(max-width: 560px\), \(pointer: coarse\) \{\s*\.df-flist \{\s*--df-flist-row: 44px;/);
+    expect(css).toMatch(/@media \(max-width: 560px\), \(any-pointer: coarse\) \{\s*\.df-flist \{\s*--df-flist-row: 44px;/);
     const row = rule(".df-flist .df-flist-row");
     expect(row).toMatch(/min-height: var\(--df-flist-row\);/);
     expect(row).toMatch(/border-radius: 8px;/);
