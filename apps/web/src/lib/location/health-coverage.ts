@@ -142,8 +142,8 @@ export async function retireHealthCoveredMoveCards(
 
 /**
  * One page of the Moves that logged themselves (PRD D19) whose unedited block a Health workout covers,
- * judged by the Move's own window and mode from its event, so it is reconciled however old its
- * evidence (Codex r2 on #462): newest first, within `window` (an imported workout) or the last 30 days.
+ * judged by the block's current window (it follows its Move) and the Move's mode, so it is reconciled
+ * however old its evidence (Codex r2/r3 on #462): newest first, within `window` (an imported workout) or the last 30 days.
  * Locks the covered blocks in entry-id order, removes those still unedited and retires their events
  * (`removeAutoMoveBlocks`). Returns how many blocks it removed and the next cursor.
  */
@@ -154,23 +154,25 @@ async function retireHealthCoveredAutoMovePage(
   const modes = new Set(["walking", "running", "cycling", "automotive"]);
   const cursor = options.cursor;
   const page = await client.query<{ entryId: string; eventId: string; startedAt: Date; stoppedAt: Date; travelMode: string | null }>(
-    `select te.id as "entryId", ae.id as "eventId", ae.occurred_at as "startedAt",
-            (ae.raw_payload ->> 'stoppedAt')::timestamptz as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
+    // The block's own bounds: replay moves an unedited block with its Move but keeps the confirmed
+    // event's payload, so the event's window can be stale (Codex r3 on #462).
+    `select te.id as "entryId", ae.id as "eventId", te.started_at as "startedAt",
+            te.stopped_at as "stoppedAt", ae.raw_payload ->> 'travelMode' as "travelMode"
      from activity_events ae
      join time_entries te on te.created_from_event_id = ae.id and te.workspace_id = ae.workspace_id and te.user_id = ae.user_id
      where ae.workspace_id = $1 and ae.user_id = $2 and ae.source = 'location_learning' and ae.event_type = 'commute_detected'
        and ae.review_status = 'confirmed' and ae.raw_payload ->> 'semanticDisposition' = 'auto_logged'
        and te.source = '${LOCATION_AUTO_LOG_SOURCE}' and te.user_edited_at is null
-       and ae.raw_payload ->> 'stoppedAt' is not null
+       and te.stopped_at is not null
        and ($4::timestamptz is not null
-         and ae.occurred_at < $5::timestamptz + interval '5 minutes' and (ae.raw_payload ->> 'stoppedAt')::timestamptz > $4::timestamptz - interval '5 minutes'
-         or $4::timestamptz is null and ae.occurred_at > $3::timestamptz - interval '30 days')
+         and te.started_at < $5::timestamptz + interval '5 minutes' and te.stopped_at > $4::timestamptz - interval '5 minutes'
+         or $4::timestamptz is null and te.started_at > $3::timestamptz - interval '30 days')
        and coalesce(ae.raw_payload ->> 'travelMode', '') <> 'automotive'
        and exists (select 1 from health_workouts hw where hw.workspace_id = $1 and hw.user_id = $2
-         and hw.started_at < (ae.raw_payload ->> 'stoppedAt')::timestamptz + interval '5 minutes'
-         and hw.stopped_at > ae.occurred_at - interval '5 minutes' and hw.stopped_at > hw.started_at)
-       and ($6::timestamptz is null or (ae.occurred_at, ae.id) < ($6::timestamptz, $7::uuid))
-     order by ae.occurred_at desc, ae.id desc
+         and hw.started_at < te.stopped_at + interval '5 minutes'
+         and hw.stopped_at > te.started_at - interval '5 minutes' and hw.stopped_at > hw.started_at)
+       and ($6::timestamptz is null or (te.started_at, ae.id) < ($6::timestamptz, $7::uuid))
+     order by te.started_at desc, ae.id desc
      limit ${PAGE}`,
     [session.workspaceId, session.userId, new Date(options.now ?? Date.now()).toISOString(),
       options.window?.startedAt ?? null, options.window?.stoppedAt ?? null,

@@ -405,7 +405,7 @@ function TripLoggingSetting() {
     <TripLoggingSwitch
       key={data.user.id}
       refresh={refresh}
-      snapshot={data}
+      snapshot={data.user}
       stored={data.user.logTripsAutomatically ?? false}
       userId={data.user.id}
     />
@@ -421,7 +421,10 @@ function TripLoggingSetting() {
  */
 export function TripLoggingSwitch({ refresh, snapshot, stored, userId }: {
   refresh: (options?: { force?: boolean }) => Promise<unknown>;
-  /** The bootstrap `stored` came from; a different one is newer. */
+  /**
+   * The bootstrap user `stored` came from: a server copy brings a new one, while local (optimistic)
+   * timer updates keep it, so only a newer server copy replaces the saved value (Codex r3 on #462).
+   */
   snapshot: unknown;
   stored: boolean;
   userId: string;

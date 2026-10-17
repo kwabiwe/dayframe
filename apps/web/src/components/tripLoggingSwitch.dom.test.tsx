@@ -51,6 +51,9 @@ describe("Log trips automatically (PRD D19, A4)", () => {
     await userEvent.setup().click(toggle);
     await waitFor(() => expect(toggle.disabled).toBe(false));
     expect(toggle.checked).toBe(false);
+    // A local (optimistic) timer update keeps the bootstrap's user: the saved value stays (Codex r3 on #462).
+    rerender(<TripLoggingSwitch refresh={failing} snapshot={first} stored userId="user-1" />);
+    expect(toggle.checked).toBe(false);
     // Another tab turned it back on; a later bootstrap says so with the same boolean as before the save.
     rerender(<TripLoggingSwitch refresh={failing} snapshot={{}} stored userId="user-1" />);
     expect(toggle.checked).toBe(true);
