@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -68,19 +68,16 @@ describe("ConfirmDialog (WUI-005/WUI-009)", () => {
     expect(document.activeElement).toBe(back);
   });
 
-  it("stops being a dialog for assistive technology while it fades out, then unmounts", async () => {
-    vi.useFakeTimers();
-    try {
-      render(<Host />);
-      fireEvent.click(screen.getByRole("button", { name: "Go back" }));
-      expect(screen.queryByRole("alertdialog")).toBeNull();
-      expect(document.querySelector(".df-confirm")?.getAttribute("aria-hidden")).toBe("true");
-      await act(async () => {
-        vi.advanceTimersByTime(130);
-      });
-      expect(document.querySelector(".df-confirm")).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("stops being a dialog for assistive technology as soon as it closes, and stays mounted but hidden", () => {
+    render(<Host />);
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    const layer = screen.getByTestId("confirm-dialog");
+    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    expect(layer.hasAttribute("inert")).toBe(true);
+    expect(layer.className).not.toContain("is-open");
+    // Reopening at once is never lost to a pending close (no presence timer).
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("alertdialog", { name: "Discard unsaved changes?" })).toBeTruthy();
   });
 });

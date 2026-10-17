@@ -3,8 +3,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-const EXIT_MS = 120;
-
 /**
  * The one web confirmation (audit WUI-005/WUI-009, owner 17 Oct 2026; the web twin of the iPhone's
  * BlocksConfirmSheet): a small centred dialog over a scrim, a question for its title, one short
@@ -14,7 +12,8 @@ const EXIT_MS = 120;
  *
  * Motion: the scrim fades and the card fades in from scale(.98) in 160 ms, and both fade out in
  * 120 ms; under Reduce Motion only the opacities change. The host owns `open`; the dialog stays
- * mounted through its exit so a fast close never cuts the fade.
+ * mounted (hidden and inert while closed), so a fast close never cuts the fade and no presence
+ * timer can race a reopening.
  *
  * `surfaceClassName` lets a host treat the dialog as part of its own interaction boundary (the
  * block editor passes `time-entry-quick-editor-nested-surface`, so a press inside it is not an
@@ -50,32 +49,24 @@ export function ConfirmDialog({
   const ownCancelRef = useRef<HTMLButtonElement | null>(null);
   const backRef = cancelRef ?? ownCancelRef;
   const confirmRef = useRef<HTMLButtonElement | null>(null);
-  const [mounted, setMounted] = useState(open);
   const [entered, setEntered] = useState(false);
   const [wasOpen, setWasOpen] = useState(open);
-  // Opening mounts at once; closing starts the fade and unmounts once it has run.
+  // Closing starts the fade at once; opening fades in on the next frame.
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setMounted(true);
-    else setEntered(false);
+    if (!open) setEntered(false);
   }
 
   useEffect(() => {
-    if (open) return undefined;
-    const timeout = window.setTimeout(() => setMounted(false), EXIT_MS);
-    return () => window.clearTimeout(timeout);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open || !mounted) return undefined;
+    if (!open) return undefined;
     const frame = window.requestAnimationFrame(() => {
       setEntered(true);
       backRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [backRef, mounted, open]);
+  }, [backRef, open]);
 
-  if (!mounted || typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null;
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -94,8 +85,12 @@ export function ConfirmDialog({
 
   return createPortal(
     <div
-      className={`df-confirm-layer ${surfaceClassName}${entered ? " is-entered" : ""}`.trim()}
+      // Always mounted (no presence timer to race an opening): closed, it is hidden, inert and out
+      // of the accessibility tree once its fade has run (CSS holds visibility for 120 ms).
+      aria-hidden={open ? undefined : true}
+      className={`df-confirm-layer ${surfaceClassName}${open ? " is-open" : ""}${open && entered ? " is-entered" : ""}`.trim()}
       data-testid="confirm-dialog"
+      inert={!open || undefined}
       onKeyDown={onKeyDown}
     >
       <div

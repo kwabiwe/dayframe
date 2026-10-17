@@ -14374,6 +14374,13 @@ dialog.ui-dialog.df-rf-dialog {
   padding: 12px;
 }
 
+/* Closed, it stays mounted but hidden once its 120 ms fade has run, and takes no presses. */
+.df-confirm-layer:not(.is-open) {
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0s linear 120ms;
+}
+
 .df-confirm-scrim {
   position: absolute;
   inset: 0;
