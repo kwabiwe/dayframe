@@ -1014,16 +1014,21 @@ export default function SettingsScreen() {
     : lastKnown?.activities?.pinned ?? 0;
   const shownPlacesCount = shownBootstrap ? shownBootstrap.places.length : lastKnown?.placesCount ?? 0;
   // Settings › Automatic tracking › "Log trips automatically" (PRD D19, A4): the switch moves at once
-  // and the account keeps what the server stored; a refused save puts it back with the reason.
+  // and the account keeps what the server stored; a refused save puts it back with the reason. The
+  // stored value holds until a bootstrap with a newer server revision arrives, so a copy read before
+  // the save never replaces it (as on web).
   const [tripsDraft, setTripsDraft] = useState<boolean | null>(null);
+  const [tripsSaved, setTripsSaved] = useState<{ userId: string; value: boolean; revision: number } | null>(null);
   async function toggleLogTrips(enabled: boolean) {
     const userId = data?.user.id;
     if (!userId || tripsDraft !== null) return;
     setTripsDraft(enabled);
     try {
       const stored = await updateLogTripsAutomatically(enabled, userId);
+      const revision = stored.revision ?? (data?.user.goalsRevision ?? 0) + 1;
+      setTripsSaved({ userId, value: stored.value, revision });
       const withValue = (currentData: MobileBootstrap | null) => currentData && currentData.user.id === userId
-        ? { ...currentData, user: { ...currentData.user, logTripsAutomatically: stored } }
+        ? { ...currentData, user: { ...currentData.user, logTripsAutomatically: stored.value, goalsRevision: Math.max(currentData.user.goalsRevision ?? 0, revision) } }
         : currentData;
       const snapshotData = readSettingsSnapshot()?.data ?? null;
       if (snapshotData) updateSettingsSnapshot({ data: withValue(snapshotData) });
@@ -1041,7 +1046,9 @@ export default function SettingsScreen() {
       setTripsDraft(null);
     }
   }
-  const shownLogTrips = shownUser?.logTripsAutomatically;
+  const shownLogTrips = tripsSaved && shownUser?.id === tripsSaved.userId && (shownUser.goalsRevision ?? 0) < tripsSaved.revision
+    ? tripsSaved.value
+    : shownUser?.logTripsAutomatically;
 
   // Settings › Your day: shown at once, saved to the account a moment after the last tap.
   const [goalDraft, setGoalDraft] = useState<TimeGoals | null>(null);

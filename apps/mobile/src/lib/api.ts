@@ -201,6 +201,8 @@ export type MobileBootstrap = {
     weeklyGoalMinutes?: number;
     /** "Log trips automatically" (PRD D19, A4); absent on servers before it. */
     logTripsAutomatically?: boolean;
+    /** The server order of the Settings values on the user row (goals and the trips switch). */
+    goalsRevision?: number;
   };
   workspace: { id: string; name: string };
   locationRolloutMode?: LocationRolloutMode;
@@ -1830,7 +1832,10 @@ export async function updateTimeGoals(goals: { dailyGoalMinutes?: number; weekly
   if (!response.ok) throw await apiResponseError(response, "Unable to save your goal");
 }
 
-/** Settings › Automatic tracking › "Log trips automatically" (PRD D19, A4). Returns the stored value. */
+/**
+ * Settings › Automatic tracking › "Log trips automatically" (PRD D19, A4). Returns the stored value
+ * and its server revision (null from a server without one).
+ */
 export async function updateLogTripsAutomatically(enabled: boolean, expectedUserId?: string) {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/profile`, {
     method: "PATCH",
@@ -1844,8 +1849,11 @@ export async function updateLogTripsAutomatically(enabled: boolean, expectedUser
     throw new AuthRequiredError();
   }
   if (!response.ok) throw await apiResponseError(response, "Unable to save this setting");
-  const body = await readJsonResponse<{ logTripsAutomatically?: unknown }>(response);
-  return typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : enabled;
+  const body = await readJsonResponse<{ logTripsAutomatically?: unknown; settingsRevision?: unknown }>(response);
+  return {
+    value: typeof body.logTripsAutomatically === "boolean" ? body.logTripsAutomatically : enabled,
+    revision: typeof body.settingsRevision === "number" ? body.settingsRevision : null
+  };
 }
 
 /** A trip pattern the person stopped logging automatically (Places › Trips, PRD D19 A4). */
