@@ -11,18 +11,36 @@ vi.mock("react", async () => {
 });
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
+const keyboard = vi.hoisted(() => ({ listeners: new Map<string, (event?: unknown) => void>() }));
 vi.mock("react-native", () => ({
-  AccessibilityInfo: { addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
+  AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
-  Keyboard: { addListener: () => ({ remove() {} }), dismiss: vi.fn() },
+  Keyboard: {
+    addListener: (name: string, listener: (event?: unknown) => void) => {
+      keyboard.listeners.set(name, listener);
+      return { remove() {} };
+    },
+    dismiss: vi.fn()
+  },
   Platform: { OS: "ios" },
   Pressable: "Pressable", ScrollView: "ScrollView", Switch: "Switch",
   Text: "Text", TextInput: "TextInput", View: "View",
   StyleSheet: { create: (value: unknown) => value, hairlineWidth: 1 },
   useWindowDimensions: () => ({ fontScale: 1, width: 375, height: 812 })
 }));
-vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
+vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 47 }) }));
+const reanimated = vi.hoisted(() => ({ withTiming: vi.fn((value: number) => value) }));
+vi.mock("react-native-reanimated", async () => {
+  const { useRef } = await import("react");
+  return {
+    default: { View: "AnimatedView" },
+    Easing: { out: (curve: unknown) => curve, cubic: "cubic" },
+    useAnimatedStyle: (style: () => object) => style(),
+    useSharedValue: (value: number) => useRef({ value }).current,
+    withTiming: reanimated.withTiming
+  };
+});
 vi.mock("react-native-svg", () => ({ default: "Svg", Circle: "Circle", Ellipse: "Ellipse", G: "G", Line: "Line", Path: "Path", Polygon: "Polygon", Polyline: "Polyline", Rect: "Rect" }));
 vi.mock("@/lib/mobileTheme", () => ({
   pressable: (value: unknown) => value,
@@ -190,6 +208,29 @@ describe("Location evidence polish (owner, 17 Oct 2026)", () => {
     }
     expect(bar[0].findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button")).toHaveLength(1);
     expect(texts("Record visit")).toHaveLength(1);
+  });
+
+  it("rides the primary bar above the keyboard, and back down when it hides (Codex r1 on #480)", async () => {
+    await render(stay({ matched: true }));
+    reanimated.withTiming.mockClear();
+    // An 812-point window with a 34-point home indicator inset; the keyboard's top at 476: the bar
+    // rises by the keyboard's overlap, on the keyboard's own duration, and comes back down.
+    await act(async () => keyboard.listeners.get("keyboardWillChangeFrame")?.({ duration: 250, endCoordinates: { screenY: 476 } }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(812 - 34 - 476, expect.objectContaining({ duration: 250 }));
+    await act(async () => keyboard.listeners.get("keyboardWillHide")?.({ duration: 250 }));
+    expect(reanimated.withTiming).toHaveBeenLastCalledWith(0, expect.objectContaining({ duration: 250 }));
+  });
+
+  it("says beside Record why it did nothing, wherever the page is scrolled (Codex r1 on #480)", async () => {
+    const { AccessibilityInfo } = await import("react-native") as unknown as { AccessibilityInfo: { announceForAccessibility: Mock } };
+    const evidence = stay({ matched: true });
+    (evidence.segment as { stoppedAt: string | null }).stoppedAt = null;
+    await render(evidence);
+    await press(primary());
+    const bar = tree!.root.findAll((node) => node.props.testID === "location-evidence-primary-bar" && typeof node.type === "string")[0];
+    expect(bar.findAll((node) => typeof node.type === "string" && text(node) === "This suggestion does not have a complete time range.")).not.toHaveLength(0);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("This suggestion does not have a complete time range.");
+    expect(onResolve).not.toHaveBeenCalled();
   });
 
   it("offers Skip in neutral text and no second Record once", async () => {

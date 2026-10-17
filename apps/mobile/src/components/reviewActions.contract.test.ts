@@ -108,7 +108,9 @@ describe("mobile Review action contracts", () => {
 
   it("keeps evidence fields visible above the keyboard and uses the shared activity chips", () => {
     const chipsSource = source("./ActivityChips.tsx");
-    expect(evidenceEditorSource).toContain('automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}');
+    // The editor owns the keyboard space so the pinned Record bar rides above it (Codex r1 on #480).
+    expect(evidenceEditorSource).toContain("automaticallyAdjustKeyboardInsets={false}");
+    expect(evidenceEditorSource).toContain("withTiming(lift, { duration, easing: Easing.out(Easing.cubic) })");
     expect(evidenceEditorSource).toContain("keyboardRevealScrollOffset");
     expect(evidenceEditorSource).toContain("revealGenerationRef");
     expect(evidenceEditorSource).toContain('placeholder={journeyCopy?.placeholder ?? "Add a name (optional)"}');

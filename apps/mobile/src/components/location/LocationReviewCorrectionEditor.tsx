@@ -14,7 +14,8 @@ import {
   useWindowDimensions,
   View
 } from "react-native";
-import Reanimated from "react-native-reanimated";
+import Reanimated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle as SvgCircle, Path, Rect } from "react-native-svg";
 import {
   DAYFRAME_BLOCKS,
@@ -214,8 +215,18 @@ export function LocationReviewCorrectionEditor({
   const savingRef = useRef(saving);
   savingRef.current = saving;
 
+  // The pinned primary bar rides above the keyboard (Codex r1 on #480): the editor owns the keyboard
+  // space (the scroll view shrinks above the bar), so a focused field is revealed above the bar.
+  const keyboardLift = useSharedValue(0);
+  const primaryBarLiftStyle = useAnimatedStyle(() => ({ marginBottom: keyboardLift.value }));
+  const primaryBarHeightRef = useRef(0);
+  const safeAreaInsets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardGeometryRef = useRef({ bottomInset: safeAreaInsets.bottom, windowHeight });
+  keyboardGeometryRef.current = { bottomInset: safeAreaInsets.bottom, windowHeight };
+
   const revealFocusedControl = useCallback((control = activeRevealControlRef.current) => {
-    const keyboardTop = keyboardTopRef.current;
+    const keyboardTop = keyboardTopRef.current === null ? null : keyboardTopRef.current - primaryBarHeightRef.current;
     if (!control || keyboardTop === null) return;
     const generation = ++revealGenerationRef.current;
     requestAnimationFrame(() => {
@@ -274,8 +285,17 @@ export function LocationReviewCorrectionEditor({
   }, [saving]);
 
   useEffect(() => {
-    const updateKeyboardFrame = (event: { endCoordinates: { screenY: number } }) => {
+    // The bar follows the keyboard with the keyboard's own duration (one Reanimated owner);
+    // Reduce Motion places it at once.
+    const liftTo = (lift: number, duration: number | undefined) => {
+      keyboardLift.value = reduceMotionRef.current || !duration
+        ? lift
+        : withTiming(lift, { duration, easing: Easing.out(Easing.cubic) });
+    };
+    const updateKeyboardFrame = (event: { duration?: number; endCoordinates: { screenY: number } }) => {
       keyboardTopRef.current = event.endCoordinates.screenY;
+      const { bottomInset, windowHeight: height } = keyboardGeometryRef.current;
+      liftTo(Math.max(0, Math.round(height - bottomInset - event.endCoordinates.screenY)), event.duration);
       revealFocusedControl();
     };
     const keyboardChanged = Keyboard.addListener(
@@ -287,9 +307,10 @@ export function LocationReviewCorrectionEditor({
       : null;
     const keyboardHidden = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => {
+      (event?: { duration?: number }) => {
         keyboardTopRef.current = null;
         revealGenerationRef.current += 1;
+        liftTo(0, event?.duration);
       }
     );
     return () => {
@@ -624,6 +645,7 @@ export function LocationReviewCorrectionEditor({
   function parsedEdit() {
     if (!evidence.segment.stoppedAt || !stopAt) {
       setValidationError("This suggestion does not have a complete time range.");
+      AccessibilityInfo.announceForAccessibility("This suggestion does not have a complete time range.");
       return null;
     }
     const parsed = parseLocationReviewWindow({
@@ -638,6 +660,8 @@ export function LocationReviewCorrectionEditor({
     });
     if (!parsed.value) {
       setValidationError(parsed.error);
+      // iOS has no live regions: the reason beside Record is announced (Codex r1 on #480).
+      if (parsed.error) AccessibilityInfo.announceForAccessibility(parsed.error);
       return null;
     }
     setValidationError(null);
@@ -718,7 +742,8 @@ export function LocationReviewCorrectionEditor({
     <>
       <ScrollView
         ref={scrollViewRef}
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        // The editor owns the keyboard space: the bar rises and the scroll view shrinks above it.
+        automaticallyAdjustKeyboardInsets={false}
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => revealFocusedControl()}
@@ -1182,9 +1207,6 @@ export function LocationReviewCorrectionEditor({
                   wheelHeight={180}
                 />
               ) : null}
-              {validationError ? (
-                <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" style={editorStyles.errorText}>{validationError}</Text>
-              ) : null}
             </View>
             </SettingsBlockGroup>
           </Reanimated.View>
@@ -1325,7 +1347,19 @@ export function LocationReviewCorrectionEditor({
       {/* The primary action stays at the bottom of the screen, under the scroll view, so recording
           is one tap from anywhere on the page (owner, 17 Oct 2026). It is part of the layout from
           the first frame and never moves; the screen's safe area keeps it above the home indicator. */}
-      <View style={editorStyles.primaryBar} testID="location-evidence-primary-bar">
+      <Reanimated.View
+        onLayout={(event) => {
+          primaryBarHeightRef.current = event.nativeEvent.layout.height;
+        }}
+        style={[editorStyles.primaryBar, primaryBarLiftStyle]}
+        testID="location-evidence-primary-bar"
+      >
+        {/* Why Record did nothing is said beside it, wherever the page is scrolled (Codex r1 on #480). */}
+        {validationError ? (
+          <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="assertive" accessibilityRole="alert" style={editorStyles.errorText}>{validationError}</Text>
+          </Reanimated.View>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           disabled={saving}
@@ -1339,7 +1373,7 @@ export function LocationReviewCorrectionEditor({
         >
           <Text {...mobileTextProps("control")} style={styles.primaryButtonText}>{primaryLabel}</Text>
         </Pressable>
-      </View>
+      </Reanimated.View>
       {activityPickerOpen ? (
         <ActivityPickerSheet
           activities={categories}
@@ -1551,7 +1585,7 @@ function formatLocationReviewDuration(startedAt: string, stoppedAt: string) {
 function createEditorStyles(theme: MobileTheme) {
   return StyleSheet.create({
     scrollContent: { paddingBottom: 34 },
-    primaryBar: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, backgroundColor: theme.background },
+    primaryBar: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 8, backgroundColor: theme.background },
     primaryBarButton: { marginTop: 0 },
     hero: { gap: 4, paddingHorizontal: 4 },
     heroTitle: { color: theme.textPrimary, fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 30, letterSpacing: -0.6, lineHeight: 34 },
