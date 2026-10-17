@@ -127,9 +127,9 @@ beforeEach(() => {
   native.searchNearby.mockImplementation(async (request: { requestId: string }) => ({
     requestId: request.requestId,
     places: [
-      { id: "poi-a", requestId: request.requestId, title: "Example Bakery", subtitle: "2 Example Road", distanceMeters: 35 },
+      { id: "poi-a", requestId: request.requestId, title: "Example Bakery", subtitle: "2 Example Road", distanceMeters: 35, category: "Bakery" },
       { id: "poi-b", requestId: request.requestId, title: "Example Studio", subtitle: null, distanceMeters: 40 },
-      { id: "poi-c", requestId: request.requestId, title: "Example Gallery", subtitle: null, distanceMeters: 180 }
+      { id: "poi-c", requestId: request.requestId, title: "Example Gallery", subtitle: null, distanceMeters: 180, category: "FitnessCenter" }
     ]
   }));
 });
@@ -202,9 +202,11 @@ describe("Where were you? (D2, D3)", () => {
     expect(native.searchNearby).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 400, limit: 5 }));
     expect(byTestId("location-evidence-nearby")).toHaveLength(1);
     expect(texts("Example Bakery")).toHaveLength(1);
-    expect(texts("40 m away · 2 Example Road")).toHaveLength(1);
-    expect(texts("40 m away")).toHaveLength(0);
-    expect(texts("180 m away")).toHaveLength(1);
+    // Each nearby row is its kind and distance, never the address (owner, 17 Oct 2026).
+    expect(texts("Bakery · 40 m")).toHaveLength(1);
+    expect(texts("Gym · 180 m")).toHaveLength(1);
+    expect(texts("2 Example Road")).toHaveLength(0);
+    expect(tree!.root.findAll((node) => node.props.glyph === "dumbbell")).not.toHaveLength(0);
     // Nearby sits under the search field.
     const order = tree!.root.findAll((node) => typeof node.type === "string" && (node.props.accessibilityLabel === "Search places" || node.props.testID === "location-evidence-nearby"));
     expect(order.map((node) => node.props.accessibilityLabel ?? node.props.testID)).toEqual(["Search places", "location-evidence-nearby"]);

@@ -4,6 +4,16 @@ import MapKit
 
 @MainActor
 final class DayframePlaceSearchTests: XCTestCase {
+  func testNearbySuggestionCarriesItsKindOfPlace() {
+    XCTAssertEqual(NearbyPointOfInterestSuggestionValue.categoryKey(.fitnessCenter), "FitnessCenter")
+    XCTAssertEqual(NearbyPointOfInterestSuggestionValue.categoryKey(.cafe), "Cafe")
+    XCTAssertNil(NearbyPointOfInterestSuggestionValue.categoryKey(nil))
+    let value = NearbyPointOfInterestSuggestionValue(
+      id: "id", requestId: "request", title: "Synthetic gym", subtitle: nil, distanceMeters: 40, category: "FitnessCenter"
+    )
+    XCTAssertEqual(value.dictionary["category"] as? String, "FitnessCenter")
+  }
+
   func testNearbySearchReturnsTopThreeDeduplicatedInProviderOrder() {
     let values = [
       nearby("Vue", distance: 140, relevance: 0),

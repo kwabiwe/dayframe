@@ -1,4 +1,5 @@
-import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat } from "@dayframe/shared";
+import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph } from "@dayframe/shared";
+import { formatPlaceDistance, nearbyPlaceCategory } from "../../lib/placeCategories";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -958,7 +959,9 @@ export function LocationReviewCorrectionEditor({
                         <View accessibilityLabel={`${nearbyChoices.length} places nearby`} style={editorStyles.suggestionList}>
                           {nearbyChoices.map((place, index) => (
                             <ResultRow
-                              detail={[formatNearbyDistance(place.distanceMeters), place.subtitle].filter(Boolean).join(" · ")}
+                              // Its kind and distance, not the long address (owner, 17 Oct 2026).
+                              detail={[nearbyPlaceCategory(place.category).label, formatPlaceDistance(place.distanceMeters)].filter(Boolean).join(" · ")}
+                              glyph={nearbyPlaceCategory(place.category).glyph}
                               disabled={resolvingSuggestion || saving}
                               divider={index > 0}
                               key={place.id}
@@ -1414,6 +1417,7 @@ function ResultRow({
   detail,
   disabled,
   divider,
+  glyph,
   onPress,
   testID,
   theme,
@@ -1422,6 +1426,8 @@ function ResultRow({
   detail: string | null;
   disabled: boolean;
   divider: boolean;
+  /** A nearby place's kind (Gym, Café); search results keep the place glyph. */
+  glyph?: DayframeGlyph;
   onPress: () => void;
   testID?: string;
   theme: MobileTheme;
@@ -1440,7 +1446,11 @@ function ResultRow({
       ]}
       testID={testID}
     >
-      <ActivityGlyph name="place" color={theme.textPrimary} />
+      {glyph ? (
+        <View style={resultRowStyles.glyph}>
+          <DayframeIcon color={theme.textPrimary} glyph={glyph} size={20} />
+        </View>
+      ) : <ActivityGlyph name="place" color={theme.textPrimary} />}
       <View style={resultRowStyles.text}>
         <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[resultRowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
         {detail ? (
@@ -1453,15 +1463,8 @@ function ResultRow({
 
 /** A place row's short line: what it is and how far from the visit ("Matched place · 20 m"). */
 function placeDistanceDetail(kind: string, meters: number | null) {
-  if (meters === null || !Number.isFinite(meters) || meters < 0) return kind;
-  return `${kind} · ${meters < 1000 ? `${Math.max(10, Math.round(meters / 10) * 10)} m` : `${(meters / 1000).toFixed(1)} km`}`;
-}
-
-/** "40 m away", "1.2 km away": distances from the visit, rounded for reading. */
-function formatNearbyDistance(meters: number) {
-  if (!Number.isFinite(meters) || meters < 0) return "";
-  if (meters < 1000) return `${Math.max(10, Math.round(meters / 10) * 10)} m away`;
-  return `${(meters / 1000).toFixed(1)} km away`;
+  const distance = meters === null ? "" : formatPlaceDistance(meters);
+  return distance ? `${kind} · ${distance}` : kind;
 }
 
 function ActivityGlyph({ name, color }: { name: LocationActivityGlyphName; color: string }) {
@@ -1686,7 +1689,8 @@ const resultRowStyles = StyleSheet.create({
   row: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 9 },
   text: { flex: 1, minWidth: 0, gap: 2 },
   title: { fontSize: 14, fontWeight: "700", lineHeight: 18 },
-  detail: { fontSize: 12, lineHeight: 16 }
+  detail: { fontSize: 12, lineHeight: 16 },
+  glyph: { width: 20, height: 20, alignItems: "center", justifyContent: "center" }
 });
 
 /** How far a touch may move and still be a tap (points); more is a scroll. */
