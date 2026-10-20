@@ -1,5 +1,5 @@
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import type { ComponentProps } from "react";
+import { StrictMode, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DAYFRAME_THEME } from "@dayframe/shared";
 
@@ -250,6 +250,81 @@ describe("QuickStartMosaic: tiles never depend on an animation surviving (Trello
     act(() => tree.unmount());
   });
 
+  it("keeps the drop-in through an ordinary re-render during the entrance (no settle)", () => {
+    const tree = render(props());
+    layOut(tree);
+    expect(tiles(tree).map((tile) => tile.opacity)).toEqual([0, 0]);
+    // The timer starting, a new handler and the running tile: same width, same tiles, same focus.
+    act(() => tree.update(<QuickStartMosaic {...props({ onStartActivity: vi.fn(), runningActivityId: "work", timerRunning: true })} />));
+    act(() => tree.update(<QuickStartMosaic {...props({ onStartActivity: vi.fn(), runningActivityId: "work", timerRunning: true })} />));
+    expect(tiles(tree)).toEqual([
+      { opacity: 0, transform: [{ translateY: 18 }, { scale: 0.92 }] },
+      { opacity: 0, transform: [{ translateY: 18 }, { scale: 0.92 }] },
+    ]);
+    expect(readQuickStartDiagnostics().hiddenCount).toBe(0);
+    act(() => tree.unmount());
+  });
+
+  it("settles after a StrictMode effect replay, with one AppState listener", () => {
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(
+        <StrictMode>
+          <QuickStartMosaic {...props()} />
+        </StrictMode>
+      );
+    });
+    layOut(tree);
+    // The replayed effects subscribe once, not twice.
+    expect(appState.listeners.size).toBe(1);
+    vi.setSystemTime(new Date("2026-10-20T20:01:00Z"));
+    appStateChange("background");
+    appStateChange("active");
+    expect(tiles(tree)).toEqual([atRest, atRest]);
+    // Never more than once per tile for one settle.
+    expect(readQuickStartDiagnostics().hiddenCount).toBeLessThanOrEqual(2);
+    act(() => tree.unmount());
+    expect(appState.listeners.size).toBe(0);
+  });
+
+  it("leaves no AppState listener or safety timer behind on unmount", () => {
+    const tree = render(props());
+    layOut(tree);
+    expect(appState.listeners.size).toBe(1);
+    // Each tile's drop-in safety net is pending (frames never ran).
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    act(() => tree.unmount());
+    expect(appState.listeners.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("takes a different real width after the screen-width fallback, then settles on foreground and focus returns", () => {
+    const tree = render(props({ focused: true }));
+    // No onLayout yet: drawn at the screen-width fallback, dropping in.
+    expect(readQuickStartDiagnostics()).toMatchObject({ width: 343, widthSource: "window" });
+    expect(tiles(tree).map((tile) => tile.opacity)).toEqual([0, 0]);
+    const slotWidths = () =>
+      tree.root.findAllByType("ReanimatedView" as never)
+        .filter((node) => node.props.layout === "layout")
+        .reduce((total, slot) => Math.max(total, (flatStyle(slot.props.style).left as number) + (flatStyle(slot.props.style).width as number)), 0);
+    expect(slotWidths()).toBeLessThanOrEqual(343);
+    // The real width differs: it wins, the tiles re-lay out to it and settle (an interruption, not hidden).
+    layOut(tree, 320);
+    expect(readQuickStartDiagnostics()).toMatchObject({ hiddenCount: 0, width: 320, widthSource: "layout" });
+    expect(slotWidths()).toBeLessThanOrEqual(320);
+    expect(tiles(tree)).toEqual([atRest, atRest]);
+    vi.setSystemTime(new Date("2026-10-20T20:01:00Z"));
+    appStateChange("background");
+    appStateChange("active");
+    expect(tiles(tree)).toEqual([atRest, atRest]);
+    act(() => tree.update(<QuickStartMosaic {...props({ focused: false })} />));
+    act(() => tree.update(<QuickStartMosaic {...props({ focused: true })} />));
+    expect(tiles(tree)).toEqual([atRest, atRest]);
+    // The width stays the real one through the returns, and nothing was found hidden.
+    expect(readQuickStartDiagnostics()).toMatchObject({ hiddenCount: 0, width: 320, widthSource: "layout" });
+    act(() => tree.unmount());
+  });
+
   it("shows tiles at rest under Reduce Motion, and a settle finds nothing hidden", () => {
     const tree = render(props({ reduceMotion: true }));
     layOut(tree);
@@ -266,15 +341,18 @@ describe("quick-start diagnostics", () => {
 
   it("records the last width, tile count and hidden tiles, in plain words", () => {
     const formatTime = (at: number) => new Date(at).toISOString().slice(11, 16);
-    expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe("Not shown yet in this session");
+    expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe("No layout yet in this session");
     recordQuickStartLayout(343, "layout", 4);
-    expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe("Last showed 4 tiles at 343 pt wide. No hidden tiles found.");
+    expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe("Last layout: 4 tiles at 343 pt wide. No hidden tiles found.");
     recordQuickStartLayout(343, "window", 1);
     recordQuickStartTileFoundHidden(Date.parse("2026-10-20T20:01:00Z"));
     expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe(
-      "Last showed 1 tile at 343 pt wide (from screen width). Found 1 hidden tile and showed it, last 20:01."
+      "Last layout: 1 tile at 343 pt wide (from screen width). Set 1 hidden tile to rest, last 20:01."
     );
     recordQuickStartTileFoundHidden(Date.parse("2026-10-20T20:05:00Z"));
+    expect(quickStartDiagnosticsSummary(readQuickStartDiagnostics(), formatTime)).toBe(
+      "Last layout: 1 tile at 343 pt wide (from screen width). Set 2 hidden tiles to rest, last 20:05."
+    );
     expect(readQuickStartDiagnostics()).toEqual({ hiddenCount: 2, lastHiddenAt: Date.parse("2026-10-20T20:05:00Z"), tileCount: 1, width: 343, widthSource: "window" });
   });
 });

@@ -1,5 +1,5 @@
 /**
- * What Today's quick-start mosaic last drew, kept in memory on this iPhone only (never uploaded,
+ * What Today's quick-start mosaic last laid out (frames computed, not proof they were seen), kept in memory on this iPhone only (never uploaded,
  * never sent to analytics) so a blank mosaic (Trello 210) can be read in Settings › Sync help in the
  * same app session. It holds no activity names or IDs: only a width, counts and a time.
  */
@@ -9,7 +9,10 @@ export type QuickStartDiagnostics = {
   /** Where that width came from: the mosaic's own layout, a measure, or the screen width. */
   widthSource: "layout" | "measure" | "window" | null;
   tileCount: number;
-  /** How many tiles were found hidden or part-moved after their entrance should have ended, and set at rest. */
+  /**
+   * How many tiles were found hidden or part-moved after their entrance should have ended, and set at
+   * rest. Setting the values is all this proves; it does not confirm the tile was then seen.
+   */
   hiddenCount: number;
   lastHiddenAt: number | null;
 };
@@ -37,11 +40,11 @@ export function resetQuickStartDiagnosticsForTests() {
 
 /** The plain line Sync help shows; `formatTime` is the page's own clock format. */
 export function quickStartDiagnosticsSummary(diagnostics: QuickStartDiagnostics, formatTime: (at: number) => string) {
-  if (!diagnostics.widthSource) return "Not shown yet in this session";
+  if (!diagnostics.widthSource) return "No layout yet in this session";
   const tiles = `${diagnostics.tileCount} ${diagnostics.tileCount === 1 ? "tile" : "tiles"}`;
   const source = diagnostics.widthSource === "layout" ? "" : diagnostics.widthSource === "measure" ? " (measured)" : " (from screen width)";
-  const shown = `Last showed ${tiles} at ${diagnostics.width} pt wide${source}.`;
-  if (!diagnostics.hiddenCount || diagnostics.lastHiddenAt === null) return `${shown} No hidden tiles found.`;
-  const found = diagnostics.hiddenCount === 1 ? "1 hidden tile and showed it" : `${diagnostics.hiddenCount} hidden tiles and showed them`;
-  return `${shown} Found ${found}, last ${formatTime(diagnostics.lastHiddenAt)}.`;
+  const layout = `Last layout: ${tiles} at ${diagnostics.width} pt wide${source}.`;
+  if (!diagnostics.hiddenCount || diagnostics.lastHiddenAt === null) return `${layout} No hidden tiles found.`;
+  const found = diagnostics.hiddenCount === 1 ? "1 hidden tile to rest" : `${diagnostics.hiddenCount} hidden tiles to rest`;
+  return `${layout} Set ${found}, last ${formatTime(diagnostics.lastHiddenAt)}.`;
 }
