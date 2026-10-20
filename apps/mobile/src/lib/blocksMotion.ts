@@ -291,64 +291,104 @@ export const DROP_IN = { distance: 18, fromScale: 0.92, firstDelayMs: 80, stagge
 export const DROP_IN_SETTLE_MS = 900;
 
 /**
- * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
- * tile mounts (first paint of the process only), so refreshes, hydration and remounts never replay it.
+ * Settles a tile at rest whenever `settle` changes after mount (the mosaic bumps it on every return to
+ * the foreground, every time Today regains focus and every re-layout after first paint), so a tile's
+ * visibility never depends on its animation or its timer surviving (Trello 210 recurred with the
+ * timer in place). `restDueAt` is when the tile should have been at rest anyway: a tile still not at
+ * rest after that is reported through `onFoundHidden`; one settled earlier was only interrupted.
  */
+function useSettleOnRevision(settle: number, restDueAt: number, atRest: () => boolean, settleAtRest: () => void, onFoundHidden?: () => void) {
+  const settledRevision = useRef(settle);
+  useEffect(() => {
+    if (settledRevision.current === settle) return;
+    settledRevision.current = settle;
+    if (!atRest() && Date.now() >= restDueAt) onFoundHidden?.();
+    settleAtRest();
+    // Runs when the revision changes; the shared values behind atRest/settleAtRest never change.
+  }, [onFoundHidden, settle]);
+}
+
 /**
  * A tile that arrives after first paint (a newly pinned activity) fades in over the control
  * duration (90 ms under Reduce Motion), owned here rather than by a Reanimated entering animation,
- * so the same safety net applies: it is forced to full opacity shortly after, frames or not.
+ * so the same safety net applies: it is forced to full opacity shortly after, frames or not, and at
+ * once on the next `settle` revision.
  */
-export function useTileFadeIn({ play, reduceMotion }: { play: boolean; reduceMotion: boolean }) {
+export function useTileFadeIn({
+  onFoundHidden,
+  play,
+  reduceMotion,
+  settle = 0,
+}: {
+  onFoundHidden?: () => void;
+  play: boolean;
+  reduceMotion: boolean;
+  settle?: number;
+}) {
   const playing = useRef(play).current;
+  const duration = reduceMotion ? 90 : MOBILE_MOTION.control;
+  const restDueAt = useRef(playing ? Date.now() + duration + DROP_IN_SETTLE_MS : 0).current;
   const opacity = useSharedValue(playing ? 0 : 1);
+  const settleAtRest = () => {
+    cancelAnimation(opacity);
+    opacity.value = 1;
+  };
+  useSettleOnRevision(settle, restDueAt, () => opacity.value === 1, settleAtRest, onFoundHidden);
   useEffect(() => {
     if (!playing) return undefined;
-    const duration = reduceMotion ? 90 : MOBILE_MOTION.control;
     opacity.value = withTiming(1, { duration, reduceMotion: ReduceMotion.Never });
-    const settle = () => {
-      cancelAnimation(opacity);
-      opacity.value = 1;
-    };
-    const fallback = setTimeout(settle, duration + DROP_IN_SETTLE_MS);
+    const fallback = setTimeout(settleAtRest, duration + DROP_IN_SETTLE_MS);
     return () => {
       clearTimeout(fallback);
-      settle();
+      settleAtRest();
     };
     // Plays once per mount.
   }, []);
   return useAnimatedStyle(() => ({ opacity: opacity.value }));
 }
 
-export function useDropIn({ index, play }: { index: number; play: boolean }) {
+/**
+ * Drops one tile into place once, staggered by its order. `play` is decided by the caller when the
+ * tile mounts (first paint of the process only), so refreshes, hydration and remounts never replay
+ * it; a new `settle` revision puts the tile at rest at once.
+ */
+export function useDropIn({ index, onFoundHidden, play, settle = 0 }: { index: number; onFoundHidden?: () => void; play: boolean; settle?: number }) {
   const playing = useRef(play).current;
+  const delay = DROP_IN.firstDelayMs + index * DROP_IN.staggerMs;
+  const restDueAt = useRef(playing ? Date.now() + delay + DROP_IN_SETTLE_MS : 0).current;
   const translateY = useSharedValue(playing ? DROP_IN.distance : 0);
   const scale = useSharedValue(playing ? DROP_IN.fromScale : 1);
   const opacity = useSharedValue(playing ? 0 : 1);
+  // An interrupted drop-in settles at rest rather than leaving a tile hidden.
+  const settleAtRest = () => {
+    cancelAnimation(translateY);
+    cancelAnimation(scale);
+    cancelAnimation(opacity);
+    translateY.value = 0;
+    scale.value = 1;
+    opacity.value = 1;
+  };
+  useSettleOnRevision(
+    settle,
+    restDueAt,
+    () => opacity.value === 1 && translateY.value === 0 && scale.value === 1,
+    settleAtRest,
+    onFoundHidden
+  );
 
   useEffect(() => {
     if (!playing) return undefined;
-    const delay = DROP_IN.firstDelayMs + index * DROP_IN.staggerMs;
     const spring = { ...BLOCKS_SPRING.land, reduceMotion: ReduceMotion.Never };
     translateY.value = withDelay(delay, withSpring(0, spring));
     scale.value = withDelay(delay, withSpring(1, spring));
     opacity.value = withDelay(delay, withTiming(1, { duration: DROP_IN.fadeMs, reduceMotion: ReduceMotion.Never }));
-    // An interrupted drop-in settles at rest rather than leaving a tile hidden.
-    const settle = () => {
-      cancelAnimation(translateY);
-      cancelAnimation(scale);
-      cancelAnimation(opacity);
-      translateY.value = 0;
-      scale.value = 1;
-      opacity.value = 1;
-    };
     // Safety net (Trello 210, the "Switch to" tiles once stayed invisible): if the frames never
     // run — the app was drawn in the background or the phone dropped frames — the tile is at rest
     // shortly after the drop-in should have ended, so it can never stay hidden.
-    const fallback = setTimeout(settle, delay + DROP_IN_SETTLE_MS);
+    const fallback = setTimeout(settleAtRest, delay + DROP_IN_SETTLE_MS);
     return () => {
       clearTimeout(fallback);
-      settle();
+      settleAtRest();
     };
     // Plays once per mount; the index is fixed at that moment.
   }, []);
