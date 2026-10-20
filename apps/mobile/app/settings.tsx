@@ -218,6 +218,7 @@ import {
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
 import { splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { quickStartDiagnosticsSummary, readQuickStartDiagnostics } from "@/lib/quickStartDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
 import { healthMappingWriter } from "@/lib/healthMappingOwner";
@@ -1619,6 +1620,7 @@ export default function SettingsScreen() {
           nativeStoreErrorCode: native.nativeStoreErrorCode
         } : null,
         presentationCache: getLocationReviewEvidencePrefetchDiagnostics(owner),
+        quickStart: readQuickStartDiagnostics(),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2762,6 +2764,13 @@ export default function SettingsScreen() {
                   testID="sync-help-health"
                   theme={theme}
                   title="Share Apple Health details"
+                />
+                <SettingsBlockRow
+                  // Kept on this iPhone for this session only (Trello 210: Today's tiles once drew blank).
+                  subtitle={quickStartDiagnosticsSummary(readQuickStartDiagnostics(), (at) => formatQueueTime(new Date(at), clockFormat))}
+                  testID="sync-help-quick-start"
+                  theme={theme}
+                  title="Today's quick start"
                 />
               </SettingsBlockGroup>
             </View>
