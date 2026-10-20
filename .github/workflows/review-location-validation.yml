@@ -119,6 +119,9 @@ jobs:
       - name: Password-reset session fence access control
         if: ${{ !cancelled() }}
         run: npm run validate:session-fence-security
+      - name: Owner-only event and entry writes
+        if: ${{ !cancelled() }}
+        run: npm run validate:event-entry-rls
       - name: Location replay and corrections
         run: npm run validate:location-v2-db
       - name: Starter activities and category icons
