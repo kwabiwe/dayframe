@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DAYFRAME_APP_ICONS, blockColorsFor } from "@dayframe/shared";
 import { SwipeDismissSheet, type SwipeDismissSheetHandle } from "./SwipeDismissSheet";
@@ -15,7 +15,10 @@ const ROW_BLOCK = 34;
  * a focused search field and Cancel. Without a query it lists Recent, then the groups A–Z; with
  * one it lists matches, earliest first, and offers "Create “q”" when no activity has that name.
  * A pick (or a created activity) is handed back and the sheet leaves. `SwipeDismissSheet` owns
- * the presentation, dismissal and Reduce Motion path.
+ * the presentation, dismissal and Reduce Motion path. The search field takes focus once the sheet
+ * has landed, so the keyboard never covers its rise, and gives it up as soon as the sheet starts
+ * to leave by any way, so the keyboard drops with the exit instead of after the spring settles and
+ * the caller unmounts the picker (owner, TestFlight 124, 20 Oct 2026).
  */
 export function ActivityPickerSheet<T extends ChoosableActivity>({
   activities,
@@ -40,6 +43,7 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
   theme: MobileTheme;
 }) {
   const sheetRef = useRef<SwipeDismissSheetHandle>(null);
+  const searchRef = useRef<TextInput>(null);
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
@@ -85,9 +89,17 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
           handleStyle={shared.sheetHandle}
           onDismiss={onClose}
           // Any way out (Cancel, backdrop, swipe, a pick) ends the picker: a create that resolves
-          // while it leaves never changes the entry.
+          // while it leaves never changes the entry, and the keyboard leaves with the sheet (the
+          // exit spring settles long after the sheet is out of sight, so waiting for the unmount
+          // left the keyboard over the screen underneath).
           onDismissStart={() => {
             done.current = true;
+            searchRef.current?.blur();
+            Keyboard.dismiss();
+          }}
+          onGestureStart={() => Keyboard.dismiss()}
+          onPresented={() => {
+            if (!done.current) searchRef.current?.focus();
           }}
           reduceMotion={reduceMotion}
           style={[shared.activeEditSheet, styles.sheet, { paddingTop: 8 }]}
@@ -98,11 +110,11 @@ export function ActivityPickerSheet<T extends ChoosableActivity>({
             <View style={[styles.search, { backgroundColor: theme.surfaceInset }]}>
               <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.search} size={18} />
               <TextInput
+                ref={searchRef}
                 {...mobileTextProps("input")}
                 accessibilityLabel="Search activities"
                 autoCapitalize="sentences"
                 autoCorrect={false}
-                autoFocus
                 clearButtonMode="while-editing"
                 onChangeText={(value) => {
                   setQuery(value);
