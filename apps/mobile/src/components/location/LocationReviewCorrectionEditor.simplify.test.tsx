@@ -519,6 +519,19 @@ describe("What did you do? (D1)", () => {
     const chips = byTestId("location-evidence-activity-chips")[0].findAll((node) => isHost(node, "Pressable"));
     expect(chips[0].props.accessibilityLabel).toBe("Set activity to Training");
     expect(chips[0].props.accessibilityState).toEqual({ selected: true });
+    // The pick never unmounts the picker (TestFlight 124, 20 Oct 2026): it stays mounted while its
+    // sheet runs its exit, and the editor removes it only from onClose, once that exit has run.
+    picker.props = null;
+    await act(async () => {
+      byTestId("location-evidence-activity-all")[0].props.onLayout({ nativeEvent: { layout: { height: 36, width: 120, x: 0, y: 0 } } });
+    });
+    expect(picker.props).not.toBeNull();
+    await act(async () => (picker.props!.onClose as () => void)());
+    picker.props = null;
+    await act(async () => {
+      byTestId("location-evidence-activity-all")[0].props.onLayout({ nativeEvent: { layout: { height: 36, width: 140, x: 0, y: 0 } } });
+    });
+    expect(picker.props).toBeNull();
     await press(primary());
     expect(onResolve.mock.calls[0][0]).toMatchObject({ edit: { categoryId: "cat-gym" } });
   });
