@@ -14,15 +14,19 @@ describe("Places › Archived on the page (Codex r1 on #508)", () => {
     expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("stale"\)\) return;\s*setStatusMessage\(options\.prefix\);/);
     expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("applied"\)\) return;\s*setData\(reconciled\);/);
     expect(refresh).toContain('if (options.onSettled && !options.onSettled("failed")) return;');
-    expect(refresh).toContain("options.failureMessage ??");
-    expect(places).toContain("failureMessage: restoredNotRefreshedMessage(place.name)");
+    expect(refresh).toContain("const failureMessage = options.failureMessage?.();");
+    // Re-checked after every await before any write (Codex r3 on #508).
+    expect(refresh).toMatch(/const bootstrap = await fetchBootstrap\(\);\s*\/\/[^\n]*\n\s*if \(!still\(\)/);
+    expect(refresh).toMatch(/await monitorList\(reconciled\);\s*if \(!still\(\)\) return;/);
+    expect(refresh).toMatch(/await refreshGeofencesForPlaces\(options\.fallbackPlaces[^\n]*\n\s*if \(!still\(\)\) return;/);
+    expect(places).toContain("archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name)");
   });
 
   it("brings a restored place whose refresh failed back from the next list, and refreshes its monitoring", () => {
     const load = between("const load = useCallback(", "useEffect(() => {\n    void load();");
-    expect(load).toMatch(/if \(takePendingRestored\([\s\S]*?\)\) \{\s*void refreshGeofencesForPlaces\(bootstrap\.places/);
+    expect(load).toContain("if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap);");
     expect(places).toContain("const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);");
-    expect(places).toContain("setTimeout(() => { void load(); }, RESTORE_REFRESH_RETRY_MS)");
+    expect(places).toContain("Math.min(RESTORE_REFRESH_RETRY_MS * 2 ** restoreRetries, RESTORE_REFRESH_RETRY_MAX_MS)");
     expect(places).toContain("testID={`places-restored-${row.id}`}");
   });
 

@@ -94,13 +94,30 @@ describe("useArchivedPlaces (location v3 PR 15b, PRD D19 A10)", () => {
     expect(latest.places.map((place) => place.id)).toEqual([studio.id]);
     expect(latest.pendingRestored).toEqual([{ id: gym.id, name: "Example Gym" }]);
     expect(mocks.announce).toHaveBeenCalledWith(expect.stringContaining("Example Gym is restored, but Places couldn't refresh"));
-    // Another account's fresh list settles nothing; this account's does, once, so monitoring refreshes.
-    expect(latest.takePendingRestored("ws-1:user-b")).toBe(false);
-    let settled = false;
-    act(() => { settled = latest.takePendingRestored(ACCOUNT_A); });
-    expect(settled).toBe(true);
+    expect(latest.restoreMonitoringWaiting).toBe(true);
+    // Only a list of this account that has the place counts, and only once monitoring is refreshed.
+    expect(latest.unmonitoredRestoredIn("ws-1:user-b", [{ id: gym.id }])).toEqual([]);
+    expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: studio.id }])).toEqual([]);
+    expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: studio.id }, { id: gym.id }])).toEqual([gym.id]);
+    let wasWaiting = false;
+    act(() => { wasWaiting = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
+    expect(wasWaiting).toBe(true);
     expect(latest.pendingRestored).toEqual([]);
-    expect(latest.takePendingRestored(ACCOUNT_A)).toBe(false);
+    expect(latest.restoreMonitoringWaiting).toBe(false);
+    expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([]);
+  });
+
+  it("tracks an applied restore's monitoring without showing it as waiting (Codex r3 on #508)", async () => {
+    mocks.restore.mockResolvedValue({ ...gym, archivedAt: null });
+    await mount(settlingWith("applied"));
+    await act(async () => { await latest.restore(gym); });
+    expect(latest.pendingRestored).toEqual([]);
+    expect(latest.restoreMonitoringWaiting).toBe(false);
+    expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([gym.id]);
+    let wasWaiting = true;
+    act(() => { wasWaiting = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
+    expect(wasWaiting).toBe(false);
+    expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([]);
   });
 
   it("keeps a refused restore's row with an announced reason", async () => {

@@ -43,7 +43,7 @@ import {
   type RestoreRefreshOutcome
 } from "@/lib/placesPage";
 import { useArchivedPlaces } from "@/lib/useArchivedPlaces";
-import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
+import { currentMobileAccountEpoch, mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   SwipeDismissSheet,
@@ -79,8 +79,15 @@ import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
 
-/** A restore accepted while Places couldn't refresh is retried once after this long. */
+/** A restore accepted while Places couldn't refresh is retried after this long, doubling each time… */
 const RESTORE_REFRESH_RETRY_MS = 5_000;
+/** …up to this long between tries, until a list with the place has refreshed monitoring. */
+const RESTORE_REFRESH_RETRY_MAX_MS = 60_000;
+
+/** The account a page list belongs to. */
+function listAccountKey(list: Pick<MobileBootstrap, "user" | "workspace">) {
+  return mobileAccountKey({ userId: list.user.id, workspaceId: list.workspace.id });
+}
 
 export default function PlacesScreen() {
   const backLabel = usePreviousScreenLabel() ?? "Settings";
@@ -127,13 +134,49 @@ export default function PlacesScreen() {
       changeEpoch.current += 1;
       return refreshAfterPlaceChange({
         prefix: `${place.name} restored.`,
-        failureMessage: restoredNotRefreshedMessage(place.name),
+        // The warning only while it still holds: a read may have brought the place back meanwhile.
+        failureMessage: () => (archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name) : `${place.name} restored.`),
         onSettled: settle
       });
     },
     shownAccountKey
   });
-  const { changed: archivedChanged, load: loadArchived, takePendingRestored } = archive;
+  const { changed: archivedChanged, load: loadArchived, settleMonitoredRestored, unmonitoredRestoredIn } = archive;
+
+  /**
+   * A check for the account lifetime a change started in (Codex r3 on #508): true while the page is
+   * open, the account epoch is unchanged and the list shown is still that account's. Every status,
+   * VoiceOver or state write after an await in a place change asks it first.
+   */
+  const lifetimeCheck = useCallback(() => {
+    const epoch = currentMobileAccountEpoch();
+    const shown = dataRef.current;
+    const key = shown ? listAccountKey(shown) : null;
+    return () => {
+      const now = dataRef.current;
+      return mounted.current && currentMobileAccountEpoch() === epoch && (now ? listAccountKey(now) : null) === key;
+    };
+  }, []);
+
+  /**
+   * Monitoring refreshed from `list`; restored places it has (and were not yet monitored) settle
+   * once it has finished, for that account and lifetime only, clearing their warning if it shows.
+   */
+  const monitorList = useCallback(async (list: MobileBootstrap) => {
+    const key = listAccountKey(list);
+    const restored = unmonitoredRestoredIn(key, list.places);
+    const epoch = currentMobileAccountEpoch();
+    const refreshed = await refreshGeofencesForPlaces(list.places, { userId: list.user.id, workspaceId: list.workspace.id })
+      .then(() => true, () => false);
+    // Settled only for this list's account, in the same lifetime, while its list is the one shown.
+    const shown = dataRef.current;
+    if (!refreshed || restored.length === 0 || !mounted.current || currentMobileAccountEpoch() !== epoch
+      || !shown || listAccountKey(shown) !== key) return;
+    if (!settleMonitoredRestored(key, restored)) return;
+    const warning = restoreWarning.current;
+    restoreWarning.current = null;
+    if (warning) setStatusMessage((current) => (current === warning ? null : current));
+  }, [settleMonitoredRestored, unmonitoredRestoredIn]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -151,14 +194,9 @@ export default function PlacesScreen() {
         .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
       setData(bootstrap);
       setLoadFailure(null);
-      // A restored place this list now brings back is monitored again (its refresh had failed).
-      if (takePendingRestored(mobileAccountKey({ userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }))) {
-        void refreshGeofencesForPlaces(bootstrap.places, { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }).catch(() => 0);
-        // Recovered: the warning that asked for this refresh no longer holds (Codex r2 on #508).
-        const warning = restoreWarning.current;
-        restoreWarning.current = null;
-        if (warning) setStatusMessage((current) => (current === warning ? null : current));
-      }
+      // A restored place this list brings back is monitored from it, whichever read lands first
+      // (its own refresh may still be out, or have failed); its warning clears once that is done.
+      if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap);
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
       if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
@@ -183,7 +221,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, [loadArchived, takePendingRestored]);
+  }, [loadArchived, monitorList, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -335,7 +373,7 @@ export default function PlacesScreen() {
     /** Places as this page now shows them, for monitoring when the fresh read fails. */
     fallbackPlaces?: MobilePlace[];
     /** The status line when the refresh fails (instead of the generic "Pull to refresh" one). */
-    failureMessage?: string;
+    failureMessage?: () => string;
     /**
      * Told how the refresh ended, before anything else happens: in the same render that applies its
      * list ("applied"), or when a newer change overtook it ("stale") or it failed. A restored row
@@ -345,9 +383,12 @@ export default function PlacesScreen() {
     onSettled?: (outcome: RestoreRefreshOutcome) => boolean;
   }) {
     const epoch = changeEpoch.current;
+    // Every write below an await first checks the change still belongs to the account shown.
+    const still = lifetimeCheck();
     try {
       const bootstrap = await fetchBootstrap();
-      if (!mounted.current) return;
+      // Another account (or lifetime) is shown now, or this list is another account's: that page's.
+      if (!still() || listAccountKey(bootstrap) !== listAccountKey(dataRef.current ?? bootstrap)) return;
       if (epoch !== changeEpoch.current) {
         if (options.onSettled && !options.onSettled("stale")) return;
         setStatusMessage(options.prefix);
@@ -356,9 +397,9 @@ export default function PlacesScreen() {
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       if (options.onSettled && !options.onSettled("applied")) return;
       setData(reconciled);
-      // Monitoring is refreshed from this list just below, including any restored place it settles.
-      takePendingRestored(mobileAccountKey({ userId: reconciled.user.id, workspaceId: reconciled.workspace.id }));
-      await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
+      // Monitoring from this list, settling any restored place it has.
+      await monitorList(reconciled);
+      if (!still()) return;
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
       setStatusMessage(bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`);
@@ -367,15 +408,18 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (!mounted.current) return;
+      if (!still()) return;
       if (options.onSettled && !options.onSettled("failed")) return;
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
       if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
         await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
+        if (!still()) return;
       }
-      if (options.failureMessage) restoreWarning.current = options.failureMessage;
-      setStatusMessage(options.failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
+      const failureMessage = options.failureMessage?.();
+      // A restore's warning is remembered, so it clears once the restored place is monitored.
+      if (failureMessage && failureMessage !== options.prefix) restoreWarning.current = failureMessage;
+      setStatusMessage(failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
 
@@ -446,15 +490,26 @@ export default function PlacesScreen() {
     }
   }
 
-  // A restore accepted while Places couldn't refresh waits under Saved places; try once more shortly
-  // (focus and pull-to-refresh also settle it), so monitoring resumes without the person acting.
+  // A restore accepted while Places couldn't refresh waits under Saved places (when the list shown
+  // lacks it). Whatever the rows show, the page retries (5 s, doubling, at most a minute apart; focus
+  // and pull-to-refresh also count) until a list with the place has refreshed monitoring (Codex r3).
   const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);
   const hasPendingRestored = pendingRestored.length > 0;
+  const restoreMonitoringWaiting = archive.restoreMonitoringWaiting;
+  const [restoreRetries, setRestoreRetries] = useState(0);
   useEffect(() => {
-    if (!hasPendingRestored) return;
-    const retry = setTimeout(() => { void load(); }, RESTORE_REFRESH_RETRY_MS);
+    if (!restoreMonitoringWaiting) {
+      setRestoreRetries(0);
+      return;
+    }
+    const delay = Math.min(RESTORE_REFRESH_RETRY_MS * 2 ** restoreRetries, RESTORE_REFRESH_RETRY_MAX_MS);
+    const retry = setTimeout(() => {
+      void load().finally(() => {
+        if (mounted.current) setRestoreRetries((count) => count + 1);
+      });
+    }, delay);
     return () => clearTimeout(retry);
-  }, [hasPendingRestored, load]);
+  }, [load, restoreMonitoringWaiting, restoreRetries]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
