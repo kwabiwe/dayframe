@@ -60,6 +60,16 @@ describe("aligning a workspace with a new account's activities (owner, 20 Oct 20
     ]));
   });
 
+  it("never renames Travel into a name another starter already took (Codex r2 on #502)", () => {
+    const plan = planStarterAlignment([row("Travel", "travel"), row("Getting around", "work")]);
+    expect(plan.rename).toBeNull();
+    expect(plan.add.map((starter) => starter.name)).not.toContain("Getting around");
+    expect(plan.leftAlone).toEqual(expect.arrayContaining([
+      { name: "Getting around", reason: "kept: already has this starter's name" },
+      { name: "Travel", reason: 'kept: a "Getting around" activity already exists' }
+    ]));
+  });
+
   it("is a no-op once aligned", () => {
     const aligned = DAYFRAME_STARTER_ACTIVITIES.map((starter) => row(starter.name, starter.starterKey));
     expect(planStarterAlignment(aligned)).toEqual({ rename: null, add: [], leftAlone: [] });
@@ -103,5 +113,13 @@ describe("Getting around's old lock name (Codex r1 on #502)", () => {
     const client = { query: vi.fn(async (_sql: string, values: unknown[] = []) => { params.push(values[0]); return { rows: [] }; }) };
     await lockActivityNames(client as never, "ws-1", ["Trips", "Getting around"]);
     expect(params).toEqual(["getting around", "travel", "trips"].map((name) => `dayframe:auto-category:ws-1:${name}`));
+  });
+
+  it("locks names that look like object properties as plain names (Codex r2 on #502)", async () => {
+    const { lockActivityNames } = await import("./automatic-category-service");
+    const params: unknown[] = [];
+    const client = { query: vi.fn(async (_sql: string, values: unknown[] = []) => { params.push(values[0]); return { rows: [] }; }) };
+    await lockActivityNames(client as never, "ws-1", ["Constructor", "__proto__", "toString"]);
+    expect(params).toEqual(["__proto__", "constructor", "tostring"].map((name) => `dayframe:auto-category:ws-1:${name}`));
   });
 });

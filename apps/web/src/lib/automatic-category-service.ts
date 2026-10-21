@@ -62,7 +62,8 @@ export const AUTOMATIC_STARTER_LOCK_NAMES = ["Commute", "Getting around", "Sleep
  * Lock names a starter still answers to: Getting around was "Travel" until 20 Oct 2026, and an
  * older server creating or restoring it locks that name, so every writer of it takes both.
  */
-const LEGACY_LOCK_NAMES: Record<string, readonly string[]> = { "getting around": ["travel"] };
+// A Map, so a name such as "constructor" or "__proto__" never reads an inherited property (Codex r2 on #502).
+const LEGACY_LOCK_NAMES: ReadonlyMap<string, readonly string[]> = new Map([["getting around", ["travel"]]]);
 
 /**
  * Takes the per-name activity locks automatic creation uses, deduplicated and in one sorted
@@ -78,7 +79,7 @@ export async function lockActivityNames(
   const keys = [...new Set(names
     .filter((name): name is string => Boolean(name?.trim()))
     .map((name) => name.trim().toLowerCase())
-    .flatMap((name) => [name, ...(LEGACY_LOCK_NAMES[name] ?? [])]))].sort();
+    .flatMap((name) => [name, ...(LEGACY_LOCK_NAMES.get(name) ?? [])]))].sort();
   for (const name of keys) {
     await client.query(
       "select pg_advisory_xact_lock(hashtextextended($1, 0))",

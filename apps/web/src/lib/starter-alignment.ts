@@ -36,14 +36,16 @@ export function planStarterAlignment(rows: readonly AlignmentRow[]): AlignmentPl
   let rename: AlignmentPlan["rename"] = null;
   const keyed = active.find((row) => row.starterKey === "travel");
   const legacyNamed = active.filter((row) => normalized(row.name) === "travel");
-  const unlinkedGettingAround = active.filter((row) => !row.starterKey && normalized(row.name) === normalized(travel.name));
-  const hasGettingAround = unlinkedGettingAround.length > 0 || (keyed !== undefined && normalized(keyed.name) === normalized(travel.name));
+  // Any other active activity already called Getting around (unlinked, or another starter renamed
+  // to it) blocks the rename: no two activities may share the name (Codex r2 on #502).
+  const otherGettingAround = active.filter((row) => row.id !== keyed?.id && normalized(row.name) === normalized(travel.name));
+  const hasGettingAround = otherGettingAround.length > 0 || (keyed !== undefined && normalized(keyed.name) === normalized(travel.name));
   const candidate = keyed
-    ? normalized(keyed.name) === "travel" && unlinkedGettingAround.length === 0 ? keyed : null
+    ? normalized(keyed.name) === "travel" && otherGettingAround.length === 0 ? keyed : null
     : hasGettingAround ? null : legacyNamed.find((row) => !row.starterKey) ?? null;
   if (candidate) rename = { id: candidate.id, from: candidate.name, to: travel.name, icon: travel.icon };
   else if (keyed && !hasGettingAround) leftAlone.push({ name: keyed.name, reason: "kept: the Travel starter was renamed by you" });
-  for (const row of unlinkedGettingAround) leftAlone.push({ name: row.name, reason: "kept: already has this starter's name" });
+  for (const row of otherGettingAround) leftAlone.push({ name: row.name, reason: "kept: already has this starter's name" });
   for (const row of legacyNamed.filter((row) => row.id !== candidate?.id)) {
     leftAlone.push({
       name: row.name,
