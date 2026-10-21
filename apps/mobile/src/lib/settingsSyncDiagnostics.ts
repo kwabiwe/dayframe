@@ -113,3 +113,33 @@ export function syncHelpStatus(input: {
     indexDetail: "All your changes are saved."
   };
 }
+
+/**
+ * Sync help › Places watched: how many saved places iOS is watching and how they were chosen
+ * (geofenceSelection.ts, location v3 PR 16b). Counts only, never where the phone is; null while
+ * no place is being watched.
+ */
+export function placesWatchedSummary(input: {
+  geofencingActive?: boolean;
+  activeMonitorCount: number;
+  configuredMonitorCount?: number;
+  geofenceSelection?: "all" | "nearest" | "priority";
+} | null | undefined) {
+  if (!input?.geofencingActive) return null;
+  const watched = nonNegativeCount(input.activeMonitorCount);
+  if (watched === 0) return null;
+  const total = Math.max(watched, nonNegativeCount(input.configuredMonitorCount ?? watched));
+  if (input.geofenceSelection === "nearest") {
+    return {
+      value: `${watched} of ${total}`,
+      detail: "The places nearest you, and always Home and Work. Places farther away are watched when you get closer."
+    };
+  }
+  if (input.geofenceSelection === "priority" || total > watched) {
+    return {
+      value: `${watched} of ${total}`,
+      detail: "Your top places for now. Once Dayframe knows where you are, the places nearest you are watched."
+    };
+  }
+  return { value: String(watched), detail: watched === 1 ? "Your saved place is watched." : "All your saved places are watched." };
+}

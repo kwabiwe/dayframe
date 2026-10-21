@@ -2,9 +2,11 @@ import * as SecureStore from "expo-secure-store";
 import {
   LOCATION_ENGINE_V2_CONFIG,
   LocationEvidenceSchema,
+  type LocationEvidence,
   type LocationEvidenceMetadata
 } from "@dayframe/shared";
 import type { MobileBootstrap } from "../api";
+import type { GeofencePositionFix } from "../geofenceSelection";
 import {
   deactivateMobileAccount,
   getActiveMobileAccountSnapshot,
@@ -317,7 +319,7 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
     // already in flight from running after B's monitoring starts.
     const current = await readLocationCaptureBinding();
     if (!current || current.id === capture.binding?.id) await native.clearAllSignals();
-    return { transferredCount: 0, drainedCount: 0, pendingAccount: true };
+    return { transferredCount: 0, drainedCount: 0, pendingAccount: true, positionSignalCount: 0, latestPosition: null };
   }
   const context = capture.context!;
   const signals = await native.drainSignals(limit);
@@ -347,7 +349,31 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
   const result = await persistLocationEvidence(evidence, capture);
   // Both acceptance and deliberate discard have committed before native clear.
   await native.clearSignals(signals.map(signal => signal.id));
-  return { transferredCount: result.insertedCount, drainedCount: signals.length, pendingAccount: false };
+  return { transferredCount: result.insertedCount, drainedCount: signals.length, pendingAccount: false,
+    ...nativePositionSignals(evidence) };
+}
+
+type NativePositionSignal = { at: number; fix: GeofencePositionFix | null };
+
+// Visits and significant changes re-pick the nearest saved places (geofence.ts). Only the newest
+// one counts: a Visit already departed says where the phone was, not where it is, so it gives no
+// fix. Kept in memory for that choice; never logged or stored.
+function nativePositionSignals(evidence: LocationEvidence[]) {
+  let positionSignalCount = 0;
+  let latestPosition: NativePositionSignal | null = null;
+  for (const item of evidence) {
+    if (item.kind !== "visit" && item.kind !== "significant_change") continue;
+    positionSignalCount += 1;
+    const departed = item.kind === "visit" && item.endedAt != null;
+    // An open Visit counts from when iOS reported it, not from the arrival it estimates.
+    const at = Date.parse(departed ? item.endedAt! : item.kind === "visit"
+      ? item.metadata?.nativeCallbackAt ?? item.occurredAt : item.occurredAt);
+    if (!Number.isFinite(at)) continue;
+    const fix = departed || item.latitude == null || item.longitude == null ? null
+      : { latitude: item.latitude, longitude: item.longitude, accuracy: item.horizontalAccuracyMeters ?? null, timestamp: at };
+    if (!latestPosition || at >= latestPosition.at) latestPosition = { at, fix };
+  }
+  return { positionSignalCount, latestPosition };
 }
 
 export function drainNativeLocationSignalsInBatches() {
@@ -363,10 +389,16 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
 }
 async function drainNativeSignalPassesUnsafe(captured: Promise<LocationCaptureSnapshot>) {
   let transferredCount = 0;
+  let positionSignalCount = 0;
+  let latestPosition: NativePositionSignal | null = null;
+  const outcome = (pendingAccount: boolean) =>
+    ({ transferredCount, pendingAccount, positionSignalCount, latestPositionFix: latestPosition?.fix ?? null });
   for (let pass = 0; pass < MAX_LOCATION_NATIVE_DRAIN_PASSES; pass += 1) {
     const result = await drainNativeLocationSignalsUnsafe(100, captured);
     transferredCount += result.transferredCount;
-    if (result.pendingAccount || result.drainedCount < 100) return { transferredCount, pendingAccount: result.pendingAccount };
+    positionSignalCount += result.positionSignalCount;
+    if (result.latestPosition && (!latestPosition || result.latestPosition.at >= latestPosition.at)) latestPosition = result.latestPosition;
+    if (result.pendingAccount || result.drainedCount < 100) return outcome(result.pendingAccount);
   }
-  return { transferredCount, pendingAccount: false };
+  return outcome(false);
 }

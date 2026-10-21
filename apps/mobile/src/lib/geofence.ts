@@ -14,6 +14,9 @@ import {
 } from "@dayframe/shared";
 import { enqueueEvent } from "./api";
 import { reverseGeocodeLocation } from "./locationGeocoding";
+import { distanceMeters, freshestGeofenceFix, GEOFENCE_POSITION_MAX_ACCURACY_METERS, GEOFENCE_POSITION_MAX_AGE_MS,
+  insideRefreshCircle, IOS_GEOFENCE_LIMIT, normalizedGeofenceRadius, selectGeofencePlaces, type GeofencePosition,
+  type GeofencePositionFix, type GeofenceRefreshCircle } from "./geofenceSelection";
 import { LOCATION_LEARNING_ENABLED_KEY, locationAccountStorageKey as accountStorageKey,
   readLocationCaptureConsent, writeLocationCaptureConsent } from "./location/captureConsent";
 import { getActiveMobileAccountSnapshot, mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount,
@@ -49,6 +52,8 @@ export type LocationVisitDiagnostics = {
   geofencingActive?: boolean;
   monitoredPlaceNames?: string[];
   excludedPlaceNames?: string[];
+  /** How the watched places were chosen (geofenceSelection.ts); never where the phone is. */
+  geofenceSelection?: "all" | "nearest" | "priority";
   lastStatus?: string;
   lastPlaceName?: string;
   lastEventAt?: string;
@@ -163,7 +168,9 @@ export type GeofenceTransitionEvidence = {
   sampleAgeSeconds?: number;
 };
 
-const IOS_GEOFENCE_LIMIT = 20;
+// The refresh circle of nearest-place selection: one of the 20 regions, never a place.
+const GEOFENCE_REFRESH_REGION_ID = "nearest-refresh";
+const MAX_DIAGNOSTIC_UNWATCHED_NAMES = 50;
 const MONITORED_PLACES_KEY = "dayframe.location.monitoredPlaces.v1";
 const SAVED_PLACE_CATALOGUE_KEY = "dayframe.location.savedPlaceCatalogue.v2";
 const GEOFENCE_REGISTRATION_KEY = "dayframe.location.geofenceRegistration.v1";
@@ -222,6 +229,15 @@ TaskManager.defineTask(DAYFRAME_GEOFENCE_TASK, async ({ data, error }) => {
         : null;
   if (!transition) return;
 
+  // The refresh circle is not a place: neither of its transitions is evidence or a visit. Leaving
+  // this lifetime's circle picks the nearest places again.
+  if (isRefreshRegionIdentifier(payload.region.identifier)) {
+    if (transition === "exit" && payload.region.identifier === refreshRegionIdentifier(capture.binding!.id)) {
+      await refreshNearestGeofencesOnWake(capture, "refresh_exit");
+    }
+    return;
+  }
+
   const persisted = await persistV2GeofenceEvidence(transition, payload.region, capture).catch(async (persistError) => {
     await recordV2LocationFailure(persistError, capture);
     return null;
@@ -267,6 +283,8 @@ TaskManager.defineTask(DAYFRAME_LOCATION_LEARNING_TASK, async ({ data, error }) 
     return null;
   });
   if (!persisted) return;
+  // A reading outside the refresh circle picks the nearest places again (after the evidence above).
+  await refreshNearestGeofencesOnWake(capture, "location_update", locations.map(fixFromLocation));
   // The continuous Expo task feeds both pipelines, but V1 classification is
   // permitted only in the explicit V1 mode.
   if (persisted.rolloutMode !== "v1") return;
@@ -547,35 +565,63 @@ async function refreshCaptureCatalogue(places: Parameters<typeof startGeofencesU
   return { ...await captureLocationOwnership(), revision: capture.revision };
 }
 
-async function startGeofencesUnsafe(
-  places: Array<{
-    id: string;
-    name: string;
-    role?: PlaceRole | null;
-    latitude?: number | null;
-    longitude?: number | null;
-    radiusMeters: number;
-    priority?: number;
-    defaultCategoryId?: string | null;
-    defaultCategoryName?: string | null;
-    defaultActivityDescription?: string | null;
-    loggingEnabled?: boolean;
-  }>,
-  capture: LocationCaptureSnapshot
-) {
+type GeofencePlaceInput = {
+  id: string;
+  name: string;
+  role?: PlaceRole | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  radiusMeters: number;
+  priority?: number;
+  defaultCategoryId?: string | null;
+  defaultCategoryName?: string | null;
+  defaultActivityDescription?: string | null;
+  loggingEnabled?: boolean;
+};
+
+type GeofenceRepickTrigger = "refresh_exit" | "location_update" | "visit_or_significant_change";
+
+async function startGeofencesUnsafe(places: GeofencePlaceInput[], capture: LocationCaptureSnapshot) {
   if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) return 0;
   const monitorablePlaces = places
-    .filter((place) => capture.context!.savedPlaces.some(saved => saved.id === place.id) && typeof place.latitude === "number" && typeof place.longitude === "number")
-    .sort((left, right) => {
-      const priorityDelta = (right.priority ?? 0) - (left.priority ?? 0);
-      if (priorityDelta !== 0) return priorityDelta;
-      const radiusDelta = left.radiusMeters - right.radiusMeters;
-      if (radiusDelta !== 0) return radiusDelta;
-      return left.id.localeCompare(right.id);
-    });
-  const registeredPlaces = monitorablePlaces.slice(0, IOS_GEOFENCE_LIMIT);
-  const excludedPlaces = monitorablePlaces.slice(IOS_GEOFENCE_LIMIT);
-  const regions = registeredPlaces
+    .filter((place) => capture.context!.savedPlaces.some(saved => saved.id === place.id) && typeof place.latitude === "number" && typeof place.longitude === "number");
+  // Every place that may be watched, so a transition of whichever are watched now finds its place.
+  await writeMonitoredPlaces(monitorablePlaces.map(monitoredPlaceFromInput));
+  return registerGeofenceSelectionUnsafe(monitorablePlaces, capture);
+}
+
+/**
+ * Registers the selected places (geofenceSelection.ts) and, above the iOS limit, the refresh circle.
+ * Re-registers only when the watched set changed (identifier, centre and radius) or the phone has
+ * left the current refresh circle; otherwise the registration iOS has is kept, because a new one
+ * makes iOS report every region's initial state again. `position` undefined reads the phone's last
+ * known position, falling back to the current circle's centre, then to priority order.
+ */
+async function registerGeofenceSelectionUnsafe(
+  monitorablePlaces: GeofencePlaceInput[],
+  capture: LocationCaptureSnapshot,
+  position?: GeofencePosition
+) {
+  const refreshIdentifier = refreshRegionIdentifier(capture.binding!.id);
+  const storedFingerprint = await readLocationCache(GEOFENCE_REGISTRATION_KEY, capture);
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+  const storedRegions = parseJson<DayframeRegion[]>(storedFingerprint, []);
+  const storedRefresh = Array.isArray(storedRegions)
+    ? storedRegions.find((region) => region?.identifier === refreshIdentifier) ?? null
+    : null;
+  let where: GeofencePosition | null = position ?? null;
+  if (!where && monitorablePlaces.length > IOS_GEOFENCE_LIMIT) {
+    where = freshestGeofenceFix([await readLastKnownGeofenceFix()]) ??
+      (storedRefresh ? { latitude: storedRefresh.latitude, longitude: storedRefresh.longitude } : null);
+    if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+  }
+  const selection = selectGeofencePlaces(monitorablePlaces, where);
+  // Above the limit the set changes as the phone moves: registered in id order, so the same set is
+  // the same registration whatever the distances.
+  const registeredPlaces = selection.mode === "all"
+    ? selection.places
+    : [...selection.places].sort((left, right) => left.id.localeCompare(right.id));
+  const placeRegions: DayframeRegion[] = registeredPlaces
     .map((place) => ({
       identifier: `${capture.binding!.id}:${place.id}`,
       latitude: place.latitude as number,
@@ -584,49 +630,148 @@ async function startGeofencesUnsafe(
       notifyOnEnter: true,
       notifyOnExit: true
     }));
-
-  await writeMonitoredPlaces(registeredPlaces.map(monitoredPlaceFromInput));
+  const samePlaces = Boolean(storedRefresh) &&
+    JSON.stringify(storedRegions.filter((region) => region !== storedRefresh)) === JSON.stringify(placeRegions);
+  const refreshRegion: DayframeRegion | null = !selection.refresh || !where
+    ? null
+    : storedRefresh && samePlaces && insideRefreshCircle(where, refreshCircleOf(storedRefresh))
+      ? storedRefresh
+      : {
+          identifier: refreshIdentifier,
+          latitude: selection.refresh.latitude,
+          longitude: selection.refresh.longitude,
+          radius: selection.refresh.radiusMeters,
+          notifyOnEnter: true,
+          notifyOnExit: true
+        };
+  const regions = refreshRegion ? [...placeRegions, refreshRegion] : placeRegions;
 
   if (regions.length === 0) {
     await stopGeofencesIfStarted();
-    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, "");
+    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, "", capture);
     await updateLocationDiagnostics({
       activeMonitorCount: 0,
       configuredMonitorCount: 0,
       excludedMonitorCount: 0,
       excludedPlaceNames: [],
+      geofenceSelection: "all",
       geofencingActive: false,
       lastStatus: "No saved places with coordinates to monitor.",
       lastMonitorRefreshAt: new Date().toISOString(),
       monitoredPlaceNames: []
-    });
+    }, capture);
     return 0;
   }
 
   const registrationFingerprint = JSON.stringify(regions);
-  const [storedFingerprint, alreadyStarted] = await Promise.all([
-    readLocationCache(GEOFENCE_REGISTRATION_KEY),
-    Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false)
-  ]);
+  const alreadyStarted = await Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false);
   if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
   if (!alreadyStarted || storedFingerprint !== registrationFingerprint) {
+    // Consent can be withdrawn while the reads above wait: nothing registers for an owner that is
+    // no longer current or no longer has Location on.
+    if (!await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) return 0;
     await Location.startGeofencingAsync(DAYFRAME_GEOFENCE_TASK, regions);
-    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, registrationFingerprint);
+    await writeLocationCache(GEOFENCE_REGISTRATION_KEY, registrationFingerprint, capture);
   }
-  const limitNote = excludedPlaces.length > 0
-    ? ` ${excludedPlaces.length} lower-priority ${excludedPlaces.length === 1 ? "place is" : "places are"} outside the iOS ${IOS_GEOFENCE_LIMIT}-region limit.`
-    : "";
+  const watchedNames = selection.places.map((place) => monitoredPlaceFromInput(place).name);
   await updateLocationDiagnostics({
-    activeMonitorCount: regions.length,
+    activeMonitorCount: placeRegions.length,
     configuredMonitorCount: monitorablePlaces.length,
-    excludedMonitorCount: excludedPlaces.length,
-    excludedPlaceNames: excludedPlaces.map((place) => monitoredPlaceFromInput(place).name),
+    excludedMonitorCount: selection.unwatched.length,
+    excludedPlaceNames: selection.unwatched.slice(0, MAX_DIAGNOSTIC_UNWATCHED_NAMES).map((place) => monitoredPlaceFromInput(place).name),
+    geofenceSelection: selection.mode,
     geofencingActive: true,
-    lastStatus: `Monitoring ${regions.length} saved ${regions.length === 1 ? "place" : "places"}.${limitNote}`,
+    lastStatus: geofenceSelectionStatus(selection.mode, placeRegions.length, monitorablePlaces.length,
+      selection.places.some((place) => place.role === "home" || place.role === "work")),
     lastMonitorRefreshAt: new Date().toISOString(),
-    monitoredPlaceNames: registeredPlaces.map((place) => monitoredPlaceFromInput(place).name)
-  });
-  return regions.length;
+    monitoredPlaceNames: watchedNames
+  }, capture);
+  return placeRegions.length;
+}
+
+function geofenceSelectionStatus(mode: "all" | "nearest" | "priority", watched: number, total: number, withRoles: boolean) {
+  if (mode === "all") return `Monitoring ${watched} saved ${watched === 1 ? "place" : "places"}.`;
+  if (mode === "priority") {
+    return `Watching ${watched} of ${total} saved places by priority until Dayframe knows where you are; then the nearest are watched.`;
+  }
+  return `Watching ${watched} of ${total} saved places: ${withRoles ? "Home and Work, then the nearest to you" : "the nearest to you"}. Places farther away are watched when you get closer.`;
+}
+
+/**
+ * Picks the nearest places again from a task wake: leaving the refresh circle, a reading outside it,
+ * or a Visit or significant location change. Runs in the lifecycle lane for the captured owner
+ * only, and never throws into the evidence path that called it.
+ */
+function refreshNearestGeofencesOnWake(capture: LocationCaptureSnapshot, trigger: GeofenceRepickTrigger,
+  fixes: GeofencePositionFix[] = []) {
+  // With 20 or fewer places every one is already watched: nothing to pick, and no lane work.
+  if (!isLocationCaptureSnapshotCurrent(capture) || monitorableCatalogue(capture).length <= IOS_GEOFENCE_LIMIT) return Promise.resolve(0);
+  return withLocationCaptureLifecycle(() => repickNearestGeofencesUnsafe(capture, trigger, fixes))
+    .catch(async () => {
+      await updateLocationDiagnostics({
+        lastStatus: "Couldn't refresh the nearest saved places. Dayframe tries again as you move.",
+        lastEventAt: new Date().toISOString()
+      }, capture).catch(() => undefined);
+      return 0;
+    });
+}
+
+async function repickNearestGeofencesUnsafe(capture: LocationCaptureSnapshot, trigger: GeofenceRepickTrigger,
+  fixes: GeofencePositionFix[]) {
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+  // The owner's current catalogue (the same one evidence admission checks), not a caller's list.
+  const monitorablePlaces = monitorableCatalogue(capture);
+  if (monitorablePlaces.length <= IOS_GEOFENCE_LIMIT) return 0;
+  if (!await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) return 0;
+  const lastKnown = trigger === "location_update" ? null : await readLastKnownGeofenceFix();
+  if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+  const position = freshestGeofenceFix([...fixes, lastKnown]);
+  // Without a recent position the watched set stays as it is.
+  if (!position) return 0;
+  if (trigger === "location_update") {
+    const stored = parseJson<DayframeRegion[]>(await readLocationCache(GEOFENCE_REGISTRATION_KEY, capture), []);
+    const refresh = Array.isArray(stored)
+      ? stored.find((region) => region?.identifier === refreshRegionIdentifier(capture.binding!.id))
+      : undefined;
+    if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
+    // An ordinary reading re-picks only once it is outside the refresh circle.
+    if (refresh && insideRefreshCircle(position, refreshCircleOf(refresh))) return 0;
+  }
+  return registerGeofenceSelectionUnsafe(monitorablePlaces, capture, { latitude: position.latitude, longitude: position.longitude });
+}
+
+function monitorableCatalogue(capture: LocationCaptureSnapshot) {
+  return (capture.context?.savedPlaces ?? [])
+    .filter((place) => typeof place.latitude === "number" && typeof place.longitude === "number");
+}
+
+function refreshRegionIdentifier(bindingId: string) {
+  return `${bindingId}:${GEOFENCE_REFRESH_REGION_ID}`;
+}
+
+function isRefreshRegionIdentifier(identifier?: string) {
+  return typeof identifier === "string" && identifier.split(":").at(-1) === GEOFENCE_REFRESH_REGION_ID;
+}
+
+function refreshCircleOf(region: DayframeRegion): GeofenceRefreshCircle {
+  return { latitude: region.latitude, longitude: region.longitude, radiusMeters: region.radius };
+}
+
+async function readLastKnownGeofenceFix(): Promise<GeofencePositionFix | null> {
+  const location = await Location.getLastKnownPositionAsync({
+    maxAge: GEOFENCE_POSITION_MAX_AGE_MS,
+    requiredAccuracy: GEOFENCE_POSITION_MAX_ACCURACY_METERS
+  }).catch(() => null);
+  return location ? fixFromLocation(location) : null;
+}
+
+function fixFromLocation(location: Location.LocationObject): GeofencePositionFix {
+  return {
+    latitude: location.coords.latitude,
+    longitude: location.coords.longitude,
+    accuracy: location.coords.accuracy,
+    timestamp: location.timestamp
+  };
 }
 
 async function startLocationLearningUnsafe(
@@ -1042,6 +1187,7 @@ export async function getLocationVisitDiagnostics(): Promise<LocationVisitDiagno
     geofencingActive,
     monitoredPlaceNames: stored.monitoredPlaceNames,
     excludedPlaceNames: stored.excludedPlaceNames,
+    geofenceSelection: stored.geofenceSelection,
     lastStatus: stored.lastStatus,
     lastPlaceName: stored.lastPlaceName,
     lastEventAt: stored.lastEventAt,
@@ -1416,11 +1562,6 @@ async function appendGeofenceTransitionEvidence(evidence: GeofenceTransitionEvid
   });
 }
 
-function normalizedGeofenceRadius(value: number) {
-  if (!Number.isFinite(value)) return 100;
-  return Math.max(25, Math.min(2000, Math.round(value)));
-}
-
 export async function stopGeofencesIfStarted() {
   const started = await Location.hasStartedGeofencingAsync(DAYFRAME_GEOFENCE_TASK).catch(() => false);
   if (started) await Location.stopGeofencingAsync(DAYFRAME_GEOFENCE_TASK);
@@ -1738,28 +1879,6 @@ function roundedCoordinate(value: number) {
   return Number(value.toFixed(6));
 }
 
-function distanceMeters(
-  leftLatitude: number,
-  leftLongitude: number,
-  rightLatitude?: number | null,
-  rightLongitude?: number | null
-) {
-  if (typeof rightLatitude !== "number" || typeof rightLongitude !== "number") return Number.POSITIVE_INFINITY;
-  const earthRadiusMeters = 6_371_000;
-  const leftPhi = degreesToRadians(leftLatitude);
-  const rightPhi = degreesToRadians(rightLatitude);
-  const deltaPhi = degreesToRadians(rightLatitude - leftLatitude);
-  const deltaLambda = degreesToRadians(rightLongitude - leftLongitude);
-  const a =
-    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-    Math.cos(leftPhi) * Math.cos(rightPhi) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function degreesToRadians(value: number) {
-  return (value * Math.PI) / 180;
-}
-
 async function readMonitoredPlaces() {
   const raw = await readLocationCache(MONITORED_PLACES_KEY);
   const places = parseJson<MonitoredPlace[]>(raw, []);
@@ -1805,10 +1924,18 @@ async function persistV2LocationBatch(locations: Location.LocationObject[], capt
 
 // Native Visit and significant-change callbacks wait in the native journal until
 // JavaScript runs. Every background wake drains them through the owned lifecycle
-// lane, so they upload with this batch instead of at the next foreground.
+// lane, so they upload with this batch instead of at the next foreground. A drained
+// Visit or significant change then picks the nearest saved places again.
 async function drainNativeSignalsOnWake(capture: LocationCaptureSnapshot) {
   if (!isLocationCaptureSnapshotCurrent(capture)) return;
-  await drainNativeLocationSignalsInBatches().catch(error => recordV2LocationFailure(error, capture));
+  const drained = await drainNativeLocationSignalsInBatches().catch(async error => {
+    await recordV2LocationFailure(error, capture);
+    return null;
+  });
+  if (drained && !drained.pendingAccount && drained.positionSignalCount > 0) {
+    await refreshNearestGeofencesOnWake(capture, "visit_or_significant_change",
+      drained.latestPositionFix ? [drained.latestPositionFix] : []);
+  }
 }
 
 async function persistV2GeofenceEvidence(transition: GeofenceTransition, region: DayframeRegion, capture: LocationCaptureSnapshot) {

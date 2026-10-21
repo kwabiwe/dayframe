@@ -664,6 +664,131 @@ describe("mobile geofence visit candidates", () => {
   });
 });
 
+describe("nearest-place geofences (location v3 PR 16b)", () => {
+  // Synthetic places on a made-up grid around (10, 20); 0.001° of latitude is about 111 m.
+  const nearbyPlace = (index: number, overrides: Record<string, unknown> = {}) => ({
+    ...place,
+    id: `30000000-0000-4000-8000-${String(index + 500).padStart(12, "0")}`,
+    name: `Synthetic place ${index}`,
+    latitude: 10 + index * 0.001,
+    longitude: 20,
+    priority: 100 - index,
+    ...overrides
+  });
+  const phoneAt = (latitude: number, longitude = 20) => locationMocks.getLastKnownPositionAsync.mockResolvedValue({
+    coords: { latitude, longitude, altitude: null, accuracy: 10, altitudeAccuracy: null, heading: null, speed: null },
+    timestamp: Date.now()
+  });
+  const registered = (call = 0) =>
+    (locationMocks.startGeofencingAsync.mock.calls[call] as unknown as [string, Array<{ identifier: string; radius: number; latitude: number }>])[1];
+
+  beforeEach(async () => {
+    asyncStore.clear();
+    vi.clearAllMocks();
+    locationMocks.getLastKnownPositionAsync.mockReset().mockResolvedValue(null);
+    __resetMobileAccountForTests();
+    await activateMobileAccount({ userId: "user-geofence", workspaceId: "workspace-geofence" });
+    asyncStore.set("dayframe.location.learning.enabled.v1:account:https%3A%2F%2Fdayframe.test:workspace-geofence:user-geofence", "true");
+  });
+
+  it("keeps today's registration for twenty or fewer places, without reading where the phone is", async () => {
+    const places = Array.from({ length: 20 }, (_, index) => nearbyPlace(index + 1, { priority: index }));
+    phoneAt(10);
+
+    await expect(startGeofences(places)).resolves.toBe(20);
+    await startGeofences(places);
+
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledOnce();
+    expect(registered().map((region) => region.identifier)).toEqual(
+      [...places].reverse().map((item) => `capture-test:${item.id}`)
+    );
+    expect(locationMocks.getLastKnownPositionAsync).not.toHaveBeenCalled();
+    await expect(getLocationVisitDiagnostics()).resolves.toMatchObject({
+      activeMonitorCount: 20,
+      configuredMonitorCount: 20,
+      excludedMonitorCount: 0,
+      geofenceSelection: "all",
+      lastStatus: "Monitoring 20 saved places."
+    });
+  });
+
+  it("above twenty, watches Home, Work and the nearest places plus a refresh circle around the phone", async () => {
+    const home = nearbyPlace(90, { role: "home", name: "1 Synthetic Road", latitude: 11 });
+    const work = nearbyPlace(91, { role: "work", name: "2 Synthetic Road", latitude: 12 });
+    const others = Array.from({ length: 25 }, (_, index) => nearbyPlace(index + 1));
+    phoneAt(10.0255); // just past place 25 of the grid: places 9–25 are the nearest others
+
+    await expect(startGeofences([...others, home, work])).resolves.toBe(19);
+
+    const regions = registered();
+    expect(regions).toHaveLength(20);
+    const placeIds = regions.slice(0, 19).map((region) => region.identifier);
+    expect(placeIds).toEqual([...placeIds].sort());
+    expect(placeIds).toContain(`capture-test:${home.id}`);
+    expect(placeIds).toContain(`capture-test:${work.id}`);
+    expect(placeIds).toContain(`capture-test:${others[24].id}`);
+    expect(placeIds).not.toContain(`capture-test:${others[0].id}`);
+    expect(regions[19]).toMatchObject({ identifier: "capture-test:nearest-refresh", latitude: 10.0255, longitude: 20 });
+    expect(regions[19].radius).toBeGreaterThanOrEqual(500);
+
+    const diagnostics = await getLocationVisitDiagnostics();
+    expect(diagnostics).toMatchObject({
+      activeMonitorCount: 19,
+      configuredMonitorCount: 27,
+      excludedMonitorCount: 8,
+      geofenceSelection: "nearest",
+      lastStatus: "Watching 19 of 27 saved places: Home and Work, then the nearest to you. Places farther away are watched when you get closer."
+    });
+    expect(diagnostics.monitoredPlaceNames).toEqual(expect.arrayContaining(["Home", "Work", "Synthetic place 25"]));
+    // Counts and names only: where the phone is never reaches diagnostics.
+    expect(JSON.stringify(diagnostics)).not.toContain("10.0255");
+  });
+
+  it("re-registers only when the watched set changes or the phone leaves the refresh circle", async () => {
+    const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
+    phoneAt(10.001);
+    await startGeofences(places);
+    // A few metres on, inside the circle, with the same nearest places: iOS keeps its registration.
+    phoneAt(10.0012);
+    await startGeofences(places);
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledOnce();
+
+    // Far up the grid the nearest places differ.
+    phoneAt(10.03);
+    await startGeofences(places);
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+    expect(registered(1).map((region) => region.identifier)).toContain(`capture-test:${places[29].id}`);
+    expect(registered(1).at(-1)).toMatchObject({ identifier: "capture-test:nearest-refresh", latitude: 10.03 });
+  });
+
+  it("keeps the current circle's set when the position is unknown later, rather than reverting to priority", async () => {
+    const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
+    phoneAt(10.03);
+    await startGeofences(places);
+    locationMocks.getLastKnownPositionAsync.mockResolvedValue(null);
+    await startGeofences(places);
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledOnce();
+    expect((await getLocationVisitDiagnostics()).geofenceSelection).toBe("nearest");
+  });
+
+  it("words the priority fallback honestly when the phone has never known where it is", async () => {
+    const places = Array.from({ length: 22 }, (_, index) => nearbyPlace(index + 1));
+    await expect(startGeofences(places)).resolves.toBe(20);
+    expect(registered().some((region) => region.identifier.endsWith(":nearest-refresh"))).toBe(false);
+    await expect(getLocationVisitDiagnostics()).resolves.toMatchObject({
+      geofenceSelection: "priority",
+      lastStatus: "Watching 20 of 22 saved places by priority until Dayframe knows where you are; then the nearest are watched."
+    });
+  });
+
+  it("never treats the refresh circle as a saved place in the legacy classifier", async () => {
+    await startGeofences([place]);
+    const result = await recordGeofenceTransition("exit", { ...region, identifier: "nearest-refresh" }, new Date("2026-07-06T12:00:00.000Z"));
+    expect(result).toMatchObject({ status: "unknown_place", queued: false });
+    expect(await readQueue()).toEqual([]);
+  });
+});
+
 describe("location access that needs iOS Settings (UIA-111)", () => {
   it("is true only when iOS won't ask again", async () => {
     const cases: Array<[unknown, unknown, boolean]> = [
