@@ -111,7 +111,8 @@ export default function PlacesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
-  const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
+  // The learned place whose sheet is open, with the account lifetime it was opened in (Codex r9 on #508).
+  const [selectedLearned, setSelectedLearned] = useState<{ place: MobileLearnedPlace; owner: string } | null>(null);
   // The status line, with the account lifetime and account it was written for: shown only while
   // both still hold, so another account (or a later lifetime) never sees it (Codex r8 on #508).
   const [status, setStatus] = useState<{ text: string; owner: string } | null>(null);
@@ -128,6 +129,9 @@ export default function PlacesScreen() {
     });
   }, [statusOwner]);
   const statusMessage = status && status.owner === statusOwner() ? status.text : null;
+  const selectedLearnedPlace = selectedLearned && selectedLearned.owner === statusOwner() ? selectedLearned.place : null;
+  const setSelectedLearnedPlace = (place: MobileLearnedPlace | null) =>
+    setSelectedLearned(place ? { place, owner: statusOwner() } : null);
   // The newest page read failed before any list was shown (staging feedback B2): an in-page state
   // with Try again instead of a system alert, and never "Nothing saved yet" for a list not read.
   const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);

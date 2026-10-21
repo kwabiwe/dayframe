@@ -810,3 +810,153 @@ describe("Places account lifetime (Codex r8 on #508)", () => {
     expect(texts()).not.toContain("Example Gym restored.");
   });
 });
+
+// Codex r9 on #508: every per-account piece of Places state, run as A acts → B acts → A returns (a
+// new lifetime of A). Lasting state (restores still to be monitored) is kept per account and comes
+// back with A; transient state (problem and status lines, the busy pill, the restore gate,
+// announcements) belongs to the lifetime that made it. Nothing of B's touches A's, and nothing of
+// A's shows to B.
+describe("Places state per account and lifetime (Codex r9 on #508)", () => {
+  const ACCOUNT_B_PLACE = { id: "30000000-0000-4000-8000-000000000006", name: "Example Library", radiusMeters: 100, priority: 5, latitude: 12, longitude: 20 };
+  const archivedOffice = { id: office.id, name: office.name, archivedAt: "2026-10-20T09:00:00.000Z" };
+  const offline = () => new Error("offline");
+  let placesOf: Record<string, unknown[]>;
+
+  async function showAccount(owner: Owner, epoch: number) {
+    mocks.owner = owner;
+    mocks.epoch = epoch;
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+  }
+  async function restoreNow(place: { id: string; name: string }) {
+    await act(async () => { restore(place); });
+    await flush();
+  }
+  const archivedGroup = () => all("ArchivedGroup")[0].props as { places: { id: string }[]; problem: string | null; restoringId: string | null };
+  const screenText = () => [...texts(), archivedGroup().problem ?? ""].join(" ");
+
+  type Row = {
+    name: string;
+    aActs: () => Promise<void>;
+    bActs: () => Promise<void>;
+    afterAReturns?: () => Promise<void>;
+    expectA: () => void;
+  };
+  const rows: Row[] = [
+    {
+      name: "restores still to be monitored come back with A, whatever B restored",
+      aActs: async () => {
+        mocks.fetchBootstrap.mockRejectedValueOnce(offline());
+        await restoreNow(archivedGym);
+        expect(waitingRow(gym.id)).toHaveLength(1);
+      },
+      bActs: async () => {
+        mocks.fetchBootstrap.mockRejectedValueOnce(offline());
+        await restoreNow(archivedOffice);
+      },
+      expectA: () => {
+        expect(monitoredWith(gym.id).length).toBeGreaterThan(0);
+        expect(waitingRow(gym.id)).toHaveLength(0);
+      }
+    },
+    {
+      name: "a refused restore's problem line stays in its lifetime",
+      aActs: async () => {
+        mocks.setPlaceArchived.mockRejectedValueOnce(offline());
+        await restoreNow(archivedGym);
+        expect(archivedGroup().problem).toBe("Couldn't restore Example Gym. Try again.");
+      },
+      bActs: async () => {
+        // B's own restore goes through, with nothing of A's problem line.
+        expect(archivedGroup().problem).toBeNull();
+        await restoreNow(archivedOffice);
+        expect(archivedGroup().problem).toBeNull();
+      },
+      expectA: () => {
+        expect(archivedGroup().problem).toBeNull();
+      }
+    },
+    {
+      name: "a restore's status line stays in its lifetime",
+      aActs: async () => {
+        mocks.fetchBootstrap.mockRejectedValueOnce(offline());
+        await restoreNow(archivedGym);
+        expect(texts().join(" ")).toContain("Example Gym is restored, but Places couldn't refresh.");
+      },
+      bActs: async () => {
+        mocks.fetchBootstrap.mockRejectedValueOnce(offline());
+        await restoreNow(archivedOffice);
+      },
+      expectA: () => {
+        expect(texts().join(" ")).not.toContain("is restored, but");
+      }
+    },
+    {
+      name: "a restore still out holds neither the busy pill nor the gate in a later lifetime",
+      aActs: async () => {
+        mocks.setPlaceArchived.mockReturnValueOnce(new Promise(() => undefined));
+        await restoreNow(archivedGym);
+        expect(archivedGroup().restoringId).toBe(gym.id);
+      },
+      bActs: async () => {
+        // B only looks: A's request still out shows B no busy pill.
+        expect(archivedGroup().restoringId).toBeNull();
+      },
+      expectA: () => {
+        expect(mocks.setPlaceArchived).toHaveBeenLastCalledWith(gym.id, false);
+        expect(mocks.setPlaceArchived).toHaveBeenCalledTimes(2);
+      },
+      afterAReturns: async () => {
+        expect(archivedGroup().restoringId).toBeNull();
+        // Restore takes A's place again in the new lifetime.
+        mocks.setPlaceArchived.mockReturnValueOnce(new Promise(() => undefined));
+        await restoreNow(archivedGym);
+      }
+    },
+    {
+      name: "a restore answered in a later lifetime announces and says nothing",
+      aActs: async () => {
+        mocks.setPlaceArchived.mockReturnValueOnce(answerA.promise);
+        await restoreNow(archivedGym);
+      },
+      bActs: async () => undefined,
+      expectA: () => {
+        expect(mocks.announce).not.toHaveBeenCalled();
+        expect(texts().join(" ")).not.toContain("Example Gym restored");
+      },
+      afterAReturns: async () => {
+        mocks.announce.mockClear();
+        await act(async () => { answerA.resolve({ ...archivedGym, archivedAt: null }); });
+        await flush();
+      }
+    }
+  ];
+  let answerA: ReturnType<typeof deferred<unknown>>;
+
+  it.each(rows)("$name", async (row) => {
+    answerA = deferred<unknown>();
+    placesOf = { "user-a": [studio], "user-b": [ACCOUNT_B_PLACE] };
+    const archivedOf: Record<string, unknown[]> = { "user-a": [archivedGym], "user-b": [archivedOffice] };
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.fetchBootstrap.mockImplementation(async () => bootstrapFor(mocks.owner!, placesOf[mocks.owner!.userId]));
+    mocks.fetchArchivedPlaces.mockImplementation(async () => archivedOf[mocks.owner!.userId]);
+    mocks.setPlaceArchived.mockResolvedValue({ archivedAt: null });
+    await showAccount(ACCOUNT_A, 1);
+    await row.aActs();
+    // B signs in on the open page and acts; nothing of A's shows to B.
+    await showAccount(ACCOUNT_B, 2);
+    expect(screenText()).not.toContain("Example Gym");
+    await row.bActs();
+    expect(screenText()).not.toContain("Example Gym");
+    // A returns in a new lifetime; the server now has A's restored place active.
+    placesOf["user-a"] = [studio, gym];
+    archivedOf["user-a"] = [];
+    mocks.announce.mockClear();
+    await showAccount(ACCOUNT_A, 3);
+    await row.afterAReturns?.();
+    // Nothing of B's touches A.
+    expect(screenText()).not.toContain("Example Office");
+    expect(screenText()).not.toContain("Example Library");
+    row.expectA();
+  });
+});

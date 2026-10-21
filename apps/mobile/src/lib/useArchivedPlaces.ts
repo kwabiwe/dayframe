@@ -21,11 +21,19 @@ type ArchivedPlace = { id: string; name: string };
  */
 type UnmonitoredRestore = ArchivedPlace & { waiting: boolean; warned: boolean };
 
+/** What transient state is tagged with: the account and the account lifetime it was made in. */
+function lifetimeKey(accountKey: string, epoch: number) {
+  return `${accountKey}|${epoch}`;
+}
+
 /**
  * Places › Archived on iPhone (location v3 PR 15b, PRD D19 A10): the archived list, its reads and
  * Restore, for the account the page shows. Every piece of state carries the account it belongs to,
  * so another account never sees a name, a busy pill, a problem line or an announcement from before
- * (Codex r1 on #508). Restore is one request at a time through a synchronous gate that only the
+ * (Codex r1 on #508). Lasting state is kept per account: the archived list (the server's word) and
+ * the restores still to be monitored, which survive another account's restores and come back with
+ * the account (Codex r9 on #508). Transient state (the busy pill, the problem line, the gate) also
+ * carries the account lifetime that made it, and shows or holds only in that lifetime. Restore is one request at a time through a synchronous gate that only the
  * request holding it releases. Every accepted restore is tracked until monitoring has been refreshed
  * from a list that has the place, for its account (`unmonitoredRestoredIn` / `settleMonitoredRestored`),
  * whichever read brings it, and the page retries while any is unresolved (`restoreMonitoringUnresolved`);
@@ -50,9 +58,11 @@ export function useArchivedPlaces({
   shownAccountKey: string | null;
 }) {
   const [archived, setArchived] = useState<{ accountKey: string; places: MobileArchivedPlace[] } | null>(null);
-  const [restoring, setRestoring] = useState<{ token: number; accountKey: string; id: string } | null>(null);
-  const [problem, setProblem] = useState<{ accountKey: string; message: string } | null>(null);
-  const [pending, setPendingState] = useState<{ accountKey: string; places: UnmonitoredRestore[] } | null>(null);
+  // Transient: tagged with `lifetimeKey` (the account and the lifetime it was made in).
+  const [restoring, setRestoring] = useState<{ token: number; owner: string; id: string } | null>(null);
+  const [problem, setProblem] = useState<{ owner: string; message: string } | null>(null);
+  // Restores still to be monitored, per account until each settles (Codex r9 on #508).
+  const [pending, setPendingState] = useState<Readonly<Record<string, UnmonitoredRestore[]>>>({});
   const pendingRef = useRef(pending);
   // Restores settled because a later list no longer had the place (archived or deleted elsewhere
   // since), by account: they are never announced or shown as restored (owner follow-up on #508).
@@ -75,7 +85,13 @@ export function useArchivedPlaces({
     return () => { mounted.current = false; };
   }, []);
 
-  const setPending = useCallback((next: { accountKey: string; places: UnmonitoredRestore[] } | null) => {
+  /** The restores of `accountKey` still to be monitored. */
+  const pendingFor = useCallback((accountKey: string) => pendingRef.current[accountKey] ?? [], []);
+  /** Replaces `accountKey`'s unmonitored restores, leaving every other account's as they are. */
+  const setPendingFor = useCallback((accountKey: string, places: UnmonitoredRestore[]) => {
+    const next = { ...pendingRef.current };
+    if (places.length > 0) next[accountKey] = places;
+    else delete next[accountKey];
     pendingRef.current = next;
     setPendingState(next);
   }, []);
@@ -101,11 +117,9 @@ export function useArchivedPlaces({
 
   /** Restored places of `accountKey` that `places` has and whose monitoring is still unrefreshed. */
   const unmonitoredRestoredIn = useCallback((accountKey: string, places: readonly { id: string }[]) => {
-    const current = pendingRef.current;
-    if (!current || current.accountKey !== accountKey) return [];
     const listed = new Set(places.map((place) => place.id));
-    return current.places.filter((place) => listed.has(place.id)).map((place) => place.id);
-  }, []);
+    return pendingFor(accountKey).filter((place) => listed.has(place.id)).map((place) => place.id);
+  }, [pendingFor]);
 
   /**
    * Monitoring was refreshed for `accountKey` from a list that has `ids`: they are settled. Returns
@@ -113,14 +127,13 @@ export function useArchivedPlaces({
    * warning line it clears).
    */
   const settleMonitoredRestored = useCallback((accountKey: string, ids: readonly string[]) => {
-    const current = pendingRef.current;
-    if (!current || current.accountKey !== accountKey || ids.length === 0) return [];
+    const current = pendingFor(accountKey);
+    if (current.length === 0 || ids.length === 0) return [];
     const settled = new Set(ids);
-    const warned = current.places.filter((place) => settled.has(place.id) && place.warned).map((place) => place.name);
-    const left = current.places.filter((place) => !settled.has(place.id));
-    setPending(left.length > 0 ? { accountKey, places: left } : null);
+    const warned = current.filter((place) => settled.has(place.id) && place.warned).map((place) => place.name);
+    setPendingFor(accountKey, current.filter((place) => !settled.has(place.id)));
     return warned;
-  }, [setPending]);
+  }, [pendingFor, setPendingFor]);
 
   /**
    * A list for `accountKey` that started after its restores were accepted (the page only applies
@@ -129,15 +142,13 @@ export function useArchivedPlaces({
    * the page clears a warning line for them. Never announced as restored.
    */
   const settleGone = useCallback((accountKey: string, isGone: (id: string) => boolean) => {
-    const current = pendingRef.current;
-    if (!current || current.accountKey !== accountKey) return [];
-    const gone = current.places.filter((place) => isGone(place.id)).map((place) => place.id);
+    const current = pendingFor(accountKey);
+    const gone = current.filter((place) => isGone(place.id)).map((place) => place.id);
     if (gone.length === 0) return [];
     for (const id of gone) goneRef.current.add(`${accountKey}|${id}`);
-    const left = current.places.filter((place) => !isGone(place.id));
-    setPending(left.length > 0 ? { accountKey, places: left } : null);
+    setPendingFor(accountKey, current.filter((place) => !isGone(place.id)));
     return gone;
-  }, [setPending]);
+  }, [pendingFor, setPendingFor]);
 
   const settleRestoresAbsentFrom = useCallback((accountKey: string, places: readonly { id: string }[]) => {
     const listed = new Set(places.map((place) => place.id));
@@ -158,37 +169,39 @@ export function useArchivedPlaces({
 
   /** The restore of `id` was announced with a warning: its recovery will be announced too. */
   const markWarned = useCallback((accountKey: string, id: string) => {
-    const current = pendingRef.current;
-    if (!current || current.accountKey !== accountKey || !current.places.some((place) => place.id === id)) return;
-    setPending({ accountKey, places: current.places.map((place) => (place.id === id ? { ...place, warned: true } : place)) });
-  }, [setPending]);
+    const current = pendingFor(accountKey);
+    if (!current.some((place) => place.id === id)) return;
+    setPendingFor(accountKey, current.map((place) => (place.id === id ? { ...place, warned: true } : place)));
+  }, [pendingFor, setPendingFor]);
 
   /** Whether the restore of `id` is still unmonitored for the account shown. */
   const restoreUnresolved = useCallback((id: string) => {
-    const current = pendingRef.current;
-    return Boolean(current && current.accountKey === shownAccountRef.current && current.places.some((place) => place.id === id));
-  }, []);
+    const accountKey = shownAccountRef.current;
+    return Boolean(accountKey && pendingFor(accountKey).some((place) => place.id === id));
+  }, [pendingFor]);
 
   const restore = useCallback(async (place: ArchivedPlace) => {
     const accountKey = shownAccountRef.current;
     if (!accountKey) return;
-    const token = gate.take(accountKey);
-    if (token === null) return;
-    const clearBusy = () => setRestoring((current) => (current?.token === token ? null : current));
-    setRestoring({ token, accountKey, id: place.id });
-    setProblem((current) => (current?.accountKey === accountKey ? null : current));
     // The account lifetime this restore belongs to: a sign-out, or a switch away and back, ends it.
     const epoch = currentMobileAccountEpoch();
+    const owner = lifetimeKey(accountKey, epoch);
+    // One at a time per account lifetime: a request still out from an earlier one never holds it.
+    const token = gate.take(owner);
+    if (token === null) return;
+    const clearBusy = () => setRestoring((current) => (current?.token === token ? null : current));
+    setRestoring({ token, owner, id: place.id });
+    setProblem((current) => (current?.owner === owner ? null : current));
     try {
-      const owner = await readActiveMobileAccount();
+      const active = await readActiveMobileAccount();
       // Started for the account the page shows, and still in that account's lifetime; otherwise its
       // answer changes nothing on screen and says nothing to VoiceOver.
       const stillOurs = async () => {
-        if (!mounted.current || !owner || mobileAccountKey(owner) !== accountKey) return false;
+        if (!mounted.current || !active || mobileAccountKey(active) !== accountKey) return false;
         const now = await readActiveMobileAccount();
         return Boolean(now && mounted.current && mobileAccountKey(now) === accountKey && currentMobileAccountEpoch() === epoch);
       };
-      if (!owner || mobileAccountKey(owner) !== accountKey) {
+      if (!active || mobileAccountKey(active) !== accountKey) {
         clearBusy();
         return;
       }
@@ -205,7 +218,7 @@ export function useArchivedPlaces({
         if (!ours) return;
         // The row stays where it was, with the reason under the group (no system alert: UIA-005).
         const message = friendlyMobileErrorMessage(error, `Couldn't restore ${place.name}. Try again.`);
-        setProblem({ accountKey, message });
+        setProblem({ owner, message });
         AccessibilityInfo.announceForAccessibility(message);
         return;
       }
@@ -220,8 +233,10 @@ export function useArchivedPlaces({
       const archivedAtAccept = archivedReadsApplied.current;
       // Tracked from now until a list with the place has refreshed monitoring, whichever read brings it.
       goneRef.current.delete(`${accountKey}|${place.id}`);
-      const tracked = pendingRef.current?.accountKey === accountKey ? pendingRef.current.places : [];
-      setPending({ accountKey, places: [...tracked.filter((item) => item.id !== place.id), { id: place.id, name: place.name, waiting: false, warned: false }] });
+      setPendingFor(accountKey, [
+        ...pendingFor(accountKey).filter((item) => item.id !== place.id),
+        { id: place.id, name: place.name, waiting: false, warned: false }
+      ]);
       const settledWith: { outcome: RestoreRefreshOutcome | null } = { outcome: null };
       await refreshRef.current(place, (settled) => {
         // Checked synchronously before anything changes: the same account lifetime, still shown.
@@ -239,9 +254,9 @@ export function useArchivedPlaces({
         }
         clearBusy();
         // Not applied: unless another read has already monitored it, it now waits (and is retried).
-        const current = pendingRef.current;
-        if (settled !== "applied" && current?.accountKey === accountKey && current.places.some((item) => item.id === place.id)) {
-          setPending({ accountKey, places: current.places.map((item) => (item.id === place.id ? { ...item, waiting: true } : item)) });
+        const current = pendingFor(accountKey);
+        if (settled !== "applied" && current.some((item) => item.id === place.id)) {
+          setPendingFor(accountKey, current.map((item) => (item.id === place.id ? { ...item, waiting: true } : item)));
         }
         return true;
       });
@@ -265,14 +280,16 @@ export function useArchivedPlaces({
     } finally {
       gate.release(token);
     }
-  }, [gate, load, markWarned, reads, restoreGone, restoreUnresolved, setPending]);
+  }, [gate, load, markWarned, pendingFor, reads, restoreGone, restoreUnresolved, setPendingFor]);
 
-  const shown = <T extends { accountKey: string }>(value: T | null) => (value && value.accountKey === shownAccountKey ? value : null);
-  const shownPending = shown(pending)?.places ?? [];
+  // Lasting state shows for the account shown; transient state only in the lifetime that made it.
+  const shownLifetime = shownAccountKey ? lifetimeKey(shownAccountKey, currentMobileAccountEpoch()) : null;
+  const current = <T extends { owner: string }>(value: T | null) => (value && value.owner === shownLifetime ? value : null);
+  const shownPending = shownAccountKey ? pending[shownAccountKey] ?? [] : [];
   return {
-    places: shown(archived)?.places ?? [],
-    restoringId: shown(restoring)?.id ?? null,
-    problem: shown(problem)?.message ?? null,
+    places: archived && archived.accountKey === shownAccountKey ? archived.places : [],
+    restoringId: current(restoring)?.id ?? null,
+    problem: current(problem)?.message ?? null,
     /** Restored places whose own refresh didn't apply and that aren't monitored yet (shown as waiting). */
     pendingRestored: shownPending.filter((place) => place.waiting).map(({ id, name }) => ({ id, name })),
     /** True while any restore is unmonitored, whatever the rows show: the page keeps retrying. */
