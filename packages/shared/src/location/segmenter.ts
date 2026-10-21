@@ -955,14 +955,18 @@ function longestNewSilenceMs(from: number, to: number, observedMs: number[], cov
   return longest;
 }
 
-/** Places matching evidence at `atMs`: an archived place only before it was archived (PRD D19 A10). */
+/**
+ * Places matching evidence at `atMs` (PRD D19 A10): an archived place only before it was archived,
+ * and a place that replaced one only from then.
+ */
 function placesAt<T extends SavedPlaceForMatching>(places: readonly T[], atMs: number) {
-  return places.filter((place) => !place.archivedAt || atMs < Date.parse(place.archivedAt));
+  return places.filter((place) => (!place.archivedAt || atMs < Date.parse(place.archivedAt))
+    && (!place.matchingStartsAt || atMs >= Date.parse(place.matchingStartsAt)));
 }
 
 function preprocess(input: LocationEngineInput) {
-  // Without an archived place the catalogue is the same for every point (the usual case).
-  const anyArchived = [...input.savedPlaces, ...input.acceptedLearnedPlaces].some((place) => place.archivedAt);
+  // Without an archived or replacing place the catalogue is the same for every point (the usual case).
+  const anyArchived = [...input.savedPlaces, ...input.acceptedLearnedPlaces].some((place) => place.archivedAt || place.matchingStartsAt);
   const archivedSavedIds = new Map(input.savedPlaces.flatMap((place) => place.archivedAt ? [[place.id, Date.parse(place.archivedAt)] as const] : []));
   const rejectedEvidence: RejectedEvidence[] = [];
   const seen = new Set<string>();

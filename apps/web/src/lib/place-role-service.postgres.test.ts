@@ -184,6 +184,27 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     const placeAt = (id: string, latitude: number, longitude: number) =>
       database!.query("update places set latitude = $2, longitude = $3 where id = $1", [id, latitude, longitude]);
 
+    it("starts a new place's matching when it replaces the old one, never an existing place's (Codex r2 on #503)", async () => {
+      const { createPlace } = await import("./event-service");
+      const startsAt = async (id: string) => (await database!.query<{ starts: boolean }>(
+        "select matching_starts_at is not null as starts from places where id = $1", [id])).rows[0]?.starts;
+      await placeAt(oldHome, 10, 20);
+      const created = await createPlace({ name: "New home", latitude: 10.002, longitude: 20, radiusMeters: 100, priority: 5 } as never, session,
+        { role: "home", previousPlaceName: "Previous home", archivePrevious: true });
+      expect(created).toMatchObject({ previousArchived: true });
+      expect(await startsAt(created.id)).toBe(true);
+      expect(await startsAt(oldHome)).toBe(false);
+    });
+
+    it("leaves an existing place's matching alone when the role moves to it with Replace (Codex r2 on #503)", async () => {
+      await placeAt(oldHome, 10, 20);
+      await placeAt(newHome, 10.002, 20);
+      await inTransaction((client) => assignPlaceRoleWith(client, session, { role: "home", placeId: newHome, archivePrevious: true }));
+      expect(await archivedAt(oldHome)).toBe(true);
+      expect((await database!.query<{ starts: boolean }>("select matching_starts_at is not null as starts from places where id = $1", [newHome])).rows[0].starts)
+        .toBe(false);
+    });
+
     it("archives the old Home with the move when it is within 300 m, renamed and without its role", async () => {
       await placeAt(oldHome, 10, 20);
       await placeAt(newHome, 10.002, 20); // about 222 m
