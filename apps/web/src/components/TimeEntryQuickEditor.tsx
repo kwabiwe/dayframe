@@ -7,6 +7,7 @@ import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
@@ -765,9 +766,39 @@ export function TimeEntryQuickEditorPanel({
             </p>
           ) : null}
         </div>
+        {/* The block's own actions as icon buttons, top right (owner, 21 Oct 2026, superseding
+            WUI-006's footer pills): ↺ Start again · trash Delete (Discard while running) · gap · ✕,
+            with the registry glyphs and tooltips the List and Today rows use. */}
         <div className="calendar-compact-editor-icons">
+          {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
+            <button
+              className="calendar-compact-icon-action"
+              type="button"
+              aria-label={`Start again: ${title}`}
+              aria-busy={busyAction === "start" || undefined}
+              data-tip="Start again"
+              disabled={controlsDisabled || props.isTimerBusy}
+              onClick={() => void controller.startAgain()}
+            >
+              <DayframeIcon glyph="rotate-ccw" size={18} />
+            </button>
+          ) : null}
+          {props.mode === "entry" && props.onDelete ? (
+            <button
+              className="calendar-compact-icon-action is-danger"
+              type="button"
+              // The tooltip's word leads the name (WCAG 2.5.3), then which block.
+              aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
+              aria-busy={busyAction === "delete" || undefined}
+              data-tip={isRunning ? "Discard" : "Delete"}
+              disabled={controlsDisabled}
+              onClick={() => void controller.deleteEntry()}
+            >
+              <DayframeIcon glyph="trash-2" size={18} />
+            </button>
+          ) : null}
           <button
-            className="calendar-compact-icon-action"
+            className="calendar-compact-icon-action is-close"
             type="button"
             aria-label="Close editor"
             data-tip="Close"
@@ -974,9 +1005,8 @@ export function TimeEntryQuickEditorPanel({
         </span>
       </div>
 
-      {/* Footer (prototype "Edit block", audit WUI-004/WUI-006): a note (an error or an overlap) on
-          its own line above the actions, never squeezing them; the block's own actions as labelled
-          pills on the left (Delete or Discard, Start again), Cancel and Save on the right. */}
+      {/* Footer (prototype "Edit block", WUI-004): a note (an error or an overlap) on its own line
+          above the actions, never squeezing them; then just Cancel and Save on the right. */}
       <div className="calendar-compact-editor-footer df-ed-foot" data-feedback-mode={feedbackMode}>
         <div
           className={`df-ed-note${feedbackMode === "error" || feedbackMode === "overlap" ? " is-shown" : ""}`}
@@ -1000,33 +1030,6 @@ export function TimeEntryQuickEditorPanel({
           </div>
         </div>
         <div className="df-ed-actions">
-          <div className="df-ed-actions-start">
-            {props.mode === "entry" && props.onDelete ? (
-              <button
-                className="df-ed-pill is-danger"
-                type="button"
-                // The visible word leads the name (WCAG 2.5.3), then which block.
-                aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
-                aria-busy={busyAction === "delete" || undefined}
-                disabled={controlsDisabled}
-                onClick={() => void controller.deleteEntry()}
-              >
-                {isRunning ? "Discard" : "Delete"}
-              </button>
-            ) : null}
-            {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
-              <button
-                className="df-ed-pill"
-                type="button"
-                aria-label={`Start again: ${title}`}
-                aria-busy={busyAction === "start" || undefined}
-                disabled={controlsDisabled || props.isTimerBusy}
-                onClick={() => void controller.startAgain()}
-              >
-                Start again
-              </button>
-            ) : null}
-          </div>
           <div className="df-ed-actions-end">
             {cancelButton()}
             {saveButton()}
