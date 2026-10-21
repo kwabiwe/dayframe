@@ -40,7 +40,8 @@ vi.mock("../geofence", () => ({
   getLocationLearningEnabled: async () => true,
   stopLocationLearningIfStarted: async () => undefined,
   stopGeofencesIfStarted: async () => undefined,
-  clearLocationCaptureCaches: async () => undefined
+  clearLocationCaptureCaches: async () => undefined,
+  refreshNearestGeofencesInLifecycleLane: async () => 0
 }));
 vi.mock("./store", () => ({
   configureLocationAccount: mocks.configureLocationAccount,

@@ -217,7 +217,7 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
-import { splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { quickStartDiagnosticsSummary, readQuickStartDiagnostics } from "@/lib/quickStartDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
@@ -957,6 +957,7 @@ export default function SettingsScreen() {
   const canClearFailed = queueDiagnostics.clearableFailedCount > 0;
 
   const locationMonitoringAllowed = locationDiagnostics?.backgroundPermission === "granted";
+  const placesWatched = placesWatchedSummary(locationDiagnostics);
   const locationCaptureNeedsRetry = locationDiagnostics?.locationLearningEnabled === true &&
     locationDiagnostics.locationLearningCaptureState === "inactive";
   // UIA-111: once iOS won't ask again (Location denied or restricted, or Always already declined),
@@ -1821,6 +1822,8 @@ export default function SettingsScreen() {
         backgroundPermission: locationDiagnostics?.backgroundPermission,
         registeredGeofenceCount: locationDiagnostics?.activeMonitorCount,
         excludedGeofenceCount: locationDiagnostics?.excludedMonitorCount,
+        configuredGeofenceCount: locationDiagnostics?.configuredMonitorCount,
+        geofenceSelection: locationDiagnostics?.geofenceSelection,
         nativePendingSignalCount: native?.pendingSignalCount ?? null,
         locationServicesEnabled: native?.locationServicesEnabled ?? null,
         accuracyAuthorization: native?.accuracyAuthorization ?? null,
@@ -2717,6 +2720,19 @@ export default function SettingsScreen() {
                       ) : null}
                     </SettingsIssueRow>
                   ) : null}
+                </SettingsBlockGroup>
+              ) : null}
+
+              {placesWatched ? (
+                <SettingsBlockGroup theme={theme} title="Location">
+                  <SettingsBlockRow
+                    divider={false}
+                    subtitle={placesWatched.detail}
+                    testID="sync-help-places-watched"
+                    theme={theme}
+                    title="Places watched"
+                    value={placesWatched.value}
+                  />
                 </SettingsBlockGroup>
               ) : null}
 

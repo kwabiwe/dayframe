@@ -38,16 +38,16 @@ The lane configuration is stable, but the build record is only a dated repositor
 - Bundle id: `com.layereight.dayframe`
 - Team: `65M773ZG6M`
 - Version: `0.1.0`
-- Last repository-recorded verified build: `0.1.0 (123)` (2026-10-17)
+- Last repository-recorded verified build: `0.1.0 (124)` (2026-10-21)
 - Group: `Internal Health Debug`
-- Delivery/build ID: `e2356f3f-c814-4d40-87ba-a587d595a442`
-- Archived commit: `f96616e`
-- Performance gate reading (baseline for the next build): staging build of `f96616e`, Today in front with a block running on the iPhone 17 over USB with Auto-Lock off (check from a screenshot that it is Dayframe Staging, full-screen, with a block running: a first attempt ran with nothing recording and was discarded), after a five-minute warm-up (6.4 %, +1.02 MiB per minute): gate 1 6.8 % and +0.65 MiB per minute, gate 2 6.4 % and +0.02 MiB per minute (17 Oct). Build 122: 6.3–6.5 %, with one accepted +4.54 MiB-per-minute step; build 121: 7.1 % / +0.98 and 5.7 % / +0.63 MiB per minute.
+- Delivery/build ID: `ca17dca4-5873-43ae-a424-150a67448cd2`
+- Archived commit: `6f45a03`
+- Performance gate reading (baseline for the next build): staging build of `6f45a03`, Today in front with a block running on the iPhone 17 over USB with Auto-Lock off (checked from screenshots): gate 1 6.9 % and −2.88 MiB per minute, gate 2 6.7 % and +0.63 MiB per minute (21 Oct). The five-minute warm-up's sampler timed out without a figure, but the app had run for more than five minutes before gate 1. Build 123: 6.4–6.8 %, at most +1.02 MiB per minute.
 - Release rule: mobile/native/runtime-configuration changes require a verified internal build before their device behavior is called released. Web-only work does not require a TestFlight build unless it changes a mobile-consumed contract or the user defines TestFlight as the success criterion.
 
 Docs-only or planning-only PRs do not require a TestFlight build unless they change build, release, signing, environment, or runtime configuration.
 
-Build 123 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
+Build 124 is recorded as `VALID`, export compliance false, en-GB notes set, and `IN_BETA_TESTING` through `Internal Health Debug`, with production API base `https://dayframe-web.vercel.app`. Earlier per-build history remains available in Git history and dated investigations rather than this procedure.
 
 Swift/SwiftUI native-view changes require a new binary. JavaScript/OTA or Vercel deployment evidence cannot prove that an updated native Calendar module is present.
 
