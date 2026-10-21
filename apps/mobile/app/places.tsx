@@ -110,8 +110,11 @@ export default function PlacesScreen() {
   dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
   const refreshPull = useRef(0);
-  const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
-  const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
+  // Ignore/Forget in flight, with the lifetime and request that set them (Codex r11 on #508).
+  type LearnedBusy = { id: string; owner: string; request: number };
+  const [ignoringLearned, setIgnoringLearned] = useState<LearnedBusy | null>(null);
+  const [forgettingLearned, setForgettingLearned] = useState<LearnedBusy | null>(null);
+  const learnedRequests = useRef(0);
   // The learned place whose sheet is open, with the account lifetime it was opened in (Codex r9 on #508).
   const [selectedLearned, setSelectedLearned] = useState<{ place: MobileLearnedPlace; owner: string } | null>(null);
   // The status line, with the account lifetime and account it was written for: shown only while
@@ -130,9 +133,16 @@ export default function PlacesScreen() {
     });
   }, [statusOwner]);
   const statusMessage = status && status.owner === statusOwner() ? status.text : null;
+  const selectedLearnedRef = useRef(selectedLearned);
+  selectedLearnedRef.current = selectedLearned;
   const selectedLearnedPlace = selectedLearned && selectedLearned.owner === statusOwner() ? selectedLearned.place : null;
-  const setSelectedLearnedPlace = (place: MobileLearnedPlace | null) =>
-    setSelectedLearned(place ? { place, owner: statusOwner() } : null);
+  const ignoringLearnedId = ignoringLearned?.owner === statusOwner() ? ignoringLearned.id : null;
+  const forgettingLearnedId = forgettingLearned?.owner === statusOwner() ? forgettingLearned.id : null;
+  const setSelectedLearnedPlace = (place: MobileLearnedPlace | null) => {
+    const next = place ? { place, owner: statusOwner() } : null;
+    selectedLearnedRef.current = next;
+    setSelectedLearned(next);
+  };
   // The newest page read failed before any list was shown (staging feedback B2): an in-page state
   // with Try again instead of a system alert, and never "Nothing saved yet" for a list not read.
   const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);
@@ -217,8 +227,9 @@ export default function PlacesScreen() {
 
   /**
    * A check for the account lifetime a change started in (Codex r3 on #508): true while the page is
-   * open, the account epoch is unchanged and the list shown is still that account's. Every status,
-   * VoiceOver or state write after an await in a place change asks it first.
+   * open, the account epoch is unchanged and the list shown is still that account's. Synchronous:
+   * every status, VoiceOver, navigation, callback or state write after an await asks it immediately
+   * before, in the same step, never across another await (Codex r11 on #508).
    */
   const lifetimeCheck = useCallback(() => {
     const epoch = currentMobileAccountEpoch();
@@ -301,12 +312,13 @@ export default function PlacesScreen() {
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
+      // Only in the lifetime it started in (sign-in, or the newest read's failure).
+      if (!mounted.current || ticket.lifetime !== accountLifetime()) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      // Only the newest read's failure, and only in the lifetime it started in.
-      if (!mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isNewest(ticket)) return;
+      if (!pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
         setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
       } else if (options?.refresh) {
@@ -403,41 +415,9 @@ export default function PlacesScreen() {
       confirmLabel: "Ignore",
       tone: "neutral",
       onConfirm: () => {
-        void ignoreLearnedCandidate(learnedPlace).then((succeeded) => {
-          if (succeeded) onSuccess?.();
-        });
+        void changeLearnedPlace("ignore", learnedPlace, onSuccess);
       }
     });
-  }
-
-  async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
-    // Every write after an await is for the account lifetime this started in (Codex r10 on #508).
-    const still = lifetimeCheck();
-    setIgnoringLearnedId(learnedPlace.id);
-    try {
-      await applyAfterSuccessfulMutation(
-        () => ignoreLearnedPlace(learnedPlace.id),
-        () => {
-          if (still()) removeLocalLearnedPlace(learnedPlace.id);
-        }
-      );
-      if (!still()) return false;
-      await refreshAfterPlaceChange({
-        prefix: "Learned place ignored.",
-        removeLearnedPlaceId: learnedPlace.id,
-        still
-      });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      if (still()) Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't ignore this suggestion. Try again."));
-      return false;
-    } finally {
-      setIgnoringLearnedId((current) => (current === learnedPlace.id ? null : current));
-    }
   }
 
   function confirmForgetLearnedCandidate(
@@ -451,40 +431,49 @@ export default function PlacesScreen() {
       confirmLabel: "Forget",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
-        void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
-          if (succeeded) onSuccess?.();
-        });
+        void changeLearnedPlace("forget", learnedPlace, onSuccess);
       }
     });
   }
 
-  async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
-    // Every write after an await is for the account lifetime this started in (Codex r10 on #508).
+  /**
+   * Ignore or Forget a learned place (Codex r10/r11 on #508). Its busy flag carries the lifetime and
+   * request that set it; after every await, `still()` is asked synchronously right before each write,
+   * and the sheet closes (`onSuccess`) only while it is still this lifetime's sheet for this place.
+   */
+  async function changeLearnedPlace(kind: "ignore" | "forget", learnedPlace: MobileLearnedPlace, onSuccess?: () => void) {
     const still = lifetimeCheck();
-    setForgettingLearnedId(learnedPlace.id);
+    const owner = statusOwner();
+    const request = ++learnedRequests.current;
+    const setBusy = kind === "ignore" ? setIgnoringLearned : setForgettingLearned;
+    setBusy({ id: learnedPlace.id, owner, request });
     try {
-      await applyAfterSuccessfulMutation(
-        () => forgetLearnedPlace(learnedPlace.id),
+      await applyAfterSuccessfulMutation<unknown>(
+        () => (kind === "ignore" ? ignoreLearnedPlace(learnedPlace.id) : forgetLearnedPlace(learnedPlace.id)),
         () => {
           if (still()) removeLocalLearnedPlace(learnedPlace.id);
         }
       );
-      if (!still()) return false;
+      if (!still()) return;
       await refreshAfterPlaceChange({
-        prefix: "Learned place forgotten.",
+        prefix: kind === "ignore" ? "Learned place ignored." : "Learned place forgotten.",
         removeLearnedPlaceId: learnedPlace.id,
         still
       });
-      return true;
+      const sheet = selectedLearnedRef.current;
+      if (still() && sheet?.owner === owner && sheet.place.id === learnedPlace.id) onSuccess?.();
     } catch (error) {
+      if (!still()) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      if (still()) Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't forget this suggestion. Try again."));
-      return false;
+      Alert.alert("Places", friendlyMobileErrorMessage(
+        error,
+        kind === "ignore" ? "Couldn't ignore this suggestion. Try again." : "Couldn't forget this suggestion. Try again."
+      ));
     } finally {
-      setForgettingLearnedId((current) => (current === learnedPlace.id ? null : current));
+      setBusy((current) => (current?.request === request ? null : current));
     }
   }
 
@@ -563,11 +552,11 @@ export default function PlacesScreen() {
       // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
       say(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
+      if (!still()) return;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return;
       }
-      if (!still()) return;
       // A read started since brings the list instead: a restore counts as overtaken, and only the
       // newest read's failure is shown or announced (Codex r6 on #508).
       if (options.onSettled && !options.onSettled(pageReads.isNewest(ticket) ? "failed" : "stale")) return;
@@ -623,11 +612,12 @@ export default function PlacesScreen() {
       try {
         previousArchived = (await setPlaceRole(request)).previousArchived === true;
       } catch (error) {
+        if (!still()) return null;
         if (error instanceof AuthRequiredError) {
           router.replace("/");
           return null;
         }
-        return still() ? friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.") : null;
+        return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
       }
       // Accepted: shown at once (only for the account lifetime that asked, while Places is open),
       // and any read that started before this answer is dropped.

@@ -1121,3 +1121,88 @@ describe("Places state per account and lifetime (Codex r9 on #508)", () => {
     row.expectA();
   });
 });
+
+// Codex r11 on #508: a check before an await (or inside an awaited helper) is not a check for what
+// runs after it. Each continuation asks the lifetime synchronously right before its first write,
+// callback or announcement; busy state carries the lifetime and request that set it.
+describe("Places continuations after an await (Codex r11 on #508)", () => {
+  const cafe = {
+    id: "40000000-0000-4000-8000-000000000002", name: "Example Bakery", classification: "place_candidate", visitCount: 3,
+    distinctDayCount: 2, lastSeenAt: "2026-10-19T09:00:00.000Z", radiusMeters: 80, totalDwellSeconds: 3_600, longestDwellSeconds: 1_800
+  };
+  const kiosk = { ...cafe, id: "40000000-0000-4000-8000-000000000003", name: "Example Kiosk" };
+  const learnedSheet = () => tree!.root.findAll((node: ReactTestInstance) => typeof node.type === "function" && "onIgnore" in node.props)[0];
+  const openLearned = async (id: string) => {
+    await act(async () => { (tree!.root.findAll((node: ReactTestInstance) => node.props.testID === `places-learned-${id}` && (node.type as unknown) === "Pressable")[0].props.onPress as () => void)(); });
+  };
+  const savePill = (name: string) => all("Pill").find((node) => node.props.accessibilityLabel === `Save ${name} as a place`)!;
+
+  it("never announces a refused restore once another account took over between the check and the write", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    const refused = deferred<unknown>();
+    mocks.setPlaceArchived.mockReturnValueOnce(refused.promise);
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    const announcedIn: number[] = [];
+    mocks.announce.mockImplementation(() => { announcedIn.push(mocks.epoch); });
+    // B signs in in the microtask right after the lifetime is next read.
+    mocks.onEpochRead = () => {
+      mocks.onEpochRead = null;
+      queueMicrotask(() => { mocks.owner = ACCOUNT_B; mocks.epoch = 2; });
+    };
+    await act(async () => { refused.reject(new Error("offline")); });
+    await flush();
+    expect(mocks.epoch).toBe(2);
+    expect(announcedIn.filter((epoch) => epoch !== 1)).toEqual([]);
+  });
+
+  it("never lets an old Ignore close the sheet another account opened since", async () => {
+    mocks.owner = ACCOUNT_A;
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio], [cafe]));
+    await act(async () => { tree = create(<PlacesScreen />); });
+    await flush();
+    await openLearned(cafe.id);
+    mocks.ignoreLearnedPlace.mockResolvedValueOnce({ ok: true });
+    const refresh = deferred<unknown>();
+    mocks.fetchBootstrap.mockReturnValueOnce(refresh.promise);
+    const closeSheet = vi.fn();
+    await act(async () => { (learnedSheet().props.onIgnore as (place: unknown, done: () => void) => void)(cafe, closeSheet); });
+    await flush();
+    // B signs in, loads its places and opens its own suggestion.
+    mocks.owner = ACCOUNT_B;
+    mocks.epoch = 2;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_B, [office], [kiosk]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    await openLearned(kiosk.id);
+    expect(learnedSheet().props.learnedPlace).toEqual(kiosk);
+    await act(async () => { refresh.resolve(bootstrapFor(ACCOUNT_A, [studio], [])); });
+    await flush();
+    expect(closeSheet).not.toHaveBeenCalled();
+    expect(learnedSheet().props.learnedPlace).toEqual(kiosk);
+  });
+
+  it("never leaves a returning account's suggestion busy from an Ignore of an earlier lifetime", async () => {
+    mocks.owner = ACCOUNT_A;
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio], [cafe]));
+    await act(async () => { tree = create(<PlacesScreen />); });
+    await flush();
+    await openLearned(cafe.id);
+    mocks.ignoreLearnedPlace.mockReturnValueOnce(new Promise(() => undefined));
+    await act(async () => { (learnedSheet().props.onIgnore as (place: unknown, done: () => void) => void)(cafe, () => undefined); });
+    await flush();
+    expect(savePill(cafe.name).props.disabled).toBe(true);
+    // Away to B and back to A: a new lifetime of A.
+    mocks.owner = ACCOUNT_B;
+    mocks.epoch = 2;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_B, [office], []));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    mocks.owner = ACCOUNT_A;
+    mocks.epoch = 3;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio], [cafe]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(savePill(cafe.name).props.disabled).toBe(false);
+  });
+});

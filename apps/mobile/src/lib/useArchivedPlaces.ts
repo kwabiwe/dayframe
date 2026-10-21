@@ -193,37 +193,38 @@ export function useArchivedPlaces({
     const clearBusy = () => setRestoring((current) => (current?.token === token ? null : current));
     setRestoring({ token, owner, id: place.id });
     setProblem((current) => (current?.owner === owner ? null : current));
+    // Synchronous (Codex r11 on #508): asked immediately before every write or announcement after an
+    // await, never across one. True while the page is open, in this lifetime, showing this account.
+    const guard = () => mounted.current && currentMobileAccountEpoch() === epoch && shownAccountRef.current === accountKey;
+    /** The account signed in is still this one (read across an await: the caller then asks `guard`). */
+    const activeIsOurs = async () => {
+      const now = await readActiveMobileAccount();
+      return Boolean(now && mobileAccountKey(now) === accountKey);
+    };
     try {
-      const active = await readActiveMobileAccount();
-      // Started for the account the page shows, and still in that account's lifetime; otherwise its
-      // answer changes nothing on screen and says nothing to VoiceOver.
-      const stillOurs = async () => {
-        if (!mounted.current || !active || mobileAccountKey(active) !== accountKey) return false;
-        const now = await readActiveMobileAccount();
-        return Boolean(now && mounted.current && mobileAccountKey(now) === accountKey && currentMobileAccountEpoch() === epoch);
-      };
-      if (!active || mobileAccountKey(active) !== accountKey) {
+      const startedOurs = await activeIsOurs();
+      if (!startedOurs || !guard()) {
         clearBusy();
         return;
       }
       try {
         await setPlaceArchived(place.id, false);
       } catch (error) {
+        clearBusy();
         if (error instanceof AuthRequiredError) {
-          clearBusy();
-          if (mounted.current) onSignedOutRef.current();
+          if (guard()) onSignedOutRef.current();
           return;
         }
-        const ours = await stillOurs();
-        clearBusy();
-        if (!ours) return;
+        const ours = await activeIsOurs();
+        if (!ours || !guard()) return;
         // The row stays where it was, with the reason under the group (no system alert: UIA-005).
         const message = friendlyMobileErrorMessage(error, `Couldn't restore ${place.name}. Try again.`);
         setProblem({ owner, message });
         AccessibilityInfo.announceForAccessibility(message);
         return;
       }
-      if (!(await stillOurs())) {
+      const acceptedOurs = await activeIsOurs();
+      if (!acceptedOurs || !guard()) {
         clearBusy();
         return;
       }
@@ -241,7 +242,7 @@ export function useArchivedPlaces({
       const settledWith: { outcome: RestoreRefreshOutcome | null } = { outcome: null };
       await refreshRef.current(place, (settled) => {
         // Checked synchronously before anything changes: the same account lifetime, still shown.
-        if (!mounted.current || currentMobileAccountEpoch() !== epoch || shownAccountRef.current !== accountKey) {
+        if (!guard()) {
           clearBusy();
           return false;
         }
@@ -264,7 +265,9 @@ export function useArchivedPlaces({
       clearBusy();
       // Never settled: the session ended during the refresh (the page is leaving for sign-in), or
       // the restore no longer belongs to the account shown.
-      if (settledWith.outcome === null || !(await stillOurs())) return;
+      if (settledWith.outcome === null) return;
+      const settledOurs = await activeIsOurs();
+      if (!settledOurs || !guard()) return;
       // Done only once monitored (the page awaits monitoring from an applied list before this). Until
       // then, the warning that holds, and its recovery is announced when it lands (Codex r4 on #508).
       if (restoreGone(place.id)) {

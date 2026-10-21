@@ -21,8 +21,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   ],
   "app/places.tsx": [
     // Load failed is the in-page Blocks state with Try again (staging feedback B2), not an alert.
-    '"Places"', // ignore failed
-    '"Places"' // forget failed
+    '"Places"' // ignore or forget failed (one call site since Codex r11 on #508)
   ],
   "app/review.tsx": [
     '"Review"', // bulk skip: some moments not saved on this iPhone
