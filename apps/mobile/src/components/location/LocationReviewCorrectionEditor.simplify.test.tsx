@@ -139,6 +139,8 @@ let tree: ReturnType<typeof create> | undefined;
 let onResolve: Mock<(action: LocationReviewAction, message: string) => Promise<void>>;
 let onVenueSuggested = vi.fn();
 beforeEach(() => {
+  focused = true;
+  saving = false;
   onResolve = vi.fn(async (_action: LocationReviewAction, _message: string) => undefined);
   onVenueSuggested = vi.fn();
   picker.props = null;
@@ -158,20 +160,22 @@ afterEach(() => {
   tree = undefined;
 });
 
-function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem: object = { suggestedCategoryId: null }) {
+let focused = true;
+let saving = false;
+function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], reviewItem: object = { suggestedCategoryId: null, status: "open" }) {
   return (
     <LocationReviewCorrectionEditor
       adjacentReview={undefined}
       categories={categories}
       evidence={evidence}
-      isFocused
+      isFocused={focused}
       onCreateActivity={async () => ({ id: "cat-new" })}
       onResolve={onResolve}
       onVenueSuggested={onVenueSuggested}
       places={[]}
       recentActivityIds={recent}
       reviewItem={reviewItem as never}
-      saving={false}
+      saving={saving}
     />
   );
 }
@@ -590,6 +594,33 @@ describe("What did you do? (D1)", () => {
       const known = { ...stay({ matched: false }), venue: { confirmedPlaceId: null, suggestedPlaceId: "ISYNTHETICSTORE", historyPlaceIds: [] } } as LocationReviewEvidenceDto;
       await render(known);
       expect(onVenueSuggested).not.toHaveBeenCalled();
+    });
+
+    it("never reports for a decided card or while the card is being decided (Codex r1 on #522)", async () => {
+      native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
+      await render(stay({ matched: false }), [], { suggestedCategoryId: null, status: "accepted" });
+      expect(onVenueSuggested).not.toHaveBeenCalled();
+      act(() => tree!.unmount());
+      saving = true;
+      await render(stay({ matched: false }));
+      expect(onVenueSuggested).not.toHaveBeenCalled();
+    });
+
+    it("reports once per card however the nearby list reloads (Codex r1 on #522)", async () => {
+      const other = (request: { requestId: string }) => ({
+        ...confident(request),
+        places: confident(request).places.map((place) => place.id === "poi-s" ? { ...place, placeId: "ISYNTHETICOTHER" } : place)
+      });
+      native.searchNearby
+        .mockImplementationOnce(async (request: { requestId: string }) => confident(request))
+        .mockImplementationOnce(async (request: { requestId: string }) => other(request))
+        .mockImplementation(async (request: { requestId: string }) => confident(request));
+      await render(stay({ matched: false }));
+      for (const value of [false, true, false, true]) {
+        focused = value;
+        await act(async () => tree!.update(editor(stay({ matched: false }))));
+      }
+      expect(onVenueSuggested.mock.calls).toEqual([["20000000-0000-4000-8000-000000000001", "ISYNTHETICSTORE"]]);
     });
 
     it("never reports a venue for a stay at a saved place", async () => {

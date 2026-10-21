@@ -416,18 +416,19 @@ export function LocationReviewCorrectionEditor({
   }, [isFocused, nearbyProvider, visitLatitude, visitLongitude]);
 
   // The venue the ranker is confident about goes to the server as an Apple Place ID (location v3
-  // PR 8), once per card, only for an unsaved stay and only when it differs from the stored one.
-  const reportedSuggestionRef = useRef<string | null>(null);
+  // PR 8): at most once per card while this screen is open, only for an open card on an unsaved
+  // stay that isn't being decided, and only when it differs from the stored one (Codex r1 on #522).
+  const reportedCardsRef = useRef(new Set<string>());
   const onVenueSuggestedRef = useRef(onVenueSuggested);
   onVenueSuggestedRef.current = onVenueSuggested;
   const suggestedVenue = nearbyState.places.find((place) => place.suggested && place.placeId) ?? null;
+  const cardOpen = reviewItem?.status === "open";
   useEffect(() => {
-    if (evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId) return;
-    const key = `${evidence.reviewItemId}:${suggestedVenue.placeId}`;
-    if (reportedSuggestionRef.current === key || evidence.venue?.suggestedPlaceId === suggestedVenue.placeId) return;
-    reportedSuggestionRef.current = key;
+    if (evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId || !cardOpen || saving) return;
+    if (reportedCardsRef.current.has(evidence.reviewItemId) || evidence.venue?.suggestedPlaceId === suggestedVenue.placeId) return;
+    reportedCardsRef.current.add(evidence.reviewItemId);
     onVenueSuggestedRef.current?.(evidence.reviewItemId, suggestedVenue.placeId);
-  }, [baselinePlaceId, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, suggestedVenue?.placeId]);
+  }, [baselinePlaceId, cardOpen, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, saving, suggestedVenue?.placeId]);
 
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(

@@ -1670,13 +1670,17 @@ export async function fetchLocationReviewEvidence(
 /**
  * Tell the server which Apple venue the ranker was confident about for an open card's unsaved stay
  * (location v3 PR 8, design §6.3): its Place ID only. Best effort and foreground only, while
- * Location evidence is on screen; any failure (offline, a decided card, another account) is
- * dropped quietly, since the suggestion is recomputed the next time the stay is opened.
+ * Location evidence is on screen; any failure (offline, a decided card) is dropped quietly, since
+ * the suggestion is recomputed the next time the stay is opened. Sent only under the session of
+ * `owner`, the account the evidence was read for, and only while the app is active, both checked
+ * again right before the request starts (Codex r1 on #522).
  */
-export async function reportVenueSuggestion(reviewItemId: string, placeId: string): Promise<boolean> {
+export async function reportVenueSuggestion(reviewItemId: string, placeId: string, owner: MobileAccountOwner): Promise<boolean> {
   try {
-    const session = await readAuthenticatedSessionSnapshot();
+    if (AppState.currentState !== "active") return false;
+    const session = await readOwnedAuthenticatedSessionSnapshot(owner);
     if (session.status !== "authenticated") return false;
+    if (AppState.currentState !== "active" || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return false;
     const { response } = await mobileJsonRequest<null>(
       `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(reviewItemId)}/venue`,
       {
