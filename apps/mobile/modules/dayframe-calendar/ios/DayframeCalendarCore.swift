@@ -19,6 +19,10 @@ public enum DayframeCalendarConstants {
   public static let creationPreviewDurationMinutes = 30
   public static let edgeAutoscrollActivationInset = 52.0
   public static let edgeAutoscrollMaximumSpeed = 420.0
+  /// A day with a named pattern's bracket (location v3 PR 14b) moves its blocks right by this, so
+  /// the bracket and its name sit in the gutter beside them and never under one.
+  public static let bracketRailWidth = 12.0
+  public static let bracketLabelMinimumHeight = 28.0
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -229,11 +233,13 @@ public enum DayframeCalendarEntryGeometryMath {
     widthFraction: Double,
     overlapCount: Int,
     textDensity: String,
-    timelineHeight: Double = .infinity
+    timelineHeight: Double = .infinity,
+    leadingInset: Double = 0
   ) -> DayframeCalendarEntryGeometryMetrics? {
     guard
       availableWidth.isFinite,
       hourLabelWidth.isFinite,
+      leadingInset.isFinite,
       semanticTop.isFinite,
       semanticHeight.isFinite,
       availableWidth > hourLabelWidth,
@@ -243,7 +249,9 @@ public enum DayframeCalendarEntryGeometryMath {
       return nil
     }
 
-    let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
+    // Lanes share the column right of any bracket rail.
+    let inset = max(0, leadingInset)
+    let blockWidth = max(0, availableWidth - hourLabelWidth - 18 - inset)
     let horizontal = DayframeCalendarHorizontalMath.metrics(
       availableWidth: blockWidth,
       offsetFraction: offsetFraction,
@@ -258,7 +266,7 @@ public enum DayframeCalendarEntryGeometryMath {
       hitHeight: horizontal.hitHeight,
       timelineHeight: timelineHeight
     )
-    let minX = hourLabelWidth + 8 + horizontal.offset
+    let minX = hourLabelWidth + 8 + inset + horizontal.offset
     let minY = vertical.hitCenterY - vertical.hitHeight / 2
 
     return DayframeCalendarEntryGeometryMetrics(
@@ -896,6 +904,49 @@ public enum DayframeCalendarBlockMath {
       + Double(components.minute ?? 0)
       + Double(components.second ?? 0) / 60.0
       + Double(components.nanosecond ?? 0) / 60_000_000_000.0
+  }
+}
+
+public struct DayframeCalendarBracketSpan: Equatable {
+  public let top: Double
+  public let height: Double
+
+  public init(top: Double, height: Double) {
+    self.top = top
+    self.height = height
+  }
+}
+
+public enum DayframeCalendarBracketMath {
+  /// A named pattern's bracket (location v3 PR 14b) runs from its first part's drawn top to its last
+  /// part's drawn bottom: each part measured as the block it is (its minimum height, a clock change's
+  /// wall-clock place), never the trip as one block, so it stays beside its parts at every zoom.
+  public static func span(
+    parts: [(startedAtMs: Double, stoppedAtMs: Double?)],
+    nowMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    hourHeight: Double,
+    calendar: Calendar = .current
+  ) -> DayframeCalendarBracketSpan? {
+    let blocks = parts.compactMap { part in
+      DayframeCalendarBlockMath.metrics(
+        startedAtMs: part.startedAtMs,
+        stoppedAtMs: part.stoppedAtMs,
+        nowMs: nowMs,
+        dayStartMs: dayStartMs,
+        dayEndMs: dayEndMs,
+        hourHeight: hourHeight,
+        calendar: calendar
+      )
+    }
+    guard
+      let top = blocks.map(\.top).min(),
+      let bottom = blocks.map({ $0.top + $0.height }).max()
+    else {
+      return nil
+    }
+    return DayframeCalendarBracketSpan(top: top, height: bottom - top)
   }
 }
 

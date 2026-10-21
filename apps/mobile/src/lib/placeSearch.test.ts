@@ -26,6 +26,9 @@ vi.mock("expo-location", () => ({
 const {
   NearbyPointOfInterestController,
   PLACE_SEARCH_MAX_LOCATION_AGE_MS,
+  nearbyInsideLine,
+  rankedNearbyPlaces,
+  venueStayFromEvidence,
   PlaceSearchController,
   friendlyPlaceSearchError,
   isSuitableLastKnownLocation,
@@ -204,7 +207,7 @@ describe("nearby point of interest controller", () => {
     expect(visibleNearbyPlaces([{ ...poi("", 10) }, { ...poi("No id", 10), id: "" }])).toEqual([]);
   });
 
-  it("asks for five places within 400 metres and shows them nearest first as given", async () => {
+  it("asks for the nearest 60 places, ranks them and shows five", async () => {
     const search = answering(Array.from({ length: 7 }, (_, index) => poi(`Place ${index}`, 50 + index)));
     const states: NearbyPointOfInterestState[] = [];
     const controller = new NearbyPointOfInterestController(
@@ -218,15 +221,93 @@ describe("nearby point of interest controller", () => {
     expect(search).toHaveBeenCalledWith(expect.objectContaining({
       requestId: expect.stringMatching(/^nearby-\d+$/),
       radiusMeters: 400,
-      limit: 5
+      limit: 60
     }));
     expect(states.at(-1)).toMatchObject({ status: "results" });
+    // Places alike in every other way rank nearest first.
     expect(states.at(-1)?.places.map((place) => place.title)).toEqual(["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]);
-    // Only opaque ids, titles, address lines and distances reach the screen: no coordinates.
+    // Only opaque ids, titles, address lines, distances and the ranking reach the screen: no coordinates.
     for (const place of states.at(-1)?.places ?? []) {
-      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "requestId", "subtitle", "title"]);
+      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "inArea", "inside", "requestId", "share", "subtitle", "suggested", "title"]);
     }
     controller.dispose();
+  });
+
+  // Venue resolver v2 (location v3 PR 7): the visit and the areas of interest reach the ranker.
+  it("puts the supermarket first with its in-store pharmacy inside it, for a 25-minute visit", async () => {
+    const search = vi.fn(async ({ requestId }: { requestId: string }) => ({
+      requestId,
+      areasOfInterest: [],
+      places: [
+        { id: "p", requestId, title: "Freshway Pharmacy", subtitle: null, distanceMeters: 18, category: "Pharmacy", offsetEastMeters: 10, offsetNorthMeters: 15, source: "nearby" as const },
+        { id: "s", requestId, title: "Freshway Superstore", subtitle: null, distanceMeters: 46, category: "FoodMarket", offsetEastMeters: 30, offsetNorthMeters: 35, source: "nearby" as const },
+        { id: "c", requestId, title: "Bean & Bar", subtitle: null, distanceMeters: 36, category: "Cafe", offsetEastMeters: -35, offsetNorthMeters: 10, source: "nearby" as const }
+      ]
+    }));
+    const states: NearbyPointOfInterestState[] = [];
+    const stay = vi.fn(() => ({
+      startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:25:00.000Z", now: new Date("2026-10-21T12:00:00.000Z"),
+      accuracyMeters: 15, spreadMeters: 20, timeZone: "Europe/London"
+    }));
+    const controller = new NearbyPointOfInterestController(
+      { search, resolve: vi.fn(), cancel: vi.fn().mockResolvedValue(undefined) },
+      (state) => states.push(state),
+      () => [],
+      stay
+    );
+    await controller.load({ latitude: 10, longitude: 20 });
+    const places = states.at(-1)!.places;
+    expect(places.map((place) => place.title)).toEqual(["Freshway Superstore", "Bean & Bar"]);
+    expect(places[0]).toMatchObject({ inside: ["Freshway Pharmacy"], suggested: true });
+    expect(nearbyInsideLine(places[0].inside)).toBe("Inside: Freshway Pharmacy");
+    expect(stay).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it("names the centre from its area of interest, even beyond 400 m, and summarises what is inside", () => {
+    const shops = Array.from({ length: 5 }, (_, index) => ({
+      ...poi(`Unit Shop ${index + 1}`, 20 + index), category: "Store", offsetEastMeters: 20 + index, offsetNorthMeters: 0
+    }));
+    const centre = { ...poi("Northgate Shopping Centre", 420), source: "area" as const, offsetEastMeters: 420, offsetNorthMeters: 0 };
+    const ranked = rankedNearbyPlaces([...shops, centre], ["Northgate Shopping Centre"], {
+      startedAt: "2026-10-21T13:00:00.000Z", stoppedAt: "2026-10-21T14:10:00.000Z", now: new Date("2026-10-21T15:00:00.000Z")
+    });
+    const visible = visibleNearbyPlaces(ranked);
+    expect(visible.map((place) => place.title)).toEqual(["Northgate Shopping Centre"]);
+    expect(nearbyInsideLine(visible[0].inside)).toBe("Inside: Unit Shop 1, Unit Shop 2 +3");
+    expect(nearbyInsideLine([])).toBeNull();
+  });
+
+  it("keeps the area the visit lies in beyond 400 m even when it came from the nearby search (Codex r1 on #517)", () => {
+    const shop = { ...poi("Unit Shop", 20), category: "Store", offsetEastMeters: 20, offsetNorthMeters: 0 };
+    const centre = { ...poi("Northgate Shopping Centre", 420), source: "nearby" as const, offsetEastMeters: 420, offsetNorthMeters: 0 };
+    const visible = visibleNearbyPlaces(rankedNearbyPlaces([shop, centre], ["Northgate Shopping Centre"], {
+      startedAt: "2026-10-21T13:00:00.000Z", stoppedAt: "2026-10-21T14:00:00.000Z", now: new Date("2026-10-21T15:00:00.000Z")
+    }));
+    expect(visible.map((place) => [place.title, place.inside])).toEqual([["Northgate Shopping Centre", ["Unit Shop"]]]);
+  });
+
+  it("measures the visit's spread from its readings, not its matching radius (Codex r1 on #517)", () => {
+    const at = (east: number, accuracyMeters: number | null) => ({
+      id: `s${east}`, point: { type: "Point" as const, coordinates: [east / 71_700, 50] as [number, number] },
+      occurredAt: "2026-10-21T10:00:00.000Z", accuracyMeters, kind: "location", role: null
+    });
+    const stay = venueStayFromEvidence({
+      segment: { startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:30:00.000Z" },
+      map: { centre: { type: "Point", coordinates: [0, 50] }, stayRadiusMeters: 120, acceptedSamples: [at(4, 5), at(6, 8), at(10, null)] }
+    } as unknown as Parameters<typeof venueStayFromEvidence>[0]);
+    expect(stay.accuracyMeters).toBe(8);
+    expect(stay.spreadMeters).toBeGreaterThan(5);
+    expect(stay.spreadMeters).toBeLessThan(8);
+  });
+
+  it("never folds a listable place into one too far to list (Codex r2 on #517)", () => {
+    const pharmacy = { ...poi("Freshway Pharmacy", 360), category: "Pharmacy", offsetEastMeters: 360, offsetNorthMeters: 0 };
+    const store = { ...poi("Freshway Superstore", 410), category: "FoodMarket", offsetEastMeters: 410, offsetNorthMeters: 0 };
+    const visible = visibleNearbyPlaces(rankedNearbyPlaces([pharmacy, store], [], {
+      startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:25:00.000Z", now: new Date("2026-10-21T11:00:00.000Z")
+    }));
+    expect(visible.map((place) => [place.title, place.inside])).toEqual([["Freshway Pharmacy", []]]);
   });
 
   it("resolves a picked place from the current list only", async () => {

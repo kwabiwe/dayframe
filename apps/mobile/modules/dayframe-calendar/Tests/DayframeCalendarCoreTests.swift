@@ -635,6 +635,106 @@ final class DayframeCalendarCoreTests: XCTestCase {
     ))
   }
 
+  func testBracketRailMovesEveryLaneRightAndKeepsLanesApart() throws {
+    // Location v3 PR 14b: a day with a named pattern's bracket keeps a 12-point rail left of its
+    // blocks; render and long-press hit geometry share it, so the rail is empty time.
+    let inset = DayframeCalendarConstants.bracketRailWidth
+    let geometry = { (offsetFraction: Double, widthFraction: Double, leadingInset: Double) in
+      DayframeCalendarEntryGeometryMath.metrics(
+        availableWidth: 320,
+        hourLabelWidth: 68,
+        semanticTop: 300,
+        semanticHeight: 60,
+        offsetFraction: offsetFraction,
+        widthFraction: widthFraction,
+        overlapCount: 1,
+        textDensity: "full",
+        leadingInset: leadingInset
+      )
+    }
+    let plain = try XCTUnwrap(geometry(0, 1, 0))
+    let full = try XCTUnwrap(geometry(0, 1, inset))
+    XCTAssertEqual(full.hitFrame.minX, plain.hitFrame.minX + inset, accuracy: 0.001)
+    XCTAssertEqual(full.hitFrame.maxX, plain.hitFrame.maxX, accuracy: 0.001)
+
+    let left = try XCTUnwrap(geometry(0, 0.5, inset))
+    let right = try XCTUnwrap(geometry(0.5, 0.5, inset))
+    XCTAssertEqual(left.hitFrame.maxX, right.hitFrame.minX, accuracy: 0.001)
+    XCTAssertEqual(right.hitFrame.maxX, plain.hitFrame.maxX, accuracy: 0.001)
+
+    let rail = DayframeCalendarPoint(x: 68 + 8 + inset / 2, y: 330)
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(point: rail, frames: [left.hitFrame, right.hitFrame]))
+    XCTAssertNil(geometry(0, 1, .nan))
+  }
+
+  func testBracketSpansAShortFinalPartAtItsMinimumHeight() throws {
+    // Location v3 PR 14b (Codex r1 on #511): a one-minute last part is drawn 4 points tall, past
+    // the trip's own end; the bracket follows the part, at every zoom.
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = try milliseconds("2026-07-11T00:00:00Z")
+    let parts: [(startedAtMs: Double, stoppedAtMs: Double?)] = [
+      (try milliseconds("2026-07-10T09:00:00Z"), try milliseconds("2026-07-10T09:30:00Z")),
+      (try milliseconds("2026-07-10T09:30:00Z"), try milliseconds("2026-07-10T09:59:00Z")),
+      (try milliseconds("2026-07-10T09:59:00Z"), try milliseconds("2026-07-10T10:00:00Z"))
+    ]
+    for hourHeight in [48.0, 72, 128] {
+      let span = try XCTUnwrap(DayframeCalendarBracketMath.span(
+        parts: parts, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, calendar: calendar
+      ))
+      let last = try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+        startedAtMs: parts[2].startedAtMs, stoppedAtMs: parts[2].stoppedAtMs, nowMs: dayEnd,
+        dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, calendar: calendar
+      ))
+      XCTAssertEqual(span.top, 9 * hourHeight, accuracy: 0.001)
+      XCTAssertEqual(span.top + span.height, last.top + last.height, accuracy: 0.001)
+      XCTAssertGreaterThan(span.top + span.height, 10 * hourHeight)
+    }
+    XCTAssertEqual(try XCTUnwrap(DayframeCalendarBracketMath.span(
+      parts: parts, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar
+    )).height, 59.0 / 60 * 48 + 4, accuracy: 0.001)
+    XCTAssertNil(DayframeCalendarBracketMath.span(
+      parts: [], nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar
+    ))
+  }
+
+  func testBracketSpansItsPartsWhereAClockChangeDrawsThem() throws {
+    // London's fall-back day (25 Oct 2026, 25 hours): a trip 01:40 BST → 01:20 GMT. Measured as one
+    // block it would be a sliver at 01:40; its parts are drawn from 01:10 to just past 01:50.
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Europe/London"))
+    let dayStart = try milliseconds("2026-10-24T23:00:00Z")
+    let dayEnd = try milliseconds("2026-10-26T00:00:00Z")
+    let parts: [(startedAtMs: Double, stoppedAtMs: Double?)] = [
+      (try milliseconds("2026-10-25T00:40:00Z"), try milliseconds("2026-10-25T00:50:00Z")),
+      (try milliseconds("2026-10-25T00:50:00Z"), try milliseconds("2026-10-25T01:10:00Z")),
+      (try milliseconds("2026-10-25T01:10:00Z"), try milliseconds("2026-10-25T01:20:00Z"))
+    ]
+    let hourHeight = 72.0
+    let span = try XCTUnwrap(DayframeCalendarBracketMath.span(
+      parts: parts, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, calendar: calendar
+    ))
+    let drawn = try parts.map { part in
+      try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+        startedAtMs: part.startedAtMs, stoppedAtMs: part.stoppedAtMs, nowMs: dayEnd,
+        dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, calendar: calendar
+      ))
+    }
+    // 01:10 GMT is the earliest drawn top; the folded middle part is 4 points at 01:50.
+    XCTAssertEqual(span.top, 70.0 / 60 * hourHeight, accuracy: 0.001)
+    XCTAssertEqual(span.top + span.height, 110.0 / 60 * hourHeight + 4, accuracy: 0.001)
+    for block in drawn {
+      XCTAssertLessThanOrEqual(span.top, block.top + 0.001)
+      XCTAssertGreaterThanOrEqual(span.top + span.height, block.top + block.height - 0.001)
+    }
+    let whole = try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+      startedAtMs: parts[0].startedAtMs, stoppedAtMs: parts[2].stoppedAtMs, nowMs: dayEnd,
+      dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, calendar: calendar
+    ))
+    XCTAssertNotEqual(whole.top, span.top, accuracy: 0.001)
+  }
+
   func testLongPressPointHitRejectsNonFinitePoint() throws {
     let geometry = try XCTUnwrap(entryGeometry(
       semanticTop: 100,
@@ -997,6 +1097,17 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(later.clockFormat)
     let twelveHour = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000, entriesJSON: "[]", clockFormat: "12h")
     XCTAssertEqual(twelveHour.clockFormat, "12h")
+    // Named patterns (location v3 PR 14b): an older bundle sends no brackets.
+    XCTAssertNil(later.brackets)
+    let bracketed = try decodePresentation(
+      selectedDayKey: "2026-07-20",
+      nowMs: 2_000,
+      entriesJSON: "[]",
+      bracketsJSON: #"[{"key":"named:trip-1","memberIds":["there","back"],"name":"School run","startedAtMs":1000,"stoppedAtMs":2000}]"#
+    )
+    XCTAssertEqual(bracketed.brackets?.first?.name, "School run")
+    XCTAssertEqual(bracketed.brackets?.first?.stoppedAtMs, 2_000)
+    XCTAssertEqual(bracketed.brackets?.first?.memberIds, ["there", "back"])
   }
 
   func testClockTextMatchesTheSharedFormatters() {
@@ -1014,12 +1125,14 @@ final class DayframeCalendarCoreTests: XCTestCase {
     selectedDayKey: String,
     nowMs: Double,
     entriesJSON: String,
-    clockFormat: String? = nil
+    clockFormat: String? = nil,
+    bracketsJSON: String? = nil
   ) throws -> DayframeCalendarPresentationRecord {
     let clockField = clockFormat.map { "\"clockFormat\":\"\($0)\"," } ?? ""
+    let bracketsField = bracketsJSON.map { "\"brackets\":\($0)," } ?? ""
     let json = """
     {
-      \(clockField)"dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
+      \(clockField)\(bracketsField)"dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
       "entries":\(entriesJSON),"framedLabel":"Nothing framed on Sunday","hapticsEnabled":false,
       "modelVersion":4,"monthTitle":"July","nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",

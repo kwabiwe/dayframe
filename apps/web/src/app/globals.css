@@ -3433,6 +3433,21 @@ dialog.ui-dialog.df-range-custom {
   gap: 8px;
 }
 
+/* Places search (location v3 PR 16c): the place editor's search field, shown from nine places. */
+.places-search {
+  display: grid;
+}
+
+.place-list-copy .place-list-visit {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.places-search-empty {
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+}
+
 /* Empty states are one muted sentence in the card (WUI-030): 14 px secondary text. */
 .places-empty-state {
   display: grid;
@@ -9291,6 +9306,50 @@ dialog.ui-dialog.df-palette {
   right: 0;
   bottom: 0;
   left: 0;
+}
+
+/*
+ * Named patterns on Calendar (location v3 PR 14b): a light "[" from a trip's first part's start to
+ * its last part's end, its name running down beside it, in the rail a bracketed day keeps left of
+ * its blocks (`calendarBracketRailPx`). Under the blocks, never hit-tested and hidden from assistive
+ * technology (each part's own name says which trip it is part of). No motion of its own: it comes
+ * and goes with its parts.
+ */
+.df-cal-bracket {
+  position: absolute;
+  z-index: 1;
+  left: 2px;
+  width: 15px;
+  pointer-events: none;
+}
+
+.df-cal-bracket::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--text-muted);
+  border-right: 0;
+  content: "";
+}
+
+.df-cal-bracket-label {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 11px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  font-weight: 650;
+  line-height: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
 }
 
 /*

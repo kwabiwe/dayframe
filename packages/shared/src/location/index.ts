@@ -20,3 +20,4 @@ export * from "./moveNaming";
 export * from "./namePatterns";
 export * from "./namedPatternRows";
 export * from "./outingCards";
+export * from "./venueRanking";

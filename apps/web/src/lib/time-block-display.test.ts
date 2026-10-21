@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calendarBlockLaneInsets,
+  calendarBracketRailPx,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
@@ -112,6 +113,22 @@ describe("time block display helpers", () => {
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0.08, widthFraction: 0.92 })).toEqual({
       left: "calc(8% + 0.5px)",
+      right: 8
+    });
+  });
+
+  it("moves a bracketed day's blocks and lanes right of the bracket rail (location v3 PR 14b)", () => {
+    expect(calendarBracketRailPx).toBe(12);
+    expect(calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 }, calendarBracketRailPx)).toEqual({
+      left: 20,
+      right: 8
+    });
+    expect(calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 0.5 }, calendarBracketRailPx)).toEqual({
+      left: 20,
+      right: "calc((100% - 12px) * 0.5 + 0.5px)"
+    });
+    expect(calendarBlockLaneInsets({ offsetFraction: 0.5, widthFraction: 0.5 }, calendarBracketRailPx)).toEqual({
+      left: "calc(12px + (100% - 12px) * 0.5 + 0.5px)",
       right: 8
     });
   });

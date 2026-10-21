@@ -203,6 +203,94 @@ describe("Calendar in Blocks", () => {
   });
 });
 
+describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
+  const schoolRun = { key: "trip-1", name: "School run", parts: 3 };
+  const part = (id: string, from: [number, number], to: [number, number], overrides: Partial<TimeEntryRow> = {}) => entry({
+    id,
+    description: id,
+    source: "location_learning",
+    startedAt: local(...from),
+    stoppedAt: local(...to),
+    locationGroup: schoolRun,
+    ...overrides
+  });
+  // Parts at least 18 px tall at 64 px an hour, so none is lifted into an overlap lane by its minimum height.
+  const trip = () => [part("there", [8, 0], [8, 20]), part("stay", [8, 20], [9, 0]), part("back", [9, 0], [9, 20])];
+  const label = (id: string) => document.querySelector(`[data-entry-id="${id}"] .calendar-entry-primary`)!.getAttribute("aria-label");
+  const left = (id: string) => document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!.style.left;
+
+  it("draws one decorative bracket with the name from the first part's start to the last part's end", () => {
+    renderCalendar([...trip(), entry({ id: "work", startedAt: local(10), stoppedAt: local(12) })]);
+    const brackets = document.querySelectorAll<HTMLElement>(".df-cal-bracket");
+    expect(brackets).toHaveLength(1);
+    const bracket = brackets[0];
+    expect(bracket.dataset.calendarBracket).toBe("named:trip-1");
+    expect(bracket.getAttribute("aria-hidden")).toBe("true");
+    // The blocks' own maths at 64 px an hour: 08:00 is 512 px down and 80 minutes is 85 px.
+    expect(bracket.style.top).toBe("512px");
+    expect(bracket.style.height).toBe("85px");
+    expect(bracket.textContent).toBe("School run");
+    expect(bracket.querySelector("button, a, [tabindex]")).toBeNull();
+    // The parts stay three separate blocks; the whole day moves right of the bracket's rail.
+    expect(document.querySelectorAll(".calendar-time-block")).toHaveLength(4);
+    for (const id of ["there", "stay", "back", "work"]) expect(left(id)).toBe("20px");
+  });
+
+  it("names each part's place in the trip once, on its own block", () => {
+    renderCalendar([...trip(), entry({ id: "work", startedAt: local(10), stoppedAt: local(12) })]);
+    expect(label("there")).toContain("Part 1 of 3 of School run.");
+    expect(label("stay")).toContain("Part 2 of 3 of School run.");
+    expect(label("back")).toContain("Part 3 of 3 of School run.");
+    expect(label("work")).not.toContain("School run");
+  });
+
+  it("draws nothing while a part is missing or a block sits between the parts", () => {
+    const [there, stay] = trip();
+    renderCalendar([there, stay]);
+    expect(document.querySelector(".df-cal-bracket")).toBeNull();
+    expect(left("there")).toBe("8px");
+    expect(label("there")).not.toContain("Part");
+    cleanup();
+    renderCalendar([...trip(), entry({ id: "coffee", startedAt: local(8, 25), stoppedAt: local(8, 50) })]);
+    expect(document.querySelector(".df-cal-bracket")).toBeNull();
+  });
+
+  it("goes with its parts: a deleted part removes it and Undo brings it back", () => {
+    const view = renderCalendar(trip());
+    expect(document.querySelectorAll(".df-cal-bracket")).toHaveLength(1);
+    view.rerender(calendarElement(trip().filter((block) => block.id !== "stay"), [], new Date(2026, 7, 2, 12, 0, 0, 0)));
+    expect(document.querySelector(".df-cal-bracket")).toBeNull();
+    expect(left("there")).toBe("8px");
+    view.rerender(calendarElement(trip(), [], new Date(2026, 7, 2, 12, 0, 0, 0)));
+    expect(document.querySelectorAll(".df-cal-bracket")).toHaveLength(1);
+  });
+
+  it("keeps the bracket beside the blocks in overlap lanes", () => {
+    renderCalendar([entry({ id: "long", startedAt: local(7, 30), stoppedAt: local(8, 30) }), ...trip()]);
+    expect(document.querySelectorAll(".df-cal-bracket")).toHaveLength(1);
+    // The first lane starts right of the rail; the second shares what is left of the column.
+    expect(left("long")).toBe("20px");
+    expect(left("there")).toContain("(100% - 12px)");
+    expect(left("there")).toContain("12.5px");
+  });
+
+  it("draws no bracket for a trip across midnight, on either day", () => {
+    const night = (id: string, from: Date, to: Date) => entry({
+      id, source: "location_learning", startedAt: from.toISOString(), stoppedAt: to.toISOString(), locationGroup: schoolRun
+    });
+    const late = [
+      night("there", new Date(2026, 7, 1, 23, 40), new Date(2026, 7, 1, 23, 50)),
+      night("stay", new Date(2026, 7, 1, 23, 50), new Date(2026, 7, 2, 0, 20)),
+      night("back", new Date(2026, 7, 2, 0, 20), new Date(2026, 7, 2, 0, 30))
+    ];
+    renderCalendar(late);
+    expect(document.querySelector(".df-cal-bracket")).toBeNull();
+    cleanup();
+    renderCalendar(late, [], new Date(2026, 7, 1, 12, 0, 0, 0));
+    expect(document.querySelector(".df-cal-bracket")).toBeNull();
+  });
+});
+
 function review(overrides: Partial<ReviewItemRow>): ReviewItemRow {
   return {
     id: "review",

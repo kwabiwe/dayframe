@@ -1008,6 +1008,28 @@ describe("mobile API client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("sends only Health events for a Health wake, also in the background, without a timer lease", async () => {
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({ localId: "timer-waiting" }),
+      storedQueuedEvent({ localId: "visit-waiting", source: "geofence", type: "geofence_enter", rawPayload: {} }),
+      storedQueuedEvent({ localId: "healthkit:workout:walk", source: "health_workout", type: "health_workout_import", rawPayload: { provider: "healthkit", externalSampleId: "walk" } })
+    ]));
+    appState.currentState = "background";
+    const sent: Array<{ localId: string; activeLeaseCount: number }> = [];
+    vi.stubGlobal("fetch", vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId: string };
+      sent.push({ localId: body.clientEventId, activeLeaseCount: getTimerBackgroundExecutionSnapshot().activeLeaseCount });
+      return Promise.resolve(jsonResponse({ eventId: `event-${body.clientEventId}`, clientEventId: body.clientEventId }, 201));
+    }));
+
+    await syncQueue({ eventScope: "non_timer" });
+    expect(sent).toEqual([]);
+    await expect(syncQueue({ eventScope: "health" })).resolves.toMatchObject({ synced: ["healthkit:workout:walk"] });
+    expect(sent).toEqual([{ localId: "healthkit:workout:walk", activeLeaseCount: 0 }]);
+    expect((await readQueue()).map((item) => item.localId).sort()).toEqual(["timer-waiting", "visit-waiting"]);
+  });
+
   it("begins the timer lease after durable storage resolves and before the next queue read", async () => {
     storeBoundSession("session-token");
     const durableWrite = deferred<void>();

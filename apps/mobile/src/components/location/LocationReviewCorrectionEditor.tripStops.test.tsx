@@ -52,6 +52,7 @@ vi.mock("@/lib/placeSearch", () => ({
   createNativeNearbyPointOfInterestProvider: () => null,
   createNativePlaceSearchProvider: () => null,
   friendlyPlaceSearchError: () => "Unavailable", visibleNearbyPlaces: () => [],
+  nearbyInsideLine: () => null, venueStayFromEvidence: () => null,
   NearbyPointOfInterestController: class {}, PlaceSearchController: class {},
   selectPlaceSearchBias: () => undefined
 }));

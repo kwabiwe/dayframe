@@ -5,6 +5,7 @@ import type {
   NormalizationContext,
   PlaceRole,
   PlaceSummary,
+  PlaceVisitStats,
   ProjectSummary,
   RecentActivitySuggestion,
   RecentActivitySuggestionCandidate
@@ -728,6 +729,32 @@ export async function getArchivedPlaces(session: RequestSession, execute: typeof
     }
     throw error;
   }
+}
+
+export const PLACE_VISITS_SQL = `select sg.place_id as "placeId",
+          max(coalesce(sg.stopped_at, sg.started_at)) as "lastVisitAt",
+          (count(*) filter (where sg.started_at >= $3::timestamptz - interval '30 days'))::int as "visitsLast30Days"
+     from stay_segments sg
+     join places pl on pl.id = sg.place_id and pl.workspace_id = sg.workspace_id and pl.archived_at is null
+    where sg.workspace_id = $1 and sg.user_id = $2
+      and sg.place_id is not null and sg.status <> 'superseded'
+    group by sg.place_id`;
+
+/**
+ * The person's visits to each saved place (Places last visit and sections, location v3 PR 16c):
+ * from their current stays there, so a Review edit, split, merge or replay that moves a stay is
+ * reflected at once. Uses idx_stay_segments_place_visits. Never returns coordinates.
+ */
+export async function getPlaceVisitStats(session: RequestSession, now = new Date(), execute: typeof query = query) {
+  const result = await execute<{ placeId: string; lastVisitAt: Date | string | null; visitsLast30Days: number }>(
+    PLACE_VISITS_SQL,
+    [session.workspaceId, session.userId, now.toISOString()]
+  );
+  return result.rows.map((row): PlaceVisitStats => ({
+    placeId: row.placeId,
+    lastVisitAt: row.lastVisitAt == null ? null : new Date(row.lastVisitAt).toISOString(),
+    visitsLast30Days: Number(row.visitsLast30Days) || 0
+  }));
 }
 
 async function getLearnedPlaces(session: RequestSession, limit = 10) {

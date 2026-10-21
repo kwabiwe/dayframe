@@ -112,9 +112,10 @@ public final class DayframePlaceSearchModule: Module {
     AsyncFunction("searchNearby") { (request: NearbyPointOfInterestQueryRecord, promise: Promise) in
       Task { @MainActor in
         do {
-          // Only opaque ids, titles, address lines and distances cross the bridge; the
-          // coordinate of a place is returned by resolveNearby once it is picked.
-          let places = try await self.nearbyCoordinator.suggestions(
+          // Only opaque ids, titles, address lines, kinds, distances and offsets from the visit
+          // cross the bridge, with the names of the areas of interest there; the coordinate of a
+          // place is returned by resolveNearby once it is picked.
+          let list = try await self.nearbyCoordinator.suggestions(
             requestId: request.requestId,
             latitude: request.latitude,
             longitude: request.longitude,
@@ -123,7 +124,8 @@ public final class DayframePlaceSearchModule: Module {
           )
           promise.resolve([
             "requestId": request.requestId,
-            "places": places.map(\.dictionary)
+            "places": list.places.map(\.dictionary),
+            "areasOfInterest": list.areasOfInterest
           ])
         } catch let error as PlaceSearchCoordinatorError {
           promise.reject(PlaceSearchException(error.rawValue))

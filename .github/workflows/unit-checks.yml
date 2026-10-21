@@ -16,7 +16,7 @@ concurrency:
 jobs:
   unit-checks:
     name: Workspace unit tests, typecheck and lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_SELF_HOSTED != 'false' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "macOS", "docker"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

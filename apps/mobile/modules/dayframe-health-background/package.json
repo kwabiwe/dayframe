@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-health-background",
+  "version": "0.1.0",
+  "description": "Dayframe's Apple Health background delivery and refresh wakes",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

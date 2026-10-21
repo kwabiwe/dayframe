@@ -92,6 +92,22 @@ export {
   type PlaceRoleSlot
 } from "./placeRoles";
 export {
+  PLACE_FREQUENT_MIN_VISITS,
+  PLACE_SECTIONS_MIN_PLACES,
+  PLACE_SHORTLIST_SIZE,
+  comparePlacesByName,
+  normalisePlaceSearch,
+  placeLastVisitLabel,
+  placeListLayout,
+  placeMatchesSearch,
+  placeRecentVisitsLabel,
+  placeVisitsById,
+  type PlaceListLayout,
+  type PlaceListSection,
+  type PlaceListSectionKey,
+  type PlaceVisitStats
+} from "./placeSections";
+export {
   ACTIVITY_CONTROL_MINIMUM_CONTRAST,
   ACTIVITY_MARKER_RADIUS_RATIO,
   activityMarkerRadius,

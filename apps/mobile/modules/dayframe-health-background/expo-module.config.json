@@ -1,0 +1,8 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["DayframeHealthBackgroundModule"],
+    "appDelegateSubscribers": ["DayframeHealthBackgroundAppDelegateSubscriber"],
+    "podspecPath": "./ios/DayframeHealthBackground.podspec"
+  }
+}

@@ -240,6 +240,7 @@ private struct DayframeCalendarTimelineCanvas: View {
             clockFormat: presentation.clockFormat,
             hourHeight: hourHeight,
             hourLabelWidth: hourLabelWidth,
+            leadingInset: CGFloat(presentation.entryLeadingInset),
             preview: preview,
             reduceTransparency: presentation.reduceTransparency,
             theme: theme
@@ -347,6 +348,7 @@ private struct DayframeCalendarCreationPreviewLayer: View {
   let clockFormat: String
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
+  let leadingInset: CGFloat
   let preview: DayframeCalendarCreationPreview
   let reduceTransparency: Bool
   let theme: DayframeCalendarTheme
@@ -361,7 +363,7 @@ private struct DayframeCalendarCreationPreviewLayer: View {
         semanticHeight: geometry.semanticHeight,
         continuesIntoNextDay: geometry.continuesIntoNextDay
       )
-      let width = max(0, availableWidth - hourLabelWidth - 18)
+      let width = max(0, availableWidth - hourLabelWidth - 18 - leadingInset)
       let semanticHeight = CGFloat(visual.semanticHeight)
       let visualHeight = CGFloat(visual.visualHeight)
       let visibleHeight = CGFloat(geometry.visibleHeight)
@@ -402,7 +404,7 @@ private struct DayframeCalendarCreationPreviewLayer: View {
       .frame(width: width, height: visualHeight)
       .frame(height: semanticHeight, alignment: .top)
       .position(
-        x: hourLabelWidth + 8 + width / 2,
+        x: hourLabelWidth + 8 + leadingInset + width / 2,
         y: CGFloat(geometry.top) + semanticHeight / 2
       )
     }
@@ -460,6 +462,36 @@ private struct DayframeCalendarEntriesLayer: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
+      // Named patterns (location v3 PR 14b): each bracket in the rail left of the blocks, spanning
+      // its parts as they are drawn (the blocks' own maths, part by part), so zoom, scroll and a
+      // day change carry it with them. It comes and goes like a block (the same fade, none under
+      // Reduce Motion) and never takes a touch.
+      ForEach(presentation.brackets) { bracket in
+        if let metrics = DayframeCalendarBracketMath.span(
+          parts: presentation.entries
+            .filter { bracket.memberIds.contains($0.entryId) }
+            .map { (startedAtMs: $0.startedAtMs, stoppedAtMs: $0.stoppedAtMs) },
+          nowMs: presentation.nowMs,
+          dayStartMs: presentation.dayStartMs,
+          dayEndMs: presentation.dayEndMs,
+          hourHeight: Double(hourHeight)
+        ) {
+          let height = CGFloat(metrics.height)
+          DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)
+            .position(
+              x: hourLabelWidth + CGFloat(8 + DayframeCalendarConstants.bracketRailWidth) / 2,
+              y: CGFloat(metrics.top) + height / 2
+            )
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .transition(
+              presentation.reduceMotion
+                ? .identity
+                : .opacity.animation(.easeOut(duration: 0.21))
+            )
+        }
+      }
+
       ForEach(presentation.entries) { entry in
         if let metrics = DayframeCalendarBlockMath.metrics(
           startedAtMs: entry.startedAtMs,
@@ -477,7 +509,8 @@ private struct DayframeCalendarEntriesLayer: View {
           widthFraction: entry.widthFraction,
           overlapCount: entry.overlapCount,
           textDensity: entry.textDensity,
-          timelineHeight: 24 * Double(hourHeight)
+          timelineHeight: 24 * Double(hourHeight),
+          leadingInset: presentation.entryLeadingInset
         ) {
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
@@ -642,6 +675,40 @@ private struct DayframeCalendarBlockView: View {
           .accessibilityHidden(true)
       }
     }
+  }
+}
+
+/// A named pattern's bracket (location v3 PR 14b): a light "[" in muted text hugging the blocks,
+/// with the name in secondary text running down beside it while there is room. Decorative only:
+/// each part's own VoiceOver label says which trip it is part of.
+private struct DayframeCalendarBracketView: View {
+  let height: CGFloat
+  let name: String
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      if Double(height) >= DayframeCalendarConstants.bracketLabelMinimumHeight {
+        // A fixed size: the rail is 12 points wide at every text size, and the parts' labels carry
+        // the name for VoiceOver and larger text.
+        Text(name)
+          .font(.system(size: 10, weight: .semibold))
+          .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(width: max(0, height - 4), height: 12)
+          .rotationEffect(.degrees(90))
+          .position(x: 6, y: height / 2)
+      }
+      Path { path in
+        path.move(to: CGPoint(x: 18, y: 0.75))
+        path.addLine(to: CGPoint(x: 14.75, y: 0.75))
+        path.addLine(to: CGPoint(x: 14.75, y: max(0.75, height - 0.75)))
+        path.addLine(to: CGPoint(x: 18, y: max(0.75, height - 0.75)))
+      }
+      .stroke(Color(dayframeCSS: theme.textMuted), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+    }
+    .frame(width: CGFloat(8 + DayframeCalendarConstants.bracketRailWidth), height: height)
   }
 }
 

@@ -481,7 +481,11 @@ export type SyncQueueOptions = {
   onlyFailed?: boolean;
   forceRetry?: boolean;
   signal?: AbortSignal;
-  eventScope?: "all" | "timer_mutations" | "non_timer";
+  /**
+   * `health` sends only queued Apple Health events and, unlike the other non-timer work, also
+   * while Dayframe is in the background: a HealthKit wake's bounded pass delivers its own capture.
+   */
+  eventScope?: "all" | "timer_mutations" | "non_timer" | "health";
 };
 
 type StoredQueuedEvent = Partial<Omit<QueuedEvent, "occurredAt">> & {
@@ -1108,6 +1112,13 @@ async function runActivityQueueSyncRequest(
   if (options.eventScope === "timer_mutations") {
     return syncQueueUnlocked(options, owner);
   }
+  if (options.eventScope === "health") {
+    // Never alongside timer delivery's background assertion; the next wake or foreground sends it.
+    if (getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0) {
+      return deferredQueueSyncResult(owner, "health");
+    }
+    return syncQueueUnlocked(options, owner);
+  }
   if (options.eventScope === "non_timer") {
     if (
       getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0 ||
@@ -1211,7 +1222,7 @@ async function syncQueueUnlocked(
   const hasDeliverableTimerMutation = queue.some((item) =>
     isQueuedTimerMutationEvent(item) && item.failureKind !== "permanent"
   );
-  if (options.eventScope !== "non_timer") {
+  if (options.eventScope !== "non_timer" && options.eventScope !== "health") {
     return withTimerBackgroundExecutionReservation(
       activityQueueBackgroundExecutionKey(owner),
       "Dayframe timer Start sync",
@@ -1388,10 +1399,11 @@ async function syncQueueItems(
 }
 
 function queueEventMatchesScope(
-  event: Pick<QueuedEvent, "type">,
+  event: Pick<QueuedEvent, "type" | "source">,
   scope: SyncQueueOptions["eventScope"] = "all"
 ) {
   if (scope === "timer_mutations") return isQueuedTimerMutationEvent(event);
+  if (scope === "health") return event.source === "health_sleep" || event.source === "health_workout";
   if (scope === "non_timer") return !isQueuedTimerMutationEvent(event);
   return true;
 }

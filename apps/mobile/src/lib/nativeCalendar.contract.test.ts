@@ -143,6 +143,44 @@ describe("native Calendar production contract", () => {
     expect(rootView).not.toContain("transaction.animation = nil");
   });
 
+  it("draws named-pattern brackets from React's model under the one timeline owner (location v3 PR 14b)", () => {
+    const records = readFileSync(`${moduleRoot}ios/DayframeCalendarRecords.swift`, "utf8");
+    const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+    const entriesLayer = rootView.slice(
+      rootView.indexOf("private struct DayframeCalendarEntriesLayer"),
+      rootView.indexOf("private struct DayframeCalendarBlockView")
+    );
+    const bracketView = rootView.slice(
+      rootView.indexOf("private struct DayframeCalendarBracketView"),
+      rootView.indexOf("private struct DayframeCalendarLiveRing")
+    );
+
+    // An optional field: an older bundle without brackets still decodes.
+    expect(records).toContain("var brackets: [DayframeCalendarBracketRecord]?");
+    expect(model).toContain("brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)");
+    // Drawn in the entries layer (the day's transition, zoom and scroll) with the blocks' own maths.
+    expect(entriesLayer).toContain("ForEach(presentation.brackets)");
+    expect(entriesLayer).toContain("DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)");
+    // Its bounds are its parts as drawn, part by part, never the trip measured as one block.
+    expect(entriesLayer).toContain("DayframeCalendarBracketMath.span(");
+    expect(entriesLayer).toContain("bracket.memberIds.contains($0.entryId)");
+    expect(entriesLayer).not.toContain("startedAtMs: bracket.startedAtMs");
+    expect(entriesLayer).toContain(".opacity.animation(.easeOut(duration: 0.21))");
+    // Never takes a touch or a VoiceOver stop; the parts' labels name the trip.
+    expect(entriesLayer).toContain(".allowsHitTesting(false)");
+    expect(entriesLayer).toContain(".accessibilityHidden(true)");
+    // The rail is shared by render and long-press hit geometry.
+    expect(entriesLayer).toContain("leadingInset: presentation.entryLeadingInset");
+    expect(coordinator).toContain("leadingInset: presentation.entryLeadingInset");
+    // Theme roles only, never a literal colour, and no data of its own.
+    expect(bracketView).toContain("theme.textSecondary");
+    expect(bracketView).toContain("theme.textMuted");
+    expect(bracketView).not.toMatch(/#[0-9A-Fa-f]{6}/);
+    expect(bracketView).not.toContain("actions.");
+  });
+
   it("passes semantic warning colours across the React-to-Swift boundary", () => {
     const records = readFileSync(`${moduleRoot}ios/DayframeCalendarRecords.swift`, "utf8");
     const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");

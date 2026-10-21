@@ -582,6 +582,45 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     }));
   });
 
+  it("starts the ghost and the draft slot right of a bracketed day's rail, as its blocks do (location v3 PR 14b)", async () => {
+    const schoolRun = { key: "trip-1", name: "School run", parts: 3 };
+    const part = (from: [number, number], to: [number, number]) => entryAt(
+      new Date(2026, 7, 2, ...from).toISOString(),
+      new Date(2026, 7, 2, ...to).toISOString(),
+      { source: "location_learning", locationGroup: schoolRun }
+    );
+    renderCalendar([part([6, 0], [6, 20]), part([6, 20], [7, 0]), part([7, 0], [7, 20])]);
+    expect(document.querySelector(".df-cal-bracket")).not.toBeNull();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(41, y(9 * 60 + 2)));
+      fireEvent.pointerMove(dayBody, pointer(41, y(9 * 60 + 47)));
+    });
+    expect(document.querySelector<HTMLElement>("[data-calendar-create-ghost]")?.style.left).toBe("20px");
+    await act(async () => {
+      fireEvent.pointerUp(dayBody, pointer(41, y(9 * 60 + 47)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
+    expect(document.querySelector<HTMLElement>("[data-calendar-draft]")?.style.left).toBe("20px");
+  });
+
+  it("leaves the ghost at the stylesheet's inset on a day without a bracket", async () => {
+    renderCalendar();
+    const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
+    pointTarget = dayBody;
+    await act(async () => {
+      fireEvent.pointerDown(dayBody, pointer(42, y(9 * 60 + 2)));
+      fireEvent.pointerMove(dayBody, pointer(42, y(9 * 60 + 47)));
+    });
+    expect(document.querySelector<HTMLElement>("[data-calendar-create-ghost]")?.style.left).toBe("");
+    await act(async () => {
+      fireEvent.pointerUp(dayBody, pointer(42, y(9 * 60 + 47)));
+    });
+    await screen.findByTestId("calendar-compact-editor");
+    expect(document.querySelector<HTMLElement>("[data-calendar-draft]")?.style.left).toBe("");
+  });
+
   it("drags upward from the press and aborts cleanly on Escape and pointer cancel", async () => {
     renderCalendar();
     const dayBody = document.querySelector<HTMLElement>("[data-calendar-day-body]") as HTMLElement;
