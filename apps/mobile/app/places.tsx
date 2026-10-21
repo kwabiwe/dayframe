@@ -1,5 +1,5 @@
 import { formatDuration } from "@dayframe/shared";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
@@ -19,9 +19,16 @@ import {
   DAYFRAME_APP_ICONS,
   DAYFRAME_BLOCKS,
   placeDisplayName,
+  placeLastVisitLabel,
+  placeListLayout,
+  placeMatchesSearch,
+  placeRecentVisitsLabel,
   placeRoleLabel,
   placeRoleSlots,
-  type PlaceRole
+  placeVisitsById,
+  type PlaceListSectionKey,
+  type PlaceRole,
+  type PlaceVisitStats
 } from "@dayframe/shared";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
@@ -29,6 +36,7 @@ import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ArchivedPlacesGroup } from "@/components/places/ArchivedPlacesGroup";
 import { ReflowBlockGroup } from "@/components/places/ReflowBlockGroup";
+import { PlacesSearchField } from "@/components/places/PlacesSearchField";
 import { PlaceRoleSheet, type PlaceRoleSaveRequest, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
@@ -58,6 +66,7 @@ import {
   readActiveMobileAccount
 } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
+import { currentTimeZoneId } from "@/lib/localeDateFormat";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -65,6 +74,7 @@ import {
 import {
   AuthRequiredError,
   fetchBootstrap,
+  fetchPlaceVisits,
   forgetLearnedPlace,
   ignoreLearnedPlace,
   setPlaceRole,
@@ -114,6 +124,11 @@ export default function PlacesScreen() {
   // over its own modal (UIA-005).
   const confirmSheet = useBlocksConfirm();
   const [data, setData] = useState<MobileBootstrap | null>(null);
+  // Each place's last visit and visits in 30 days (location v3 PR 16c), for the account whose list
+  // they were read with; another account's list never shows them.
+  const [visits, setVisits] = useState<{ key: string; lifetime: string; rows: PlaceVisitStats[]; at: number } | null>(null);
+  const visitsRead = useRef(0);
+  const [search, setSearch] = useState("");
   const dataRef = useRef(data);
   dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
@@ -304,6 +319,29 @@ export default function PlacesScreen() {
   const monitorList = useCallback((list: MobileBootstrap) =>
     monitor.request({ list, epoch: currentMobileAccountEpoch() }), [monitor]);
 
+  /**
+   * Visits for the list just shown (location v3 PR 16c): applied only while it is still this
+   * lifetime's list and this is the newest visits read; any failure just leaves the rows without a
+   * visit line (a session that ended still opens sign-in).
+   */
+  const loadVisits = useCallback(async (list: MobileBootstrap, origin: string | null) => {
+    // Started for every list the page applies (a read or a change's refresh), so only the newest
+    // list's visits ever land (Codex r1 on #521).
+    const still = lifetimeCheck();
+    const lifetime = accountLifetime();
+    const read = ++visitsRead.current;
+    try {
+      const rows = await fetchPlaceVisits();
+      if (!still() || read !== visitsRead.current) return;
+      setVisits({ key: listAccountKey(list), lifetime, rows, at: Date.now() });
+    } catch (error) {
+      if (sessionEnded(error, origin)) return;
+      // The newest read failed: the rows lose their visit lines rather than keep older ones.
+      if (!still() || read !== visitsRead.current) return;
+      setVisits(null);
+    }
+  }, [accountLifetime, lifetimeCheck, sessionEnded]);
+
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
   const load = useCallback(async (options?: { refresh?: boolean }) => {
@@ -323,6 +361,7 @@ export default function PlacesScreen() {
       dataRef.current = bootstrap;
       setData(bootstrap);
       setLoadFailure(null);
+      void loadVisits(bootstrap, origin);
       // A restored place this list brings back is monitored from it, whichever read lands first
       // (its own refresh may still be out, or have failed); its warning clears once that is done.
       // Once this page has monitored any list, every list it shows is monitored (Codex r6 on #508).
@@ -353,7 +392,7 @@ export default function PlacesScreen() {
     } finally {
       if (pull !== null && pull === refreshPull.current) setRefreshing(false);
     }
-  }, [accountLifetime, activeAccountKey, loadArchived, monitor, monitorList, pageReads, sessionEnded, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
+  }, [accountLifetime, activeAccountKey, loadArchived, loadVisits, monitor, monitorList, pageReads, sessionEnded, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -563,6 +602,7 @@ export default function PlacesScreen() {
       pageReads.applied(ticket);
       dataRef.current = reconciled;
       setData(reconciled);
+      void loadVisits(reconciled, activeAccountKey());
       // A restored place this list lacks is gone again; monitoring from it settles any it has.
       settleGoneRestores(reconciled);
       await monitorList(reconciled);
@@ -596,8 +636,41 @@ export default function PlacesScreen() {
     (learnedPlace) => learnedPlace.classification === "place_candidate"
   );
   const categories = data?.categories ?? [];
-  const rolePlaces = places.map(withRole);
+  const rolePlaces = useMemo(() => places.map(withRole), [places]);
   const slots = placeRoleSlots(rolePlaces);
+  // Search and sections (location v3 PR 16c): one list under nine places; from nine, search and
+  // Frequent / Recent above All places. Visit lines only from this account's own visits read.
+  // Only this account's visits from this lifetime (Codex r1 on #521): an earlier lifetime's never come back.
+  const visitRows = visits && data && visits.key === listAccountKey(data) && visits.lifetime === accountLifetime() ? visits.rows : null;
+  const visitsById = useMemo(() => placeVisitsById(visitRows), [visitRows]);
+  const visitsNow = useMemo(() => new Date(visits?.at ?? Date.now()), [visits?.at]);
+  // The device's zone, cached and re-read once a second at most (localeDateFormat), so labels
+  // follow a zone change without building a formatter per row.
+  const zoneId = currentTimeZoneId();
+  const deviceZone = zoneId === "local" ? undefined : zoneId;
+  const layout = useMemo(() => placeListLayout(rolePlaces, visitsById, search), [rolePlaces, visitsById, search]);
+  const searching = layout.searchable && search.trim().length > 0;
+  const shownArchived = searching ? archive.places.filter((place) => placeMatchesSearch(place, search)) : archive.places;
+  const lastSectionKey = layout.sections.at(-1)?.key ?? null;
+  const placesById = useMemo(() => new Map(places.map((place) => [place.id, place])), [places]);
+  // VoiceOver on iPhone has no live regions: the search result is announced, once per result,
+  // after typing pauses (Codex r1 on #521).
+  const searchAnnouncement = !searching ? null
+    : layout.sections.length === 0 && shownArchived.length === 0 ? `No places match ${search.trim()}.`
+    : resultCountAnnouncement((layout.sections[0]?.places.length ?? 0) + shownArchived.length);
+  const lastAnnouncement = useRef<string | null>(null);
+  useEffect(() => {
+    if (!searchAnnouncement || searchAnnouncement === lastAnnouncement.current) {
+      if (!searchAnnouncement) lastAnnouncement.current = null;
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastAnnouncement.current = searchAnnouncement;
+      AccessibilityInfo.announceForAccessibility(searchAnnouncement);
+    }, 700);
+    return () => clearTimeout(timer);
+    // Every edit restarts the pause, even one that keeps the same result (Codex r2 on #521).
+  }, [searchAnnouncement, search]);
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
   const pageState = placesPageState(Boolean(data), Boolean(loadFailure));
@@ -682,6 +755,77 @@ export default function PlacesScreen() {
     }, delay);
     return () => clearTimeout(retry);
   }, [load, restoreMonitoringUnresolved, restoreRetries]);
+
+  /** One saved place's row: its name, last visit (and 30-day visits in Frequent) and details. */
+  function placeRow(rolePlace: (typeof rolePlaces)[number], index: number, sectionKey: PlaceListSectionKey) {
+    const place = placesById.get(rolePlace.id) ?? rolePlace;
+    const name = placeDisplayName(rolePlace);
+    const stats = visitsById.get(rolePlace.id);
+    const visitLine = [
+      sectionKey === "frequent" ? placeRecentVisitsLabel(stats) : null,
+      placeLastVisitLabel(stats?.lastVisitAt, visitsNow, deviceZone)
+    ].filter(Boolean).join(" · ");
+    const subtitle = [visitLine, placeRowSubtitle(rolePlace, categories)].filter(Boolean).join("\n");
+    return (
+      <Pressable
+        accessibilityHint="Edits this place"
+        accessibilityLabel={`${name}, ${subtitle.replace(/\n/g, ", ")}`}
+        accessibilityRole="button"
+        onPress={() => beginEditPlace(place)}
+        style={({ pressed }) => [
+          styles.placesRow,
+          index > 0 ? styles.settingsActivityRowDivider : null,
+          pressed ? styles.placesRowPressed : null
+        ]}
+        // The All places (or only) row keeps the plain id that tests and links use.
+        testID={sectionKey === "all" || sectionKey === "results" ? `places-row-${rolePlace.id}` : `places-row-${sectionKey}-${rolePlace.id}`}
+      >
+        <View style={styles.placesRowMain}>
+          <View style={styles.placesBlock}>
+            <DayframeIcon
+              color={theme.textPrimary}
+              glyph={rolePlace.role === "home" ? DAYFRAME_APP_ICONS.placeHome : rolePlace.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places}
+              size={18}
+            />
+          </View>
+          <View style={styles.settingsActivityText}>
+            <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{name}</Text>
+            <Text {...mobileTextProps("metadata")} numberOfLines={4} style={styles.settingsActivityMeta}>{subtitle}</Text>
+          </View>
+        </View>
+        <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
+      </Pressable>
+    );
+  }
+
+  /** A restored place still waiting for a refreshed list. */
+  function pendingRestoredRow(row: (typeof pendingRestored)[number], index: number) {
+    return (
+      <Reanimated.View
+        key={`restored-${row.id}`}
+        entering={localPresenceEntering(reduceMotion)}
+        exiting={localPresenceExiting(reduceMotion)}
+        layout={localLayoutTransition(reduceMotion)}
+      >
+        <View
+          accessible
+          accessibilityLabel={row.accessibilityLabel}
+          style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}
+          testID={`places-restored-${row.id}`}
+        >
+          <View style={styles.placesRowMain}>
+            <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+              <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+            </View>
+            <View style={styles.settingsActivityText}>
+              <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{row.name}</Text>
+              <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
+            </View>
+          </View>
+        </View>
+      </Reanimated.View>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -779,90 +923,65 @@ export default function PlacesScreen() {
             ))}
           </ReflowBlockGroup>
 
-          <ReflowBlockGroup
-            foot={places.length === 0 && !hasPendingRestored ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change, archive or delete it."}
-            reduceMotion={reduceMotion}
-            theme={theme}
-            title="Saved places"
-          >
-            {places.length === 0 && !hasPendingRestored ? (
+          {layout.searchable ? <PlacesSearchField initialValue={search} onChange={setSearch} theme={theme} /> : null}
+
+          {places.length === 0 && !hasPendingRestored ? (
+            <ReflowBlockGroup
+              foot="No places yet. Add one by searching for an address or using where you are."
+              reduceMotion={reduceMotion}
+              theme={theme}
+              title="Saved places"
+            >
               <View style={styles.placesEmpty}>
                 <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>Nothing saved yet</Text>
               </View>
-            ) : null}
-            {places.map((place, index) => {
-              const rolePlace = withRole(place);
-              const name = placeDisplayName(rolePlace);
-              const subtitle = placeRowSubtitle(rolePlace, categories);
-              return (
-                <Reanimated.View
-                  key={place.id}
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                >
-                  <Pressable
-                    accessibilityHint="Edits this place"
-                    accessibilityLabel={`${name}, ${subtitle.replace(/\n/g, ", ")}`}
-                    accessibilityRole="button"
-                    onPress={() => beginEditPlace(place)}
-                    style={({ pressed }) => [
-                      styles.placesRow,
-                      index > 0 ? styles.settingsActivityRowDivider : null,
-                      pressed ? styles.placesRowPressed : null
-                    ]}
-                    testID={`places-row-${place.id}`}
-                  >
-                    <View style={styles.placesRowMain}>
-                      <View style={styles.placesBlock}>
-                        <DayframeIcon
-                          color={theme.textPrimary}
-                          glyph={rolePlace.role === "home" ? DAYFRAME_APP_ICONS.placeHome : rolePlace.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places}
-                          size={18}
-                        />
-                      </View>
-                      <View style={styles.settingsActivityText}>
-                        <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{name}</Text>
-                        <Text {...mobileTextProps("metadata")} numberOfLines={3} style={styles.settingsActivityMeta}>{subtitle}</Text>
-                      </View>
-                    </View>
-                    <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.next} size={18} />
-                  </Pressable>
-                </Reanimated.View>
-              );
-            })}
-            {/* Restored, but no refreshed list has brought it back yet (Codex r1 on #508): it waits
-                here, never in neither list, until a read lands and monitoring resumes. */}
-            {pendingRestored.map((row, index) => (
-              <Reanimated.View
-                key={`restored-${row.id}`}
-                entering={localPresenceEntering(reduceMotion)}
-                exiting={localPresenceExiting(reduceMotion)}
-                layout={localLayoutTransition(reduceMotion)}
+            </ReflowBlockGroup>
+          ) : null}
+
+          {searching && layout.sections.length === 0 && shownArchived.length === 0 ? (
+            <Text {...mobileTextProps("body")} accessibilityLiveRegion="polite" style={styles.placesStatus} testID="places-search-empty">
+              No places match "{search.trim()}".
+            </Text>
+          ) : null}
+
+          {layout.sections.map((section) => (
+            <Reanimated.View
+              key={section.key}
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
+              <ReflowBlockGroup
+                foot={section.key === lastSectionKey ? "Tap a place to change, archive or delete it." : undefined}
+                reduceMotion={reduceMotion}
+                theme={theme}
+                title={section.key === "all" && !layout.searchable ? "Saved places" : section.title}
               >
-                <View
-                  accessible
-                  accessibilityLabel={row.accessibilityLabel}
-                  style={[styles.placesRow, places.length + index > 0 ? styles.settingsActivityRowDivider : null]}
-                  testID={`places-restored-${row.id}`}
-                >
-                  <View style={styles.placesRowMain}>
-                    <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
-                      <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
-                    </View>
-                    <View style={styles.settingsActivityText}>
-                      <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{row.name}</Text>
-                      <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
-                    </View>
-                  </View>
-                </View>
-              </Reanimated.View>
-            ))}
-          </ReflowBlockGroup>
+                {section.places.map((rolePlace, index) => (
+                  <Reanimated.View
+                    key={`${section.key}-${rolePlace.id}`}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    {placeRow(rolePlace, index, section.key)}
+                  </Reanimated.View>
+                ))}
+                {/* Restored, but no refreshed list has brought it back yet (Codex r1 on #508): it waits
+                    in the last group, never in neither list, until a read lands and monitoring resumes. */}
+                {section.key === lastSectionKey ? pendingRestored.map((row, index) => pendingRestoredRow(row, section.places.length + index)) : null}
+              </ReflowBlockGroup>
+            </Reanimated.View>
+          ))}
+          {layout.sections.length === 0 && hasPendingRestored ? (
+            <ReflowBlockGroup reduceMotion={reduceMotion} theme={theme} title="Saved places">
+              {pendingRestored.map((row, index) => pendingRestoredRow(row, index))}
+            </ReflowBlockGroup>
+          ) : null}
 
           <ArchivedPlacesGroup
             onRestore={(place) => void archive.restore(place)}
-            places={archive.places}
+            places={shownArchived}
             problem={archive.problem}
             reduceMotion={reduceMotion}
             restoringId={archive.restoringId}
@@ -1257,3 +1376,7 @@ const learnedSheetStyles = StyleSheet.create({
   half: { flex: 1 },
   pillText: { fontSize: 16, fontWeight: "700" }
 });
+
+function resultCountAnnouncement(count: number) {
+  return count === 1 ? "1 place matches." : `${count} places match.`;
+}

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   onEpochRead: null as null | (() => void),
   fetchBootstrap: vi.fn(),
   fetchArchivedPlaces: vi.fn(),
+  fetchPlaceVisits: vi.fn(),
   setPlaceArchived: vi.fn(),
   setPlaceRole: vi.fn(),
   ignoreLearnedPlace: vi.fn(),
@@ -51,6 +52,7 @@ const factories = vi.hoisted(() => ({
       AuthRequiredError,
       fetchArchivedPlaces: () => mocks.fetchArchivedPlaces(),
       fetchBootstrap: () => mocks.fetchBootstrap(),
+      fetchPlaceVisits: () => mocks.fetchPlaceVisits(),
       forgetLearnedPlace: vi.fn(),
       ignoreLearnedPlace: (id: string) => mocks.ignoreLearnedPlace(id),
       setPlaceArchived: (id: string, archived: boolean) => mocks.setPlaceArchived(id, archived),
@@ -73,6 +75,7 @@ vi.mock("react-native", async () => {
       React.createElement("ScrollView", null, props.refreshControl as never, props.children as never),
     StyleSheet: { create: <T,>(styles: T) => styles, hairlineWidth: 1 },
     Text: host("Text"),
+    TextInput: host("TextInput"),
     View: host("View")
   };
 });
@@ -119,6 +122,8 @@ vi.mock("@/components/places/PlaceRoleSheet", async () => {
   };
 });
 vi.mock("@/components/places/StoppedTripsGroup", () => ({ StoppedTripsGroup: () => null }));
+vi.mock("@/components/places/PlacesSearchField", () => import("./PlacesSearchField"));
+vi.mock("@/lib/localeDateFormat", () => ({ currentTimeZoneId: () => "Europe/London" }));
 vi.mock("@/components/settings/SettingsBlocks", async () => {
   const React = await import("react");
   return {
@@ -200,6 +205,7 @@ beforeEach(() => {
   mocks.epoch = 1;
   mocks.onEpochRead = null;
   mocks.fetchArchivedPlaces.mockResolvedValue([archivedGym]);
+  mocks.fetchPlaceVisits.mockResolvedValue([]);
   mocks.refreshGeofences.mockResolvedValue(0);
 });
 afterEach(() => {
@@ -1385,5 +1391,161 @@ describe("Places when the Archived read's 401 comes first (Codex r13 on #508)", 
     await flush();
     expect(router.replace).toHaveBeenCalledWith("/");
     expect(texts().join(" ")).not.toContain("Couldn't refresh");
+  });
+});
+
+describe("Places search, sections and last visit on iPhone (location v3 PR 16c)", () => {
+  // Synthetic Exampleton places.
+  const named = (index: number, name: string) => ({ ...gym, id: `30000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`, name });
+  const many = ["Alder Café", "Birch Library", "Cedar Pool", "Dock Market", "Elm Park", "Fern School", "Gorse Clinic", "Hazel Studio", "Ivy Bakery"]
+    .map((name, index) => named(index, name));
+  const groupTitles = () => all("Group").map((node) => node.props.title);
+  const rowNames = (title: string) => all("Group").find((node) => node.props.title === title)!
+    .findAll((node: ReactTestInstance) => (node.type as unknown) === "Pressable" && String(node.props.testID ?? "").startsWith("places-row-"))
+    .map((node: ReactTestInstance) => String(node.props.accessibilityLabel).split(",")[0]);
+  const today = () => new Date().toISOString();
+
+  it("keeps a short list as one Saved places group with no search, with each row's last visit", async () => {
+    mocks.fetchPlaceVisits.mockResolvedValue([{ placeId: studio.id, lastVisitAt: today(), visitsLast30Days: 1 }]);
+    await mountFor(ACCOUNT_A, [studio, office]);
+    expect(groupTitles()).toContain("Saved places");
+    expect(all("TextInput")).toHaveLength(0);
+    expect(texts().join(" | ")).toContain("Last visit today");
+  });
+
+  it("adds search, Frequent, Recent and All places from nine places, and filters on typing", async () => {
+    mocks.fetchPlaceVisits.mockResolvedValue([
+      { placeId: many[2].id, lastVisitAt: today(), visitsLast30Days: 4 },
+      { placeId: many[4].id, lastVisitAt: today(), visitsLast30Days: 1 }
+    ]);
+    mocks.fetchArchivedPlaces.mockResolvedValue([{ id: "30000000-0000-4000-8000-000000000299", name: "Old Cedar Hall", archivedAt: "2026-10-20T09:00:00.000Z" }]);
+    await mountFor(ACCOUNT_A, many);
+    expect(groupTitles()).toEqual(expect.arrayContaining(["Frequent", "Recent", "All places"]));
+    expect(rowNames("Frequent")).toEqual(["Cedar Pool"]);
+    expect(rowNames("Recent")).toEqual(["Elm Park"]);
+    expect(rowNames("All places")).toHaveLength(9);
+    expect(texts().join(" | ")).toContain("4 visits in 30 days · Last visit today");
+    await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("cedar"); });
+    expect(groupTitles()).not.toContain("Frequent");
+    expect(rowNames("Results")).toEqual(["Cedar Pool"]);
+    expect(all("ArchivedGroup")[0].props.places.map((place: { name: string }) => place.name)).toEqual(["Old Cedar Hall"]);
+    await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("nowhere"); });
+    expect(texts().join(" | ")).toContain('No places match "nowhere".');
+  });
+
+  it("never shows one account's visits on another account's list", async () => {
+    const late = deferred<unknown>();
+    mocks.fetchPlaceVisits.mockReturnValueOnce(late.promise);
+    await mountFor(ACCOUNT_A, [studio]);
+    // Signed into account B, whose list is now shown, before A's visits answer.
+    mocks.owner = ACCOUNT_B;
+    mocks.epoch = 2;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_B, [{ ...studio, id: office.id, name: "Example Office" }]));
+    mocks.fetchPlaceVisits.mockResolvedValueOnce([]);
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    await act(async () => { late.resolve([{ placeId: office.id, lastVisitAt: today(), visitsLast30Days: 3 }]); });
+    await flush();
+    expect(texts().join(" | ")).not.toContain("Last visit");
+  });
+
+  it("shows the rows without visit lines when the visits read fails", async () => {
+    mocks.fetchPlaceVisits.mockRejectedValue(new Error("offline"));
+    await mountFor(ACCOUNT_A, [studio]);
+    expect(rowNames("Saved places")).toEqual(["Example Studio"]);
+    expect(texts().join(" | ")).not.toContain("Last visit");
+  });
+
+  describe("Codex r1 on #521", () => {
+    const visit = (id: string, count = 1) => ({ placeId: id, lastVisitAt: today(), visitsLast30Days: count });
+    const shown = () => texts().join(" | ");
+
+    it("lets only the newest list's visits land, also after a change's refresh", async () => {
+      // Every read the mount starts waits on the same answer.
+      const first = deferred<unknown>();
+      mocks.fetchPlaceVisits.mockReturnValue(first.promise);
+      await mountFor(ACCOUNT_A, [studio]);
+      const settledCalls = mocks.fetchPlaceVisits.mock.calls.length;
+      // A restore is accepted; its refresh applies a newer list and reads visits again.
+      mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+      mocks.fetchArchivedPlaces.mockResolvedValue([]);
+      mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+      mocks.fetchPlaceVisits.mockResolvedValueOnce([]);
+      await act(async () => { restore(archivedGym); });
+      await flush();
+      // The change's own list started a visits read of its own.
+      expect(mocks.fetchPlaceVisits.mock.calls.length).toBe(settledCalls + 1);
+      // The first read's late answer is for an older list: it never lands.
+      await act(async () => { first.resolve([visit(studio.id), visit(gym.id)]); });
+      await flush();
+      expect(shown()).not.toContain("Last visit");
+    });
+
+    it("never brings back an earlier lifetime's visits when the account returns", async () => {
+      mocks.fetchPlaceVisits.mockResolvedValue([visit(studio.id)]);
+      await mountFor(ACCOUNT_A, [studio]);
+      expect(shown()).toContain("Last visit today");
+      // B, then A again in a new lifetime, with their own visits still out (never answered).
+      mocks.fetchPlaceVisits.mockReturnValue(new Promise(() => undefined));
+      for (const [owner, epoch] of [[ACCOUNT_B, 2], [ACCOUNT_A, 3]] as const) {
+        mocks.owner = owner;
+        mocks.epoch = epoch;
+        mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(owner, [studio]));
+        await act(async () => { await pullToRefresh(); });
+        await flush();
+      }
+      // A's earlier lifetime's lines never show on its new lifetime's list.
+      expect(shown()).not.toContain("Last visit");
+    });
+
+    it("drops the visit lines when the newest visits read fails", async () => {
+      mocks.fetchPlaceVisits.mockResolvedValue([visit(studio.id)]);
+      await mountFor(ACCOUNT_A, [studio]);
+      expect(shown()).toContain("Last visit today");
+      mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio]));
+      mocks.fetchPlaceVisits.mockRejectedValueOnce(new Error("offline"));
+      await act(async () => { await pullToRefresh(); });
+      await flush();
+      expect(shown()).not.toContain("Last visit");
+    });
+
+    it("shows the query in force when the field comes back after the list dips under nine", async () => {
+      await mountFor(ACCOUNT_A, many);
+      await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("cedar"); });
+      for (const list of [many.slice(0, 8), many]) {
+        mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, list));
+        await act(async () => { await pullToRefresh(); });
+        await flush();
+      }
+      expect(all("TextInput")[0].props.defaultValue).toBe("cedar");
+      expect(rowNames("Results")).toEqual(["Cedar Pool"]);
+    });
+
+    it("tells VoiceOver the search result once typing pauses", async () => {
+      await mountFor(ACCOUNT_A, many);
+      vi.useFakeTimers();
+      mocks.announce.mockClear();
+      await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("now"); });
+      await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("nowhere"); });
+      await act(async () => { vi.advanceTimersByTime(800); });
+      expect(mocks.announce.mock.calls).toEqual([["No places match nowhere."]]);
+      await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("cedar"); });
+      await act(async () => { vi.advanceTimersByTime(800); });
+      expect(mocks.announce).toHaveBeenLastCalledWith("1 place matches.");
+    });
+
+    it("restarts the pause on every edit, even one that keeps the result (Codex r2 on #521)", async () => {
+      await mountFor(ACCOUNT_A, many);
+      vi.useFakeTimers();
+      mocks.announce.mockClear();
+      const type = (value: string) => act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)(value); });
+      await type("ce");
+      await act(async () => { vi.advanceTimersByTime(650); });
+      await type("ced");
+      await act(async () => { vi.advanceTimersByTime(650); });
+      expect(mocks.announce).not.toHaveBeenCalled();
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(mocks.announce.mock.calls).toEqual([["1 place matches."]]);
+    });
   });
 });

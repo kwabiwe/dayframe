@@ -434,6 +434,15 @@ Block pull-to-refresh:
 - Async outcome: not applicable. A refresh after an edit, delete, archive or restore keeps the typed search.
 - Accessibility: Reduce Motion needs no path (no motion). The field is a labelled `searchbox` inside a search landmark; a polite status announces "N places match" (and how many are archived); ✕ ("Clear search", 44 px) and Escape clear it and keep focus in the field; each place keeps one `#place-<id>` anchor, on its All places (or Results) row.
 
+## iPhone Settings › Saved places search and sections (location v3 PR 16c)
+
+- Trigger: typing in or clearing Search places (from nine saved places), a visits read landing, a list refresh.
+- Owner: the page's existing Reanimated presence and layout helpers (`localPresenceEntering` / `localPresenceExiting` / `localLayoutTransition`) on each group and row, as for Archived and Suggested places; the field itself never moves.
+- Entrance/update/exit: typing swaps Frequent, Recent and All places for one Results group (rows fade out and in with the presence helpers; the groups below reflow with the layout transition); clearing brings the sections back the same way. A visits read (or its failure, which drops the lines) adds or removes the visit line inside rows and, from nine places, can bring Frequent and Recent in, reorder them or take them away: their rows and groups enter, move and leave with the same helpers. A place shown in two groups has a row per group (keyed by group), so each moves with its own group.
+- Interruption: every keystroke replaces the result; a newer visits read replaces an older one, and one from another account or lifetime is dropped.
+- Async outcome: nothing optimistic; a failed visits read leaves rows without a visit line.
+- Accessibility: Reduce Motion uses the helpers' immediate path (groups and rows appear and leave at once); the field is labelled "Search places" with a 44-point height and the system clear button and keeps its text when it remounts; VoiceOver hears the result ("N places match." or "No places match …") once, after typing pauses; each row's VoiceOver label includes its visit line.
+
 ## Web popovers and sheets (web UI audit WUI-022/WUI-026, 17 Oct 2026)
 
 - Trigger: opening an anchored popover, menu or list; at ≤560 px they open as bottom sheets.
