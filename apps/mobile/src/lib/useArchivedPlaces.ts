@@ -124,17 +124,30 @@ export function useArchivedPlaces({
    * elsewhere since), so there is nothing to monitor. They settle silently; returns their ids so
    * the page clears a warning line for them. Never announced as restored.
    */
-  const settleRestoresAbsentFrom = useCallback((accountKey: string, places: readonly { id: string }[]) => {
+  const settleGone = useCallback((accountKey: string, isGone: (id: string) => boolean) => {
     const current = pendingRef.current;
     if (!current || current.accountKey !== accountKey) return [];
-    const listed = new Set(places.map((place) => place.id));
-    const gone = current.places.filter((place) => !listed.has(place.id)).map((place) => place.id);
+    const gone = current.places.filter((place) => isGone(place.id)).map((place) => place.id);
     if (gone.length === 0) return [];
     for (const id of gone) goneRef.current.add(`${accountKey}|${id}`);
-    const left = current.places.filter((place) => listed.has(place.id));
+    const left = current.places.filter((place) => !isGone(place.id));
     setPending(left.length > 0 ? { accountKey, places: left } : null);
     return gone;
   }, [setPending]);
+
+  const settleRestoresAbsentFrom = useCallback((accountKey: string, places: readonly { id: string }[]) => {
+    const listed = new Set(places.map((place) => place.id));
+    return settleGone(accountKey, (id) => !listed.has(id));
+  }, [settleGone]);
+
+  /**
+   * Restored places of `accountKey` that were archived or deleted again on this iPhone since (Codex
+   * r6 on #508): settled silently as gone, like a list that lacks them; returns their ids.
+   */
+  const settleRestoresRemoved = useCallback((accountKey: string, ids: readonly string[]) => {
+    const removed = new Set(ids);
+    return settleGone(accountKey, (id) => removed.has(id));
+  }, [settleGone]);
 
   /** Whether the restore of `id` settled because the place is gone again (for the account shown). */
   const restoreGone = useCallback((id: string) => goneRef.current.has(`${shownAccountRef.current}|${id}`), []);
@@ -262,6 +275,7 @@ export function useArchivedPlaces({
     restoreUnresolved,
     settleMonitoredRestored,
     settleRestoresAbsentFrom,
+    settleRestoresRemoved,
     unmonitoredRestoredIn
   };
 }

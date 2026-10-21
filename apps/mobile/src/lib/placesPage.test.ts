@@ -3,6 +3,7 @@ import {
   applyPlaceRoleLocally,
   archivePlaceConfirmCopy,
   archivedPlaceRows,
+  createMonitorQueue,
   createPageReadGate,
   createPlaceRestoreGate,
   pendingRestoredRows,
@@ -181,7 +182,7 @@ describe("createPageReadGate (Codex r5 on #508)", () => {
     expect(gate.judge(newer, "1")).toBe("apply");
     gate.applied(newer);
     expect(gate.judge(older, "1")).toBe("stale");
-    expect(gate.isLatestApplied(newer)).toBe(true);
+    expect(gate.isCurrent(newer)).toBe(true);
     expect(gate.superseded(older)).toBe(true);
   });
 
@@ -193,7 +194,7 @@ describe("createPageReadGate (Codex r5 on #508)", () => {
     gate.applied(older);
     expect(gate.judge(newer, "1")).toBe("apply");
     gate.applied(newer);
-    expect(gate.isLatestApplied(older)).toBe(false);
+    expect(gate.isCurrent(older)).toBe(false);
   });
 
   it("drops a read that a change overtook, and one from another account lifetime", () => {
@@ -206,6 +207,19 @@ describe("createPageReadGate (Codex r5 on #508)", () => {
     expect(gate.judge(after, "2")).toBe("foreign");
   });
 
+  it("ends an applied list's follow-ups once a change is accepted (Codex r6 on #508)", () => {
+    const gate = createPageReadGate();
+    const read = gate.begin("1");
+    gate.applied(read);
+    expect(gate.isCurrent(read)).toBe(true);
+    gate.changed();
+    expect(gate.isCurrent(read)).toBe(false);
+    // The read after the change is current again once applied.
+    const next = gate.begin("1");
+    gate.applied(next);
+    expect(gate.isCurrent(next)).toBe(true);
+  });
+
   it("reports a failure only for the newest read started", () => {
     const gate = createPageReadGate();
     const first = gate.begin("1");
@@ -213,6 +227,50 @@ describe("createPageReadGate (Codex r5 on #508)", () => {
     const second = gate.begin("1");
     expect(gate.isNewest(first)).toBe(false);
     expect(gate.isNewest(second)).toBe(true);
+  });
+});
+
+function deferredBoolean() {
+  let resolve!: (value: boolean) => void;
+  const promise = new Promise<boolean>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+describe("createMonitorQueue (Codex r6 on #508)", () => {
+  it("runs one refresh at a time, ends on the newest input, and finishes only that one", async () => {
+    const runs: Array<{ input: string; done: ReturnType<typeof deferredBoolean> }> = [];
+    const finished: Array<[string, boolean]> = [];
+    const queue = createMonitorQueue<string>((input) => {
+      const done = deferredBoolean();
+      runs.push({ input, done });
+      return done.promise;
+    }, (input, refreshed) => finished.push([input, refreshed]));
+    expect(queue.engaged()).toBe(false);
+    const first = queue.request("older");
+    expect(queue.engaged()).toBe(true);
+    await Promise.resolve();
+    void queue.request("middle");
+    const last = queue.request("newest");
+    // Only the running one has started; the newest replaced the one waiting.
+    expect(runs.map((run) => run.input)).toEqual(["older"]);
+    runs[0].done.resolve(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runs.map((run) => run.input)).toEqual(["older", "newest"]);
+    expect(finished).toEqual([]);
+    runs[1].done.resolve(false);
+    await Promise.all([first, last]);
+    expect(finished).toEqual([["newest", false]]);
+  });
+
+  it("starts again for a request made after it drained, and treats a throw as a failed refresh", async () => {
+    const finished: Array<[number, boolean]> = [];
+    const queue = createMonitorQueue<number>(async (input) => {
+      if (input === 2) throw new Error("location unavailable");
+      return true;
+    }, (input, refreshed) => finished.push([input, refreshed]));
+    await queue.request(1);
+    await queue.request(2);
+    expect(finished).toEqual([[1, true], [2, false]]);
   });
 });
 

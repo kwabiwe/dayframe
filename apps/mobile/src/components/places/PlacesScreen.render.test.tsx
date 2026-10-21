@@ -472,3 +472,137 @@ describe("Places read ordering (Codex r5 on #508)", () => {
   });
 });
 
+
+// Codex r6 on #508: an accepted archive or delete drops every read already out (the next list comes
+// from after it); monitoring follows the newest list (latest wins); a follow-up of a list a change
+// has since overtaken settles nothing; only the newest read's failure is shown or announced.
+describe("Places read ordering and monitoring (Codex r6 on #508)", () => {
+  const ACCOUNT_A_KEY = "ws-1:user-a";
+  const noteArchived = async (id: string) => {
+    const { notePlaceDeleted } = await import("../../lib/placesPage");
+    await act(async () => { notePlaceDeleted(ACCOUNT_A_KEY, id); });
+    await flush();
+  };
+
+  it("never lets an opening read bring back a place archived before anything was shown", async () => {
+    mocks.owner = ACCOUNT_A;
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    const opening = deferred<unknown>();
+    const focused = deferred<unknown>();
+    // Both opening reads (mount and focus) read the list before the archive; any read after it doesn't have the place.
+    mocks.fetchBootstrap.mockReturnValueOnce(opening.promise).mockReturnValueOnce(focused.promise)
+      .mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio]));
+    await act(async () => { tree = create(<PlacesScreen />); });
+    await flush();
+    expect(mocks.fetchBootstrap).toHaveBeenCalledTimes(2);
+    await noteArchived(gym.id);
+    await act(async () => { opening.resolve(bootstrapFor(ACCOUNT_A, [studio, gym])); });
+    await flush();
+    await act(async () => { focused.resolve(bootstrapFor(ACCOUNT_A, [studio, gym])); });
+    await flush();
+    expect(savedRowIds()).toEqual([studio.id]);
+    expect(mocks.refreshGeofences.mock.calls.filter(([list]) => (list as { id: string }[]).some((place) => place.id === gym.id))).toHaveLength(0);
+  });
+
+  it("monitors the newest list when it removes a restored place during older monitoring", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    const monitoring = deferred<number>();
+    mocks.refreshGeofences.mockReturnValueOnce(monitoring.promise);
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(monitoredLists()).toEqual([ids([studio, gym]).join(",")]);
+    // A newer pull: the restored place is gone again, and another place is new.
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, office]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    await act(async () => { monitoring.resolve(1); });
+    await flush();
+    expect(savedRowIds()).toEqual(ids([studio, office]));
+    expect(mocks.refreshGeofences).toHaveBeenLastCalledWith([studio, office], ACCOUNT_A);
+  });
+
+  it("settles and announces nothing when monitoring finishes after an archive removed the restored place", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    const monitoring = deferred<number>();
+    mocks.refreshGeofences.mockReturnValueOnce(monitoring.promise);
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    await noteArchived(gym.id);
+    expect(savedRowIds()).toEqual([studio.id]);
+    mocks.announce.mockClear();
+    await act(async () => { monitoring.resolve(1); });
+    await flush();
+    expect(texts().join(" ")).not.toContain("Example Gym");
+    expect(mocks.announce).not.toHaveBeenCalled();
+    // Monitoring's last input is the list shown now.
+    expect(mocks.refreshGeofences).toHaveBeenLastCalledWith([studio], ACCOUNT_A);
+  });
+
+  it("does not announce recovery when an archive overtakes a pull's monitoring", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    mocks.fetchBootstrap.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(waitingRow(gym.id)).toHaveLength(1);
+    const monitoring = deferred<number>();
+    mocks.refreshGeofences.mockReturnValueOnce(monitoring.promise);
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    await noteArchived(gym.id);
+    expect(savedRowIds()).toEqual([studio.id]);
+    mocks.announce.mockClear();
+    await act(async () => { monitoring.resolve(1); });
+    await flush();
+    expect(mocks.announce).not.toHaveBeenCalled();
+    expect(waitingRow(gym.id)).toHaveLength(0);
+  });
+
+  it("keeps a newer pull's failure line when an older restore refresh fails after it", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    const older = deferred<unknown>();
+    mocks.fetchBootstrap.mockReturnValueOnce(older.promise);
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    mocks.fetchBootstrap.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(texts()).toContain("Couldn't refresh your places. Try again.");
+    await act(async () => { older.reject(new Error("offline")); });
+    await flush();
+    // The one status line is still the newer pull's; the restore still waits under Saved places.
+    expect(texts().filter((line) => /couldn't refresh/i.test(line))).toEqual(["Couldn't refresh your places. Try again."]);
+    expect(waitingRow(gym.id)).toHaveLength(1);
+  });
+
+  it("never says Places couldn't refresh for an older restore read once a newer list shows the place", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    const older = deferred<unknown>();
+    mocks.fetchBootstrap.mockReturnValueOnce(older.promise);
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    // A newer pull shows the place, but monitoring from it fails.
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    mocks.refreshGeofences.mockRejectedValueOnce(new Error("location unavailable"));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(savedRowIds()).toEqual(ids([studio, gym]));
+    mocks.announce.mockClear();
+    await act(async () => { older.reject(new Error("offline")); });
+    await flush();
+    expect(texts().join(" ")).not.toContain("Places couldn't refresh");
+    expect(mocks.announce).not.toHaveBeenCalledWith(expect.stringContaining("Places couldn't refresh"));
+  });
+});

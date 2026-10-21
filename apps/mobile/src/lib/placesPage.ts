@@ -121,17 +121,20 @@ export function archivedPlaceRows(places: readonly { id: string; name: string }[
   }));
 }
 
-/** A page read's place in line: when it started, what had changed by then, and in which lifetime. */
+/** A page read's place in line: when it started, how many changes had been accepted by then, and in which lifetime. */
 export type PageReadTicket = { sequence: number; changes: number; lifetime: string };
 
 /**
  * The one gate every Places list goes through before it is applied, settles restores or refreshes
- * monitoring (Codex r5 on #508, after rounds 2–5 were all read-ordering races). Every page read
+ * monitoring (Codex r5/r6 on #508, after rounds 2–6 were all read-ordering races). Every page read
  * (opening, focus, pull-to-refresh, Try again, the restore retry, and the refresh after a change or
- * a restore) takes a ticket when it starts. Its list may be applied only when:
+ * a restore) takes a ticket when it starts. Every accepted change (an archive, a delete, a restore,
+ * Home/Work, a learned place) calls `changed`, so a read that started before it never applies: the
+ * next list to apply always comes from after every change accepted so far. A list may be applied
+ * only when:
  * - it belongs to the same account lifetime (else "foreign": nothing is applied or said);
- * - no change happened after it started (`changed`), and no read that started after it has already
- *   been applied (else "stale": overtaken; nothing is applied or monitored).
+ * - no change was accepted after it started, and no read that started after it has already been
+ *   applied (else "stale": overtaken; nothing is applied or monitored).
  * Applying records the ticket, so an older answer arriving later can never undo a newer one.
  */
 export function createPageReadGate() {
@@ -143,7 +146,7 @@ export function createPageReadGate() {
       issued += 1;
       return { sequence: issued, changes, lifetime };
     },
-    /** A local change happened: every read already out is out of date. */
+    /** A change was accepted: every read already out, and every list already applied, is out of date. */
     changed() {
       changes += 1;
     },
@@ -159,9 +162,13 @@ export function createPageReadGate() {
     superseded(ticket: PageReadTicket) {
       return ticket.changes !== changes || ticket.sequence <= lastApplied;
     },
-    /** `ticket`'s list is the newest applied (its follow-ups may still write). */
-    isLatestApplied(ticket: PageReadTicket) {
-      return lastApplied === ticket.sequence;
+    /**
+     * `ticket`'s list is what the page shows: the newest applied, with no change accepted since
+     * (Codex r6 on #508). Only then may its follow-ups (settling restores, the learned-place
+     * backfill) still write.
+     */
+    isCurrent(ticket: PageReadTicket) {
+      return lastApplied === ticket.sequence && ticket.changes === changes;
     },
     /** No read started after `ticket` (only the newest read reports its failure). */
     isNewest(ticket: PageReadTicket) {
@@ -170,7 +177,52 @@ export function createPageReadGate() {
   };
 }
 
-/** How the refresh after an accepted restore ended: its list applied, overtaken by a newer change, or failed. */
+/**
+ * Places' geofence monitoring, one refresh at a time and latest wins (Codex r6 on #508): a request
+ * while one runs replaces whatever was waiting, and runs once the running one finishes, so the last
+ * input is always the newest requested. `finished` hears only the last run of a drain (a run that a
+ * newer request overtook settles nothing). `request` resolves once the queue has drained. `engaged`:
+ * the page has asked for monitoring at least once, so from then on every list it shows is monitored.
+ */
+export function createMonitorQueue<T>(refresh: (input: T) => Promise<boolean>, finished: (input: T, refreshed: boolean) => void) {
+  let waiting: { input: T } | null = null;
+  let active = false;
+  let engaged = false;
+  let drained: Promise<void> = Promise.resolve();
+  async function drain() {
+    try {
+      while (waiting) {
+        const { input } = waiting;
+        waiting = null;
+        const refreshed = await Promise.resolve().then(() => refresh(input)).then((value) => value, () => false);
+        if (!waiting) finished(input, refreshed);
+      }
+    } finally {
+      // In the same step as the last check for a waiting input, so a request never goes unrun.
+      active = false;
+    }
+  }
+  return {
+    request(input: T) {
+      engaged = true;
+      waiting = { input };
+      if (!active) {
+        active = true;
+        drained = drain();
+      }
+      return drained;
+    },
+    engaged() {
+      return engaged;
+    }
+  };
+}
+
+/**
+ * How the refresh after an accepted restore ended: its list applied; overtaken ("stale": a newer
+ * change or list landed, or it failed after a newer read started, which brings the list instead);
+ * or failed as the newest read.
+ */
 export type RestoreRefreshOutcome = "applied" | "stale" | "failed";
 
 /**
