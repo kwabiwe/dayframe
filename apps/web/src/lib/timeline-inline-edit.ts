@@ -101,7 +101,12 @@ export function buildTimelineInlineSavePlan(
   now = new Date()
 ): CalendarEntryCompactSavePlan {
   // Saving commits typed times with the shared reader (`15:1` → 15:10; owner, 15 Oct 2026).
-  const edit = { ...typedEdit, draft: normalizeCalendarEntryCompactTypedTimes(typedEdit.draft) };
+  const normalized = normalizeCalendarEntryCompactTypedTimes(typedEdit.draft);
+  // Shorthand ("21:3", "6") reads its day only once committed (Codex r2 on #504).
+  const edit = {
+    ...typedEdit,
+    draft: typedEdit.finishTyped && !typedEdit.finishDateChosen ? inferTypedFinishDate(normalized) : normalized
+  };
   if (edit.field === "time") {
     const sourceEntry: TimeEntryRow = {
       ...entry,
