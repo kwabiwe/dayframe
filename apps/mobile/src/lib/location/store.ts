@@ -650,12 +650,15 @@ async function motionCaptureStateFor(binding: LocationCaptureBinding, transactio
 
 async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot: LocationCaptureSnapshot,
   options: { motionCapture?: MotionCaptureCommit } = {}) {
-  if (items.length === 0 && !options.motionCapture) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0 };
+  if (items.length === 0 && !options.motionCapture) return { insertedCount: 0, duplicateCount: 0, rejectedCount: 0, admittedIds: [] as string[] };
   const now = new Date().toISOString();
   const expiresAt = new Date(Date.parse(now) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
   const db = await database();
   let insertedCount = 0;
   let rejectedCount = 0;
+  // Items that passed admission (inserted now or already journaled): only these may inform other
+  // capture decisions, such as which saved places the phone watches (geofence.ts).
+  let admittedIds: string[] = [];
   const rejections: Record<string, number> = {};
   const reject = (reason: string, count = 1) => { rejections[reason] = (rejections[reason] ?? 0) + count; rejectedCount += count; };
   try { await db.withExclusiveTransactionAsync(async (transaction) => {
@@ -696,6 +699,7 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
         now
       );
       insertedCount += result.changes;
+      admittedIds.push(evidence.clientEvidenceId);
     }
     // The motion cursor advances only with the evidence it produced.
     if (options.motionCapture) {
@@ -706,6 +710,7 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
   }); } catch (error) {
     if (!(error instanceof StaleLocationCaptureError)) throw error;
     insertedCount = 0;
+    admittedIds = [];
     rejectedCount = items.length;
     await recordCaptureRejections({ stale_epoch: items.length }, db);
   }
@@ -713,7 +718,7 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
   // No local journal replay here (investigation 2026-10-12, 13 Oct): it re-ran the shared engine over the
   // whole seven-day journal (up to 5,000 location and 10,000 motion rows) after every stored sample, in
   // the background too, for diagnostics alone. See `refreshLocalJournalReplayIfDue`.
-  return { insertedCount, duplicateCount: items.length - insertedCount - rejectedCount, rejectedCount };
+  return { insertedCount, duplicateCount: items.length - insertedCount - rejectedCount, rejectedCount, admittedIds };
 }
 
 /**
