@@ -73,6 +73,11 @@ export type SavedPlaceForMatching = {
    * keeps its past visits as they were and no new visit matches it.
    */
   archivedAt?: string | null;
+  /**
+   * "Replace the old place": the place matches only evidence from this moment, when it replaced an
+   * archived place nearby, so history before then keeps the old place's visits.
+   */
+  matchingStartsAt?: string | null;
 };
 
 export type LearnedPlaceForMatching = SavedPlaceForMatching & {

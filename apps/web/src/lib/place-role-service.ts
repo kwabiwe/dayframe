@@ -14,6 +14,12 @@ export type PlaceRoleAssignment = {
    * when it is within 300 m of the new one (a short move, whose two circles would overlap).
    */
   archivePrevious?: boolean;
+  /**
+   * The target was created in this transaction (adding a place into the slot): when it replaces
+   * an archived place it matches only evidence from now, so replay leaves earlier history with the
+   * old place (Codex r2 on #503). An existing target already competed for that history.
+   */
+  targetIsNew?: boolean;
 };
 
 export type PlaceRoleAssignmentResult =
@@ -123,6 +129,9 @@ export async function assignPlaceRoleWith(
           assignment.placeId]
       );
       previousArchived = Boolean(assignment.archivePrevious) && updated.rows.some((row) => row.archived);
+      if (previousArchived && assignment.targetIsNew && target) {
+        await client.query("update places set matching_starts_at = now() where id = $1 and workspace_id = $2", [target.id, session.workspaceId]);
+      }
     }
     if (target && target.role !== assignment.role) {
       // A place holds one role: making the Work place Home leaves Work empty.

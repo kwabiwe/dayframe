@@ -176,7 +176,7 @@ The server that reads Home and Work place roles requires `supabase/migrations/20
 
 ### Place archive schema prerequisite
 
-The server with Archive place (location v3 PR 15) requires `supabase/migrations/202610210001_place_archive.sql` (local `packages/db/migrations/016_place_archive.sql`) before its Preview or production deployment. It adds a nullable `places.archived_at`; no existing row changes and nothing is backfilled. Every place read filters on it, so without it bootstrap and the Places page fail, naming this migration. Apply it to staging before the Preview, then to production before the server change merges (migration → server → phone). Older servers and phones ignore the column; an older phone simply stops seeing places archived from the web.
+The server with Archive place (location v3 PR 15) requires `supabase/migrations/202610210001_place_archive.sql` (local `packages/db/migrations/016_place_archive.sql`) before its Preview or production deployment. It adds nullable `places.archived_at` and `places.matching_starts_at`; no existing row changes and nothing is backfilled. Every place read filters on it, so without it bootstrap and the Places page fail, naming this migration. Apply it to staging before the Preview, then to production before the server change merges (migration → server → phone). Older servers and phones ignore the column; an older phone simply stops seeing places archived from the web.
 
 ### Password reset schema prerequisite
 
