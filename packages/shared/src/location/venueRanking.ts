@@ -113,6 +113,9 @@ const CATEGORY_KINDS: Readonly<Record<string, VenueKind>> = {
   GasStation: "petrol", AutomotiveRepair: "motoring", CarRental: "motoring", RVPark: "motoring"
 };
 
+/** "Market Street (Stop K)", "Stand 4", "Bus stop": a stop, whatever street or station it is named after. */
+const STOP_MARKER = /\b(bus stop|stop [a-z0-9]{1,2}|stand [a-z0-9]{1,2}|bus shelter|bus station stop)\b/;
+
 // Words that say what a place is when Apple gives no kind (or a vague one). Whole words only,
 // most specific first ("Shell Service Station" is petrol, not a station; "Car park" is not a park).
 const NAME_KINDS: readonly [RegExp, VenueKind][] = [
@@ -121,8 +124,8 @@ const NAME_KINDS: readonly [RegExp, VenueKind][] = [
   [/\b(shopping (centre|center)|mall|retail park|outlet (centre|village)|arcade)\b/, "shopping_centre"],
   [/\b(superstore|supermarket|hypermarket|food hall)\b/, "supermarket"],
   [/\b(megastore|department store|warehouse|home centre|garden centre|retail warehouse)\b/, "large_store"],
+  [STOP_MARKER, "bus_stop"],
   [/\b(railway station|train station|station|underground|interchange|metro)\b/, "station"],
-  [/\b(bus stop|stop [a-z0-9]{1,2}|stand [a-z0-9]{1,2}|bus shelter)\b/, "bus_stop"],
   [/\b(school|academy|nursery|primary|infant|junior school)\b/, "school"],
   [/\b(university|campus|college)\b/, "campus"],
   [/\b(hospital|infirmary|medical centre)\b/, "hospital"],
@@ -143,14 +146,21 @@ const STREET_NAME = /\b(road|rd|street|st|lane|ln|avenue|ave|way|close|drive|cre
 
 /** What kind of venue a candidate is: its Apple category, refined or filled in by its name. */
 export function venueKind(candidate: Pick<VenueCandidate, "title" | "category">): VenueKind {
-  const name = searchText(candidate.title).replace(/[^\p{L}\p{N}&' ]+/gu, " ").replace(/\s+/g, " ").trim();
-  const fromName = STREET_NAME.test(name) && !/\b(car park|parking)\b/.test(name)
-    ? null
-    : NAME_KINDS.find(([pattern]) => pattern.test(name))?.[1] ?? null;
+  const words = (text: string) => searchText(text).replace(/[^\p{L}\p{N}&' ]+/gu, " ").replace(/\s+/g, " ").trim();
+  const name = words(candidate.title);
+  // The name without its bracketed part ("Station Road (Stop K)" → "station road").
+  const base = words(candidate.title.replace(/\([^)]*\)/g, " "));
+  const streetNamed = STREET_NAME.test(base);
+  const fromName = STOP_MARKER.test(name)
+    ? "bus_stop"
+    : streetNamed && !/\b(car park|parking)\b/.test(name)
+      ? null
+      : NAME_KINDS.find(([pattern]) => pattern.test(name))?.[1] ?? null;
   const fromCategory = candidate.category ? CATEGORY_KINDS[candidate.category] ?? null : null;
   if (candidate.category === "PublicTransport") {
-    // Apple files bus stops and stations alike; a stop is not a destination.
-    return fromName === "station" ? "station" : fromName === "bus_stop" ? "bus_stop" : /\bstation\b/.test(name) ? "station" : "bus_stop";
+    // Apple files bus stops and stations alike; a stop is not a destination, and neither is a
+    // stop named after its street (Codex r2 on #517).
+    return fromName === "station" ? "station" : "bus_stop";
   }
   // A vague Apple kind ("Store", none) gives way to a clear name ("… Superstore", "… Shopping Centre").
   if (!fromCategory || fromCategory === "small_shop") return fromName ?? fromCategory ?? "other";
@@ -213,10 +223,12 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
   if (!usable.length) return { venues: [], suggestion: null };
 
   const kinds = new Map(usable.map((candidate) => [candidate.id, venueKind(candidate)]));
-  const areaNames = (stay.areasOfInterest ?? []).map(searchText).filter(Boolean);
-  const insideArea = (candidate: VenueCandidate) => areaNames.some((area) => namesMatch(searchText(candidate.title), area));
+  const areas = stay.areasOfInterest ?? [];
   // A place named like an area the stay lies in is a container that covers the stay, whatever
-  // Apple calls it (a shopping centre filed as "Store").
+  // Apple calls it (a shopping centre filed as "Store"), unless it is a car park or stop named
+  // after the area ("Northgate Shopping Centre Car Park", Codex r2 on #517).
+  const insideArea = (candidate: VenueCandidate) =>
+    !NON_DESTINATIONS.has(kinds.get(candidate.id)!) && venueNamedLikeArea(candidate.title, areas);
   for (const candidate of usable) {
     if (insideArea(candidate) && !VENUE_KINDS[kinds.get(candidate.id)!].container) kinds.set(candidate.id, "shopping_centre");
   }
@@ -345,6 +357,12 @@ function addressNames(child: VenueCandidate, parent: VenueCandidate) {
 function distinctiveWords(title: string) {
   return [...new Set(searchText(title).split(/[^\p{L}\p{N}]+/u))]
     .filter((word) => word.length >= 4 && !GENERIC_WORDS.has(word));
+}
+
+/** Whether a place is named like one of the areas of interest a stay lies in. */
+export function venueNamedLikeArea(title: string, areasOfInterest: readonly string[]) {
+  const name = searchText(title);
+  return areasOfInterest.some((area) => namesMatch(name, searchText(area)));
 }
 
 /** Same name ignoring case, accents and spacing, or one containing the other as whole words. */

@@ -301,6 +301,15 @@ describe("nearby point of interest controller", () => {
     expect(stay.spreadMeters).toBeLessThan(8);
   });
 
+  it("never folds a listable place into one too far to list (Codex r2 on #517)", () => {
+    const pharmacy = { ...poi("Freshway Pharmacy", 360), category: "Pharmacy", offsetEastMeters: 360, offsetNorthMeters: 0 };
+    const store = { ...poi("Freshway Superstore", 410), category: "FoodMarket", offsetEastMeters: 410, offsetNorthMeters: 0 };
+    const visible = visibleNearbyPlaces(rankedNearbyPlaces([pharmacy, store], [], {
+      startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:25:00.000Z", now: new Date("2026-10-21T11:00:00.000Z")
+    }));
+    expect(visible.map((place) => [place.title, place.inside])).toEqual([["Freshway Pharmacy", []]]);
+  });
+
   it("resolves a picked place from the current list only", async () => {
     const resolve = vi.fn().mockResolvedValue(resolved);
     const search = answering([poi("Example Cafe", 40, "a")], [poi("Example Cafe", 40, "b")]);

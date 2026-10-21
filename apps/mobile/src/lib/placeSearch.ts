@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { distanceMeters, rankVenues, type LocationReviewEvidenceDto, type VenueStay } from "@dayframe/shared";
+import { distanceMeters, rankVenues, venueNamedLikeArea, type LocationReviewEvidenceDto, type VenueStay } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
@@ -59,7 +59,11 @@ export function rankedNearbyPlaces(
   stay: VenueStay | null = null
 ): NearbyVenue[] {
   const now = new Date();
-  const ranking = rankVenues(places.filter(isNearbyRow), stay
+  // Only places that can be listed take part, so nothing folds into a parent that is then hidden
+  // for distance (Codex r2 on #517): within 400 m, or named like the area the visit lies in.
+  const listable = places.filter((place) => isNearbyRow(place) &&
+    (place.distanceMeters <= NEARBY_POI_RADIUS_METERS || venueNamedLikeArea(place.title, areasOfInterest)));
+  const ranking = rankVenues(listable, stay
     ? { ...stay, areasOfInterest: stay.areasOfInterest ?? areasOfInterest }
     : { startedAt: now.toISOString(), stoppedAt: now.toISOString(), now, areasOfInterest });
   const byId = new Map(places.map((place) => [place.id, place]));

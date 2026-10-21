@@ -221,3 +221,26 @@ describe("rankVenues: Codex r1 on #517", () => {
     expect(ranking.venues[0]).toMatchObject({ insideArea: true });
   });
 });
+
+describe("rankVenues: Codex r2 on #517", () => {
+  it("never makes a stop named after a station or street a station", () => {
+    expect(venueKind({ title: "Station Road (Stop K)", category: "PublicTransport" })).toBe("bus_stop");
+    expect(venueKind({ title: "Station Road", category: "PublicTransport" })).toBe("bus_stop");
+    expect(venueKind({ title: "Exampleton Station (Stand 4)", category: "PublicTransport" })).toBe("bus_stop");
+    expect(venueKind({ title: "Exampleton Bus Station", category: "PublicTransport" })).toBe("station");
+    const ranking = rankVenues([place("Station Road (Stop K)", "PublicTransport", 3, 4), place("Alder Books", "Store", 20, 15)], stay(20, 12));
+    expect(titles(ranking)[0]).toBe("Alder Books");
+    expect(ranking.venues.every((venue) => venue.children.length === 0)).toBe(true);
+    expect(ranking.suggestion?.candidate.title).not.toBe("Station Road (Stop K)");
+  });
+
+  it("never turns a car park named after the area into the area", () => {
+    const carPark = place("Northgate Shopping Centre Car Park", null, 30, 10);
+    const shop = place("Unit Shop", "Store", 20, 0);
+    const ranking = rankVenues([carPark, shop], stay(60, 14, { areasOfInterest: ["Northgate Shopping Centre"] }));
+    expect(venueKind(carPark)).toBe("parking");
+    expect(ranking.venues.find((venue) => venue.candidate.id === carPark.id)).toMatchObject({ kind: "parking", insideArea: false, children: [] });
+    expect(ranking.suggestion?.candidate.id).not.toBe(carPark.id);
+  });
+});
+
