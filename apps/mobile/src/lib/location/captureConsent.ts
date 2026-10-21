@@ -13,6 +13,30 @@ export async function readLocationCaptureConsent(owner: MobileAccountOwner) {
   return await AsyncStorage.getItem(locationAccountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner))) === "true";
 }
 
-export function writeLocationCaptureConsent(owner: MobileAccountOwner, enabled: boolean) {
-  return AsyncStorage.setItem(locationAccountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)), String(enabled));
+type ConsentListener = (owner: MobileAccountOwner, enabled: boolean) => void;
+const consentListeners = new Set<ConsentListener>();
+
+/** Hears every consent write (the tracking-stopped notice keeps its armed flag current with it). */
+export function subscribeLocationCaptureConsent(listener: ConsentListener) {
+  consentListeners.add(listener);
+  return () => {
+    consentListeners.delete(listener);
+  };
+}
+
+function announceConsent(owner: MobileAccountOwner, enabled: boolean) {
+  for (const listener of consentListeners) {
+    try {
+      listener(owner, enabled);
+    } catch {
+      // A listener never blocks the consent write.
+    }
+  }
+}
+
+export async function writeLocationCaptureConsent(owner: MobileAccountOwner, enabled: boolean) {
+  // Off is announced before it is stored, so dependants stand down first; on only once stored.
+  if (!enabled) announceConsent(owner, false);
+  await AsyncStorage.setItem(locationAccountStorageKey(LOCATION_LEARNING_ENABLED_KEY, mobileAccountKey(owner)), String(enabled));
+  if (enabled) announceConsent(owner, true);
 }

@@ -26,7 +26,7 @@ describe("POST /api/review/[id]/venue (location v3 PR 8)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
-    mocks.setSuggestedVenue.mockResolvedValue({ stored: true });
+    mocks.setSuggestedVenue.mockResolvedValue("stored");
   });
 
   it("stores or clears an Apple Place ID for the session's own item", async () => {
@@ -47,6 +47,13 @@ describe("POST /api/review/[id]/venue (location v3 PR 8)", () => {
     expect((await post("not-a-uuid", { placeId: "I1" })).status).toBe(404);
     mocks.setSuggestedVenue.mockResolvedValue(null);
     expect((await post(reviewId, { placeId: "I1" })).status).toBe(404);
+  });
+
+  it("says busy while a decision holds the card", async () => {
+    mocks.setSuggestedVenue.mockResolvedValue("busy");
+    const response = await post(reviewId, { placeId: "I1" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "review_busy" });
   });
 
   it("needs a session", async () => {

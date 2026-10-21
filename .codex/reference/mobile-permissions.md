@@ -64,6 +64,12 @@ The Location switch represents saved account consent. Adjacent status separately
 
 Motion & Fitness (Core Motion) is offered in Settings > Location under Suggestions (the Settings index also shows its state and action on a Motion & Fitness row of its own); onboarding will offer it later. Show iOS permission separately from Location consent: it is read only while Location suggestions are on, and capture needs both. States: not available (simulator, unsupported device), not requested (Allow Motion & Fitness, which shows the system prompt through a one-minute history query), allowed, off (Open iOS Settings), restricted (Open iOS Settings), and unknown. Re-read the status whenever the app returns to the foreground. Never show raw `CMAuthorizationStatus` values or native error codes. `NSMotionUsageDescription` is set in `app.json` and the checked-in `Info.plist` with Dayframe's own wording; real prompts and history need a physical iPhone.
 
+## Notifications
+
+Dayframe asks for notification permission only when the person turns on something that needs it (Evening reminder, Tell me if tracking stops), never on launch. Both rows read the same live permission: on only when the person's switch is on and notifications are allowed; while iOS denies them, the switch is replaced by Open Settings with "Notifications are off in iPhone Settings". Re-read the permission whenever the app returns to the foreground.
+
+The tracking-stopped notice (`apps/mobile/src/lib/trackingNotice.ts`, `modules/dayframe-tracking-notice`) is posted natively from `applicationWillTerminate`, so it needs an "armed" flag JS keeps current on launch and every app-state change: this iPhone's switch (on by default), notifications allowed, the signed-in account's location consent and Always access. Sign-out, an account change and turning location consent off (announced by `writeLocationCaptureConsent` before it is stored) disarm at once, without waiting for reads; a recompute that began for another account never arms. Native re-checks Always access and allows one notice per rolling 24 hours, reserving the day's notice before it submits and giving it back only when iOS definitely refuses; every new launch removes it. It carries no place, account or location data.
+
 ## HealthKit State
 
 HealthKit requires a native iOS build and real-device validation. Expo Go and many simulator paths cannot fully exercise it.

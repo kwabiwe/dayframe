@@ -5,6 +5,8 @@ PODS:
     - ExpoModulesCore
   - DayframeDurationDial (0.1.0):
     - ExpoModulesCore
+  - DayframeHealthBackground (0.1.0):
+    - ExpoModulesCore
   - DayframeLocationVisits (0.1.0):
     - ExpoModulesCore
   - DayframeMotionActivity (0.1.0):
@@ -12,6 +14,8 @@ PODS:
   - DayframePlaceSearch (0.1.0):
     - ExpoModulesCore
   - DayframeTimeWheel (0.1.0):
+    - ExpoModulesCore
+  - DayframeTrackingNotice (0.1.0):
     - ExpoModulesCore
   - EXApplication (56.0.3):
     - ExpoModulesCore
@@ -2407,10 +2411,12 @@ DEPENDENCIES:
   - DayframeBackgroundExecution (from `../modules/dayframe-background-execution/ios`)
   - DayframeCalendar (from `../modules/dayframe-calendar/ios`)
   - DayframeDurationDial (from `../modules/dayframe-duration-dial/ios`)
+  - DayframeHealthBackground (from `../modules/dayframe-health-background/ios`)
   - DayframeLocationVisits (from `../modules/dayframe-location-visits/ios`)
   - DayframeMotionActivity (from `../modules/dayframe-motion-activity/ios`)
   - DayframePlaceSearch (from `../modules/dayframe-place-search/ios`)
   - DayframeTimeWheel (from `../modules/dayframe-time-wheel/ios`)
+  - DayframeTrackingNotice (from `../modules/dayframe-tracking-notice/ios`)
   - EXApplication (from `../../../node_modules/expo-application/ios`)
   - EXConstants (from `../../../node_modules/expo-constants/ios`)
   - Expo (from `../../../node_modules/expo`)
@@ -2535,6 +2541,8 @@ EXTERNAL SOURCES:
     :path: "../modules/dayframe-calendar/ios"
   DayframeDurationDial:
     :path: "../modules/dayframe-duration-dial/ios"
+  DayframeHealthBackground:
+    :path: "../modules/dayframe-health-background/ios"
   DayframeLocationVisits:
     :path: "../modules/dayframe-location-visits/ios"
   DayframeMotionActivity:
@@ -2543,6 +2551,8 @@ EXTERNAL SOURCES:
     :path: "../modules/dayframe-place-search/ios"
   DayframeTimeWheel:
     :path: "../modules/dayframe-time-wheel/ios"
+  DayframeTrackingNotice:
+    :path: "../modules/dayframe-tracking-notice/ios"
   EXApplication:
     :path: "../../../node_modules/expo-application/ios"
   EXConstants:
@@ -2779,10 +2789,12 @@ SPEC CHECKSUMS:
   DayframeBackgroundExecution: 274dfb23d7af7ae9d558dc477a9d87e78291864b
   DayframeCalendar: 39d64f9aa02df88cebb110e26ba387d78936abf5
   DayframeDurationDial: dfee3e1252be07902bf9097d15129947d54b96b2
+  DayframeHealthBackground: 57698821e685f7565c8e8f99af5b7fc6f2474eec
   DayframeLocationVisits: a92d96c395edf56959289c8e57ebb10ab4417884
   DayframeMotionActivity: d10a88e8894cb8c6a37bc317fb306c73bed8d9eb
   DayframePlaceSearch: 0dca400edd668a45b1c00b986ecb147ada6bfea5
   DayframeTimeWheel: dcf0054913139c6039e0100f8c0cba0dc0e8e93f
+  DayframeTrackingNotice: f0ea88e59512a0ca307292918c4577206bce5780
   EXApplication: e6040c92edc5522accd62852342e6b14742d42c0
   EXConstants: 6bcea1db4d1215969dc3409dfe33d94a5bfe50ca
   Expo: b06a9178293f86989516ee226c240605fb307d12

@@ -41,6 +41,24 @@ export function boundedHealthQuery<T>(
   });
 }
 
+function captureCancelled() {
+  return Object.assign(new Error("Health capture cancelled."), { name: "AbortError" });
+}
+
+/** Resolves when the promise settles or the signal aborts, whichever is first. */
+function settledUnlessAborted(promise: Promise<unknown>, signal?: AbortSignal) {
+  if (!signal) return promise.then(() => undefined, () => undefined);
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    signal.addEventListener("abort", done, { once: true });
+    promise.then(done, done);
+  });
+}
+
 /** Per-type observer changes are consumed after the current capture, independently of server work. */
 export function createHealthCaptureCoalescer() {
   const active = new Map<
@@ -90,6 +108,26 @@ export function createHealthCaptureCoalescer() {
         }
       });
       active.set(key, entry);
+      return entry.promise as Promise<T>;
+    },
+    /**
+     * A capture that starts after this call, for a bounded background pass: waits (cancellably)
+     * for one already running for the key, whose query may predate the wake's change, then joins
+     * one that started since or runs its own. Its own entry never schedules a follow-up: the pass
+     * asks for another capture when a wake needs one, and every observer change reaches the pass
+     * as a wake. A cancelled wait never starts the capture.
+     */
+    async runFresh<T>(key: string, capture: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+      const current = active.get(key);
+      if (current) await settledUnlessAborted(current.promise, signal);
+      if (signal?.aborted) throw captureCancelled();
+      const started = active.get(key);
+      if (started) return started.promise as Promise<T>;
+      const entry = { promise: Promise.resolve<unknown>(undefined), dirty: false };
+      active.set(key, entry);
+      entry.promise = capture().finally(() => {
+        if (active.get(key) === entry) active.delete(key);
+      });
       return entry.promise as Promise<T>;
     },
   };

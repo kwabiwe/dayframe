@@ -48,7 +48,7 @@ describe("friendly offline states (staging feedback B1, B2)", () => {
     expect(branches).toContain(') : pageState === "failed" && loadFailure ? (');
     expect(branches).not.toMatch(/ActivityIndicator|RefreshControl/);
     // Set never opens adding a place from an unknown list.
-    expect(places).toContain("if (roleSaving.current || !dataRef.current) return;");
+    expect(places).toContain("if (roleSaving.current === statusOwner() || !dataRef.current) return;");
   });
 
   it("lets the empty state's explanation scale without a cap (body role) and keeps 44-point Try again", () => {

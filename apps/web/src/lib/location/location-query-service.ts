@@ -427,6 +427,8 @@ function logLocationEvidenceTiming(
     acceptedEvidenceMs: timings.acceptedEvidenceMs ?? null,
     rejectedEvidenceMs: timings.rejectedEvidenceMs ?? null,
     nearbyPlacesMs: timings.nearbyPlacesMs ?? null,
+    // Its duration only: never the Place IDs it read (Codex r1 on #519).
+    venueHistoryMs: timings.venueHistoryMs ?? null,
     assemblyMs: timings.assemblyMs ?? null,
     totalMs: timings.totalMs ?? null,
     acceptedEvidenceCount: evidence?.segment.evidenceCount ?? null,

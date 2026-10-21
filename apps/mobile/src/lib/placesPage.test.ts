@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "./placesPage";
+import {
+  applyPlaceRoleLocally,
+  archivePlaceConfirmCopy,
+  archivedPlaceRows,
+  authFailureOpensSignIn,
+  createMonitorQueue,
+  createPageReadGate,
+  createPlaceRestoreGate,
+  pendingRestoredRows,
+  learnedPlaceSubtitle,
+  notePlaceDeleted,
+  placeRowSubtitle,
+  placesPageState,
+  replacePreviousNote,
+  replacePreviousOffered,
+  restoredMonitoredMessage,
+  restoredNotMonitoredMessage,
+  restoredNotRefreshedMessage,
+  sessionEndOpensSignIn,
+  subscribeDeletedPlaces,
+  takeDeletedPlaces
+} from "./placesPage";
 
 const categories = [{ id: "c1", name: "Exercise" }];
 
@@ -85,6 +106,287 @@ describe("applyPlaceRoleLocally with implicit holders", () => {
   });
 });
 
+// Synthetic coordinates: at latitude 10, 0.001° of latitude is about 111 m.
+describe("replacePreviousOffered (Replace the old place, PRD D19 A10)", () => {
+  const oldHome = { latitude: 10, longitude: 20 };
+
+  it("offers it only within 300 m", () => {
+    expect(replacePreviousOffered(oldHome, { latitude: 10, longitude: 20 })).toBe(true);
+    expect(replacePreviousOffered(oldHome, { latitude: 10.002, longitude: 20 })).toBe(true);
+    expect(replacePreviousOffered(oldHome, { latitude: 10.003, longitude: 20 })).toBe(false);
+  });
+
+  it("never offers it when either place has no coordinates", () => {
+    expect(replacePreviousOffered(null, oldHome)).toBe(false);
+    expect(replacePreviousOffered(oldHome, null)).toBe(false);
+    expect(replacePreviousOffered({ latitude: null, longitude: null }, oldHome)).toBe(false);
+    expect(replacePreviousOffered(oldHome, { latitude: 10 })).toBe(false);
+    expect(replacePreviousOffered(oldHome, { latitude: Number.NaN, longitude: 20 })).toBe(false);
+  });
+
+  it("says why, and that it can be restored", () => {
+    expect(replacePreviousNote("home")).toBe("Your old Home is close by; archive it so the two don't overlap. You can restore it from Places.");
+    expect(replacePreviousNote("work")).toMatch(/^Your old Work is close by/);
+  });
+});
+
+describe("applyPlaceRoleLocally with Replace the old place", () => {
+  const places = [
+    { id: "a", name: "Example Flat", role: "home" as const, latitude: 10, longitude: 20 },
+    { id: "b", name: "Example Gym", role: null, latitude: 10.001, longitude: 20 },
+    { id: "c", name: "Example Office", role: null, latitude: 10.01, longitude: 20 }
+  ];
+
+  it("drops the archived old holder from the list", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "b", previousPlaceName: null, archivePrevious: true }).map((place) => [place.id, place.role]))
+      .toEqual([["b", "home"], ["c", null]]);
+  });
+
+  it("keeps an old holder farther than 300 m (the server archives nothing)", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: null, archivePrevious: true }).map((place) => [place.id, place.role]))
+      .toEqual([["a", null], ["b", null], ["c", "home"]]);
+  });
+
+  it("archives a nearby implicit holder named like the role, even without a rename", () => {
+    const implicit = [{ ...places[0], name: "Home", role: null }, places[1]];
+    expect(applyPlaceRoleLocally(implicit, { role: "home", placeId: "b", previousPlaceName: null, archivePrevious: true }).map((place) => place.id))
+      .toEqual(["b"]);
+  });
+});
+
+describe("Places › Archived (PRD D19 A10)", () => {
+  it("keeps the server's order and says the history is kept", () => {
+    expect(archivedPlaceRows([{ id: "p2", name: "Example Gym" }, { id: "p1", name: "Example Studio" }])).toEqual([
+      { id: "p2", name: "Example Gym", subtitle: "History kept", accessibilityLabel: "Example Gym, archived, history kept", restoreLabel: "Restore Example Gym" },
+      { id: "p1", name: "Example Studio", subtitle: "History kept", accessibilityLabel: "Example Studio, archived, history kept", restoreLabel: "Restore Example Studio" }
+    ]);
+  });
+
+  it("confirms an archive with what it keeps and where to restore it", () => {
+    expect(archivePlaceConfirmCopy({ name: "Example Gym", role: null })).toEqual({
+      eyebrow: "Place",
+      title: "Archive Example Gym?",
+      message: "Past blocks keep its name, and it stops matching new visits. You can restore it from Places › Archived.",
+      confirmLabel: "Archive"
+    });
+    expect(archivePlaceConfirmCopy({ name: "Example Flat", role: "home" })).toEqual(expect.objectContaining({
+      title: "Archive Home?",
+      message: "Past blocks keep its name, and it stops matching new visits and stops being your Home. You can restore it from Places › Archived."
+    }));
+  });
+});
+
+describe("createPageReadGate (Codex r5 on #508)", () => {
+  it("applies reads in any order only while each is newer than the last applied", () => {
+    const gate = createPageReadGate();
+    const older = gate.begin("1");
+    const newer = gate.begin("1");
+    expect(gate.judge(newer, "1")).toBe("apply");
+    gate.applied(newer);
+    expect(gate.judge(older, "1")).toBe("stale");
+    expect(gate.isCurrent(newer)).toBe(true);
+    expect(gate.superseded(older)).toBe(true);
+  });
+
+  it("lets an older read apply when it lands first, then the newer one", () => {
+    const gate = createPageReadGate();
+    const older = gate.begin("1");
+    const newer = gate.begin("1");
+    expect(gate.judge(older, "1")).toBe("apply");
+    gate.applied(older);
+    expect(gate.judge(newer, "1")).toBe("apply");
+    gate.applied(newer);
+    expect(gate.isCurrent(older)).toBe(false);
+  });
+
+  it("drops a read that a change overtook, and one from another account lifetime", () => {
+    const gate = createPageReadGate();
+    const before = gate.begin("1");
+    gate.changed();
+    const after = gate.begin("1");
+    expect(gate.judge(before, "1")).toBe("stale");
+    expect(gate.judge(after, "1")).toBe("apply");
+    expect(gate.judge(after, "2")).toBe("foreign");
+  });
+
+  it("ends an applied list's follow-ups once a change is accepted (Codex r6 on #508)", () => {
+    const gate = createPageReadGate();
+    const read = gate.begin("1");
+    gate.applied(read);
+    expect(gate.isCurrent(read)).toBe(true);
+    gate.changed();
+    expect(gate.isCurrent(read)).toBe(false);
+    // The read after the change is current again once applied.
+    const next = gate.begin("1");
+    gate.applied(next);
+    expect(gate.isCurrent(next)).toBe(true);
+  });
+
+  it("reports a failure only for the newest read started", () => {
+    const gate = createPageReadGate();
+    const first = gate.begin("1");
+    expect(gate.isNewest(first)).toBe(true);
+    const second = gate.begin("1");
+    expect(gate.isNewest(first)).toBe(false);
+    expect(gate.isNewest(second)).toBe(true);
+  });
+});
+
+function deferredBoolean() {
+  let resolve!: (value: boolean) => void;
+  const promise = new Promise<boolean>((res) => { resolve = res; });
+  return { promise, resolve };
+}
+
+describe("createMonitorQueue (Codex r6/r7 on #508)", () => {
+  it("runs one refresh at a time and ends on the newest input; every run that ran is finished", async () => {
+    const runs: Array<{ input: string; done: ReturnType<typeof deferredBoolean> }> = [];
+    const finished: Array<[string, boolean]> = [];
+    const queue = createMonitorQueue<string>({
+      refresh: (input) => {
+        const done = deferredBoolean();
+        runs.push({ input, done });
+        return done.promise.then((ok) => { if (!ok) throw new Error("location unavailable"); });
+      },
+      runnable: () => true,
+      finished: (input, refreshed) => { finished.push([input, refreshed]); }
+    });
+    expect(queue.engaged()).toBe(false);
+    const first = queue.request("older");
+    expect(queue.engaged()).toBe(true);
+    await Promise.resolve();
+    let middleSettled = false;
+    void queue.request("middle").then(() => { middleSettled = true; });
+    const last = queue.request("newest");
+    // Only the running one has started; the newest replaced the one waiting, which stops waiting.
+    expect(runs.map((run) => run.input)).toEqual(["older"]);
+    await Promise.resolve();
+    expect(middleSettled).toBe(true);
+    runs[0].done.resolve(true);
+    await first;
+    expect(finished).toEqual([["older", true]]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(runs.map((run) => run.input)).toEqual(["older", "newest"]);
+    runs[1].done.resolve(false);
+    await last;
+    expect(finished).toEqual([["older", true], ["newest", false]]);
+  });
+
+  it("starts again for a request made after it drained, and treats a throw as a failed refresh", async () => {
+    const finished: Array<[number, boolean]> = [];
+    const queue = createMonitorQueue<number>({
+      refresh: async (input) => {
+        if (input === 2) throw new Error("location unavailable");
+      },
+      runnable: () => true,
+      finished: (input, refreshed) => { finished.push([input, refreshed]); }
+    });
+    await queue.request(1);
+    await queue.request(2);
+    expect(finished).toEqual([[1, true], [2, false]]);
+  });
+
+  it("checks an input and starts its refresh in one synchronous step (Codex r8 on #508)", async () => {
+    const steps: string[] = [];
+    const first = deferredBoolean();
+    const queue = createMonitorQueue<string>({
+      refresh: (input) => {
+        steps.push(`start ${input}`);
+        return input === "first" ? first.promise : Promise.resolve(true);
+      },
+      runnable: (input) => {
+        steps.push(`check ${input}`);
+        // Anything queued for a microtask after the check runs only after the start.
+        queueMicrotask(() => steps.push("microtask"));
+        return true;
+      },
+      finished: () => undefined
+    });
+    void queue.request("first");
+    await Promise.resolve();
+    const queued = queue.request("queued");
+    first.resolve(true);
+    await queued;
+    expect(steps.slice(0, 2)).toEqual(["check first", "start first"]);
+    const queuedCheck = steps.indexOf("check queued");
+    expect(steps[queuedCheck + 1]).toBe("start queued");
+  });
+
+  it("drops an input that is no longer runnable when its turn comes, and whatever waits on clear (Codex r7 on #508)", async () => {
+    const started: string[] = [];
+    const running = deferredBoolean();
+    let lifetime = "1";
+    const queue = createMonitorQueue<{ name: string; lifetime: string }>({
+      refresh: (input) => {
+        started.push(input.name);
+        return input.name === "first" ? running.promise : Promise.resolve(true);
+      },
+      runnable: (input) => input.lifetime === lifetime,
+      finished: () => undefined
+    });
+    void queue.request({ name: "first", lifetime: "1" });
+    await Promise.resolve();
+    const queued = queue.request({ name: "queued", lifetime: "1" });
+    lifetime = "2";
+    running.resolve(true);
+    await queued;
+    expect(started).toEqual(["first"]);
+    const blocked = deferredBoolean();
+    const queue2 = createMonitorQueue<string>({ refresh: (input) => { started.push(input); return blocked.promise; }, runnable: () => true, finished: () => undefined });
+    void queue2.request("running");
+    await Promise.resolve();
+    const waiting = queue2.request("waiting");
+    queue2.clear();
+    await waiting;
+    blocked.resolve(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["first", "running"]);
+  });
+});
+
+describe("createPlaceRestoreGate (Codex r1 on #508)", () => {
+  it("lets one restore through at a time, and only its own request unlocks it", () => {
+    const gate = createPlaceRestoreGate();
+    const first = gate.take("ws:a");
+    expect(first).not.toBeNull();
+    expect(gate.take("ws:a")).toBeNull();
+    expect(gate.release(first! + 1)).toBe(false);
+    expect(gate.take("ws:a")).toBeNull();
+    expect(gate.release(first!)).toBe(true);
+    expect(gate.take("ws:a")).not.toBeNull();
+  });
+
+  it("is taken over by another account, and the old request's release never frees the new one", () => {
+    const gate = createPlaceRestoreGate();
+    const old = gate.take("ws:a")!;
+    const other = gate.take("ws:b");
+    expect(other).not.toBeNull();
+    expect(gate.release(old)).toBe(false);
+    expect(gate.take("ws:b")).toBeNull();
+  });
+});
+
+describe("restored places waiting for a refresh (Codex r1 on #508)", () => {
+  it("shows them under Saved places until the shown list has them", () => {
+    const pending = [{ id: "p1", name: "Example Gym" }, { id: "p2", name: "Example Studio" }];
+    expect(pendingRestoredRows(pending, [{ id: "p2" }])).toEqual([
+      { id: "p1", name: "Example Gym", subtitle: "Restored · pull to refresh to finish", accessibilityLabel: "Example Gym, restored, pull to refresh to finish" }
+    ]);
+    expect(pendingRestoredRows(pending, [{ id: "p1" }, { id: "p2" }])).toEqual([]);
+  });
+
+  it("says honestly when visits at a restored place aren't noticed yet, and when they are again (Codex r4 on #508)", () => {
+    expect(restoredNotMonitoredMessage("Example Gym")).toBe("Example Gym is restored, but visits there aren't noticed yet. Dayframe will keep trying.");
+    expect(restoredMonitoredMessage("Example Gym")).toBe("Example Gym restored. Visits there are noticed again.");
+  });
+
+  it("says honestly that the restore landed but the list did not", () => {
+    expect(restoredNotRefreshedMessage("Example Gym")).toBe(
+      "Example Gym is restored, but Places couldn't refresh. Pull to refresh to finish; visits there are noticed again once it shows."
+    );
+  });
+});
+
 describe("deleted places hand-off", () => {
   it("tells a page that is already showing", () => {
     const heard: string[] = [];
@@ -116,5 +418,24 @@ describe("placesPageState (staging feedback B2, Codex r1)", () => {
   it("is pending before the first read settles and failed when it did not land", () => {
     expect(placesPageState(false, false)).toBe("pending");
     expect(placesPageState(false, true)).toBe("failed");
+  });
+});
+
+describe("authFailureOpensSignIn (Codex r12 on #508)", () => {
+  it("opens sign-in when signed out or the same account is still active, never for another account", () => {
+    expect(authFailureOpensSignIn("ws:a", null)).toBe(true);
+    expect(authFailureOpensSignIn("ws:a", { userId: "a", workspaceId: "ws" })).toBe(true);
+    expect(authFailureOpensSignIn("ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
+    expect(authFailureOpensSignIn(null, { userId: "b", workspaceId: "ws" })).toBe(true);
+  });
+});
+
+describe("sessionEndOpensSignIn (Codex r13 on #508)", () => {
+  it("opens sign-in for a stale session only when signed out, and for sign-in-again as before", () => {
+    expect(sessionEndOpensSignIn("stale", "ws:a", null)).toBe(true);
+    expect(sessionEndOpensSignIn("stale", "ws:a", { userId: "a", workspaceId: "ws" })).toBe(false);
+    expect(sessionEndOpensSignIn("stale", "ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
+    expect(sessionEndOpensSignIn("auth", "ws:a", { userId: "a", workspaceId: "ws" })).toBe(true);
+    expect(sessionEndOpensSignIn("auth", "ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
   });
 });

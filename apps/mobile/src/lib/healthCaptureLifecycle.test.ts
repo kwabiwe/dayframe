@@ -62,6 +62,42 @@ describe("Health capture lifecycle", () => {
     await expect(observer).resolves.toBe("later");
     expect(sleep).toHaveBeenCalledTimes(2);
   });
+  it("starts a fresh capture only after the running one settles", async () => {
+    const runner = createHealthCaptureCoalescer();
+    const first = deferred<string>();
+    const capture = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue("fresh");
+    const running = runner.run("owner:sleep", capture);
+    const fresh = runner.runFresh("owner:sleep", capture);
+    await Promise.resolve();
+    expect(capture).toHaveBeenCalledTimes(1);
+    first.resolve("old");
+    await expect(running).resolves.toBe("old");
+    await expect(fresh).resolves.toBe("fresh");
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
+  it("schedules no follow-up of its own for a fresh capture that was marked dirty", async () => {
+    vi.useFakeTimers();
+    const runner = createHealthCaptureCoalescer();
+    const capture = vi.fn().mockResolvedValue("fresh");
+    const fresh = runner.runFresh("owner:sleep", capture);
+    void runner.run("owner:sleep", capture, true);
+    await expect(fresh).resolves.toBe("fresh");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
+  it("rejects a fresh capture whose wait was cancelled, without starting it", async () => {
+    const runner = createHealthCaptureCoalescer();
+    const first = deferred<string>();
+    const capture = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue("late");
+    void runner.run("owner:sleep", capture);
+    const controller = new AbortController();
+    const fresh = runner.runFresh("owner:sleep", capture, controller.signal);
+    controller.abort();
+    await expect(fresh).rejects.toMatchObject({ name: "AbortError" });
+    first.resolve("done");
+    await Promise.resolve();
+    expect(capture).toHaveBeenCalledTimes(1);
+  });
   it("retries a dirty type after a failed capture independently of a hung server reprocess", async () => {
     const runner = createHealthCaptureCoalescer();
     const capture = vi

@@ -473,6 +473,7 @@ async function resolveClosedLocationReview(
     (
       action.action === "record_poi_once" &&
       item.status === "accepted" &&
+      await pickedVenueMatches(client, item, action.applePlaceId, session) &&
       await locationEditMatchesExisting(
         client,
         item,
@@ -619,6 +620,25 @@ async function performAction(
     default:
       throw new ReviewResolutionError("invalid_action", "Use the standard review action for this operation.", { status: 400 });
   }
+}
+
+/**
+ * Whether a repeated one-time pick names the venue already kept for this stay (Codex r1 on #519):
+ * a request without a Place ID (an older app) matches as before; one naming another venue does not.
+ */
+async function pickedVenueMatches(
+  client: pg.PoolClient,
+  item: LockedReview,
+  applePlaceId: string | undefined,
+  session: RequestSession
+) {
+  if (!applePlaceId) return true;
+  if (item.segmentKind !== "stay") return false;
+  const stored = await client.query<{ venuePlaceId: string | null }>(
+    `select venue_place_id as "venuePlaceId" from stay_segments where id = $1 and workspace_id = $2 and user_id = $3`,
+    [item.segmentId, session.workspaceId, session.userId]
+  );
+  return stored.rows[0]?.venuePlaceId === applePlaceId;
 }
 
 /**

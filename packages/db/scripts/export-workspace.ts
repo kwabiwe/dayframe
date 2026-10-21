@@ -19,6 +19,9 @@ const tables = [
   "time_entries",
   "time_entry_tags",
   "review_items",
+  // Location stays and moves, including the Apple venue Place IDs kept for stays (location v3 PR 8).
+  "stay_segments",
+  "commute_segments",
   "health_sleep_segments",
   "location_name_patterns",
   "import_runs"

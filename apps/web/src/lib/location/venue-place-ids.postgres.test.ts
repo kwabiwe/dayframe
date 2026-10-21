@@ -70,11 +70,11 @@ describeWithDatabase("venue Place IDs on disposable PostgreSQL (location v3 PR 8
 
   it("stores and clears a suggestion only on the person's own open, unsaved stay", async () => {
     const open = await reviewFor(userId);
-    expect(await setSuggestedVenue(open.reviewId, "ISYNTHETICA", session)).toEqual({ stored: true });
+    expect(await setSuggestedVenue(open.reviewId, "ISYNTHETICA", session)).toBe("stored");
     expect(await suggestion(open.segmentId)).toBe("ISYNTHETICA");
     // Unchanged is still a success; null clears it.
-    expect(await setSuggestedVenue(open.reviewId, "ISYNTHETICA", session)).toEqual({ stored: true });
-    expect(await setSuggestedVenue(open.reviewId, null, session)).toEqual({ stored: true });
+    expect(await setSuggestedVenue(open.reviewId, "ISYNTHETICA", session)).toBe("stored");
+    expect(await setSuggestedVenue(open.reviewId, null, session)).toBe("stored");
     expect(await suggestion(open.segmentId)).toBeNull();
 
     // Someone else in the workspace can't set it.
@@ -91,6 +91,23 @@ describeWithDatabase("venue Place IDs on disposable PostgreSQL (location v3 PR 8
 
     const commute = await reviewFor(userId, { commute: true });
     expect(await setSuggestedVenue(commute.reviewId, "ISYNTHETICE", session)).toBeNull();
+  });
+
+  it("never lands after a concurrent decision: busy while it is held, refused once it commits (Codex r1 on #519)", async () => {
+    const card = await reviewFor(userId);
+    const decision = await database!.connect();
+    try {
+      await decision.query("begin");
+      // A decision holds the card's row, as resolveLocationReviewAction does.
+      await decision.query("select id from review_items where id = $1 for update", [card.reviewId]);
+      expect(await setSuggestedVenue(card.reviewId, "ISYNTHETICRACE", session)).toBe("busy");
+      await decision.query("update review_items set status = 'accepted' where id = $1", [card.reviewId]);
+      await decision.query("commit");
+    } finally {
+      decision.release();
+    }
+    expect(await setSuggestedVenue(card.reviewId, "ISYNTHETICRACE", session)).toBeNull();
+    expect(await suggestion(card.segmentId)).toBeNull();
   });
 
   it("lists venues the person picked within 150 m, newest first, never someone else's, through its index", async () => {

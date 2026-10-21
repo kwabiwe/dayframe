@@ -32,6 +32,7 @@ import {
   createPlace,
   deletePlace,
   fetchBootstrap,
+  setPlaceArchived,
   updatePlace,
   type MobileBootstrap,
   type MobileLearnedPlace,
@@ -51,7 +52,13 @@ import {
 import { friendlyMobileErrorMessage } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces, requestForegroundLocationPermission } from "@/lib/geofence";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
-import { applyPlaceRoleLocally, notePlaceDeleted } from "@/lib/placesPage";
+import {
+  applyPlaceRoleLocally,
+  archivePlaceConfirmCopy,
+  notePlaceDeleted,
+  replacePreviousNote,
+  replacePreviousOffered
+} from "@/lib/placesPage";
 import {
   foregroundLocationPermissionGuidance,
   formatLocationAccuracy,
@@ -138,7 +145,10 @@ export default function PlaceEditorScreen() {
   const [locationPrecise, setLocationPrecise] = useState(true);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [previousRoleName, setPreviousRoleName] = useState<string | null>(null);
+  // "Replace the old place" (PRD D19 A10): archive the old Home/Work when it is within 300 m.
+  const [replacePrevious, setReplacePrevious] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const saveInFlight = useRef(false);
   const mounted = useRef(true);
   useEffect(() => () => {
@@ -239,6 +249,9 @@ export default function PlaceEditorScreen() {
   // The role this place holds (or takes): a Home place gets the Log automatically caution.
   const placeRole = newRole ?? (loadedEntity as MobilePlace | null)?.role ?? null;
   const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
+  // Offered only when the old holder is within 300 m of where this place is now (as on the web);
+  // it appears and goes as the coordinate changes, and the server checks the distance again.
+  const replaceOffered = Boolean(newRole && roleHolder && replacePreviousOffered(roleHolder, formCoordinate));
   const title = mode === "edit"
     ? "Edit place"
     : mode === "learned"
@@ -364,9 +377,10 @@ export default function PlaceEditorScreen() {
             targetId: null,
             holder: roleHolder,
             previousPlaceName: previousRoleName ?? previousRolePlaceName(newRole)
-          }).previousPlaceName
+          }).previousPlaceName,
+          ...(replaceOffered && replacePrevious ? { archivePrevious: true } : {})
         } : undefined;
-        accepted = (await createPlace({
+        const created = (await createPlace({
           learnedPlaceId: mode === "learned" ? params.learnedPlaceId : undefined,
           name: validation.value.name,
           latitude: validation.value.latitude,
@@ -378,7 +392,17 @@ export default function PlaceEditorScreen() {
           defaultCategoryId: loggingEnabled ? validation.value.defaultCategoryId : null,
           defaultActivityDescription: loggingEnabled ? validation.value.defaultActivityDescription : null
         }, newRoleRequest)).place;
-        if (newRoleRequest) roleChange = { role: newRoleRequest.role, placeId: accepted.id, previousPlaceName: newRoleRequest.previousPlaceName ?? null };
+        const { previousArchived, ...createdPlace } = created;
+        accepted = createdPlace;
+        // The server said whether it archived the old holder; the snapshot then drops it too.
+        if (newRoleRequest) {
+          roleChange = {
+            role: newRoleRequest.role,
+            placeId: accepted.id,
+            previousPlaceName: newRoleRequest.previousPlaceName ?? null,
+            archivePrevious: previousArchived === true
+          };
+        }
       }
     } catch (error) {
       saveInFlight.current = false;
@@ -437,7 +461,7 @@ export default function PlaceEditorScreen() {
     confirmSheet.confirm({
       eyebrow: "Place",
       title: `Delete ${placeDisplayName(withRole(place))}?`,
-      message: "Past blocks keep their time but lose this place.",
+      message: "Past blocks keep their time but lose this place. Archive it instead to keep its name on them.",
       confirmLabel: "Delete",
       confirmHint: "This can't be undone.",
       // removePlace re-checks saveInFlight, so a save started meanwhile still wins.
@@ -445,13 +469,28 @@ export default function PlaceEditorScreen() {
     });
   }
 
-  async function removePlace(place: MobilePlace) {
+  /** Archive place (location v3 PR 15b, PRD D19 A10): the gentler way out, undone by Restore. */
+  function confirmArchivePlace() {
+    if (mode !== "edit" || !loadedEntity || saveInFlight.current) return;
+    const place = loadedEntity as MobilePlace;
+    confirmSheet.confirm({
+      ...archivePlaceConfirmCopy(withRole(place)),
+      // Reversible from Places › Archived, so neutral, with no "can't be undone" hint.
+      tone: "neutral",
+      onConfirm: () => void removePlace(place, "archive")
+    });
+  }
+
+  /** Delete or archive: either way the place leaves Places and monitoring once it is accepted. */
+  async function removePlace(place: MobilePlace, how: "delete" | "archive" = "delete") {
     if (saveInFlight.current) return;
     saveInFlight.current = true;
-    setDeleting(true);
+    const setRemoving = how === "archive" ? setArchiving : setDeleting;
+    setRemoving(true);
     const owner = await readActiveMobileAccount();
     try {
-      await deletePlace(place.id);
+      if (how === "archive") await setPlaceArchived(place.id, true);
+      else await deletePlace(place.id);
     } catch (error) {
       saveInFlight.current = false;
       // Signed out (the session was rejected): go to sign-in from this editor even though the
@@ -461,11 +500,15 @@ export default function PlaceEditorScreen() {
         return;
       }
       if (!(await editorStillFor(owner))) return;
-      setDeleting(false);
-      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't delete this place. Try again."));
+      setRemoving(false);
+      Alert.alert("Places", friendlyMobileErrorMessage(
+        error,
+        how === "archive" ? "Couldn't archive this place. Try again." : "Couldn't delete this place. Try again."
+      ));
       return;
     }
-    // Accepted: Places drops the row when it is shown again, even if its own refresh fails.
+    // Accepted: Places drops the row when it is shown again, even if its own refresh fails (an
+    // archived place then shows under Archived from Places' next read).
     if (owner) notePlaceDeleted(mobileAccountKey(owner), place.id);
     if (!(await refreshGeofencesAfterChange((data?.places ?? []).filter((candidate) => candidate.id !== place.id)))) return;
     if (await editorStillFor(owner)) router.back();
@@ -490,7 +533,7 @@ export default function PlaceEditorScreen() {
     : mode === "learned" ? "SUGGESTED PLACE" : "NEW";
   const coordinateProblem = !validation.ok && /Latitude|Longitude/.test(validation.message) ? validation.message : null;
   const radiusProblem = !validation.ok && /Radius/.test(validation.message) ? validation.message : null;
-  const busy = saving || deleting;
+  const busy = saving || deleting || archiving;
   const canSave = validation.ok && !busy && !loading;
 
   return (
@@ -756,6 +799,29 @@ export default function PlaceEditorScreen() {
                     testID="place-editor-previous-role-name"
                     value={previousRoleName ?? previousRolePlaceName(newRole)}
                   />
+                  {replaceOffered ? (
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion)}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                    >
+                      <SettingsBlockRow
+                        control={
+                          <SettingsSwitch
+                            accessibilityHint={replacePreviousNote(newRole)}
+                            label="Replace the old place"
+                            onValueChange={setReplacePrevious}
+                            theme={theme}
+                            value={replacePrevious}
+                          />
+                        }
+                        subtitle={replacePreviousNote(newRole)}
+                        testID="place-editor-replace-previous"
+                        theme={theme}
+                        title="Replace the old place"
+                      />
+                    </Reanimated.View>
+                  ) : null}
                 </SettingsBlockGroup>
               </Reanimated.View>
             ) : null}
@@ -966,7 +1032,24 @@ export default function PlaceEditorScreen() {
             ) : null}
 
             {mode === "edit" && loadedEntity ? (
-              <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
+              <Reanimated.View layout={localLayoutTransition(reduceMotion)} style={editorStyles.endActions}>
+                {/* Archive is the gentler, recommended way out (PRD D19 A10): a neutral pill above
+                    Delete, undone by Restore under Places › Archived. */}
+                <Pressable
+                  accessibilityHint="Keeps its name on past blocks and stops matching new visits. You can restore it."
+                  accessibilityRole="button"
+                  accessibilityState={{ busy: archiving, disabled: busy }}
+                  disabled={busy}
+                  onPress={confirmArchivePlace}
+                  style={({ pressed }) => [
+                    editorStyles.deleteButton,
+                    { backgroundColor: theme.surface, opacity: busy && !archiving ? 0.45 : 1 },
+                    pressed ? { backgroundColor: theme.surfaceMuted } : null
+                  ]}
+                  testID="place-editor-archive"
+                >
+                  <Text {...mobileTextProps("control")} style={[editorStyles.deleteText, { color: theme.textPrimary }]}>{archiving ? "Archiving…" : "Archive place"}</Text>
+                </Pressable>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ busy: deleting, disabled: busy }}
@@ -981,6 +1064,9 @@ export default function PlaceEditorScreen() {
                 >
                   <Text {...mobileTextProps("control")} style={[editorStyles.deleteText, { color: theme.dangerText }]}>{deleting ? "Deleting…" : "Delete place"}</Text>
                 </Pressable>
+                <Text {...mobileTextProps("metadata")} style={[editorStyles.note, editorStyles.endNote, { color: theme.textMuted }]}>
+                  Archiving keeps its name on past blocks; you can restore it from Places. Deleting can&apos;t be undone.
+                </Text>
               </Reanimated.View>
             ) : null}
           </View>
@@ -1073,6 +1159,8 @@ const editorStyles = StyleSheet.create({
   radiusRow: { alignItems: "center", columnGap: 12, flexDirection: "row", flexWrap: "wrap", minHeight: 52, paddingHorizontal: 16, paddingVertical: 6, rowGap: 6 },
   fieldInput: { fontSize: 16, minHeight: 52, paddingHorizontal: 16, paddingVertical: 12 },
   inlineInput: { flex: 1.4, fontSize: 16, minHeight: 44, minWidth: 0, textAlign: "right" },
+  endActions: { gap: 10 },
+  endNote: { marginTop: 0 },
   deleteButton: { alignItems: "center", borderRadius: DAYFRAME_BLOCKS.radius.pill, justifyContent: "center", minHeight: 50 },
   deleteText: { fontSize: 15, fontWeight: "700" }
 });
