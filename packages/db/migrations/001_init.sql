@@ -951,3 +951,10 @@ create index if not exists idx_stay_segments_place_visits
   on stay_segments(workspace_id, user_id, place_id, started_at)
   include (stopped_at)
   where place_id is not null and status <> 'superseded';
+
+-- Keep the clean base fixture aligned with 020_stay_segment_venue_place_ids.sql (venue Place IDs).
+alter table stay_segments add column if not exists venue_place_id text;
+alter table stay_segments add column if not exists suggested_venue_place_id text;
+create index if not exists idx_stay_segments_venue_history
+  on stay_segments using gist(centre)
+  where venue_place_id is not null;

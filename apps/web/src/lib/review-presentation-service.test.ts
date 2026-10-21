@@ -153,6 +153,31 @@ describe("getReviewPresentation", () => {
     expect((await getReviewPresentation(session, request, {}, {})).records[0]).not.toHaveProperty("learnedName");
   });
 
+  it("sends an unsaved stay's Apple venue Place ID only to clients that ask (location v3 PR 8)", async () => {
+    const raw = { ...reviewRow(reviewId), locationSegmentId: "70000000-0000-4000-8000-000000000001", title: "Unknown place",
+      eventType: "visit_detected", timeAwayStopCount: null, routeLabel: null, venuePlaceId: "ISYNTHETICVENUE1" };
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("current_setting")) return { rows: [{ transaction_timeout: null }] };
+      if (sql.includes("with open_reviews")) return { rows: [{ globalCount: 1, todayCount: 1, openReviewItemIds: [reviewId] }] };
+      if (sql.includes("from time_entries te")) return { rows: [] };
+      if (sql.includes("from review_items ri")) {
+        // Only a stay without a saved place carries one: the picked venue first, else the suggestion.
+        expect(sql).toContain("when st.id is not null and st.place_id is null");
+        expect(sql).toContain("coalesce(st.venue_place_id, st.suggested_venue_place_id)");
+        return { rows: [raw] };
+      }
+      return { rows: [] };
+    });
+    mocks.connect.mockResolvedValue({ query, release: vi.fn() });
+    const request = { version: 1 as const, mode: "backlog" as const, timeZone: "Etc/UTC", limit: 100 };
+    const asked = await getReviewPresentation(session, request, {}, { venue: true });
+    expect(asked.records[0]).toMatchObject({ venuePlaceId: "ISYNTHETICVENUE1" });
+    expect(ReviewPresentationResponseSchema.safeParse(asked).success).toBe(true);
+    const older = await getReviewPresentation(session, request, {}, { learnedName: true, outing: true });
+    expect(older.records[0]).not.toHaveProperty("venuePlaceId");
+    expect(ReviewPresentationResponseSchema.safeParse(older).success).toBe(true);
+  });
+
   it("counts cards and sends the outing map only to clients that ask; beyond its limit the counts are not exact (PR 12c)", async () => {
     let stays = [{ member: "71000000-0000-4000-8000-000000000002", stay: "71000000-0000-4000-8000-000000000001" }];
     const query = vi.fn(async (sql: string) => {

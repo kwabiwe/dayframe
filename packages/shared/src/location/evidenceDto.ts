@@ -96,6 +96,16 @@ export const LocationReviewEvidenceDtoSchema = z.object({
     reason: z.enum(["place_transition", "evidence_gap", "movement", "manual"]),
     confidence: z.string()
   })),
+  /**
+   * Apple venues for a stay (location v3 PR 8): the one picked when it was recorded, the one the
+   * iPhone suggested, and those picked within 150 m before (Place IDs only, newest first).
+   * Absent from older servers.
+   */
+  venue: z.object({
+    confirmedPlaceId: z.string().nullable(),
+    suggestedPlaceId: z.string().nullable(),
+    historyPlaceIds: z.array(z.string()).max(20)
+  }).optional(),
   evidenceExpiresAt: z.string().nullable(),
   evidenceExpired: z.boolean(),
   rawEvidenceAvailable: z.boolean(),

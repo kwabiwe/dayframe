@@ -10,6 +10,8 @@ import { placeDisplayNameSql } from "../place-display";
 
 type ReviewSegmentRow = {
   reviewItemId: string;
+  venuePlaceId?: string | null;
+  suggestedVenuePlaceId?: string | null;
   eventId: string;
   title: string;
   notes: string | null;
@@ -84,6 +86,7 @@ type LocationEvidenceTimings = {
   acceptedEvidenceMs?: number;
   rejectedEvidenceMs?: number;
   nearbyPlacesMs?: number;
+  venueHistoryMs?: number;
   assemblyMs?: number;
   totalMs?: number;
 };
@@ -147,6 +150,8 @@ async function buildLocationReviewEvidence(
             case when st.centre is null then null else ST_X(st.centre::geometry) end as "centreLongitude",
             case when st.centre is null then null else ST_Y(st.centre::geometry) end as "centreLatitude",
             st.radius_m as "radiusMeters",
+            st.venue_place_id as "venuePlaceId",
+            st.suggested_venue_place_id as "suggestedVenuePlaceId",
             coalesce(st.confidence, cs.confidence) as confidence,
             coalesce(st.continuity_status, cs.continuity_status) as "continuityStatus",
             coalesce(st.algorithm_version, cs.algorithm_version) as "algorithmVersion",
@@ -182,7 +187,7 @@ async function buildLocationReviewEvidence(
   if (!review) throw new LocationEvidenceNotFoundError("Location review evidence was not found.");
   const kind = review.stayId ? "stay" as const : "commute" as const;
   const centre = point(review.centreLongitude, review.centreLatitude);
-  const [evidenceResult, rejectedResult, nearbyPlaces] = await Promise.all([
+  const [evidenceResult, rejectedResult, nearbyPlaces, venueHistory] = await Promise.all([
     timedPhase(timings, "acceptedEvidenceMs", () => query<EvidenceMapRow>(
       `select le.id,
             le.client_evidence_id as "clientEvidenceId",
@@ -231,7 +236,11 @@ async function buildLocationReviewEvidence(
             centre.coordinates[0]
           )
         )
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    kind === "stay" && centre && review.stayId
+      ? timedPhase(timings, "venueHistoryMs", () => venueHistoryNear(
+          session, review.stayId!, centre.coordinates[1], centre.coordinates[0]))
+      : Promise.resolve([] as string[])
   ]);
   const retained = downsampleEvidence(evidenceResult.rows, 160);
   const assemblyStartedAt = Date.now();
@@ -339,6 +348,13 @@ async function buildLocationReviewEvidence(
     },
     stops,
     suggestedSplitPoints,
+    ...(kind === "stay" ? {
+      venue: {
+        confirmedPlaceId: review.venuePlaceId ?? null,
+        suggestedPlaceId: review.suggestedVenuePlaceId ?? null,
+        historyPlaceIds: venueHistory
+      }
+    } : {}),
     evidenceExpiresAt: expiresAt,
     evidenceExpired,
     rawEvidenceAvailable: expiryRows.length > 0,
@@ -359,6 +375,30 @@ async function buildLocationReviewEvidence(
   const parsed = LocationReviewEvidenceDtoSchema.parse(dto);
   timings.assemblyMs = Date.now() - assemblyStartedAt;
   return parsed;
+}
+
+/** How near a past stay must be for its picked venue to count as "picked here before" (design §8 cell). */
+export const VENUE_HISTORY_RADIUS_METERS = 150;
+
+export const VENUE_HISTORY_SQL = `select venue_place_id as "placeId"
+     from stay_segments
+    where workspace_id = $1 and user_id = $2 and id <> $3
+      and venue_place_id is not null
+      and ST_DWithin(centre, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6)
+    group by venue_place_id
+    order by max(coalesce(stopped_at, started_at)) desc
+    limit 20`;
+
+/**
+ * Apple venues the person picked for their own stays within 150 m of this one, newest first
+ * (location v3 PR 8): Place IDs only, for the iPhone's venue ranker.
+ */
+async function venueHistoryNear(session: RequestSession, stayId: string, latitude: number, longitude: number) {
+  const result = await query<{ placeId: string }>(
+    VENUE_HISTORY_SQL,
+    [session.workspaceId, session.userId, stayId, longitude, latitude, VENUE_HISTORY_RADIUS_METERS]
+  );
+  return result.rows.map((row) => row.placeId);
 }
 
 async function timedPhase<K extends keyof LocationEvidenceTimings, T>(
@@ -387,6 +427,8 @@ function logLocationEvidenceTiming(
     acceptedEvidenceMs: timings.acceptedEvidenceMs ?? null,
     rejectedEvidenceMs: timings.rejectedEvidenceMs ?? null,
     nearbyPlacesMs: timings.nearbyPlacesMs ?? null,
+    // Its duration only: never the Place IDs it read (Codex r1 on #519).
+    venueHistoryMs: timings.venueHistoryMs ?? null,
     assemblyMs: timings.assemblyMs ?? null,
     totalMs: timings.totalMs ?? null,
     acceptedEvidenceCount: evidence?.segment.evidenceCount ?? null,

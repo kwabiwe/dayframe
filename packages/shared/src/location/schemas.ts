@@ -196,6 +196,12 @@ export const REVIEW_COUNT_CARDS = "cards";
 /** Asks the location replay reply to carry `semanticChangeCount` (see `LocationReplayResponseSchema`). */
 export const SEMANTIC_CHANGE_COUNT_REQUEST_HEADER = "x-dayframe-semantic-change-count";
 
+/**
+ * An Apple Place ID (MKMapItem.Identifier): opaque, printable, no spaces. Dayframe stores these
+ * and never Apple's names, addresses or coordinates (PRD D19 A7, design §14).
+ */
+export const ApplePlaceIdSchema = z.string().trim().min(1).max(200).regex(/^[\x21-\x7e]+$/);
+
 export const ReviewEntryEditSchema = z
   .object({
     categoryId: z.string().uuid().nullable().optional(),
@@ -229,7 +235,9 @@ export const ChangePlaceAndConfirmSchema = z.object({
 }).strict();
 export const RecordOnceLocationReviewSchema = z.object({ action: z.literal("record_once"), edit: ReviewEntryEditSchema.optional() }).strict();
 export const RecordPoiOnceLocationReviewSchema = z.object({
-  action: z.literal("record_poi_once"), name: z.string().trim().min(1).max(120), edit: ReviewEntryEditSchema.optional()
+  action: z.literal("record_poi_once"), name: z.string().trim().min(1).max(120), edit: ReviewEntryEditSchema.optional(),
+  /** The picked Apple venue's Place ID (location v3 PR 8); older apps omit it. */
+  applePlaceId: ApplePlaceIdSchema.optional()
 }).strict();
 export const SavePlaceAndConfirmSchema = z.object({
   action: z.literal("save_place_and_confirm"), name: z.string().trim().min(1).max(120),
@@ -237,7 +245,9 @@ export const SavePlaceAndConfirmSchema = z.object({
   radiusMeters: z.number().int().min(30).max(200).default(80), edit: ReviewEntryEditSchema.optional(),
   /** The place's "Suggest visits here" and "Log automatically" (web's Save this place box, PRD D19); older apps omit them. */
   suggestVisits: z.boolean().optional(),
-  autoLog: z.boolean().optional()
+  autoLog: z.boolean().optional(),
+  /** The picked Apple venue's Place ID (location v3 PR 8); older apps and a search or pin omit it. */
+  applePlaceId: ApplePlaceIdSchema.optional()
 }).strict();
 /** A saved place's size for "Save this place" (PRD D19, design §7): the circle around where you were. */
 export const SAVE_PLACE_RADIUS_METERS = { small: 60, medium: 110, large: 200 } as const;
