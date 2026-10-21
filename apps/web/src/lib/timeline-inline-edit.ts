@@ -102,11 +102,10 @@ export function buildTimelineInlineSavePlan(
 ): CalendarEntryCompactSavePlan {
   // Saving commits typed times with the shared reader (`15:1` → 15:10; owner, 15 Oct 2026).
   const normalized = normalizeCalendarEntryCompactTypedTimes(typedEdit.draft);
-  // Shorthand ("21:3", "6") reads its day only once committed (Codex r2 on #504).
-  const edit = {
-    ...typedEdit,
-    draft: typedEdit.finishTyped && !typedEdit.finishDateChosen ? inferTypedFinishDate(normalized) : normalized
-  };
+  // Shorthand ("21:3", "6", "23:3") reads its day, and a Start past End carries End, only once
+  // committed (Codex r2/r3 on #504): the same rules as a complete time typed live.
+  const inferred = typedEdit.finishTyped && !typedEdit.finishDateChosen ? inferTypedFinishDate(normalized) : normalized;
+  const edit = { ...typedEdit, draft: committedInlineDraft(typedEdit, inferred) };
   if (edit.field === "time") {
     const sourceEntry: TimeEntryRow = {
       ...entry,
@@ -147,6 +146,13 @@ export function buildTimelineInlineSavePlan(
     entry,
     now
   });
+}
+
+function committedInlineDraft(edit: TimelineInlineEditDraft, draft: CalendarEntryCompactDraft): CalendarEntryCompactDraft {
+  if (edit.field !== "time" || !edit.sourceStoppedAt || !edit.dirty.startedAtTime) return draft;
+  const source = { originalStartedAt: edit.sourceStartedAt, originalStoppedAt: edit.sourceStoppedAt };
+  if (trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "finish" }, owner: "finish" })) return draft;
+  return trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "start" }, owner: "start" }) ?? draft;
 }
 
 function updateTimelineInlineTemporalEdge(

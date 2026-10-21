@@ -125,4 +125,13 @@ describe("typed edits stay within 24 h (Codex r1 on #504)", () => {
     const six = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "finish", "6");
     expect(buildTimelineInlineSavePlan(six, hour, new Date(2026, 7, 4)).payload).toEqual({ stoppedAt: new Date(2026, 7, 3, 6, 0).toISOString() });
   });
+
+  it("carries End with a committed shorthand Start past it (Codex r3 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    const edit = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "23:3");
+    expect(buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4)).payload).toEqual({
+      startedAt: new Date(2026, 7, 2, 23, 30).toISOString(),
+      stoppedAt: new Date(2026, 7, 3, 0, 30).toISOString()
+    });
+  });
 });
