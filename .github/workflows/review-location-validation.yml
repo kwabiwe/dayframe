@@ -91,6 +91,8 @@ jobs:
       fail-fast: false
       matrix:
         schema: [base, ordered]
+    env:
+      CONTAINER: dayframe-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.schema }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,8 +105,6 @@ jobs:
       # A disposable PostGIS container on a free port, so the same steps run on GitHub's Ubuntu runners
       # and on the self-hosted Mac mini (service containers exist only on Linux runners).
       - name: Start disposable PostGIS
-        env:
-          CONTAINER: dayframe-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.schema }}
         run: |
           docker run -d --name "$CONTAINER" -e POSTGRES_USER=dayframe -e POSTGRES_PASSWORD=dayframe \
             -e POSTGRES_DB=dayframe_ci_test -p 127.0.0.1::5432 postgis/postgis:16-3.4
@@ -116,7 +116,6 @@ jobs:
           done
           docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U dayframe -d dayframe_ci_test
           port=$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
-          echo "CONTAINER=$CONTAINER" >> "$GITHUB_ENV"
           echo "DATABASE_URL=postgres://dayframe:dayframe@127.0.0.1:$port/dayframe_ci_test" >> "$GITHUB_ENV"
       - run: npx tsx scripts/setup-validation-db.ts ${{ matrix.schema }}
       - name: Integration token access control
@@ -173,9 +172,10 @@ jobs:
         env:
           DAYFRAME_LOCATION_GROUPS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-groups.postgres.test.ts
+      # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
-        if: ${{ always() && env.CONTAINER != '' }}
-        run: docker rm -f "$CONTAINER" >/dev/null
+        if: always()
+        run: docker rm -fv "$CONTAINER" >/dev/null 2>&1 || true
 
   clean-ios-simulator:
     name: Clean iOS Simulator
