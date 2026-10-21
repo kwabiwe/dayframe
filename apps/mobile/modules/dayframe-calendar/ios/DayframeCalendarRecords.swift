@@ -60,7 +60,19 @@ struct DayframeCalendarEntryRecord: Codable {
   var zIndex = 0
 }
 
+/// A named pattern's bracket (location v3 PR 14b): React finds the trip; Swift only draws it.
+struct DayframeCalendarBracketRecord: Codable {
+  var key = ""
+  /// The parts' entry ids: the bracket is drawn from their blocks as laid out.
+  var memberIds: [String] = []
+  var name = ""
+  var startedAtMs: Double = 0
+  var stoppedAtMs: Double = 0
+}
+
 struct DayframeCalendarPresentationRecord: Codable {
+  /// Named patterns on the day; a model without them (an older bundle) draws none.
+  var brackets: [DayframeCalendarBracketRecord]?
   var dayEndMs: Double = 0
   var dayStartMs: Double = 0
   var emptyState = "No tracked time for this day."

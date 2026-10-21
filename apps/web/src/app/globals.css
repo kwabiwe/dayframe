@@ -9294,6 +9294,50 @@ dialog.ui-dialog.df-palette {
 }
 
 /*
+ * Named patterns on Calendar (location v3 PR 14b): a light "[" from a trip's first part's start to
+ * its last part's end, its name running down beside it, in the rail a bracketed day keeps left of
+ * its blocks (`calendarBracketRailPx`). Under the blocks, never hit-tested and hidden from assistive
+ * technology (each part's own name says which trip it is part of). No motion of its own: it comes
+ * and goes with its parts.
+ */
+.df-cal-bracket {
+  position: absolute;
+  z-index: 1;
+  left: 2px;
+  width: 15px;
+  pointer-events: none;
+}
+
+.df-cal-bracket::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 3px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--text-muted);
+  border-right: 0;
+  content: "";
+}
+
+.df-cal-bracket-label {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 11px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  font-weight: 650;
+  line-height: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: vertical-rl;
+}
+
+/*
  * Layers in a day column: entries (lane z-index 2 + lane), then Review suggestions in their lane,
  * then the now line; a hovered, selected or resizing entry rises above the suggestions.
  */
