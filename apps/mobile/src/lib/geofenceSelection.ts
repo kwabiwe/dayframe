@@ -12,6 +12,10 @@ export const IOS_GEOFENCE_LIMIT = 20;
 export const GEOFENCE_REFRESH_MIN_RADIUS_METERS = 500;
 // When no other place is near, a long drive still re-picks at least every 20 km.
 export const GEOFENCE_REFRESH_MAX_RADIUS_METERS = 20_000;
+// A kept refresh circle may differ from the radius the current catalogue needs by this much: it
+// absorbs rounding and edits of a few metres, never a circle 50 m wider than the gap to the nearest
+// unwatched place (or 50 m narrower than it needs to be, which only re-picks early).
+export const GEOFENCE_REFRESH_RADIUS_TOLERANCE_METERS = 50;
 // A position older or vaguer than this does not re-pick (the watched set stays as it is).
 export const GEOFENCE_POSITION_MAX_AGE_MS = 15 * 60_000;
 export const GEOFENCE_POSITION_MAX_ACCURACY_METERS = 1_500;
@@ -73,20 +77,28 @@ export function selectGeofencePlaces<T extends GeofenceCandidate>(
     .sort((left, right) => left.edge - right.edge || left.centre - right.centre || byPriority(left.place, right.place));
   const nearestCount = Math.max(0, slots - chosenRoles.length);
   const chosen = [...chosenRoles, ...ranked.slice(0, nearestCount).map((item) => item.place)];
-  // The circle reaches the nearest place that is not watched, so the phone leaves it before it can
-  // enter an unwatched place (unless the minimum radius is wider than that gap).
-  const firstUnwatched = ranked[nearestCount];
-  const radiusMeters = clamp(
-    Math.round(firstUnwatched ? firstUnwatched.edge : GEOFENCE_REFRESH_MAX_RADIUS_METERS),
-    GEOFENCE_REFRESH_MIN_RADIUS_METERS,
-    GEOFENCE_REFRESH_MAX_RADIUS_METERS
-  );
+  const unwatched = monitorable.filter((place) => !chosen.includes(place));
   return {
     mode: "nearest",
     places: chosen,
-    unwatched: monitorable.filter((place) => !chosen.includes(place)),
-    refresh: { latitude: position.latitude, longitude: position.longitude, radiusMeters }
+    unwatched,
+    refresh: { latitude: position.latitude, longitude: position.longitude, radiusMeters: refreshRadiusFor(position, unwatched) }
   };
+}
+
+/**
+ * The refresh circle's radius around `centre`: it reaches the nearest unwatched place (to its
+ * circle's edge), so the phone leaves it before it can enter an unwatched place, unless the
+ * minimum radius is wider than that gap.
+ */
+export function refreshRadiusFor(centre: GeofencePosition, unwatched: GeofenceCandidate[]) {
+  let nearestEdge = GEOFENCE_REFRESH_MAX_RADIUS_METERS;
+  for (const place of unwatched) {
+    const edge = distanceMeters(centre.latitude, centre.longitude, place.latitude, place.longitude) -
+      normalizedGeofenceRadius(place.radiusMeters);
+    if (Number.isFinite(edge)) nearestEdge = Math.min(nearestEdge, Math.max(0, edge));
+  }
+  return clamp(Math.round(nearestEdge), GEOFENCE_REFRESH_MIN_RADIUS_METERS, GEOFENCE_REFRESH_MAX_RADIUS_METERS);
 }
 
 /** True when the position is inside (or on the edge of) the refresh circle. */

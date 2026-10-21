@@ -761,6 +761,23 @@ describe("nearest-place geofences (location v3 PR 16b)", () => {
     expect(registered(1).at(-1)).toMatchObject({ identifier: "capture-test:nearest-refresh", latitude: 10.03 });
   });
 
+  it("Codex r1 #5: re-fits the refresh circle when an unwatched place moves closer", async () => {
+    // 19 places within about 420 m of the phone, 6 more a long way off: a 20 km circle.
+    const near = Array.from({ length: 19 }, (_, index) => nearbyPlace(index + 1, { latitude: 10 + (index + 1) * 0.0002 }));
+    const far = Array.from({ length: 6 }, (_, index) => nearbyPlace(index + 40, { latitude: 11 }));
+    phoneAt(10);
+    await startGeofences([...near, ...far]);
+    expect(registered().at(-1)).toMatchObject({ identifier: "capture-test:nearest-refresh", radius: 20_000 });
+    // One far place is edited to about 667 m away (567 m to its circle): still unwatched, but the
+    // circle must now end there.
+    const edited = [...near, { ...far[0], latitude: 10.006 }, ...far.slice(1)];
+    await startGeofences(edited);
+    expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+    expect(registered(1).slice(0, 19)).toEqual(registered(0).slice(0, 19));
+    expect(registered(1).at(-1)!.radius).toBeGreaterThanOrEqual(560);
+    expect(registered(1).at(-1)!.radius).toBeLessThanOrEqual(570);
+  });
+
   it("keeps the current circle's set when the position is unknown later, rather than reverting to priority", async () => {
     const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
     phoneAt(10.03);

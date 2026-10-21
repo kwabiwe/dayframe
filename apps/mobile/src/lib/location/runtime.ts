@@ -349,8 +349,10 @@ async function drainNativeLocationSignalsUnsafe(limit = 100,
   const result = await persistLocationEvidence(evidence, capture);
   // Both acceptance and deliberate discard have committed before native clear.
   await native.clearSignals(signals.map(signal => signal.id));
+  // Only admitted signals (after the binding's cutoff, for this owner) may move the watched places.
+  const admitted = new Set(result.admittedIds);
   return { transferredCount: result.insertedCount, drainedCount: signals.length, pendingAccount: false,
-    ...nativePositionSignals(evidence) };
+    ...nativePositionSignals(evidence.filter(item => admitted.has(item.clientEvidenceId))) };
 }
 
 type NativePositionSignal = { at: number; fix: GeofencePositionFix | null };
@@ -385,6 +387,14 @@ async function drainNativeLocationSignalsInBatchesUnsafe(captured = captureLocat
   // Motion & Fitness history joins the same wake, after native signals; a
   // failure there never fails the drain.
   if (!result.pendingAccount) await captureMotionActivitySafelyUnsafe(await captured);
+  // Every drain (task wakes, bootstrap, foreground sync) lets an admitted Visit or significant
+  // change pick the nearest saved places again, in this same lane; it never fails the drain.
+  if (!result.pendingAccount && result.positionSignalCount > 0) {
+    await import("../geofence")
+      .then(geofence => geofence.refreshNearestGeofencesInLifecycleLane(captured, "visit_or_significant_change",
+        result.latestPositionFix ? [result.latestPositionFix] : []))
+      .catch(() => undefined);
+  }
   return result;
 }
 async function drainNativeSignalPassesUnsafe(captured: Promise<LocationCaptureSnapshot>) {

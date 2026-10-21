@@ -1055,6 +1055,71 @@ describe("nearest-place geofences on task wakes (location v3 PR 16b)", () => {
     expect(h.nativeCalls.slice(-8)).toContain("expo:stopGeofencing");
   });
 
+  it("Codex r1 #1: readings the capture boundary rejected never move the watched places", async () => {
+    await signIn(A, grid);
+    const count = registrations().length;
+    // An Expo reading from before this capture lifetime, still recent by age.
+    vi.setSystemTime(T0 + 30_000);
+    await learningTask()({ data: { locations: [at(10.025, T0 - 30_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    // A native Visit that began before the binding (rejected as before_binding) though iOS reported
+    // it afterwards.
+    await signInNearThirdPlace();
+    const after = registrations().length;
+    vi.setSystemTime(T0 + 120_000);
+    h.nativeSignals.push({ id: "visit-pre-binding", kind: "visit", occurredAt: new Date(T0 - 600_000).toISOString(), endedAt: null,
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 40,
+      metadata: { visitDepartureOpen: "true", nativeCallbackAt: new Date(T0 + 100_000).toISOString() } });
+    await learningTask()({ data: { locations: [] }, error: null });
+    expect(h.nativeSignals).toEqual([]);
+    expect(registrations()).toHaveLength(after);
+  });
+
+  it("Codex r1 #2: a wake captured before a Places edit re-picks from the edited catalogue", async () => {
+    await signInNearThirdPlace();
+    const gate = deferred();
+    const hold = runtime.withLocationCaptureLifecycle(() => gate.promise);
+    const evidenceRows = rows().length;
+    vi.setSystemTime(T0 + 120_000);
+    const wake = learningTask()({ data: { locations: [at(10.025, T0 + 120_000)] }, error: null });
+    // The wake has captured its owner (and 25 places) and stored its reading.
+    await vi.waitFor(() => expect(rows()).toHaveLength(evidenceRows + 1));
+    const edit = geofence.refreshGeofencesForPlaces(grid.slice(0, 20), A);
+    gate.resolve();
+    await hold; await edit; await wake; await settle();
+    expect(lastRegistration()).toHaveLength(20);
+    expect(lastRegistration().some((identifier) => identifier.endsWith(":nearest-refresh"))).toBe(false);
+    expect(lastRegistration().some((identifier) => identifier.endsWith(grid[24].id))).toBe(false);
+  });
+
+  it("Codex r1 #3: a wake with an older reading cannot move the set back after a newer one", async () => {
+    const binding = await signInNearThirdPlace();
+    vi.setSystemTime(T0 + 200_000);
+    await learningTask()({ data: { locations: [at(10.025, T0 + 200_000)] }, error: null });
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    const count = registrations().length;
+    // Delivered later, but read earlier than the reading the selection already used.
+    await learningTask()({ data: { locations: [at(10.001, T0 + 150_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+  });
+
+  it("Codex r1 #4: a foreground sync or bootstrap drain re-picks from a drained significant change", async () => {
+    const binding = await signInNearThirdPlace();
+    vi.setSystemTime(T0 + 120_000);
+    h.nativeSignals.push({ id: "slc-foreground", kind: "significant_change", occurredAt: new Date(T0 + 110_000).toISOString(),
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+    expect(h.nativeSignals).toEqual([]);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    vi.setSystemTime(T0 + 240_000);
+    h.nativeSignals.push({ id: "slc-bootstrap", kind: "significant_change", occurredAt: new Date(T0 + 230_000).toISOString(),
+      latitude: 10.001, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await runtime.configureLocationIntelligence(bootstrap(A, grid));
+    expect(h.nativeSignals).toEqual([]);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[0].id}`);
+  });
+
   it("logout removes the refresh circle with the other regions, and a late exit for it re-registers nothing", async () => {
     const binding = await signInNearThirdPlace();
     await signOut("logout");
