@@ -33,6 +33,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   "app/settings.tsx": [
     '"Unable to refresh Settings"',
     '"Apple Health"', // mapping save failed (the one Health mapping writer)
+    '"Tracking notice"', // switch not saved
     '"Evening reminder"', // change failed
     '"Log trips automatically"', // switch not saved (PRD D19, A4)
     '"Your day"', // goal not saved

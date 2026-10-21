@@ -53,7 +53,8 @@ export function subscribeReviewNudgeOpens(onOpen: (accountKey: string | null) =>
 
 /**
  * Shows the reminder even while Dayframe is open (iOS otherwise drops it), but only when it
- * belongs to the signed-in account. Dayframe sends no other notifications.
+ * belongs to the signed-in account. The only other notification, the tracking-stopped notice
+ * (`trackingNotice.ts`), is posted while iOS ends Dayframe, so it never reaches this handler.
  */
 export function installReviewNudgeForegroundHandler(isCurrentAccount: (accountKey: string | null) => Promise<boolean>) {
   Notifications.setNotificationHandler({

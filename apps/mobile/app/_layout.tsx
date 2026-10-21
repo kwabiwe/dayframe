@@ -14,10 +14,15 @@ import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { createNavigationColors } from "@/lib/navigationTheme";
 import { primeSettingsLastKnown } from "@/lib/settingsLastKnown";
 import { installHealthBackgroundSync } from "@/lib/healthBackgroundSync";
+import { installTrackingNotice } from "@/lib/trackingNotice";
 
 // Apple Health wakes (new sleep or workouts, or a background app refresh) are handled from module
 // evaluation, so a cold background launch captures and uploads without any screen becoming active.
 installHealthBackgroundSync();
+
+// The tracking-stopped notice's armed flag is kept current from module evaluation (headless
+// launches included), because iOS reads it natively while ending Dayframe.
+installTrackingNotice();
 
 // A4 (Codex r1 on #365): Settings' last-known display values start loading when this module is
 // evaluated, before any screen renders, so Settings opened by the user finds them ready on its

@@ -11,6 +11,7 @@ import {
   setReviewNudgeMinutes,
   type ReviewNudgeState
 } from "@/lib/reviewNudge";
+import { readTrackingNoticeEnabled, setTrackingNoticeEnabled } from "@/lib/trackingNotice";
 import type { ReviewNudgePermission } from "@/lib/reviewNudgeNative";
 import { synchroniseDeviceNow, getLastManualSyncResult } from "@/lib/manualSyncRuntime";
 import { createOwnerSyncCoalescer } from "@/lib/ownerSyncCoalescer";
@@ -811,9 +812,49 @@ export default function SettingsScreen() {
     return () => subscription.remove();
   }, [refreshReviewNudge, transitionReady]);
 
+  // The tracking-stopped notice: this iPhone's switch, shown on only while notifications are
+  // allowed (the same iOS permission the evening reminder reads above).
+  const [trackingNotice, setTrackingNotice] = useRememberedSettingsState<boolean | null>("trackingNotice", null);
+  const [trackingNoticeBusy, setTrackingNoticeBusy] = useState(false);
+  useEffect(() => {
+    if (!transitionReady) return;
+    const read = async () => {
+      const startedFor = await beginRememberedSettingsRead();
+      const enabled = await readTrackingNoticeEnabled().catch(() => null);
+      if (enabled !== null) setTrackingNotice(enabled, startedFor);
+    };
+    void read();
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") void read(); });
+    return () => subscription.remove();
+  }, [setTrackingNotice, transitionReady]);
+
+  async function toggleTrackingNotice(enabled: boolean) {
+    if (trackingNoticeBusy) return;
+    setTrackingNoticeBusy(true);
+    try {
+      const startedFor = await beginRememberedSettingsRead();
+      if (enabled) {
+        // iOS asks once; after that the choice lives in iPhone Settings.
+        const nativeModule = await import("@/lib/reviewNudgeNative").catch(() => null);
+        if (!nativeModule) return;
+        let permission = await nativeModule.readReviewNudgePermission().catch(() => "denied" as const);
+        if (permission === "undetermined") permission = await nativeModule.requestReviewNudgePermission().catch(() => "denied" as const);
+        setNudgePermission(permission, startedFor);
+        if (permission !== "granted") return;
+      }
+      await setTrackingNoticeEnabled(enabled);
+      setTrackingNotice(enabled, startedFor);
+    } catch {
+      Alert.alert("Tracking notice", "The notice couldn't be changed. Try again.");
+    } finally {
+      setTrackingNoticeBusy(false);
+    }
+  }
+
   // Display only (A4): the live reminder once read, otherwise the last-known one.
   const shownReviewNudge = reviewNudge ? { enabled: reviewNudge.enabled, minutes: reviewNudge.minutes } : lastKnown?.reviewNudge ?? null;
   const shownNudgePermission = nudgePermission ?? lastKnown?.nudgePermission ?? null;
+  const shownTrackingNotice = trackingNotice ?? lastKnown?.trackingNotice ?? null;
   const shownReviewNudgeOn = Boolean(shownReviewNudge?.enabled) && shownNudgePermission === "granted";
 
   async function changeReviewNudge(change: (owner: MobileAccountOwner) => Promise<ReviewNudgeState>) {
@@ -2813,6 +2854,31 @@ export default function SettingsScreen() {
                   testID="location-access"
                   theme={theme}
                   title="Location"
+                />
+                <SettingsBlockRow
+                  control={shownNudgePermission === "denied" ? (
+                    <SettingsPillButton
+                      accessibilityLabel="Open iPhone Settings to allow notifications"
+                      label="Open Settings"
+                      onPress={() => void Linking.openSettings()}
+                      theme={theme}
+                    />
+                  ) : (
+                    <SettingsSwitch
+                      disabled={trackingNotice === null || trackingNoticeBusy}
+                      label="Tell me if tracking stops"
+                      // Acts only on this visit's live read (a last-known value is display only).
+                      onValueChange={(enabled) => void toggleTrackingNotice(enabled)}
+                      theme={theme}
+                      value={shownTrackingNotice === true && shownNudgePermission === "granted"}
+                    />
+                  )}
+                  subtitle={shownNudgePermission === "denied"
+                    ? "Notifications are off in iPhone Settings"
+                    : "One notice, at most once a day, if Dayframe is closed while tracking"}
+                  testID="location-tracking-notice"
+                  theme={theme}
+                  title="Tell me if tracking stops"
                 />
               </SettingsBlockGroup>
 

@@ -75,6 +75,20 @@ When changing place roles, role labels or any read path that shows a saved place
 - Run `npx vitest run src/lib/reviewNudge.test.ts` in `apps/mobile` (time today/tomorrow, once a day, stale counts, permission, account fence, ordering) and the route tests for `/api/events`, `/api/location/evidence` and `/api/location/replay` plus `src/lib/review-count.test.ts` in `apps/web` (count only for app sessions; replay only when asked; a slow or failed count is left out).
 - Native module change: `pod install` (Xcode 26.6, `LANG=en_US.UTF-8`), a full Debug simulator build, then on the simulator turn the reminder on with suggestions waiting and confirm it is scheduled for the chosen time; to see one arrive, temporarily (never committed) let the planner fire a minute ahead, confirm one notification with the count and no place, and that tapping it opens Review. On a staging phone confirm the permission prompt, the notification and that an older installed build still syncs location against the new server.
 
+## Tracking-stopped notice (iPhone)
+
+- Run `npx vitest run src/lib/trackingNotice.test.ts` in `apps/mobile` (arming inputs, default on, app-state recompute, sign-out disarm, failed read) and `swift test` in `apps/mobile/modules/dayframe-tracking-notice` (Always access, 24-hour limit, clock moved back).
+- Native module change: `pod install` (Xcode 26.6, `LANG=en_US.UTF-8`) and a full Debug Simulator build. The Simulator cannot prove the notice: termination behaviour needs a physical iPhone.
+- Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN` for each:
+  1. With location suggestions on, Location set to Always and notifications allowed, open Dayframe, then close it from the app switcher. One notification reads "Dayframe isn't tracking locations — open it to resume", with no sound.
+  2. Background first: send Dayframe to the background, use other apps for a minute, then close it from the app switcher. The notice arrives (continuous location keeps Dayframe running, so iOS reports the close).
+  3. Once a day: reopen and close it again within 24 hours; no second notice.
+  4. Reopening Dayframe removes the notice from Notification Center.
+  5. Off switch: Settings › Location › Tell me if tracking stops off, close from the app switcher; no notice. Turned back on, the next close (after 24 hours) notifies again.
+  6. No notice when it doesn't apply: location suggestions off, Location not Always, notifications denied (the row shows Open Settings), or signed out.
+  7. Permission: with notifications never asked, turning the switch on shows the iOS prompt once; refusing leaves it off.
+  8. Limitation, recorded not failed: when iOS has suspended Dayframe (location off or paused) a close from the app switcher sends nothing; when iOS itself ends Dayframe, location relaunches it and tracking resumes, so no notice is expected.
+
 ## Today in Blocks (iPhone)
 
 - Unit: `apps/mobile/src/components/accessibility/TodayTimerSurface.test.tsx` (labels, caps, on-block colours in both themes, Switch/Recording tiles, no duplicate start), `src/lib/quickStartMosaic.test.ts` (week window, ranking, flush columns), `src/lib/blocksMotion.test.tsx` (landing once per token, no replay, Reduce Motion opacity only, 2.4 s ring), `src/lib/haptics.test.ts` (moment map, one Stop composite, Settings switch).
