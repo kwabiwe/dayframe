@@ -218,7 +218,7 @@ function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCate
   if (isTimeAwayReviewItem(item) && !item.rawPayload?.routeLabel) return undefined;
   if (item.eventType === "commute_detected") {
     // Only a Commute (Home ↔ Work, or an older server's journey) falls back to Commute; every other
-    // Move to Travel (PRD D19).
+    // Move to Getting around (PRD D19).
     const name = item.title?.trim() === "Commute" || !item.rawPayload?.routeLabel ? "commute" : "travel";
     return categories.find((candidate) => candidate.name.trim().toLowerCase() === name);
   }
