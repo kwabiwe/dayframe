@@ -179,6 +179,52 @@ describe("TodayBlockRows", () => {
     expect(props.onDeleteEntries).not.toHaveBeenCalled();
   });
 
+  describe("a named pattern (location v3 PR 14)", () => {
+    const travel = { description: null, categoryId: "travel", categoryName: "Travel", categoryColor: "slate" };
+    const parts = () => [
+      entry("back", at(8, 30), at(8, 40), travel),
+      entry("stay", at(8, 10), at(8, 30), { description: "School", categoryId: "errands", categoryName: "Errands" }),
+      entry("there", at(8, 0), at(8, 10), travel)
+    ];
+    const named = (items = parts()) => {
+      const seconds = [600, 1200, 600];
+      const entries = items.map((value: any, index: number) => ({ entry: value, overlapSeconds: seconds[index] ?? 600 }));
+      return { entries, key: "named:named:stay", name: "School run", representative: entries[0],
+        totalSeconds: entries.reduce((sum: number, item: { overlapSeconds: number }) => sum + item.overlapSeconds, 0) } as HistoryEntryGroup;
+    };
+
+    it("reads as its name, with its whole time, its parts and a strip of them", () => {
+      const { tree } = render([named()]);
+      const row = tree.root.findByProps({ testID: "today-block-row-back" });
+      const texts = row.findAllByType("Text" as never).map((node) => node.props.children);
+      expect(texts).toContain("School run");
+      expect(texts).toContain("08:00–08:40 · 3 parts");
+      expect(texts).toContain("40m");
+      expect(tree.root.findByProps({ testID: "today-block-parts" }).props.children).toHaveLength(3);
+      expect(row.props.accessibilityLabel).toBe("Expand School run, 3 parts. School run, 08:00 to 08:40, Travel, then School, then Travel, 40 minutes");
+    });
+
+    it("offers no Start again, by swipe or by VoiceOver, and deletes all its parts at once", () => {
+      const items = parts();
+      const { props, tree } = render([named(items)]);
+      swipe(0, 300);
+      expect(props.onReplayEntry).not.toHaveBeenCalled();
+      const row = tree.root.findByProps({ testID: "today-block-row-back" });
+      expect(row.props.accessibilityActions.map((action: { name: string }) => action.name)).toEqual(["delete"]);
+      swipe(0, -150);
+      expect(props.onDeleteEntries).toHaveBeenCalledWith(items);
+    });
+
+    it("opens to its parts, each its own block", () => {
+      const items = parts();
+      const { props, tree } = render([named(items)]);
+      act(() => tree.root.findByProps({ testID: "today-block-row-back" }).props.onPress());
+      expect(tree.root.findByProps({ testID: "today-block-children-named:named:stay" })).toBeTruthy();
+      act(() => tree.root.findByProps({ testID: "today-block-child-stay" }).props.onPress());
+      expect(props.onOpenEntry).toHaveBeenCalledWith(items[1]);
+    });
+  });
+
   it("says a group's count once to VoiceOver", () => {
     const { tree } = render([group(entry("a", at(8), at(9)), entry("b", at(10), at(11)))]);
     const label = tree.root.findByProps({ testID: "today-block-row-a" }).props.accessibilityLabel as string;

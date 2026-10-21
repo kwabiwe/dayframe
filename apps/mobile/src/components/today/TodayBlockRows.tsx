@@ -13,7 +13,7 @@ import Reanimated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS } from "@dayframe/shared";
+import { blockColorsFor, DAYFRAME_APP_ICONS, DAYFRAME_BLOCKS } from "@dayframe/shared";
 import type { MobileTimeEntry } from "../../lib/api";
 import { BLOCKS_SPRING, POP_REQUEST_TTL_MS, type LandingRequest } from "../../lib/blocksMotion";
 import { rowFlightNode } from "../../lib/stopFlight";
@@ -131,6 +131,8 @@ export function TodayBlockRows({
         ) : groups.map((group, index) => {
           const grouped = group.entries.length > 1;
           const isExpanded = grouped && expanded.has(group.key);
+          // A named A → B → A (location v3 PR 14): its name, a strip of its parts, never started again.
+          const named = Boolean(group.name);
           return (
             <Reanimated.View entering={entering} exiting={exiting} key={group.key} layout={layout}>
               <TodayBlockRow
@@ -145,6 +147,9 @@ export function TodayBlockRows({
                 expanded={grouped ? isExpanded : undefined}
                 icon={activityIconFor(group.representative.entry.categoryId)}
                 meta={rowMeta(group, nowMs, clockFormat)}
+                parts={named ? [...group.entries].reverse().map(({ entry, overlapSeconds }) => ({ entry, seconds: overlapSeconds })) : undefined}
+                startAgain={!named}
+                title={named ? group.name : undefined}
                 // The Expand/Collapse prefix already says how many entries the group holds.
                 spokenLabel={rowSpokenLabel(group, nowMs, clockFormat, { omitCount: grouped })}
                 onDelete={() => onDeleteEntries(group.entries.map(({ entry }) => entry))}
@@ -225,9 +230,12 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   onReplay,
   reduceMotion,
   rowLanding,
+  parts,
   rowPop = null,
   spokenLabel,
+  startAgain = true,
   theme,
+  title: titleOverride,
 }: {
   activeTimerRunning: boolean;
   blockSeconds: number;
@@ -248,14 +256,20 @@ export const TodayBlockRow = memo(function TodayBlockRow({
   reduceMotion: boolean;
   rowLanding: LandingRequest | null;
   rowPop?: LandingRequest | null;
+  /** A named pattern's parts, oldest first: a thin strip under the meta line, each as long as its time. */
+  parts?: { entry: Entry; seconds: number }[];
   /** Read by VoiceOver: title, times read "to", activity, place and tags. */
   spokenLabel: string;
+  /** False for a named pattern: Start again is not offered on a group of trips (PRD D19 A9). */
+  startAgain?: boolean;
   theme: MobileTheme;
+  /** A named pattern's name in place of the block's own title. */
+  title?: string;
 }) {
   const { width } = useWindowDimensions();
   const live = !entry.stoppedAt;
-  const replayable = !live && canStartAgain(entry);
-  const title = rowTitle(entry);
+  const replayable = startAgain && !live && canStartAgain(entry);
+  const title = titleOverride ?? rowTitle(entry);
   const duration = rowDuration(durationSeconds);
   const offset = useSharedValue(0);
   const base = useSharedValue(0);
@@ -335,7 +349,9 @@ export const TodayBlockRow = memo(function TodayBlockRow({
 
   const spoken = spokenDuration(durationSeconds);
   const label = count > 1
-    ? `${expanded ? "Collapse" : "Expand"} ${count} ${title} blocks. ${spokenLabel}, ${spoken}`
+    ? titleOverride
+      ? `${expanded ? "Collapse" : "Expand"} ${title}, ${count} parts. ${spokenLabel}, ${spoken}`
+      : `${expanded ? "Collapse" : "Expand"} ${count} ${title} blocks. ${spokenLabel}, ${spoken}`
     : `${spokenLabel}, ${spoken}`;
   const actions = [
     ...(replayable ? [{ name: "startAgain", label: activeTimerRunning ? `Switch to ${title}` : "Start again" }] : []),
@@ -432,6 +448,7 @@ export const TodayBlockRow = memo(function TodayBlockRow({
               >
                 {meta}
               </Text>
+              {parts?.length ? <PartsStrip parts={parts} theme={theme} /> : null}
             </View>
             <Text
               {...mobileTextProps("numeric")}
@@ -447,6 +464,23 @@ export const TodayBlockRow = memo(function TodayBlockRow({
     </View>
   );
 });
+
+/** A named pattern's parts as one thin strip of activity colours, each as long as its time. */
+function PartsStrip({ parts, theme }: { parts: { entry: Entry; seconds: number }[]; theme: MobileTheme }) {
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.strip} testID="today-block-parts">
+      {parts.map(({ entry, seconds }) => (
+        <View
+          key={entry.id}
+          style={[styles.stripPart, {
+            backgroundColor: blockColorsFor(entry.categoryColor ?? entry.categoryId ?? entry.categoryName, theme.mode, entry.categoryName ?? "").fill,
+            flexGrow: Math.max(1, seconds)
+          }]}
+        />
+      ))}
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   section: { gap: 10 },
@@ -470,4 +504,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: "700" },
   meta: { fontSize: 12.5, fontVariant: ["tabular-nums"] },
   duration: { fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "700" },
+  strip: { flexDirection: "row", gap: 2, height: 4, marginTop: 6 },
+  stripPart: { borderRadius: 2, flexBasis: 0, minWidth: 4 },
 });
