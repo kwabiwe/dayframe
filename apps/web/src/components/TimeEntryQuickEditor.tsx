@@ -24,6 +24,8 @@ import {
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
   keepTypedMeridiemTime,
+  inferTypedFinishDate,
+  LONG_BLOCK_NOTE_SECONDS,
   normalizeCalendarEntryCompactTypedTimes,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
@@ -107,6 +109,8 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       : calendarEntryCompactCreateInitialDraft(props.source)
   ));
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // An End date chosen in the date picker always wins over the typed End time's inferred day.
+  const finishDateChosenRef = useRef(false);
   const descriptionRef = useRef<HTMLInputElement | null>(null);
   const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -243,8 +247,10 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   ) => {
     if (busyRef.current) return;
     setActiveTemporalOwner(commit ? null : owner);
+    if (key === "stoppedAtDate") finishDateChosenRef.current = true;
     setDraft((current) => {
-      const next = { ...current, [key]: value, temporalOwner: owner };
+      const typed = { ...current, [key]: value, temporalOwner: owner };
+      const next = key === "stoppedAtTime" && !finishDateChosenRef.current ? inferTypedFinishDate(typed) : typed;
       const isComplete = commit || (owner === "duration"
         ? isCompleteCalendarEntryCompactDurationInput(value)
         : isCalendarEntryCompactTimeInputReadyToSynchronize(value));
@@ -265,7 +271,8 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     setDraft((current) => {
       if (current.temporalOwner !== owner) return current;
       // Leaving a time field commits what the shared reader understands (`15:1` → 15:10).
-      const committed = owner === "duration" ? current : normalizeCalendarEntryCompactTypedTimes(current);
+      const normalized = owner === "duration" ? current : normalizeCalendarEntryCompactTypedTimes(current);
+      const committed = owner === "finish" && !finishDateChosenRef.current ? inferTypedFinishDate(normalized) : normalized;
       try {
         return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: committed, owner });
       } catch {
@@ -575,6 +582,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         ? "overlap"
         : "default";
   const finishDayOffset = isRunning ? 0 : calendarEntryLocalDayOffset(draft.startedAtDate, draft.stoppedAtDate);
+  const longBlockSeconds = preview.plan?.durationSeconds ?? draft.durationSeconds;
 
   return {
     activeTemporalOwner,
@@ -606,6 +614,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     isEntered,
     isExiting,
     isRunning,
+    longBlockSeconds,
     panelRef,
     preview,
     save,
@@ -660,6 +669,7 @@ export function TimeEntryQuickEditorPanel({
     isBusy,
     isCategoryOpen,
     isRunning,
+    longBlockSeconds,
     panelRef,
     preview,
     saveBlockedByTimer,
@@ -936,6 +946,12 @@ export function TimeEntryQuickEditorPanel({
             </label>
           )}
         </div>
+        {!isRunning && longBlockSeconds > LONG_BLOCK_NOTE_SECONDS ? (
+          // A gentle check on a long block (owner, 21 Oct 2026): muted, inline, never blocks Save.
+          <p className="calendar-compact-long-note" role="status">
+            Long block · {formatDuration(longBlockSeconds)}. Is the end right?
+          </p>
+        ) : null}
       </div>
 
       {/* Footer (prototype "Edit block", audit WUI-004/WUI-006): a note (an error or an overlap) on

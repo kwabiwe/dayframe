@@ -2,6 +2,7 @@ import {
   buildCalendarEntryCompactSavePlan,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
+  inferTypedFinishDate,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   keepTypedMeridiemTime,
   normalizeCalendarEntryCompactTypedTimes,
@@ -22,6 +23,8 @@ export type TimelineInlineEditDraft = {
   dirty: CalendarEntryCompactDirty;
   sourceStartedAt: string;
   sourceStoppedAt: string | null;
+  /** The End date was chosen in the date picker, so a typed End time no longer infers its day. */
+  finishDateChosen?: boolean;
 };
 
 export function createTimelineInlineEditDraft(
@@ -58,9 +61,13 @@ export function updateTimelineInlineTime(
   edge: TimelineInlineTimeEdge,
   rawValue: string
 ): TimelineInlineEditDraft {
-  const timeKey = edge === "start" ? "startedAtTime" : "stoppedAtTime";
+  const value = maskTimeInput(rawValue);
+  if (edge === "start") return updateTimelineInlineTemporalEdge(edit, edge, { startedAtTime: value });
+  // A typed End reads against Start's time of day, as in the block editor (owner, 21 Oct 2026).
+  const inferred = edit.finishDateChosen ? null : inferTypedFinishDate({ ...edit.draft, stoppedAtTime: value });
   return updateTimelineInlineTemporalEdge(edit, edge, {
-    [timeKey]: maskTimeInput(rawValue)
+    stoppedAtTime: value,
+    ...(inferred && inferred.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: inferred.stoppedAtDate } : {})
   });
 }
 
@@ -70,8 +77,8 @@ export function updateTimelineInlineDate(
   edge: TimelineInlineTimeEdge,
   date: string
 ): TimelineInlineEditDraft {
-  const dateKey = edge === "start" ? "startedAtDate" : "stoppedAtDate";
-  return updateTimelineInlineTemporalEdge(edit, edge, { [dateKey]: date });
+  if (edge === "start") return updateTimelineInlineTemporalEdge(edit, edge, { startedAtDate: date });
+  return updateTimelineInlineTemporalEdge({ ...edit, finishDateChosen: true }, edge, { stoppedAtDate: date });
 }
 
 export function buildTimelineInlineSavePlan(
