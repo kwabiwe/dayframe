@@ -55,6 +55,46 @@ describe("mobile history presentation", () => {
     expect(grouped[0].totalSeconds).toBe(5400);
   });
 
+  describe("named patterns (location v3 PR 14)", () => {
+    const at = (h: number, m = 0) => new Date(2026, 9, 20, h, m);
+    const named = { key: "named:stay", name: "School run" };
+    const travel = { categoryId: "travel", categoryName: "Travel", description: null, source: "location_learning" };
+    // Newest first, as a day section lists them.
+    const trip = () => [
+      { entry: { ...entry("back", at(8, 30), at(8, 40)), ...travel, locationGroup: named }, overlapSeconds: 600 },
+      { entry: { ...entry("stay", at(8, 10), at(8, 30)), source: "location_learning", locationGroup: named }, overlapSeconds: 1200 },
+      { entry: { ...entry("there", at(8, 0), at(8, 10)), ...travel, locationGroup: named }, overlapSeconds: 600 }
+    ];
+
+    it("shows the parts of a named A → B → A as one row with its name", () => {
+      const grouped = groupHistoryDayEntries(trip());
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0]).toMatchObject({ key: "named:named:stay", name: "School run", totalSeconds: 2400 });
+      expect(grouped[0].entries.map(({ entry: item }) => item.id)).toEqual(["back", "stay", "there"]);
+    });
+
+    it("keeps location blocks out of the activity grouping, so Travel moves stay apart", () => {
+      const moves = trip().map((item) => ({ ...item, entry: { ...item.entry, ...travel, locationGroup: null } }));
+      expect(groupHistoryDayEntries(moves).map((group) => group.key)).toEqual(["entry:back", "entry:stay", "entry:there"]);
+    });
+
+    it("leaves the parts apart when another block sits between them, one is running, or they span over three hours", () => {
+      const [back, stay, there] = trip();
+      const between = { entry: { ...entry("coffee", at(8, 20), at(8, 25)), source: "manual_app" }, overlapSeconds: 300 };
+      expect(groupHistoryDayEntries([back, between, stay, there]).filter((group) => group.name)).toHaveLength(1);
+      expect(groupHistoryDayEntries([back, between, stay, there]).find((group) => group.name)?.entries).toHaveLength(2);
+      // A part still running: the trip is not over, so nothing groups yet.
+      expect(groupHistoryDayEntries([{ ...back, entry: { ...back.entry, stoppedAt: null } }, stay, there]).some((group) => group.name)).toBe(false);
+      const long = { ...back, entry: { ...back.entry, stoppedAt: at(11, 1).toISOString() } };
+      expect(groupHistoryDayEntries([long, stay, there]).some((group) => group.name)).toBe(false);
+    });
+
+    it("keeps the remaining parts together when one is deleted", () => {
+      const [back, , there] = trip();
+      expect(groupHistoryDayEntries([back, there])).toEqual([expect.objectContaining({ name: "School run", totalSeconds: 1200 })]);
+    });
+  });
+
   it("keeps blank uncategorized entries individual so each row can be deleted", () => {
     const grouped = groupHistoryDayEntries([
       entry("uncategorized-one", new Date(2026, 6, 16, 9, 0), new Date(2026, 6, 16, 9, 0)),

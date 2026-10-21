@@ -24,6 +24,7 @@ import {
   missingRequiredColumnError,
   query
 } from "./db";
+import { getLocationGroups, withLocationGroups, type LocationGroup } from "./location/location-groups";
 import { placeDisplayNameSql } from "./place-display";
 import { getDevSession, type RequestSession } from "./session";
 import { entryOverlapSeconds } from "./time-entry-overlap";
@@ -149,6 +150,8 @@ export type TimeEntryRow = {
   ownerAuthoredInReview?: boolean;
   /** For a Move's automatic block (PRD D19), its Move's event, for "Don't log trips like this". */
   automaticMoveEventId?: string | null;
+  /** A member of a named A → B → A (location v3 PR 14): adjacent members show as one row. */
+  locationGroup?: LocationGroup;
   description: string | null;
   startedAt: string;
   stoppedAt: string | null;
@@ -359,6 +362,10 @@ export async function getBootstrapData(
     getReviewOutingStays(session)
   ]);
 
+  // Named patterns (PR 14): one read over every list's location blocks, then each list is tagged.
+  const locationGroups = await getLocationGroups({ query }, session, [...entries, ...historyEntries, ...dayEntries, ...weekEntries]);
+  const grouped = <T extends { id: string }>(list: T[]) => withLocationGroups(list, locationGroups);
+
   const capturedAt = new Date(capturedNow);
   const todayCoverage = analyzeTimeIntervals(
     dayEntries.map((entry) => ({
@@ -398,10 +405,10 @@ export async function getBootstrapData(
     places,
     learnedPlaces,
     automationRules,
-    entries,
-    historyEntries,
-    dayEntries,
-    weekEntries,
+    entries: grouped(entries),
+    historyEntries: grouped(historyEntries),
+    dayEntries: grouped(dayEntries),
+    weekEntries: grouped(weekEntries),
     activeEntry,
     reviewItems,
     activityEvents,

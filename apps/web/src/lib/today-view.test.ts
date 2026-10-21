@@ -21,6 +21,7 @@ import {
   ribbonNextStartMs,
   ribbonReach,
   withMinimumSpan,
+  todayRows,
   type TodayEntry
 } from "@/lib/today-view";
 
@@ -480,3 +481,19 @@ describe("ribbon details", () => {
     expect(isUnsavedEntryId("80000000-0000-4000-8000-000000000001")).toBe(false);
   });
 });
+
+describe("todayRows (location v3 PR 14)", () => {
+  const group = { key: "named:stay", name: "School run" };
+  const block = (id: string, from: number, to: number, locationGroup: typeof group | null = group) => ({
+    entry: { id, startedAt: new Date(2026, 9, 20, 8, from).toISOString(), stoppedAt: new Date(2026, 9, 20, 8, to).toISOString(),
+      categoryId: null, categoryName: null, categoryColor: null, locationGroup: locationGroup ?? undefined },
+    clip: { fromMs: 0, toMs: 0 }
+  });
+
+  it("makes a named pattern's adjacent parts one row and leaves the rest as blocks", () => {
+    const rows = todayRows([block("solo", 50, 55, null), block("back", 30, 40), block("stay", 10, 30), block("there", 0, 10)]);
+    expect(rows.map((row) => row.kind === "block" ? row.block.entry.id : `${row.name}:${row.blocks.map((item) => item.entry.id).join("+")}`))
+      .toEqual(["solo", "School run:back+stay+there"]);
+  });
+});
+

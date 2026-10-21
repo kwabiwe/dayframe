@@ -55,8 +55,11 @@ async function mount(data: BootstrapData) {
   return { container, root };
 }
 
+/** Today's rows, without a named pattern's parts (they sit in its panel, open or not). */
 function rowLabels(container: HTMLElement) {
-  return [...container.querySelectorAll(".df-erow-main")].map((button) => button.getAttribute("aria-label")?.split(",")[0]);
+  return [...container.querySelectorAll(".df-erow-main")]
+    .filter((button) => !button.closest(".df-erow-children"))
+    .map((button) => button.getAttribute("aria-label")?.split(",")[0]);
 }
 
 describe("Today", () => {
@@ -256,6 +259,61 @@ describe("Today", () => {
     expect(container.textContent).toContain("2 moments waiting");
     expect(container.textContent).not.toContain("4 moments waiting");
     await act(async () => root.unmount());
+  });
+
+  describe("a named pattern (location v3 PR 14)", () => {
+    const group = { key: "named:stay", name: "School run" };
+    const part = (id: string, from: number, to: number, extra: Partial<TimeEntryRow> = {}) => entry({
+      id, source: "location_learning", description: null, categoryId: "travel", categoryName: "Travel", categoryColor: "slate",
+      startedAt: local(8, from), stoppedAt: local(8, to), durationSeconds: (to - from) * 60, locationGroup: group, ...extra
+    });
+    const ids = ["81000000-0000-4000-8000-000000000001", "81000000-0000-4000-8000-000000000002", "81000000-0000-4000-8000-000000000003"];
+    function withTrip() {
+      const data = bootstrap();
+      const trip = [
+        part(ids[0], 0, 10),
+        part(ids[1], 10, 30, { description: "School", categoryId: "admin", categoryName: "Admin", categoryColor: "steel" }),
+        part(ids[2], 30, 40)
+      ];
+      const entries = [...data.entries, ...trip];
+      return { ...data, entries, historyEntries: entries, dayEntries: entries, weekEntries: entries } as BootstrapData;
+    }
+
+    it("shows its parts as one row with its name, its whole time and a strip, and opens to the parts", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      const { container, root } = await mount(withTrip());
+      expect(rowLabels(container)).toEqual(["Deep work", "Inbox", "School run"]);
+      const named = container.querySelector<HTMLButtonElement>(".df-erow-named .df-erow-main")!;
+      expect(named.getAttribute("aria-label")).toContain("School run, 3 parts: Travel, then School, then Travel, 08:00 to 08:40, 40m. Show the parts");
+      expect(named.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelectorAll(".df-erow-parts i")).toHaveLength(3);
+      expect(container.querySelector(".df-erow-named .df-erow-when")?.textContent).toBe("08:00–08:40 · 3 parts");
+      expect(container.querySelector(".df-erow-children")?.hasAttribute("inert")).toBe(true);
+      // No Start again on a group; its parts keep their own.
+      expect(container.querySelector('.df-erow-named button[aria-label^="Start"]')).toBeNull();
+      await act(async () => named.click());
+      expect(named.getAttribute("aria-expanded")).toBe("true");
+      expect(container.querySelector(".df-erow-children")?.hasAttribute("inert")).toBe(false);
+      expect(container.querySelectorAll(".df-erow-children .df-erow")).toHaveLength(3);
+      await act(async () => root.unmount());
+    });
+
+    it("deletes all its parts with one Undo", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      vi.setSystemTime(NOW);
+      const { container, root } = await mount(withTrip());
+      await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Delete School run: all 3 parts"]')!.click());
+      await act(async () => vi.advanceTimersByTime(200));
+      expect(rowLabels(container)).toEqual(["Deep work", "Inbox"]);
+      const toast = container.querySelector(".df-toast");
+      expect(toast?.textContent).toContain("Deleted 3 School run blocks");
+      await act(async () => toast!.querySelector<HTMLButtonElement>(".df-toast-action")!.click());
+      expect(rowLabels(container)).toEqual(["Deep work", "Inbox", "School run"]);
+      await act(async () => vi.advanceTimersByTime(6_000));
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+      await act(async () => root.unmount());
+    });
   });
 
   it("never offers Delete or Start again on the running block", async () => {
