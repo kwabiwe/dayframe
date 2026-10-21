@@ -33,6 +33,13 @@ describe("entry sheet End inference (owner, 21 Oct 2026)", () => {
     expect(inferEndOnStartDay(startGmt, nextDay0135)).toBe(Date.parse("2026-10-25T01:35:00Z"));
   });
 
+  it("finds the later occurrence when the clocks go back half an hour (Codex r3 on #506)", () => {
+    process.env.TZ = "Australia/Lord_Howe";
+    const start = Date.parse("2026-04-04T15:10:00Z"); // 5 Apr 01:40 +10:30, the second 01:40
+    const fromNextDay = Date.parse("2026-04-05T15:15:00Z"); // 6 Apr 01:45 +10:30
+    expect(inferEndOnStartDay(start, fromNextDay)).toBe(Date.parse("2026-04-04T15:15:00Z")); // 5 Apr 01:45 +10:30
+  });
+
   it("moves End with a Start moved past it, keeping the duration", () => {
     expect(endFollowingStart(at(2, 21), at(2, 22), at(2, 23, 30))).toBe(at(3, 0, 30));
     expect(endFollowingStart(at(2, 21), at(2, 22), at(2, 21, 30))).toBeNull();
