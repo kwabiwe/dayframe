@@ -50,7 +50,7 @@ async function replayWithDecidedOrigin(qualifies: boolean) {
       algorithmVersion: item.algorithmVersion, timeZone: item.timeZone, isSimulated: item.isSimulated ?? null,
       metadata: item.metadata ?? {}, receivedAt: item.receivedAt })) };
     if (sql.includes("from places\n")) return { rows: fixture.savedPlaces };
-    if (sql.includes("from learned_places\n")) return { rows: fixture.acceptedLearnedPlaces };
+    if (sql.includes("from learned_places lp\n")) return { rows: fixture.acceptedLearnedPlaces };
     if (sql.includes("insert into stay_segments")) return { rows: local.segmentUpserts.filter((segment) => segment.kind === "stay")
       .map((segment) => ({ id: `db-${segment.clientSegmentId}`, clientSegmentId: segment.clientSegmentId })) };
     if (sql.includes("from stay_segments") && sql.includes("for update")) return { rows: [{

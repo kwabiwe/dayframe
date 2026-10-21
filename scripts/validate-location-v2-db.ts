@@ -2980,6 +2980,33 @@ async function validateReviewModeAutoLogPlaces() {
   assert.equal(await count("time_entries"), entryCount, "A retry duplicated an auto-logged block.");
   assert.equal(await count("review_items"), reviewCount, "A retry added a Review card for an auto-logged visit.");
 
+  // Archive place after its visits (location v3 PR 15, PRD D19 A10; Codex r1 on #503): replay keeps
+  // matching it for evidence before it was archived, so its unedited blocks and their visits stay as
+  // they were and no Review card appears for them.
+  const archivedPlaceId = logged[0].placeId!;
+  await pool.query("update places set archived_at = $3 where workspace_id = $1 and id = $2", [WORKSPACE_ID, archivedPlaceId, PROCESSING_AT]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const afterArchive = await autoEntries();
+  assert.deepEqual(afterArchive.map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    logged.map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    "Archiving a place moved, re-linked or removed its past auto-logged blocks on replay.");
+  assert.equal(await count("review_items"), reviewCount, "Archiving a place brought its past visits back to Review.");
+  // Replace the old place (Codex r2 on #503): a new place on the same spot, matching from the
+  // moment it replaced the old one, leaves those blocks with the old place too.
+  const successorId = "c0000000-0000-4000-8000-0000000000aa";
+  await pool.query(
+    `insert into places (id, workspace_id, name, latitude, longitude, radius_meters, priority, logging_enabled, auto_log, matching_starts_at)
+     select $3, workspace_id, 'Replacement', latitude, longitude, radius_meters, priority + 1, logging_enabled, auto_log, $4
+       from places where workspace_id = $1 and id = $2`, [WORKSPACE_ID, archivedPlaceId, successorId, PROCESSING_AT]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  assert.deepEqual((await autoEntries()).map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    logged.map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    "A place that replaced an archived one took over the old place's past auto-logged blocks on replay.");
+  assert.equal(await count("review_items"), reviewCount, "Replacing a place brought its past visits back to Review.");
+  await pool.query("delete from places where workspace_id = $1 and id = $2", [WORKSPACE_ID, successorId]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  await pool.query("update places set archived_at = null where workspace_id = $1 and id = $2", [WORKSPACE_ID, archivedPlaceId]);
+
   // A late fix that keeps the stay's ID but moves a boundary: the unedited block follows (Codex r1 on #435).
   await pool.query("update time_entries set stopped_at = stopped_at - interval '3 minutes' where id = $1", [logged[1].id]);
   await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);

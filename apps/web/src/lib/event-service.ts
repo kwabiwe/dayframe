@@ -67,7 +67,7 @@ import {
 } from "./automatic-category-service";
 import { getServerLocationRolloutMode } from "./location/location-rollout";
 import { placeDisplayNameSql } from "./place-display";
-import { assignPlaceRoleWith } from "./place-role-service";
+import { assignPlaceRoleWith, lockLocationOwnersForArchive, placeWriteMigrationError } from "./place-role-service";
 
 export type { AutomaticLoggingCategoryKind } from "./automatic-category-service";
 
@@ -1712,7 +1712,7 @@ export async function archiveCategory(id: string, session: RequestSession = getD
   }
 }
 
-export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
+export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null; archivePrevious?: boolean };
 
 export async function createPlace(
   input: PlaceMutationFields,
@@ -1730,14 +1730,15 @@ export async function createPlace(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (newRole.archivePrevious) await lockLocationOwnersForArchive(client, session.workspaceId);
     const place = await insertPlaceRecord(
       <T extends pg.QueryResultRow>(statement: string, values?: unknown[]) => client.query<T>(statement, values),
       input,
       session
     );
-    await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    const assigned = await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id, targetIsNew: true });
     await client.query("commit");
-    return { ...place, role: newRole.role };
+    return { ...place, role: newRole.role, ...previousArchivedOf(assigned) };
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1755,6 +1756,8 @@ export async function createPlaceFromLearnedPlace(
   const client = await pool.connect();
   try {
     await client.query("begin");
+    // Before the learned place's row lock: owner locks always come first (Codex r1 on #503).
+    if (newRole?.archivePrevious) await lockLocationOwnersForArchive(client, session.workspaceId);
     const learnedPlace = await client.query<{ id: string }>(
       `select id
        from learned_places
@@ -1786,9 +1789,9 @@ export async function createPlaceFromLearnedPlace(
          and user_id = $3`,
       [learnedPlaceId, session.workspaceId, session.userId, place.id]
     );
-    if (newRole) await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    const assigned = newRole ? await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id, targetIsNew: true }) : null;
     await client.query("commit");
-    return newRole ? { ...place, role: newRole.role } : place;
+    return newRole ? { ...place, role: newRole.role, ...previousArchivedOf(assigned) } : place;
   } catch (error) {
     await client.query("rollback");
     const readinessError = learnedPlacesReadinessError(error);
@@ -2185,6 +2188,52 @@ const PLACE_DELETE_ATTEMPTS = 3;
  * serialization failure. The wait limit applies to each lock it takes (Postgres `lock_timeout`), so
  * a delete behind several busy locks can take longer in all.
  */
+/** Whether "Replace the old place" archived the previous holder, when it was asked to. */
+function previousArchivedOf(result: Awaited<ReturnType<typeof assignPlaceRoleWith>> | null) {
+  return result?.status === "assigned" && result.previousArchived !== undefined ? { previousArchived: result.previousArchived } : {};
+}
+
+/**
+ * Archive place (location v3 PR 15, PRD D19 A10): the place keeps its name on past blocks,
+ * Reports and exports, but leaves bootstrap, matching, geofences, nearby suggestions and pickers
+ * until it is restored. Archiving clears its Home or Work role, so the slot is free for the new
+ * place; a restored place comes back without a role. Returns null when there is no such place.
+ */
+export async function setPlaceArchived(id: string, archived: boolean, session: RequestSession = getDevSession()) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    // Every member's location work finishes first, and none reads the old catalogue after.
+    await client.query("set local lock_timeout = '10000ms'");
+    await lockLocationOwnersForArchive(client, session.workspaceId);
+    const result = await client.query<{ id: string; name: string; archivedAt: string | null }>(
+      archived
+        ? `update places set archived_at = coalesce(archived_at, now()), role = null
+            where id = $1 and workspace_id = $2
+            returning id, name, archived_at as "archivedAt"`
+        : `update places set archived_at = null
+            where id = $1 and workspace_id = $2
+            returning id, name, archived_at as "archivedAt"`,
+      [id, session.workspaceId]
+    );
+    await client.query("commit");
+    return result.rows[0] ?? null;
+  } catch (error) {
+    await client.query("rollback").catch(() => undefined);
+    if ((error as { code?: unknown } | null)?.code === "55P03") throw new PlaceArchiveBusyError(error);
+    throw placeWriteMigrationError(error) ?? error;
+  } finally {
+    client.release();
+  }
+}
+
+export class PlaceArchiveBusyError extends Error {
+  readonly code = "place_archive_busy";
+  constructor(cause: unknown) {
+    super("This place is busy right now, so it wasn't changed. Try again in a moment.", { cause });
+  }
+}
+
 export async function deletePlace(
   id: string,
   session: RequestSession = getDevSession(),
