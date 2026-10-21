@@ -623,6 +623,19 @@ describe("What did you do? (D1)", () => {
       expect(onVenueSuggested.mock.calls).toEqual([["20000000-0000-4000-8000-000000000001", "ISYNTHETICSTORE"]]);
     });
 
+    it("reports once the evidence's account is known, not counting the card before (Codex r4 on #522)", async () => {
+      native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
+      const reported = onVenueSuggested;
+      // Cached evidence first: no reporter yet.
+      onVenueSuggested = undefined as never;
+      await render(stay({ matched: false }));
+      expect(reported).not.toHaveBeenCalled();
+      // The owned network read lands: the reporter arrives and the card reports once.
+      onVenueSuggested = reported;
+      await act(async () => tree!.update(editor(stay({ matched: false }))));
+      expect(reported.mock.calls).toEqual([["20000000-0000-4000-8000-000000000001", "ISYNTHETICSTORE"]]);
+    });
+
     it("never reports a venue for a stay at a saved place", async () => {
       native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
       await render(stay({ matched: true }));

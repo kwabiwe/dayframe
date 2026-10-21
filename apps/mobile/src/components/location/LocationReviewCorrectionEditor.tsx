@@ -116,7 +116,11 @@ export function LocationReviewCorrectionEditor({
   /** All activities' Create: resolves to the new activity's id, or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
-  /** The ranker is confident about this Apple venue for the unsaved stay (location v3 PR 8). */
+  /**
+   * The ranker is confident about this Apple venue for the unsaved stay (location v3 PR 8). Given
+   * only while a report can go out (the evidence's account is known); absent, nothing is reported
+   * and the card is not counted as reported (Codex r4 on #522).
+   */
   onVenueSuggested?: (reviewItemId: string, placeId: string) => void;
   places: Place[];
   /** Activities used most recently first, for the chips and the picker's Recent. */
@@ -423,12 +427,13 @@ export function LocationReviewCorrectionEditor({
   onVenueSuggestedRef.current = onVenueSuggested;
   const suggestedVenue = nearbyState.places.find((place) => place.suggested && place.placeId) ?? null;
   const cardOpen = reviewItem?.status === "open";
+  const canReport = Boolean(onVenueSuggested);
   useEffect(() => {
-    if (evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId || !cardOpen || saving) return;
+    if (!canReport || evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId || !cardOpen || saving) return;
     if (reportedCardsRef.current.has(evidence.reviewItemId) || evidence.venue?.suggestedPlaceId === suggestedVenue.placeId) return;
     reportedCardsRef.current.add(evidence.reviewItemId);
     onVenueSuggestedRef.current?.(evidence.reviewItemId, suggestedVenue.placeId);
-  }, [baselinePlaceId, cardOpen, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, saving, suggestedVenue?.placeId]);
+  }, [baselinePlaceId, canReport, cardOpen, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, saving, suggestedVenue?.placeId]);
 
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(

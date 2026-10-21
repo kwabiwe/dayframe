@@ -15,14 +15,16 @@ const apiSource = readSource("./api.ts");
 // Location v3 PR 8b: a venue suggestion is sent only under the account its evidence was read for.
 describe("venue suggestion ownership (Codex r1/r2 on #522)", () => {
   it("pairs only network-read evidence with its account, never cached evidence", () => {
-    const assignments = [...screenSource.matchAll(/evidenceOwner\.current = ([^;]+);/g)].map((match) => match[1].trim());
+    const assignments = [...screenSource.matchAll(/setEvidenceOwner\(([^;]+)\);/g)].map((match) => match[1].trim());
     // Cleared when cached evidence is shown; set only from the account the network read used.
     expect(assignments).toEqual([
       "null",
       "{ userId: owner.userId, workspaceId: owner.workspaceId }",
       "{ userId: owner.userId, workspaceId: owner.workspaceId }"
     ]);
-    expect(screenSource).not.toMatch(/evidenceOwner\.current = cachedOwner/);
+    expect(screenSource).not.toMatch(/setEvidenceOwner\(cachedOwner/);
+    // The editor gets a reporter only while that account is known.
+    expect(screenSource).toContain("onVenueSuggested={evidenceOwner ? (reviewItemId, placeId) =>");
     const networkReads = [...screenSource.matchAll(/await revalidateLocationReviewEvidence\(\{\s*reviewItemId: id,\s*workspaceId: owner\.workspaceId,\s*userId: owner\.userId/g)];
     expect(networkReads).toHaveLength(2);
   });
