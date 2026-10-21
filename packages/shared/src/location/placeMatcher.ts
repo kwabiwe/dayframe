@@ -28,6 +28,58 @@ function classRank(value: LocationMatchClass) {
   return value === "strong" ? 0 : value === "plausible" ? 1 : 2;
 }
 
+/**
+ * Places at scale (location v3 PR 16, PRD D19 A10 §11.1): saved or learned places sorted by
+ * latitude once per engine run, so each reading is compared only with the places in its latitude
+ * band. A great-circle distance is never shorter than its north–south part (R·|Δlatitude|), so a
+ * place outside the band is farther than any radius plus accuracy allowance plus boundary
+ * tolerance reaches: "outside" for certain, which no decision uses. Matching is unchanged.
+ */
+export type PlaceLatitudeIndex<T extends SavedPlaceForMatching> = {
+  places: T[];
+  order: number[];
+  latitudes: number[];
+  bandDegrees: number;
+};
+
+const EARTH_RADIUS_METERS = 6_371_008.8;
+
+export function indexPlacesByLatitude<T extends SavedPlaceForMatching>(
+  places: readonly T[],
+  config: Pick<LocationEngineConfig, "maxAccuracyAllowanceMeters">
+): PlaceLatitudeIndex<T> {
+  const order = places.map((_place, index) => index).sort((a, b) => places[a].latitude - places[b].latitude || a - b);
+  const reachMeters = Math.max(0, ...places.map((place) => Math.max(20, place.radiusMeters)))
+    + Math.max(0, config.maxAccuracyAllowanceMeters) + MATCH_BOUNDARY_TOLERANCE_METERS + 1;
+  return {
+    places: [...places],
+    order,
+    latitudes: order.map((index) => places[index].latitude),
+    bandDegrees: (reachMeters / EARTH_RADIUS_METERS) * (180 / Math.PI)
+  };
+}
+
+/** The indexed places that can match a reading at `latitude`, in their original order. */
+export function placesNearLatitude<T extends SavedPlaceForMatching>(index: PlaceLatitudeIndex<T>, latitude: number): T[] {
+  const lowest = lowerBound(index.latitudes, latitude - index.bandDegrees);
+  const picked: number[] = [];
+  for (let position = lowest; position < index.latitudes.length && index.latitudes[position] <= latitude + index.bandDegrees; position += 1) {
+    picked.push(index.order[position]);
+  }
+  return picked.sort((a, b) => a - b).map((original) => index.places[original]);
+}
+
+function lowerBound(sorted: number[], value: number) {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (sorted[middle] < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 export function matchLocationToPlaces(
   input: MatchInput,
   savedPlaces: SavedPlaceForMatching[],

@@ -2,7 +2,7 @@ import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
 import { assembleTripsThroughStops, deriveCommutes } from "./commute";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
-import { matchLocationToPlaces } from "./placeMatcher";
+import { indexPlacesByLatitude, matchLocationToPlaces, placesNearLatitude } from "./placeMatcher";
 import { buildMotionTimeline, isMotionEvidence, refineStayDeparturesWithMotion } from "./motionActivity";
 import { analyseSavedPlaceArrivalEvidence } from "./savedPlaceArrivalSupport";
 import type {
@@ -956,14 +956,17 @@ function longestNewSilenceMs(from: number, to: number, observedMs: number[], cov
 }
 
 /** Places matching evidence at `atMs`: an archived place only before it was archived (PRD D19 A10). */
-function placesAt<T extends SavedPlaceForMatching>(places: readonly T[], atMs: number) {
-  return places.filter((place) => !place.archivedAt || atMs < Date.parse(place.archivedAt));
+function placesAt<T extends SavedPlaceForMatching>(places: T[], atMs: number, anyArchived: boolean) {
+  return anyArchived ? places.filter((place) => !place.archivedAt || atMs < Date.parse(place.archivedAt)) : places;
 }
 
 function preprocess(input: LocationEngineInput) {
   // Without an archived place the catalogue is the same for every point (the usual case).
   const anyArchived = [...input.savedPlaces, ...input.acceptedLearnedPlaces].some((place) => place.archivedAt);
   const archivedSavedIds = new Map(input.savedPlaces.flatMap((place) => place.archivedAt ? [[place.id, Date.parse(place.archivedAt)] as const] : []));
+  // Each reading meets only the places in its latitude band (places at scale, PR 16).
+  const savedIndex = indexPlacesByLatitude(input.savedPlaces, input.config);
+  const learnedIndex = indexPlacesByLatitude(input.acceptedLearnedPlaces, input.config);
   const rejectedEvidence: RejectedEvidence[] = [];
   const seen = new Set<string>();
   const sorted = input.evidence.map((evidence) => ({ ...evidence, metadata: evidence.metadata ? { ...evidence.metadata } : undefined })).sort((a, b) => {
@@ -1044,8 +1047,8 @@ function preprocess(input: LocationEngineInput) {
           horizontalAccuracyMeters: normalisedEvidence.horizontalAccuracyMeters ?? null,
           savedPlaceIdHint: normalisedEvidence.savedPlaceId
         },
-        anyArchived ? placesAt(input.savedPlaces, occurredAtMs) : input.savedPlaces,
-        anyArchived ? placesAt(input.acceptedLearnedPlaces, occurredAtMs) : input.acceptedLearnedPlaces,
+        placesAt(placesNearLatitude(savedIndex, normalisedEvidence.latitude), occurredAtMs, anyArchived),
+        placesAt(placesNearLatitude(learnedIndex, normalisedEvidence.latitude), occurredAtMs, anyArchived),
         input.config
       );
       // A completed Visit's coordinate averages its whole interval, so it is
