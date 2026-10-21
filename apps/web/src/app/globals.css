@@ -6074,8 +6074,8 @@ dialog.ui-dialog.df-range-custom {
   letter-spacing: 0.02em;
 }
 
-/* The block editors' field labels: the #391 small uppercase head, inside each time box. Scoped to
-   the editor panel, so Add time keeps its own labels (Codex r1 on #465). */
+/* The block editors' field labels: the #391 small uppercase head (WUI-018), above each time box, as
+   on the iPhone entry sheet (owner, 21 Oct 2026). Scoped to the editor panel. */
 .calendar-compact-editor-panel .calendar-compact-field-label,
 .calendar-compact-editor-panel .calendar-compact-editor-fields label > span,
 .calendar-compact-editor-panel .calendar-compact-duration-field > span {
@@ -12238,13 +12238,21 @@ dialog.ui-dialog.df-palette {
   margin: -10px -12px 0 0;
 }
 
+/* ↺ Start again · trash Delete, then a 10 px gap before ✕ (owner, 21 Oct 2026). */
+.calendar-compact-editor-icons > .is-close:not(:first-child) {
+  /* 8 px plus the row's 2 px gap: 10 px before ✕ (Codex r1 on #505). */
+  margin-left: 8px;
+}
+
 .calendar-compact-editor-panel .calendar-compact-editor-fields {
   gap: 12px;
   padding: 12px var(--calendar-compact-horizontal-inset);
 }
 
-/* Time boxes (WUI-001; prototype `.times`): one inset box per field, its 11 px label inside above
-   the value, about 56 px tall, the date glyph at its trailing edge and the focus ring on the box. */
+/* Time boxes (owner, 21 Oct 2026, superseding WUI-001's label inside): START / END / DURATION sit
+   above their boxes, as on the iPhone entry sheet, and each box holds only its value: a 44 px inset
+   fill with the shared 1 px idle line (WUI-017), the focus ring and the danger underline on the box,
+   the date glyph at its trailing edge. */
 .calendar-compact-editor-panel .calendar-compact-temporal-fields {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(84px, 0.7fr);
 }
@@ -12253,43 +12261,58 @@ dialog.ui-dialog.df-palette {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 2px;
-  border-radius: 12px;
-  padding: 7px 12px 6px;
-  background: var(--surface-inset);
-  box-shadow: inset 0 0 0 2px transparent;
-}
-
-.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:focus-within {
-  box-shadow: inset 0 0 0 2px var(--web-focus-border);
-}
-
-.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:has(input[aria-invalid="true"]) {
-  box-shadow: inset 0 -2px 0 var(--danger);
-}
-
-.calendar-compact-editor-panel .calendar-compact-temporal-fields > *:focus-within:has(input[aria-invalid="true"]) {
-  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
-}
-
-.calendar-compact-editor-panel .calendar-compact-date-time-controls,
-.calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within,
-.calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]) {
-  min-height: 28px;
-  overflow: visible;
-  border-radius: 0;
+  gap: 6px;
+  padding: 0;
   background: transparent;
   box-shadow: none;
 }
 
-.calendar-compact-editor-panel .calendar-compact-temporal-fields input,
-.calendar-compact-editor-panel .calendar-compact-temporal-fields input:focus,
-.calendar-compact-editor-panel .calendar-compact-temporal-fields input[aria-invalid="true"]:focus {
+.calendar-compact-editor-panel .calendar-compact-date-time-controls,
+.calendar-compact-editor-panel .calendar-compact-duration-input input,
+.calendar-compact-editor-panel .calendar-compact-duration,
+.calendar-compact-editor-panel .calendar-compact-running-value {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  overflow: visible;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 12px;
+  background: var(--surface-inset);
+  box-shadow: inset 0 0 0 var(--web-control-border-width) var(--control-border);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within,
+.calendar-compact-editor-panel .calendar-compact-duration-input input:focus {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--web-focus-border);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls:has(input[aria-invalid="true"]),
+.calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 var(--web-control-border-width) var(--control-border), inset 0 -2px 0 var(--danger);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls:focus-within:has(input[aria-invalid="true"]),
+.calendar-compact-editor-panel .calendar-compact-duration-input input[aria-invalid="true"]:focus {
+  box-shadow: inset 0 0 0 2px var(--web-focus-border), inset 0 -2px 0 var(--danger);
+}
+
+.calendar-compact-editor-panel .calendar-compact-date-time-controls > input,
+.calendar-compact-editor-panel .calendar-compact-date-time-controls > input:focus,
+.calendar-compact-editor-panel .calendar-compact-date-time-controls > input[aria-invalid="true"]:focus {
+  min-width: 0;
   min-height: 28px;
+  flex: 1 1 auto;
+  border: 0;
   border-radius: 0;
   padding: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.calendar-compact-editor-panel .calendar-compact-duration-input input {
+  width: 100%;
 }
 
 .calendar-compact-editor-panel .calendar-compact-date-time-controls > input,
@@ -12308,21 +12331,13 @@ dialog.ui-dialog.df-palette {
   min-width: 44px;
   height: 44px;
   min-height: 44px;
-  margin: -8px -12px -8px -6px;
+  margin: 0 -12px 0 -6px;
   color: var(--muted);
 }
 
 .calendar-compact-editor-panel .calendar-compact-date-trigger:hover,
 .calendar-compact-editor-panel .calendar-compact-date-trigger[aria-expanded="true"] {
   color: var(--foreground);
-}
-
-.calendar-compact-editor-panel .calendar-compact-duration,
-.calendar-compact-editor-panel .calendar-compact-running-value {
-  min-height: 28px;
-  border-radius: 0;
-  padding: 0;
-  background: transparent;
 }
 
 .calendar-compact-editor-panel .calendar-compact-running-value {
@@ -12333,6 +12348,7 @@ dialog.ui-dialog.df-palette {
    own actions (Delete or Discard, Start again) on the left and Cancel and Save on the right. */
 .calendar-compact-editor-footer.df-ed-foot {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   height: auto;
   min-height: 0;
   max-height: none;
@@ -12360,67 +12376,21 @@ dialog.ui-dialog.df-palette {
   overflow: hidden;
 }
 
+/* Just Cancel and Save, at the trailing edge (owner, 21 Oct 2026). */
 .df-ed-actions {
   display: flex;
+  width: 100%;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.df-ed-actions-start,
 .df-ed-actions-end {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.df-ed-actions-end {
   margin-left: auto;
   gap: 8px;
-}
-
-.df-ed-actions-start:empty {
-  display: none;
-}
-
-.df-ed-pill {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  border: 0;
-  border-radius: 999px;
-  padding: 0 12px;
-  background: var(--surface-inset);
-  color: var(--foreground);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 650;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.df-ed-pill:hover:not(:disabled) {
-  background: var(--surface-muted);
-}
-
-.df-ed-pill.is-danger {
-  background: transparent;
-  color: var(--danger-text);
-}
-
-.df-ed-pill.is-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-}
-
-.df-ed-pill:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-
-.df-ed-pill:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 
 .calendar-compact-editor-panel .calendar-compact-save,
@@ -12486,8 +12456,7 @@ dialog.ui-dialog.df-palette {
    (after the "All activities" chip's own 32 px, which it overrides; Codex r1 on #465). */
 @media (any-pointer: coarse) {
   .df-ed-chips .df-rchip,
-  .df-ed-chips .calendar-compact-category-field > .df-rchip--more,
-  .df-ed-pill {
+  .df-ed-chips .calendar-compact-category-field > .df-rchip--more {
     min-height: 44px;
   }
 }
@@ -12692,7 +12661,9 @@ dialog.ui-dialog.df-palette {
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
+  letter-spacing: 0.06em;
   line-height: 16px;
+  text-transform: uppercase;
 }
 
 .df-start-date-picker {

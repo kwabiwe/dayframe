@@ -937,3 +937,198 @@ describe("Motion & Fitness capture", () => {
     expect(motionRows()).toEqual([]);
   });
 });
+
+describe("nearest-place geofences on task wakes (location v3 PR 16b)", () => {
+  // Synthetic places on a made-up grid around (10, 20); 0.001° of latitude is about 111 m.
+  const grid = Array.from({ length: 25 }, (_, index) => ({
+    id: `c0000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    name: `Synthetic grid place ${index + 1}`,
+    latitude: 10 + (index + 1) * 0.001,
+    longitude: 20,
+    radiusMeters: 100
+  }));
+  const at = (latitude: number, ms: number) =>
+    ({ coords: { latitude, longitude: 20, accuracy: 5, altitude: 10, speed: 0, heading: 0 }, timestamp: ms });
+  const registrations = () => h.nativeCalls.filter((call) => call.startsWith("expo:startGeofencing:"));
+  const lastRegistration = () => registrations().at(-1)?.slice("expo:startGeofencing:".length).split(",") ?? [];
+  const refreshRegion = (bindingId: string) =>
+    ({ identifier: `${bindingId}:nearest-refresh`, latitude: 10.003, longitude: 20, radius: 500 });
+  const lastKnown = async () => vi.mocked((await import("expo-location")).getLastKnownPositionAsync);
+  async function signInNearThirdPlace() {
+    await signIn(A, grid);
+    // Bootstrap knew no position: today's priority order, no refresh circle yet.
+    expect(lastRegistration()).toHaveLength(20);
+    vi.setSystemTime(T0 + 60_000);
+    await learningTask()({ data: { locations: [at(10.003, T0 + 60_000)] }, error: null });
+    const binding = (await store.readLocationCaptureBinding())!;
+    expect(lastRegistration()).toContain(`${binding.id}:nearest-refresh`);
+    expect(lastRegistration()).not.toContain(`${binding.id}:${grid[24].id}`);
+    return binding;
+  }
+
+  afterEach(async () => { (await lastKnown()).mockReset().mockImplementation(async () => null); });
+
+  it("with twenty or fewer places, readings and Visits never re-register", async () => {
+    await signIn(A, grid.slice(0, 20));
+    const count = registrations().length;
+    vi.setSystemTime(T0 + 60_000);
+    h.nativeSignals.push({ id: "slc-small", kind: "significant_change", occurredAt: new Date(T0 + 50_000).toISOString(),
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await learningTask()({ data: { locations: [at(10.025, T0 + 60_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    expect(lastRegistration().some((identifier) => identifier.endsWith(":nearest-refresh"))).toBe(false);
+  });
+
+  it("a reading outside the refresh circle re-picks; one inside it, or an unchanged set, does not", async () => {
+    const binding = await signInNearThirdPlace();
+    const count = registrations().length;
+    await learningTask()({ data: { locations: [at(10.0032, T0 + 70_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    vi.setSystemTime(T0 + 120_000);
+    await learningTask()({ data: { locations: [at(10.025, T0 + 120_000)] }, error: null });
+    expect(registrations()).toHaveLength(count + 1);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    expect(lastRegistration()).toHaveLength(20);
+  });
+
+  it("the refresh circle's enter and exit are never place evidence, and its exit re-picks from the last known position", async () => {
+    const binding = await signInNearThirdPlace();
+    const before = rows();
+    const count = registrations().length;
+    await geofenceTask()({ data: { eventType: 1, region: refreshRegion(binding.id) }, error: null });
+    // No recent position: the exit keeps the watched set as it is.
+    await geofenceTask()({ data: { eventType: 2, region: refreshRegion(binding.id) }, error: null });
+    expect(registrations()).toHaveLength(count);
+    (await lastKnown()).mockImplementation(async () => at(10.025, Date.now()) as never);
+    await geofenceTask()({ data: { eventType: 2, region: refreshRegion(binding.id) }, error: null });
+    expect(registrations()).toHaveLength(count + 1);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    expect(rows()).toEqual(before);
+    expect((await store.getLocationStoreDiagnostics()).captureRejectedEvidenceCounts.foreign_place ?? 0).toBe(0);
+    expect((await import("../api")).enqueueEvent).not.toHaveBeenCalled();
+  });
+
+  it("a drained Visit or significant change re-picks the nearest places", async () => {
+    const binding = await signInNearThirdPlace();
+    vi.setSystemTime(T0 + 120_000);
+    h.nativeSignals.push({ id: "slc-far", kind: "significant_change", occurredAt: new Date(T0 + 110_000).toISOString(),
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await learningTask()({ data: { locations: [] }, error: null });
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    const count = registrations().length;
+    // An open Visit where the phone already is picks the same set: nothing re-registers.
+    vi.setSystemTime(T0 + 180_000);
+    h.nativeSignals.push({ id: "visit-same", kind: "visit", occurredAt: new Date(T0 + 170_000).toISOString(), endedAt: null,
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 40, metadata: { visitDepartureOpen: "true" } });
+    await learningTask()({ data: { locations: [] }, error: null });
+    expect(registrations()).toHaveLength(count);
+  });
+
+  it("an account switch while a re-pick waits registers nothing for the old account", async () => {
+    const binding = await signInNearThirdPlace();
+    const entered = deferred(), blocked = deferred();
+    (await lastKnown()).mockImplementationOnce(async () => { entered.resolve(); await blocked.promise; return at(10.025, Date.now()) as never; });
+    const callback = geofenceTask()({ data: { eventType: 2, region: refreshRegion(binding.id) }, error: null });
+    await entered.promise;
+    const count = registrations().length;
+    const revision = store.locationCaptureRevision();
+    const switched = account.activateMobileAccount(B);
+    await vi.waitFor(() => expect(store.locationCaptureRevision()).toBeGreaterThan(revision));
+    blocked.resolve();
+    await callback; await switched; await settle();
+    expect(registrations().slice(count).some((call) => call.includes(binding.id))).toBe(false);
+  });
+
+  it("turning Location off while a re-pick waits registers nothing", async () => {
+    const binding = await signInNearThirdPlace();
+    const entered = deferred(), blocked = deferred();
+    (await lastKnown()).mockImplementationOnce(async () => { entered.resolve(); await blocked.promise; return at(10.025, Date.now()) as never; });
+    const callback = geofenceTask()({ data: { eventType: 2, region: refreshRegion(binding.id) }, error: null });
+    await entered.promise;
+    const count = registrations().length;
+    const revision = store.locationCaptureRevision();
+    const off = geofence.setLocationLearningEnabled(false, grid, A);
+    await vi.waitFor(() => expect(store.locationCaptureRevision()).toBeGreaterThan(revision));
+    blocked.resolve();
+    await callback; await off; await settle();
+    expect(registrations()).toHaveLength(count);
+    expect(h.nativeCalls.slice(-8)).toContain("expo:stopGeofencing");
+  });
+
+  it("Codex r1 #1: readings the capture boundary rejected never move the watched places", async () => {
+    await signIn(A, grid);
+    const count = registrations().length;
+    // An Expo reading from before this capture lifetime, still recent by age.
+    vi.setSystemTime(T0 + 30_000);
+    await learningTask()({ data: { locations: [at(10.025, T0 - 30_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    // A native Visit that began before the binding (rejected as before_binding) though iOS reported
+    // it afterwards.
+    await signInNearThirdPlace();
+    const after = registrations().length;
+    vi.setSystemTime(T0 + 120_000);
+    h.nativeSignals.push({ id: "visit-pre-binding", kind: "visit", occurredAt: new Date(T0 - 600_000).toISOString(), endedAt: null,
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 40,
+      metadata: { visitDepartureOpen: "true", nativeCallbackAt: new Date(T0 + 100_000).toISOString() } });
+    await learningTask()({ data: { locations: [] }, error: null });
+    expect(h.nativeSignals).toEqual([]);
+    expect(registrations()).toHaveLength(after);
+  });
+
+  it("Codex r1 #2: a wake captured before a Places edit re-picks from the edited catalogue", async () => {
+    await signInNearThirdPlace();
+    const gate = deferred();
+    const hold = runtime.withLocationCaptureLifecycle(() => gate.promise);
+    const evidenceRows = rows().length;
+    vi.setSystemTime(T0 + 120_000);
+    const wake = learningTask()({ data: { locations: [at(10.025, T0 + 120_000)] }, error: null });
+    // The wake has captured its owner (and 25 places) and stored its reading.
+    await vi.waitFor(() => expect(rows()).toHaveLength(evidenceRows + 1));
+    const edit = geofence.refreshGeofencesForPlaces(grid.slice(0, 20), A);
+    gate.resolve();
+    await hold; await edit; await wake; await settle();
+    expect(lastRegistration()).toHaveLength(20);
+    expect(lastRegistration().some((identifier) => identifier.endsWith(":nearest-refresh"))).toBe(false);
+    expect(lastRegistration().some((identifier) => identifier.endsWith(grid[24].id))).toBe(false);
+  });
+
+  it("Codex r1 #3: a wake with an older reading cannot move the set back after a newer one", async () => {
+    const binding = await signInNearThirdPlace();
+    vi.setSystemTime(T0 + 200_000);
+    await learningTask()({ data: { locations: [at(10.025, T0 + 200_000)] }, error: null });
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    const count = registrations().length;
+    // Delivered later, but read earlier than the reading the selection already used.
+    await learningTask()({ data: { locations: [at(10.001, T0 + 150_000)] }, error: null });
+    expect(registrations()).toHaveLength(count);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+  });
+
+  it("Codex r1 #4: a foreground sync or bootstrap drain re-picks from a drained significant change", async () => {
+    const binding = await signInNearThirdPlace();
+    vi.setSystemTime(T0 + 120_000);
+    h.nativeSignals.push({ id: "slc-foreground", kind: "significant_change", occurredAt: new Date(T0 + 110_000).toISOString(),
+      latitude: 10.025, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await runtime.syncLocationIntelligenceOnForeground().catch(() => undefined);
+    expect(h.nativeSignals).toEqual([]);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[24].id}`);
+    vi.setSystemTime(T0 + 240_000);
+    h.nativeSignals.push({ id: "slc-bootstrap", kind: "significant_change", occurredAt: new Date(T0 + 230_000).toISOString(),
+      latitude: 10.001, longitude: 20, horizontalAccuracyMeters: 300, metadata: {} });
+    await runtime.configureLocationIntelligence(bootstrap(A, grid));
+    expect(h.nativeSignals).toEqual([]);
+    expect(lastRegistration()).toContain(`${binding.id}:${grid[0].id}`);
+  });
+
+  it("logout removes the refresh circle with the other regions, and a late exit for it re-registers nothing", async () => {
+    const binding = await signInNearThirdPlace();
+    await signOut("logout");
+    expect(h.nativeCalls).toContain("expo:stopGeofencing");
+    expect([...h.asyncStore.keys()].some((storageKey) => storageKey.startsWith("dayframe.location.geofenceRegistration.v1"))).toBe(false);
+    const count = registrations().length;
+    (await lastKnown()).mockImplementation(async () => at(10.025, Date.now()) as never);
+    await geofenceTask()({ data: { eventType: 2, region: refreshRegion(binding.id) }, error: null });
+    await settle();
+    expect(registrations()).toHaveLength(count);
+  });
+});

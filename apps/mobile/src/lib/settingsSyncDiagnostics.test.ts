@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceSyncAttentionStatus, splitReviewSyncIssues, syncHelpStatus } from "./settingsSyncDiagnostics";
+import { deviceSyncAttentionStatus, placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "./settingsSyncDiagnostics";
 
 describe("Settings sync diagnostics summary", () => {
   it("reports block Stop and time-entry attention together", () => {
@@ -82,5 +82,30 @@ describe("offline is never 'needs your attention' (I1)", () => {
     for (const rejection of [{ timerStopIssueCount: 1 }, { timeEntryIssueCount: 1 }, { reviewIssueCount: 1 }, { permanentFailedCount: 1 }]) {
       expect(syncHelpStatus({ ...none, queuedCount: 3, reviewCheckingCount: 2, ...rejection }).kind).toBe("attention");
     }
+  });
+});
+
+describe("Sync help › Places watched (location v3 PR 16b)", () => {
+  it("counts the watched places and says the nearest are chosen above the iOS limit", () => {
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 19, configuredMonitorCount: 31, geofenceSelection: "nearest" }))
+      .toEqual({
+        value: "19 of 31",
+        detail: "The places nearest you, and always Home and Work. Places farther away are watched when you get closer."
+      });
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 20, configuredMonitorCount: 22, geofenceSelection: "priority" }))
+      .toMatchObject({ value: "20 of 22" });
+    // Diagnostics saved by an older build (no selection, places left out) never claim all are watched.
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 20, configuredMonitorCount: 22 }))
+      .toMatchObject({ value: "20 of 22" });
+  });
+
+  it("shows every place as watched up to the limit, and nothing while monitoring is off", () => {
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 7, configuredMonitorCount: 7, geofenceSelection: "all" }))
+      .toEqual({ value: "7", detail: "All your saved places are watched." });
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 1, geofenceSelection: "all" }))
+      .toEqual({ value: "1", detail: "Your saved place is watched." });
+    expect(placesWatchedSummary({ geofencingActive: false, activeMonitorCount: 7 })).toBeNull();
+    expect(placesWatchedSummary({ geofencingActive: true, activeMonitorCount: 0 })).toBeNull();
+    expect(placesWatchedSummary(null)).toBeNull();
   });
 });
