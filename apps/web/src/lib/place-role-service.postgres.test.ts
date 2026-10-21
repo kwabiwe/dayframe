@@ -302,6 +302,54 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     }
   });
 
+  it("reads each place's last visit and 30-day visits from current stays, through their index (PR 16c)", async () => {
+    const { getPlaceVisitStats, PLACE_VISITS_SQL } = await import("./queries");
+    const client = await database!.connect();
+    const otherUser = "62000000-0000-4000-8000-000000000009";
+    try {
+      await client.query("begin");
+      await client.query("insert into users (id, email, name) values ($1, 'place-visits@example.test', 'Other person')", [otherUser]);
+      await client.query("insert into workspace_members (workspace_id, user_id, role) values ($1, $2, 'member')", [workspaceId, otherUser]);
+      const stay = (user: string, place: string | null, status: string, startedAt: string, stoppedAt: string | null) => client.query(
+        `insert into stay_segments (workspace_id, user_id, place_id, status, started_at, stopped_at) values ($1, $2, $3, $4, $5, $6)`,
+        [workspaceId, user, place, status, startedAt, stoppedAt]);
+      await stay(userId, gym, "finalised", "2026-10-20T09:00:00Z", "2026-10-20T10:00:00Z");
+      await stay(userId, gym, "ignored", "2026-10-02T09:00:00Z", "2026-10-02T09:30:00Z");
+      await stay(userId, gym, "finalised", "2026-09-01T09:00:00Z", "2026-09-01T10:00:00Z"); // over 30 days
+      await stay(userId, gym, "superseded", "2026-10-21T08:00:00Z", "2026-10-21T09:00:00Z"); // replaced
+      await stay(userId, office, "open", "2026-10-21T07:00:00Z", null); // still there
+      await stay(userId, null, "finalised", "2026-10-21T06:00:00Z", "2026-10-21T06:30:00Z"); // unknown place
+      await stay(otherUser, newHome, "finalised", "2026-10-21T06:00:00Z", "2026-10-21T06:30:00Z"); // someone else
+      await client.query("update places set archived_at = now() where id = $1", [oldHome]);
+      await stay(userId, oldHome, "finalised", "2026-10-19T06:00:00Z", "2026-10-19T06:30:00Z"); // archived place
+
+      const execute = client.query.bind(client) as unknown as Parameters<typeof getPlaceVisitStats>[2];
+      const rows = await getPlaceVisitStats(session, new Date("2026-10-21T10:00:00Z"), execute);
+      expect(rows.sort((a, b) => a.placeId.localeCompare(b.placeId))).toEqual([
+        { placeId: office, lastVisitAt: "2026-10-21T07:00:00.000Z", visitsLast30Days: 1 },
+        { placeId: gym, lastVisitAt: "2026-10-20T10:00:00.000Z", visitsLast30Days: 2 }
+      ].sort((a, b) => a.placeId.localeCompare(b.placeId)));
+
+      // A table at scale: mostly other people's stays, and this person's own mix of saved-place,
+      // unknown-place and superseded stays, so the planner weighs the partial index as it would.
+      const fill = (user: string, count: number) => client.query(
+        `insert into stay_segments (workspace_id, user_id, place_id, status, started_at, stopped_at)
+         select $1, $2, case when n % 3 = 0 then null else $3::uuid end, case when n % 4 = 0 then 'superseded' else 'finalised' end,
+                now() - n * interval '1 hour', now() - n * interval '1 hour' + interval '20 minutes'
+           from generate_series(1, $4::int) n`,
+        [workspaceId, user, newHome, count]);
+      await fill(otherUser, 8000);
+      await fill(userId, 800);
+      await client.query("analyze stay_segments");
+      const plan = (await client.query<{ "QUERY PLAN": string }>(`explain ${PLACE_VISITS_SQL}`, [workspaceId, userId, "2026-10-21T10:00:00Z"]))
+        .rows.map((row) => row["QUERY PLAN"]).join("\n");
+      expect(plan).toContain("idx_stay_segments_place_visits");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  }, 30_000);
+
   it("enforces one Home per workspace in the database", async () => {
     await expect(database!.query("update places set role = 'home' where id = $1", [gym])).rejects.toMatchObject({ code: "23505" });
     await expect(database!.query("update places set role = 'gym' where id = $1", [gym])).rejects.toMatchObject({ code: "23514" });
