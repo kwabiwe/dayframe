@@ -2980,6 +2980,19 @@ async function validateReviewModeAutoLogPlaces() {
   assert.equal(await count("time_entries"), entryCount, "A retry duplicated an auto-logged block.");
   assert.equal(await count("review_items"), reviewCount, "A retry added a Review card for an auto-logged visit.");
 
+  // Archive place after its visits (location v3 PR 15, PRD D19 A10; Codex r1 on #503): replay keeps
+  // matching it for evidence before it was archived, so its unedited blocks and their visits stay as
+  // they were and no Review card appears for them.
+  const archivedPlaceId = logged[0].placeId!;
+  await pool.query("update places set archived_at = $3 where workspace_id = $1 and id = $2", [WORKSPACE_ID, archivedPlaceId, PROCESSING_AT]);
+  await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);
+  const afterArchive = await autoEntries();
+  assert.deepEqual(afterArchive.map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    logged.map((entry) => [entry.id, entry.eventId, entry.placeId, entry.startedAt.toISOString()]),
+    "Archiving a place moved, re-linked or removed its past auto-logged blocks on replay.");
+  assert.equal(await count("review_items"), reviewCount, "Archiving a place brought its past visits back to Review.");
+  await pool.query("update places set archived_at = null where workspace_id = $1 and id = $2", [WORKSPACE_ID, archivedPlaceId]);
+
   // A late fix that keeps the stay's ID but moves a boundary: the unedited block follows (Codex r1 on #435).
   await pool.query("update time_entries set stopped_at = stopped_at - interval '3 minutes' where id = $1", [logged[1].id]);
   await ingestLocationEvidence(reviewBatch, session, PROCESSING_AT);

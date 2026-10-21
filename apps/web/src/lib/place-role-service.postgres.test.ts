@@ -205,6 +205,34 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
       expect(await archivedAt(oldHome)).toBe(false);
     });
 
+    it("replaces an implicit 'Home' without a new name (Codex r1 on #503)", async () => {
+      await database!.query("update places set role = null where id = $1", [oldHome]);
+      await database!.query("insert into places (id, workspace_id, name, latitude, longitude) values ($1, $2, 'Home', 10, 20)", [namedHome, workspaceId]);
+      await placeAt(newHome, 10.002, 20); // about 222 m
+      const result = await inTransaction((client) => assignPlaceRoleWith(client, session,
+        { role: "home", placeId: newHome, previousPlaceName: null, archivePrevious: true }));
+      expect(result).toEqual({ status: "assigned", placeId: newHome, previousPlaceId: namedHome, previousArchived: true });
+      expect(await archivedAt(namedHome)).toBe(true);
+      expect((await roles())[namedHome]).toEqual({ name: "Home", role: null });
+    });
+
+    it("waits for a member's running location work before archiving (Codex r1 on #503)", async () => {
+      const { setPlaceArchived } = await import("./event-service");
+      const replay = await database!.connect();
+      try {
+        await replay.query("begin");
+        await replay.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
+        let done = false;
+        const archiving = setPlaceArchived(gym, true, session).then((place) => { done = true; return place; });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(done).toBe(false);
+        await replay.query("commit");
+        await expect(archiving).resolves.toMatchObject({ id: gym });
+      } finally {
+        replay.release();
+      }
+    });
+
     it("never gives an archived place a role, nor treats an archived 'Home' as the implicit holder", async () => {
       await database!.query("update places set archived_at = now() where id = $1", [gym]);
       expect(await inTransaction((client) => assignPlaceRoleWith(client, session, { role: "work", placeId: gym })))

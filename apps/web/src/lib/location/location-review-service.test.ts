@@ -279,10 +279,23 @@ describe("location review confirmation semantics", () => {
         if (statement.includes("for update of ri, ae nowait")) return { rows: [{ ...lockedStay(), ...card }] };
         if (statement.includes("from stay_segments") && statement.includes("for update nowait")) return { rows: [{ id: "segment-1" }] };
         if (statement.includes("as archived from places")) return { rows: [{ archived: true }] };
+        // A learned place linked to an archived saved place.
+        if (statement.includes("from learned_places lp")) return { rows: [{ archived: true }] };
         if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-archived" }] };
         return { rows: [] };
       })
     }) as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+    const archivedLearnedId = "60000000-0000-4000-8000-0000000000bb";
+
+    it("refuses a learned place linked to an archived place as a new pick, but keeps the Stay's own (Codex r1 on #503)", async () => {
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({}), "review-1", { action: "change_place_and_confirm", placeId: null, learnedPlaceId: archivedLearnedId }, session
+      )).rejects.toMatchObject({ code: "invalid_action", message: "Learned place was not found." });
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({ learnedPlaceId: archivedLearnedId }), "review-1",
+        { action: "change_place_and_confirm", placeId: null, learnedPlaceId: archivedLearnedId }, session
+      )).resolves.toMatchObject({ entryId: "entry-archived" });
+    });
 
     it("refuses an archived place as a new pick", async () => {
       await expect(resolveLocationReviewActionWithClient(

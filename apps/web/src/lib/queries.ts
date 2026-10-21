@@ -126,6 +126,8 @@ export type AutomationRuleRow = {
   activityDescription: string | null;
   confidenceThreshold: string;
   enabled: boolean;
+  /** Its place is archived (PRD D19 A10): kept and exported, never executed. */
+  placeArchived?: boolean;
 };
 
 export type TimeEntryRow = {
@@ -460,7 +462,9 @@ export async function getNormalizationContext(
       loggingEnabled: place.loggingEnabled,
       autoLog: place.autoLog
     })),
-    automationRules: automationRules.map<AutomationRuleSummary>((rule) => ({
+    // A rule at an archived place never runs: matching sees the event's place id, not the
+    // catalogue, so leaving the place out of `places` alone would not stop it (Codex r1 on #503).
+    automationRules: automationRules.filter((rule) => !rule.placeArchived).map<AutomationRuleSummary>((rule) => ({
       id: rule.id,
       name: rule.name,
       triggerSource: rule.triggerSource as AutomationRuleSummary["triggerSource"],
@@ -793,7 +797,8 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
               c.name as "categoryName",
               ar.activity_description as "activityDescription",
               ar.confidence_threshold as "confidenceThreshold",
-              ar.enabled
+              ar.enabled,
+              coalesce(pl.archived_at is not null, false) as "placeArchived"
        from automation_rules ar
        left join places pl on pl.id = ar.place_id and pl.workspace_id = ar.workspace_id
        left join projects p on p.id = ar.project_id and p.workspace_id = ar.workspace_id and p.is_archived = false
@@ -819,7 +824,8 @@ async function getAutomationRules(session: RequestSession, execute: typeof query
                 c.name as "categoryName",
                 null::text as "activityDescription",
                 ar.confidence_threshold as "confidenceThreshold",
-                ar.enabled
+                ar.enabled,
+                coalesce(pl.archived_at is not null, false) as "placeArchived"
          from automation_rules ar
          left join places pl on pl.id = ar.place_id and pl.workspace_id = ar.workspace_id
          left join projects p on p.id = ar.project_id and p.workspace_id = ar.workspace_id and p.is_archived = false

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { authErrorResponse } from "@/lib/api-errors";
 import { MissingRequiredColumnError } from "@/lib/db";
-import { setPlaceArchived } from "@/lib/event-service";
+import { PlaceArchiveBusyError, setPlaceArchived } from "@/lib/event-service";
 import { resolveRequestSession } from "@/lib/ingest-auth";
 import { getArchivedPlaces } from "@/lib/queries";
 
@@ -36,5 +36,6 @@ function errorResponse(error: unknown) {
   if (response) return response;
   if (error instanceof ZodError) return NextResponse.json({ issues: error.issues }, { status: 400 });
   if (error instanceof MissingRequiredColumnError) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error instanceof PlaceArchiveBusyError) return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
   throw error;
 }

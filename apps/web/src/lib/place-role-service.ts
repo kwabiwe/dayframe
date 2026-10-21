@@ -29,11 +29,40 @@ export class PlaceRoleConflictError extends Error {
   }
 }
 
+const PLACE_ARCHIVE_MIGRATION = "supabase/migrations/202610210001_place_archive.sql";
+
+/**
+ * Archiving changes what replay matches, so it waits for each member's running location work and
+ * none starts against the old catalogue until it commits (Codex r1 on #503). Location writers
+ * (ingest, replay, Review) take the per-user owner advisory lock; only a member can run them, so
+ * this takes every member's, in user-id order (as deleting a place does). Call it first in the
+ * transaction, before any row lock.
+ */
+export async function lockLocationOwnersForArchive(client: Pick<pg.PoolClient, "query">, workspaceId: string) {
+  const members = await client.query<{ userId: string }>(
+    `select user_id::text as "userId" from workspace_members where workspace_id = $1 order by 1`,
+    [workspaceId]
+  );
+  for (const { userId } of members.rows) {
+    await client.query("select pg_advisory_xact_lock(hashtext($1), hashtext($2))", [workspaceId, userId]);
+  }
+}
+
+/** The database lacks a column a place write now needs: name the migration (Codex r1 on #503). */
+export function placeWriteMigrationError(error: unknown) {
+  if (isUndefinedColumnError(error, "role")) {
+    return missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
+  }
+  if (isUndefinedColumnError(error, "archived_at")) return missingRequiredColumnError("places", "archived_at", PLACE_ARCHIVE_MIGRATION, error);
+  return null;
+}
+
 /**
  * Gives `placeId` the role and takes it from whichever place held it, inside the caller's
  * transaction. Only the role moves: entries keep pointing at the place they were recorded
  * at, so the old Home's history stays on the old Home. The old holder can be renamed in
- * the same step so that history doesn't read as a street address.
+ * the same step so that history doesn't read as a street address. A caller passing
+ * `archivePrevious` takes `lockLocationOwnersForArchive` first in its transaction.
  */
 export async function assignPlaceRoleWith(
   client: Pick<pg.PoolClient, "query">,
@@ -68,7 +97,8 @@ export async function assignPlaceRoleWith(
       ? []
       : locked.rows.filter((row) => row.role === null && row.id !== assignment.placeId
         && row.name.trim().toLowerCase() === placeRoleLabel(assignment.role).toLowerCase());
-    const previous = holder ? [holder] : previousPlaceName ? implicit : [];
+    // Implicit holders change when renamed or replaced; Replace alone must still archive them (Codex r1 on #503).
+    const previous = holder ? [holder] : previousPlaceName || assignment.archivePrevious ? implicit : [];
     let previousArchived = false;
     if (previous.length > 0) {
       // "Replace the old place": archived with the role cleared, only within 300 m of the new place.
@@ -109,10 +139,7 @@ export async function assignPlaceRoleWith(
     };
   } catch (error) {
     if (isUniqueViolationError(error, "places_workspace_role_idx")) throw new PlaceRoleConflictError(error);
-    if (isUndefinedColumnError(error, "role")) {
-      throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
-    }
-    throw error;
+    throw placeWriteMigrationError(error) ?? error;
   }
 }
 
@@ -120,6 +147,7 @@ export async function assignPlaceRole(session: RequestSession, assignment: Place
   const client = await pool.connect();
   try {
     await client.query("begin");
+    if (assignment.archivePrevious) await lockLocationOwnersForArchive(client, session.workspaceId);
     const result = await assignPlaceRoleWith(client, session, assignment);
     await client.query(result.status === "assigned" ? "commit" : "rollback");
     return result;

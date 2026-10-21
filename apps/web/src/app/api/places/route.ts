@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { PlaceRoleSchema } from "@dayframe/shared";
 import { authErrorResponse } from "@/lib/api-errors";
+import { MissingRequiredColumnError } from "@/lib/db";
 import {
   createPlace,
   createPlaceFromLearnedPlace,
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
     if (error instanceof PlaceRoleConflictError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
     }
+    if (error instanceof MissingRequiredColumnError) return NextResponse.json({ error: error.message }, { status: 500 });
     throw error;
   }
 }

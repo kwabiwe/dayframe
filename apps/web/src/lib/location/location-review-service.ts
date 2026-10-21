@@ -769,13 +769,22 @@ async function changePlace(
   if (action.placeId && action.learnedPlaceId) {
     throw new ReviewResolutionError("invalid_action", "Choose either a saved place or a learned place.", { status: 422 });
   }
-  if (action.placeId) await validateReferences(client, session, undefined, action.placeId);
+  if (action.placeId) await validateReferences(client, session, undefined, action.placeId, item.suggestedPlaceId);
   if (action.learnedPlaceId) {
-    const learned = await client.query(
-      `select 1 from learned_places where id = $1 and workspace_id = $2 and user_id = $3 and status = 'accepted'`,
+    // A learned place linked to an archived saved place is no new pick; the Stay's own learned
+    // place still is, so an earlier choice can be confirmed (Codex r1 on #503).
+    const learned = await client.query<{ archived: boolean }>(
+      `select exists (
+                select 1 from places p
+                 where p.id = lp.place_id and p.workspace_id = lp.workspace_id and p.archived_at is not null
+              ) as archived
+         from learned_places lp
+        where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
       [action.learnedPlaceId, session.workspaceId, session.userId]
     );
-    if (!learned.rows[0]) throw new ReviewResolutionError("invalid_action", "Learned place was not found.", { status: 422 });
+    if (!learned.rows[0] || (learned.rows[0].archived && action.learnedPlaceId !== item.learnedPlaceId)) {
+      throw new ReviewResolutionError("invalid_action", "Learned place was not found.", { status: 422 });
+    }
   }
   await client.query(
     `update review_items set suggested_place_id = $1

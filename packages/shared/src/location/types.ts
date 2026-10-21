@@ -68,6 +68,11 @@ export type SavedPlaceForMatching = {
   priority?: number;
   loggingEnabled?: boolean;
   correctionScore?: number;
+  /**
+   * Archived (PRD D19 A10): the place matches only evidence from before this moment, so replay
+   * keeps its past visits as they were and no new visit matches it.
+   */
+  archivedAt?: string | null;
 };
 
 export type LearnedPlaceForMatching = SavedPlaceForMatching & {
