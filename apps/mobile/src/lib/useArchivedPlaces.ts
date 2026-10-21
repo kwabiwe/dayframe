@@ -59,6 +59,9 @@ export function useArchivedPlaces({
   const goneRef = useRef(new Set<string>());
   // Only the newest archived read applies, and none that was out while a restore or an archive landed.
   const reads = useRef(createArchivedReadGate()).current;
+  // Counts archived lists applied from a read: one applied after a restore was accepted is the
+  // server's word since, which an overtaken restore never edits (Codex r7 on #508).
+  const archivedReadsApplied = useRef(0);
   const gate = useRef(createPlaceRestoreGate()).current;
   const mounted = useRef(true);
   const shownAccountRef = useRef(shownAccountKey);
@@ -86,6 +89,7 @@ export function useArchivedPlaces({
       if (!mounted.current || !reads.current(read)) return;
       const now = await readActiveMobileAccount();
       if (!now || mobileAccountKey(now) !== mobileAccountKey(owner) || !reads.current(read)) return;
+      archivedReadsApplied.current += 1;
       setArchived({ accountKey: mobileAccountKey(owner), places });
     } catch {
       // Signed out or offline: the page read says so; this section never breaks the page.
@@ -213,6 +217,7 @@ export function useArchivedPlaces({
       // same render as the refreshed list brings the place back under Saved places; when that list
       // doesn't come, the place waits under Saved places as restored until a later read lands.
       reads.changed();
+      const archivedAtAccept = archivedReadsApplied.current;
       // Tracked from now until a list with the place has refreshed monitoring, whichever read brings it.
       goneRef.current.delete(`${accountKey}|${place.id}`);
       const tracked = pendingRef.current?.accountKey === accountKey ? pendingRef.current.places : [];
@@ -225,9 +230,13 @@ export function useArchivedPlaces({
           return false;
         }
         settledWith.outcome = settled;
-        setArchived((current) => current && current.accountKey === accountKey
-          ? { ...current, places: current.places.filter((item) => item.id !== place.id) }
-          : current);
+        // The row leaves Archived only from the list read before the restore: one read since (the
+        // place archived again, here or elsewhere) is kept as it is (Codex r7 on #508).
+        if (archivedReadsApplied.current === archivedAtAccept) {
+          setArchived((current) => current && current.accountKey === accountKey
+            ? { ...current, places: current.places.filter((item) => item.id !== place.id) }
+            : current);
+        }
         clearBusy();
         // Not applied: unless another read has already monitored it, it now waits (and is retried).
         const current = pendingRef.current;

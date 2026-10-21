@@ -90,8 +90,8 @@ const RESTORE_REFRESH_RETRY_MS = 5_000;
 /** …up to this long between tries, until a list with the place has refreshed monitoring. */
 const RESTORE_REFRESH_RETRY_MAX_MS = 60_000;
 
-/** What monitoring is refreshed from: a list, the read it came from (null for one changed here), and its lifetime. */
-type MonitorInput = { list: MobileBootstrap; ticket: PageReadTicket | null; epoch: number };
+/** What monitoring is refreshed from: a list the page showed, and the account lifetime it was asked in. */
+type MonitorInput = { list: MobileBootstrap; epoch: number };
 
 /** The account a page list belongs to. */
 function listAccountKey(list: Pick<MobileBootstrap, "user" | "workspace">) {
@@ -200,34 +200,42 @@ export default function PlacesScreen() {
     };
   }, []);
 
+  /** Monitoring from `input` still belongs here: the page is open, in its lifetime, showing its account. */
+  const monitorInputCurrent = useCallback(({ list, epoch }: MonitorInput) => {
+    const shown = dataRef.current;
+    return mounted.current && currentMobileAccountEpoch() === epoch && Boolean(shown) && listAccountKey(shown!) === listAccountKey(list);
+  }, []);
+
   /**
-   * Monitoring finished from `list` (the last input of a drain): restored places it has (and were not
-   * yet monitored) settle, only while its list is what the page shows (the newest applied, with no
-   * change accepted since: Codex r6 on #508), for that account and lifetime. A failure leaves them
-   * unresolved, so the retry goes on. One that was announced with a warning has its warning line
-   * cleared and its recovery announced.
+   * The one place a restore's monitoring settles, decided from what the page shows now (Codex r7 on
+   * #508): after any successful refresh from `list` that still belongs here, restored places it had
+   * that the list shown now also has (and were not yet monitored) settle. A failure leaves them
+   * unresolved, so the retry goes on. One announced with a warning has its warning line cleared and
+   * its recovery announced.
    */
   const monitorFinished = useRef<(input: MonitorInput, refreshed: boolean) => void>(() => undefined);
-  monitorFinished.current = ({ list, ticket, epoch }, refreshed) => {
-    if (!refreshed || !ticket || !mounted.current || currentMobileAccountEpoch() !== epoch || !pageReads.isCurrent(ticket)) return;
-    const key = listAccountKey(list);
-    const shown = dataRef.current;
-    if (!shown || listAccountKey(shown) !== key) return;
-    const restored = unmonitoredRestoredIn(key, list.places);
+  monitorFinished.current = (input, refreshed) => {
+    if (!refreshed || !monitorInputCurrent(input)) return;
+    const key = listAccountKey(input.list);
+    const shownIds = new Set(dataRef.current!.places.map((place) => place.id));
+    const restored = unmonitoredRestoredIn(key, input.list.places).filter((id) => shownIds.has(id));
     if (restored.length === 0) return;
     const recovered = settleMonitoredRestored(key, restored);
     clearRestoreWarning(restored);
     for (const name of recovered) AccessibilityInfo.announceForAccessibility(restoredMonitoredMessage(name));
   };
-  // One geofence refresh at a time, latest wins (Codex r6 on #508): monitoring's last input is always
-  // the newest list asked for, and only that run settles restores.
-  const monitor = useRef(createMonitorQueue<MonitorInput>(
-    ({ list }) => refreshGeofencesForPlaces(list.places, { userId: list.user.id, workspaceId: list.workspace.id }).then(() => true),
-    (input, refreshed) => monitorFinished.current(input, refreshed)
-  )).current;
-  /** Monitoring refreshed from `list` (latest wins); resolves once monitoring has caught up. */
-  const monitorList = useCallback((list: MobileBootstrap, ticket: PageReadTicket | null) =>
-    monitor.request({ list, ticket, epoch: currentMobileAccountEpoch() }), [monitor]);
+  // One geofence refresh at a time, latest wins (Codex r6 on #508); nothing queued starts outside its
+  // account lifetime or after the page closes (Codex r7 on #508).
+  const monitor = useRef(createMonitorQueue<MonitorInput>({
+    refresh: ({ list }) => refreshGeofencesForPlaces(list.places, { userId: list.user.id, workspaceId: list.workspace.id }),
+    runnable: (input) => monitorInputCurrent(input),
+    finished: (input, refreshed) => monitorFinished.current(input, refreshed)
+  })).current;
+  // Closing the page drops whatever monitoring still waits.
+  useEffect(() => () => monitor.clear(), [monitor]);
+  /** Monitoring refreshed from `list` (latest wins); resolves once it ran, or was overtaken or dropped. */
+  const monitorList = useCallback((list: MobileBootstrap) =>
+    monitor.request({ list, epoch: currentMobileAccountEpoch() }), [monitor]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -250,7 +258,7 @@ export default function PlacesScreen() {
       // Once this page has monitored any list, every list it shows is monitored (Codex r6 on #508).
       settleGoneRestores(bootstrap);
       if (monitor.engaged() || unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) {
-        void monitorList(bootstrap, ticket);
+        void monitorList(bootstrap);
       }
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
@@ -313,7 +321,7 @@ export default function PlacesScreen() {
       ? deleted.reduce((list, id) => reconcileBootstrapPlaces(list, { removePlaceId: id }), shown)
       : shown);
     // Monitoring follows the list shown, once this page has monitored any.
-    if (monitor.engaged()) void monitorList(next, null);
+    if (monitor.engaged()) void monitorList(next);
     return false;
   }, [archivedChanged, clearRestoreWarning, loadArchived, monitor, monitorList, pageReads, settleRestoresRemoved]);
 
@@ -459,11 +467,17 @@ export default function PlacesScreen() {
      */
     onSettled?: (outcome: RestoreRefreshOutcome) => boolean;
   }) {
-    /** A restore's warning line (anything but the plain prefix) is remembered with its place. */
-    const rememberRestoreWarning = (message: string | undefined) => {
-      if (message && message !== options.prefix && options.restoredPlaceId) {
+    /**
+     * The status line, written only while no read started after this one (Codex r6/r7 on #508): a
+     * newer read's line (its failure) is never replaced. A restore's warning line (anything but the
+     * plain prefix) is remembered with its place.
+     */
+    const say = (message: string) => {
+      if (!pageReads.isNewest(ticket)) return;
+      if (message !== options.prefix && options.restoredPlaceId) {
         restoreWarning.current = { placeId: options.restoredPlaceId, message };
       }
+      setStatusMessage(message);
     };
     // Starts after the change it follows, so it is newer than every read already out.
     const ticket = pageReads.begin(accountLifetime());
@@ -479,9 +493,7 @@ export default function PlacesScreen() {
         if (options.onSettled && !options.onSettled("stale")) return;
         // A newer change or read brings the list; until a restore is monitored it says so.
         const staleMessage = options.successMessage?.();
-        if (staleMessage === null) return;
-        rememberRestoreWarning(staleMessage);
-        setStatusMessage(staleMessage ?? options.prefix);
+        if (staleMessage !== null) say(staleMessage ?? options.prefix);
         return;
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
@@ -491,15 +503,14 @@ export default function PlacesScreen() {
       setData(reconciled);
       // A restored place this list lacks is gone again; monitoring from it settles any it has.
       settleGoneRestores(reconciled);
-      await monitorList(reconciled, ticket);
+      await monitorList(reconciled);
       if (!still()) return;
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
       const successMessage = options.successMessage?.();
       if (successMessage === null) return;
       // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
-      rememberRestoreWarning(successMessage);
-      setStatusMessage(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
+      say(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -512,15 +523,12 @@ export default function PlacesScreen() {
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
       if (options.fallbackPlaces && current && !pageReads.superseded(ticket)) {
-        await monitorList({ ...current, places: options.fallbackPlaces }, null);
+        await monitorList({ ...current, places: options.fallbackPlaces });
         if (!still()) return;
       }
-      if (!pageReads.isNewest(ticket)) return;
       const failureMessage = options.failureMessage?.();
-      if (failureMessage === null) return;
       // A restore's warning is remembered, so it clears once the restored place is monitored.
-      rememberRestoreWarning(failureMessage);
-      setStatusMessage(failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
+      if (failureMessage !== null) say(failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
 

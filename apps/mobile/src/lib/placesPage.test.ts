@@ -236,41 +236,83 @@ function deferredBoolean() {
   return { promise, resolve };
 }
 
-describe("createMonitorQueue (Codex r6 on #508)", () => {
-  it("runs one refresh at a time, ends on the newest input, and finishes only that one", async () => {
+describe("createMonitorQueue (Codex r6/r7 on #508)", () => {
+  it("runs one refresh at a time and ends on the newest input; every run that ran is finished", async () => {
     const runs: Array<{ input: string; done: ReturnType<typeof deferredBoolean> }> = [];
     const finished: Array<[string, boolean]> = [];
-    const queue = createMonitorQueue<string>((input) => {
-      const done = deferredBoolean();
-      runs.push({ input, done });
-      return done.promise;
-    }, (input, refreshed) => finished.push([input, refreshed]));
+    const queue = createMonitorQueue<string>({
+      refresh: (input) => {
+        const done = deferredBoolean();
+        runs.push({ input, done });
+        return done.promise.then((ok) => { if (!ok) throw new Error("location unavailable"); });
+      },
+      runnable: () => true,
+      finished: (input, refreshed) => { finished.push([input, refreshed]); }
+    });
     expect(queue.engaged()).toBe(false);
     const first = queue.request("older");
     expect(queue.engaged()).toBe(true);
     await Promise.resolve();
-    void queue.request("middle");
+    let middleSettled = false;
+    void queue.request("middle").then(() => { middleSettled = true; });
     const last = queue.request("newest");
-    // Only the running one has started; the newest replaced the one waiting.
+    // Only the running one has started; the newest replaced the one waiting, which stops waiting.
     expect(runs.map((run) => run.input)).toEqual(["older"]);
+    await Promise.resolve();
+    expect(middleSettled).toBe(true);
     runs[0].done.resolve(true);
+    await first;
+    expect(finished).toEqual([["older", true]]);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(runs.map((run) => run.input)).toEqual(["older", "newest"]);
-    expect(finished).toEqual([]);
     runs[1].done.resolve(false);
-    await Promise.all([first, last]);
-    expect(finished).toEqual([["newest", false]]);
+    await last;
+    expect(finished).toEqual([["older", true], ["newest", false]]);
   });
 
   it("starts again for a request made after it drained, and treats a throw as a failed refresh", async () => {
     const finished: Array<[number, boolean]> = [];
-    const queue = createMonitorQueue<number>(async (input) => {
-      if (input === 2) throw new Error("location unavailable");
-      return true;
-    }, (input, refreshed) => finished.push([input, refreshed]));
+    const queue = createMonitorQueue<number>({
+      refresh: async (input) => {
+        if (input === 2) throw new Error("location unavailable");
+      },
+      runnable: () => true,
+      finished: (input, refreshed) => { finished.push([input, refreshed]); }
+    });
     await queue.request(1);
     await queue.request(2);
     expect(finished).toEqual([[1, true], [2, false]]);
+  });
+
+  it("drops an input that is no longer runnable when its turn comes, and whatever waits on clear (Codex r7 on #508)", async () => {
+    const started: string[] = [];
+    const running = deferredBoolean();
+    let lifetime = "1";
+    const queue = createMonitorQueue<{ name: string; lifetime: string }>({
+      refresh: (input) => {
+        started.push(input.name);
+        return input.name === "first" ? running.promise : Promise.resolve(true);
+      },
+      runnable: (input) => input.lifetime === lifetime,
+      finished: () => undefined
+    });
+    void queue.request({ name: "first", lifetime: "1" });
+    await Promise.resolve();
+    const queued = queue.request({ name: "queued", lifetime: "1" });
+    lifetime = "2";
+    running.resolve(true);
+    await queued;
+    expect(started).toEqual(["first"]);
+    const blocked = deferredBoolean();
+    const queue2 = createMonitorQueue<string>({ refresh: (input) => { started.push(input); return blocked.promise; }, runnable: () => true, finished: () => undefined });
+    void queue2.request("running");
+    await Promise.resolve();
+    const waiting = queue2.request("waiting");
+    queue2.clear();
+    await waiting;
+    blocked.resolve(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(["first", "running"]);
   });
 });
 

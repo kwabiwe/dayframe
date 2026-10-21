@@ -178,24 +178,36 @@ export function createPageReadGate() {
 }
 
 /**
- * Places' geofence monitoring, one refresh at a time and latest wins (Codex r6 on #508): a request
- * while one runs replaces whatever was waiting, and runs once the running one finishes, so the last
- * input is always the newest requested. `finished` hears only the last run of a drain (a run that a
- * newer request overtook settles nothing). `request` resolves once the queue has drained. `engaged`:
- * the page has asked for monitoring at least once, so from then on every list it shows is monitored.
+ * Places' geofence monitoring, one refresh at a time and latest wins (Codex r6/r7 on #508): a request
+ * while one runs replaces whatever was waiting, so the last input is always the newest requested.
+ * Just before an input runs, `runnable` is asked again; false drops it unrun (its account lifetime
+ * ended, or the page closed), and `clear` drops whatever waits. `finished` hears every refresh that
+ * ran, so retries that keep queueing newer inputs never starve settlement; it decides from the
+ * page's current state, not from the input's. `request` resolves once that input has run, or was
+ * replaced or dropped. `engaged`: the page has asked at least once, so every list it shows from then
+ * on is monitored.
  */
-export function createMonitorQueue<T>(refresh: (input: T) => Promise<boolean>, finished: (input: T, refreshed: boolean) => void) {
-  let waiting: { input: T } | null = null;
+export function createMonitorQueue<T>(options: {
+  refresh: (input: T) => Promise<unknown>;
+  runnable: (input: T) => boolean;
+  finished: (input: T, refreshed: boolean) => void;
+}) {
+  type Job = { input: T; done: () => void };
+  let waiting: Job | null = null;
   let active = false;
   let engaged = false;
-  let drained: Promise<void> = Promise.resolve();
   async function drain() {
     try {
       while (waiting) {
-        const { input } = waiting;
+        const job: Job = waiting;
         waiting = null;
-        const refreshed = await Promise.resolve().then(() => refresh(input)).then((value) => value, () => false);
-        if (!waiting) finished(input, refreshed);
+        try {
+          if (!options.runnable(job.input)) continue;
+          const refreshed = await Promise.resolve().then(() => options.refresh(job.input)).then(() => true, () => false);
+          options.finished(job.input, refreshed);
+        } finally {
+          job.done();
+        }
       }
     } finally {
       // In the same step as the last check for a waiting input, so a request never goes unrun.
@@ -205,12 +217,19 @@ export function createMonitorQueue<T>(refresh: (input: T) => Promise<boolean>, f
   return {
     request(input: T) {
       engaged = true;
-      waiting = { input };
+      waiting?.done();
+      let done!: () => void;
+      const ran = new Promise<void>((resolve) => { done = resolve; });
+      waiting = { input, done };
       if (!active) {
         active = true;
-        drained = drain();
+        void drain();
       }
-      return drained;
+      return ran;
+    },
+    clear() {
+      waiting?.done();
+      waiting = null;
     },
     engaged() {
       return engaged;
