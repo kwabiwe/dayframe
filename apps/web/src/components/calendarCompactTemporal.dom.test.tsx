@@ -272,7 +272,8 @@ describe("Calendar compact temporal DOM", () => {
     fireEvent.blur(finish);
     expect(finish.value).toBe("09:00");
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("Finish must be after Start");
+    // 09:00 is before Start's 10:00, so it reads as tomorrow (owner, 21 Oct 2026), still an invalid End.
+    expect(alert.textContent).toContain("Finish can't be on a day after today.");
     expect(screen.getByLabelText("Start time").getAttribute("aria-invalid")).toBeNull();
     expect(finish.getAttribute("aria-invalid")).toBe("true");
     expect(finish.getAttribute("aria-describedby")).toBe(alert.id);
@@ -465,3 +466,87 @@ function localIso(value: string) {
   if (!iso) throw new Error(`Bad test date: ${value}`);
   return iso;
 }
+
+describe("End time inference and the long-block note (owner, 21 Oct 2026)", () => {
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_200 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (query: string) => ({ matches: query !== "(max-width: 560px)", addListener: vi.fn(), removeListener: vi.fn() })
+    });
+    window.localStorage.setItem("dayframe.clockFormat", "24h");
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+  });
+
+  it("reads 21:30 over a 21:00 → 06:04 (+1) block as 30m the same day, and saves it", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    renderEditor({ capturedNow: new Date(2026, 7, 3, 12), onSave, sourceEntry: entry("2026-08-02T21:00", "2026-08-03T06:04") });
+    const finish = await screen.findByLabelText("End time, one day after Start") as HTMLInputElement;
+    const duration = screen.getByLabelText("Duration") as HTMLInputElement;
+    expect(duration.value).toBe("9h 4m");
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("Long block · 9h 4m. Is the end right?");
+
+    await user.clear(finish);
+    await user.type(finish, "21:30");
+    expect(duration.value).toBe("30m");
+    expect(screen.getByLabelText("End time")).toBeTruthy();
+    expect(document.querySelector(".calendar-compact-day-offset")).toBeNull();
+    expect(document.querySelector(".calendar-compact-long-note")).toBeNull();
+
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave.mock.calls[0][0].payload).toEqual({ stoppedAt: localIso("2026-08-02T21:30") });
+  });
+
+  it("reads an End at or before Start's time as the next day (+1), never over 24 h", async () => {
+    const user = userEvent.setup();
+    renderEditor({ capturedNow: new Date(2026, 7, 3, 12), sourceEntry: entry("2026-08-02T21:00", "2026-08-02T22:00") });
+    const finish = await screen.findByLabelText("End time") as HTMLInputElement;
+    const duration = screen.getByLabelText("Duration") as HTMLInputElement;
+
+    await user.clear(finish);
+    await user.type(finish, "06:04");
+    expect(duration.value).toBe("9h 4m");
+    expect(document.querySelector(".calendar-compact-day-offset")?.textContent).toBe("+1");
+
+    await user.clear(finish);
+    await user.type(finish, "21:00");
+    expect(duration.value).toBe("24h");
+
+    await user.clear(finish);
+    await user.type(finish, "23:15");
+    expect(duration.value).toBe("2h 15m");
+    expect(document.querySelector(".calendar-compact-day-offset")).toBeNull();
+  });
+
+  it("keeps the +1 while an End is half typed, and announces the note only once the time settles", async () => {
+    const user = userEvent.setup();
+    renderEditor({ capturedNow: new Date(2026, 7, 3, 12), sourceEntry: entry("2026-08-02T21:00", "2026-08-03T06:04") });
+    const finish = await screen.findByLabelText("End time, one day after Start") as HTMLInputElement;
+    await user.clear(finish);
+    await user.type(finish, "21:3");
+    expect(document.querySelector(".calendar-compact-day-offset")?.textContent).toBe("+1");
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("");
+    await user.clear(finish);
+    await user.type(finish, "07:00");
+    await user.tab();
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("Long block · 10h. Is the end right?");
+  });
+
+  it("moves End forward with Start, keeping the duration", async () => {
+    const user = userEvent.setup();
+    renderEditor({ capturedNow: new Date(2026, 7, 3, 12), sourceEntry: entry("2026-08-02T21:00", "2026-08-02T22:00") });
+    const start = await screen.findByLabelText("Start time") as HTMLInputElement;
+    await user.clear(start);
+    await user.type(start, "23:30");
+    // Past the old End (22:00): End follows to 00:30 the next day and the block stays 1h.
+    expect((screen.getByLabelText("End time, one day after Start") as HTMLInputElement).value).toBe("00:30");
+    expect((screen.getByLabelText("Duration") as HTMLInputElement).value).toBe("1h");
+  });
+});
