@@ -43,9 +43,22 @@ function metaActivity(entry: RowEntry) {
   return displayTimerDescription(entry)?.trim() ? entry.categoryName : null;
 }
 
+/** A row's title: a named pattern's name (location v3 PR 14), else its block's display name. */
+export function groupTitle(group: HistoryEntryGroup) {
+  return group.name ?? rowTitle(group.representative.entry);
+}
+
+/** A named pattern's whole time: its first part's start to its last part's end. */
+function namedSpan(group: HistoryEntryGroup, nowMs: number, clockFormat: ClockFormat, separator: string) {
+  const starts = group.entries.map(({ entry }) => entry.startedAt).sort();
+  const stops = group.entries.map(({ entry }) => entry.stoppedAt ?? "").sort();
+  return `${clock(starts[0] ?? null, nowMs, clockFormat)}${separator}${clock(stops.at(-1) || null, nowMs, clockFormat)}`;
+}
+
 /** The row's second line: time, how many repeats a group holds, then the activity. */
 export function rowMeta(group: HistoryEntryGroup, nowMs: number, clockFormat: ClockFormat) {
   const { entry } = group.representative;
+  if (group.name) return `${namedSpan(group, nowMs, clockFormat, "–")} · ${group.entries.length} parts`;
   return [
     rowTimeRange(entry, nowMs, clockFormat),
     group.entries.length > 1 ? `${group.entries.length} blocks` : null,
@@ -59,6 +72,15 @@ export function rowMeta(group: HistoryEntryGroup, nowMs: number, clockFormat: Cl
  */
 export function rowSpokenLabel(group: HistoryEntryGroup, nowMs: number, clockFormat: ClockFormat, { omitCount = false } = {}) {
   const { entry } = group.representative;
+  if (group.name) {
+    return [
+      group.name,
+      namedSpan(group, nowMs, clockFormat, " to "),
+      omitCount ? null : `${group.entries.length} parts`,
+      // Oldest first, as the trip happened.
+      [...group.entries].reverse().map(({ entry: part }) => rowTitle(part)).join(", then "),
+    ].filter(Boolean).join(", ");
+  }
   const tags = entry.tagNames ?? entry.tags?.map((tag) => tag.name) ?? [];
   return [
     rowTitle(entry),

@@ -2,8 +2,8 @@
 
 import { formatClockHour } from "@dayframe/shared";
 import Link from "next/link";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { resolveActivityIcon, withGoalExclusions } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
@@ -39,6 +39,8 @@ import {
   ribbonNextStartMs,
   staleEditError,
   todayBlocks,
+  todayRows,
+  type TodayRow,
   whereTodayWentBars,
   type GoalCellSlice,
   type WhereTodayWentBar
@@ -121,27 +123,51 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     [data.categories]
   );
 
-  const deleteEntry = useCallback((entry: TimeEntryRow, focusNextId: string | null) => {
-    if (!entry.stoppedAt || leaveTimersRef.current.has(entry.id)) return;
+  /** Deletes one block, or a named pattern's parts together (location v3 PR 14), with one Undo. */
+  const deleteEntries = useCallback((targets: TimeEntryRow[], focusNextId: string | null, title: string) => {
+    if (targets.length === 0 || targets.some((entry) => !entry.stoppedAt || leaveTimersRef.current.has(entry.id))) return;
     setActionError(null);
+    const ids = targets.map((entry) => entry.id);
     const commit = () => {
-      leaveTimersRef.current.delete(entry.id);
+      for (const id of ids) leaveTimersRef.current.delete(id);
       setLeavingIds((current) => {
         const next = new Set(current);
-        next.delete(entry.id);
+        for (const id of ids) next.delete(id);
         return next;
       });
-      setToastEntry(entry);
-      requestDelete({ entries: [entry], label: deletedToastLabel(1, timeEntryTitle(entry)) });
+      // "Don't log trips like this" is offered only for one automatic Move deleted on its own.
+      setToastEntry(targets.length === 1 ? targets[0] : null);
+      requestDelete({ entries: targets, label: deletedToastLabel(targets.length, title) });
       if (focusNextId) window.requestAnimationFrame(() => rowRefs.current.get(focusNextId)?.focus());
     };
     if (prefersReducedMotion()) {
       commit();
       return;
     }
-    setLeavingIds((current) => new Set(current).add(entry.id));
-    leaveTimersRef.current.set(entry.id, setTimeout(commit, ROW_EXIT_MS));
+    setLeavingIds((current) => {
+      const next = new Set(current);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    const timer = setTimeout(commit, ROW_EXIT_MS);
+    for (const id of ids) leaveTimersRef.current.set(id, timer);
   }, [requestDelete]);
+  const deleteEntry = useCallback((entry: TimeEntryRow, focusNextId: string | null) => (
+    deleteEntries([entry], focusNextId, timeEntryTitle(entry))
+  ), [deleteEntries]);
+  const registerRow = useCallback((id: string, element: HTMLButtonElement | null) => {
+    if (element) rowRefs.current.set(id, element);
+    else rowRefs.current.delete(id);
+  }, []);
+  const [openPatterns, setOpenPatterns] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePattern = useCallback((key: string) => {
+    setOpenPatterns((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const startAgain = useCallback(async (entry: TimeEntryRow) => {
     if (startingId || isTimerBusy) {
@@ -181,6 +207,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const dayEnd = localDayEnd(dayStart);
   const goal = buildGoalFrame({ categories: withGoalExclusions(data.categories, data.goalExcludedCategoryIds), entries, goalMinutes: data.user.dailyGoalMinutes, nowMs });
   const blocks = todayBlocks(entries, dayStart, nowMs);
+  const rows = todayRows(blocks);
   const totals = coveredActivityTotals(entries, dayStart, dayEnd, nowMs);
   const bars = whereTodayWentBars(totals);
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
@@ -318,33 +345,52 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
         ) : null}
         {blocks.length ? (
           <ul className="df-rows">
-            {blocks.map(({ entry }, index) => {
-              const category = entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null;
-              const nextId = blocks[index + 1]?.entry.id ?? blocks[index - 1]?.entry.id ?? null;
+            {rows.map((row, index) => {
+              const neighbour = rows[index + 1] ?? rows[index - 1];
+              const nextId = neighbour ? rowFocusKey(neighbour) : null;
+              const rowContext = {
+                categoriesById,
+                isTimerBusy,
+                leavingIds,
+                nowMs,
+                onDelete: deleteEntry,
+                onEdit: (entry: TimeEntryRow) => {
+                  // A Start that has not reached the server yet has a temporary ID; it can be
+                  // edited once it is saved (from the command bar meanwhile).
+                  if (!isUnsavedEntryId(entry.id)) setEditingEntry(entry);
+                },
+                onStartAgain: async (entry: TimeEntryRow) => {
+                  const outcome = await startAgain(entry);
+                  if (!outcome.ok) setActionError(outcome.error);
+                },
+                registerRow,
+                startingId
+              };
+              if (row.kind === "block") {
+                return <TodayEntryRow context={rowContext} entry={row.block.entry} focusNextId={nextId} key={row.block.entry.id} />;
+              }
+              const parts = row.blocks.map(({ entry }) => entry);
               return (
-                <TodayBlockRow
-                  category={category}
-                  durationMs={(entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs) - Date.parse(entry.startedAt)}
-                  entry={entry}
-                  isLeaving={leavingIds.has(entry.id)}
-                  isStarting={startingId === entry.id}
-                  key={entry.id}
-                  onDelete={() => deleteEntry(entry, nextId)}
-                  onEdit={() => {
-                    // A Start that has not reached the server yet has a temporary ID; it can be
-                    // edited once it is saved (from the command bar meanwhile).
-                    if (!isUnsavedEntryId(entry.id)) setEditingEntry(entry);
-                  }}
-                  onStartAgain={async () => {
-                    const outcome = await startAgain(entry);
-                    if (!outcome.ok) setActionError(outcome.error);
-                  }}
-                  registerMain={(element) => {
-                    if (element) rowRefs.current.set(entry.id, element);
-                    else rowRefs.current.delete(entry.id);
-                  }}
-                  startDisabled={Boolean(startingId) || isTimerBusy}
-                />
+                <TodayNamedRow
+                  isLeaving={parts.some((entry) => leavingIds.has(entry.id))}
+                  isOpen={openPatterns.has(row.key)}
+                  key={row.key}
+                  name={row.name}
+                  nowMs={nowMs}
+                  onDelete={() => deleteEntries(parts, nextId, row.name)}
+                  onToggle={() => togglePattern(row.key)}
+                  parts={parts}
+                  registerMain={(element) => registerRow(rowFocusKey(row), element)}
+                >
+                  {parts.map((entry, partIndex) => (
+                    <TodayEntryRow
+                      context={rowContext}
+                      entry={entry}
+                      focusNextId={parts[partIndex + 1]?.id ?? parts[partIndex - 1]?.id ?? parts[0].id}
+                      key={entry.id}
+                    />
+                  ))}
+                </TodayNamedRow>
               );
             })}
           </ul>
@@ -638,6 +684,147 @@ function WhereTodayWent({ bars }: { bars: readonly WhereTodayWentBar[] }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+type TodayEntryRowContext = {
+  categoriesById: ReadonlyMap<string, CategoryRow>;
+  isTimerBusy: boolean;
+  leavingIds: ReadonlySet<string>;
+  nowMs: number;
+  onDelete: (entry: TimeEntryRow, focusNextId: string | null) => void;
+  onEdit: (entry: TimeEntryRow) => void;
+  onStartAgain: (entry: TimeEntryRow) => Promise<void>;
+  registerRow: (id: string, element: HTMLButtonElement | null) => void;
+  startingId: string | null;
+};
+
+/** One block's row, on its own or as a named pattern's part. */
+function TodayEntryRow({ context, entry, focusNextId }: { context: TodayEntryRowContext; entry: TimeEntryRow; focusNextId: string | null }) {
+  const category = entry.categoryId ? context.categoriesById.get(entry.categoryId) ?? null : null;
+  return (
+    <TodayBlockRow
+      category={category}
+      durationMs={(entry.stoppedAt ? Date.parse(entry.stoppedAt) : context.nowMs) - Date.parse(entry.startedAt)}
+      entry={entry}
+      isLeaving={context.leavingIds.has(entry.id)}
+      isStarting={context.startingId === entry.id}
+      onDelete={() => context.onDelete(entry, focusNextId)}
+      onEdit={() => context.onEdit(entry)}
+      onStartAgain={() => void context.onStartAgain(entry)}
+      registerMain={(element) => context.registerRow(entry.id, element)}
+      startDisabled={Boolean(context.startingId) || context.isTimerBusy}
+    />
+  );
+}
+
+/** Where focus goes after a delete: a block's own row, or a group's header (never one of its parts). */
+function rowFocusKey(row: TodayRow<TimeEntryRow>) {
+  return row.kind === "block" ? row.block.entry.id : `named-row:${row.key}`;
+}
+
+/**
+ * A named A → B → A (location v3 PR 14, PRD D19 A9): one row with the pattern's name, its whole
+ * time and a strip of its parts; it opens to the parts (each its own block, edited and deleted on
+ * its own). Delete removes every part with one Undo; there is no Start again on a group.
+ */
+function TodayNamedRow({
+  children,
+  isLeaving,
+  isOpen,
+  name,
+  nowMs,
+  onDelete,
+  onToggle,
+  parts,
+  registerMain
+}: {
+  children: ReactNode;
+  isLeaving: boolean;
+  isOpen: boolean;
+  name: string;
+  nowMs: number;
+  onDelete: () => void;
+  onToggle: () => void;
+  parts: TimeEntryRow[];
+  registerMain: (element: HTMLButtonElement | null) => void;
+}) {
+  const clock = useClockFormat();
+  const panelId = useId();
+  // Parts arrive newest first; the strip and the spoken list read as the trip happened.
+  const ordered = [...parts].reverse();
+  const startMs = Math.min(...parts.map((entry) => Date.parse(entry.startedAt)));
+  const endMs = Math.max(...parts.map((entry) => (entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs)));
+  const seconds = parts.reduce((sum, entry) => sum + ((entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs) - Date.parse(entry.startedAt)) / 1000, 0);
+  const start = formatTime(new Date(startMs).toISOString(), clock);
+  const end = formatTime(new Date(endMs).toISOString(), clock);
+  const titles = ordered.map((entry) => timeEntryTitle(entry));
+
+  function onKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      onDelete();
+    }
+  }
+
+  return (
+    <li className={`df-erow-group${isOpen ? " is-open" : ""}`}>
+      <div className={`df-erow df-erow-named${isLeaving ? " is-leaving" : ""}`}>
+        <button
+          aria-controls={panelId}
+          aria-expanded={isOpen}
+          aria-label={`${name}, ${parts.length} parts: ${titles.join(", then ")}, ${start} to ${end}, ${spokenDuration(seconds)}. ${isOpen ? "Hide" : "Show"} the parts; Delete or Backspace deletes all of them.`}
+          className="df-erow-main"
+          onClick={onToggle}
+          onKeyDown={onKeyDown}
+          ref={registerMain}
+          type="button"
+        >
+          <span className="df-erow-block df-erow-block-named" style={{ height: blockRowHeight(endMs - startMs) }}>
+            <DayframeIcon glyph="route" size={16} />
+          </span>
+          <span className="df-erow-text">
+            <b>{name}</b>
+            {/* Phones hide the time column, so the group keeps its span and parts here. */}
+            <span className="df-erow-named-meta">{start}–{end} · {parts.length} parts</span>
+            <span className="df-erow-parts" aria-hidden="true">
+              {ordered.map((entry) => (
+                <i
+                  key={entry.id}
+                  style={{
+                    ...blockStyle(entry.categoryColor, entry.categoryName ?? ""),
+                    flexGrow: Math.max(1, (entry.stoppedAt ? Date.parse(entry.stoppedAt) : nowMs) - Date.parse(entry.startedAt))
+                  }}
+                />
+              ))}
+            </span>
+          </span>
+          <span className="df-erow-when">{start}–{end} · {parts.length} parts</span>
+          <span className="df-erow-dur">{formatDuration(seconds)}</span>
+        </button>
+        <span className="df-erow-acts">
+          <button
+            aria-label={`Delete ${name}: all ${parts.length} parts`}
+            className="df-icon-action"
+            data-tip="Delete"
+            disabled={isLeaving}
+            onClick={onDelete}
+            type="button"
+          >
+            <DayframeIcon glyph="trash-2" size={16} />
+          </button>
+        </span>
+      </div>
+      <div className="df-erow-children" id={panelId} inert={!isOpen}>
+        <div className="df-erow-children-body">
+          <ul className="df-rows">{children}</ul>
+          {/* Phones hide the row's hover actions, so the open group says it here too. */}
+          <button className="df-erow-children-delete" disabled={isLeaving} onClick={onDelete} type="button">
+            Delete all {parts.length} parts
+          </button>
+        </div>
+      </div>
+    </li>
   );
 }
 

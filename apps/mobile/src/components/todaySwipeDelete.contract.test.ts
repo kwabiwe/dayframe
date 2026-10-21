@@ -59,7 +59,9 @@ describe("Today rows swipe-to-delete contract", () => {
 
   it("keeps Start again functional as an explicit switch while another timer runs", () => {
     expect(rowsSource).toContain('activeTimerRunning ? `Switch to ${title}` : "Start again"');
-    expect(rowsSource).toContain("const replayable = !live && canStartAgain(entry)");
+    // A named pattern (location v3 PR 14) is the one row without Start again.
+    expect(rowsSource).toContain("const replayable = startAgain && !live && canStartAgain(entry)");
+    expect(rowsSource).toContain("startAgain={!named}");
     expect(dashboardSource).toContain("!isActiveEntryPendingDeletion()");
   });
 
