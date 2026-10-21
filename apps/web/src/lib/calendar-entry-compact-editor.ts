@@ -216,7 +216,7 @@ export function keepTypedMeridiemTime<T extends Pick<CalendarEntryCompactDraft, 
 }
 
 /**
- * A typed End time reads against Start's time of day, as Toggl does (owner, 21 Oct 2026): later than
+ * A typed End time reads against Start's time of day (owner, 21 Oct 2026): later than
  * Start is the same day as Start, at or before it is the next day (the End box shows "+1"). So typing
  * 21:30 over a 21:00 → 06:04 (+1) block gives 30m, never 24h 30m, and typing alone never makes a
  * block longer than 24 h. Callers skip this when the End date was chosen in the date picker, which
@@ -233,6 +233,19 @@ export function inferTypedFinishDate<T extends Pick<CalendarEntryCompactDraft, "
 
 /** Over 8 h, the editor asks gently whether the End is right (owner, 21 Oct 2026); Save still works. */
 export const LONG_BLOCK_NOTE_SECONDS = 8 * 3600;
+
+/**
+ * Typing alone never makes a block longer than 24 h (owner, 21 Oct 2026): on a night the clocks go
+ * back, "the next day" can be 24h 30m or 25h, so a typed End checks the real length too (Codex r1 on
+ * #504). Choosing the End date in the date picker lifts the limit.
+ */
+export const TYPED_BLOCK_LIMIT_SECONDS = 24 * 3600;
+export const TYPED_BLOCK_LIMIT_MESSAGE = "Finish more than 24 h after Start needs its End date chosen in the calendar.";
+
+export function enforceTypedBlockLimit<P extends { durationSeconds: number }>(plan: P, typedFinish: boolean): P {
+  if (typedFinish && plan.durationSeconds > TYPED_BLOCK_LIMIT_SECONDS) throw new Error(TYPED_BLOCK_LIMIT_MESSAGE);
+  return plan;
+}
 
 export function isCalendarEntryCompactTimeInputReadyToSynchronize(value: string) {
   const trimmed = value.trim();

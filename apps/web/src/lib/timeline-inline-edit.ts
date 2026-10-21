@@ -2,6 +2,7 @@ import {
   buildCalendarEntryCompactSavePlan,
   calendarEntryCompactInitialDraft,
   emptyCalendarEntryCompactDirty,
+  enforceTypedBlockLimit,
   inferTypedFinishDate,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   keepTypedMeridiemTime,
@@ -25,6 +26,8 @@ export type TimelineInlineEditDraft = {
   sourceStoppedAt: string | null;
   /** The End date was chosen in the date picker, so a typed End time no longer infers its day. */
   finishDateChosen?: boolean;
+  /** The End time was typed in this edit, so a later Start re-reads its day. */
+  finishTyped?: boolean;
 };
 
 export function createTimelineInlineEditDraft(
@@ -62,10 +65,21 @@ export function updateTimelineInlineTime(
   rawValue: string
 ): TimelineInlineEditDraft {
   const value = maskTimeInput(rawValue);
-  if (edge === "start") return updateTimelineInlineTemporalEdge(edit, edge, { startedAtTime: value });
-  // A typed End reads against Start's time of day, as in the block editor (owner, 21 Oct 2026).
-  const inferred = edit.finishDateChosen ? null : inferTypedFinishDate({ ...edit.draft, stoppedAtTime: value });
-  return updateTimelineInlineTemporalEdge(edit, edge, {
+  const ready = isCalendarEntryCompactTimeInputReadyToSynchronize(value);
+  if (edge === "start") {
+    // An End typed in this edit re-reads its day against the new Start (owner, 21 Oct 2026).
+    const reread = edit.finishTyped && !edit.finishDateChosen && ready
+      ? inferTypedFinishDate({ ...edit.draft, startedAtTime: value })
+      : null;
+    return updateTimelineInlineTemporalEdge(edit, edge, {
+      startedAtTime: value,
+      ...(reread && reread.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: reread.stoppedAtDate } : {})
+    });
+  }
+  // A typed End reads against Start's time of day, as in the block editor (owner, 21 Oct 2026); only
+  // a complete time moves the day.
+  const inferred = edit.finishDateChosen || !ready ? null : inferTypedFinishDate({ ...edit.draft, stoppedAtTime: value });
+  return updateTimelineInlineTemporalEdge({ ...edit, finishTyped: !edit.finishDateChosen }, edge, {
     stoppedAtTime: value,
     ...(inferred && inferred.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: inferred.stoppedAtDate } : {})
   });
@@ -101,12 +115,14 @@ export function buildTimelineInlineSavePlan(
       edit.draft.stoppedAtTime !== sourceDraft.stoppedAtTime;
     if (!timeChanged) return unchangedTimelineInlineSavePlan(entry, now);
 
-    const sourcePlan = buildCalendarEntryCompactSavePlan({
+    // Typed times keep the block within 24 h unless the End date was chosen (Codex r1 on #504).
+    const typedTimes = !edit.finishDateChosen && (edit.dirty.startedAtTime || edit.dirty.stoppedAtTime);
+    const sourcePlan = enforceTypedBlockLimit(buildCalendarEntryCompactSavePlan({
       draft: edit.draft,
       dirty: edit.dirty,
       entry: sourceEntry,
       now
-    });
+    }), typedTimes);
     return {
       ...sourcePlan,
       payload: {
@@ -144,8 +160,8 @@ function updateTimelineInlineTemporalEdge(
   };
   const edgeTime = edge === "start" ? nextDraft.startedAtTime : nextDraft.stoppedAtTime;
   const edgeDate = edge === "start" ? nextDraft.startedAtDate : nextDraft.stoppedAtDate;
-  const synchronized = /^\d{4}-\d{2}-\d{2}$/.test(edgeDate) &&
-    isCalendarEntryCompactTimeInputReadyToSynchronize(edgeTime)
+  const canSynchronize = /^\d{4}-\d{2}-\d{2}$/.test(edgeDate) && isCalendarEntryCompactTimeInputReadyToSynchronize(edgeTime);
+  const fixedEdges = canSynchronize
     ? trySynchronizeCalendarEntryCompactDraft({
         draft: nextDraft,
         originalStartedAt: edit.sourceStartedAt,
@@ -153,6 +169,15 @@ function updateTimelineInlineTemporalEdge(
         owner
       })
     : null;
+  // A Start typed past End moves End forward, keeping the duration (owner, 21 Oct 2026).
+  const synchronized = fixedEdges ?? (canSynchronize && edge === "start" && edit.sourceStoppedAt
+    ? trySynchronizeCalendarEntryCompactDraft({
+        draft: { ...nextDraft, temporalOwner: "start" },
+        originalStartedAt: edit.sourceStartedAt,
+        originalStoppedAt: edit.sourceStoppedAt,
+        owner: "start"
+      })
+    : null);
   const dirty = { ...edit.dirty };
   for (const key of Object.keys(patch) as Array<keyof typeof patch>) {
     if (key in dirty) dirty[key] = true;
