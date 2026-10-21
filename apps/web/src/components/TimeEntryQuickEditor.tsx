@@ -27,7 +27,6 @@ import {
   keepTypedMeridiemTime,
   enforceTypedBlockLimit,
   inferTypedFinishDate,
-  LONG_BLOCK_NOTE_SECONDS,
   normalizeCalendarEntryCompactTypedTimes,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
@@ -596,7 +595,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         ? "overlap"
         : "default";
   const finishDayOffset = isRunning ? 0 : calendarEntryLocalDayOffset(draft.startedAtDate, draft.stoppedAtDate);
-  const longBlockSeconds = preview.plan?.durationSeconds ?? draft.durationSeconds;
 
   return {
     activeTemporalOwner,
@@ -628,7 +626,6 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     isEntered,
     isExiting,
     isRunning,
-    longBlockSeconds,
     panelRef,
     preview,
     save,
@@ -683,7 +680,6 @@ export function TimeEntryQuickEditorPanel({
     isBusy,
     isCategoryOpen,
     isRunning,
-    longBlockSeconds,
     panelRef,
     preview,
     saveBlockedByTimer,
@@ -990,19 +986,6 @@ export function TimeEntryQuickEditorPanel({
             </label>
           )}
         </div>
-        {!isRunning && longBlockSeconds > LONG_BLOCK_NOTE_SECONDS ? (
-          // A gentle check on a long block (owner, 21 Oct 2026): muted, inline, never blocks Save.
-          <p className="calendar-compact-long-note" aria-hidden="true">
-            Long block · {formatDuration(longBlockSeconds)}. Is the end right?
-          </p>
-        ) : null}
-        {/* Announced once the time is settled, never at each keystroke's passing estimate (Codex r1
-            on #504); the visible line above updates at once. */}
-        <span className="sr-only calendar-compact-long-note-live" aria-live="polite" aria-atomic="true">
-          {!isRunning && !controller.activeTemporalOwner && longBlockSeconds > LONG_BLOCK_NOTE_SECONDS
-            ? `Long block · ${formatDuration(longBlockSeconds)}. Is the end right?`
-            : ""}
-        </span>
       </div>
 
       {/* Footer (prototype "Edit block", WUI-004): a note (an error or an overlap) on its own line
