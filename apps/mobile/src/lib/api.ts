@@ -1648,10 +1648,14 @@ export async function resolveLocationReviewItem(id: string, action: LocationRevi
 
 export async function fetchLocationReviewEvidence(
   id: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; owner?: MobileAccountOwner } = {}
 ): Promise<LocationReviewEvidenceDto> {
-  const session = await readAuthenticatedSessionSnapshot();
-  if (session.status === "changed") throw new StaleMobileSessionResponseError();
+  // With an owner, the read goes only under that account's own session: evidence cached and shown
+  // for one account is never read with another's bearer during an account handover (Codex r3 on #522).
+  const session = options.owner
+    ? await readOwnedAuthenticatedSessionSnapshot(options.owner)
+    : await readAuthenticatedSessionSnapshot();
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
   if (session.status !== "authenticated") throw new AuthRequiredError();
   const { response, body } = await mobileJsonRequest<LocationReviewEvidenceDto | null>(
     `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(id)}/location-evidence`,

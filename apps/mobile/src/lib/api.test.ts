@@ -301,6 +301,17 @@ describe("mobile API client", () => {
     await expect(getSessionToken()).resolves.toBeNull();
   });
 
+  it("reads location evidence only under the account it is for (Codex r3 on #522)", async () => {
+    const { fetchLocationReviewEvidence } = await import("./api");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({}, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+    await setSessionToken("account-a-token", TIMER_STOP_OWNER);
+    await expect(fetchLocationReviewEvidence("40000000-0000-4000-8000-000000000001", {
+      owner: { userId: "user-b", workspaceId: "workspace-a" }
+    })).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("reports a venue suggestion only under the evidence's own account and while the app is active (Codex r1 on #522)", async () => {
     const { reportVenueSuggestion } = await import("./api");
     const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true }, 200)));

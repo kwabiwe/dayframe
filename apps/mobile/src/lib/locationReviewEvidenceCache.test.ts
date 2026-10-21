@@ -108,6 +108,10 @@ describe("Location Review evidence cache orchestration", () => {
       expect.objectContaining({ evidence, source: "network" })
     ]);
     expect(fetchLocationReviewEvidence).toHaveBeenCalledTimes(1);
+    // Read under the account it is cached for (Codex r3 on #522).
+    expect(fetchLocationReviewEvidence).toHaveBeenCalledWith(evidence.reviewItemId, expect.objectContaining({
+      owner: { userId: owner.userId, workspaceId: owner.workspaceId }
+    }));
     expect(cacheLocationReviewEvidence).toHaveBeenCalledTimes(1);
   });
 
@@ -197,7 +201,7 @@ describe("Location Review evidence cache orchestration", () => {
     expect(fetchLocationReviewEvidence).toHaveBeenNthCalledWith(
       1,
       evidence.reviewItemId,
-      { signal: expect.any(AbortSignal) }
+      { signal: expect.any(AbortSignal), owner: { userId: owner.userId, workspaceId: owner.workspaceId } }
     );
 
     firstController.abort(cancellation);
@@ -215,7 +219,7 @@ describe("Location Review evidence cache orchestration", () => {
     expect(fetchLocationReviewEvidence).toHaveBeenNthCalledWith(
       2,
       evidence.reviewItemId,
-      { signal: expect.any(AbortSignal) }
+      { signal: expect.any(AbortSignal), owner: { userId: owner.userId, workspaceId: owner.workspaceId } }
     );
     expect(cacheLocationReviewEvidence).toHaveBeenCalledOnce();
   });

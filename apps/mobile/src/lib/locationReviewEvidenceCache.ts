@@ -240,7 +240,9 @@ function networkLocationReviewEvidence(input: EvidenceOwner) {
       if (nextRequest.consumerCount === 0) invalidate();
     };
     const networkPromise = fetchLocationReviewEvidence(input.reviewItemId, {
-      signal: transportController.signal
+      signal: transportController.signal,
+      // Read under the account it is cached for, never whichever session is current (Codex r3 on #522).
+      owner: { userId: input.userId, workspaceId: input.workspaceId }
     })
       .then((evidence) => {
         setTimeout(() => {
