@@ -1,10 +1,11 @@
 /**
  * Named patterns on Today (location v3 PR 14, PRD D19 A9). The server tags each block of a named
- * A → B → A with one `locationGroup`; a Today list shows as one row the members that sit next to
- * each other in its order, all finished and within three hours, so an edit that moved a part
- * away, or a block logged in between, leaves the parts as their own rows. Display only.
+ * A → B → A with one `locationGroup`; a Today list shows it as one row only while all of its parts
+ * sit next to each other in its order, finished and within three hours, so an edit that moved a
+ * part away, a deleted part or a block logged in between leaves the parts as their own rows.
  */
-export type NamedPatternTag = { key: string; name: string };
+/** `parts`: how many blocks the pattern has; a row forms only while all of them sit together. */
+export type NamedPatternTag = { key: string; name: string; parts?: number };
 
 export type NamedPatternItem = {
   id: string;
@@ -25,7 +26,8 @@ export function namedPatternRuns(items: readonly NamedPatternItem[]) {
     while (group && end + 1 < items.length && items[end + 1].locationGroup?.key === group.key) end += 1;
     const run = items.slice(index, end + 1);
     index = end + 1;
-    if (!group || run.length < 2 || run.some((item) => !item.stoppedAt)) continue;
+    if (!group || run.length < 2 || (group.parts !== undefined && run.length !== group.parts)) continue;
+    if (run.some((item) => !item.stoppedAt)) continue;
     const starts = run.map((item) => Date.parse(item.startedAt));
     const stops = run.map((item) => Date.parse(item.stoppedAt!));
     if (starts.some(Number.isNaN) || stops.some(Number.isNaN)) continue;

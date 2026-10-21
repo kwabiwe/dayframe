@@ -5,10 +5,15 @@ import type { RequestSession } from "../session";
  * Named patterns on Today and Calendar (location v3 PR 14, PRD D19 A9). Display only: blocks stay
  * separate in storage, Reports and exports. A Move into a Stay and the Move out of it back to where
  * it started (A → B → A), all logged, all within three hours, whose Stay the person has named (a
- * learned name they gave it, `location_name_patterns` with uses), are tagged with one group key and
- * the name; clients show adjacent members as one row ("School run · 36m"). Nothing else groups.
+ * learned name they gave it, `location_name_patterns` with uses), are tagged with one group key,
+ * the name and how many parts it has; clients show it as one row ("School run · 36m") only while
+ * every part sits next to the others. Nothing else groups.
+ *
+ * A Stay corrected in Review (split or merged) is a new segment: its block stands for the stays it
+ * came from (a split's parent, a merge's originals), which the Moves either side still name. The
+ * Stay blocks that stand for the same stays form one middle; a split Stay's two parts both join.
  */
-export type LocationGroup = { key: string; name: string };
+export type LocationGroup = { key: string; name: string; parts: number };
 
 export const LOCATION_GROUP_MAX_SPAN_MS = 3 * 60 * 60 * 1000;
 /** Two ends of a trip at an unsaved place count as the same place within this distance. */
@@ -22,6 +27,7 @@ type BlockRow = {
   id: string;
   eventType: string | null;
   segmentId: string | null;
+  correctedSegmentId: string | null;
   fromStay: string | null;
   toStay: string | null;
   patternKey: string | null;
@@ -40,7 +46,8 @@ export type LocationGroupBlock = {
   kind: "stay" | "move";
   startedAtMs: number;
   stoppedAtMs: number;
-  segmentId: string | null;
+  /** A Stay: the client segment ids it stands for (itself, or the stays a correction came from). */
+  covers: string[];
   fromStay: string | null;
   toStay: string | null;
   name: string | null;
@@ -63,6 +70,7 @@ export async function getLocationGroups(db: Queryable, session: RequestSession, 
     `select te.id,
             ae.event_type as "eventType",
             ae.raw_payload ->> 'clientSegmentId' as "segmentId",
+            case when ae.raw_payload ->> 'correction' = 'true' then ae.raw_payload ->> 'segmentId' end as "correctedSegmentId",
             ae.raw_payload ->> 'fromStaySegmentId' as "fromStay",
             ae.raw_payload ->> 'toStaySegmentId' as "toStay",
             ae.raw_payload ->> 'namePatternKey' as "patternKey"
@@ -72,19 +80,41 @@ export async function getLocationGroups(db: Queryable, session: RequestSession, 
       where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])`,
     [session.workspaceId, session.userId, [...candidates.keys()]]
   );
-  const stayKeys = [...new Set(blocks.rows.filter(isStayRow).flatMap((row) => row.patternKey ? [row.patternKey] : []))];
+  const stayRows = blocks.rows.filter(isStayRow);
+  const stayKeys = [...new Set(stayRows.flatMap((row) => row.patternKey ? [row.patternKey] : []))];
   const moveEnds = [...new Set(blocks.rows.filter((row) => !isStayRow(row)).flatMap((row) => [row.fromStay, row.toStay])
     .filter((value): value is string => Boolean(value)))];
   if (stayKeys.length === 0 || moveEnds.length === 0) return new Map<string, LocationGroup>();
 
   // In turn: callers may pass one transaction client, which runs one query at a time.
-  const names = await db.query<{ patternKey: string; name: string; uses: number }>(
-    `select pattern_key as "patternKey", name, uses
+  // The name the person has used most for each pattern, ties to the latest used (then by band).
+  const names = await db.query<{ patternKey: string; name: string }>(
+    `select distinct on (pattern_key) pattern_key as "patternKey", name
        from location_name_patterns
       where workspace_id = $1 and user_id = $2 and pattern_key = any($3::text[])
-        and name is not null and uses > 0`,
+        and name is not null and uses > 0
+      order by pattern_key, uses desc, last_used_at desc nulls last, band`,
     [session.workspaceId, session.userId, stayKeys]
   );
+  // A corrected Stay's segment, by primary key: the stays it came from (a split's parent, a
+  // merge's originals) as the Moves name them.
+  const correctedIds = [...new Set(stayRows.flatMap((row) => row.correctedSegmentId ? [row.correctedSegmentId] : []))];
+  const corrected = correctedIds.length === 0
+    ? { rows: [] as { id: string; covers: string[] | null }[] }
+    : await db.query<{ id: string; covers: string[] | null }>(
+      `select s.id::text as id,
+              array_remove(array[s.client_segment_id, parent.client_segment_id]
+                || coalesce((select array_agg(original.client_segment_id)
+                               from stay_segments original
+                              where original.workspace_id = s.workspace_id and original.user_id = s.user_id
+                                and original.id::text in (select jsonb_array_elements_text(coalesce(s.metadata -> 'mergedSegmentIds', '[]'::jsonb)))),
+                            array[]::text[]), null) as covers
+         from stay_segments s
+         left join stay_segments parent on parent.id = s.parent_segment_id and parent.workspace_id = s.workspace_id
+        where s.workspace_id = $1 and s.user_id = $2 and s.id::text = any($3::text[])`,
+      [session.workspaceId, session.userId, correctedIds]
+    );
+  // The Moves' ends, by owner and client segment id (`idx_stay_segments_owner_client`).
   const ends = await db.query<StayEndRow>(
     `select client_segment_id as "segmentId", place_id as "placeId", learned_place_id as "learnedPlaceId",
             case when centre is null then null else ST_Y(centre::geometry) end as latitude,
@@ -94,52 +124,75 @@ export async function getLocationGroups(db: Queryable, session: RequestSession, 
     [session.workspaceId, session.userId, moveEnds]
   );
 
-  // The name the person has used most for the pattern, across time-of-day bands.
-  const nameByKey = new Map<string, { name: string; uses: number }>();
-  for (const row of names.rows) {
-    const current = nameByKey.get(row.patternKey);
-    if (!current || row.uses > current.uses) nameByKey.set(row.patternKey, { name: row.name, uses: row.uses });
-  }
+  const nameByKey = new Map(names.rows.map((row) => [row.patternKey, row.name] as const));
+  const coversById = new Map(corrected.rows.map((row) => [row.id, row.covers ?? []] as const));
   const endBySegment = new Map(ends.rows.map((row) => [row.segmentId, row] as const));
   const input: LocationGroupBlock[] = blocks.rows.flatMap((row) => {
     const entry = candidates.get(row.id);
     if (!entry?.stoppedAt) return [];
     const stay = isStayRow(row);
+    const covers = !stay ? [] : row.correctedSegmentId ? coversById.get(row.correctedSegmentId) ?? [] : row.segmentId ? [row.segmentId] : [];
     return [{
       id: row.id,
       kind: stay ? "stay" as const : "move" as const,
       startedAtMs: new Date(entry.startedAt).getTime(),
       stoppedAtMs: new Date(entry.stoppedAt).getTime(),
-      segmentId: row.segmentId,
+      covers,
       fromStay: row.fromStay,
       toStay: row.toStay,
-      name: stay && row.patternKey ? nameByKey.get(row.patternKey)?.name ?? null : null
+      name: stay && row.patternKey ? nameByKey.get(row.patternKey) ?? null : null
     }];
   });
   return groupNamedPatterns(input, (segmentId) => endBySegment.get(segmentId) ?? null);
 }
 
-function isStayRow(row: BlockRow) {
+function isStayRow(row: Pick<BlockRow, "eventType">) {
   return row.eventType !== "commute_detected";
 }
 
-/** Pure: the A → B → A chains around a named Stay, each member keyed by the Stay's block. */
+/**
+ * Pure: the A → B → A chains around a named Stay. Stay blocks that stand for a shared stay are one
+ * middle (a split's two parts, or a merge standing for both originals); the Move into it and the
+ * Move out of it must be unique, back to the same place, and all within three hours.
+ */
 export function groupNamedPatterns(blocks: LocationGroupBlock[], endOf: (segmentId: string) => StayEnd | null) {
   const groups = new Map<string, LocationGroup>();
   const moves = blocks.filter((block) => block.kind === "move");
-  for (const stay of blocks) {
-    if (stay.kind !== "stay" || !stay.name || !stay.segmentId) continue;
-    const into = moves.filter((move) => move.toStay === stay.segmentId);
-    const outOf = moves.filter((move) => move.fromStay === stay.segmentId);
+  const stays = blocks.filter((block) => block.kind === "stay" && block.covers.length > 0)
+    .sort((left, right) => left.startedAtMs - right.startedAtMs || left.id.localeCompare(right.id));
+  const used = new Set<string>();
+  for (const seed of stays) {
+    if (used.has(seed.id)) continue;
+    // Every Stay block standing for one of the same stays, transitively.
+    const middle = [seed];
+    const covered = new Set(seed.covers);
+    for (let grown = true; grown;) {
+      grown = false;
+      for (const stay of stays) {
+        if (middle.includes(stay) || !stay.covers.some((id) => covered.has(id))) continue;
+        middle.push(stay);
+        for (const id of stay.covers) covered.add(id);
+        grown = true;
+      }
+    }
+    for (const stay of middle) used.add(stay.id);
+    middle.sort((left, right) => left.startedAtMs - right.startedAtMs || left.id.localeCompare(right.id));
+    const name = middle.find((stay) => stay.name)?.name;
+    if (!name) continue;
+    const into = moves.filter((move) => move.toStay !== null && covered.has(move.toStay));
+    const outOf = moves.filter((move) => move.fromStay !== null && covered.has(move.fromStay));
     // One Move each way, or the chain is ambiguous and nothing groups.
-    if (into.length !== 1 || outOf.length !== 1) continue;
+    if (into.length !== 1 || outOf.length !== 1 || into[0] === outOf[0]) continue;
     const [there, back] = [into[0], outOf[0]];
-    if (there.stoppedAtMs > stay.startedAtMs + 60_000 || back.startedAtMs < stay.stoppedAtMs - 60_000) continue;
+    const first = middle[0];
+    const last = middle[middle.length - 1];
+    if (there.stoppedAtMs > first.startedAtMs + 60_000 || back.startedAtMs < last.stoppedAtMs - 60_000) continue;
     if (back.stoppedAtMs - there.startedAtMs > LOCATION_GROUP_MAX_SPAN_MS) continue;
     if (!there.fromStay || !back.toStay || !sameEnd(endOf(there.fromStay), endOf(back.toStay))) continue;
-    if ([there, stay, back].some((block) => groups.has(block.id))) continue;
-    const group = { key: `named:${stay.id}`, name: stay.name };
-    for (const block of [there, stay, back]) groups.set(block.id, group);
+    const members = [there, ...middle, back];
+    if (members.some((block) => groups.has(block.id))) continue;
+    const group = { key: `named:${first.id}`, name, parts: members.length };
+    for (const block of members) groups.set(block.id, group);
   }
   return groups;
 }

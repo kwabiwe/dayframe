@@ -262,7 +262,7 @@ describe("Today", () => {
   });
 
   describe("a named pattern (location v3 PR 14)", () => {
-    const group = { key: "named:stay", name: "School run" };
+    const group = { key: "named:stay", name: "School run", parts: 3 };
     const part = (id: string, from: number, to: number, extra: Partial<TimeEntryRow> = {}) => entry({
       id, source: "location_learning", description: null, categoryId: "travel", categoryName: "Travel", categoryColor: "slate",
       startedAt: local(8, from), stoppedAt: local(8, to), durationSeconds: (to - from) * 60, locationGroup: group, ...extra
@@ -289,6 +289,8 @@ describe("Today", () => {
       expect(named.getAttribute("aria-expanded")).toBe("false");
       expect(container.querySelectorAll(".df-erow-parts i")).toHaveLength(3);
       expect(container.querySelector(".df-erow-named .df-erow-when")?.textContent).toBe("08:00–08:40 · 3 parts");
+      // Phones hide the time column; the text column keeps the span and parts (Codex r1 on #501).
+      expect(container.querySelector(".df-erow-named .df-erow-named-meta")?.textContent).toBe("08:00–08:40 · 3 parts");
       expect(container.querySelector(".df-erow-children")?.hasAttribute("inert")).toBe(true);
       // No Start again on a group; its parts keep their own.
       expect(container.querySelector('.df-erow-named button[aria-label^="Start"]')).toBeNull();
@@ -296,6 +298,24 @@ describe("Today", () => {
       expect(named.getAttribute("aria-expanded")).toBe("true");
       expect(container.querySelector(".df-erow-children")?.hasAttribute("inert")).toBe(false);
       expect(container.querySelectorAll(".df-erow-children .df-erow")).toHaveLength(3);
+      await act(async () => root.unmount());
+    });
+
+    it("moves focus to the group's header, not a hidden part, when its neighbour is deleted (Codex r1 on #501)", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+      vi.setSystemTime(NOW);
+      const frame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+        callback(0);
+        return 0;
+      });
+      const { container, root } = await mount(withTrip());
+      const inbox = [...container.querySelectorAll<HTMLButtonElement>(".df-erow-main")].find((button) =>
+        button.getAttribute("aria-label")?.startsWith("Inbox"))!;
+      inbox.focus();
+      await act(async () => inbox.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true })));
+      await act(async () => vi.advanceTimersByTime(200));
+      expect(document.activeElement).toBe(container.querySelector(".df-erow-named .df-erow-main"));
+      frame.mockRestore();
       await act(async () => root.unmount());
     });
 

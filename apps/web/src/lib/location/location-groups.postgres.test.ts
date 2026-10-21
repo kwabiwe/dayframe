@@ -93,8 +93,69 @@ describeWithDatabase("named patterns on disposable PostgreSQL (location v3 PR 14
       [workspaceId, userId]);
     const groups = await getLocationGroups(database!, session, await listed());
     expect([...groups.keys()].sort()).toEqual([entries.there, entries.stay, entries.back].sort());
-    expect(groups.get(entries.there)).toEqual({ key: `named:${entries.stay}`, name: "School run" });
+    expect(groups.get(entries.there)).toEqual({ key: `named:${entries.stay}`, name: "School run", parts: 3 });
     expect(groups.has(entries.manual)).toBe(false);
+  });
+
+  it("finds the Moves' ends through the owner and client segment index (Codex r1 on #501)", async () => {
+    const client = await database!.connect();
+    try {
+      await client.query("begin");
+      await client.query("set local enable_seqscan = off");
+      const plan = await client.query<{ "QUERY PLAN": string }>(
+        `explain select client_segment_id from stay_segments
+          where workspace_id = $1 and user_id = $2 and client_segment_id = any($3::text[])`,
+        [workspaceId, userId, ["seg-home-before", "seg-home-after"]]);
+      expect(plan.rows.map((row) => row["QUERY PLAN"]).join("\n")).toContain("idx_stay_segments_owner_client");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
+  it("groups a Stay split in Review: both parts stand for the stay the Moves name (Codex r1 on #501)", async () => {
+    const db = database!;
+    // A second outing later in the day, its stop split into two parts by a correction.
+    const parent = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, started_at, stopped_at, centre)
+       values ($1, $2, 'seg-park', 'device-1', $3, $4, ST_SetSRID(ST_MakePoint(20.02, 10.02), 4326)::geography) returning id`,
+      [workspaceId, userId, at(130), at(160)])).rows[0].id;
+    const children: string[] = [];
+    for (const [clientId, start, stop] of [["seg-park-left", 130, 145], ["seg-park-right", 145, 160]] as const) {
+      children.push((await db.query<{ id: string }>(
+        `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, started_at, stopped_at, parent_segment_id, source)
+         values ($1, $2, $3, 'device-1', $4, $5, $6, 'manual_split') returning id`,
+        [workspaceId, userId, clientId, at(start), at(stop), parent])).rows[0].id);
+    }
+    for (const [segmentId, start] of [["seg-home-before-2", 100], ["seg-home-after-2", 170]] as const) {
+      await db.query(
+        `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, place_id, started_at, stopped_at, centre)
+         values ($1, $2, $3, 'device-1', $4, $5, $6, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography)`,
+        [workspaceId, userId, segmentId, homeId, at(start), at(start + 10)]);
+    }
+    const ids = ["63000000-0000-4000-8000-000000000301", "63000000-0000-4000-8000-000000000302",
+      "63000000-0000-4000-8000-000000000303", "63000000-0000-4000-8000-000000000304"];
+    const parts: [string, string, Record<string, unknown>, number, number][] = [
+      [ids[0], "commute_detected", { clientSegmentId: "seg-m3", fromStaySegmentId: "seg-home-before-2", toStaySegmentId: "seg-park" }, 120, 130],
+      [ids[1], "unknown_stay", { segmentId: children[0], correction: true, namePatternKey: "hashed-park-key" }, 130, 145],
+      [ids[2], "unknown_stay", { segmentId: children[1], correction: true, namePatternKey: "hashed-park-key" }, 145, 160],
+      [ids[3], "commute_detected", { clientSegmentId: "seg-m4", fromStaySegmentId: "seg-park", toStaySegmentId: "seg-home-after-2" }, 160, 170]
+    ];
+    for (const [id, eventType, payload, start, stop] of parts) {
+      const eventId = (await db.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+         values ($1, $2, 'location_learning', $3, $4, 'medium', $5::jsonb) returning id`,
+        [workspaceId, userId, eventType, at(start), JSON.stringify(payload)])).rows[0].id;
+      await db.query(
+        `insert into time_entries (id, workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
+         values ($1, $2, $3, 'location_learning', $4, $5, $6)`,
+        [id, workspaceId, userId, at(start), at(stop), eventId]);
+    }
+    await db.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses)
+       values ($1, $2, 'hashed-park-key', 'morning', 'Park run', 1)`, [workspaceId, userId]);
+    const groups = await getLocationGroups(database!, session, await listed());
+    expect(ids.map((id) => groups.get(id))).toEqual(ids.map(() => ({ key: `named:${ids[1]}`, name: "Park run", parts: 4 })));
   });
 
   it("never uses another person's names or blocks", async () => {

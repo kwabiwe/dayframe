@@ -933,3 +933,8 @@ create index if not exists idx_segment_evidence_commute_lookup
 
 -- Keep the clean base fixture aligned with 015_log_trips_automatically.sql ("Log trips automatically").
 alter table users add column if not exists log_trips_automatically boolean not null default true;
+
+-- Keep the clean base fixture aligned with 017_stay_segment_owner_client_index.sql (named patterns).
+create index if not exists idx_stay_segments_owner_client
+  on stay_segments(workspace_id, user_id, client_segment_id)
+  where client_segment_id is not null;

@@ -483,7 +483,7 @@ describe("ribbon details", () => {
 });
 
 describe("todayRows (location v3 PR 14)", () => {
-  const group = { key: "named:stay", name: "School run" };
+  const group = { key: "named:stay", name: "School run", parts: 3 };
   const block = (id: string, from: number, to: number, locationGroup: typeof group | null = group) => ({
     entry: { id, startedAt: new Date(2026, 9, 20, 8, from).toISOString(), stoppedAt: new Date(2026, 9, 20, 8, to).toISOString(),
       categoryId: null, categoryName: null, categoryColor: null, locationGroup: locationGroup ?? undefined },

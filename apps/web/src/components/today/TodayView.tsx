@@ -347,7 +347,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           <ul className="df-rows">
             {rows.map((row, index) => {
               const neighbour = rows[index + 1] ?? rows[index - 1];
-              const nextId = neighbour ? rowFirstEntryId(neighbour) : null;
+              const nextId = neighbour ? rowFocusKey(neighbour) : null;
               const rowContext = {
                 categoriesById,
                 isTimerBusy,
@@ -380,7 +380,7 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
                   onDelete={() => deleteEntries(parts, nextId, row.name)}
                   onToggle={() => togglePattern(row.key)}
                   parts={parts}
-                  registerMain={(element) => registerRow(parts[0].id, element)}
+                  registerMain={(element) => registerRow(rowFocusKey(row), element)}
                 >
                   {parts.map((entry, partIndex) => (
                     <TodayEntryRow
@@ -718,8 +718,9 @@ function TodayEntryRow({ context, entry, focusNextId }: { context: TodayEntryRow
   );
 }
 
-function rowFirstEntryId(row: TodayRow<TimeEntryRow>) {
-  return row.kind === "block" ? row.block.entry.id : row.blocks[0]?.entry.id ?? null;
+/** Where focus goes after a delete: a block's own row, or a group's header (never one of its parts). */
+function rowFocusKey(row: TodayRow<TimeEntryRow>) {
+  return row.kind === "block" ? row.block.entry.id : `named-row:${row.key}`;
 }
 
 /**
@@ -784,6 +785,8 @@ function TodayNamedRow({
           </span>
           <span className="df-erow-text">
             <b>{name}</b>
+            {/* Phones hide the time column, so the group keeps its span and parts here. */}
+            <span className="df-erow-named-meta">{start}–{end} · {parts.length} parts</span>
             <span className="df-erow-parts" aria-hidden="true">
               {ordered.map((entry) => (
                 <i

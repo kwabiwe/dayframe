@@ -8688,6 +8688,10 @@ dialog.ui-dialog.df-palette {
   color: var(--text-primary);
 }
 
+.df-erow-text .df-erow-named-meta {
+  display: none;
+}
+
 .df-erow-text .df-erow-parts {
   display: flex;
   gap: 2px;
@@ -9039,6 +9043,10 @@ dialog.ui-dialog.df-palette {
   .df-erow-acts,
   .df-today-blocks-hint {
     display: none;
+  }
+
+  .df-erow-text .df-erow-named-meta {
+    display: block;
   }
 
   .df-erow-children-delete {

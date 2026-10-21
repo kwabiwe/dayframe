@@ -20,10 +20,10 @@ const home: StayEnd = { placeId: "place-home", learnedPlaceId: null, latitude: 1
 function chain(overrides: { name?: string | null; backMinutes?: number } = {}): LocationGroupBlock[] {
   const back = overrides.backMinutes ?? 40;
   return [
-    { id: "there", kind: "move", startedAtMs: at(0), stoppedAtMs: at(10), segmentId: "m1", fromStay: "home-before", toStay: "school", name: null },
-    { id: "stay", kind: "stay", startedAtMs: at(10), stoppedAtMs: at(back - 10), segmentId: "school", fromStay: null, toStay: null,
+    { id: "there", kind: "move", startedAtMs: at(0), stoppedAtMs: at(10), covers: [], fromStay: "home-before", toStay: "school", name: null },
+    { id: "stay", kind: "stay", startedAtMs: at(10), stoppedAtMs: at(back - 10), covers: ["school"], fromStay: null, toStay: null,
       name: overrides.name === undefined ? "School run" : overrides.name },
-    { id: "back", kind: "move", startedAtMs: at(back - 10), stoppedAtMs: at(back), segmentId: "m2", fromStay: "school", toStay: "home-after", name: null }
+    { id: "back", kind: "move", startedAtMs: at(back - 10), stoppedAtMs: at(back), covers: [], fromStay: "school", toStay: "home-after", name: null }
   ];
 }
 const ends = (map: Record<string, StayEnd>) => (segmentId: string) => map[segmentId] ?? null;
@@ -32,7 +32,7 @@ describe("named patterns on Today (location v3 PR 14)", () => {
   it("groups a Move into a named Stay and the Move back to the same place", () => {
     const groups = groupNamedPatterns(chain(), ends({ "home-before": home, "home-after": home }));
     expect([...groups.keys()].sort()).toEqual(["back", "stay", "there"]);
-    expect(groups.get("there")).toEqual({ key: "named:stay", name: "School run" });
+    expect(groups.get("there")).toEqual({ key: "named:stay", name: "School run", parts: 3 });
   });
 
   it("leaves an unnamed pattern, a trip that ends somewhere else, or one over three hours alone", () => {
@@ -48,6 +48,20 @@ describe("named patterns on Today (location v3 PR 14)", () => {
     expect(groupNamedPatterns([there, stay, back, { ...back, id: "back-2" }], ends({ "home-before": home, "home-after": home })).size).toBe(0);
   });
 
+  it("groups a Stay corrected in Review: a split's two parts, or a merge standing for both stays (Codex r1 on #501)", () => {
+    const [there, stay, back] = chain();
+    const left = { ...stay, id: "left", stoppedAtMs: at(20), covers: ["school-left", "school"] };
+    const right = { ...stay, id: "right", startedAtMs: at(20), covers: ["school-right", "school"], name: null };
+    const split = groupNamedPatterns([there, left, right, back], ends({ "home-before": home, "home-after": home }));
+    expect([...split.keys()].sort()).toEqual(["back", "left", "right", "there"]);
+    expect(split.get("right")).toEqual({ key: "named:left", name: "School run", parts: 4 });
+    // A merge of the stop with a second stop before the drive back: the Moves name either original.
+    const merged = { ...stay, id: "merged", covers: ["school-merge", "school", "shop"] };
+    const out = { ...back, fromStay: "shop" };
+    expect(groupNamedPatterns([there, merged, out], ends({ "home-before": home, "home-after": home })).get("merged"))
+      .toEqual({ key: "named:merged", name: "School run", parts: 3 });
+  });
+
   it("treats unsaved ends within 150 m as one place, and a saved end never as an unsaved one", () => {
     const unsaved = { placeId: null, learnedPlaceId: null, latitude: 10, longitude: 20 };
     expect(sameEnd(unsaved, { ...unsaved, latitude: 10.001 })).toBe(true); // about 111 m
@@ -60,7 +74,7 @@ describe("named patterns on Today (location v3 PR 14)", () => {
   it("tags only the members", () => {
     const groups = groupNamedPatterns(chain(), ends({ "home-before": home, "home-after": home }));
     expect(withLocationGroups([{ id: "stay" }, { id: "other" }], groups)).toEqual([
-      { id: "stay", locationGroup: { key: "named:stay", name: "School run" } },
+      { id: "stay", locationGroup: { key: "named:stay", name: "School run", parts: 3 } },
       { id: "other" }
     ]);
   });
@@ -75,14 +89,18 @@ describe("named patterns on Today (location v3 PR 14)", () => {
       active -= 1;
       if (sql.includes("from time_entries te")) {
         return { rows: [
-          { id: "there", eventType: "commute_detected", segmentId: "m1", fromStay: "home-before", toStay: "school", patternKey: "k-m1" },
-          { id: "stay", eventType: "visit_suggestion", segmentId: "school", fromStay: null, toStay: null, patternKey: "k-school" },
-          { id: "back", eventType: "commute_detected", segmentId: "m2", fromStay: "school", toStay: "home-after", patternKey: "k-m2" }
+          { id: "there", eventType: "commute_detected", segmentId: "m1", correctedSegmentId: null, fromStay: "home-before", toStay: "school", patternKey: "k-m1" },
+          { id: "stay", eventType: "unknown_stay", segmentId: null, correctedSegmentId: "70000000-0000-4000-8000-000000000099", fromStay: null, toStay: null, patternKey: "k-school" },
+          { id: "back", eventType: "commute_detected", segmentId: "m2", correctedSegmentId: null, fromStay: "school", toStay: "home-after", patternKey: "k-m2" }
         ] };
       }
       if (sql.includes("from location_name_patterns")) {
-        return { rows: [{ patternKey: "k-school", name: "Drop-off", uses: 1 }, { patternKey: "k-school", name: "School run", uses: 3 }] };
+        // The database picks the most used name per pattern (distinct on … order by uses desc).
+        expect(sql).toContain("order by pattern_key, uses desc, last_used_at desc nulls last, band");
+        return { rows: [{ patternKey: "k-school", name: "School run" }] };
       }
+      // A Stay corrected in Review stands for the stay it came from (Codex r1 on #501).
+      if (sql.includes("left join stay_segments parent")) return { rows: [{ id: "70000000-0000-4000-8000-000000000099", covers: ["school-left", "school"] }] };
       if (sql.includes("from stay_segments")) {
         return { rows: [
           { segmentId: "home-before", placeId: "place-home", learnedPlaceId: null, latitude: 10, longitude: 20 },
@@ -96,7 +114,7 @@ describe("named patterns on Today (location v3 PR 14)", () => {
     });
     const groups = await getLocationGroups({ query } as never, session,
       [entry("there", 0, 10), entry("stay", 10, 30), entry("back", 30, 40), { ...entry("manual", 50, 60), source: "manual_app" }]);
-    expect(groups.get("stay")).toEqual({ key: "named:stay", name: "School run" });
+    expect(groups.get("stay")).toEqual({ key: "named:stay", name: "School run", parts: 3 });
     expect(groups.has("manual")).toBe(false);
     expect(most).toBe(1);
     // Only location blocks are read.

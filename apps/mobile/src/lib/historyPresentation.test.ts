@@ -57,7 +57,7 @@ describe("mobile history presentation", () => {
 
   describe("named patterns (location v3 PR 14)", () => {
     const at = (h: number, m = 0) => new Date(2026, 9, 20, h, m);
-    const named = { key: "named:stay", name: "School run" };
+    const named = { key: "named:stay", name: "School run", parts: 3 };
     const travel = { categoryId: "travel", categoryName: "Travel", description: null, source: "location_learning" };
     // Newest first, as a day section lists them.
     const trip = () => [
@@ -81,17 +81,17 @@ describe("mobile history presentation", () => {
     it("leaves the parts apart when another block sits between them, one is running, or they span over three hours", () => {
       const [back, stay, there] = trip();
       const between = { entry: { ...entry("coffee", at(8, 20), at(8, 25)), source: "manual_app" }, overlapSeconds: 300 };
-      expect(groupHistoryDayEntries([back, between, stay, there]).filter((group) => group.name)).toHaveLength(1);
-      expect(groupHistoryDayEntries([back, between, stay, there]).find((group) => group.name)?.entries).toHaveLength(2);
+      // Two of its three parts never form the row (Codex r1 on #501).
+      expect(groupHistoryDayEntries([back, between, stay, there]).some((group) => group.name)).toBe(false);
       // A part still running: the trip is not over, so nothing groups yet.
       expect(groupHistoryDayEntries([{ ...back, entry: { ...back.entry, stoppedAt: null } }, stay, there]).some((group) => group.name)).toBe(false);
       const long = { ...back, entry: { ...back.entry, stoppedAt: at(11, 1).toISOString() } };
       expect(groupHistoryDayEntries([long, stay, there]).some((group) => group.name)).toBe(false);
     });
 
-    it("keeps the remaining parts together when one is deleted", () => {
+    it("lets the remaining parts go back to their own rows when one is deleted", () => {
       const [back, , there] = trip();
-      expect(groupHistoryDayEntries([back, there])).toEqual([expect.objectContaining({ name: "School run", totalSeconds: 1200 })]);
+      expect(groupHistoryDayEntries([back, there]).map((group) => group.key)).toEqual(["entry:back", "entry:there"]);
     });
   });
 
