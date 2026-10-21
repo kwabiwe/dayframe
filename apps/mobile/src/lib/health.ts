@@ -74,11 +74,6 @@ const HEALTHKIT_WORKOUT_PREFERENCES_KEY =
 const HEALTHKIT_AUTOMATIC_SYNC_KEY = "dayframe.healthkit.automaticSync.v1";
 const HEALTHKIT_BACKGROUND_DELIVERY_KEY =
   "dayframe.healthkit.backgroundDelivery.v2";
-const HEALTHKIT_BACKGROUND_SYNC_TYPES = [
-  HEALTHKIT_SLEEP_TYPE,
-  HEALTHKIT_WORKOUT_TYPE,
-] as const;
-const HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE = 1;
 const HEALTH_REPROCESS_THROTTLE_MS = 5 * 60 * 1000;
 const HEALTH_REPROCESS_BACKOFF_MS = 10 * 60 * 1000;
 const HEALTH_REPROCESS_BATCH_SIZE = 25;
@@ -174,13 +169,6 @@ type HealthKitWorkoutSample = {
   sourceRevision?: { source?: { name?: string; bundleIdentifier?: string } };
   metadata?: Record<string, unknown>;
   toJSON?: () => HealthKitWorkoutSample;
-};
-
-export type HealthKitChangeType =
-  (typeof HEALTHKIT_BACKGROUND_SYNC_TYPES)[number];
-
-export type HealthKitChangeSubscription = {
-  remove: () => void;
 };
 
 export type HealthDebugExportOptions = {
@@ -307,57 +295,37 @@ export async function isHealthKitAutomaticSyncEnabled() {
   );
 }
 
+let libraryBackgroundManagerRetired = false;
+
 export async function configureHealthKitAutomaticSync() {
   ensureIos();
   const healthkit = await loadHealthKit();
   const available = await Promise.resolve(healthkit.isHealthDataAvailable());
   if (!available) return false;
 
-  const configured = await healthkit
-    .configureBackgroundTypes(
-      [...HEALTHKIT_BACKGROUND_SYNC_TYPES],
-      HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE,
-    )
-    .catch(() => false);
-  const deliveryResults = await Promise.all(
-    HEALTHKIT_BACKGROUND_SYNC_TYPES.map((type) =>
-      healthkit
-        .enableBackgroundDelivery(type, HEALTHKIT_UPDATE_FREQUENCY_IMMEDIATE)
-        .catch(() => false),
-    ),
-  );
-  const enabled = configured !== false && deliveryResults.some(Boolean);
-  if (enabled) {
-    await AsyncStorage.setItem(HEALTHKIT_BACKGROUND_DELIVERY_KEY, "true");
-  } else {
-    await AsyncStorage.setItem(HEALTHKIT_BACKGROUND_DELIVERY_KEY, "false");
+  // Dayframe's own module owns the sleep/workout observers and background delivery, keeping each
+  // wake open until its bounded Health pass finishes. Retire the library's launch-time manager
+  // (older builds configured it), which finished every wake at once and never reached JS.
+  if (!libraryBackgroundManagerRetired) {
+    libraryBackgroundManagerRetired = true;
+    await Promise.resolve(healthkit.clearBackgroundTypes?.()).catch(() => undefined);
   }
-  return enabled;
-}
-
-export async function startHealthKitChangeObservers(
-  onChange: (type: HealthKitChangeType, errorMessage?: string) => void,
-): Promise<HealthKitChangeSubscription | null> {
-  ensureIos();
-  if (!(await isHealthKitAutomaticSyncEnabled())) return null;
-
-  const healthkit = await loadHealthKit();
-  const subscriptions = HEALTHKIT_BACKGROUND_SYNC_TYPES.map((type) =>
-    healthkit.subscribeToChanges(type, ({ errorMessage }) => {
-      onChange(type, errorMessage);
-    }),
+  const native = await import("../../modules/dayframe-health-background");
+  const enabled = await native.setEnabled(true).catch(() => false);
+  await AsyncStorage.setItem(
+    HEALTHKIT_BACKGROUND_DELIVERY_KEY,
+    enabled ? "true" : "false",
   );
-
-  return {
-    remove: () => {
-      for (const subscription of subscriptions) subscription.remove();
-    },
-  };
+  return enabled;
 }
 
 export type HealthCaptureOptions = {
   signal?: AbortSignal;
   observerChange?: boolean;
+  /** Query pages per pass (250 samples each), 20 at most; a background wake reads fewer. */
+  maxPages?: number;
+  /** A background wake's capture: starts after the call instead of joining one already running. */
+  fresh?: boolean;
   repairWindow?: { startedAt: string; stoppedAt: string };
 };
 const HEALTH_QUERY_PAGE_SIZE = 250;
@@ -385,11 +353,10 @@ async function captureHealthKind(
   const owner = await currentHealthCaptureOwner();
   if (!owner) throw new Error("Sign in before capturing Apple Health data.");
   const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
-  return activeHealthCaptures.run(
-    key,
-    () => captureHealthKindUnsafe(owner, kind, options),
-    options.observerChange,
-  );
+  const capture = () => captureHealthKindUnsafe(owner, kind, options);
+  return options.fresh
+    ? activeHealthCaptures.runFresh(key, capture, options.signal)
+    : activeHealthCaptures.run(key, capture, options.observerChange);
 }
 
 async function captureHealthKindUnsafe(
@@ -440,7 +407,8 @@ async function captureHealthKindUnsafe(
   // Recover a committed source page even when its former process died before enqueue.
   importedCount += (await handoffHealthEvents(owner, enqueueEvent, isCurrent))
     .queuedCount;
-  for (let page = 0; page < 20; page++) {
+  const maxPages = Math.min(20, Math.max(1, options.maxPages ?? 20));
+  for (let page = 0; page < maxPages; page++) {
     if (!(await isCurrent())) {
       partial = true;
       break;
