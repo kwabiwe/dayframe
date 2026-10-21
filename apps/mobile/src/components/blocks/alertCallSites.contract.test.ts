@@ -17,12 +17,11 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Current location"', // current location failed
     '"Places"', // follow-up: form validation (move inline)
     '"Places"', // save failed
-    '"Places"' // delete failed
+    '"Places"' // delete or archive failed
   ],
   "app/places.tsx": [
     // Load failed is the in-page Blocks state with Try again (staging feedback B2), not an alert.
-    '"Places"', // ignore failed
-    '"Places"' // forget failed
+    '"Places"' // ignore or forget failed (one call site since Codex r11 on #508)
   ],
   "app/review.tsx": [
     '"Review"', // bulk skip: some moments not saved on this iPhone
@@ -33,6 +32,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   "app/settings.tsx": [
     '"Unable to refresh Settings"',
     '"Apple Health"', // mapping save failed (the one Health mapping writer)
+    '"Tracking notice"', // switch not saved
     '"Evening reminder"', // change failed
     '"Log trips automatically"', // switch not saved (PRD D19, A4)
     '"Your day"', // goal not saved

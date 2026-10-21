@@ -14,7 +14,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertEqual(value.dictionary["category"] as? String, "FitnessCenter")
   }
 
-  func testNearbySearchReturnsTopThreeDeduplicatedInProviderOrder() {
+  func testNearbySearchReturnsNearestThreeDeduplicated() {
     let values = [
       nearby("Starlight", distance: 140, relevance: 0),
       nearby("Noodle House", distance: 90, relevance: 1),
@@ -23,9 +23,10 @@ final class DayframePlaceSearchTests: XCTestCase {
       nearby("Examplegate", distance: 60, relevance: 4)
     ]
 
+    // The venue ranker orders them later; native keeps the nearest, one per name.
     XCTAssertEqual(
       NearbyPointOfInterestCoordinator.normalized(values).map(\.name),
-      ["Starlight", "Noodle House", "Thread"]
+      ["Examplegate", "Noodle House", "Thread"]
     )
   }
 
@@ -61,7 +62,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertNil(NearbyPointOfInterestCoordinator.contextQuery(from: genericOnly))
   }
 
-  func testContextualRankingPromotesSiteThenDiningAndActivity() {
+  func testPlacesFoundByNameAreKeptBeforeTheNearest() {
     let values = [
       nearby("Sweet Corner", distance: 14, relevance: 0, category: .store),
       nearby("Barber Duo", distance: 14, relevance: 1, category: .store),
@@ -78,7 +79,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     )
   }
 
-  func testNearbyRankingDemotesUtilitiesAndEnforcesRadius() {
+  func testNearbyKeepsEveryVisitableKindAndEnforcesRadius() {
     let values = [
       nearby("Nearest fuel", distance: 5, relevance: 0, category: .gasStation),
       nearby("Cafe", distance: 80, relevance: 1, category: .cafe),
@@ -86,7 +87,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     ]
     XCTAssertEqual(
       NearbyPointOfInterestCoordinator.normalized(values, maximumDistanceMeters: 750).map(\.name),
-      ["Cafe", "Nearest fuel"]
+      ["Nearest fuel", "Cafe"]
     )
   }
 
@@ -117,7 +118,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     let five = NearbyPointOfInterestCoordinator.presented(values, maximumDistanceMeters: 400, limit: 5)
     XCTAssertEqual(five.count, 5)
     XCTAssertEqual(five.map(\.distanceMeters), five.map(\.distanceMeters).sorted())
-    XCTAssertEqual(NearbyPointOfInterestCoordinator.presented(values, limit: 50).count, NearbyPointOfInterestCoordinator.maximumLimit - 1)
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.presented(values, limit: 50).count, values.count)
+    XCTAssertEqual(NearbyPointOfInterestCoordinator.maximumLimit, 60)
     XCTAssertEqual(NearbyPointOfInterestCoordinator.presented(values, limit: 0).count, 1)
   }
 
@@ -264,15 +266,17 @@ final class DayframePlaceSearchTests: XCTestCase {
       nearby("Far bakery", distance: 300, relevance: 0, category: .bakery, address: "1 Example Road"),
       nearby("Near cafe", distance: 40, relevance: 1, category: .cafe)
     ]))
-    let suggestions = try await task.value
+    let list = try await task.value
+    let suggestions = list.places
+    XCTAssertEqual(list.areasOfInterest, [])
     XCTAssertEqual(suggestions, [
-      NearbyPointOfInterestSuggestionValue(id: "poi-1", requestId: "nearby-1", title: "Near cafe", subtitle: nil, distanceMeters: 40, category: "Cafe"),
-      NearbyPointOfInterestSuggestionValue(id: "poi-2", requestId: "nearby-1", title: "Far bakery", subtitle: "1 Example Road", distanceMeters: 300, category: "Bakery")
+      NearbyPointOfInterestSuggestionValue(id: "poi-1", requestId: "nearby-1", title: "Near cafe", subtitle: nil, distanceMeters: 40, category: "Cafe", offsetEastMeters: 30, offsetNorthMeters: -20),
+      NearbyPointOfInterestSuggestionValue(id: "poi-2", requestId: "nearby-1", title: "Far bakery", subtitle: "1 Example Road", distanceMeters: 300, category: "Bakery", offsetEastMeters: 30, offsetNorthMeters: -20)
     ])
     for suggestion in suggestions {
       let dictionary = suggestion.dictionary
-      // The kind of place crosses too; never a coordinate.
-      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters", "category"])
+      // The kind of place and its offset from the visit cross too; never a coordinate.
+      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters", "category", "offsetEastMeters", "offsetNorthMeters", "source"])
       XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: dictionary))
     }
     let resolved = try coordinator.resolve(id: "poi-2", requestId: "nearby-1")
@@ -338,8 +342,8 @@ final class DayframePlaceSearchTests: XCTestCase {
     }
     searcher.completeNearby(.success([nearby("New cafe", distance: 50, relevance: 0, category: .cafe)]))
     let fresh = try await second.value
-    XCTAssertEqual(fresh.map(\.title), ["New cafe"])
-    XCTAssertEqual(try coordinator.resolve(id: fresh[0].id, requestId: "nearby-1").name, "New cafe")
+    XCTAssertEqual(fresh.places.map(\.title), ["New cafe"])
+    XCTAssertEqual(try coordinator.resolve(id: fresh.places[0].id, requestId: "nearby-1").name, "New cafe")
   }
 
   func testPickFromACancelledListNeverResolvesAfterARestartWithTheSameRequestId() async throws {
@@ -474,6 +478,96 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertEqual(result?.1, 0)
   }
 
+  // Venue resolver v2 (location v3 PR 7): the areas of interest come back with the list, and an
+  // area no nearby place is named after is searched for by name, so the centre itself can rank.
+  func testAreaOfInterestIsSearchedForByNameAndKept() async throws {
+    let searcher = FakeNearbySearcher()
+    searcher.immediateAreas = nil
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 60)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([
+      nearby("Unit shop", distance: 20, relevance: 0, category: .store),
+      nearby("Corner noodles", distance: 30, relevance: 1, category: .restaurant)
+    ]))
+    await Task.yield()
+    // Nothing more is asked until the areas answer.
+    XCTAssertEqual(searcher.contextQueries, [])
+    searcher.completeAreas(["Northgate Shopping Centre", "northgate shopping centre", " "])
+    await Task.yield()
+    XCTAssertEqual(searcher.contextQueries, ["Northgate Shopping Centre"])
+    searcher.completeContext(.success([
+      nearby("Northgate Shopping Centre", distance: 90, relevance: 0, category: .store),
+      nearby("Elsewhere Superstore", distance: 120, relevance: 1, category: .foodMarket)
+    ]))
+    let list = try await task.value
+    XCTAssertEqual(list.areasOfInterest, ["Northgate Shopping Centre"])
+    XCTAssertEqual(list.places.map(\.title), ["Unit shop", "Corner noodles", "Northgate Shopping Centre"])
+    XCTAssertEqual(list.places.map(\.source), ["nearby", "nearby", "area"])
+  }
+
+  func testNoAreaSearchWhenANearbyPlaceIsNamedAfterTheArea() async throws {
+    let searcher = FakeNearbySearcher()
+    searcher.immediateAreas = ["Northgate Shopping Centre"]
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 60)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("Northgate Shopping Centre", distance: 40, relevance: 0)]))
+    let list = try await task.value
+    XCTAssertEqual(searcher.contextQueries, [])
+    XCTAssertEqual(list.places.map(\.title), ["Northgate Shopping Centre"])
+  }
+
+  func testCancelWhileAreasAreOutstandingRejectsAndIgnoresLateAreas() async {
+    let searcher = FakeNearbySearcher()
+    searcher.immediateAreas = nil
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher)
+    let task = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 60)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("Unit shop", distance: 20, relevance: 0)]))
+    coordinator.cancel()
+    searcher.completeAreas(["Late Area Centre"])
+    await XCTAssertThrowsErrorAsync(try await task.value) { error in
+      XCTAssertEqual(error as? PlaceSearchCoordinatorError, .cancelled)
+    }
+    XCTAssertEqual(searcher.contextQueries, [])
+  }
+
+  func testOffsetsAreWholeMetresEastAndNorth() {
+    let origin = CLLocationCoordinate2D(latitude: 50, longitude: 0)
+    let offset = NearbyPointOfInterestCoordinator.offsetMeters(
+      from: origin,
+      to: CLLocationCoordinate2D(latitude: 50.0009, longitude: 0.0014)
+    )
+    XCTAssertEqual(offset.north, 100)
+    XCTAssertEqual(offset.east, 100)
+    XCTAssertTrue(NearbyPointOfInterestCoordinator.namesArea("Northgate", "Northgate Shopping Centre"))
+    XCTAssertFalse(NearbyPointOfInterestCoordinator.namesArea("Gate", "Northgate Shopping Centre"))
+  }
+
+  // Codex r1 on #517: the real searcher's nearby search must not cancel the areas lookup the
+  // coordinator starts alongside it; only a full cancel does.
+  func testNearbySearchKeepsTheAreasLookupStartedAlongsideIt() {
+    let geocoder = FakeAreaGeocoder()
+    let searcher = MapKitNearbyPointOfInterestSearcher(makeGeocoder: { geocoder })
+    let center = CLLocationCoordinate2D(latitude: 10, longitude: 20)
+    var areas: [String]?
+    searcher.areasOfInterest(center: center) { areas = $0 }
+    searcher.searchNearby(center: center, radiusMeters: 400) { _ in }
+    XCTAssertEqual(geocoder.cancelCount, 0)
+    geocoder.answer(["Synthetic Centre"])
+    XCTAssertEqual(areas, ["Synthetic Centre"])
+    searcher.areasOfInterest(center: center) { _ in }
+    searcher.cancel()
+    XCTAssertEqual(geocoder.cancelCount, 1) // only the outstanding second lookup
+  }
+
   func testRapidReplacementKeepsOnlyLatestRegistry() async throws {
     let resolved = ResolvedPlaceSearchValue(
       title: "Home",
@@ -502,9 +596,27 @@ final class DayframePlaceSearchTests: XCTestCase {
 private final class FakeNearbySearcher: NearbyPointOfInterestSearching {
   var radiusMeters: Double?
   var contextQuery: String?
+  var contextQueries: [String] = []
   var cancelCount = 0
+  /// Answered at once when set; nil holds the answer until `completeAreas`.
+  var immediateAreas: [String]? = []
   private var nearbyCompletion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
   private var contextCompletion: ((Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void)?
+  private var areasCompletion: (([String]) -> Void)?
+
+  func areasOfInterest(center: CLLocationCoordinate2D, completion: @escaping ([String]) -> Void) {
+    if let immediateAreas {
+      completion(immediateAreas)
+    } else {
+      areasCompletion = completion
+    }
+  }
+
+  func completeAreas(_ names: [String]) {
+    let completion = areasCompletion
+    areasCompletion = nil
+    completion?(names)
+  }
 
   func searchNearby(
     center: CLLocationCoordinate2D,
@@ -522,6 +634,7 @@ private final class FakeNearbySearcher: NearbyPointOfInterestSearching {
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
   ) {
     contextQuery = query
+    contextQueries.append(query)
     contextCompletion = completion
   }
 
@@ -628,7 +741,9 @@ private func nearby(
     relevanceIndex: relevance,
     category: category,
     source: source,
-    localityNames: localityNames
+    localityNames: localityNames,
+    offsetEastMeters: 30,
+    offsetNorthMeters: -20
   )
 }
 
@@ -643,5 +758,24 @@ private func XCTAssertThrowsErrorAsync<T>(
     XCTFail("Expected expression to throw", file: file, line: line)
   } catch {
     errorHandler(error)
+  }
+}
+
+@MainActor
+private final class FakeAreaGeocoder: AreaOfInterestGeocoding {
+  var cancelCount = 0
+  private var completion: (([String]?) -> Void)?
+
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void) {
+    self.completion = completion
+  }
+
+  func answer(_ names: [String]?) {
+    completion?(names)
+    completion = nil
+  }
+
+  func cancel() {
+    cancelCount += 1
   }
 }

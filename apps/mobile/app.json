@@ -21,6 +21,9 @@
         ]
       },
       "infoPlist": {
+        "BGTaskSchedulerPermittedIdentifiers": [
+          "com.layereight.dayframe.health-refresh"
+        ],
         "UIBackgroundModes": [
           "location",
           "fetch"

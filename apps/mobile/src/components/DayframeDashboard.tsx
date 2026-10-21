@@ -178,10 +178,9 @@ import {
   importHealthKitSleep,
   importHealthKitWorkouts,
   isHealthKitAutomaticSyncEnabled,
-  reprocessExistingHealthReviewItems,
-  startHealthKitChangeObservers,
-  type HealthKitChangeSubscription
+  reprocessExistingHealthReviewItems
 } from "@/lib/health";
+import { subscribeHealthChanges } from "@/lib/healthBackgroundSync";
 import { syncLiveActivityForEntry } from "@/lib/liveActivity";
 import {
   pendingTimerStopsForOwner,
@@ -1272,26 +1271,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     if (authState !== "authenticated") return undefined;
-    let mounted = true;
-    let subscription: HealthKitChangeSubscription | null = null;
     void syncHealthKitAndReload("foreground");
-
-    void (async () => {
-      const nextSubscription = await startHealthKitChangeObservers((type) => {
-        if (mounted) void syncHealthKitAndReload("observer", type);
-      });
-      if (!mounted) {
-        nextSubscription?.remove();
-        return;
-      }
-      subscription = nextSubscription;
-    })()
-      .catch(() => undefined);
-
-    return () => {
-      mounted = false;
-      subscription?.remove();
-    };
+    // The background Health pass (healthBackgroundSync) captures and uploads every wake; in front,
+    // Today also sends the rest of the queue, reprocesses Review and reloads what it shows.
+    return subscribeHealthChanges((type) => {
+      if (AppState.currentState === "active") void syncHealthKitAndReload("observer", type);
+    });
   }, [authState, syncHealthKitAndReload]);
 
   useFocusEffect(

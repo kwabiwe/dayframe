@@ -204,6 +204,7 @@ describe("Settings' last-known values on the device (A4)", () => {
       motionFitnessStatus: "authorized",
       reviewNudge: { enabled: true, minutes: 21 * 60 },
       nudgePermission: "granted",
+      trackingNotice: true,
       sync: { queuedCount: 2 }
     });
     expect(storedKeys()).toHaveLength(1);
@@ -218,6 +219,7 @@ describe("Settings' last-known values on the device (A4)", () => {
       motionFitnessStatus: "authorized",
       reviewNudge: { enabled: true, minutes: 21 * 60 },
       nudgePermission: "granted",
+      trackingNotice: true,
       sync: { queuedCount: 2 }
     });
     // A live read that agrees changes nothing; one that differs changes only that field.
@@ -225,6 +227,8 @@ describe("Settings' last-known values on the device (A4)", () => {
     await app.remember("motionFitnessStatus", "denied");
     expect(page.renders.at(-1)).toMatchObject({ healthAccessGranted: true, motionFitnessStatus: "denied", nudgePermission: "granted" });
     expect(storedPayload(A)?.values).toMatchObject({ motionFitnessStatus: "denied", healthAccessGranted: true });
+    await app.remember("trackingNotice", false);
+    expect(storedPayload(A)?.values).toMatchObject({ trackingNotice: false });
     page.unmount();
   });
 

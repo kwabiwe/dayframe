@@ -198,6 +198,8 @@ Named patterns on Today (location v3 PR 14) read the stays at each end of a logg
 
 Places at scale (location v3 PR 16a) reads saved places near a point through `idx_places_geography`. Apply `supabase/migrations/202610210003_place_geography_index.sql` (local `packages/db/migrations/018_place_geography_index.sql`, mirrored in `001_init.sql`) to staging before the Preview and to production before the server change merges. It only adds a GiST expression index on `places`; without it the search is slower, not wrong. No RLS change.
 
+Places search, sections and last visit (location v3 PR 16c) read each place's last visit and visits in the last 30 days through `idx_stay_segments_place_visits`. Apply `supabase/migrations/202610210004_stay_segment_place_visit_index.sql` (local `packages/db/migrations/019_stay_segment_place_visit_index.sql`, mirrored in `001_init.sql`) to staging before the Preview and to production before the server change merges. It only adds a partial btree index on `stay_segments`; without it the read is slower, not wrong. No RLS change.
+
 Venue Place IDs (location v3 PR 8) add `stay_segments.venue_place_id` and `suggested_venue_place_id` (nullable text) and the partial GiST index `idx_stay_segments_venue_history`. Apply `supabase/migrations/202610210005_stay_segment_venue_place_ids.sql` (local `packages/db/migrations/020_stay_segment_venue_place_ids.sql`, mirrored in `001_init.sql`) to staging before the Preview and to production before the server change merges: the server writes and reads both columns, so it must not deploy first. Additive, no backfill, no RLS change (the owner policies on `stay_segments` cover them).
 
 ### Motion & Fitness schema prerequisite
