@@ -60,6 +60,8 @@ type PlaceRow = {
   radiusMeters: number;
   priority: number;
   loggingEnabled: boolean;
+  archivedAt: string | null;
+  matchingStartsAt: string | null;
 };
 
 type LearnedPlaceRow = PlaceRow;
@@ -148,20 +150,29 @@ export async function replayLocationEvidence(
   observeLocationCount(options, "evidenceRows", evidenceResult.rows.length);
   observeLocationStage(options, "catalogue_read");
   observeLocationTiming(options, "catalogue_read", "started");
+  // An archived place (PRD D19 A10), and an accepted learned place linked to one, match only
+  // evidence from before it was archived, and a place that replaced one only from then: replayed
+  // history keeps its visits (and their blocks) as they were, and no new visit matches the old
+  // place (Codex r1–r2 on #503).
   const placesResult = await client.query<PlaceRow>(
     `select id, name, latitude, longitude,
             radius_meters as "radiusMeters", priority,
-            logging_enabled as "loggingEnabled"
+            logging_enabled as "loggingEnabled",
+            to_char(archived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "archivedAt",
+            to_char(matching_starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "matchingStartsAt"
      from places
      where workspace_id = $1 and latitude is not null and longitude is not null`,
     [session.workspaceId]
   );
   const learnedResult = await client.query<LearnedPlaceRow & { savedPlaceId: string | null }>(
-    `select id, name, latitude, longitude,
-            radius_meters as "radiusMeters", 0 as priority, true as "loggingEnabled",
-            place_id as "savedPlaceId"
-     from learned_places
-     where workspace_id = $1 and user_id = $2 and status = 'accepted'`,
+    `select lp.id, lp.name, lp.latitude, lp.longitude,
+            lp.radius_meters as "radiusMeters", 0 as priority, true as "loggingEnabled",
+            lp.place_id as "savedPlaceId",
+            to_char(saved.archived_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "archivedAt",
+            to_char(saved.matching_starts_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "matchingStartsAt"
+     from learned_places lp
+     left join places saved on saved.id = lp.place_id and saved.workspace_id = lp.workspace_id
+     where lp.workspace_id = $1 and lp.user_id = $2 and lp.status = 'accepted'`,
     [session.workspaceId, session.userId]
   );
   // The saved place each accepted learned place is linked to, as Review emission resolves it.

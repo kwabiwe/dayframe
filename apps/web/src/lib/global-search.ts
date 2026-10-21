@@ -133,7 +133,7 @@ export async function searchDayframe(
                    when ${placeDisplayNameSql("p")} ilike $3 || '%' or p.name ilike $3 || '%' then 90 else 60 end
        from places p
        left join categories c on c.id = p.default_category_id and c.workspace_id = p.workspace_id
-       where p.workspace_id = $1 and (${placeDisplayNameSql("p")} ilike '%' || $3 || '%' or p.name ilike '%' || $3 || '%')
+       where p.workspace_id = $1 and p.archived_at is null and (${placeDisplayNameSql("p")} ilike '%' || $3 || '%' or p.name ilike '%' || $3 || '%')
        union all
        select 'tag:' || t.id::text, 'tag', t.name, 'Tag', null, null,
               null, null, null, null, null, array[t.name], null, null, null,

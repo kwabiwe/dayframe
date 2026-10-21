@@ -577,7 +577,7 @@ async function editAndConfirmGenericReview(
   edit: ReviewMutationEdit,
   session: RequestSession
 ) {
-  await validateEditReferences(client, edit, session, item.id);
+  await validateEditReferences(client, edit, session, item.id, item.suggestedPlaceId);
   const existing = item.eventId
     ? await entryCreatedFromEvent(client, item.eventId, session)
     : null;
@@ -799,7 +799,8 @@ async function validateEditReferences(
   client: pg.PoolClient,
   edit: ReviewMutationEdit,
   session: RequestSession,
-  reviewItemId: string
+  reviewItemId: string,
+  currentPlaceId: string | null = null
 ) {
   if (edit.categoryId) {
     const category = await client.query(
@@ -822,11 +823,12 @@ async function validateEditReferences(
     }
   }
   if (edit.placeId) {
-    const place = await client.query(
-      `select 1 from places where id = $1 and workspace_id = $2`,
+    // An archived place (PRD D19 A10) can stay on a card that already names it, never be newly picked.
+    const place = await client.query<{ archived: boolean }>(
+      `select archived_at is not null as archived from places where id = $1 and workspace_id = $2`,
       [edit.placeId, session.workspaceId]
     );
-    if (!place.rows[0]) {
+    if (!place.rows[0] || (place.rows[0].archived && edit.placeId !== currentPlaceId)) {
       throw new ReviewResolutionError(
         "invalid_action",
         "The selected place is no longer available.",

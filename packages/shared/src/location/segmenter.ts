@@ -13,6 +13,7 @@ import type {
   LocationEvidence,
   PlaceMatch,
   RejectedEvidence,
+  SavedPlaceForMatching,
   StaySegment
 } from "./types";
 
@@ -954,7 +955,19 @@ function longestNewSilenceMs(from: number, to: number, observedMs: number[], cov
   return longest;
 }
 
+/**
+ * Places matching evidence at `atMs` (PRD D19 A10): an archived place only before it was archived,
+ * and a place that replaced one only from then.
+ */
+function placesAt<T extends SavedPlaceForMatching>(places: readonly T[], atMs: number) {
+  return places.filter((place) => (!place.archivedAt || atMs < Date.parse(place.archivedAt))
+    && (!place.matchingStartsAt || atMs >= Date.parse(place.matchingStartsAt)));
+}
+
 function preprocess(input: LocationEngineInput) {
+  // Without an archived or replacing place the catalogue is the same for every point (the usual case).
+  const anyArchived = [...input.savedPlaces, ...input.acceptedLearnedPlaces].some((place) => place.archivedAt || place.matchingStartsAt);
+  const archivedSavedIds = new Map(input.savedPlaces.flatMap((place) => place.archivedAt ? [[place.id, Date.parse(place.archivedAt)] as const] : []));
   const rejectedEvidence: RejectedEvidence[] = [];
   const seen = new Set<string>();
   const sorted = input.evidence.map((evidence) => ({ ...evidence, metadata: evidence.metadata ? { ...evidence.metadata } : undefined })).sort((a, b) => {
@@ -1011,6 +1024,9 @@ function preprocess(input: LocationEngineInput) {
     }
     const normalisedEvidence = {
       ...evidence,
+      // A geofence or Visit hint naming a place archived by then names no place.
+      savedPlaceId: evidence.savedPlaceId && occurredAtMs >= (archivedSavedIds.get(evidence.savedPlaceId) ?? Infinity)
+        ? null : evidence.savedPlaceId,
       endedAt: evidence.kind === "visit" && evidence.endedAt &&
         Number.isFinite(Date.parse(evidence.endedAt)) && Date.parse(evidence.endedAt) > occurredAtMs &&
         Date.parse(evidence.endedAt) <= Date.parse(input.processingAt) ? evidence.endedAt : null,
@@ -1032,8 +1048,8 @@ function preprocess(input: LocationEngineInput) {
           horizontalAccuracyMeters: normalisedEvidence.horizontalAccuracyMeters ?? null,
           savedPlaceIdHint: normalisedEvidence.savedPlaceId
         },
-        input.savedPlaces,
-        input.acceptedLearnedPlaces,
+        anyArchived ? placesAt(input.savedPlaces, occurredAtMs) : input.savedPlaces,
+        anyArchived ? placesAt(input.acceptedLearnedPlaces, occurredAtMs) : input.acceptedLearnedPlaces,
         input.config
       );
       // A completed Visit's coordinate averages its whole interval, so it is

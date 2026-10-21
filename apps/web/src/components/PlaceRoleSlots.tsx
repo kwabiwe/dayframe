@@ -5,6 +5,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRef, useState } from "react";
 import {
+  distanceMeters,
   initialPreviousPlaceName,
   leavingRoleHolder,
   placeChoiceLabel,
@@ -23,6 +24,8 @@ type Editing = {
   previousPlaceName: string;
   /** Once the person types a name, choosing another place no longer replaces it. */
   renameTouched: boolean;
+  /** "Replace the old place" (PRD D19 A10): archive the old holder when it is within 300 m. */
+  replacePrevious: boolean;
   mode: "choose" | "clear";
 };
 
@@ -50,6 +53,14 @@ export function PlaceRoleSlots({
   const chosenPlace = targetId ? places.find((place) => place.id === targetId) ?? null : null;
   const chosenOtherRole = chosenPlace?.role && chosenPlace.role !== editing?.role ? chosenPlace.role : null;
   const roleLeavesHolder = Boolean(holder && (editing?.mode === "clear" || (targetId && targetId !== holder.id)));
+  const holderPlace = holder ? places.find((place) => place.id === holder.id) ?? null : null;
+  const holderIsNearby = Boolean(editing?.mode === "choose" && roleLeavesHolder && holderPlace && chosenPlace
+    && typeof holderPlace.latitude === "number" && typeof holderPlace.longitude === "number"
+    && typeof chosenPlace.latitude === "number" && typeof chosenPlace.longitude === "number"
+    && distanceMeters(
+      { latitude: holderPlace.latitude, longitude: holderPlace.longitude },
+      { latitude: chosenPlace.latitude, longitude: chosenPlace.longitude }
+    ) <= 300);
 
   function open(role: PlaceRole, mode: Editing["mode"]) {
     const slot = slots.find((candidate) => candidate.role === role);
@@ -62,7 +73,8 @@ export function PlaceRoleSlots({
       previousPlaceName: slot
         ? initialPreviousPlaceName(role, mode === "clear" ? slot.place : leavingRoleHolder(slot, current?.id ?? null), mode === "clear" ? null : current)
         : "",
-      renameTouched: false
+      renameTouched: false,
+      replacePrevious: true
     });
   }
 
@@ -79,12 +91,15 @@ export function PlaceRoleSlots({
       const response = await clientFetch("/api/places/role", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(placeRoleRequest({
-          role: editing.role,
-          targetId,
-          holder,
-          previousPlaceName: editing.previousPlaceName
-        }))
+        body: JSON.stringify({
+          ...placeRoleRequest({
+            role: editing.role,
+            targetId,
+            holder,
+            previousPlaceName: editing.previousPlaceName
+          }),
+          ...(holderIsNearby && editing.replacePrevious ? { archivePrevious: true } : {})
+        })
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { error?: string } | null;
@@ -205,6 +220,27 @@ export function PlaceRoleSlots({
                   setEditing((current) => current ? { ...current, previousPlaceName, renameTouched: true } : current);
                 }}
               />
+            ) : null}
+            {holderIsNearby ? (
+              <label className="place-suggestion-toggle">
+                <span>
+                  <strong>Replace the old place</strong>
+                  <small id="place-role-replace-help">
+                    The old {editingSlot.label.toLowerCase()} is within 300 m of this place, so their circles would overlap. Archive it: past blocks keep its name, and you can restore it from Places.
+                  </small>
+                </span>
+                <input
+                  aria-describedby="place-role-replace-help"
+                  aria-label="Replace the old place"
+                  checked={editing.replacePrevious}
+                  role="switch"
+                  type="checkbox"
+                  onChange={(event) => {
+                    const replacePrevious = event.target.checked;
+                    setEditing((current) => current ? { ...current, replacePrevious } : current);
+                  }}
+                />
+              </label>
             ) : null}
             {error ? <p className="place-editor-status is-error" role="alert">{error}</p> : null}
           </div>

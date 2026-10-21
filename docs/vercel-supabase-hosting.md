@@ -174,6 +174,10 @@ The server that reads activity icons, seeds starter activities for new workspace
 
 The server that reads Home and Work place roles requires `supabase/migrations/202610070001_place_role.sql` (local `packages/db/migrations/009_place_role.sql`) before its Preview or production deployment. It adds a nullable `places.role` column with a `home`/`work` check and a partial unique index on `(workspace_id, role)`; no existing row changes and nothing is backfilled. Every place-name read selects the column, so without it bootstrap, entries, Review, Reports, search, exports and integrations fail: bootstrap and place writes name this migration, other reads fail with a Postgres undefined-column error. Staging validation is not production authorization.
 
+### Place archive schema prerequisite
+
+The server with Archive place (location v3 PR 15) requires `supabase/migrations/202610210001_place_archive.sql` (local `packages/db/migrations/016_place_archive.sql`) before its Preview or production deployment. It adds nullable `places.archived_at` and `places.matching_starts_at`; no existing row changes and nothing is backfilled. Every place read filters on it, so without it bootstrap and the Places page fail, naming this migration. Apply it to staging before the Preview, then to production before the server change merges (migration → server → phone). Older servers and phones ignore the column; an older phone simply stops seeing places archived from the web.
+
 ### Password reset schema prerequisite
 
 The server with Forgot password requires `supabase/migrations/202610120001_user_session_fences.sql` (local `packages/db/migrations/011_user_session_fences.sql`) before its Preview or production deployment. It adds the empty `user_session_fences` table (user id, reset time) with RLS on, no policies and every `anon`/`authenticated` grant revoked, so only the server can read or write it; no existing row changes. Every sign-in reads it, so without it every sign-in fails. Apply it to staging before the Preview, then to production before the server change merges. Older servers ignore the table.

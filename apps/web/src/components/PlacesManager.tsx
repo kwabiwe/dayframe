@@ -6,16 +6,19 @@ import { useRouter } from "next/navigation";
 import { Info } from "lucide-react";
 import { useState, useTransition } from "react";
 import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/shared";
-import type { LearnedPlaceRow, PlaceRow } from "@/lib/queries";
+import type { ArchivedPlaceRow, LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { PlaceRoleSlots } from "./PlaceRoleSlots";
 import { StoppedTripsSection } from "./StoppedTripsSection";
 import { Button, ModalDialog } from "./ui/Primitives";
 
 export function PlacesManager({
+  archivedPlaces = [],
   learnedPlaces,
   places
 }: {
+  /** Archived places (PRD D19 A10): restorable, out of every list and matcher meanwhile. */
+  archivedPlaces?: ArchivedPlaceRow[];
   learnedPlaces: LearnedPlaceRow[];
   places: PlaceRow[];
 }) {
@@ -50,6 +53,32 @@ export function PlacesManager({
       refresh("Place deleted.");
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Unable to delete this place.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Archive (true) or restore (false) a place (location v3 PR 15, PRD D19 A10). */
+  async function setArchived(place: { id: string }, archived: boolean) {
+    if (busyId) return;
+    setBusyId(place.id);
+    setDeleteError(null);
+    try {
+      const response = await clientFetch("/api/places/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: place.id, archived })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? (archived ? "Unable to archive this place." : "Unable to restore this place."));
+      }
+      if (archived) setDeletingPlace(null);
+      refresh(archived ? "Place archived. Past blocks keep its name." : "Place restored.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to change this place.";
+      if (archived) setDeleteError(message);
+      else setStatus(message);
     } finally {
       setBusyId(null);
     }
@@ -171,6 +200,40 @@ export function PlacesManager({
         </div>
       </section>
 
+      {archivedPlaces.length ? (
+        <section className="places-list-section" aria-labelledby="places-archived-title">
+          <header>
+            <div>
+              <h2 id="places-archived-title">Archived</h2>
+              <p>Not matched or suggested. Past blocks keep their names.</p>
+            </div>
+            <span>{archivedPlaces.length}</span>
+          </header>
+          <div className="places-list">
+            {archivedPlaces.map((place) => (
+              <article className="place-list-row" key={place.id}>
+                <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
+                <div className="place-list-copy">
+                  <h3>{place.name}</h3>
+                  <p>History kept</p>
+                </div>
+                <div className="place-list-actions">
+                  <button
+                    aria-label={`Restore ${place.name}`}
+                    className="df-rbtn df-rbtn--sm df-rbtn--ghost"
+                    disabled={busyId === place.id}
+                    onClick={() => void setArchived(place, false)}
+                    type="button"
+                  >
+                    {busyId === place.id ? "Restoring…" : "Restore"}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="places-list-section">
         <header>
           <div>
@@ -231,12 +294,19 @@ export function PlacesManager({
         <ModalDialog
           busy={busyId === deletingPlace.id}
           description={deletingPlace.role
-            ? `This is your ${placeRoleLabel(deletingPlace.role)}, so that slot will be empty. Existing blocks keep their time data, but this place label will be removed.`
-            : "Existing blocks keep their time data, but this place label will be removed."}
+            ? `This is your ${placeRoleLabel(deletingPlace.role)}, so that slot will be empty. Existing blocks keep their time data, but this place label will be removed. Archive instead keeps its name on past blocks and stops matching it; you can restore it later.`
+            : "Existing blocks keep their time data, but this place label will be removed. Archive instead keeps its name on past blocks and stops matching it; you can restore it later."}
           footer={(
             <>
               <Button variant="ghost" disabled={busyId === deletingPlace.id} onClick={() => setDeletingPlace(null)}>
                 Cancel
+              </Button>
+              <Button
+                disabled={busyId === deletingPlace.id}
+                variant="secondary"
+                onClick={() => void setArchived(deletingPlace, true)}
+              >
+                Archive instead
               </Button>
               <Button
                 disabled={busyId === deletingPlace.id}

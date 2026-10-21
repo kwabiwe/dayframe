@@ -35,7 +35,7 @@ function journeyReplayQuery(
       receivedAt: item.receivedAt
     })) };
     if (sql.includes("from places\n")) return { rows: fixture.savedPlaces };
-    if (sql.includes("from learned_places\n")) return { rows: fixture.acceptedLearnedPlaces };
+    if (sql.includes("from learned_places lp\n")) return { rows: fixture.acceptedLearnedPlaces };
     if (sql.includes("for update of s")) return { rows: protectedRows };
     if (sql.includes("from stay_segments") && sql.includes("for update")) return { rows: existingRows };
     return { rows: [] };
