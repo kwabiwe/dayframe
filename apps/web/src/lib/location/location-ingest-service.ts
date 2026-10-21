@@ -735,7 +735,7 @@ async function savedCommuteEndpointsExist(
   const result = await client.query<{ count: number }>(
     `select count(*)::integer as count
      from places
-     where workspace_id = $1 and id = any($2::uuid[])`,
+     where workspace_id = $1 and id = any($2::uuid[]) and archived_at is null`,
     [session.workspaceId, endpointIds]
   );
   return result.rows[0]?.count === endpointIds.length;
@@ -763,7 +763,7 @@ async function trustedPlaceContext(
     }>(
       `select pl.id as "placeId", ${placeDisplayNameSql("pl")} as name, pl.default_category_id as "categoryId",
               pl.default_activity_description as description, pl.logging_enabled as "loggingEnabled"
-       from places pl where pl.id = $1 and pl.workspace_id = $2`,
+       from places pl where pl.id = $1 and pl.workspace_id = $2 and pl.archived_at is null`,
       [segment.placeId, session.workspaceId]
     );
     const place = result.rows[0];
@@ -786,7 +786,7 @@ async function trustedPlaceContext(
               p.default_category_id as "categoryId", p.default_activity_description as description,
               p.logging_enabled as "loggingEnabled"
        from learned_places lp
-       join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
+       join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and p.archived_at is null
        where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
       [segment.learnedPlaceId, session.workspaceId, session.userId]
     );

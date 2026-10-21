@@ -449,7 +449,7 @@ async function nearbySavedPlaces(session: RequestSession, latitude: number, long
               ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
             ) as "distanceMeters"
      from places
-     where workspace_id = $1 and latitude is not null and longitude is not null
+     where workspace_id = $1 and latitude is not null and longitude is not null and archived_at is null
        and ST_DWithin(
          ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
          ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,

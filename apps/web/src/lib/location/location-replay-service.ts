@@ -153,15 +153,21 @@ export async function replayLocationEvidence(
             radius_meters as "radiusMeters", priority,
             logging_enabled as "loggingEnabled"
      from places
-     where workspace_id = $1 and latitude is not null and longitude is not null`,
+     where workspace_id = $1 and latitude is not null and longitude is not null and archived_at is null`,
     [session.workspaceId]
   );
+  // An accepted learned place linked to an archived saved place leaves matching with it (PRD D19 A10).
   const learnedResult = await client.query<LearnedPlaceRow & { savedPlaceId: string | null }>(
     `select id, name, latitude, longitude,
             radius_meters as "radiusMeters", 0 as priority, true as "loggingEnabled",
             place_id as "savedPlaceId"
      from learned_places
-     where workspace_id = $1 and user_id = $2 and status = 'accepted'`,
+     where workspace_id = $1 and user_id = $2 and status = 'accepted'
+       and not exists (
+         select 1 from places archived
+          where archived.id = learned_places.place_id and archived.workspace_id = learned_places.workspace_id
+            and archived.archived_at is not null
+       )`,
     [session.workspaceId, session.userId]
   );
   // The saved place each accepted learned place is linked to, as Review emission resolves it.

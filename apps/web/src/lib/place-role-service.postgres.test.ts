@@ -178,6 +178,61 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     }
   });
 
+  describe("Archive place and Replace the old place (location v3 PR 15, PRD D19 A10)", () => {
+    const archivedAt = async (id: string) =>
+      (await database!.query<{ archived: boolean }>("select archived_at is not null as archived from places where id = $1", [id])).rows[0]?.archived;
+    const placeAt = (id: string, latitude: number, longitude: number) =>
+      database!.query("update places set latitude = $2, longitude = $3 where id = $1", [id, latitude, longitude]);
+
+    it("archives the old Home with the move when it is within 300 m, renamed and without its role", async () => {
+      await placeAt(oldHome, 10, 20);
+      await placeAt(newHome, 10.002, 20); // about 222 m
+      const result = await inTransaction((client) => assignPlaceRoleWith(client, session,
+        { role: "home", placeId: newHome, previousPlaceName: "Previous home", archivePrevious: true }));
+      expect(result).toEqual({ status: "assigned", placeId: newHome, previousPlaceId: oldHome, previousArchived: true });
+      expect((await roles())[oldHome]).toEqual({ name: "Previous home", role: null });
+      expect(await archivedAt(oldHome)).toBe(true);
+      // Its past block keeps its name.
+      expect(await entryPlaceName()).toEqual({ placeId: oldHome, placeName: "Previous home" });
+    });
+
+    it("keeps the old Home active when the new one is farther than 300 m", async () => {
+      await placeAt(oldHome, 10, 20);
+      await placeAt(newHome, 10.01, 20); // about 1.1 km
+      const result = await inTransaction((client) => assignPlaceRoleWith(client, session,
+        { role: "home", placeId: newHome, archivePrevious: true }));
+      expect(result).toMatchObject({ status: "assigned", previousPlaceId: oldHome, previousArchived: false });
+      expect(await archivedAt(oldHome)).toBe(false);
+    });
+
+    it("never gives an archived place a role, nor treats an archived 'Home' as the implicit holder", async () => {
+      await database!.query("update places set archived_at = now() where id = $1", [gym]);
+      expect(await inTransaction((client) => assignPlaceRoleWith(client, session, { role: "work", placeId: gym })))
+        .toEqual({ status: "place_not_found" });
+      await database!.query("update places set role = null where id = $1", [oldHome]);
+      await database!.query("insert into places (id, workspace_id, name, archived_at) values ($1, $2, 'Home', now())", [namedHome, workspaceId]);
+      await inTransaction((client) =>
+        assignPlaceRoleWith(client, session, { role: "home", placeId: newHome, previousPlaceName: "Previous home" }));
+      expect((await roles())[namedHome]).toEqual({ name: "Home", role: null });
+    });
+
+    it("archives and restores through the app, leaving lists but not past blocks", async () => {
+      const { setPlaceArchived } = await import("./event-service");
+      const { getArchivedPlaces, getNormalizationContext } = await import("./queries");
+      // Places as bootstrap, matching and pickers read them (getPlaces), on both schema profiles.
+      const listed = async () => (await getNormalizationContext(session)).places.map((place) => place.id);
+      const archived = await setPlaceArchived(oldHome, true, session);
+      expect(archived).toMatchObject({ id: oldHome, name: "12 Example Street" });
+      expect((await roles())[oldHome]?.role).toBeNull();
+      expect(await listed()).not.toContain(oldHome);
+      expect((await getArchivedPlaces(session)).map((place) => place.id)).toEqual([oldHome]);
+      expect(await entryPlaceName()).toEqual({ placeId: oldHome, placeName: "12 Example Street" });
+      expect(await setPlaceArchived(oldHome, false, session)).toMatchObject({ archivedAt: null });
+      expect(await listed()).toContain(oldHome);
+      expect(await setPlaceArchived(foreign, true, session)).toBeNull();
+    });
+  });
+
   it("enforces one Home per workspace in the database", async () => {
     await expect(database!.query("update places set role = 'home' where id = $1", [gym])).rejects.toMatchObject({ code: "23505" });
     await expect(database!.query("update places set role = 'gym' where id = $1", [gym])).rejects.toMatchObject({ code: "23514" });

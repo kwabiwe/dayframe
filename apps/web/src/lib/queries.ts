@@ -660,7 +660,8 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
        from places pl
        left join projects p on p.id = pl.default_project_id and p.workspace_id = pl.workspace_id
        left join categories c on c.id = pl.default_category_id and c.workspace_id = pl.workspace_id
-       where pl.workspace_id = $1
+       -- An archived place (PRD D19 A10) leaves every list, picker, matcher and geofence.
+       where pl.workspace_id = $1 and pl.archived_at is null
        order by pl.priority desc, pl.name`,
       [session.workspaceId]
     );
@@ -687,6 +688,32 @@ async function getPlaces(session: RequestSession, execute: typeof query = query)
     }
     if (isUndefinedColumnError(error, "role")) {
       throw missingRequiredColumnError("places", "role", "supabase/migrations/202610070001_place_role.sql", error);
+    }
+    if (isUndefinedColumnError(error, "archived_at")) {
+      throw missingRequiredColumnError("places", "archived_at", PLACE_ARCHIVE_MIGRATION, error);
+    }
+    throw error;
+  }
+}
+
+export const PLACE_ARCHIVE_MIGRATION = "supabase/migrations/202610210001_place_archive.sql";
+
+export type ArchivedPlaceRow = { id: string; name: string; archivedAt: string };
+
+/** Archived places, newest first, for Places' Archived section (restorable). */
+export async function getArchivedPlaces(session: RequestSession, execute: typeof query = query) {
+  try {
+    const result = await execute<ArchivedPlaceRow>(
+      `select id, name, archived_at as "archivedAt"
+         from places
+        where workspace_id = $1 and archived_at is not null
+        order by archived_at desc, name`,
+      [session.workspaceId]
+    );
+    return result.rows;
+  } catch (error) {
+    if (isUndefinedColumnError(error, "archived_at")) {
+      throw missingRequiredColumnError("places", "archived_at", PLACE_ARCHIVE_MIGRATION, error);
     }
     throw error;
   }

@@ -1712,7 +1712,7 @@ export async function archiveCategory(id: string, session: RequestSession = getD
   }
 }
 
-export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
+export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null; archivePrevious?: boolean };
 
 export async function createPlace(
   input: PlaceMutationFields,
@@ -1735,9 +1735,9 @@ export async function createPlace(
       input,
       session
     );
-    await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    const assigned = await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
     await client.query("commit");
-    return { ...place, role: newRole.role };
+    return { ...place, role: newRole.role, ...previousArchivedOf(assigned) };
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1786,9 +1786,9 @@ export async function createPlaceFromLearnedPlace(
          and user_id = $3`,
       [learnedPlaceId, session.workspaceId, session.userId, place.id]
     );
-    if (newRole) await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    const assigned = newRole ? await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id }) : null;
     await client.query("commit");
-    return newRole ? { ...place, role: newRole.role } : place;
+    return newRole ? { ...place, role: newRole.role, ...previousArchivedOf(assigned) } : place;
   } catch (error) {
     await client.query("rollback");
     const readinessError = learnedPlacesReadinessError(error);
@@ -2185,6 +2185,40 @@ const PLACE_DELETE_ATTEMPTS = 3;
  * serialization failure. The wait limit applies to each lock it takes (Postgres `lock_timeout`), so
  * a delete behind several busy locks can take longer in all.
  */
+/** Whether "Replace the old place" archived the previous holder, when it was asked to. */
+function previousArchivedOf(result: Awaited<ReturnType<typeof assignPlaceRoleWith>> | null) {
+  return result?.status === "assigned" && result.previousArchived !== undefined ? { previousArchived: result.previousArchived } : {};
+}
+
+const PLACE_ARCHIVE_MIGRATION = "supabase/migrations/202610210001_place_archive.sql";
+
+/**
+ * Archive place (location v3 PR 15, PRD D19 A10): the place keeps its name on past blocks,
+ * Reports and exports, but leaves bootstrap, matching, geofences, nearby suggestions and pickers
+ * until it is restored. Archiving clears its Home or Work role, so the slot is free for the new
+ * place; a restored place comes back without a role. Returns null when there is no such place.
+ */
+export async function setPlaceArchived(id: string, archived: boolean, session: RequestSession = getDevSession()) {
+  try {
+    const result = await query<{ id: string; name: string; archivedAt: string | null }>(
+      archived
+        ? `update places set archived_at = coalesce(archived_at, now()), role = null
+            where id = $1 and workspace_id = $2
+            returning id, name, archived_at as "archivedAt"`
+        : `update places set archived_at = null
+            where id = $1 and workspace_id = $2
+            returning id, name, archived_at as "archivedAt"`,
+      [id, session.workspaceId]
+    );
+    return result.rows[0] ?? null;
+  } catch (error) {
+    if (isUndefinedColumnError(error, "archived_at")) {
+      throw missingRequiredColumnError("places", "archived_at", PLACE_ARCHIVE_MIGRATION, error);
+    }
+    throw error;
+  }
+}
+
 export async function deletePlace(
   id: string,
   session: RequestSession = getDevSession(),

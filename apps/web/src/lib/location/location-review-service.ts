@@ -658,7 +658,7 @@ async function confirmReview(
       ? edit?.placeId ?? null
       : item.suggestedPlaceId;
   const placeLabel = placeIdentity?.placeLabel ?? null;
-  await validateReferences(client, session, categoryId, placeId);
+  await validateReferences(client, session, categoryId, placeId, item.suggestedPlaceId);
   const description = confirmedLocationDescription(entryKind(item), item.title, edit, item.suggestedTitles, item.learnedName ? item.title : null);
   const entry = await client.query<{ id: string }>(
     `insert into time_entries (
@@ -1226,15 +1226,22 @@ async function validateReferences(
   client: pg.PoolClient,
   session: RequestSession,
   categoryId?: string | null,
-  placeId?: string | null
+  placeId?: string | null,
+  /** The card's own place: still accepted if it was archived since (PRD D19 A10); a new pick is not. */
+  currentPlaceId?: string | null
 ) {
   if (categoryId) {
     const category = await client.query("select 1 from categories where id = $1 and workspace_id = $2 and is_archived = false", [categoryId, session.workspaceId]);
     if (!category.rows[0]) throw new ReviewResolutionError("invalid_action", "Activity was not found.", { status: 422 });
   }
   if (placeId) {
-    const place = await client.query("select 1 from places where id = $1 and workspace_id = $2", [placeId, session.workspaceId]);
-    if (!place.rows[0]) throw new ReviewResolutionError("invalid_action", "Place was not found.", { status: 422 });
+    const place = await client.query<{ archived: boolean }>(
+      "select archived_at is not null as archived from places where id = $1 and workspace_id = $2",
+      [placeId, session.workspaceId]
+    );
+    if (!place.rows[0] || (place.rows[0].archived && placeId !== currentPlaceId)) {
+      throw new ReviewResolutionError("invalid_action", "Place was not found.", { status: 422 });
+    }
   }
 }
 
@@ -1267,7 +1274,7 @@ async function createChildEntry(
 ) {
   const categoryId = editedCategoryId(item, edit);
   const placeId = editedPlaceId(item, edit);
-  await validateReferences(client, session, categoryId, placeId);
+  await validateReferences(client, session, categoryId, placeId, item.suggestedPlaceId);
   const description = edit?.description ?? item.title;
   const { id: event, pattern } = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit, {
     ownerAuthoredDescription: isOwnerAuthoredReviewDescription(description, item.suggestedTitles)
@@ -1304,7 +1311,7 @@ async function createChildReview(
   stoppedAt: string,
   edit?: ReviewEntryEdit
 ) {
-  await validateReferences(client, session, editedCategoryId(item, edit), editedPlaceId(item, edit));
+  await validateReferences(client, session, editedCategoryId(item, edit), editedPlaceId(item, edit), item.suggestedPlaceId);
   const { id: eventId } = await createChildEvent(client, session, item, segmentId, startedAt, stoppedAt, edit);
   await client.query(
     `insert into review_items (
