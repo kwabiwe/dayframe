@@ -1,4 +1,4 @@
-import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph } from "@dayframe/shared";
+import { distanceMeters, formatClockTime, formatClockValue, formatDuration, type ClockFormat, type DayframeGlyph, type VenueStay } from "@dayframe/shared";
 import { formatPlaceDistance, nearbyPlaceCategory } from "../../lib/placeCategories";
 import { learnedLocationName, locationEvidenceDetails, locationEvidenceLine } from "../../lib/locationEvidenceSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -47,6 +47,7 @@ import {
   createNativeNearbyPointOfInterestProvider,
   createNativePlaceSearchProvider,
   friendlyPlaceSearchError,
+  nearbyInsideLine,
   visibleNearbyPlaces,
   NearbyPointOfInterestController,
   PlaceSearchController,
@@ -378,6 +379,10 @@ export function LocationReviewCorrectionEditor({
   );
   const listedSavedPlaceNamesRef = useRef(listedSavedPlaceNames);
   listedSavedPlaceNamesRef.current = listedSavedPlaceNames;
+  // The visit the venue ranker weighs places against (location v3 PR 7): its times, how accurate
+  // its readings were and how far they spread. Read when the list loads, never stored.
+  const venueStayRef = useRef<VenueStay | null>(null);
+  venueStayRef.current = evidence.segment.kind === "stay" ? venueStayFromEvidence(evidence) : null;
 
   // D3: every stay (a saved match included) lists the nearest few Apple places around the visit
   // under the empty search field. The search runs once per visit centre while the screen is focused;
@@ -390,7 +395,8 @@ export function LocationReviewCorrectionEditor({
     const controller = new NearbyPointOfInterestController(
       nearbyProvider,
       setNearbyState,
-      () => listedSavedPlaceNamesRef.current
+      () => listedSavedPlaceNamesRef.current,
+      () => venueStayRef.current
     );
     nearbyControllerRef.current = controller;
     void controller.load({ latitude: visitLatitude, longitude: visitLongitude });
@@ -1081,6 +1087,8 @@ export function LocationReviewCorrectionEditor({
                               glyph={nearbyPlaceCategory(place.category).glyph}
                               disabled={resolvingSuggestion || saving}
                               divider={index > 0}
+                              // The shops or counters folded into it (venue resolver v2, design §6.2).
+                              inside={nearbyInsideLine(place.inside)}
                               key={place.id}
                               onPress={() => void chooseNearbyPlace(place)}
                               testID={`location-evidence-nearby-${index}`}
@@ -1613,6 +1621,7 @@ function ResultRow({
   disabled,
   divider,
   glyph,
+  inside = null,
   onPress,
   testID,
   theme,
@@ -1623,6 +1632,8 @@ function ResultRow({
   divider: boolean;
   /** A nearby place's kind (Gym, Café); search results keep the place glyph. */
   glyph?: DayframeGlyph;
+  /** "Inside: Freshway Pharmacy, Bean & Bar +12" for a centre or store with places folded in. */
+  inside?: string | null;
   onPress: () => void;
   testID?: string;
   theme: MobileTheme;
@@ -1630,7 +1641,7 @@ function ResultRow({
 }) {
   return (
     <Pressable
-      accessibilityLabel={[title, detail].filter(Boolean).join(", ")}
+      accessibilityLabel={[title, detail, inside].filter(Boolean).join(", ")}
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
@@ -1650,6 +1661,9 @@ function ResultRow({
         <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={[resultRowStyles.title, { color: theme.textPrimary }]}>{title}</Text>
         {detail ? (
           <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[resultRowStyles.detail, { color: theme.textSecondary }]}>{detail}</Text>
+        ) : null}
+        {inside ? (
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[resultRowStyles.detail, { color: theme.textSecondary }]}>{inside}</Text>
         ) : null}
       </View>
     </Pressable>
@@ -1901,3 +1915,18 @@ const resultRowStyles = StyleSheet.create({
 
 /** How far a touch may move and still be a tap (points); more is a scroll. */
 const TAP_SLOP = 10;
+
+/** The stay as the venue ranker weighs it: times, typical reading accuracy and spread. */
+function venueStayFromEvidence(evidence: LocationReviewEvidenceDto): VenueStay {
+  const accuracies = evidence.map.acceptedSamples
+    .map((sample) => sample.accuracyMeters)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  return {
+    startedAt: evidence.segment.startedAt,
+    stoppedAt: evidence.segment.stoppedAt,
+    now: new Date(),
+    accuracyMeters: accuracies.length ? accuracies[Math.floor(accuracies.length / 2)] : null,
+    spreadMeters: evidence.map.stayRadiusMeters
+  };
+}

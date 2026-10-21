@@ -48,15 +48,16 @@ export type NearbyPointOfInterestQuery = {
   latitude: number;
   longitude: number;
   radiusMeters: number;
-  /** At most this many places (the native side caps it at 8). */
+  /** At most this many places (the native side caps it at 60). */
   limit: number;
 };
 
 /**
  * One nearby point of interest as it crosses the bridge: an opaque id for this generation, the
- * title, an address line, the rounded distance and its kind of place (Apple's category without its
- * prefix, e.g. "FitnessCenter"; absent from older native builds). The coordinate stays native until
- * the place is picked (`resolveNearby`).
+ * title, an address line, the rounded distance, its kind of place (Apple's category without its
+ * prefix, e.g. "FitnessCenter"), where it lies from the visit in whole metres east and north, and
+ * how it was found (the nearby search, a shared-name site search, or an area of interest's name).
+ * The coordinate stays native until the place is picked (`resolveNearby`).
  */
 export type NearbyPointOfInterest = {
   id: string;
@@ -65,11 +66,16 @@ export type NearbyPointOfInterest = {
   subtitle: string | null;
   distanceMeters: number;
   category?: string | null;
+  offsetEastMeters?: number | null;
+  offsetNorthMeters?: number | null;
+  source?: "nearby" | "contextual" | "area" | null;
 };
 
 export type NearbyPointOfInterestResult = {
   requestId: string;
   places: NearbyPointOfInterest[];
+  /** Names of the areas of interest the visit lies in (a shopping centre); often none. */
+  areasOfInterest?: string[];
 };
 
 export type NearbyPointOfInterestResolutionRequest = {

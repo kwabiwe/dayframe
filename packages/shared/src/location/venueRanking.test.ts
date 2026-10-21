@@ -1,0 +1,173 @@
+import { describe, expect, it } from "vitest";
+import { rankVenues, venueKind, type VenueCandidate, type VenueStay } from "./venueRanking";
+
+// Synthetic venues in Exampleton (design §6.5): every name, address and layout here is made up.
+// Offsets are metres east and north of the stay's centre.
+let next = 0;
+function place(title: string, category: string | null, east: number, north: number, extra: Partial<VenueCandidate> = {}): VenueCandidate {
+  next += 1;
+  return {
+    id: `v${next}`,
+    title,
+    category,
+    subtitle: extra.subtitle ?? `${next} High Street, Exampleton ZZ1 1ZZ`,
+    distanceMeters: Math.round(Math.hypot(east, north)),
+    offsetEastMeters: east,
+    offsetNorthMeters: north,
+    source: "nearby",
+    ...extra
+  };
+}
+
+/** A weekday stay of `minutes` starting at `hour` local (London, 21 Oct 2026 is a Wednesday). */
+function stay(minutes: number, hour = 11, extra: Partial<VenueStay> = {}): VenueStay {
+  const start = new Date(Date.UTC(2026, 9, 21, hour - 1, 0)); // BST = UTC+1
+  return {
+    startedAt: start.toISOString(),
+    stoppedAt: new Date(start.getTime() + minutes * 60_000).toISOString(),
+    now: new Date("2026-10-21T23:00:00Z"),
+    accuracyMeters: 15,
+    spreadMeters: 20,
+    timeZone: "Europe/London",
+    ...extra
+  };
+}
+
+const titles = (ranking: ReturnType<typeof rankVenues>) => ranking.venues.map((venue) => venue.candidate.title);
+
+describe("rankVenues: the failures reported before PR 7", () => {
+  it("rolls an in-store pharmacy into its supermarket and suggests the supermarket", () => {
+    const store = place("Freshway Superstore", "FoodMarket", 30, 35);
+    const pharmacy = place("Freshway Pharmacy", "Pharmacy", 10, 15);
+    const cafe = place("Bean & Bar", "Cafe", -35, 10);
+    const ranking = rankVenues([pharmacy, cafe, store], stay(25));
+    expect(ranking.suggestion?.candidate.title).toBe("Freshway Superstore");
+    expect(ranking.venues[0].children.map((child) => child.title)).toEqual(["Freshway Pharmacy"]);
+    expect(titles(ranking)).not.toContain("Freshway Pharmacy");
+  });
+
+  it("prefers the supermarket to a studio beside it, kind known or not", () => {
+    const store = place("Freshway Superstore", "FoodMarket", 40, 30);
+    for (const studio of [place("Kelp Yoga Studio", "FitnessCenter", 12, -10), place("Kelp Studio", null, 12, -10)]) {
+      const ranking = rankVenues([studio, store], stay(25));
+      expect(titles(ranking)[0]).toBe("Freshway Superstore");
+      // Not folded: the studio shares no distinctive word with the store.
+      expect(ranking.venues[0].children).toEqual([]);
+    }
+  });
+
+  it("names the shopping centre the stay is in, with its shops inside it", () => {
+    const shops = Array.from({ length: 30 }, (_, index) =>
+      place(`Unit Shop ${index + 1}`, index % 3 === 0 ? "Store" : index % 3 === 1 ? null : "Restaurant",
+        Math.round(Math.cos(index) * 50), Math.round(Math.sin(index) * 50)));
+    // Apple's point for the centre can be far from where the stay is inside it.
+    const centre = place("Northgate Shopping Centre", "Store", 380, 150, { source: "area" });
+    const ranking = rankVenues([...shops, centre], stay(70, 14, { areasOfInterest: ["Northgate Shopping Centre"] }));
+    expect(ranking.suggestion?.candidate.title).toBe("Northgate Shopping Centre");
+    expect(ranking.suggestion?.kind).toBe("shopping_centre");
+    expect(ranking.venues[0].children).toHaveLength(30);
+  });
+
+  it("finds the centre by its name and the addresses of its shops without an area of interest", () => {
+    const centre = place("Northgate Shopping Centre", null, 60, 80);
+    const inside = place("Fern Outfitters", "Store", -150, 40, { subtitle: "Unit 4, Northgate Shopping Centre, Exampleton ZZ1 2ZZ" });
+    const nearby = place("Gorse Shoes", "Store", 20, 20);
+    const ranking = rankVenues([inside, nearby, centre], stay(60, 15));
+    expect(titles(ranking)[0]).toBe("Northgate Shopping Centre");
+    expect(ranking.venues[0].children.map((child) => child.title).sort()).toEqual(["Fern Outfitters", "Gorse Shoes"]);
+  });
+});
+
+describe("rankVenues: kinds, dwell and time of day", () => {
+  it("leaves a busy high street without a confident suggestion", () => {
+    const street = [
+      place("Alder Books", null, 20, 10), place("Birch & Co", "Store", -25, 15), place("Cedar Kitchen", "Restaurant", 30, -20),
+      place("Dock Nails", "Beauty", -10, -35), place("Elm Hardware", null, 40, 25), place("Fern Fashion", "Store", -45, -10)
+    ];
+    const ranking = rankVenues(street, stay(12, 13));
+    expect(ranking.suggestion).toBeNull();
+    expect(ranking.venues).toHaveLength(street.length);
+  });
+
+  it("puts the gym first for a long workout, the café next door second", () => {
+    const ranking = rankVenues([place("Bean Corner", "Cafe", 8, 5), place("Peak Fitness", "FitnessCenter", 25, 30)], stay(75, 18));
+    expect(titles(ranking)).toEqual(["Peak Fitness", "Bean Corner"]);
+  });
+
+  it("suggests the school for a weekday drop-off, but not at the weekend", () => {
+    const venues = [place("Exampleton Primary School", "School", 50, 40), place("Corner News", "Store", 10, 10), place("School Lane (Stop K)", "PublicTransport", 5, -5)];
+    expect(rankVenues(venues, stay(12, 9)).suggestion?.candidate.title).toBe("Exampleton Primary School");
+    const saturday = stay(12, 9, { startedAt: "2026-10-24T08:00:00Z", stoppedAt: "2026-10-24T08:12:00Z" });
+    expect(rankVenues(venues, saturday).venues[0].candidate.title).not.toBe("Exampleton Primary School");
+  });
+
+  it("never suggests a bus stop, and keeps a station a destination", () => {
+    expect(venueKind({ title: "Market Street (Stop K)", category: "PublicTransport" })).toBe("bus_stop");
+    expect(venueKind({ title: "Exampleton Station", category: "PublicTransport" })).toBe("station");
+    const ranking = rankVenues([place("Market Street (Stop K)", "PublicTransport", 3, 2), place("Alder Books", null, 30, 20)], stay(20, 12));
+    expect(titles(ranking)[0]).toBe("Alder Books");
+  });
+
+  it("folds a concourse café into the station the stay is at", () => {
+    const station = place("Exampleton Station", "PublicTransport", 30, 30);
+    const cafe = place("Platform Coffee", "Cafe", 50, 20);
+    const ranking = rankVenues([cafe, station], stay(10, 8));
+    expect(ranking.suggestion?.candidate.title).toBe("Exampleton Station");
+    expect(ranking.venues[0].children.map((child) => child.title)).toEqual(["Platform Coffee"]);
+  });
+
+  it("marks a bar down in the morning", () => {
+    const bar = place("The Kelp Tavern", "Nightlife", 10, 10);
+    const cafe = place("Alder Café", "Cafe", 20, 20);
+    expect(titles(rankVenues([bar, cafe], stay(60, 10)))[0]).toBe("Alder Café");
+    expect(titles(rankVenues([bar, cafe], stay(100, 21)))[0]).toBe("The Kelp Tavern");
+  });
+
+  it("lets a venue you picked here before win a close call", () => {
+    const a = place("Alder Café", "Cafe", 15, 10);
+    const b = place("Birch Café", "Cafe", 12, 8);
+    expect(titles(rankVenues([a, b], stay(40)))[0]).toBe("Birch Café");
+    const ranking = rankVenues([a, b], stay(40, 11, { pickedBefore: (candidate) => candidate.title === "Alder Café" }));
+    expect(titles(ranking)[0]).toBe("Alder Café");
+  });
+
+  it("infers a kind from the name when Apple gives none", () => {
+    expect(venueKind({ title: "Kelp Superstore", category: null })).toBe("supermarket");
+    expect(venueKind({ title: "Kelp Superstore", category: "Store" })).toBe("supermarket");
+    expect(venueKind({ title: "Exampleton Retail Park", category: "Store" })).toBe("shopping_centre");
+    expect(venueKind({ title: "Fern Café", category: null })).toBe("dining");
+    expect(venueKind({ title: "Hazel & Co", category: null })).toBe("other");
+  });
+});
+
+describe("rankVenues: input hygiene", () => {
+  it("drops never-a-visit kinds, nameless rows and repeats, keeping the nearest branch", () => {
+    const near = place("Freshway Express", "FoodMarket", 20, 0);
+    const far = place("freshway express", "FoodMarket", 200, 0);
+    const ranking = rankVenues([
+      place("Car Park A", "Parking", 2, 2), place("Cash Machine", "ATM", 3, 3), place("  ", null, 1, 1), far, near
+    ], stay(20));
+    expect(ranking.venues.map((venue) => venue.candidate.id)).toEqual([near.id]);
+  });
+
+  it("folds a counter by distance alone when offsets are missing, but only when it must be inside", () => {
+    const store = { ...place("Freshway Superstore", "FoodMarket", 0, 0), offsetEastMeters: null, offsetNorthMeters: null, distanceMeters: 25 };
+    const close = { ...place("Freshway Pharmacy", "Pharmacy", 0, 0), offsetEastMeters: null, offsetNorthMeters: null, distanceMeters: 20 };
+    const far = { ...place("Freshway Bank", "Bank", 0, 0), offsetEastMeters: null, offsetNorthMeters: null, distanceMeters: 50 };
+    const ranking = rankVenues([store, close, far], stay(25));
+    expect(ranking.venues[0].candidate.title).toBe("Freshway Superstore");
+    expect(ranking.venues[0].children.map((child) => child.title)).toEqual(["Freshway Pharmacy"]);
+    expect(titles(ranking)).toContain("Freshway Bank");
+  });
+
+  it("returns nothing for nothing, and shares that sum to one", () => {
+    expect(rankVenues([], stay(10))).toEqual({ venues: [], suggestion: null });
+    const ranking = rankVenues([place("Alder Books", null, 10, 0), place("Birch Café", "Cafe", 30, 0)], stay(30));
+    expect(ranking.venues.reduce((sum, venue) => sum + venue.share, 0)).toBeCloseTo(1, 10);
+  });
+
+  it("handles an open stay by measuring it to now", () => {
+    const open = { ...stay(0), stoppedAt: null, now: new Date(Date.parse(stay(0).startedAt) + 70 * 60_000) };
+    expect(titles(rankVenues([place("Bean Corner", "Cafe", 8, 5), place("Peak Fitness", "FitnessCenter", 25, 30)], open))[0]).toBe("Peak Fitness");
+  });
+});

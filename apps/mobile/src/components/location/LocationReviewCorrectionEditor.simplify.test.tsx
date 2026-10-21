@@ -297,7 +297,7 @@ describe("Where were you? (D2, D3)", () => {
     expect(texts("Record without choosing a place")).toHaveLength(0);
     expect(texts("Search other places")).toHaveLength(0);
     // D3: a saved match no longer hides nearby places. The one named like the saved place is not repeated.
-    expect(native.searchNearby).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 400, limit: 5 }));
+    expect(native.searchNearby).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 400, limit: 60 }));
     expect(byTestId("location-evidence-nearby")).toHaveLength(1);
     expect(texts("Example Bakery")).toHaveLength(1);
     // Each nearby row is its kind and distance, never the address (owner, 17 Oct 2026).

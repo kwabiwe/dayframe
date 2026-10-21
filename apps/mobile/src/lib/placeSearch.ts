@@ -1,4 +1,5 @@
 import * as Location from "expo-location";
+import { rankVenues, type VenueStay } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
@@ -27,26 +28,76 @@ export const PLACE_SEARCH_REQUIRED_ACCURACY_METERS = 5_000;
 export const NEARBY_POI_RADIUS_METERS = 400;
 /** Location evidence lists at most five nearby places under the empty search field. */
 export const NEARBY_POI_MAX_VISIBLE_RESULTS = 5;
+/**
+ * How many places the native search hands over for ranking: MapKit answers with the nearest ~50
+ * whatever the radius (owner's iOS 27.2 checks, 21 Oct 2026), plus the site and area searches.
+ */
+export const NEARBY_POI_CANDIDATE_LIMIT = 60;
+
+/** A nearby place as Location evidence lists it, after the venue ranker (location v3 PR 7). */
+export type NearbyVenue = NearbyPointOfInterest & {
+  /** Places inside it (a shop in a centre, a counter in a supermarket), most likely first. */
+  inside: string[];
+  /** Its share of the evidence among the listed venues (0–1). */
+  share: number;
+  /** The ranker is confident the visit was here (design §6.3). */
+  suggested: boolean;
+};
 
 const normalisePlaceName = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 /**
- * Presentation-only filtering of the native list (already nearest first): drops malformed rows,
- * anything outside the radius, repeated names and names already on screen as saved places
- * (`hiddenNames`), and keeps at most five. Never changes saved radii or engine matching.
+ * Orders the native list with the venue ranker (`rankVenues`, design §6): the place you were at
+ * first, at the scale you'd say it, with the places inside it folded under it. Without a stay
+ * (no times) it still folds and ranks, with length and time of day left out.
  */
-export function visibleNearbyPlaces(
+export function rankedNearbyPlaces(
   places: readonly NearbyPointOfInterest[],
+  areasOfInterest: readonly string[] = [],
+  stay: VenueStay | null = null
+): NearbyVenue[] {
+  const now = new Date();
+  const ranking = rankVenues(places.filter(isNearbyRow), stay
+    ? { ...stay, areasOfInterest: stay.areasOfInterest ?? areasOfInterest }
+    : { startedAt: now.toISOString(), stoppedAt: now.toISOString(), now, areasOfInterest });
+  const byId = new Map(places.map((place) => [place.id, place]));
+  return ranking.venues.map((venue) => ({
+    ...byId.get(venue.candidate.id)!,
+    inside: venue.children.map((child) => child.title),
+    share: venue.share,
+    suggested: ranking.suggestion?.candidate.id === venue.candidate.id
+  }));
+}
+
+function isNearbyRow(place: NearbyPointOfInterest) {
+  return typeof place.id === "string" && place.id.length > 0 &&
+    typeof place.title === "string" && place.title.trim().length > 0 &&
+    Number.isFinite(place.distanceMeters) && place.distanceMeters >= 0;
+}
+
+/** "Inside: Freshway Pharmacy, Bean & Bar +12" (design §6.2), or null with nothing inside. */
+export function nearbyInsideLine(inside: readonly string[]) {
+  if (!inside.length) return null;
+  const shown = inside.slice(0, 2).join(", ");
+  return inside.length > 2 ? `Inside: ${shown} +${inside.length - 2}` : `Inside: ${shown}`;
+}
+
+/**
+ * Presentation-only filtering of the ranked list (already in order): drops malformed rows,
+ * anything outside the radius (except an area of interest the visit lies in, whose point can be
+ * farther), repeated names and names already on screen as saved places (`hiddenNames`), and keeps
+ * at most five. Never changes saved radii or engine matching.
+ */
+export function visibleNearbyPlaces<T extends NearbyPointOfInterest>(
+  places: readonly T[],
   hiddenNames: readonly string[] = []
 ) {
   const seen = new Set(hiddenNames.map(normalisePlaceName).filter(Boolean));
-  const unique: NearbyPointOfInterest[] = [];
+  const unique: T[] = [];
   for (const place of places) {
     if (
-      typeof place.id !== "string" || !place.id ||
-      typeof place.title !== "string" || !place.title.trim() ||
-      !Number.isFinite(place.distanceMeters) || place.distanceMeters < 0 ||
-      place.distanceMeters > NEARBY_POI_RADIUS_METERS
+      !isNearbyRow(place) ||
+      (place.source !== "area" && place.distanceMeters > NEARBY_POI_RADIUS_METERS)
     ) continue;
     const key = normalisePlaceName(place.title);
     if (seen.has(key)) continue;
@@ -91,7 +142,7 @@ export type NearbyPointOfInterestProvider = {
 export type NearbyPointOfInterestState = {
   requestId: string | null;
   status: "idle" | "loading" | "results" | "no-results" | "error";
-  places: NearbyPointOfInterest[];
+  places: NearbyVenue[];
   message: string | null;
 };
 
@@ -300,7 +351,9 @@ export class NearbyPointOfInterestController {
   constructor(
     private readonly provider: NearbyPointOfInterestProvider,
     private readonly onStateChange: (state: NearbyPointOfInterestState) => void,
-    private readonly hiddenNames: () => readonly string[] = () => []
+    private readonly hiddenNames: () => readonly string[] = () => [],
+    /** The visit being named: its times, accuracy and spread feed the venue ranker. */
+    private readonly stay: () => VenueStay | null = () => null
   ) {}
 
   async load(center: PlaceSearchCoordinate) {
@@ -314,13 +367,15 @@ export class NearbyPointOfInterestController {
         latitude: center.latitude,
         longitude: center.longitude,
         radiusMeters: NEARBY_POI_RADIUS_METERS,
-        limit: NEARBY_POI_MAX_VISIBLE_RESULTS
+        limit: NEARBY_POI_CANDIDATE_LIMIT
       });
       if (this.disposed || result.requestId !== requestId || !this.isCurrent(requestId)) return;
-      const places = visibleNearbyPlaces(
+      const ranked = rankedNearbyPlaces(
         result.places.filter((place) => place.requestId === requestId),
-        this.hiddenNames()
+        Array.isArray(result.areasOfInterest) ? result.areasOfInterest.filter((name) => typeof name === "string") : [],
+        this.stay()
       );
+      const places = visibleNearbyPlaces(ranked, this.hiddenNames());
       this.onStateChange({
         requestId,
         status: places.length > 0 ? "results" : "no-results",
