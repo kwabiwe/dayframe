@@ -190,6 +190,10 @@ The server with Forgot password requires `supabase/migrations/202610120001_user_
 
 The server that reads each activity's "Counts toward goal" switch requires `supabase/migrations/202610110001_category_counts_toward_goal.sql` (local `packages/db/migrations/010_category_counts_toward_goal.sql`) before its Preview or production deployment. It adds `categories.counts_toward_goal boolean not null default true` and, in the same run only, sets it false for the Sleep starter and any activity named Sleep; no other row changes. Every category read selects the column, so without it bootstrap, `/api/categories` and Reports fail (bootstrap names this migration). Apply it to staging before the Preview, then to production before the server change merges. Staging validation is not production authorization.
 
+### Place geography index prerequisite
+
+Places at scale (location v3 PR 16a) reads saved places near a point through `idx_places_geography`. Apply `supabase/migrations/202610210003_place_geography_index.sql` (local `packages/db/migrations/018_place_geography_index.sql`, mirrored in `001_init.sql`) to staging before the Preview and to production before the server change merges. It only adds a GiST expression index on `places`; without it the search is slower, not wrong. No RLS change.
+
 ### Motion & Fitness schema prerequisite
 
 The server that accepts Motion & Fitness evidence requires `supabase/migrations/202610050001_location_motion_activity.sql` (local `packages/db/migrations/007_location_motion_activity.sql`) before its Preview or production deployment, and production must have it before any phone build that sends `motion_activity` is installed. It only widens the `location_evidence` kind check and adds a coordinate-free check for motion rows. Staging validation is not production authorization.

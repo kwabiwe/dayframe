@@ -282,6 +282,26 @@ describeWithDatabase("place roles on disposable PostgreSQL", () => {
     });
   });
 
+  it("finds nearby saved places through the geography index (places at scale, PR 16)", async () => {
+    const { NEARBY_SAVED_PLACES_SQL } = await import("./location/location-query-service");
+    const client = await database!.connect();
+    try {
+      await client.query("begin");
+      // Thousands of places, so the planner weighs the index as it would at scale.
+      await client.query(
+        `insert into places (workspace_id, name, latitude, longitude, radius_meters)
+         select $1, 'Generated ' || n, 10 + (n % 100) * 0.01, 20 + (n / 100) * 0.01, 100 from generate_series(1, 3000) n`,
+        [workspaceId]);
+      await client.query("analyze places");
+      const plan = (await client.query<{ "QUERY PLAN": string }>(`explain ${NEARBY_SAVED_PLACES_SQL}`, [workspaceId, 20.05, 10.05]))
+        .rows.map((row) => row["QUERY PLAN"]).join("\n");
+      expect(plan).toContain("idx_places_geography");
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
   it("enforces one Home per workspace in the database", async () => {
     await expect(database!.query("update places set role = 'home' where id = $1", [gym])).rejects.toMatchObject({ code: "23505" });
     await expect(database!.query("update places set role = 'gym' where id = $1", [gym])).rejects.toMatchObject({ code: "23514" });
