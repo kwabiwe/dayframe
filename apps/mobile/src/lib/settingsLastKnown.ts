@@ -103,6 +103,7 @@ export type SettingsLastKnownDisplay = Readonly<{
   location?: Readonly<SettingsLocationDisplay>;
   reviewNudge?: Readonly<{ enabled: boolean; minutes: number }>;
   nudgePermission?: ReviewNudgePermission;
+  trackingNotice?: boolean;
   sync?: Readonly<SettingsLastKnownSyncCounts>;
   activities?: Readonly<{ count: number; pinned: number }>;
   placesCount?: number;
@@ -168,6 +169,8 @@ export function sanitizeSettingsLastKnown(input: unknown): SettingsLastKnownDisp
   }
   const nudgePermission = oneOf(NUDGE_PERMISSIONS, input.nudgePermission);
   if (nudgePermission) out.nudgePermission = nudgePermission;
+  const trackingNotice = bool(input.trackingNotice);
+  if (trackingNotice !== undefined) out.trackingNotice = trackingNotice;
   if (isRecord(input.sync)) {
     const sync: SettingsLastKnownSyncCounts = {};
     for (const key of SETTINGS_LAST_KNOWN_SYNC_COUNT_KEYS) {
@@ -232,6 +235,8 @@ export function settingsLastKnownPatchForRemembered(key: string, value: unknown)
       return sanitizeSettingsLastKnown({ reviewNudge: { enabled: record.enabled, minutes: record.minutes } });
     case "nudgePermission":
       return sanitizeSettingsLastKnown({ nudgePermission: value });
+    case "trackingNotice":
+      return sanitizeSettingsLastKnown({ trackingNotice: value });
     case "reviewSyncDiagnostics":
       return sanitizeSettingsLastKnown({
         sync: { reviewWaitingCount: record.waitingCount, reviewSignInCount: record.authenticationRequiredCount }

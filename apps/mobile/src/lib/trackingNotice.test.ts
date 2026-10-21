@@ -21,8 +21,14 @@ const {
 } = await import("./trackingNotice");
 
 function harness(overrides: Partial<TrackingNoticeDependencies> = {}) {
-  const lifecycle = { appState: [] as Array<() => void>, signedOut: [] as Array<() => void> };
+  const lifecycle = {
+    appState: [] as Array<() => void>,
+    signedOut: [] as Array<() => void>,
+    account: [] as Array<() => void>,
+    consent: [] as Array<(enabled: boolean) => void>
+  };
   const base = {
+    readAccountKey: vi.fn(async (): Promise<string | null> => "account-a"),
     readEnabled: vi.fn(readTrackingNoticeEnabled),
     readNotificationPermission: vi.fn(async (): Promise<ReviewNudgePermission | null> => "granted"),
     readLocationConsent: vi.fn(async () => true),
@@ -33,7 +39,9 @@ function harness(overrides: Partial<TrackingNoticeDependencies> = {}) {
   const deps = Object.assign(base, overrides) as typeof base;
   installTrackingNotice(deps, {
     subscribeAppState: (listener) => lifecycle.appState.push(listener),
-    subscribeSignedOut: (listener) => lifecycle.signedOut.push(listener)
+    subscribeSignedOut: (listener) => lifecycle.signedOut.push(listener),
+    subscribeAccountChange: (listener) => lifecycle.account.push(listener),
+    subscribeLocationConsent: (listener) => lifecycle.consent.push(listener)
   });
   return { deps, lifecycle };
 }
@@ -78,17 +86,51 @@ describe("tracking-stopped notice arming", () => {
     expect(lastArmed(deps.setArmed)).toBe(false);
   });
 
-  it("disarms on sign-out even while an older recompute is still reading", async () => {
+  it("disarms on sign-out at once, before a recompute's slow read settles", async () => {
     let release!: () => void;
-    const { deps, lifecycle } = harness({
-      readLocationConsent: vi.fn(() => new Promise<boolean>((resolve) => { release = () => resolve(true); }))
-    });
-    await vi.waitFor(() => expect(deps.readLocationConsent).toHaveBeenCalled());
+    const { deps, lifecycle } = harness();
+    await syncTrackingNoticeArming();
+    expect(lastArmed(deps.setArmed)).toBe(true);
+    deps.readLocationConsent.mockImplementationOnce(() => new Promise<boolean>((resolve) => { release = () => resolve(true); }));
+    void syncTrackingNoticeArming();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     for (const listener of lifecycle.signedOut) listener();
+    expect(lastArmed(deps.setArmed)).toBe(false);
     release();
-    await vi.waitFor(() => expect(deps.setArmed).toHaveBeenCalledWith(false));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(deps.setArmed.mock.calls.map(([armed]) => armed)).toEqual([false]);
+    expect(lastArmed(deps.setArmed)).toBe(false);
+  });
+
+  it("never lets one account's reads arm another", async () => {
+    let release!: () => void;
+    let account = "account-a";
+    const { deps, lifecycle } = harness({ readAccountKey: vi.fn(async () => account) });
+    deps.readLocationConsent.mockImplementationOnce(() => new Promise<boolean>((resolve) => { release = () => resolve(true); }));
+    void syncTrackingNoticeArming();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    account = "account-b";
+    deps.readLocationConsent.mockResolvedValue(false);   // B never turned location on
+    for (const listener of lifecycle.account) listener();
+    release();
+    await syncTrackingNoticeArming();
+    expect(deps.setArmed.mock.calls.map(([armed]) => armed)).not.toContain(true);
+  });
+
+  it("disarms as soon as location consent is turned off", async () => {
+    const { deps, lifecycle } = harness();
+    await syncTrackingNoticeArming();
+    expect(lastArmed(deps.setArmed)).toBe(true);
+    deps.readLocationConsent.mockResolvedValue(false);
+    for (const listener of lifecycle.consent) listener(false);
+    expect(lastArmed(deps.setArmed)).toBe(false);
+    await syncTrackingNoticeArming();
+    expect(lastArmed(deps.setArmed)).toBe(false);
+  });
+
+  it("stays disarmed with nobody signed in", async () => {
+    const { deps } = harness({ readAccountKey: vi.fn(async () => null) });
+    await syncTrackingNoticeArming();
+    expect(lastArmed(deps.setArmed)).toBe(false);
   });
 
   it("disarms when a read fails", async () => {

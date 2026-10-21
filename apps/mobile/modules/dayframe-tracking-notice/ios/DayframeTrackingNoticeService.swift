@@ -38,12 +38,15 @@ final class DayframeTrackingNoticeService {
     let now = Date()
     defaults.set(now.timeIntervalSince1970, forKey: Self.lastTerminationKey)
     let alwaysAuthorized = CLLocationManager().authorizationStatus == .authorizedAlways
+    let previousNoticeAt = storedDate(Self.lastNoticeKey)
     guard DayframeTrackingNoticeCore.shouldNotify(
       armed: defaults.bool(forKey: Self.armedKey),
       alwaysAuthorized: alwaysAuthorized,
-      lastNoticeAt: storedDate(Self.lastNoticeKey),
+      lastNoticeAt: previousNoticeAt,
       now: now
     ) else { return }
+    // Reserve today's notice first: the centre may accept the request after the wait below ends.
+    defaults.set(now.timeIntervalSince1970, forKey: Self.lastNoticeKey)
 
     let content = UNMutableNotificationContent()
     content.body = Self.body
@@ -56,9 +59,13 @@ final class DayframeTrackingNoticeService {
     UNUserNotificationCenter.current().add(request) { error in
       outcome.finish(succeeded: error == nil)
     }
-    // Without notification permission the add fails, and the daily allowance stays unused.
-    if outcome.wait(seconds: Self.addTimeoutSeconds) {
-      defaults.set(now.timeIntervalSince1970, forKey: Self.lastNoticeKey)
+    // Only a definite refusal (notifications not allowed) gives today's allowance back.
+    if outcome.wait(seconds: Self.addTimeoutSeconds) == .refused {
+      if let previousNoticeAt {
+        defaults.set(previousNoticeAt.timeIntervalSince1970, forKey: Self.lastNoticeKey)
+      } else {
+        defaults.removeObject(forKey: Self.lastNoticeKey)
+      }
     }
   }
 
@@ -77,6 +84,8 @@ final class DayframeTrackingNoticeService {
 
 /// Hands the notification centre's answer back to the terminating main thread.
 private final class AddOutcome: @unchecked Sendable {
+  enum Result { case accepted, refused, unknown }
+
   private let lock = NSLock()
   private let done = DispatchSemaphore(value: 0)
   private var succeeded = false
@@ -88,11 +97,11 @@ private final class AddOutcome: @unchecked Sendable {
     done.signal()
   }
 
-  /// True only when the request was accepted within the time allowed.
-  func wait(seconds: TimeInterval) -> Bool {
-    guard done.wait(timeout: .now() + seconds) == .success else { return false }
+  /// `unknown` when the centre has not answered in time: it may still accept the request.
+  func wait(seconds: TimeInterval) -> Result {
+    guard done.wait(timeout: .now() + seconds) == .success else { return .unknown }
     lock.lock()
     defer { lock.unlock() }
-    return succeeded
+    return succeeded ? .accepted : .refused
   }
 }

@@ -854,6 +854,7 @@ export default function SettingsScreen() {
   // Display only (A4): the live reminder once read, otherwise the last-known one.
   const shownReviewNudge = reviewNudge ? { enabled: reviewNudge.enabled, minutes: reviewNudge.minutes } : lastKnown?.reviewNudge ?? null;
   const shownNudgePermission = nudgePermission ?? lastKnown?.nudgePermission ?? null;
+  const shownTrackingNotice = trackingNotice ?? lastKnown?.trackingNotice ?? null;
   const shownReviewNudgeOn = Boolean(shownReviewNudge?.enabled) && shownNudgePermission === "granted";
 
   async function changeReviewNudge(change: (owner: MobileAccountOwner) => Promise<ReviewNudgeState>) {
@@ -2866,9 +2867,10 @@ export default function SettingsScreen() {
                     <SettingsSwitch
                       disabled={trackingNotice === null || trackingNoticeBusy}
                       label="Tell me if tracking stops"
+                      // Acts only on this visit's live read (a last-known value is display only).
                       onValueChange={(enabled) => void toggleTrackingNotice(enabled)}
                       theme={theme}
-                      value={trackingNotice === true && shownNudgePermission === "granted"}
+                      value={shownTrackingNotice === true && shownNudgePermission === "granted"}
                     />
                   )}
                   subtitle={shownNudgePermission === "denied"
