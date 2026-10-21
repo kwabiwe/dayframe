@@ -3,8 +3,9 @@ import { AccessibilityInfo } from "react-native";
 import { createArchivedReadGate } from "./activitiesPage";
 import { AuthRequiredError, fetchArchivedPlaces, setPlaceArchived, type MobileArchivedPlace } from "./api";
 import { friendlyMobileErrorMessage } from "./friendlyError";
-import { currentMobileAccountEpoch, mobileAccountKey, readActiveMobileAccount } from "./mobileAccount";
+import { currentMobileAccountEpoch, getActiveMobileAccountSnapshot, mobileAccountKey, readActiveMobileAccount } from "./mobileAccount";
 import {
+  authFailureOpensSignIn,
   createPlaceRestoreGate,
   restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
@@ -212,7 +213,9 @@ export function useArchivedPlaces({
       } catch (error) {
         clearBusy();
         if (error instanceof AuthRequiredError) {
-          if (guard()) onSignedOutRef.current();
+          // Sign-in opens unless another account has become active since (Codex r12 on #508): signing
+          // out ends this lifetime too, so the lifetime guard alone would swallow it.
+          if (mounted.current && authFailureOpensSignIn(accountKey, getActiveMobileAccountSnapshot())) onSignedOutRef.current();
           return;
         }
         const ours = await activeIsOurs();

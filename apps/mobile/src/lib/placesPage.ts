@@ -246,6 +246,17 @@ export function createMonitorQueue<T>(options: {
 }
 
 /**
+ * Whether a request made for `originAccountKey` that came back "sign in again" opens sign-in now
+ * (Codex r12 on #508): yes when no account is active (signed out) or the same account still is (its
+ * session was the one invalidated); no only when a different account has since become active, whose
+ * page this no longer is. Never decided by the page's lifetime alone: signing out ends it too.
+ */
+export function authFailureOpensSignIn(originAccountKey: string | null, active: { userId: string; workspaceId: string } | null) {
+  if (!active) return true;
+  return originAccountKey === null || `${active.workspaceId}:${active.userId}` === originAccountKey;
+}
+
+/**
  * How the refresh after an accepted restore ended: its list applied; overtaken ("stale": a newer
  * change or list landed, or it failed after a newer read started, which brings the list instead);
  * or failed as the newest read.

@@ -3,6 +3,7 @@ import {
   applyPlaceRoleLocally,
   archivePlaceConfirmCopy,
   archivedPlaceRows,
+  authFailureOpensSignIn,
   createMonitorQueue,
   createPageReadGate,
   createPlaceRestoreGate,
@@ -416,5 +417,14 @@ describe("placesPageState (staging feedback B2, Codex r1)", () => {
   it("is pending before the first read settles and failed when it did not land", () => {
     expect(placesPageState(false, false)).toBe("pending");
     expect(placesPageState(false, true)).toBe("failed");
+  });
+});
+
+describe("authFailureOpensSignIn (Codex r12 on #508)", () => {
+  it("opens sign-in when signed out or the same account is still active, never for another account", () => {
+    expect(authFailureOpensSignIn("ws:a", null)).toBe(true);
+    expect(authFailureOpensSignIn("ws:a", { userId: "a", workspaceId: "ws" })).toBe(true);
+    expect(authFailureOpensSignIn("ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
+    expect(authFailureOpensSignIn(null, { userId: "b", workspaceId: "ws" })).toBe(true);
   });
 });

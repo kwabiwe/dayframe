@@ -21,9 +21,13 @@ const mocks = vi.hoisted(() => ({
   setPlaceArchived: vi.fn(),
   setPlaceRole: vi.fn(),
   ignoreLearnedPlace: vi.fn(),
+  copyDetail: vi.fn(),
   refreshGeofences: vi.fn(),
   announce: vi.fn()
 }));
+
+// One sign-in error class for every path that imports the API (the screen and the archived hook).
+const authErrors = vi.hoisted(() => ({ AuthRequiredError: class AuthRequiredError extends Error {} }));
 
 const factories = vi.hoisted(() => ({
   accountMock: () => ({
@@ -32,13 +36,14 @@ const factories = vi.hoisted(() => ({
       mocks.onEpochRead?.();
       return epoch;
     },
+    getActiveMobileAccountSnapshot: () => mocks.owner,
     mobileAccountKey: (owner: Owner) => `${owner.workspaceId}:${owner.userId}`,
     mobileAccountOwnersEqual: (left: Owner | null | undefined, right: Owner | null | undefined) =>
       left?.userId === right?.userId && left?.workspaceId === right?.workspaceId,
     readActiveMobileAccount: async () => mocks.owner
   }),
   apiMock: () => {
-    class AuthRequiredError extends Error {}
+    const { AuthRequiredError } = authErrors;
     return {
       AuthRequiredError,
       fetchArchivedPlaces: () => mocks.fetchArchivedPlaces(),
@@ -114,12 +119,18 @@ vi.mock("@/components/places/StoppedTripsGroup", () => ({ StoppedTripsGroup: () 
 vi.mock("@/components/settings/SettingsBlocks", async () => {
   const React = await import("react");
   return {
-    SettingsBlockGroup: () => null,
-    SettingsBlockRow: () => null,
+    SettingsBlockGroup: (props: { children?: unknown }) => React.createElement("BlockGroup", null, props.children as never),
+    SettingsBlockRow: (props: { control?: unknown }) => React.createElement("BlockRow", null, props.control as never),
     SettingsPillButton: (props: Record<string, unknown>) => React.createElement("Pill", props)
   };
 });
-vi.mock("@/components/SwipeDismissSheet", () => ({ SwipeDismissSheet: () => null }));
+// Sheets draw their content, so controls inside them (a learned place's Copy) can be pressed.
+vi.mock("@/components/SwipeDismissSheet", async () => {
+  const React = await import("react");
+  return {
+    SwipeDismissSheet: React.forwardRef((props: { children?: unknown }, _ref) => React.createElement("Sheet", null, props.children as never))
+  };
+});
 vi.mock("@/lib/placesPage", () => import("../../lib/placesPage"));
 vi.mock("@/lib/useArchivedPlaces", () => import("../../lib/useArchivedPlaces"));
 vi.mock("@/lib/mobileAccount", () => factories.accountMock());
@@ -134,8 +145,8 @@ vi.mock("@/lib/locationGeocoding", () => ({ backfillLearnedPlaceLocations: async
 vi.mock("@/lib/localMutation", () => import("../../lib/localMutation"));
 vi.mock("@/lib/places", () => ({ withRole: <T extends { role?: unknown }>(place: T) => ({ ...place, role: place.role ?? null }) }));
 vi.mock("@/lib/learnedPlaces", () => ({
-  copyLearnedPlaceDetail: vi.fn(),
-  learnedPlaceDetailValues: (place: { name: string }) => ({ name: place.name, address: null, coordinates: null })
+  copyLearnedPlaceDetail: (value: string | null) => mocks.copyDetail(value),
+  learnedPlaceDetailValues: (place: { name: string }) => ({ name: place.name, address: "1 Example Street, Exampleton", coordinates: null })
 }));
 vi.mock("@/lib/mobileTheme", () => ({ pressable: (value: unknown) => value, useMobileTheme: () => ({ styles: {}, theme: {} }) }));
 vi.mock("@/lib/motion", () => ({
@@ -1204,5 +1215,117 @@ describe("Places continuations after an await (Codex r11 on #508)", () => {
     await act(async () => { await pullToRefresh(); });
     await flush();
     expect(savePill(cafe.name).props.disabled).toBe(false);
+  });
+});
+
+// Codex r12 on #508: a "sign in again" answer to this page's own request opens sign-in when the app is
+// now signed out, even though signing out also ended the page's lifetime; only another account having
+// become active since makes it someone else's page (no redirect, nothing shown). A late copy never
+// shows its toast in a sheet it didn't come from.
+describe("Places sign-in after a lifetime ends (Codex r12 on #508)", () => {
+  const bakery = {
+    id: "40000000-0000-4000-8000-000000000004", name: "Example Deli", classification: "place_candidate", visitCount: 3,
+    distinctDayCount: 2, lastSeenAt: "2026-10-19T09:00:00.000Z", radiusMeters: 80, totalDwellSeconds: 3_600, longestDwellSeconds: 1_800
+  };
+  const kiosk = { ...bakery, id: "40000000-0000-4000-8000-000000000005", name: "Example Stand" };
+  const learnedSheet = () => tree!.root.findAll((node: ReactTestInstance) => typeof node.type === "function" && "onIgnore" in node.props)[0];
+  const openLearned = async (id: string) => {
+    await act(async () => { (tree!.root.findAll((node: ReactTestInstance) => node.props.testID === `places-learned-${id}` && (node.type as unknown) === "Pressable")[0].props.onPress as () => void)(); });
+  };
+  const pill = (label: string) => all("Pill").find((node) => node.props.accessibilityLabel === label)!;
+
+  type Site = { name: string; start: (answer: Promise<unknown>) => Promise<void> };
+  const sites: Site[] = [
+    {
+      name: "a page read",
+      start: async (answer) => {
+        mocks.fetchBootstrap.mockReturnValueOnce(answer);
+        await act(async () => { void pullToRefresh(); });
+      }
+    },
+    {
+      name: "a Restore",
+      start: async (answer) => {
+        mocks.setPlaceArchived.mockReturnValueOnce(answer);
+        await act(async () => { restore(archivedGym); });
+      }
+    },
+    {
+      name: "the refresh after a Restore",
+      start: async (answer) => {
+        mocks.setPlaceArchived.mockResolvedValueOnce({ ...archivedGym, archivedAt: null });
+        mocks.fetchBootstrap.mockReturnValueOnce(answer);
+        await act(async () => { restore(archivedGym); });
+      }
+    },
+    {
+      name: "a Home/Work save",
+      start: async (answer) => {
+        mocks.setPlaceRole.mockReturnValueOnce(answer);
+        await act(async () => { (pill("Set Home").props.onPress as () => void)(); });
+        await act(async () => { void (all("RoleSheet")[0].props.onSave as (request: unknown) => Promise<unknown>)({ role: "home", placeId: studio.id, previousPlaceName: null }); });
+      }
+    },
+    {
+      name: "an Ignore",
+      start: async (answer) => {
+        mocks.ignoreLearnedPlace.mockReturnValueOnce(answer);
+        await openLearned(bakery.id);
+        await act(async () => { (learnedSheet().props.onIgnore as (place: unknown, done: () => void) => void)(bakery, () => undefined); });
+      }
+    }
+  ];
+  const cases = sites.flatMap((site) => [
+    { site, then: "signed out" as const },
+    { site, then: "replaced by another account" as const }
+  ]);
+
+  it.each(cases)("$site.name answered \"sign in again\" after the app was $then", async ({ site, then }) => {
+    const { AuthRequiredError } = await import("../../lib/api");
+    const { router } = await import("expo-router");
+    mocks.owner = ACCOUNT_A;
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio], [bakery]));
+    await act(async () => { tree = create(<PlacesScreen />); });
+    await flush();
+    const answer = deferred<unknown>();
+    await site.start(answer.promise);
+    await flush();
+    const before = texts();
+    vi.mocked(router.replace).mockClear();
+    mocks.announce.mockClear();
+    // The session is invalidated (signed out), or another account is active now.
+    mocks.owner = then === "signed out" ? null : ACCOUNT_B;
+    mocks.epoch = 2;
+    await act(async () => { answer.reject(new AuthRequiredError()); });
+    await flush();
+    if (then === "signed out") {
+      expect(router.replace).toHaveBeenCalledWith("/");
+    } else {
+      expect(router.replace).not.toHaveBeenCalled();
+      expect(mocks.announce).not.toHaveBeenCalled();
+      // Nothing new is shown (A's own sheet may close: it is no longer the account shown).
+      expect(texts().filter((line) => !before.includes(line))).toEqual([]);
+    }
+  });
+
+  it("never shows a late copy's toast in a sheet another account opened since", async () => {
+    mocks.owner = ACCOUNT_A;
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio], [bakery]));
+    await act(async () => { tree = create(<PlacesScreen />); });
+    await flush();
+    await openLearned(bakery.id);
+    const copying = deferred<boolean>();
+    mocks.copyDetail.mockReturnValueOnce(copying.promise);
+    await act(async () => { (pill("Copy address").props.onPress as () => void)(); });
+    // B signs in, loads its places and opens its own suggestion.
+    mocks.owner = ACCOUNT_B;
+    mocks.epoch = 2;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_B, [office], [kiosk]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    await openLearned(kiosk.id);
+    await act(async () => { copying.resolve(true); });
+    await flush();
+    expect(texts()).not.toContain("Address copied");
   });
 });

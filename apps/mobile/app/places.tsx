@@ -34,6 +34,7 @@ import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import {
   applyPlaceRoleLocally,
+  authFailureOpensSignIn,
   learnedPlaceSubtitle,
   pendingRestoredRows,
   placeRowSubtitle,
@@ -49,7 +50,13 @@ import {
   type RestoreRefreshOutcome
 } from "@/lib/placesPage";
 import { useArchivedPlaces } from "@/lib/useArchivedPlaces";
-import { currentMobileAccountEpoch, mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
+import {
+  currentMobileAccountEpoch,
+  getActiveMobileAccountSnapshot,
+  mobileAccountKey,
+  mobileAccountOwnersEqual,
+  readActiveMobileAccount
+} from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   SwipeDismissSheet,
@@ -222,6 +229,20 @@ export default function PlacesScreen() {
     clearRestoreWarning(settleRestoresAbsentFrom(listAccountKey(list), list.places));
   }, [clearRestoreWarning, settleRestoresAbsentFrom]);
 
+  /** The account signed in now (its key), for deciding where a later "sign in again" leads. */
+  const activeAccountKey = useCallback(() => {
+    const active = getActiveMobileAccountSnapshot();
+    return active ? mobileAccountKey(active) : null;
+  }, []);
+  /**
+   * A request made for `origin` came back "sign in again": sign-in opens unless another account has
+   * become active since (Codex r12 on #508). Checked from the app's own account state, not the page
+   * lifetime, which signing out also ends.
+   */
+  const openSignInAfter = useCallback((origin: string | null) => {
+    if (mounted.current && authFailureOpensSignIn(origin, getActiveMobileAccountSnapshot())) router.replace("/");
+  }, []);
+
   /** The account lifetime a read starts in; its list applies only in the same one. */
   const accountLifetime = useCallback(() => String(currentMobileAccountEpoch()), []);
 
@@ -287,6 +308,7 @@ export default function PlacesScreen() {
     // Archived reads alongside, on its own: its failure never touches the page.
     void loadArchived();
     const ticket = pageReads.begin(accountLifetime());
+    const origin = activeAccountKey();
     try {
       const bootstrap = await fetchBootstrap();
       // A delete or archive accepted while this read was out dropped it (Codex r6 on #508): any list
@@ -312,13 +334,12 @@ export default function PlacesScreen() {
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
-      // Only in the lifetime it started in (sign-in, or the newest read's failure).
-      if (!mounted.current || ticket.lifetime !== accountLifetime()) return;
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        openSignInAfter(origin);
         return;
       }
-      if (!pageReads.isNewest(ticket)) return;
+      // Only the newest read's failure, in the lifetime it started in.
+      if (!mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
         setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
       } else if (options?.refresh) {
@@ -330,7 +351,7 @@ export default function PlacesScreen() {
     } finally {
       if (pull !== null && pull === refreshPull.current) setRefreshing(false);
     }
-  }, [accountLifetime, loadArchived, monitor, monitorList, pageReads, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
+  }, [accountLifetime, activeAccountKey, loadArchived, monitor, monitorList, openSignInAfter, pageReads, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -444,6 +465,7 @@ export default function PlacesScreen() {
   async function changeLearnedPlace(kind: "ignore" | "forget", learnedPlace: MobileLearnedPlace, onSuccess?: () => void) {
     const still = lifetimeCheck();
     const owner = statusOwner();
+    const origin = activeAccountKey();
     const request = ++learnedRequests.current;
     const setBusy = kind === "ignore" ? setIgnoringLearned : setForgettingLearned;
     setBusy({ id: learnedPlace.id, owner, request });
@@ -463,11 +485,11 @@ export default function PlacesScreen() {
       const sheet = selectedLearnedRef.current;
       if (still() && sheet?.owner === owner && sheet.place.id === learnedPlace.id) onSuccess?.();
     } catch (error) {
-      if (!still()) return;
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        openSignInAfter(origin);
         return;
       }
+      if (!still()) return;
       Alert.alert("Places", friendlyMobileErrorMessage(
         error,
         kind === "ignore" ? "Couldn't ignore this suggestion. Try again." : "Couldn't forget this suggestion. Try again."
@@ -521,6 +543,7 @@ export default function PlacesScreen() {
     // started in; a change from an ended lifetime refreshes nothing.
     const still = options.still ?? lifetimeCheck();
     if (!still()) return;
+    const origin = activeAccountKey();
     // Starts after the change it follows, so it is newer than every read already out.
     const ticket = pageReads.begin(accountLifetime());
     try {
@@ -552,11 +575,11 @@ export default function PlacesScreen() {
       // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
       say(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
-      if (!still()) return;
       if (error instanceof AuthRequiredError) {
-        router.replace("/");
+        openSignInAfter(origin);
         return;
       }
+      if (!still()) return;
       // A read started since brings the list instead: a restore counts as overtaken, and only the
       // newest read's failure is shown or announced (Codex r6 on #508).
       if (options.onSettled && !options.onSettled(pageReads.isNewest(ticket) ? "failed" : "stale")) return;
@@ -606,17 +629,18 @@ export default function PlacesScreen() {
     // The account lifetime this change belongs to (Codex r10 on #508): its answer is applied,
     // monitored and said only while that lifetime and its account are still shown.
     const still = lifetimeCheck();
+    const origin = activeAccountKey();
     try {
       const owner = await readActiveMobileAccount();
       let previousArchived = false;
       try {
         previousArchived = (await setPlaceRole(request)).previousArchived === true;
       } catch (error) {
-        if (!still()) return null;
         if (error instanceof AuthRequiredError) {
-          router.replace("/");
+          openSignInAfter(origin);
           return null;
         }
+        if (!still()) return null;
         return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
       }
       // Accepted: shown at once (only for the account lifetime that asked, while Places is open),
@@ -1002,9 +1026,11 @@ function LearnedPlaceDetailSheet({
     action();
   }
   async function copyDetail(label: string, value: string | null) {
-    const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
-    if (!copied) return;
+    // Taken before the copy (Codex r12 on #508): showing another place, closing the sheet or another
+    // account moves it on, so a late copy never shows its toast in a sheet it didn't come from.
     const token = ++copyToastToken.current;
+    const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
+    if (!copied || copyToastToken.current !== token) return;
     if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
     setCopyToast(`${label} copied`);
     copyToastTimer.current = setTimeout(() => {

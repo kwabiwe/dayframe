@@ -25,6 +25,7 @@ vi.mock("./api", () => {
 vi.mock("./friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("./mobileAccount", () => ({
   currentMobileAccountEpoch: () => mocks.epoch,
+  getActiveMobileAccountSnapshot: () => mocks.owner,
   mobileAccountKey: (owner: { userId: string; workspaceId: string }) => `${owner.workspaceId}:${owner.userId}`,
   readActiveMobileAccount: async () => mocks.owner
 }));
