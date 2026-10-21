@@ -394,3 +394,81 @@ describe("Places › Archived › Restore of a place that is gone again (owner f
   });
 });
 
+// Read ordering (Codex r5 on #508): every page read takes a sequence when it starts; a list applies,
+// settles restores and refreshes monitoring only when it is newer than the last list applied, in the
+// same account lifetime, and no change happened since it started.
+const savedRowIds = () => tree!.root.findAll((node: ReactTestInstance) => typeof node.props.testID === "string"
+  && node.props.testID.startsWith("places-row-") && (node.type as unknown) === "Pressable")
+  .map((node) => (node.props.testID as string).slice("places-row-".length)).sort();
+const ids = (list: { id: string }[]) => list.map((place) => place.id).sort();
+const monitoredLists = () => mocks.refreshGeofences.mock.calls.map(([list]) => ids(list as { id: string }[]).join(","));
+
+type ReadKind = "pull" | "restore" | "retry";
+async function startRead(kind: ReadKind, answer: Promise<unknown>) {
+  mocks.fetchBootstrap.mockReturnValueOnce(answer);
+  if (kind === "pull") {
+    let pulling!: Promise<void>;
+    await act(async () => { pulling = pullToRefresh(); });
+    void pulling;
+  } else if (kind === "restore") {
+    await act(async () => { restore(archivedGym); });
+  } else {
+    // The restore is still unmonitored, so its retry runs after 5 s.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_100); });
+  }
+  await flush();
+}
+
+describe("Places read ordering (Codex r5 on #508)", () => {
+  it("never lets an older restore refresh bring back a place a newer pull settled as gone", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    const held = deferred<unknown>();
+    await startRead("restore", held.promise);
+    // A newer pull: the place is gone again (archived elsewhere since).
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(savedRowIds()).toEqual([studio.id]);
+    mocks.refreshGeofences.mockClear();
+    // The held, older restore refresh lands with the place.
+    await act(async () => { held.resolve(bootstrapFor(ACCOUNT_A, [studio, gym])); });
+    await flush();
+    expect(savedRowIds()).toEqual([studio.id]);
+    expect(waitingRow(gym.id)).toHaveLength(0);
+    expect(monitoredWith(gym.id)).toHaveLength(0);
+  });
+
+  const listOlder = [studio, gym];
+  const listNewer = [studio, gym, office];
+  const cases: Array<[ReadKind, ReadKind, "older first" | "newer first"]> = [];
+  for (const [first, second] of [["pull", "restore"], ["restore", "pull"], ["restore", "retry"]] as Array<[ReadKind, ReadKind]>) {
+    cases.push([first, second, "older first"], [first, second, "newer first"]);
+  }
+
+  it.each(cases)("%s then %s, resolving %s: the newer read wins and the older never applies or monitors", async (first, second, order) => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const older = deferred<unknown>();
+    const newer = deferred<unknown>();
+    await startRead(first, older.promise);
+    await startRead(second, newer.promise);
+    mocks.refreshGeofences.mockClear();
+    const resolveOlder = () => older.resolve(bootstrapFor(ACCOUNT_A, listOlder));
+    const resolveNewer = () => newer.resolve(bootstrapFor(ACCOUNT_A, listNewer));
+    // Monitoring calls from the moment the newer list can land on.
+    let fromNewer = 0;
+    for (const answer of order === "older first" ? [resolveOlder, resolveNewer] : [resolveNewer, resolveOlder]) {
+      if (answer === resolveNewer) fromNewer = mocks.refreshGeofences.mock.calls.length;
+      await act(async () => { answer(); });
+      await flush();
+    }
+    expect(savedRowIds()).toEqual(ids(listNewer));
+    // Once the newer list can land, the older one is never applied or monitored.
+    expect(monitoredLists().slice(fromNewer)).not.toContain(ids(listOlder).join(","));
+  });
+});
+

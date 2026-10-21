@@ -15,19 +15,19 @@ describe("Places › Archived on the page (Codex r1 on #508)", () => {
     // "restored" only once monitored: an unresolved restore keeps its honest line (Codex r4 on #508).
     expect(refresh).toContain("setStatusMessage(successMessage ?? (bootstrapHasPlace ?");
     expect(places).toContain("restoreMonitoringUnresolved = archive.restoreMonitoringUnresolved");
-    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("applied"\)\) return;\s*setData\(reconciled\);/);
+    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("applied"\)\) return;\s*pageReads\.applied\(ticket\);\s*setData\(reconciled\);/);
     expect(refresh).toContain('if (options.onSettled && !options.onSettled("failed")) return;');
     expect(refresh).toContain("const failureMessage = options.failureMessage?.();");
     // Re-checked after every await before any write (Codex r3 on #508).
     expect(refresh).toMatch(/const bootstrap = await fetchBootstrap\(\);\s*\/\/[^\n]*\n\s*if \(!still\(\)/);
-    expect(refresh).toMatch(/await monitorList\(reconciled\);\s*if \(!still\(\)\) return;/);
+    expect(refresh).toMatch(/await monitorList\(reconciled, ticket\);\s*if \(!still\(\)\) return;/);
     expect(refresh).toMatch(/await refreshGeofencesForPlaces\(options\.fallbackPlaces[^\n]*\n\s*if \(!still\(\)\) return;/);
     expect(places).toContain("archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name)");
   });
 
   it("brings a restored place whose refresh failed back from the next list, and refreshes its monitoring", () => {
     const load = between("const load = useCallback(", "useEffect(() => {\n    void load();");
-    expect(load).toContain("if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap);");
+    expect(load).toContain("if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap, ticket);");
     expect(places).toContain("const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);");
     expect(places).toContain("Math.min(RESTORE_REFRESH_RETRY_MS * 2 ** restoreRetries, RESTORE_REFRESH_RETRY_MAX_MS)");
     expect(places).toContain("testID={`places-restored-${row.id}`}");
@@ -44,4 +44,17 @@ describe("Places › Archived on the page (Codex r1 on #508)", () => {
       expect(places).not.toMatch(new RegExp(`<SettingsBlockGroup[^>]*?title="${title}"`));
     }
   });
+
+  it("sends every list through the one read gate (Codex r5 on #508)", () => {
+    // Every read takes a ticket when it starts, and is judged before its list is applied.
+    expect(places.match(/= pageReads\.begin\(accountLifetime\(\)\);/g)).toHaveLength(2);
+    expect(places.match(/pageReads\.judge\(ticket, accountLifetime\(\)\)/g)).toHaveLength(2);
+    // A fetched list is applied only right after the gate records it.
+    expect(places.match(/pageReads\.applied\(ticket\);\s*setData\((bootstrap|reconciled)\);/g)).toHaveLength(2);
+    // Monitoring and late follow-ups only for the newest applied list; no other read ordering.
+    expect(places).toContain("if (!pageReads.isLatestApplied(ticket)) return;");
+    expect(places).not.toContain("changeEpoch");
+    expect(places).not.toContain("readSequence");
+  });
 });
+

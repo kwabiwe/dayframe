@@ -121,6 +121,55 @@ export function archivedPlaceRows(places: readonly { id: string; name: string }[
   }));
 }
 
+/** A page read's place in line: when it started, what had changed by then, and in which lifetime. */
+export type PageReadTicket = { sequence: number; changes: number; lifetime: string };
+
+/**
+ * The one gate every Places list goes through before it is applied, settles restores or refreshes
+ * monitoring (Codex r5 on #508, after rounds 2–5 were all read-ordering races). Every page read
+ * (opening, focus, pull-to-refresh, Try again, the restore retry, and the refresh after a change or
+ * a restore) takes a ticket when it starts. Its list may be applied only when:
+ * - it belongs to the same account lifetime (else "foreign": nothing is applied or said);
+ * - no change happened after it started (`changed`), and no read that started after it has already
+ *   been applied (else "stale": overtaken; nothing is applied or monitored).
+ * Applying records the ticket, so an older answer arriving later can never undo a newer one.
+ */
+export function createPageReadGate() {
+  let issued = 0;
+  let lastApplied = 0;
+  let changes = 0;
+  return {
+    begin(lifetime: string): PageReadTicket {
+      issued += 1;
+      return { sequence: issued, changes, lifetime };
+    },
+    /** A local change happened: every read already out is out of date. */
+    changed() {
+      changes += 1;
+    },
+    judge(ticket: PageReadTicket, lifetime: string): "apply" | "stale" | "foreign" {
+      if (ticket.lifetime !== lifetime) return "foreign";
+      return ticket.changes !== changes || ticket.sequence <= lastApplied ? "stale" : "apply";
+    },
+    /** Call in the same synchronous step as applying the list. */
+    applied(ticket: PageReadTicket) {
+      lastApplied = Math.max(lastApplied, ticket.sequence);
+    },
+    /** A change or a newer list has landed since `ticket` started. */
+    superseded(ticket: PageReadTicket) {
+      return ticket.changes !== changes || ticket.sequence <= lastApplied;
+    },
+    /** `ticket`'s list is the newest applied (its follow-ups may still write). */
+    isLatestApplied(ticket: PageReadTicket) {
+      return lastApplied === ticket.sequence;
+    },
+    /** No read started after `ticket` (only the newest read reports its failure). */
+    isNewest(ticket: PageReadTicket) {
+      return issued === ticket.sequence;
+    }
+  };
+}
+
 /** How the refresh after an accepted restore ended: its list applied, overtaken by a newer change, or failed. */
 export type RestoreRefreshOutcome = "applied" | "stale" | "failed";
 

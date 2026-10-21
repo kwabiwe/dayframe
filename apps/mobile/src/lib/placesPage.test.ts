@@ -3,6 +3,7 @@ import {
   applyPlaceRoleLocally,
   archivePlaceConfirmCopy,
   archivedPlaceRows,
+  createPageReadGate,
   createPlaceRestoreGate,
   pendingRestoredRows,
   learnedPlaceSubtitle,
@@ -169,6 +170,49 @@ describe("Places › Archived (PRD D19 A10)", () => {
       title: "Archive Home?",
       message: "Past blocks keep its name, and it stops matching new visits and stops being your Home. You can restore it from Places › Archived."
     }));
+  });
+});
+
+describe("createPageReadGate (Codex r5 on #508)", () => {
+  it("applies reads in any order only while each is newer than the last applied", () => {
+    const gate = createPageReadGate();
+    const older = gate.begin("1");
+    const newer = gate.begin("1");
+    expect(gate.judge(newer, "1")).toBe("apply");
+    gate.applied(newer);
+    expect(gate.judge(older, "1")).toBe("stale");
+    expect(gate.isLatestApplied(newer)).toBe(true);
+    expect(gate.superseded(older)).toBe(true);
+  });
+
+  it("lets an older read apply when it lands first, then the newer one", () => {
+    const gate = createPageReadGate();
+    const older = gate.begin("1");
+    const newer = gate.begin("1");
+    expect(gate.judge(older, "1")).toBe("apply");
+    gate.applied(older);
+    expect(gate.judge(newer, "1")).toBe("apply");
+    gate.applied(newer);
+    expect(gate.isLatestApplied(older)).toBe(false);
+  });
+
+  it("drops a read that a change overtook, and one from another account lifetime", () => {
+    const gate = createPageReadGate();
+    const before = gate.begin("1");
+    gate.changed();
+    const after = gate.begin("1");
+    expect(gate.judge(before, "1")).toBe("stale");
+    expect(gate.judge(after, "1")).toBe("apply");
+    expect(gate.judge(after, "2")).toBe("foreign");
+  });
+
+  it("reports a failure only for the newest read started", () => {
+    const gate = createPageReadGate();
+    const first = gate.begin("1");
+    expect(gate.isNewest(first)).toBe(true);
+    const second = gate.begin("1");
+    expect(gate.isNewest(first)).toBe(false);
+    expect(gate.isNewest(second)).toBe(true);
   });
 });
 

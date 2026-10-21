@@ -38,11 +38,13 @@ import {
   pendingRestoredRows,
   placeRowSubtitle,
   placesPageState,
+  createPageReadGate,
   restoredMonitoredMessage,
   restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
   subscribeDeletedPlaces,
   takeDeletedPlaces,
+  type PageReadTicket,
   type RestoreRefreshOutcome
 } from "@/lib/placesPage";
 import { useArchivedPlaces } from "@/lib/useArchivedPlaces";
@@ -118,10 +120,10 @@ export default function PlacesScreen() {
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
   // One Home/Work change at a time across the page (a second sheet can't open mid-save).
   const roleSaving = useRef(false);
-  // Bumped by every accepted change: a read that started before it is out of date and dropped.
-  const changeEpoch = useRef(0);
-  // Only the newest page read applies (mount and focus can both be out at once).
-  const readSequence = useRef(0);
+  // The one gate every list read goes through (Codex r5 on #508): a read's list applies, settles
+  // restores and refreshes monitoring only if no change happened and no newer list was applied since
+  // it started, in the same account lifetime. Every accepted change calls `pageReads.changed()`.
+  const pageReads = useRef(createPageReadGate()).current;
   const mounted = useRef(true);
   useEffect(() => () => {
     mounted.current = false;
@@ -134,7 +136,7 @@ export default function PlacesScreen() {
     refreshAfterRestore: (place, settle) => {
       // Accepted: every page read already out started before the place came back, so none may
       // apply (and settle it without the place) once this restore is waiting (Codex r2 on #508).
-      changeEpoch.current += 1;
+      pageReads.changed();
       return refreshAfterPlaceChange({
         prefix: `${place.name} restored.`,
         // The warning only while it still holds: a read may have brought the place back meanwhile;
@@ -162,12 +164,15 @@ export default function PlacesScreen() {
 
   /**
    * An applied list (so one that started after every restore it could settle was accepted: older
-   * reads are dropped by `changeEpoch`) that lacks a restored place: the place isn't active on the
+   * reads are dropped by the read gate) that lacks a restored place: the place isn't active on the
    * server any more, so its restore settles silently, with its waiting row, warning and retries.
    */
   const settleGoneRestores = useCallback((list: MobileBootstrap) => {
     clearRestoreWarning(settleRestoresAbsentFrom(listAccountKey(list), list.places));
   }, [clearRestoreWarning, settleRestoresAbsentFrom]);
+
+  /** The account lifetime a read starts in; its list applies only in the same one. */
+  const accountLifetime = useCallback(() => String(currentMobileAccountEpoch()), []);
 
   /**
    * A check for the account lifetime a change started in (Codex r3 on #508): true while the page is
@@ -190,20 +195,23 @@ export default function PlacesScreen() {
    * the retry goes on. One that was announced with a warning has its warning line cleared and its
    * recovery announced.
    */
-  const monitorList = useCallback(async (list: MobileBootstrap) => {
+  const monitorList = useCallback(async (list: MobileBootstrap, ticket: PageReadTicket) => {
+    // Only the newest applied list is monitored, and only it settles restores (Codex r5 on #508).
+    if (!pageReads.isLatestApplied(ticket)) return;
     const key = listAccountKey(list);
     const restored = unmonitoredRestoredIn(key, list.places);
     const epoch = currentMobileAccountEpoch();
     const refreshed = await refreshGeofencesForPlaces(list.places, { userId: list.user.id, workspaceId: list.workspace.id })
       .then(() => true, () => false);
-    // Settled only for this list's account, in the same lifetime, while its list is the one shown.
+    // Settled only for this list's account, in the same lifetime, while its list is the one shown
+    // and still the newest applied.
     const shown = dataRef.current;
     if (!refreshed || restored.length === 0 || !mounted.current || currentMobileAccountEpoch() !== epoch
-      || !shown || listAccountKey(shown) !== key) return;
+      || !shown || listAccountKey(shown) !== key || !pageReads.isLatestApplied(ticket)) return;
     const recovered = settleMonitoredRestored(key, restored);
     clearRestoreWarning(restored);
     for (const name of recovered) AccessibilityInfo.announceForAccessibility(restoredMonitoredMessage(name));
-  }, [clearRestoreWarning, settleMonitoredRestored, unmonitoredRestoredIn]);
+  }, [clearRestoreWarning, pageReads, settleMonitoredRestored, unmonitoredRestoredIn]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -211,25 +219,26 @@ export default function PlacesScreen() {
     if (options?.refresh) setRefreshing(true);
     // Archived reads alongside, on its own: its failure never touches the page.
     void loadArchived();
-    const epoch = changeEpoch.current;
-    const read = ++readSequence.current;
+    const ticket = pageReads.begin(accountLifetime());
     try {
       const fetched = await fetchBootstrap();
-      if (!mounted.current || epoch !== changeEpoch.current || read !== readSequence.current) return;
+      if (!mounted.current || pageReads.judge(ticket, accountLifetime()) !== "apply") return;
       // Deletes accepted while this read was out (possibly before the page had any data) still apply.
       const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
         .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
+      pageReads.applied(ticket);
       setData(bootstrap);
       setLoadFailure(null);
       // A restored place this list brings back is monitored from it, whichever read lands first
       // (its own refresh may still be out, or have failed); its warning clears once that is done.
       settleGoneRestores(bootstrap);
-      if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap);
+      if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap, ticket);
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
       if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
-        if (resolved.length === 0) return;
+        // Only onto this list while it is the newest applied one.
+        if (resolved.length === 0 || !mounted.current || !pageReads.isLatestApplied(ticket)) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
@@ -237,7 +246,7 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (!mounted.current || read !== readSequence.current) return;
+      if (!mounted.current || !pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
         setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
       } else if (options?.refresh) {
@@ -249,7 +258,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, [loadArchived, monitorList, settleGoneRestores, unmonitoredRestoredIn]);
+  }, [accountLifetime, loadArchived, monitorList, pageReads, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -265,7 +274,7 @@ export default function PlacesScreen() {
       || !mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })) return;
     const deleted = takeDeletedPlaces(mobileAccountKey(owner));
     if (deleted.length === 0) return;
-    changeEpoch.current += 1;
+    pageReads.changed();
     setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
       ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
       : current);
@@ -389,7 +398,7 @@ export default function PlacesScreen() {
   }
 
   function removeLocalLearnedPlace(id: string) {
-    changeEpoch.current += 1;
+    pageReads.changed();
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -420,16 +429,19 @@ export default function PlacesScreen() {
         restoreWarning.current = { placeId: options.restoredPlaceId, message };
       }
     };
-    const epoch = changeEpoch.current;
+    // Starts after the change it follows, so it is newer than every read already out.
+    const ticket = pageReads.begin(accountLifetime());
     // Every write below an await first checks the change still belongs to the account shown.
     const still = lifetimeCheck();
     try {
       const bootstrap = await fetchBootstrap();
       // Another account (or lifetime) is shown now, or this list is another account's: that page's.
       if (!still() || listAccountKey(bootstrap) !== listAccountKey(dataRef.current ?? bootstrap)) return;
-      if (epoch !== changeEpoch.current) {
+      const verdict = pageReads.judge(ticket, accountLifetime());
+      if (verdict === "foreign") return;
+      if (verdict === "stale") {
         if (options.onSettled && !options.onSettled("stale")) return;
-        // A newer change's refresh will bring the list; until a restore is monitored it says so.
+        // A newer change or read brings the list; until a restore is monitored it says so.
         const staleMessage = options.successMessage?.();
         if (staleMessage === null) return;
         rememberRestoreWarning(staleMessage);
@@ -438,10 +450,11 @@ export default function PlacesScreen() {
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       if (options.onSettled && !options.onSettled("applied")) return;
+      pageReads.applied(ticket);
       setData(reconciled);
       // A restored place this list lacks is gone again; monitoring from it settles any it has.
       settleGoneRestores(reconciled);
-      await monitorList(reconciled);
+      await monitorList(reconciled, ticket);
       if (!still()) return;
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
@@ -459,7 +472,7 @@ export default function PlacesScreen() {
       if (options.onSettled && !options.onSettled("failed")) return;
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
-      if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
+      if (options.fallbackPlaces && current && !pageReads.superseded(ticket)) {
         await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
         if (!still()) return;
       }
@@ -516,7 +529,7 @@ export default function PlacesScreen() {
       // Accepted: shown at once (only for the account that asked, while Places is open), and any
       // read that started before this answer is dropped.
       if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
-      changeEpoch.current += 1;
+      pageReads.changed();
       const shown = dataRef.current;
       // "Replace the old place": the server archived the old holder, so it leaves Saved places too.
       const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, { ...request, archivePrevious: previousArchived }) : undefined;
