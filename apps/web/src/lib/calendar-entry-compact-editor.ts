@@ -231,9 +231,6 @@ export function inferTypedFinishDate<T extends Pick<CalendarEntryCompactDraft, "
   return stoppedAtDate === draft.stoppedAtDate ? draft : { ...draft, stoppedAtDate };
 }
 
-/** Over 8 h, the editor asks gently whether the End is right (owner, 21 Oct 2026); Save still works. */
-export const LONG_BLOCK_NOTE_SECONDS = 8 * 3600;
-
 /**
  * Typing alone never makes a block longer than 24 h (owner, 21 Oct 2026): on a night the clocks go
  * back, "the next day" can be 24h 30m or 25h, so a typed End checks the real length too (Codex r1 on
