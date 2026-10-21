@@ -8,7 +8,7 @@ import type { MotionTravelMode } from "./types";
 /** One end of a Move: the place's display name (Home and Work by their role label) and its role. */
 export type MoveEndpoint = { name: string | null; role: "home" | "work" | null };
 
-/** What a Move suggests as its activity: Commute between Home and Work, Errands with a stop, else Travel. */
+/** What a Move suggests as its activity: Commute between Home and Work, Errands with a stop, else Getting around. */
 export type MoveActivityKind = "commute" | "errand" | "travel";
 
 export type MoveName = { title: string; route: string; activity: MoveActivityKind };

@@ -36,7 +36,7 @@ export function commuteCategorySpec(): AutomaticCategorySpec {
   return starterSpec("commute");
 }
 
-/** Travel: the activity a Move suggests when it is not Home ↔ Work (PRD D19, A5). */
+/** Getting around (starter key `travel`): the activity a Move suggests when it is not Home ↔ Work (PRD D19, A5). */
 export function travelCategorySpec(): AutomaticCategorySpec {
   return starterSpec("travel");
 }
@@ -55,7 +55,15 @@ export function automaticCategoryLockKey(workspaceId: string, name: string) {
 
 // Starter categories that automatic logging can create. Callers that take more than one of
 // these locks take them in this (alphabetical) order.
-export const AUTOMATIC_STARTER_LOCK_NAMES = ["Commute", "Sleep", "Travel"] as const;
+// "Travel" is the old name of Getting around: a server not yet updated mid-rollout still locks it.
+export const AUTOMATIC_STARTER_LOCK_NAMES = ["Commute", "Getting around", "Sleep", "Travel"] as const;
+
+/**
+ * Lock names a starter still answers to: Getting around was "Travel" until 20 Oct 2026, and an
+ * older server creating or restoring it locks that name, so every writer of it takes both.
+ */
+// A Map, so a name such as "constructor" or "__proto__" never reads an inherited property (Codex r2 on #502).
+const LEGACY_LOCK_NAMES: ReadonlyMap<string, readonly string[]> = new Map([["getting around", ["travel"]]]);
 
 /**
  * Takes the per-name activity locks automatic creation uses, deduplicated and in one sorted
@@ -70,7 +78,8 @@ export async function lockActivityNames(
 ) {
   const keys = [...new Set(names
     .filter((name): name is string => Boolean(name?.trim()))
-    .map((name) => name.trim().toLowerCase()))].sort();
+    .map((name) => name.trim().toLowerCase())
+    .flatMap((name) => [name, ...(LEGACY_LOCK_NAMES.get(name) ?? [])]))].sort();
   for (const name of keys) {
     await client.query(
       "select pg_advisory_xact_lock(hashtextextended($1, 0))",
@@ -86,10 +95,7 @@ export async function ensureAutomaticCategoryId(
   /** Counts a created category (the app's activity list changes). */
   changes?: { count: number }
 ) {
-  await client.query(
-    "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-    [automaticCategoryLockKey(session.workspaceId, spec.name)]
-  );
+  await lockActivityNames(client, session.workspaceId, [spec.name]);
   if (spec.starterKey) {
     const starter = await client.query<{ id: string }>(
       `select id
@@ -133,9 +139,10 @@ export async function ensureHealthEventCategoryId(
 }
 
 /**
- * Travel, created like Commute when a Move needs it. It takes Commute's name lock first, so a
- * transaction that names Moves in any order keeps the one lock order (Commute, Sleep, Travel) that
- * starter activities use; transaction advisory locks are re-entrant.
+ * Getting around (starter key `travel`), created like Commute when a Move needs it. It takes
+ * Commute's name lock first, so a transaction that names Moves in any order keeps the one lock
+ * order (Commute, Getting around, Sleep) that starter activities use; transaction advisory locks
+ * are re-entrant.
  */
 export async function ensureTravelCategoryId(
   client: pg.PoolClient,
