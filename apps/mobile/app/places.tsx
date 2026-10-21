@@ -1,6 +1,7 @@
 import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Modal,
   Pressable,
@@ -20,18 +21,42 @@ import {
   placeDisplayName,
   placeRoleLabel,
   placeRoleSlots,
-  type PlaceRole,
-  type placeRoleRequest
+  type PlaceRole
 } from "@dayframe/shared";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
-import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
+import { ArchivedPlacesGroup } from "@/components/places/ArchivedPlacesGroup";
+import { ReflowBlockGroup } from "@/components/places/ReflowBlockGroup";
+import { PlaceRoleSheet, type PlaceRoleSaveRequest, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
-import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
+import {
+  applyPlaceRoleLocally,
+  sessionEndOpensSignIn,
+  learnedPlaceSubtitle,
+  pendingRestoredRows,
+  placeRowSubtitle,
+  placesPageState,
+  createMonitorQueue,
+  createPageReadGate,
+  restoredMonitoredMessage,
+  restoredNotMonitoredMessage,
+  restoredNotRefreshedMessage,
+  subscribeDeletedPlaces,
+  takeDeletedPlaces,
+  type PageReadTicket,
+  type RestoreRefreshOutcome
+} from "@/lib/placesPage";
+import { useArchivedPlaces } from "@/lib/useArchivedPlaces";
+import {
+  currentMobileAccountEpoch,
+  getActiveMobileAccountSnapshot,
+  mobileAccountKey,
+  mobileAccountOwnersEqual,
+  readActiveMobileAccount
+} from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
   SwipeDismissSheet,
@@ -49,6 +74,7 @@ import {
 } from "@/lib/api";
 import { friendlyMobileErrorMessage, mobileFailureKind } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { StaleMobileSessionResponseError } from "@/lib/mobile-network";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
 import { withRole } from "@/lib/places";
@@ -67,6 +93,19 @@ import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
 
+/** A restore accepted while Places couldn't refresh is retried after this long, doubling each time… */
+const RESTORE_REFRESH_RETRY_MS = 5_000;
+/** …up to this long between tries, until a list with the place has refreshed monitoring. */
+const RESTORE_REFRESH_RETRY_MAX_MS = 60_000;
+
+/** What monitoring is refreshed from: a list the page showed, and the account lifetime it was asked in. */
+type MonitorInput = { list: MobileBootstrap; epoch: number };
+
+/** The account a page list belongs to. */
+function listAccountKey(list: Pick<MobileBootstrap, "user" | "workspace">) {
+  return mobileAccountKey({ userId: list.user.id, workspaceId: list.workspace.id });
+}
+
 export default function PlacesScreen() {
   const backLabel = usePreviousScreenLabel() ?? "Settings";
   const reduceMotion = useReduceMotionPreference();
@@ -78,55 +117,231 @@ export default function PlacesScreen() {
   const dataRef = useRef(data);
   dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
-  const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
-  const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
-  const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const refreshPull = useRef(0);
+  // Ignore/Forget in flight, with the lifetime and request that set them (Codex r11 on #508).
+  type LearnedBusy = { id: string; owner: string; request: number };
+  const [ignoringLearned, setIgnoringLearned] = useState<LearnedBusy | null>(null);
+  const [forgettingLearned, setForgettingLearned] = useState<LearnedBusy | null>(null);
+  const learnedRequests = useRef(0);
+  // The learned place whose sheet is open, with the account lifetime it was opened in (Codex r9 on #508).
+  const [selectedLearned, setSelectedLearned] = useState<{ place: MobileLearnedPlace; owner: string } | null>(null);
+  // The status line, with the account lifetime and account it was written for: shown only while
+  // both still hold, so another account (or a later lifetime) never sees it (Codex r8 on #508).
+  const [status, setStatus] = useState<{ text: string; owner: string } | null>(null);
+  const statusOwner = useCallback(() => {
+    const shown = dataRef.current;
+    return `${currentMobileAccountEpoch()}|${shown ? listAccountKey(shown) : ""}`;
+  }, []);
+  /** Sets the status line for the lifetime and account shown now (an updater sees only a current line). */
+  const setStatusMessage = useCallback((next: string | null | ((current: string | null) => string | null)) => {
+    const owner = statusOwner();
+    setStatus((current) => {
+      const text = typeof next === "function" ? next(current?.owner === owner ? current.text : null) : next;
+      return text === null ? null : { text, owner };
+    });
+  }, [statusOwner]);
+  const statusMessage = status && status.owner === statusOwner() ? status.text : null;
+  const selectedLearnedRef = useRef(selectedLearned);
+  selectedLearnedRef.current = selectedLearned;
+  const selectedLearnedPlace = selectedLearned && selectedLearned.owner === statusOwner() ? selectedLearned.place : null;
+  const ignoringLearnedId = ignoringLearned?.owner === statusOwner() ? ignoringLearned.id : null;
+  const forgettingLearnedId = forgettingLearned?.owner === statusOwner() ? forgettingLearned.id : null;
+  const setSelectedLearnedPlace = (place: MobileLearnedPlace | null) => {
+    const next = place ? { place, owner: statusOwner() } : null;
+    selectedLearnedRef.current = next;
+    setSelectedLearned(next);
+  };
   // The newest page read failed before any list was shown (staging feedback B2): an in-page state
   // with Try again instead of a system alert, and never "Nothing saved yet" for a list not read.
   const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);
   // The status line a failed pull-to-refresh showed, cleared by the next read that lands.
   const refreshFailureMessage = useRef<string | null>(null);
+  // The "restored, but Places couldn't refresh" line, cleared when its waiting place settles.
+  const restoreWarning = useRef<{ placeId: string; message: string; owner: string } | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
-  const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
-  // One Home/Work change at a time across the page (a second sheet can't open mid-save).
-  const roleSaving = useRef(false);
-  // Bumped by every accepted change: a read that started before it is out of date and dropped.
-  const changeEpoch = useRef(0);
-  // Only the newest page read applies (mount and focus can both be out at once).
-  const readSequence = useRef(0);
+  // Bound to the account lifetime that opened it, with its draft (Codex r10 on #508): another
+  // account, or a later lifetime, never sees it, and opening it again starts a fresh draft.
+  const [roleSheetState, setRoleSheetState] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode; owner: string } | null>(null);
+  const roleSheet = roleSheetState && roleSheetState.owner === statusOwner() ? roleSheetState : null;
+  // One Home/Work change at a time in an account lifetime (a second sheet can't open mid-save); a
+  // save still out from an earlier lifetime never holds a later one (Codex r10 on #508).
+  const roleSaving = useRef<string | null>(null);
+  // The one gate every list read goes through (Codex r5/r6 on #508): a read's list applies, settles
+  // restores and refreshes monitoring only if no change was accepted and no newer list was applied
+  // since it started, in the same account lifetime. Every accepted change calls `pageReads.changed()`.
+  const pageReads = useRef(createPageReadGate()).current;
   const mounted = useRef(true);
   useEffect(() => () => {
     mounted.current = false;
   }, []);
+  const shownAccountKey = data ? mobileAccountKey({ userId: data.user.id, workspaceId: data.workspace.id }) : null;
+  // Places › Archived (location v3 PR 15b, PRD D19 A10): read with the page, for the account that
+  // read it, and shown only when there are some. A failed read leaves it as it was (or hidden).
+  const archive = useArchivedPlaces({
+    onSignedOut: () => router.replace("/"),
+    refreshAfterRestore: (place, settle) => {
+      // Accepted: every page read already out started before the place came back, so none may
+      // apply (and settle it without the place) once this restore is waiting (Codex r2 on #508).
+      pageReads.changed();
+      return refreshAfterPlaceChange({
+        prefix: `${place.name} restored.`,
+        // The warning only while it still holds: a read may have brought the place back meanwhile;
+        // and "restored" only once its visits are noticed again (Codex r4 on #508).
+        // Nothing at all (null) when it is gone again: archived or deleted elsewhere since.
+        failureMessage: () => (archive.restoreGone(place.id) ? null
+          : archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name) : `${place.name} restored.`),
+        successMessage: () => (archive.restoreGone(place.id) ? null
+          : archive.restoreUnresolved(place.id) ? restoredNotMonitoredMessage(place.name) : `${place.name} restored.`),
+        restoredPlaceId: place.id,
+        onSettled: settle
+      });
+    },
+    shownAccountKey
+  });
+  const {
+    changed: archivedChanged,
+    load: loadArchived,
+    settleMonitoredRestored,
+    settleRestoresAbsentFrom,
+    settleRestoresRemoved,
+    unmonitoredRestoredIn
+  } = archive;
+
+  /** The warning line for these restores no longer holds: it clears (only if it still shows). */
+  const clearRestoreWarning = useCallback((ids: readonly string[]) => {
+    const warning = restoreWarning.current;
+    if (!warning) return;
+    // A warning from another lifetime or account is never shown again: it is simply forgotten.
+    if (warning.owner !== statusOwner()) {
+      restoreWarning.current = null;
+      return;
+    }
+    if (!ids.includes(warning.placeId)) return;
+    restoreWarning.current = null;
+    setStatusMessage((current) => (current === warning.message ? null : current));
+  }, [setStatusMessage, statusOwner]);
+
+  /**
+   * An applied list (so one that started after every restore it could settle was accepted: older
+   * reads are dropped by the read gate) that lacks a restored place: the place isn't active on the
+   * server any more, so its restore settles silently, with its waiting row, warning and retries.
+   */
+  const settleGoneRestores = useCallback((list: MobileBootstrap) => {
+    clearRestoreWarning(settleRestoresAbsentFrom(listAccountKey(list), list.places));
+  }, [clearRestoreWarning, settleRestoresAbsentFrom]);
+
+  /** The account signed in now (its key), for deciding where a later "sign in again" leads. */
+  const activeAccountKey = useCallback(() => {
+    const active = getActiveMobileAccountSnapshot();
+    return active ? mobileAccountKey(active) : null;
+  }, []);
+  /**
+   * A request made for `origin` failed because its session ended ("sign in again", or a stale-session
+   * answer after a parallel request's 401): true, and sign-in opens unless another account has become
+   * active since (Codex r12/r13 on #508). Decided from the app's own account state, never the page
+   * lifetime, which signing out also ends; nothing else is shown for it. False for any other error.
+   */
+  const sessionEnded = useCallback((error: unknown, origin: string | null) => {
+    const kind = error instanceof AuthRequiredError ? "auth" : error instanceof StaleMobileSessionResponseError ? "stale" : null;
+    if (!kind) return false;
+    if (mounted.current && sessionEndOpensSignIn(kind, origin, getActiveMobileAccountSnapshot())) router.replace("/");
+    return true;
+  }, []);
+
+  /** The account lifetime a read starts in; its list applies only in the same one. */
+  const accountLifetime = useCallback(() => String(currentMobileAccountEpoch()), []);
+
+  /**
+   * A check for the account lifetime a change started in (Codex r3 on #508): true while the page is
+   * open, the account epoch is unchanged and the list shown is still that account's. Synchronous:
+   * every status, VoiceOver, navigation, callback or state write after an await asks it immediately
+   * before, in the same step, never across another await (Codex r11 on #508).
+   */
+  const lifetimeCheck = useCallback(() => {
+    const epoch = currentMobileAccountEpoch();
+    const shown = dataRef.current;
+    const key = shown ? listAccountKey(shown) : null;
+    return () => {
+      const now = dataRef.current;
+      return mounted.current && currentMobileAccountEpoch() === epoch && (now ? listAccountKey(now) : null) === key;
+    };
+  }, []);
+
+  /** Monitoring from `input` still belongs here: the page is open, in its lifetime, showing its account. */
+  const monitorInputCurrent = useCallback(({ list, epoch }: MonitorInput) => {
+    const shown = dataRef.current;
+    return mounted.current && currentMobileAccountEpoch() === epoch && Boolean(shown) && listAccountKey(shown!) === listAccountKey(list);
+  }, []);
+
+  /**
+   * The one place a restore's monitoring settles, decided from what the page shows now (Codex r7 on
+   * #508): after any successful refresh from `list` that still belongs here, restored places it had
+   * that the list shown now also has (and were not yet monitored) settle. A failure leaves them
+   * unresolved, so the retry goes on. One announced with a warning has its warning line cleared and
+   * its recovery announced.
+   */
+  const monitorFinished = useRef<(input: MonitorInput, refreshed: boolean) => void>(() => undefined);
+  monitorFinished.current = (input, refreshed) => {
+    if (!refreshed || !monitorInputCurrent(input)) return;
+    const key = listAccountKey(input.list);
+    const shownIds = new Set(dataRef.current!.places.map((place) => place.id));
+    const restored = unmonitoredRestoredIn(key, input.list.places).filter((id) => shownIds.has(id));
+    if (restored.length === 0) return;
+    const recovered = settleMonitoredRestored(key, restored);
+    clearRestoreWarning(restored);
+    for (const name of recovered) AccessibilityInfo.announceForAccessibility(restoredMonitoredMessage(name));
+  };
+  // One geofence refresh at a time, latest wins (Codex r6 on #508); nothing queued starts outside its
+  // account lifetime or after the page closes (Codex r7 on #508).
+  const monitor = useRef(createMonitorQueue<MonitorInput>({
+    refresh: ({ list }) => refreshGeofencesForPlaces(list.places, { userId: list.user.id, workspaceId: list.workspace.id }),
+    runnable: (input) => monitorInputCurrent(input),
+    finished: (input, refreshed) => monitorFinished.current(input, refreshed)
+  })).current;
+  // Closing the page drops whatever monitoring still waits.
+  useEffect(() => () => monitor.clear(), [monitor]);
+  /** Monitoring refreshed from `list` (latest wins); resolves once it ran, or was overtaken or dropped. */
+  const monitorList = useCallback((list: MobileBootstrap) =>
+    monitor.request({ list, epoch: currentMobileAccountEpoch() }), [monitor]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
   const load = useCallback(async (options?: { refresh?: boolean }) => {
-    if (options?.refresh) setRefreshing(true);
-    const epoch = changeEpoch.current;
-    const read = ++readSequence.current;
+    // The spinner belongs to the newest pull-to-refresh: an older one ending never stops it.
+    const pull = options?.refresh ? ++refreshPull.current : null;
+    if (pull !== null) setRefreshing(true);
+    // Archived reads alongside, on its own: its failure never touches the page.
+    void loadArchived();
+    const ticket = pageReads.begin(accountLifetime());
+    const origin = activeAccountKey();
     try {
-      const fetched = await fetchBootstrap();
-      if (!mounted.current || epoch !== changeEpoch.current || read !== readSequence.current) return;
-      // Deletes accepted while this read was out (possibly before the page had any data) still apply.
-      const bootstrap = takeDeletedPlaces(mobileAccountKey({ userId: fetched.user.id, workspaceId: fetched.workspace.id }))
-        .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
+      const bootstrap = await fetchBootstrap();
+      // A delete or archive accepted while this read was out dropped it (Codex r6 on #508): any list
+      // that applies started after every accepted change, so it never has a place removed since.
+      if (!mounted.current || pageReads.judge(ticket, accountLifetime()) !== "apply") return;
+      pageReads.applied(ticket);
+      dataRef.current = bootstrap;
       setData(bootstrap);
       setLoadFailure(null);
+      // A restored place this list brings back is monitored from it, whichever read lands first
+      // (its own refresh may still be out, or have failed); its warning clears once that is done.
+      // Once this page has monitored any list, every list it shows is monitored (Codex r6 on #508).
+      settleGoneRestores(bootstrap);
+      if (monitor.engaged() || unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) {
+        void monitorList(bootstrap);
+      }
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
       if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
-        if (resolved.length === 0) return;
+        // Only onto this list while it is what the page shows.
+        if (resolved.length === 0 || !mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isCurrent(ticket)) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      if (!mounted.current || read !== readSequence.current) return;
+      if (sessionEnded(error, origin)) return;
+      // Only the newest read's failure, in the lifetime it started in.
+      if (!mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
         setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
       } else if (options?.refresh) {
@@ -136,33 +351,55 @@ export default function PlacesScreen() {
         setStatusMessage(message);
       }
     } finally {
-      if (options?.refresh) setRefreshing(false);
+      if (pull !== null && pull === refreshPull.current) setRefreshing(false);
     }
-  }, []);
+  }, [accountLifetime, activeAccountKey, loadArchived, monitor, monitorList, pageReads, sessionEnded, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // A place the editor deleted leaves the list at once, even if a refresh then fails: on focus,
-  // and when the delete finishes after the person already came back to this page.
+  /**
+   * A place the editor archived or deleted leaves the list at once, even if a refresh then fails: on
+   * focus, and when it finishes after the person already came back to this page. Accepted on the
+   * server before now, so every read already out is dropped (Codex r6 on #508): the next list to
+   * apply comes from after it. True when nothing was shown yet, so a read must start again.
+   */
   const applyDeletedPlaces = useCallback(async () => {
+    const epoch = currentMobileAccountEpoch();
     const owner = await readActiveMobileAccount();
+    // Read for the lifetime it started in: another one takes its deletes at its own focus.
+    if (!mounted.current || !owner || currentMobileAccountEpoch() !== epoch) return false;
+    const sameAccount = (list: MobileBootstrap) =>
+      mobileAccountOwnersEqual(owner, { userId: list.user.id, workspaceId: list.workspace.id });
     const current = dataRef.current;
-    // Nothing shown yet: leave the deletes for the opening read to apply (it is not dropped).
-    if (!mounted.current || !owner || !current
-      || !mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })) return;
-    const deleted = takeDeletedPlaces(mobileAccountKey(owner));
-    if (deleted.length === 0) return;
-    changeEpoch.current += 1;
-    setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
-      ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
-      : current);
-  }, []);
+    // Another account's list is shown: its deletes wait for that account's page.
+    if (current && !sameAccount(current)) return false;
+    const key = mobileAccountKey(owner);
+    const deleted = takeDeletedPlaces(key);
+    if (deleted.length === 0) return false;
+    pageReads.changed();
+    // A restore of one of them still waiting to be monitored is over: the place is gone again.
+    clearRestoreWarning(settleRestoresRemoved(key, deleted));
+    // An archived place shows under Archived from a read after it landed.
+    archivedChanged();
+    void loadArchived();
+    if (!current) return true;
+    const next = deleted.reduce((list, id) => reconcileBootstrapPlaces(list, { removePlaceId: id }), current);
+    dataRef.current = next;
+    setData((shown) => shown && sameAccount(shown)
+      ? deleted.reduce((list, id) => reconcileBootstrapPlaces(list, { removePlaceId: id }), shown)
+      : shown);
+    // Monitoring follows the list shown, once this page has monitored any.
+    if (monitor.engaged()) void monitorList(next);
+    return false;
+  }, [archivedChanged, clearRestoreWarning, loadArchived, monitor, monitorList, pageReads, settleRestoresRemoved]);
 
   useEffect(() => subscribeDeletedPlaces(() => {
-    void applyDeletedPlaces();
-  }), [applyDeletedPlaces]);
+    void applyDeletedPlaces().then((needsRead) => {
+      if (needsRead) void load();
+    });
+  }), [applyDeletedPlaces, load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -201,35 +438,9 @@ export default function PlacesScreen() {
       confirmLabel: "Ignore",
       tone: "neutral",
       onConfirm: () => {
-        void ignoreLearnedCandidate(learnedPlace).then((succeeded) => {
-          if (succeeded) onSuccess?.();
-        });
+        void changeLearnedPlace("ignore", learnedPlace, onSuccess);
       }
     });
-  }
-
-  async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
-    setIgnoringLearnedId(learnedPlace.id);
-    try {
-      await applyAfterSuccessfulMutation(
-        () => ignoreLearnedPlace(learnedPlace.id),
-        () => removeLocalLearnedPlace(learnedPlace.id)
-      );
-      await refreshAfterPlaceChange({
-        prefix: "Learned place ignored.",
-        removeLearnedPlaceId: learnedPlace.id
-      });
-      return true;
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't ignore this suggestion. Try again."));
-      return false;
-    } finally {
-      setIgnoringLearnedId(null);
-    }
   }
 
   function confirmForgetLearnedCandidate(
@@ -243,39 +454,52 @@ export default function PlacesScreen() {
       confirmLabel: "Forget",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
-        void forgetLearnedCandidate(learnedPlace).then((succeeded) => {
-          if (succeeded) onSuccess?.();
-        });
+        void changeLearnedPlace("forget", learnedPlace, onSuccess);
       }
     });
   }
 
-  async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
-    setForgettingLearnedId(learnedPlace.id);
+  /**
+   * Ignore or Forget a learned place (Codex r10/r11 on #508). Its busy flag carries the lifetime and
+   * request that set it; after every await, `still()` is asked synchronously right before each write,
+   * and the sheet closes (`onSuccess`) only while it is still this lifetime's sheet for this place.
+   */
+  async function changeLearnedPlace(kind: "ignore" | "forget", learnedPlace: MobileLearnedPlace, onSuccess?: () => void) {
+    const still = lifetimeCheck();
+    const owner = statusOwner();
+    const origin = activeAccountKey();
+    const request = ++learnedRequests.current;
+    const setBusy = kind === "ignore" ? setIgnoringLearned : setForgettingLearned;
+    setBusy({ id: learnedPlace.id, owner, request });
     try {
-      await applyAfterSuccessfulMutation(
-        () => forgetLearnedPlace(learnedPlace.id),
-        () => removeLocalLearnedPlace(learnedPlace.id)
+      await applyAfterSuccessfulMutation<unknown>(
+        () => (kind === "ignore" ? ignoreLearnedPlace(learnedPlace.id) : forgetLearnedPlace(learnedPlace.id)),
+        () => {
+          if (still()) removeLocalLearnedPlace(learnedPlace.id);
+        }
       );
+      if (!still()) return;
       await refreshAfterPlaceChange({
-        prefix: "Learned place forgotten.",
-        removeLearnedPlaceId: learnedPlace.id
+        prefix: kind === "ignore" ? "Learned place ignored." : "Learned place forgotten.",
+        removeLearnedPlaceId: learnedPlace.id,
+        still
       });
-      return true;
+      const sheet = selectedLearnedRef.current;
+      if (still() && sheet?.owner === owner && sheet.place.id === learnedPlace.id) onSuccess?.();
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't forget this suggestion. Try again."));
-      return false;
+      if (sessionEnded(error, origin)) return;
+      if (!still()) return;
+      Alert.alert("Places", friendlyMobileErrorMessage(
+        error,
+        kind === "ignore" ? "Couldn't ignore this suggestion. Try again." : "Couldn't forget this suggestion. Try again."
+      ));
     } finally {
-      setForgettingLearnedId(null);
+      setBusy((current) => (current?.request === request ? null : current));
     }
   }
 
   function removeLocalLearnedPlace(id: string) {
-    changeEpoch.current += 1;
+    pageReads.changed();
     setData((current) => current ? reconcileBootstrapPlaces(current, { removeLearnedPlaceId: id }) : current);
   }
 
@@ -286,32 +510,84 @@ export default function PlacesScreen() {
     removeLearnedPlaceId?: string;
     /** Places as this page now shows them, for monitoring when the fresh read fails. */
     fallbackPlaces?: MobilePlace[];
+    /** The status line when the refresh fails (instead of the generic "Pull to refresh" one); null says nothing. */
+    failureMessage?: () => string | null;
+    /** The status line once the list and its monitoring are done (instead of `prefix`); null says nothing. */
+    successMessage?: () => string | null;
+    /** The restored place a warning line from this refresh is about (it clears when that settles). */
+    restoredPlaceId?: string;
+    /** The account lifetime of the change this follows (else the one shown when it starts). */
+    still?: () => boolean;
+    /**
+     * Told how the refresh ended, before anything else happens: in the same render that applies its
+     * list ("applied"), or when a newer change overtook it ("stale") or it failed. A restored row
+     * leaves Archived with it. False means the change no longer belongs to the account shown (a
+     * sign-out, a switch, or away and back): then nothing is applied or said (Codex r2 on #508).
+     */
+    onSettled?: (outcome: RestoreRefreshOutcome) => boolean;
   }) {
-    const epoch = changeEpoch.current;
+    /**
+     * The status line, written only while no read started after this one (Codex r6/r7 on #508): a
+     * newer read's line (its failure) is never replaced. A restore's warning line (anything but the
+     * plain prefix) is remembered with its place.
+     */
+    const say = (message: string) => {
+      if (!pageReads.isNewest(ticket)) return;
+      if (message !== options.prefix && options.restoredPlaceId) {
+        restoreWarning.current = { placeId: options.restoredPlaceId, message, owner: statusOwner() };
+      }
+      setStatusMessage(message);
+    };
+    // Every write below an await first checks the change still belongs to the account lifetime it
+    // started in; a change from an ended lifetime refreshes nothing.
+    const still = options.still ?? lifetimeCheck();
+    if (!still()) return;
+    const origin = activeAccountKey();
+    // Starts after the change it follows, so it is newer than every read already out.
+    const ticket = pageReads.begin(accountLifetime());
     try {
       const bootstrap = await fetchBootstrap();
-      if (!mounted.current) return;
-      if (epoch !== changeEpoch.current) {
-        setStatusMessage(options.prefix);
+      // Another account (or lifetime) is shown now, or this list is another account's: that page's.
+      if (!still() || listAccountKey(bootstrap) !== listAccountKey(dataRef.current ?? bootstrap)) return;
+      const verdict = pageReads.judge(ticket, accountLifetime());
+      if (verdict === "foreign") return;
+      if (verdict === "stale") {
+        if (options.onSettled && !options.onSettled("stale")) return;
+        // A newer change or read brings the list; until a restore is monitored it says so.
+        const staleMessage = options.successMessage?.();
+        if (staleMessage !== null) say(staleMessage ?? options.prefix);
         return;
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
+      if (options.onSettled && !options.onSettled("applied")) return;
+      pageReads.applied(ticket);
+      dataRef.current = reconciled;
       setData(reconciled);
-      await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
+      // A restored place this list lacks is gone again; monitoring from it settles any it has.
+      settleGoneRestores(reconciled);
+      await monitorList(reconciled);
+      if (!still()) return;
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
-      setStatusMessage(bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`);
+      const successMessage = options.successMessage?.();
+      if (successMessage === null) return;
+      // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
+      say(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
+      if (sessionEnded(error, origin)) return;
+      if (!still()) return;
+      // A read started since brings the list instead: a restore counts as overtaken, and only the
+      // newest read's failure is shown or announced (Codex r6 on #508).
+      if (options.onSettled && !options.onSettled(pageReads.isNewest(ticket) ? "failed" : "stale")) return;
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
-      if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
-        await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
+      if (options.fallbackPlaces && current && !pageReads.superseded(ticket)) {
+        await monitorList({ ...current, places: options.fallbackPlaces });
+        if (!still()) return;
       }
-      setStatusMessage(`${options.prefix} Pull to refresh if it doesn't show on another device.`);
+      const failureMessage = options.failureMessage?.();
+      // A restore's warning is remembered, so it clears once the restored place is monitored.
+      if (failureMessage !== null) say(failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
 
@@ -328,52 +604,84 @@ export default function PlacesScreen() {
 
   function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
     // Only from a list that was read: an unknown list never sends Set straight to adding a place.
-    if (roleSaving.current || !dataRef.current) return;
+    if (roleSaving.current === statusOwner() || !dataRef.current) return;
     setStatusMessage(null);
     // Nothing saved to choose from yet: go straight to adding the place into the slot.
     if (mode === "choose" && places.length === 0) {
       beginAddRolePlace(role);
       return;
     }
-    setRoleSheet({ role, mode });
+    setRoleSheetState({ role, mode, owner: statusOwner() });
   }
 
   function beginAddRolePlace(role: PlaceRole) {
     router.push({ pathname: "/place-editor", params: { mode: "create", role } } as never);
   }
 
-  async function saveRole(request: ReturnType<typeof placeRoleRequest>) {
-    if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
-    roleSaving.current = true;
+  async function saveRole(request: PlaceRoleSaveRequest) {
+    const lifetime = statusOwner();
+    if (roleSaving.current === lifetime) return "Another change is still saving. Try again in a moment.";
+    roleSaving.current = lifetime;
+    // The account lifetime this change belongs to (Codex r10 on #508): its answer is applied,
+    // monitored and said only while that lifetime and its account are still shown.
+    const still = lifetimeCheck();
+    const origin = activeAccountKey();
     try {
       const owner = await readActiveMobileAccount();
+      let previousArchived = false;
       try {
-        await setPlaceRole(request);
+        previousArchived = (await setPlaceRole(request)).previousArchived === true;
       } catch (error) {
-        if (error instanceof AuthRequiredError) {
-          router.replace("/");
-          return null;
-        }
+        if (sessionEnded(error, origin)) return null;
+        if (!still()) return null;
         return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
       }
-      // Accepted: shown at once (only for the account that asked, while Places is open), and any
-      // read that started before this answer is dropped.
-      if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
-      changeEpoch.current += 1;
+      // Accepted: shown at once (only for the account lifetime that asked, while Places is open),
+      // and any read that started before this answer is dropped.
+      if (!still() || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !still()) return null;
+      pageReads.changed();
       const shown = dataRef.current;
-      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, request) : undefined;
+      // "Replace the old place": the server archived the old holder, so it leaves Saved places too.
+      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, { ...request, archivePrevious: previousArchived }) : undefined;
       if (shown && nextPlaces) {
         const next = { ...shown, places: nextPlaces };
         dataRef.current = next;
         setData(next);
       }
+      if (previousArchived) archivedChanged();
       const label = placeRoleLabel(request.role);
-      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.`, fallbackPlaces: nextPlaces });
+      const prefix = !request.placeId
+        ? `${label} cleared.`
+        : previousArchived ? `${label} updated. The old ${label.toLowerCase()} is archived.` : `${label} updated.`;
+      await refreshAfterPlaceChange({ prefix, fallbackPlaces: nextPlaces, still });
+      if (previousArchived && still()) void loadArchived();
       return null;
     } finally {
-      roleSaving.current = false;
+      if (roleSaving.current === lifetime) roleSaving.current = null;
     }
   }
+
+  // A restore accepted while Places couldn't refresh waits under Saved places (when the list shown
+  // lacks it). While any restore is unmonitored, whatever the rows show and whether its list or
+  // its monitoring failed (Codex r4 on #508), the page retries (5 s, doubling, at most a minute apart; focus
+  // and pull-to-refresh also count) until a list with the place has refreshed monitoring (Codex r3).
+  const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);
+  const hasPendingRestored = pendingRestored.length > 0;
+  const restoreMonitoringUnresolved = archive.restoreMonitoringUnresolved;
+  const [restoreRetries, setRestoreRetries] = useState(0);
+  useEffect(() => {
+    if (!restoreMonitoringUnresolved) {
+      setRestoreRetries(0);
+      return;
+    }
+    const delay = Math.min(RESTORE_REFRESH_RETRY_MS * 2 ** restoreRetries, RESTORE_REFRESH_RETRY_MAX_MS);
+    const retry = setTimeout(() => {
+      void load().finally(() => {
+        if (mounted.current) setRestoreRetries((count) => count + 1);
+      });
+    }, delay);
+    return () => clearTimeout(retry);
+  }, [load, restoreMonitoringUnresolved, restoreRetries]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -441,7 +749,9 @@ export default function PlacesScreen() {
             />
           ) : (
           <>
-          <SettingsBlockGroup foot="Trips are named after these." theme={theme} title="Home and Work">
+          {/* Every group reflows with the shared layout owner, so rows fading in or out (Saved places,
+              Archived, Suggested places) never make a boundary or a footnote below them jump. */}
+          <ReflowBlockGroup foot="Trips are named after these." reduceMotion={reduceMotion} theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
               <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
                 <View style={styles.placesRowMain}>
@@ -467,14 +777,15 @@ export default function PlacesScreen() {
                 </View>
               </View>
             ))}
-          </SettingsBlockGroup>
+          </ReflowBlockGroup>
 
-          <SettingsBlockGroup
-            foot={places.length === 0 ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change it or delete it."}
+          <ReflowBlockGroup
+            foot={places.length === 0 && !hasPendingRestored ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change, archive or delete it."}
+            reduceMotion={reduceMotion}
             theme={theme}
             title="Saved places"
           >
-            {places.length === 0 ? (
+            {places.length === 0 && !hasPendingRestored ? (
               <View style={styles.placesEmpty}>
                 <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>Nothing saved yet</Text>
               </View>
@@ -520,47 +831,95 @@ export default function PlacesScreen() {
                 </Reanimated.View>
               );
             })}
-          </SettingsBlockGroup>
-
-          {learnedPlaces.length > 0 ? (
-            <SettingsBlockGroup foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save." theme={theme} title="Suggested places">
-              {learnedPlaces.map((learnedPlace, index) => (
-                <Reanimated.View
-                  key={learnedPlace.id}
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
+            {/* Restored, but no refreshed list has brought it back yet (Codex r1 on #508): it waits
+                here, never in neither list, until a read lands and monitoring resumes. */}
+            {pendingRestored.map((row, index) => (
+              <Reanimated.View
+                key={`restored-${row.id}`}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+              >
+                <View
+                  accessible
+                  accessibilityLabel={row.accessibilityLabel}
+                  style={[styles.placesRow, places.length + index > 0 ? styles.settingsActivityRowDivider : null]}
+                  testID={`places-restored-${row.id}`}
                 >
-                  <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
-                    <Pressable
-                      accessibilityHint="Shows details, Ignore and Forget"
-                      accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
-                      accessibilityRole="button"
-                      onPress={() => setSelectedLearnedPlace(learnedPlace)}
-                      style={({ pressed }) => [styles.placesRowMain, pressed ? styles.placesRowPressed : null]}
-                      testID={`places-learned-${learnedPlace.id}`}
-                    >
-                      <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
-                        <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
-                      </View>
-                      <View style={styles.settingsActivityText}>
-                        <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={styles.settingsActivityName}>{learnedPlace.name}</Text>
-                        <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>{learnedPlaceSubtitle(learnedPlace)}</Text>
-                      </View>
-                    </Pressable>
-                    <View style={styles.placesRowActions}>
-                      <SettingsPillButton
-                        accessibilityLabel={`Save ${learnedPlace.name} as a place`}
-                        disabled={ignoringLearnedId === learnedPlace.id || forgettingLearnedId === learnedPlace.id}
-                        label="Save"
-                        onPress={() => beginSaveLearnedPlace(learnedPlace)}
-                        theme={theme}
-                      />
+                  <View style={styles.placesRowMain}>
+                    <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+                      <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                    </View>
+                    <View style={styles.settingsActivityText}>
+                      <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{row.name}</Text>
+                      <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
                     </View>
                   </View>
-                </Reanimated.View>
-              ))}
-            </SettingsBlockGroup>
+                </View>
+              </Reanimated.View>
+            ))}
+          </ReflowBlockGroup>
+
+          <ArchivedPlacesGroup
+            onRestore={(place) => void archive.restore(place)}
+            places={archive.places}
+            problem={archive.problem}
+            reduceMotion={reduceMotion}
+            restoringId={archive.restoringId}
+            styles={styles}
+            theme={theme}
+          />
+
+          {learnedPlaces.length > 0 ? (
+            <Reanimated.View
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
+              <ReflowBlockGroup
+                foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save."
+                reduceMotion={reduceMotion}
+                theme={theme}
+                title="Suggested places"
+              >
+                {learnedPlaces.map((learnedPlace, index) => (
+                  <Reanimated.View
+                    key={learnedPlace.id}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
+                      <Pressable
+                        accessibilityHint="Shows details, Ignore and Forget"
+                        accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
+                        accessibilityRole="button"
+                        onPress={() => setSelectedLearnedPlace(learnedPlace)}
+                        style={({ pressed }) => [styles.placesRowMain, pressed ? styles.placesRowPressed : null]}
+                        testID={`places-learned-${learnedPlace.id}`}
+                      >
+                        <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+                          <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                        </View>
+                        <View style={styles.settingsActivityText}>
+                          <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={styles.settingsActivityName}>{learnedPlace.name}</Text>
+                          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>{learnedPlaceSubtitle(learnedPlace)}</Text>
+                        </View>
+                      </Pressable>
+                      <View style={styles.placesRowActions}>
+                        <SettingsPillButton
+                          accessibilityLabel={`Save ${learnedPlace.name} as a place`}
+                          disabled={ignoringLearnedId === learnedPlace.id || forgettingLearnedId === learnedPlace.id}
+                          label="Save"
+                          onPress={() => beginSaveLearnedPlace(learnedPlace)}
+                          theme={theme}
+                        />
+                      </View>
+                    </View>
+                  </Reanimated.View>
+                ))}
+              </ReflowBlockGroup>
+            </Reanimated.View>
           ) : null}
           <StoppedTripsGroup reduceMotion={reduceMotion} styles={styles} theme={theme} />
           </>
@@ -583,10 +942,10 @@ export default function PlacesScreen() {
       />
       {roleSheet && editingSlot ? (
         <PlaceRoleSheet
-          key={`${roleSheet.role}-${roleSheet.mode}`}
+          key={`${roleSheet.role}-${roleSheet.mode}-${roleSheet.owner}`}
           mode={roleSheet.mode}
           onAddNew={beginAddRolePlace}
-          onClose={() => setRoleSheet(null)}
+          onClose={() => setRoleSheetState(null)}
           onSave={saveRole}
           places={rolePlaces}
           reduceMotion={reduceMotion}
@@ -660,9 +1019,11 @@ function LearnedPlaceDetailSheet({
     action();
   }
   async function copyDetail(label: string, value: string | null) {
-    const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
-    if (!copied) return;
+    // Taken before the copy (Codex r12 on #508): showing another place, closing the sheet or another
+    // account moves it on, so a late copy never shows its toast in a sheet it didn't come from.
     const token = ++copyToastToken.current;
+    const copied = await copyLearnedPlaceDetail(value, Clipboard.setStringAsync);
+    if (!copied || copyToastToken.current !== token) return;
     if (copyToastTimer.current) clearTimeout(copyToastTimer.current);
     setCopyToast(`${label} copied`);
     copyToastTimer.current = setTimeout(() => {

@@ -72,6 +72,11 @@ export function SettingsBlockGroup({
   );
 }
 
+/** The group's own styles, for a page that draws the same group with its own layout owner. */
+export function settingsBlockGroupStyles() {
+  return { eyebrow: blockStyles.eyebrow, foot: blockStyles.foot, group: blockStyles.group, list: blockStyles.list };
+}
+
 /**
  * A row: title, optional subtitle, and either a control (switch, stepper, segmented) or, when it
  * opens something, a value and a chevron. `divider` draws the hairline above every row but the first.
