@@ -425,6 +425,15 @@ Block pull-to-refresh:
 - Focus: archiving closes the editor, so focus moves to the toast's Undo; when that toast leaves with focus on it, focus moves to New activity (or the Library heading while New activity is disabled). Saving returns focus to that activity's Edit even when the card moved to another group; creating returns it to New activity (the dialog's opener); restoring from Archived moves it to the restored card's Edit. Cards keep their `#category-<id>` anchors for ⌘K links. A restore whose re-pin is refused still refreshes the shell.
 - Accessibility: Reduce Motion follows the toast's own path. Pins are toggle buttons named "Pin/Unpin X to/from quick start"; each Edit is named for its activity; the editor's icon and colour choices are radio groups with roving focus (arrow keys without modifiers); sparklines are decorative.
 
+## Web Library › Places search and sections (location v3 PR 16c)
+
+- Trigger: typing in or clearing Search places (from nine saved places), Escape in the field, the field's ✕.
+- Owner: none — React re-renders the list in place. A search swaps Frequent, Recent and All places for one Results section (and narrows Archived) on each keystroke with no list animation, so nothing moves while typing; clearing brings the sections back the same way.
+- Surrounding layout: the field sits between Home and Work and the first section and never moves; sections above Learned places grow or shrink, and the page below reflows with them (no scroll jump: the field stays where it was typed in).
+- Interruption: every keystroke replaces the result; there is no async work (the list filters data already on the page).
+- Async outcome: not applicable. A refresh after an edit, delete, archive or restore keeps the typed search.
+- Accessibility: Reduce Motion needs no path (no motion). The field is a labelled `searchbox` inside a search landmark; a polite status announces "N places match" (and how many are archived); ✕ ("Clear search", 44 px) and Escape clear it and keep focus in the field; each place keeps one `#place-<id>` anchor, on its All places (or Results) row.
+
 ## Web popovers and sheets (web UI audit WUI-022/WUI-026, 17 Oct 2026)
 
 - Trigger: opening an anchored popover, menu or list; at ≤560 px they open as bottom sheets.
