@@ -257,6 +257,16 @@ export function authFailureOpensSignIn(originAccountKey: string | null, active: 
 }
 
 /**
+ * How a request's session ended: "auth" (told to sign in again) or "stale" (its session was replaced
+ * or invalidated before it answered, as when a parallel read's 401 signed the app out first). Sign-in
+ * opens for "auth" as `authFailureOpensSignIn` says, and for "stale" only when no account is active
+ * now (Codex r13 on #508); anything else is another session's answer, and nothing is shown.
+ */
+export function sessionEndOpensSignIn(kind: "auth" | "stale", originAccountKey: string | null, active: { userId: string; workspaceId: string } | null) {
+  return kind === "auth" ? authFailureOpensSignIn(originAccountKey, active) : !active;
+}
+
+/**
  * How the refresh after an accepted restore ended: its list applied; overtaken ("stale": a newer
  * change or list landed, or it failed after a newer read started, which brings the list instead);
  * or failed as the newest read.

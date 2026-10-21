@@ -3,9 +3,10 @@ import { AccessibilityInfo } from "react-native";
 import { createArchivedReadGate } from "./activitiesPage";
 import { AuthRequiredError, fetchArchivedPlaces, setPlaceArchived, type MobileArchivedPlace } from "./api";
 import { friendlyMobileErrorMessage } from "./friendlyError";
+import { StaleMobileSessionResponseError } from "./mobile-network";
 import { currentMobileAccountEpoch, getActiveMobileAccountSnapshot, mobileAccountKey, readActiveMobileAccount } from "./mobileAccount";
 import {
-  authFailureOpensSignIn,
+  sessionEndOpensSignIn,
   createPlaceRestoreGate,
   restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
@@ -97,6 +98,17 @@ export function useArchivedPlaces({
     setPendingState(next);
   }, []);
 
+  /**
+   * A request made for `accountKey` failed because its session ended: true, and sign-in opens unless
+   * another account has become active since (Codex r12/r13 on #508). False for any other error.
+   */
+  const sessionEnded = useCallback((error: unknown, accountKey: string) => {
+    const kind = error instanceof AuthRequiredError ? "auth" : error instanceof StaleMobileSessionResponseError ? "stale" : null;
+    if (!kind) return false;
+    if (mounted.current && sessionEndOpensSignIn(kind, accountKey, getActiveMobileAccountSnapshot())) onSignedOutRef.current();
+    return true;
+  }, []);
+
   const load = useCallback(async () => {
     const read = reads.begin();
     const epoch = currentMobileAccountEpoch();
@@ -109,10 +121,12 @@ export function useArchivedPlaces({
       if (!now || mobileAccountKey(now) !== mobileAccountKey(owner) || currentMobileAccountEpoch() !== epoch || !reads.current(read)) return;
       archivedReadsApplied.current += 1;
       setArchived({ accountKey: mobileAccountKey(owner), places });
-    } catch {
-      // Signed out or offline: the page read says so; this section never breaks the page.
+    } catch (error) {
+      // Its session ended (its 401 may be the first, before the page's own read answers): sign-in
+      // opens as for any page request (Codex r13 on #508). Offline: this section never breaks the page.
+      sessionEnded(error, mobileAccountKey(owner));
     }
-  }, [reads]);
+  }, [reads, sessionEnded]);
 
   /** An archive, a restore or Replace landed: a read already out is dropped (call `load` after). */
   const changed = useCallback(() => reads.changed(), [reads]);
@@ -212,12 +226,9 @@ export function useArchivedPlaces({
         await setPlaceArchived(place.id, false);
       } catch (error) {
         clearBusy();
-        if (error instanceof AuthRequiredError) {
-          // Sign-in opens unless another account has become active since (Codex r12 on #508): signing
-          // out ends this lifetime too, so the lifetime guard alone would swallow it.
-          if (mounted.current && authFailureOpensSignIn(accountKey, getActiveMobileAccountSnapshot())) onSignedOutRef.current();
-          return;
-        }
+        // Sign-in opens unless another account has become active since (Codex r12/r13 on #508):
+        // signing out ends this lifetime too, so the lifetime guard alone would swallow it.
+        if (sessionEnded(error, accountKey)) return;
         const ours = await activeIsOurs();
         if (!ours || !guard()) return;
         // The row stays where it was, with the reason under the group (no system alert: UIA-005).
@@ -287,7 +298,7 @@ export function useArchivedPlaces({
     } finally {
       gate.release(token);
     }
-  }, [gate, load, markWarned, pendingFor, reads, restoreGone, restoreUnresolved, setPendingFor]);
+  }, [gate, load, markWarned, pendingFor, reads, restoreGone, restoreUnresolved, sessionEnded, setPendingFor]);
 
   // Lasting state shows for the account shown; transient state only in the lifetime that made it.
   const shownLifetime = shownAccountKey ? lifetimeKey(shownAccountKey, currentMobileAccountEpoch()) : null;

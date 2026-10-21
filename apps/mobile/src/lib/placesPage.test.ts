@@ -17,6 +17,7 @@ import {
   restoredMonitoredMessage,
   restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
+  sessionEndOpensSignIn,
   subscribeDeletedPlaces,
   takeDeletedPlaces
 } from "./placesPage";
@@ -426,5 +427,15 @@ describe("authFailureOpensSignIn (Codex r12 on #508)", () => {
     expect(authFailureOpensSignIn("ws:a", { userId: "a", workspaceId: "ws" })).toBe(true);
     expect(authFailureOpensSignIn("ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
     expect(authFailureOpensSignIn(null, { userId: "b", workspaceId: "ws" })).toBe(true);
+  });
+});
+
+describe("sessionEndOpensSignIn (Codex r13 on #508)", () => {
+  it("opens sign-in for a stale session only when signed out, and for sign-in-again as before", () => {
+    expect(sessionEndOpensSignIn("stale", "ws:a", null)).toBe(true);
+    expect(sessionEndOpensSignIn("stale", "ws:a", { userId: "a", workspaceId: "ws" })).toBe(false);
+    expect(sessionEndOpensSignIn("stale", "ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
+    expect(sessionEndOpensSignIn("auth", "ws:a", { userId: "a", workspaceId: "ws" })).toBe(true);
+    expect(sessionEndOpensSignIn("auth", "ws:a", { userId: "b", workspaceId: "ws" })).toBe(false);
   });
 });

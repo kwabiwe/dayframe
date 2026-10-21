@@ -27,7 +27,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // One sign-in error class for every path that imports the API (the screen and the archived hook).
-const authErrors = vi.hoisted(() => ({ AuthRequiredError: class AuthRequiredError extends Error {} }));
+const authErrors = vi.hoisted(() => ({
+  AuthRequiredError: class AuthRequiredError extends Error {},
+  StaleMobileSessionResponseError: class StaleMobileSessionResponseError extends Error {}
+}));
 
 const factories = vi.hoisted(() => ({
   accountMock: () => ({
@@ -139,6 +142,8 @@ vi.mock("@/lib/mobileTypography", () => ({ MOBILE_DISPLAY_FONT: { bold: "Display
 vi.mock("@/lib/api", () => factories.apiMock());
 vi.mock("../../lib/api", () => factories.apiMock());
 vi.mock("@/lib/friendlyError", () => factories.friendlyMock());
+vi.mock("@/lib/mobile-network", () => ({ StaleMobileSessionResponseError: authErrors.StaleMobileSessionResponseError }));
+vi.mock("../../lib/mobile-network", () => ({ StaleMobileSessionResponseError: authErrors.StaleMobileSessionResponseError }));
 vi.mock("../../lib/friendlyError", () => factories.friendlyMock());
 vi.mock("@/lib/geofence", () => ({ refreshGeofencesForPlaces: (places: unknown, owner: unknown) => mocks.refreshGeofences(places, owner) }));
 vi.mock("@/lib/locationGeocoding", () => ({ backfillLearnedPlaceLocations: async () => [] }));
@@ -1327,5 +1332,58 @@ describe("Places sign-in after a lifetime ends (Codex r12 on #508)", () => {
     await act(async () => { copying.resolve(true); });
     await flush();
     expect(texts()).not.toContain("Address copied");
+  });
+});
+
+// Codex r13 on #508: the Archived read's 401 can come first, signing the app out; the page's own read
+// then answers "stale session". Sign-in still opens unless another account has become active.
+describe("Places when the Archived read's 401 comes first (Codex r13 on #508)", () => {
+  const cases = [
+    { then: "signed out", owner: null as Owner | null, epoch: 2, opensSignIn: true },
+    { then: "still signed in as the same account (not yet signed out)", owner: ACCOUNT_A as Owner | null, epoch: 1, opensSignIn: true },
+    { then: "replaced by another account", owner: ACCOUNT_B as Owner | null, epoch: 2, opensSignIn: false }
+  ];
+
+  it.each(cases)("opens sign-in only when it should: $then", async ({ owner, epoch, opensSignIn }) => {
+    const { AuthRequiredError } = await import("../../lib/api");
+    const { router } = await import("expo-router");
+    await mountFor(ACCOUNT_A, [studio]);
+    const archivedRead = deferred<unknown>();
+    const pageRead = deferred<unknown>();
+    mocks.fetchArchivedPlaces.mockReturnValueOnce(archivedRead.promise);
+    mocks.fetchBootstrap.mockReturnValueOnce(pageRead.promise);
+    await act(async () => { void pullToRefresh(); });
+    await flush();
+    const before = texts();
+    vi.mocked(router.replace).mockClear();
+    mocks.owner = owner;
+    mocks.epoch = epoch;
+    // The Archived read's 401 lands first; the page's read then finds its session replaced.
+    await act(async () => { archivedRead.reject(new AuthRequiredError()); });
+    await flush();
+    await act(async () => { pageRead.reject(new authErrors.StaleMobileSessionResponseError()); });
+    await flush();
+    if (opensSignIn) {
+      expect(router.replace).toHaveBeenCalledWith("/");
+    } else {
+      expect(router.replace).not.toHaveBeenCalled();
+      expect(texts().filter((line) => !before.includes(line))).toEqual([]);
+    }
+  });
+
+  it("opens sign-in when the page's own read finds its session gone after signing out", async () => {
+    const { router } = await import("expo-router");
+    await mountFor(ACCOUNT_A, [studio]);
+    const pageRead = deferred<unknown>();
+    mocks.fetchBootstrap.mockReturnValueOnce(pageRead.promise);
+    await act(async () => { void pullToRefresh(); });
+    await flush();
+    vi.mocked(router.replace).mockClear();
+    mocks.owner = null;
+    mocks.epoch = 2;
+    await act(async () => { pageRead.reject(new authErrors.StaleMobileSessionResponseError()); });
+    await flush();
+    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(texts().join(" ")).not.toContain("Couldn't refresh");
   });
 });

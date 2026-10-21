@@ -34,7 +34,7 @@ import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import {
   applyPlaceRoleLocally,
-  authFailureOpensSignIn,
+  sessionEndOpensSignIn,
   learnedPlaceSubtitle,
   pendingRestoredRows,
   placeRowSubtitle,
@@ -74,6 +74,7 @@ import {
 } from "@/lib/api";
 import { friendlyMobileErrorMessage, mobileFailureKind } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
+import { StaleMobileSessionResponseError } from "@/lib/mobile-network";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
 import { applyAfterSuccessfulMutation } from "@/lib/localMutation";
 import { withRole } from "@/lib/places";
@@ -235,12 +236,16 @@ export default function PlacesScreen() {
     return active ? mobileAccountKey(active) : null;
   }, []);
   /**
-   * A request made for `origin` came back "sign in again": sign-in opens unless another account has
-   * become active since (Codex r12 on #508). Checked from the app's own account state, not the page
-   * lifetime, which signing out also ends.
+   * A request made for `origin` failed because its session ended ("sign in again", or a stale-session
+   * answer after a parallel request's 401): true, and sign-in opens unless another account has become
+   * active since (Codex r12/r13 on #508). Decided from the app's own account state, never the page
+   * lifetime, which signing out also ends; nothing else is shown for it. False for any other error.
    */
-  const openSignInAfter = useCallback((origin: string | null) => {
-    if (mounted.current && authFailureOpensSignIn(origin, getActiveMobileAccountSnapshot())) router.replace("/");
+  const sessionEnded = useCallback((error: unknown, origin: string | null) => {
+    const kind = error instanceof AuthRequiredError ? "auth" : error instanceof StaleMobileSessionResponseError ? "stale" : null;
+    if (!kind) return false;
+    if (mounted.current && sessionEndOpensSignIn(kind, origin, getActiveMobileAccountSnapshot())) router.replace("/");
+    return true;
   }, []);
 
   /** The account lifetime a read starts in; its list applies only in the same one. */
@@ -334,10 +339,7 @@ export default function PlacesScreen() {
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        openSignInAfter(origin);
-        return;
-      }
+      if (sessionEnded(error, origin)) return;
       // Only the newest read's failure, in the lifetime it started in.
       if (!mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
@@ -351,7 +353,7 @@ export default function PlacesScreen() {
     } finally {
       if (pull !== null && pull === refreshPull.current) setRefreshing(false);
     }
-  }, [accountLifetime, activeAccountKey, loadArchived, monitor, monitorList, openSignInAfter, pageReads, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
+  }, [accountLifetime, activeAccountKey, loadArchived, monitor, monitorList, pageReads, sessionEnded, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -485,10 +487,7 @@ export default function PlacesScreen() {
       const sheet = selectedLearnedRef.current;
       if (still() && sheet?.owner === owner && sheet.place.id === learnedPlace.id) onSuccess?.();
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        openSignInAfter(origin);
-        return;
-      }
+      if (sessionEnded(error, origin)) return;
       if (!still()) return;
       Alert.alert("Places", friendlyMobileErrorMessage(
         error,
@@ -575,10 +574,7 @@ export default function PlacesScreen() {
       // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
       say(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        openSignInAfter(origin);
-        return;
-      }
+      if (sessionEnded(error, origin)) return;
       if (!still()) return;
       // A read started since brings the list instead: a restore counts as overtaken, and only the
       // newest read's failure is shown or announced (Codex r6 on #508).
@@ -636,10 +632,7 @@ export default function PlacesScreen() {
       try {
         previousArchived = (await setPlaceRole(request)).previousArchived === true;
       } catch (error) {
-        if (error instanceof AuthRequiredError) {
-          openSignInAfter(origin);
-          return null;
-        }
+        if (sessionEnded(error, origin)) return null;
         if (!still()) return null;
         return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
       }

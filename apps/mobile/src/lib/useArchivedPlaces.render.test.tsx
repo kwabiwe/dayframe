@@ -22,6 +22,7 @@ vi.mock("./api", () => {
     setPlaceArchived: (id: string, archived: boolean) => mocks.restore(id, archived)
   };
 });
+vi.mock("./mobile-network", () => ({ StaleMobileSessionResponseError: class StaleMobileSessionResponseError extends Error {} }));
 vi.mock("./friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("./mobileAccount", () => ({
   currentMobileAccountEpoch: () => mocks.epoch,
