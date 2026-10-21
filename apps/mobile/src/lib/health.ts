@@ -324,6 +324,8 @@ export type HealthCaptureOptions = {
   observerChange?: boolean;
   /** Query pages per pass (250 samples each), 20 at most; a background wake reads fewer. */
   maxPages?: number;
+  /** A background wake's capture: starts after the call instead of joining one already running. */
+  fresh?: boolean;
   repairWindow?: { startedAt: string; stoppedAt: string };
 };
 const HEALTH_QUERY_PAGE_SIZE = 250;
@@ -351,11 +353,10 @@ async function captureHealthKind(
   const owner = await currentHealthCaptureOwner();
   if (!owner) throw new Error("Sign in before capturing Apple Health data.");
   const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
-  return activeHealthCaptures.run(
-    key,
-    () => captureHealthKindUnsafe(owner, kind, options),
-    options.observerChange,
-  );
+  const capture = () => captureHealthKindUnsafe(owner, kind, options);
+  return options.fresh
+    ? activeHealthCaptures.runFresh(key, capture)
+    : activeHealthCaptures.run(key, capture, options.observerChange);
 }
 
 async function captureHealthKindUnsafe(

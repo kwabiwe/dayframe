@@ -62,6 +62,19 @@ describe("Health capture lifecycle", () => {
     await expect(observer).resolves.toBe("later");
     expect(sleep).toHaveBeenCalledTimes(2);
   });
+  it("starts a fresh capture only after the running one settles", async () => {
+    const runner = createHealthCaptureCoalescer();
+    const first = deferred<string>();
+    const capture = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue("fresh");
+    const running = runner.run("owner:sleep", capture);
+    const fresh = runner.runFresh("owner:sleep", capture);
+    await Promise.resolve();
+    expect(capture).toHaveBeenCalledTimes(1);
+    first.resolve("old");
+    await expect(running).resolves.toBe("old");
+    await expect(fresh).resolves.toBe("fresh");
+    expect(capture).toHaveBeenCalledTimes(2);
+  });
   it("retries a dirty type after a failed capture independently of a hung server reprocess", async () => {
     const runner = createHealthCaptureCoalescer();
     const capture = vi

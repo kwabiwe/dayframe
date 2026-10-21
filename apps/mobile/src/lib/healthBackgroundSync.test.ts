@@ -9,6 +9,7 @@ import {
   type HealthWakeDependencies
 } from "./healthBackgroundSync";
 import type { HealthCaptureOptions, HealthImportStatus } from "./health";
+import { createHealthCaptureCoalescer } from "./healthCaptureLifecycle";
 
 const queued: HealthImportStatus = { provider: "healthkit", status: "queued", notes: "", importedCount: 1 };
 
@@ -92,13 +93,81 @@ describe("Apple Health wake runner", () => {
     await vi.waitFor(() => expect(deps.captureWorkouts).toHaveBeenCalledTimes(1));
     runner.receive({ id: "w2", kind: "workout", reason: "observer" });
     runner.receive({ id: "w3", kind: "sleep", reason: "observer" });
-    expect(deps.captureWorkouts).toHaveBeenCalledTimes(2);
+    // The second workout capture starts only once the first settles, so it reads w2's change.
+    expect(deps.captureWorkouts).toHaveBeenCalledTimes(1);
     expect(deps.captureSleep).toHaveBeenCalledTimes(1);
     expect(deps.complete).not.toHaveBeenCalled();
     release();
     await runner.idle();
+    expect(deps.captureWorkouts).toHaveBeenCalledTimes(2);
+    expect(deps.captureWorkouts.mock.calls.every(([options]) => options.fresh === true)).toBe(true);
     expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(1);
     expect(deps.complete.mock.calls.map(([id]) => id)).toEqual(["w1", "w2", "w3"]);
+  });
+
+  it("keeps every capture a wake needs inside its pass, with the real capture coalescer", async () => {
+    const coalescer = createHealthCaptureCoalescer();
+    const starts: Array<() => void> = [];
+    const events: string[] = [];
+    const work = () => new Promise<HealthImportStatus>((resolve) => {
+      events.push(`start ${starts.length + 1}`);
+      starts.push(() => resolve(queued));
+    });
+    const captureWorkouts = (options: HealthCaptureOptions) => options.fresh
+      ? coalescer.runFresh("owner:workout", work)
+      : coalescer.run("owner:workout", work, options.observerChange);
+    const deps = dependencies({ captureWorkouts: vi.fn(captureWorkouts) });
+    deps.complete.mockImplementation(async (id: string) => { events.push(`complete ${id}`); return true; });
+    const runner = createHealthWakeRunner(deps);
+    const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    void captureWorkouts({});                       // Today's foreground capture: start 1
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await flush();
+    expect(starts).toHaveLength(1);                 // w1 waits for a capture that starts after it
+    starts[0]();
+    await vi.waitFor(() => expect(starts).toHaveLength(2));
+    runner.receive({ id: "w2", kind: "workout", reason: "observer" });
+    void captureWorkouts({ observerChange: true }); // Today hears the same change: entry follow-up
+    starts[1]();
+    await vi.waitFor(() => expect(starts).toHaveLength(3));
+    runner.receive({ id: "w3", kind: "workout", reason: "observer" });
+    starts[2]();
+    await vi.waitFor(() => expect(starts).toHaveLength(4));
+    starts[3]();
+    await runner.idle();
+    await flush();
+    await flush();
+    expect(starts).toHaveLength(4);                 // nothing starts after the wakes are finished
+    expect(events.slice(-3)).toEqual(["complete w1", "complete w2", "complete w3"]);
+    expect(events.indexOf("start 4")).toBeLessThan(events.indexOf("complete w1"));
+  });
+
+  it("finishes the wake when the automatic-sync check stalls past the capture deadline", async () => {
+    vi.useFakeTimers();
+    const deps = dependencies({ isAutomaticSyncEnabled: vi.fn(() => new Promise<boolean>(() => undefined)) });
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await vi.advanceTimersByTimeAsync(HEALTH_WAKE_CAPTURE_MS);
+    await runner.idle();
+    expect(deps.captureWorkouts).not.toHaveBeenCalled();
+    expect(deps.complete).toHaveBeenCalledWith("w1", false);
+  });
+
+  it("never lengthens the budget when the wall clock moved back after the wake", async () => {
+    vi.useFakeTimers();
+    let uploadSignal: AbortSignal | undefined;
+    const deps = dependencies({
+      uploadHealthEvents: vi.fn((signal: AbortSignal) => {
+        uploadSignal = signal;
+        return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(false)));
+      })
+    });
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "w1", kind: "workout", reason: "observer", receivedAt: Date.now() + 60_000 });
+    await vi.advanceTimersByTimeAsync(HEALTH_WAKE_PASS_MS);
+    await runner.idle();
+    expect(uploadSignal?.aborted).toBe(true);
   });
 
   it("gives a wake that arrives during the upload a follow-up pass", async () => {

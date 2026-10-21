@@ -92,6 +92,16 @@ export function createHealthCaptureCoalescer() {
       active.set(key, entry);
       return entry.promise as Promise<T>;
     },
+    /**
+     * A capture that starts after this call, for a background wake: waits for one already running
+     * for the key (its query may predate the wake's change, and a change during its follow-up
+     * would start an unowned cycle), then runs, or joins one that started since.
+     */
+    async runFresh<T>(key: string, capture: () => Promise<T>): Promise<T> {
+      const current = active.get(key);
+      if (current) await current.promise.catch(() => undefined);
+      return runner.run(key, capture);
+    },
   };
   return runner;
 }
