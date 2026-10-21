@@ -143,4 +143,18 @@ describe("typed edits stay within 24 h (Codex r1 on #504)", () => {
       expect(() => buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4)), end || "blank").toThrow();
     }
   });
+
+  it("keeps a skipped-hour End an error rather than carrying it (Codex r5 on #504)", () => {
+    process.env.TZ = "Europe/London";
+    const early = block(new Date(2026, 2, 29, 0, 0), new Date(2026, 2, 29, 0, 30));
+    const start = updateTimelineInlineTime(createTimelineInlineEditDraft(early, "time"), early, "start", "00:1");
+    const edit = updateTimelineInlineTime(start, early, "finish", "01:30");
+    expect(() => buildTimelineInlineSavePlan(edit, early, new Date(2026, 2, 30))).toThrow();
+  });
+
+  it("never limits a running row's elapsed time (Codex r5 on #504)", () => {
+    const running = { ...block(new Date(2026, 7, 3, 9, 0), new Date(2026, 7, 3, 10, 0)), stoppedAt: null } as unknown as TimeEntryRow;
+    const edit = updateTimelineInlineTime(createTimelineInlineEditDraft(running, "time"), running, "start", "09:30");
+    expect(buildTimelineInlineSavePlan(edit, running, new Date(2026, 7, 4, 12)).payload).toEqual({ startedAt: new Date(2026, 7, 3, 9, 30).toISOString() });
+  });
 });

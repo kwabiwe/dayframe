@@ -13,7 +13,8 @@ import {
   type CalendarEntryCompactDraft,
   type CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput } from "@/lib/calendar-grid";
+import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { dateTimeLocalInputToIsoCandidates } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
 
 export type TimelineInlineEditField = "description" | "time";
@@ -121,7 +122,8 @@ export function buildTimelineInlineSavePlan(
     if (!timeChanged) return unchangedTimelineInlineSavePlan(entry, now);
 
     // Typed times keep the block within 24 h unless the End date was chosen (Codex r1 on #504).
-    const typedTimes = !edit.finishDateChosen && (edit.dirty.startedAtTime || edit.dirty.stoppedAtTime);
+    // A running row has no End date to choose, so its live elapsed time is never limited (Codex r5).
+    const typedTimes = Boolean(edit.sourceStoppedAt) && !edit.finishDateChosen && (edit.dirty.startedAtTime || edit.dirty.stoppedAtTime);
     const sourcePlan = enforceTypedBlockLimit(buildCalendarEntryCompactSavePlan({
       draft: edit.draft,
       dirty: edit.dirty,
@@ -149,9 +151,14 @@ export function buildTimelineInlineSavePlan(
   });
 }
 
-/** A readable End, so a Start past it may carry it; a blank or invalid End stays an error (Codex r4 on #504). */
+/**
+ * A readable End that exists on the clock, so a Start past it may carry it; a blank, invalid or
+ * skipped-hour End stays an error (Codex r4/r5 on #504).
+ */
 function hasReadableFinish(draft: CalendarEntryCompactDraft) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(draft.stoppedAtDate) && isCompleteCalendarEntryCompactTimeInput(draft.stoppedAtTime);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.stoppedAtDate) || !isCompleteCalendarEntryCompactTimeInput(draft.stoppedAtTime)) return false;
+  const time = parseTimeInput(draft.stoppedAtTime);
+  return Boolean(time) && dateTimeLocalInputToIsoCandidates(`${draft.stoppedAtDate}T${time}`).length > 0;
 }
 
 function committedInlineDraft(edit: TimelineInlineEditDraft, draft: CalendarEntryCompactDraft): CalendarEntryCompactDraft {
