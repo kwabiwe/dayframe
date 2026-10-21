@@ -47,7 +47,7 @@ import type { DayframeTimeWheelChange } from "../../modules/dayframe-time-wheel"
 import { TIME_WHEEL_PANEL_CHROME, TIME_WHEEL_PANEL_MARGIN_TOP, TimeWheelPanel } from "@/components/TimeWheelPanel";
 import { timeWheelAccessibilityStep } from "@/lib/timeWheel";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
-import { endFollowingStart, inferEndOnStartDay } from "@/lib/entryEndInference";
+import { endAfterStartMove, inferEndOnStartDay } from "@/lib/entryEndInference";
 import { addLocalDays, formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
 import {
   HistoricalSuggestionsOverlay,
@@ -232,6 +232,9 @@ export function ActiveTimerEditSheet({
   const [draftEndMs, setDraftEndMs] = useState(0);
   // An End date chosen on the date sheet wins over the End wheel's inferred day (owner, 21 Oct 2026).
   const endDateChosenRef = useRef(false);
+  // The latest interval a card change applied, so wheel callbacks batched before a render read it,
+  // never a stale one (Codex r1 on #506). Re-synced from the drafts after each render.
+  const cardIntervalRef = useRef<{ startMs: number; endMs: number } | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
@@ -2186,32 +2189,48 @@ export function ActiveTimerEditSheet({
   // is Start's day, at or before it the next day, unless the End date was chosen on the date sheet.
   // A Start moved to or past End carries End with it, keeping the duration.
   function applyCardTime(target: "start" | "end", valueMs: number) {
-    const startMs = parsedStart.date?.getTime() ?? draftStartMs;
-    if (target === "end") {
-      const endMs = endDateChosenRef.current ? valueMs : inferEndOnStartDay(startMs, valueMs);
+    const latest = cardIntervalRef.current ?? {
+      endMs: parsedStop.date?.getTime() ?? draftEndMs,
+      startMs: parsedStart.date?.getTime() ?? draftStartMs
+    };
+    const setEnd = (endMs: number) => {
       const end = new Date(endMs);
       setDraftEndMs(endMs);
       setStoppedDateText(formatDateInput(end));
       setStoppedTimeText(formatTimeInput(end));
+    };
+    if (target === "end") {
+      const endMs = endDateChosenRef.current ? valueMs : inferEndOnStartDay(latest.startMs, valueMs);
+      setEnd(endMs);
+      cardIntervalRef.current = { ...latest, endMs };
+      // A time the wheel did not show (the hour skipped when the clocks go forward) re-aims the native
+      // End wheel; a new day at the same time needs nothing (Codex r1 on #506).
+      if (formatTimeInput(new Date(endMs)) !== formatTimeInput(new Date(valueMs))) bumpTimeWheelRevision();
     } else {
       const at = new Date(valueMs);
       setDraftStartMs(valueMs);
       setDateText(formatDateInput(at));
       setTimeText(formatTimeInput(at));
       if (isRunningMode) setStartTimeEdited(true);
-      const movedEndMs = hasStoppedTime
-        ? endFollowingStart(startMs, parsedStop.date?.getTime() ?? draftEndMs, valueMs)
-        : null;
-      if (movedEndMs !== null) {
-        const end = new Date(movedEndMs);
-        setDraftEndMs(movedEndMs);
-        setStoppedDateText(formatDateInput(end));
-        setStoppedTimeText(formatTimeInput(end));
-      }
+      const endMs = hasStoppedTime
+        ? endAfterStartMove({
+            endDateChosen: endDateChosenRef.current,
+            nextStartMs: valueMs,
+            previousEndMs: latest.endMs,
+            previousStartMs: latest.startMs
+          })
+        : latest.endMs;
+      // The wheel shows Start here, so End's move needs no re-aim (and none mid-spin).
+      if (hasStoppedTime && endMs !== latest.endMs) setEnd(endMs);
+      cardIntervalRef.current = { startMs: valueMs, endMs };
     }
     setDraftRevision((current) => current + 1);
     setValidationError(null);
   }
+
+  useLayoutEffect(() => {
+    cardIntervalRef.current = null;
+  });
 
   const cardTimeMs = (target: "start" | "end") => target === "end"
     ? parsedStop.date?.getTime() ?? draftEndMs
@@ -2359,6 +2378,8 @@ export function ActiveTimerEditSheet({
     // #419): there is nothing to merge.
     const ownDraftMs = datePickerTarget === "end" ? draftEndMs : draftStartMs;
     if (formatDateInput(date) === (datePickerTarget === "end" ? stoppedDateText : dateText) && ownDraftMs > 0) {
+      // Confirming the End's own day is still an explicit choice (Codex r1 on #506).
+      if (datePickerTarget === "end") endDateChosenRef.current = true;
       setValidationError(null);
       return true;
     }
