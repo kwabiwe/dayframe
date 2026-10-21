@@ -219,8 +219,12 @@ function fallbackSemanticCategory(item: MobileReviewItem, categories: MobileCate
   if (item.eventType === "commute_detected") {
     // Only a Commute (Home ↔ Work, or an older server's journey) falls back to Commute; every other
     // Move to Getting around (PRD D19).
-    const name = item.title?.trim() === "Commute" || !item.rawPayload?.routeLabel ? "commute" : "travel";
-    return categories.find((candidate) => candidate.name.trim().toLowerCase() === name);
+    // By starter key first, so a renamed starter is still found; then by its current name (and
+    // Getting around's old name, "Travel"; Codex r1 on #502).
+    const commute = item.title?.trim() === "Commute" || !item.rawPayload?.routeLabel;
+    const [starterKey, names] = commute ? ["commute", ["commute"]] : ["travel", ["getting around", "travel"]];
+    return categories.find((candidate) => candidate.starterKey === starterKey)
+      ?? names.map((name) => categories.find((candidate) => candidate.name.trim().toLowerCase() === name)).find(Boolean);
   }
   return fallbackHealthCategory(item, categories);
 }

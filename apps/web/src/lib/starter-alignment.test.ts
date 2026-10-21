@@ -38,6 +38,28 @@ describe("aligning a workspace with a new account's activities (owner, 20 Oct 20
     expect(both.leftAlone).toContainEqual({ name: "Travel", reason: 'kept: a "Getting around" activity already exists' });
   });
 
+  it("never takes another starter renamed Travel, and reports it (Codex r1 on #502)", () => {
+    const plan = planStarterAlignment([row("Travel", "work")]);
+    expect(plan.rename).toBeNull();
+    expect(plan.add.map((starter) => starter.name)).toContain("Getting around");
+    expect(plan.leftAlone).toContainEqual({ name: "Travel", reason: "kept: another activity with this name" });
+  });
+
+  it("does not add Getting around again when an archived Travel is there (Codex r1 on #502)", () => {
+    const plan = planStarterAlignment([row("Travel", null, true)]);
+    expect(plan.add.map((starter) => starter.name)).not.toContain("Getting around");
+    expect(plan.leftAlone).toContainEqual({ name: "Travel", reason: "kept archived: not added again" });
+  });
+
+  it("reports an unlinked Getting around, and never renames Travel beside it into a duplicate (Codex r1 on #502)", () => {
+    const plan = planStarterAlignment([row("Travel", "travel"), row("Getting around")]);
+    expect(plan.rename).toBeNull();
+    expect(plan.leftAlone).toEqual(expect.arrayContaining([
+      { name: "Getting around", reason: "kept: already has this starter's name" },
+      { name: "Travel", reason: 'kept: a "Getting around" activity already exists' }
+    ]));
+  });
+
   it("is a no-op once aligned", () => {
     const aligned = DAYFRAME_STARTER_ACTIVITIES.map((starter) => row(starter.name, starter.starterKey));
     expect(planStarterAlignment(aligned)).toEqual({ rename: null, add: [], leftAlone: [] });
@@ -58,6 +80,8 @@ describe("aligning a workspace with a new account's activities (owner, 20 Oct 20
       .toBeLessThan(statements.findIndex((statement) => statement.sql.startsWith("select id, name, starter_key")));
     const update = statements.find((statement) => statement.sql.startsWith("update categories"))!;
     expect(update.params).toEqual(["id-Travel-travel", "ws-1", "Getting around", "journey", "travel"]);
+    // A Travel archived after the plan was read is not renamed (Codex r1 on #502).
+    expect(update.sql).toContain("coalesce(is_archived, false) = false");
     const inserts = statements.filter((statement) => statement.sql.includes("insert into categories"));
     expect(inserts).toHaveLength(plan.add.length);
     expect(inserts.every((statement) => statement.sql.includes("false"))).toBe(true);
@@ -69,5 +93,15 @@ describe("aligning a workspace with a new account's activities (owner, 20 Oct 20
       return { rows: [], rowCount: 0 };
     }) };
     await expect(applyStarterAlignment(client as never, "ws-1")).rejects.toThrow("changed while aligning");
+  });
+});
+
+describe("Getting around's old lock name (Codex r1 on #502)", () => {
+  it("is taken with the new one, in sorted order, by every writer that locks the name", async () => {
+    const { lockActivityNames } = await import("./automatic-category-service");
+    const params: unknown[] = [];
+    const client = { query: vi.fn(async (_sql: string, values: unknown[] = []) => { params.push(values[0]); return { rows: [] }; }) };
+    await lockActivityNames(client as never, "ws-1", ["Trips", "Getting around"]);
+    expect(params).toEqual(["getting around", "travel", "trips"].map((name) => `dayframe:auto-category:ws-1:${name}`));
   });
 });

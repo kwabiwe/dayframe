@@ -1,6 +1,6 @@
 import type pg from "pg";
 import { DAYFRAME_STARTER_ACTIVITIES, starterActivityByKey, type DayframeStarterActivity } from "@dayframe/shared";
-import { AUTOMATIC_STARTER_LOCK_NAMES, automaticCategoryLockKey } from "./automatic-category-service";
+import { AUTOMATIC_STARTER_LOCK_NAMES, lockActivityNames } from "./automatic-category-service";
 
 /**
  * One workspace's activities brought in line with a new account's (owner decision, 20 Oct 2026):
@@ -30,22 +30,25 @@ export function planStarterAlignment(rows: readonly AlignmentRow[]): AlignmentPl
   const travel = starterActivityByKey("travel");
   const leftAlone: AlignmentPlan["leftAlone"] = [];
 
-  // The rename: the Travel starter (its key, else an activity simply named Travel), unless a
-  // Getting around already exists or the person renamed it to something of their own.
+  // The rename: the Travel starter (its key, else an unlinked activity simply named Travel), unless
+  // a Getting around already exists or the person renamed the starter to something of their own.
+  // A row named Travel that is another starter (renamed) is never taken (Codex r1 on #502).
   let rename: AlignmentPlan["rename"] = null;
-  const hasGettingAround = active.some((row) => normalized(row.name) === normalized(travel.name));
   const keyed = active.find((row) => row.starterKey === "travel");
-  const named = active.filter((row) => normalized(row.name) === "travel");
-  const candidate = keyed && normalized(keyed.name) === "travel" ? keyed : keyed ? null : named[0] ?? null;
-  if (hasGettingAround) {
-    for (const row of named) leftAlone.push({ name: row.name, reason: `kept: a "${travel.name}" activity already exists` });
-  } else if (keyed && !candidate) {
-    leftAlone.push({ name: keyed.name, reason: "kept: the Travel starter was renamed by you" });
-  } else if (candidate) {
-    rename = { id: candidate.id, from: candidate.name, to: travel.name, icon: travel.icon };
-    for (const row of named.filter((row) => row.id !== candidate.id)) {
-      leftAlone.push({ name: row.name, reason: "kept: another activity with this name" });
-    }
+  const legacyNamed = active.filter((row) => normalized(row.name) === "travel");
+  const unlinkedGettingAround = active.filter((row) => !row.starterKey && normalized(row.name) === normalized(travel.name));
+  const hasGettingAround = unlinkedGettingAround.length > 0 || (keyed !== undefined && normalized(keyed.name) === normalized(travel.name));
+  const candidate = keyed
+    ? normalized(keyed.name) === "travel" && unlinkedGettingAround.length === 0 ? keyed : null
+    : hasGettingAround ? null : legacyNamed.find((row) => !row.starterKey) ?? null;
+  if (candidate) rename = { id: candidate.id, from: candidate.name, to: travel.name, icon: travel.icon };
+  else if (keyed && !hasGettingAround) leftAlone.push({ name: keyed.name, reason: "kept: the Travel starter was renamed by you" });
+  for (const row of unlinkedGettingAround) leftAlone.push({ name: row.name, reason: "kept: already has this starter's name" });
+  for (const row of legacyNamed.filter((row) => row.id !== candidate?.id)) {
+    leftAlone.push({
+      name: row.name,
+      reason: hasGettingAround ? `kept: a "${travel.name}" activity already exists` : "kept: another activity with this name"
+    });
   }
 
   const add: DayframeStarterActivity[] = [];
@@ -57,7 +60,10 @@ export function planStarterAlignment(rows: readonly AlignmentRow[]): AlignmentPl
       leftAlone.push({ name: sameName.name, reason: "kept: already has this starter's name" });
       continue;
     }
-    const archivedStarter = archived.find((row) => row.starterKey === starter.starterKey || normalized(row.name) === normalized(starter.name));
+    // Archived under its key, its name, or (Getting around) its old name: not added again.
+    const archivedStarter = archived.find((row) => row.starterKey === starter.starterKey
+      || normalized(row.name) === normalized(starter.name)
+      || (starter.starterKey === "travel" && normalized(row.name) === "travel"));
     if (archivedStarter) {
       leftAlone.push({ name: archivedStarter.name, reason: "kept archived: not added again" });
       continue;
@@ -98,16 +104,13 @@ export async function readStarterAlignment(client: Client, workspaceId: string) 
  */
 export async function applyStarterAlignment(client: Client, workspaceId: string) {
   const travel = starterActivityByKey("travel");
-  const names = [...new Set([...AUTOMATIC_STARTER_LOCK_NAMES, "Travel"])].sort((left, right) => left.localeCompare(right));
-  for (const name of names) {
-    await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [automaticCategoryLockKey(workspaceId, name)]);
-  }
+  await lockActivityNames(client, workspaceId, [...AUTOMATIC_STARTER_LOCK_NAMES]);
   await client.query("select id from workspaces where id = $1 for no key update", [workspaceId]);
   const plan = planStarterAlignment(await readRows(client, workspaceId));
   if (plan.rename) {
     const renamed = await client.query(
       `update categories set name = $3, icon = $4, starter_key = coalesce(starter_key, $5)
-        where id = $1 and workspace_id = $2 and lower(btrim(name)) = 'travel'`,
+        where id = $1 and workspace_id = $2 and lower(btrim(name)) = 'travel' and coalesce(is_archived, false) = false`,
       [plan.rename.id, workspaceId, plan.rename.to, plan.rename.icon, travel.starterKey]
     );
     if (renamed.rowCount !== 1) throw new Error("The Travel activity changed while aligning; nothing was changed.");
