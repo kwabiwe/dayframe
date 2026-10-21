@@ -1061,6 +1061,62 @@ describe("native Calendar Blocks presentation", () => {
     expect(twelve.clockFormat).toBe("12h");
     expect(twelve.entries[0].meta).toContain("9:05 PM-10:00 PM");
   });
+
+  describe("named patterns (location v3 PR 14b)", () => {
+    const tag = { key: "trip-1", name: "School run", parts: 3 };
+    const part = (id: string, from: number, to: number) => entry({
+      id,
+      description: id,
+      source: "location_learning",
+      locationGroup: tag,
+      startedAt: iso(from),
+      stoppedAt: iso(to)
+    });
+    const at = (hour: number, minute: number, day = 10) => localTime(2026, 7, day, hour, minute);
+    const trip = () => [part("there", at(8, 0), at(8, 10)), part("stay", at(8, 10), at(8, 30)), part("back", at(8, 30), at(8, 40))];
+    const label = (state: ReturnType<typeof build>, id: string) =>
+      state.model.entries.find((item) => item.entryId === id)?.accessibilityLabel ?? "";
+
+    it("sends Swift one bracket for a complete trip and keeps its parts as blocks", () => {
+      const state = build(at(12, 0), bootstrap([...trip(), entry({ id: "work", startedAt: iso(at(9, 0)), stoppedAt: iso(at(11, 0)) })]));
+      expect(state.model.brackets).toEqual([{
+        key: "named:trip-1",
+        name: "School run",
+        startedAtMs: at(8, 0),
+        stoppedAtMs: at(8, 40)
+      }]);
+      expect(state.model.entries.map((item) => item.entryId)).toEqual(["there", "stay", "back", "work"]);
+      expect(JSON.parse(JSON.stringify(state.model)).brackets).toEqual(state.model.brackets);
+    });
+
+    it("says each part's place in the trip once, in that part's own label", () => {
+      const state = build(at(12, 0), bootstrap([...trip(), entry({ id: "work", startedAt: iso(at(9, 0)), stoppedAt: iso(at(11, 0)) })]));
+      expect(label(state, "there")).toBe("Open time block: there. Part 1 of 3 of School run");
+      expect(label(state, "stay")).toContain(". Part 2 of 3 of School run");
+      expect(label(state, "back")).toContain(". Part 3 of 3 of School run");
+      expect(label(state, "work")).not.toContain("School run");
+    });
+
+    it("sends no bracket while a part is missing, a block sits between the parts or the trip runs", () => {
+      const [there, stay, back] = trip();
+      expect(build(at(12, 0), bootstrap([there, back])).model.brackets).toEqual([]);
+      const between = entry({ id: "coffee", startedAt: iso(at(8, 15)), stoppedAt: iso(at(8, 20)) });
+      expect(build(at(12, 0), bootstrap([there, stay, between, back])).model.brackets).toEqual([]);
+      const running = { ...back, stoppedAt: null };
+      expect(build(at(8, 35), bootstrap([there, stay, running], { activeEntry: running })).model.brackets).toEqual([]);
+      expect(label(build(at(12, 0), bootstrap([there, back])), "there")).not.toContain("Part");
+    });
+
+    it("sends no bracket for a trip across midnight on either day", () => {
+      const late = [
+        part("there", at(23, 40, 9), at(23, 50, 9)),
+        part("stay", at(23, 50, 9), at(0, 20)),
+        part("back", at(0, 20), at(0, 30))
+      ];
+      expect(build(at(12, 0), bootstrap(late)).model.brackets).toEqual([]);
+      expect(build(at(12, 0), bootstrap(late), darkTheme(), "2026-07-09").model.brackets).toEqual([]);
+    });
+  });
 });
 
 describe("native Calendar update cadence", () => {

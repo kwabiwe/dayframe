@@ -36,3 +36,46 @@ export function namedPatternRuns(items: readonly NamedPatternItem[]) {
   }
   return runs;
 }
+
+/**
+ * A named pattern on Calendar (location v3 PR 14b): one light bracket from its first part's start
+ * to its last part's end, beside blocks that stay separate. The same rule as Today's row (every part
+ * there, next to the others, finished, within three hours), with the blocks in Calendar's order (by
+ * start). `memberIds` are the parts, oldest first.
+ */
+export type NamedPatternBracket = { key: string; name: string; startMs: number; endMs: number; memberIds: string[] };
+
+/**
+ * Calendar's brackets. With `within` (a day's `[startMs, endMs)`), only a pattern wholly inside it:
+ * a trip across midnight keeps its parts as ordinary blocks on both days and draws no bracket.
+ */
+export function namedPatternBrackets(
+  items: readonly NamedPatternItem[],
+  within?: { startMs: number; endMs: number }
+): NamedPatternBracket[] {
+  const ordered = [...items].sort((left, right) =>
+    Date.parse(left.startedAt) - Date.parse(right.startedAt) || left.id.localeCompare(right.id));
+  const runs = namedPatternRuns(ordered);
+  const brackets: NamedPatternBracket[] = [];
+  // Whether the last bracket is still taking parts: a block outside any group closes it.
+  let open = false;
+  for (const item of ordered) {
+    const run = runs.get(item.id);
+    if (!run) {
+      open = false;
+      continue;
+    }
+    const startMs = Date.parse(item.startedAt);
+    const endMs = Date.parse(item.stoppedAt!);
+    const last = brackets.at(-1);
+    if (open && last?.key === run.key) {
+      last.startMs = Math.min(last.startMs, startMs);
+      last.endMs = Math.max(last.endMs, endMs);
+      last.memberIds.push(item.id);
+      continue;
+    }
+    brackets.push({ key: run.key, name: run.name, startMs, endMs, memberIds: [item.id] });
+    open = true;
+  }
+  return within ? brackets.filter((bracket) => bracket.startMs >= within.startMs && bracket.endMs <= within.endMs) : brackets;
+}

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, formatClockParts, type ClockFormat } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -31,6 +31,7 @@ import {
 } from "@/lib/format";
 import {
   calendarBlockLaneInsets,
+  calendarBracketRailPx,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
@@ -770,6 +771,23 @@ export function CalendarReview({
   const isToday = (day: Date) => formatCalendarDateKey(day) === todayKey;
   const gridEntries = localTimeReady ? entries : NO_TIMELINE_ENTRIES;
   const gridReviewItems = localTimeReady ? reviewItems : NO_REVIEW_ITEMS;
+  // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
+  // one shown day (none across midnight), and each part's place in it for its block's name. Drawn
+  // from the stored blocks, so a resize draft moves its block but not the bracket until it is saved.
+  const calendarBrackets = useMemo(() => {
+    const byDay = new Map<string, NamedPatternBracket[]>();
+    const parts = new Map<string, string>();
+    const members = new Map(gridEntries.map((entry) => [entry.id, entry]));
+    for (const day of visibleDays) {
+      const dayStart = startOfDay(day);
+      const brackets = namedPatternBrackets(gridEntries, { startMs: dayStart.getTime(), endMs: addDays(dayStart, 1).getTime() });
+      byDay.set(formatCalendarDateKey(day), brackets);
+      for (const bracket of brackets) {
+        bracket.memberIds.forEach((id, index) => parts.set(id, `Part ${index + 1} of ${bracket.memberIds.length} of ${bracket.name}.`));
+      }
+    }
+    return { byDay, members, parts };
+  }, [gridEntries, visibleDays]);
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -1476,6 +1494,11 @@ export function CalendarReview({
             const futureZoneTop = createLimitMinutes < calendarHours.endHour * 60 && !dayIsFuture
               ? Math.round(((createLimitMinutes - calendarHours.startHour * 60) / 60) * rowHeight)
               : null;
+            const dayBrackets = calendarBrackets.byDay.get(dayKey) ?? [];
+            const railPx = dayBrackets.length ? calendarBracketRailPx : 0;
+            // The drag ghost and the draft slot start where a full-width block does, right of any
+            // bracket rail (CSS keeps its 8 px inset on a day without one).
+            const draftInsets = railPx ? { left: calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 }, railPx).left } : {};
             return (
             <div
               key={`${day.toISOString()}-body`}
@@ -1511,6 +1534,32 @@ export function CalendarReview({
                   style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
                 />
               ) : null}
+              {dayBrackets.map((bracket) => {
+                // From the first part's drawn top to the last part's drawn bottom (the blocks' own
+                // maths, minimum heights included), so it stays beside them at every zoom.
+                const parts = bracket.memberIds.flatMap((id) => {
+                  const member = calendarBrackets.members.get(id);
+                  const geometry = member
+                    ? calendarBlockStyle(member, null, day, rowHeight, calendarHeight, calendarHours, capturedNow)
+                    : null;
+                  return geometry ? [geometry] : [];
+                });
+                if (!parts.length) return null;
+                const top = Math.min(...parts.map((part) => part.top));
+                const height = Math.max(...parts.map((part) => part.top + part.height)) - top;
+                // Decorative: the parts' own names say which trip they belong to.
+                return (
+                  <span
+                    aria-hidden="true"
+                    className="df-cal-bracket"
+                    data-calendar-bracket={bracket.key}
+                    key={`bracket:${bracket.key}`}
+                    style={{ top, height }}
+                  >
+                    {height >= 28 ? <span className="df-cal-bracket-label">{bracket.name}</span> : null}
+                  </span>
+                );
+              })}
               {pendingReviewSpans(gridReviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
                 const geometry = calendarBlockStyle(
                   { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
@@ -1580,7 +1629,7 @@ export function CalendarReview({
                     aria-hidden="true"
                     className="calendar-create-ghost tabular"
                     data-calendar-create-ghost
-                    style={geometry}
+                    style={{ ...geometry, ...draftInsets }}
                   >
                     {`${formatCalendarAxisMinutes(createGhost.startMinutes, clock, true)}–${formatCalendarAxisMinutes(createGhost.endMinutes, clock, true)} · ${formatDuration(seconds)}`}
                   </div>
@@ -1607,6 +1656,7 @@ export function CalendarReview({
                     data-calendar-draft-session={visibleSelectedTarget.sessionId}
                     ref={registerCalendarDraftAnchor}
                     style={{
+                      ...draftInsets,
                       height: geometry.height,
                       top: geometry.top,
                       zIndex: 1
@@ -1674,7 +1724,7 @@ export function CalendarReview({
                     entry,
                     startsBeforeDay
                   } = block;
-                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock);
+                  const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
                   const lane = lanes.get(blockKey) ?? {
                     laneCount: 1,
                     laneIndex: 0,
@@ -1719,7 +1769,7 @@ export function CalendarReview({
                       ].join(" ")}
                       style={{
                         ...blockPositionStyle,
-                        ...calendarBlockLaneStyle(lane),
+                        ...calendarBlockLaneStyle(lane, railPx),
                         // Blocks: a solid activity fill with its measured on-block text colour.
                         ...(entry.categoryId ? activityBlockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
                         "--calendar-block-accent": accent,
@@ -2032,9 +2082,9 @@ function calendarBlockLaneStyle({
   offsetFraction,
   widthFraction,
   zIndex
-}: TimeBlockLane): CSSProperties {
+}: TimeBlockLane, railPx = 0): CSSProperties {
   return {
-    ...calendarBlockLaneInsets({ offsetFraction, widthFraction }),
+    ...calendarBlockLaneInsets({ offsetFraction, widthFraction }, railPx),
     zIndex: 2 + zIndex
   };
 }
@@ -2045,7 +2095,9 @@ function calendarBlockDetailsLabel(
   _durationSeconds: number,
   day: Date,
   capturedNow: Date,
-  clock: ClockFormat
+  clock: ClockFormat,
+  /** "Part 2 of 3 of School run.": a named pattern's part (location v3 PR 14b). */
+  partOf?: string
 ) {
   const details = calendarEntrySliceDetails(entry, draft, day, capturedNow);
   const displayEntry = {
@@ -2054,7 +2106,7 @@ function calendarBlockDetailsLabel(
     stoppedAt: draft?.stoppedAt ?? entry.stoppedAt
   };
   const tags = entry.tagNames.length ? ` All tags: ${entry.tagNames.join(", ")}.` : "";
-  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}.${tags}${details.continuation ? ` ${details.continuation}` : ""}`;
+  return `${calendarBlockPrimaryLine(displayEntry)}. ${calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}.${tags}${partOf ? ` ${partOf}` : ""}${details.continuation ? ` ${details.continuation}` : ""}`;
 }
 
 function calendarEntrySliceDetails(

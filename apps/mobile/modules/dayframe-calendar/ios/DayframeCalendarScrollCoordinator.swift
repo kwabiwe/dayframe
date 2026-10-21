@@ -520,7 +520,8 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           widthFraction: entry.widthFraction,
           overlapCount: entry.overlapCount,
           textDensity: entry.textDensity,
-          timelineHeight: 24 * hourHeight
+          timelineHeight: 24 * hourHeight,
+          leadingInset: presentation.entryLeadingInset
         )?.hitFrame
       }
       guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames) else {

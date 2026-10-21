@@ -19,6 +19,10 @@ public enum DayframeCalendarConstants {
   public static let creationPreviewDurationMinutes = 30
   public static let edgeAutoscrollActivationInset = 52.0
   public static let edgeAutoscrollMaximumSpeed = 420.0
+  /// A day with a named pattern's bracket (location v3 PR 14b) moves its blocks right by this, so
+  /// the bracket and its name sit in the gutter beside them and never under one.
+  public static let bracketRailWidth = 12.0
+  public static let bracketLabelMinimumHeight = 28.0
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -229,11 +233,13 @@ public enum DayframeCalendarEntryGeometryMath {
     widthFraction: Double,
     overlapCount: Int,
     textDensity: String,
-    timelineHeight: Double = .infinity
+    timelineHeight: Double = .infinity,
+    leadingInset: Double = 0
   ) -> DayframeCalendarEntryGeometryMetrics? {
     guard
       availableWidth.isFinite,
       hourLabelWidth.isFinite,
+      leadingInset.isFinite,
       semanticTop.isFinite,
       semanticHeight.isFinite,
       availableWidth > hourLabelWidth,
@@ -243,7 +249,9 @@ public enum DayframeCalendarEntryGeometryMath {
       return nil
     }
 
-    let blockWidth = max(0, availableWidth - hourLabelWidth - 18)
+    // Lanes share the column right of any bracket rail.
+    let inset = max(0, leadingInset)
+    let blockWidth = max(0, availableWidth - hourLabelWidth - 18 - inset)
     let horizontal = DayframeCalendarHorizontalMath.metrics(
       availableWidth: blockWidth,
       offsetFraction: offsetFraction,
@@ -258,7 +266,7 @@ public enum DayframeCalendarEntryGeometryMath {
       hitHeight: horizontal.hitHeight,
       timelineHeight: timelineHeight
     )
-    let minX = hourLabelWidth + 8 + horizontal.offset
+    let minX = hourLabelWidth + 8 + inset + horizontal.offset
     let minY = vertical.hitCenterY - vertical.hitHeight / 2
 
     return DayframeCalendarEntryGeometryMetrics(

@@ -635,6 +635,38 @@ final class DayframeCalendarCoreTests: XCTestCase {
     ))
   }
 
+  func testBracketRailMovesEveryLaneRightAndKeepsLanesApart() throws {
+    // Location v3 PR 14b: a day with a named pattern's bracket keeps a 12-point rail left of its
+    // blocks; render and long-press hit geometry share it, so the rail is empty time.
+    let inset = DayframeCalendarConstants.bracketRailWidth
+    let geometry = { (offsetFraction: Double, widthFraction: Double, leadingInset: Double) in
+      DayframeCalendarEntryGeometryMath.metrics(
+        availableWidth: 320,
+        hourLabelWidth: 68,
+        semanticTop: 300,
+        semanticHeight: 60,
+        offsetFraction: offsetFraction,
+        widthFraction: widthFraction,
+        overlapCount: 1,
+        textDensity: "full",
+        leadingInset: leadingInset
+      )
+    }
+    let plain = try XCTUnwrap(geometry(0, 1, 0))
+    let full = try XCTUnwrap(geometry(0, 1, inset))
+    XCTAssertEqual(full.hitFrame.minX, plain.hitFrame.minX + inset, accuracy: 0.001)
+    XCTAssertEqual(full.hitFrame.maxX, plain.hitFrame.maxX, accuracy: 0.001)
+
+    let left = try XCTUnwrap(geometry(0, 0.5, inset))
+    let right = try XCTUnwrap(geometry(0.5, 0.5, inset))
+    XCTAssertEqual(left.hitFrame.maxX, right.hitFrame.minX, accuracy: 0.001)
+    XCTAssertEqual(right.hitFrame.maxX, plain.hitFrame.maxX, accuracy: 0.001)
+
+    let rail = DayframeCalendarPoint(x: 68 + 8 + inset / 2, y: 330)
+    XCTAssertFalse(DayframeCalendarLongPressMath.pointHitsEntry(point: rail, frames: [left.hitFrame, right.hitFrame]))
+    XCTAssertNil(geometry(0, 1, .nan))
+  }
+
   func testLongPressPointHitRejectsNonFinitePoint() throws {
     let geometry = try XCTUnwrap(entryGeometry(
       semanticTop: 100,
@@ -997,6 +1029,16 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNil(later.clockFormat)
     let twelveHour = try decodePresentation(selectedDayKey: "2026-07-20", nowMs: 2_000, entriesJSON: "[]", clockFormat: "12h")
     XCTAssertEqual(twelveHour.clockFormat, "12h")
+    // Named patterns (location v3 PR 14b): an older bundle sends no brackets.
+    XCTAssertNil(later.brackets)
+    let bracketed = try decodePresentation(
+      selectedDayKey: "2026-07-20",
+      nowMs: 2_000,
+      entriesJSON: "[]",
+      bracketsJSON: #"[{"key":"named:trip-1","name":"School run","startedAtMs":1000,"stoppedAtMs":2000}]"#
+    )
+    XCTAssertEqual(bracketed.brackets?.first?.name, "School run")
+    XCTAssertEqual(bracketed.brackets?.first?.stoppedAtMs, 2_000)
   }
 
   func testClockTextMatchesTheSharedFormatters() {
@@ -1014,12 +1056,14 @@ final class DayframeCalendarCoreTests: XCTestCase {
     selectedDayKey: String,
     nowMs: Double,
     entriesJSON: String,
-    clockFormat: String? = nil
+    clockFormat: String? = nil,
+    bracketsJSON: String? = nil
   ) throws -> DayframeCalendarPresentationRecord {
     let clockField = clockFormat.map { "\"clockFormat\":\"\($0)\"," } ?? ""
+    let bracketsField = bracketsJSON.map { "\"brackets\":\($0)," } ?? ""
     let json = """
     {
-      \(clockField)"dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
+      \(clockField)\(bracketsField)"dayEndMs":86400000,"dayStartMs":0,"emptyState":"No tracked time for this day.",
       "entries":\(entriesJSON),"framedLabel":"Nothing framed on Sunday","hapticsEnabled":false,
       "modelVersion":4,"monthTitle":"July","nowMs":\(nowMs),"reduceMotion":false,
       "reduceTransparency":false,"refreshing":false,"selectedDayKey":"\(selectedDayKey)",
