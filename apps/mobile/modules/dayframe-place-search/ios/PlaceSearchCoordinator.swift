@@ -75,12 +75,16 @@ struct NearbyPointOfInterestValue: Equatable {
   /// the venue ranker compares places with each other (a pharmacy inside a supermarket).
   var offsetEastMeters: Int? = nil
   var offsetNorthMeters: Int? = nil
+  /// Apple's Place ID (MKMapItem.Identifier, iOS 18+). Dayframe may store this, never the name
+  /// or address (location v3 PR 8, PRD D19 A7).
+  var placeId: String? = nil
 
   func withSource(_ source: Source) -> NearbyPointOfInterestValue {
     NearbyPointOfInterestValue(
       name: name, formattedAddress: formattedAddress, latitude: latitude, longitude: longitude,
       distanceMeters: distanceMeters, relevanceIndex: relevanceIndex, category: category, source: source,
-      localityNames: localityNames, offsetEastMeters: offsetEastMeters, offsetNorthMeters: offsetNorthMeters
+      localityNames: localityNames, offsetEastMeters: offsetEastMeters, offsetNorthMeters: offsetNorthMeters,
+      placeId: placeId
     )
   }
 }
@@ -101,6 +105,7 @@ struct NearbyPointOfInterestSuggestionValue: Equatable {
   var offsetEastMeters: Int? = nil
   var offsetNorthMeters: Int? = nil
   var source: String = "nearby"
+  var placeId: String? = nil
 
   var dictionary: [String: Any] {
     [
@@ -112,7 +117,8 @@ struct NearbyPointOfInterestSuggestionValue: Equatable {
       "category": category as Any,
       "offsetEastMeters": offsetEastMeters as Any,
       "offsetNorthMeters": offsetNorthMeters as Any,
-      "source": source
+      "source": source,
+      "placeId": placeId as Any
     ]
   }
 
@@ -230,7 +236,8 @@ final class NearbyPointOfInterestCoordinator {
         category: NearbyPointOfInterestSuggestionValue.categoryKey(place.category),
         offsetEastMeters: place.offsetEastMeters,
         offsetNorthMeters: place.offsetNorthMeters,
-        source: place.source.key
+        source: place.source.key,
+        placeId: place.placeId
       )
     }
     return NearbyPointOfInterestList(places: places, areasOfInterest: result.areasOfInterest)
@@ -695,7 +702,8 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
         source: source,
         localityNames: localityNames,
         offsetEastMeters: offset.east,
-        offsetNorthMeters: offset.north
+        offsetNorthMeters: offset.north,
+        placeId: Self.placeId(of: item)
       )
     }
   }
@@ -708,6 +716,15 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
       return .networkUnavailable
     }
     return .searchUnavailable
+  }
+
+  /// Apple's Place ID for a map item, on iOS 18 and later (none before).
+  private static func placeId(of item: MKMapItem) -> String? {
+    if #available(iOS 18.0, macOS 15.0, *) {
+      let raw = item.identifier?.rawValue
+      return raw?.isEmpty == false ? raw : nil
+    }
+    return nil
   }
 }
 

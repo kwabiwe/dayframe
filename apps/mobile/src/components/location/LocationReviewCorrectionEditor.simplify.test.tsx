@@ -137,8 +137,10 @@ function journey() {
 
 let tree: ReturnType<typeof create> | undefined;
 let onResolve: Mock<(action: LocationReviewAction, message: string) => Promise<void>>;
+let onVenueSuggested = vi.fn();
 beforeEach(() => {
   onResolve = vi.fn(async (_action: LocationReviewAction, _message: string) => undefined);
+  onVenueSuggested = vi.fn();
   picker.props = null;
   native.searchNearby.mockReset();
   native.resolveNearby.mockReset();
@@ -165,6 +167,7 @@ function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], revi
       isFocused
       onCreateActivity={async () => ({ id: "cat-new" })}
       onResolve={onResolve}
+      onVenueSuggested={onVenueSuggested}
       places={[]}
       recentActivityIds={recent}
       reviewItem={reviewItem as never}
@@ -548,5 +551,51 @@ describe("What did you do? (D1)", () => {
     // Untouched: no categoryId, so the server files it as Commute.
     expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "edit_and_confirm" });
     expect((onResolve.mock.calls[0][0] as { edit: object }).edit).not.toHaveProperty("categoryId");
+  });
+
+  // Location v3 PR 8: Apple Place IDs, never names, go to the server.
+  describe("venue Place IDs", () => {
+    const confident = (request: { requestId: string }) => ({
+      requestId: request.requestId,
+      areasOfInterest: [],
+      places: [
+        { id: "poi-s", requestId: request.requestId, title: "Freshway Superstore", subtitle: null, distanceMeters: 30, category: "FoodMarket",
+          offsetEastMeters: 20, offsetNorthMeters: 20, source: "nearby", placeId: "ISYNTHETICSTORE" },
+        { id: "poi-p", requestId: request.requestId, title: "Freshway Pharmacy", subtitle: null, distanceMeters: 15, category: "Pharmacy",
+          offsetEastMeters: 10, offsetNorthMeters: 10, source: "nearby", placeId: "ISYNTHETICPHARMACY" }
+      ]
+    });
+
+    it("records a picked nearby venue with its Place ID", async () => {
+      native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
+      native.resolveNearby.mockResolvedValue({
+        suggestionId: "poi-s", title: "Freshway Superstore", subtitle: null, name: "Freshway Superstore",
+        formattedAddress: null, latitude: 10.0002, longitude: 20.0002
+      });
+      await render(stay({ matched: false }));
+      await press(byTestId("location-evidence-nearby-0")[0]);
+      await press(primary());
+      expect(onResolve.mock.calls[0][0]).toMatchObject({ action: "record_poi_once", name: "Freshway Superstore", applePlaceId: "ISYNTHETICSTORE" });
+    });
+
+    it("reports the confident venue once for an unsaved stay, and not when the server already has it", async () => {
+      native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
+      await render(stay({ matched: false }));
+      expect(onVenueSuggested.mock.calls).toEqual([["20000000-0000-4000-8000-000000000001", "ISYNTHETICSTORE"]]);
+      await act(async () => tree!.update(editor(stay({ matched: false }))));
+      expect(onVenueSuggested).toHaveBeenCalledTimes(1);
+
+      act(() => tree!.unmount());
+      onVenueSuggested = vi.fn();
+      const known = { ...stay({ matched: false }), venue: { confirmedPlaceId: null, suggestedPlaceId: "ISYNTHETICSTORE", historyPlaceIds: [] } } as LocationReviewEvidenceDto;
+      await render(known);
+      expect(onVenueSuggested).not.toHaveBeenCalled();
+    });
+
+    it("never reports a venue for a stay at a saved place", async () => {
+      native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
+      await render(stay({ matched: true }));
+      expect(onVenueSuggested).not.toHaveBeenCalled();
+    });
   });
 });

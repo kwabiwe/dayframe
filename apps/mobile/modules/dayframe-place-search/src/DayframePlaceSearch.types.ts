@@ -69,6 +69,8 @@ export type NearbyPointOfInterest = {
   offsetEastMeters?: number | null;
   offsetNorthMeters?: number | null;
   source?: "nearby" | "contextual" | "area" | null;
+  /** Apple's Place ID (iOS 18+): what Dayframe may keep for a picked or suggested venue, never its name. */
+  placeId?: string | null;
 };
 
 export type NearbyPointOfInterestResult = {

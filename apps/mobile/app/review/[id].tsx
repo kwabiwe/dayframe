@@ -24,6 +24,7 @@ import {
   createCategory,
   fetchBootstrap,
   normaliseLocationReviewRequestError,
+  reportVenueSuggestion,
   resolveLocationReviewItem,
   type MobileBootstrap,
   type MobileReviewItem
@@ -501,6 +502,7 @@ export default function LocationReviewDetailScreen() {
           isFocused={isFocused}
           onCreateActivity={createActivity}
           onResolve={perform}
+          onVenueSuggested={(reviewItemId, placeId) => void reportVenueSuggestion(reviewItemId, placeId)}
           places={data?.places ?? []}
           recentActivityIds={recentActivities}
           reviewItem={reviewItem}

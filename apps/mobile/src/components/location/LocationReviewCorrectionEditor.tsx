@@ -102,6 +102,7 @@ export function LocationReviewCorrectionEditor({
   isFocused,
   onCreateActivity,
   onResolve,
+  onVenueSuggested,
   places,
   recentActivityIds = [],
   reviewItem,
@@ -115,6 +116,8 @@ export function LocationReviewCorrectionEditor({
   /** All activities' Create: resolves to the new activity's id, or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
+  /** The ranker is confident about this Apple venue for the unsaved stay (location v3 PR 8). */
+  onVenueSuggested?: (reviewItemId: string, placeId: string) => void;
   places: Place[];
   /** Activities used most recently first, for the chips and the picker's Recent. */
   recentActivityIds?: readonly string[];
@@ -412,6 +415,20 @@ export function LocationReviewCorrectionEditor({
     };
   }, [isFocused, nearbyProvider, visitLatitude, visitLongitude]);
 
+  // The venue the ranker is confident about goes to the server as an Apple Place ID (location v3
+  // PR 8), once per card, only for an unsaved stay and only when it differs from the stored one.
+  const reportedSuggestionRef = useRef<string | null>(null);
+  const onVenueSuggestedRef = useRef(onVenueSuggested);
+  onVenueSuggestedRef.current = onVenueSuggested;
+  const suggestedVenue = nearbyState.places.find((place) => place.suggested && place.placeId) ?? null;
+  useEffect(() => {
+    if (evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId) return;
+    const key = `${evidence.reviewItemId}:${suggestedVenue.placeId}`;
+    if (reportedSuggestionRef.current === key || evidence.venue?.suggestedPlaceId === suggestedVenue.placeId) return;
+    reportedSuggestionRef.current = key;
+    onVenueSuggestedRef.current?.(evidence.reviewItemId, suggestedVenue.placeId);
+  }, [baselinePlaceId, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, suggestedVenue?.placeId]);
+
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(
     nearbyState.places,
@@ -625,7 +642,9 @@ export function LocationReviewCorrectionEditor({
         name: result.name?.trim() || result.title.trim(),
         formattedAddress: result.formattedAddress || result.subtitle,
         latitude: result.latitude,
-        longitude: result.longitude
+        longitude: result.longitude,
+        // Kept so the server can remember the venue by Apple's ID, never its name (PR 8).
+        applePlaceId: place.placeId ?? null
       });
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
@@ -747,7 +766,7 @@ export function LocationReviewCorrectionEditor({
     const edit = parsedEdit();
     if (!edit) return;
     const action: LocationReviewAction = newPlace && !saveForFuture
-      ? { action: "record_poi_once", name: newPlace.name, edit }
+      ? { action: "record_poi_once", name: newPlace.name, edit, ...(newPlace.applePlaceId ? { applePlaceId: newPlace.applePlaceId } : {}) }
       : buildLocationReviewResolutionAction({
           baselinePlaceId,
           edit,

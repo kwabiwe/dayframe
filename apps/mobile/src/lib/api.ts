@@ -1653,6 +1653,37 @@ export async function fetchLocationReviewEvidence(
   return body;
 }
 
+/**
+ * Tell the server which Apple venue the ranker was confident about for an open card's unsaved stay
+ * (location v3 PR 8, design §6.3): its Place ID only. Best effort and foreground only, while
+ * Location evidence is on screen; any failure (offline, a decided card, another account) is
+ * dropped quietly, since the suggestion is recomputed the next time the stay is opened.
+ */
+export async function reportVenueSuggestion(reviewItemId: string, placeId: string): Promise<boolean> {
+  try {
+    const session = await readAuthenticatedSessionSnapshot();
+    if (session.status !== "authenticated") return false;
+    const { response } = await mobileJsonRequest<null>(
+      `${DAYFRAME_API_BASE}/api/review/${encodeURIComponent(reviewItemId)}/venue`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.snapshot.token}` },
+        body: JSON.stringify({ placeId })
+      },
+      {
+        timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
+        timeoutMessage: "Saving the suggested place took too long.",
+        isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+        handleAuthentication: false,
+        validate: () => null
+      }
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export function normaliseLocationReviewRequestError(
   error: unknown,
   kind: "evidence" | "action"
