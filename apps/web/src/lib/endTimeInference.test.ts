@@ -134,4 +134,13 @@ describe("typed edits stay within 24 h (Codex r1 on #504)", () => {
       stoppedAt: new Date(2026, 7, 3, 0, 30).toISOString()
     });
   });
+
+  it("never lets a Start carry a blank or unreadable End (Codex r4 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    for (const end of ["", "99:99"]) {
+      const start = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "21:3");
+      const edit = updateTimelineInlineTime(start, hour, "finish", end);
+      expect(() => buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4)), end || "blank").toThrow();
+    }
+  });
 });

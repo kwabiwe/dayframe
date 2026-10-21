@@ -5,6 +5,7 @@ import {
   enforceTypedBlockLimit,
   inferTypedFinishDate,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
+  isCompleteCalendarEntryCompactTimeInput,
   keepTypedMeridiemTime,
   normalizeCalendarEntryCompactTypedTimes,
   trySynchronizeCalendarEntryCompactDraft,
@@ -148,8 +149,13 @@ export function buildTimelineInlineSavePlan(
   });
 }
 
+/** A readable End, so a Start past it may carry it; a blank or invalid End stays an error (Codex r4 on #504). */
+function hasReadableFinish(draft: CalendarEntryCompactDraft) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(draft.stoppedAtDate) && isCompleteCalendarEntryCompactTimeInput(draft.stoppedAtTime);
+}
+
 function committedInlineDraft(edit: TimelineInlineEditDraft, draft: CalendarEntryCompactDraft): CalendarEntryCompactDraft {
-  if (edit.field !== "time" || !edit.sourceStoppedAt || !edit.dirty.startedAtTime) return draft;
+  if (edit.field !== "time" || !edit.sourceStoppedAt || !edit.dirty.startedAtTime || !hasReadableFinish(draft)) return draft;
   const source = { originalStartedAt: edit.sourceStartedAt, originalStoppedAt: edit.sourceStoppedAt };
   if (trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "finish" }, owner: "finish" })) return draft;
   return trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "start" }, owner: "start" }) ?? draft;
@@ -181,7 +187,7 @@ function updateTimelineInlineTemporalEdge(
       })
     : null;
   // A Start typed past End moves End forward, keeping the duration (owner, 21 Oct 2026).
-  const synchronized = fixedEdges ?? (canSynchronize && edge === "start" && edit.sourceStoppedAt
+  const synchronized = fixedEdges ?? (canSynchronize && edge === "start" && edit.sourceStoppedAt && hasReadableFinish(nextDraft)
     ? trySynchronizeCalendarEntryCompactDraft({
         draft: { ...nextDraft, temporalOwner: "start" },
         originalStartedAt: edit.sourceStartedAt,
