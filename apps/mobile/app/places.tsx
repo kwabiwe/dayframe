@@ -669,7 +669,8 @@ export default function PlacesScreen() {
       AccessibilityInfo.announceForAccessibility(searchAnnouncement);
     }, 700);
     return () => clearTimeout(timer);
-  }, [searchAnnouncement]);
+    // Every edit restarts the pause, even one that keeps the same result (Codex r2 on #521).
+  }, [searchAnnouncement, search]);
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
   const pageState = placesPageState(Boolean(data), Boolean(loadFailure));

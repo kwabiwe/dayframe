@@ -1461,9 +1461,11 @@ describe("Places search, sections and last visit on iPhone (location v3 PR 16c)"
     const shown = () => texts().join(" | ");
 
     it("lets only the newest list's visits land, also after a change's refresh", async () => {
+      // Every read the mount starts waits on the same answer.
       const first = deferred<unknown>();
-      mocks.fetchPlaceVisits.mockReturnValueOnce(first.promise);
+      mocks.fetchPlaceVisits.mockReturnValue(first.promise);
       await mountFor(ACCOUNT_A, [studio]);
+      const settledCalls = mocks.fetchPlaceVisits.mock.calls.length;
       // A restore is accepted; its refresh applies a newer list and reads visits again.
       mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
       mocks.fetchArchivedPlaces.mockResolvedValue([]);
@@ -1471,7 +1473,8 @@ describe("Places search, sections and last visit on iPhone (location v3 PR 16c)"
       mocks.fetchPlaceVisits.mockResolvedValueOnce([]);
       await act(async () => { restore(archivedGym); });
       await flush();
-      expect(mocks.fetchPlaceVisits.mock.calls.length).toBeGreaterThanOrEqual(2);
+      // The change's own list started a visits read of its own.
+      expect(mocks.fetchPlaceVisits.mock.calls.length).toBe(settledCalls + 1);
       // The first read's late answer is for an older list: it never lands.
       await act(async () => { first.resolve([visit(studio.id), visit(gym.id)]); });
       await flush();
@@ -1482,14 +1485,16 @@ describe("Places search, sections and last visit on iPhone (location v3 PR 16c)"
       mocks.fetchPlaceVisits.mockResolvedValue([visit(studio.id)]);
       await mountFor(ACCOUNT_A, [studio]);
       expect(shown()).toContain("Last visit today");
+      // B, then A again in a new lifetime, with their own visits still out (never answered).
+      mocks.fetchPlaceVisits.mockReturnValue(new Promise(() => undefined));
       for (const [owner, epoch] of [[ACCOUNT_B, 2], [ACCOUNT_A, 3]] as const) {
         mocks.owner = owner;
         mocks.epoch = epoch;
         mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(owner, [studio]));
-        mocks.fetchPlaceVisits.mockRejectedValueOnce(new Error("offline"));
         await act(async () => { await pullToRefresh(); });
         await flush();
       }
+      // A's earlier lifetime's lines never show on its new lifetime's list.
       expect(shown()).not.toContain("Last visit");
     });
 
@@ -1527,6 +1532,20 @@ describe("Places search, sections and last visit on iPhone (location v3 PR 16c)"
       await act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)("cedar"); });
       await act(async () => { vi.advanceTimersByTime(800); });
       expect(mocks.announce).toHaveBeenLastCalledWith("1 place matches.");
+    });
+
+    it("restarts the pause on every edit, even one that keeps the result (Codex r2 on #521)", async () => {
+      await mountFor(ACCOUNT_A, many);
+      vi.useFakeTimers();
+      mocks.announce.mockClear();
+      const type = (value: string) => act(async () => { (all("TextInput")[0].props.onChangeText as (value: string) => void)(value); });
+      await type("ce");
+      await act(async () => { vi.advanceTimersByTime(650); });
+      await type("ced");
+      await act(async () => { vi.advanceTimersByTime(650); });
+      expect(mocks.announce).not.toHaveBeenCalled();
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(mocks.announce.mock.calls).toEqual([["1 place matches."]]);
     });
   });
 });
