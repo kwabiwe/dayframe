@@ -154,6 +154,19 @@ export function restoredNotRefreshedMessage(name: string) {
 }
 
 /**
+ * Said (and announced) when a restore's list arrived but monitoring from it failed: the place is
+ * back, but its visits aren't noticed until a retry succeeds (Codex r4 on #508).
+ */
+export function restoredNotMonitoredMessage(name: string) {
+  return `${name} is restored, but visits there aren't noticed yet. Dayframe will keep trying.`;
+}
+
+/** Announced once a restore that was announced with a warning is monitored after all. */
+export function restoredMonitoredMessage(name: string) {
+  return `${name} restored. Visits there are noticed again.`;
+}
+
+/**
  * Restored places still waiting for a refreshed list, as rows under Saved places (never in neither
  * list): only those the shown list doesn't already have.
  */

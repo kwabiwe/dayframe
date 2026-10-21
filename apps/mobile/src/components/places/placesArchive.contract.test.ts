@@ -11,7 +11,10 @@ describe("Places › Archived on the page (Codex r1 on #508)", () => {
   it("settles a restore with the refresh's outcome, in the same render that applies its list", () => {
     const refresh = between("async function refreshAfterPlaceChange(", "const places = data?.places");
     // Settled first, and nothing applied or said when it no longer belongs to the account shown (Codex r2 on #508).
-    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("stale"\)\) return;\s*setStatusMessage\(options\.prefix\);/);
+    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("stale"\)\) return;\s*\/\/[^\n]*\n\s*const staleMessage = options\.successMessage\?\.\(\);/);
+    // "restored" only once monitored: an unresolved restore keeps its honest line (Codex r4 on #508).
+    expect(refresh).toContain("setStatusMessage(successMessage ?? (bootstrapHasPlace ?");
+    expect(places).toContain("restoreMonitoringUnresolved = archive.restoreMonitoringUnresolved");
     expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("applied"\)\) return;\s*setData\(reconciled\);/);
     expect(refresh).toContain('if (options.onSettled && !options.onSettled("failed")) return;');
     expect(refresh).toContain("const failureMessage = options.failureMessage?.();");

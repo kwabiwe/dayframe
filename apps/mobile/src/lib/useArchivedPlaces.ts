@@ -4,15 +4,22 @@ import { createArchivedReadGate } from "./activitiesPage";
 import { AuthRequiredError, fetchArchivedPlaces, setPlaceArchived, type MobileArchivedPlace } from "./api";
 import { friendlyMobileErrorMessage } from "./friendlyError";
 import { currentMobileAccountEpoch, mobileAccountKey, readActiveMobileAccount } from "./mobileAccount";
-import { createPlaceRestoreGate, restoredNotRefreshedMessage, type RestoreRefreshOutcome } from "./placesPage";
+import {
+  createPlaceRestoreGate,
+  restoredNotMonitoredMessage,
+  restoredNotRefreshedMessage,
+  type RestoreRefreshOutcome
+} from "./placesPage";
 
 type ArchivedPlace = { id: string; name: string };
 /**
- * A restored place whose monitoring hasn't been refreshed from a list that has it (Codex r3 on
- * #508). `waiting`: its own refresh didn't apply, so it shows under Saved places (when the list
- * shown lacks it) and the page retries until monitoring is refreshed.
+ * A restored place whose monitoring hasn't been refreshed from a list that has it (Codex r3/r4 on
+ * #508). Every one keeps the page retrying until monitoring is refreshed, whatever went wrong.
+ * `waiting` is presentation only: its own refresh didn't apply, so it shows under Saved places
+ * (when the list shown lacks it). `warned`: it was announced with a warning, so its recovery is
+ * announced too.
  */
-type UnmonitoredRestore = ArchivedPlace & { waiting: boolean };
+type UnmonitoredRestore = ArchivedPlace & { waiting: boolean; warned: boolean };
 
 /**
  * Places › Archived on iPhone (location v3 PR 15b, PRD D19 A10): the archived list, its reads and
@@ -21,9 +28,11 @@ type UnmonitoredRestore = ArchivedPlace & { waiting: boolean };
  * (Codex r1 on #508). Restore is one request at a time through a synchronous gate that only the
  * request holding it releases. Every accepted restore is tracked until monitoring has been refreshed
  * from a list that has the place, for its account (`unmonitoredRestoredIn` / `settleMonitoredRestored`),
- * whichever read brings it; one whose own refresh did not land also waits under Saved places
- * (`pendingRestored`) and keeps the page retrying (`restoreMonitoringWaiting`), so the place is never
- * in neither list and is never left unmonitored (Codex r1–r3 on #508).
+ * whichever read brings it, and the page retries while any is unresolved (`restoreMonitoringUnresolved`);
+ * one whose own refresh did not land also waits under Saved places (`pendingRestored`), so the place
+ * is never in neither list and is never left unmonitored. A restore is announced as done only once it
+ * is monitored; until then it is announced with the warning that holds, and its recovery is
+ * announced when it lands (Codex r1–r4 on #508).
  */
 export function useArchivedPlaces({
   onSignedOut,
@@ -45,6 +54,9 @@ export function useArchivedPlaces({
   const [problem, setProblem] = useState<{ accountKey: string; message: string } | null>(null);
   const [pending, setPendingState] = useState<{ accountKey: string; places: UnmonitoredRestore[] } | null>(null);
   const pendingRef = useRef(pending);
+  // Restores settled because a later list no longer had the place (archived or deleted elsewhere
+  // since), by account: they are never announced or shown as restored (owner follow-up on #508).
+  const goneRef = useRef(new Set<string>());
   // Only the newest archived read applies, and none that was out while a restore or an archive landed.
   const reads = useRef(createArchivedReadGate()).current;
   const gate = useRef(createPlaceRestoreGate()).current;
@@ -93,16 +105,45 @@ export function useArchivedPlaces({
 
   /**
    * Monitoring was refreshed for `accountKey` from a list that has `ids`: they are settled. Returns
-   * true when one of them was waiting (its "couldn't refresh" warning no longer holds).
+   * the names of those announced with a warning, whose recovery the page announces (and whose
+   * warning line it clears).
    */
   const settleMonitoredRestored = useCallback((accountKey: string, ids: readonly string[]) => {
     const current = pendingRef.current;
-    if (!current || current.accountKey !== accountKey || ids.length === 0) return false;
+    if (!current || current.accountKey !== accountKey || ids.length === 0) return [];
     const settled = new Set(ids);
-    const wasWaiting = current.places.some((place) => settled.has(place.id) && place.waiting);
+    const warned = current.places.filter((place) => settled.has(place.id) && place.warned).map((place) => place.name);
     const left = current.places.filter((place) => !settled.has(place.id));
     setPending(left.length > 0 ? { accountKey, places: left } : null);
-    return wasWaiting;
+    return warned;
+  }, [setPending]);
+
+  /**
+   * A list for `accountKey` that started after its restores were accepted (the page only applies
+   * those) lacks some of them: the server no longer has them as active places (archived or deleted
+   * elsewhere since), so there is nothing to monitor. They settle silently; returns their ids so
+   * the page clears a warning line for them. Never announced as restored.
+   */
+  const settleRestoresAbsentFrom = useCallback((accountKey: string, places: readonly { id: string }[]) => {
+    const current = pendingRef.current;
+    if (!current || current.accountKey !== accountKey) return [];
+    const listed = new Set(places.map((place) => place.id));
+    const gone = current.places.filter((place) => !listed.has(place.id)).map((place) => place.id);
+    if (gone.length === 0) return [];
+    for (const id of gone) goneRef.current.add(`${accountKey}|${id}`);
+    const left = current.places.filter((place) => listed.has(place.id));
+    setPending(left.length > 0 ? { accountKey, places: left } : null);
+    return gone;
+  }, [setPending]);
+
+  /** Whether the restore of `id` settled because the place is gone again (for the account shown). */
+  const restoreGone = useCallback((id: string) => goneRef.current.has(`${shownAccountRef.current}|${id}`), []);
+
+  /** The restore of `id` was announced with a warning: its recovery will be announced too. */
+  const markWarned = useCallback((accountKey: string, id: string) => {
+    const current = pendingRef.current;
+    if (!current || current.accountKey !== accountKey || !current.places.some((place) => place.id === id)) return;
+    setPending({ accountKey, places: current.places.map((place) => (place.id === id ? { ...place, warned: true } : place)) });
   }, [setPending]);
 
   /** Whether the restore of `id` is still unmonitored for the account shown. */
@@ -160,8 +201,9 @@ export function useArchivedPlaces({
       // doesn't come, the place waits under Saved places as restored until a later read lands.
       reads.changed();
       // Tracked from now until a list with the place has refreshed monitoring, whichever read brings it.
+      goneRef.current.delete(`${accountKey}|${place.id}`);
       const tracked = pendingRef.current?.accountKey === accountKey ? pendingRef.current.places : [];
-      setPending({ accountKey, places: [...tracked.filter((item) => item.id !== place.id), { id: place.id, name: place.name, waiting: false }] });
+      setPending({ accountKey, places: [...tracked.filter((item) => item.id !== place.id), { id: place.id, name: place.name, waiting: false, warned: false }] });
       const settledWith: { outcome: RestoreRefreshOutcome | null } = { outcome: null };
       await refreshRef.current(place, (settled) => {
         // Checked synchronously before anything changes: the same account lifetime, still shown.
@@ -185,15 +227,23 @@ export function useArchivedPlaces({
       // Never settled: the session ended during the refresh (the page is leaving for sign-in), or
       // the restore no longer belongs to the account shown.
       if (settledWith.outcome === null || !(await stillOurs())) return;
-      // The warning only while it still holds (another read may have brought the place back meanwhile).
-      AccessibilityInfo.announceForAccessibility(settledWith.outcome === "failed" && restoreUnresolved(place.id)
-        ? restoredNotRefreshedMessage(place.name)
-        : `${place.name} restored.`);
+      // Done only once monitored (the page awaits monitoring from an applied list before this). Until
+      // then, the warning that holds, and its recovery is announced when it lands (Codex r4 on #508).
+      if (restoreGone(place.id)) {
+        // Gone again before its monitoring finished: nothing was restored for good, so nothing is said.
+      } else if (restoreUnresolved(place.id)) {
+        markWarned(accountKey, place.id);
+        AccessibilityInfo.announceForAccessibility(settledWith.outcome === "failed"
+          ? restoredNotRefreshedMessage(place.name)
+          : restoredNotMonitoredMessage(place.name));
+      } else {
+        AccessibilityInfo.announceForAccessibility(`${place.name} restored.`);
+      }
       void load();
     } finally {
       gate.release(token);
     }
-  }, [gate, load, reads, restoreUnresolved, setPending]);
+  }, [gate, load, markWarned, reads, restoreGone, restoreUnresolved, setPending]);
 
   const shown = <T extends { accountKey: string }>(value: T | null) => (value && value.accountKey === shownAccountKey ? value : null);
   const shownPending = shown(pending)?.places ?? [];
@@ -203,13 +253,15 @@ export function useArchivedPlaces({
     problem: shown(problem)?.message ?? null,
     /** Restored places whose own refresh didn't apply and that aren't monitored yet (shown as waiting). */
     pendingRestored: shownPending.filter((place) => place.waiting).map(({ id, name }) => ({ id, name })),
-    /** True while such a place exists: the page keeps retrying until monitoring is refreshed. */
-    restoreMonitoringWaiting: shownPending.some((place) => place.waiting),
+    /** True while any restore is unmonitored, whatever the rows show: the page keeps retrying. */
+    restoreMonitoringUnresolved: shownPending.length > 0,
     load,
     changed,
     restore,
+    restoreGone,
     restoreUnresolved,
     settleMonitoredRestored,
+    settleRestoresAbsentFrom,
     unmonitoredRestoredIn
   };
 }

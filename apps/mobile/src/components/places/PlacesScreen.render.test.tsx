@@ -319,3 +319,78 @@ describe("Places › Archived › Restore monitoring (Codex r3 on #508)", () => 
     expect(mocks.fetchBootstrap.mock.calls.length).toBe(reads);
   });
 });
+
+describe("Places › Archived › Restore when monitoring fails (Codex r4 on #508)", () => {
+  it("retries monitoring that failed after its list applied, and says so honestly until it lands", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // The restore's own refresh applies a list with the place, but monitoring from it fails.
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    mocks.refreshGeofences.mockRejectedValueOnce(new Error("location unavailable"));
+    mocks.announce.mockClear();
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(monitoredWith(gym.id)).toHaveLength(1);
+    // Not announced or shown as complete while visits there aren't noticed.
+    expect(mocks.announce).not.toHaveBeenCalledWith("Example Gym restored.");
+    expect(mocks.announce).toHaveBeenCalledWith("Example Gym is restored, but visits there aren't noticed yet. Dayframe will keep trying.");
+    expect(texts().join(" ")).toContain("visits there aren't noticed yet");
+    // Monitoring recovers: a retry refreshes it and says so once.
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    await flush();
+    expect(monitoredWith(gym.id).length).toBeGreaterThan(1);
+    expect(mocks.announce).toHaveBeenCalledWith("Example Gym restored. Visits there are noticed again.");
+    expect(texts().join(" ")).not.toContain("aren't noticed yet");
+    const attempts = mocks.refreshGeofences.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(mocks.refreshGeofences.mock.calls.length).toBe(attempts);
+  });
+});
+
+describe("Places › Archived › Restore of a place that is gone again (owner follow-up on #508)", () => {
+  it("settles silently when a read started after the restore lacks the place", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // The restore's own refresh fails: the place waits, with its warning, and retries start.
+    mocks.fetchBootstrap.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(waitingRow(gym.id)).toHaveLength(1);
+    expect(texts().join(" ")).toContain("Places couldn't refresh");
+    // Archived (or deleted) elsewhere since: a pull started after the restore no longer has it.
+    mocks.announce.mockClear();
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(waitingRow(gym.id)).toHaveLength(0);
+    expect(texts().join(" ")).not.toContain("Example Gym");
+    expect(mocks.announce).not.toHaveBeenCalledWith(expect.stringContaining("restored"));
+    // Nothing left to monitor: no more retries.
+    const reads = mocks.fetchBootstrap.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(mocks.fetchBootstrap.mock.calls.length).toBe(reads);
+  });
+
+  it("says nothing of a restore whose own refresh no longer has the place, and stops", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // Archived again elsewhere before the restore's own refresh read the list.
+    mocks.fetchBootstrap.mockResolvedValue(bootstrapFor(ACCOUNT_A, [studio]));
+    mocks.announce.mockClear();
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(waitingRow(gym.id)).toHaveLength(0);
+    expect(texts().join(" ")).not.toContain("Example Gym");
+    expect(mocks.announce).not.toHaveBeenCalled();
+    const reads = mocks.fetchBootstrap.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(mocks.fetchBootstrap.mock.calls.length).toBe(reads);
+  });
+});
+

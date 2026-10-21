@@ -1,6 +1,7 @@
 import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Modal,
   Pressable,
@@ -37,6 +38,8 @@ import {
   pendingRestoredRows,
   placeRowSubtitle,
   placesPageState,
+  restoredMonitoredMessage,
+  restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
   subscribeDeletedPlaces,
   takeDeletedPlaces,
@@ -110,7 +113,7 @@ export default function PlacesScreen() {
   // The status line a failed pull-to-refresh showed, cleared by the next read that lands.
   const refreshFailureMessage = useRef<string | null>(null);
   // The "restored, but Places couldn't refresh" line, cleared when its waiting place settles.
-  const restoreWarning = useRef<string | null>(null);
+  const restoreWarning = useRef<{ placeId: string; message: string } | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
   // One Home/Work change at a time across the page (a second sheet can't open mid-save).
@@ -134,14 +137,37 @@ export default function PlacesScreen() {
       changeEpoch.current += 1;
       return refreshAfterPlaceChange({
         prefix: `${place.name} restored.`,
-        // The warning only while it still holds: a read may have brought the place back meanwhile.
-        failureMessage: () => (archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name) : `${place.name} restored.`),
+        // The warning only while it still holds: a read may have brought the place back meanwhile;
+        // and "restored" only once its visits are noticed again (Codex r4 on #508).
+        // Nothing at all (null) when it is gone again: archived or deleted elsewhere since.
+        failureMessage: () => (archive.restoreGone(place.id) ? null
+          : archive.restoreUnresolved(place.id) ? restoredNotRefreshedMessage(place.name) : `${place.name} restored.`),
+        successMessage: () => (archive.restoreGone(place.id) ? null
+          : archive.restoreUnresolved(place.id) ? restoredNotMonitoredMessage(place.name) : `${place.name} restored.`),
+        restoredPlaceId: place.id,
         onSettled: settle
       });
     },
     shownAccountKey
   });
-  const { changed: archivedChanged, load: loadArchived, settleMonitoredRestored, unmonitoredRestoredIn } = archive;
+  const { changed: archivedChanged, load: loadArchived, settleMonitoredRestored, settleRestoresAbsentFrom, unmonitoredRestoredIn } = archive;
+
+  /** The warning line for these restores no longer holds: it clears (only if it still shows). */
+  const clearRestoreWarning = useCallback((ids: readonly string[]) => {
+    const warning = restoreWarning.current;
+    if (!warning || !ids.includes(warning.placeId)) return;
+    restoreWarning.current = null;
+    setStatusMessage((current) => (current === warning.message ? null : current));
+  }, []);
+
+  /**
+   * An applied list (so one that started after every restore it could settle was accepted: older
+   * reads are dropped by `changeEpoch`) that lacks a restored place: the place isn't active on the
+   * server any more, so its restore settles silently, with its waiting row, warning and retries.
+   */
+  const settleGoneRestores = useCallback((list: MobileBootstrap) => {
+    clearRestoreWarning(settleRestoresAbsentFrom(listAccountKey(list), list.places));
+  }, [clearRestoreWarning, settleRestoresAbsentFrom]);
 
   /**
    * A check for the account lifetime a change started in (Codex r3 on #508): true while the page is
@@ -160,7 +186,9 @@ export default function PlacesScreen() {
 
   /**
    * Monitoring refreshed from `list`; restored places it has (and were not yet monitored) settle
-   * once it has finished, for that account and lifetime only, clearing their warning if it shows.
+   * once it has finished, for that account and lifetime only. A failure leaves them unresolved, so
+   * the retry goes on. One that was announced with a warning has its warning line cleared and its
+   * recovery announced.
    */
   const monitorList = useCallback(async (list: MobileBootstrap) => {
     const key = listAccountKey(list);
@@ -172,11 +200,10 @@ export default function PlacesScreen() {
     const shown = dataRef.current;
     if (!refreshed || restored.length === 0 || !mounted.current || currentMobileAccountEpoch() !== epoch
       || !shown || listAccountKey(shown) !== key) return;
-    if (!settleMonitoredRestored(key, restored)) return;
-    const warning = restoreWarning.current;
-    restoreWarning.current = null;
-    if (warning) setStatusMessage((current) => (current === warning ? null : current));
-  }, [settleMonitoredRestored, unmonitoredRestoredIn]);
+    const recovered = settleMonitoredRestored(key, restored);
+    clearRestoreWarning(restored);
+    for (const name of recovered) AccessibilityInfo.announceForAccessibility(restoredMonitoredMessage(name));
+  }, [clearRestoreWarning, settleMonitoredRestored, unmonitoredRestoredIn]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -196,6 +223,7 @@ export default function PlacesScreen() {
       setLoadFailure(null);
       // A restored place this list brings back is monitored from it, whichever read lands first
       // (its own refresh may still be out, or have failed); its warning clears once that is done.
+      settleGoneRestores(bootstrap);
       if (unmonitoredRestoredIn(listAccountKey(bootstrap), bootstrap.places).length > 0) void monitorList(bootstrap);
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
@@ -221,7 +249,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, [loadArchived, monitorList, unmonitoredRestoredIn]);
+  }, [loadArchived, monitorList, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -372,8 +400,12 @@ export default function PlacesScreen() {
     removeLearnedPlaceId?: string;
     /** Places as this page now shows them, for monitoring when the fresh read fails. */
     fallbackPlaces?: MobilePlace[];
-    /** The status line when the refresh fails (instead of the generic "Pull to refresh" one). */
-    failureMessage?: () => string;
+    /** The status line when the refresh fails (instead of the generic "Pull to refresh" one); null says nothing. */
+    failureMessage?: () => string | null;
+    /** The status line once the list and its monitoring are done (instead of `prefix`); null says nothing. */
+    successMessage?: () => string | null;
+    /** The restored place a warning line from this refresh is about (it clears when that settles). */
+    restoredPlaceId?: string;
     /**
      * Told how the refresh ended, before anything else happens: in the same render that applies its
      * list ("applied"), or when a newer change overtook it ("stale") or it failed. A restored row
@@ -382,6 +414,12 @@ export default function PlacesScreen() {
      */
     onSettled?: (outcome: RestoreRefreshOutcome) => boolean;
   }) {
+    /** A restore's warning line (anything but the plain prefix) is remembered with its place. */
+    const rememberRestoreWarning = (message: string | undefined) => {
+      if (message && message !== options.prefix && options.restoredPlaceId) {
+        restoreWarning.current = { placeId: options.restoredPlaceId, message };
+      }
+    };
     const epoch = changeEpoch.current;
     // Every write below an await first checks the change still belongs to the account shown.
     const still = lifetimeCheck();
@@ -391,18 +429,27 @@ export default function PlacesScreen() {
       if (!still() || listAccountKey(bootstrap) !== listAccountKey(dataRef.current ?? bootstrap)) return;
       if (epoch !== changeEpoch.current) {
         if (options.onSettled && !options.onSettled("stale")) return;
-        setStatusMessage(options.prefix);
+        // A newer change's refresh will bring the list; until a restore is monitored it says so.
+        const staleMessage = options.successMessage?.();
+        if (staleMessage === null) return;
+        rememberRestoreWarning(staleMessage);
+        setStatusMessage(staleMessage ?? options.prefix);
         return;
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
       if (options.onSettled && !options.onSettled("applied")) return;
       setData(reconciled);
-      // Monitoring from this list, settling any restored place it has.
+      // A restored place this list lacks is gone again; monitoring from it settles any it has.
+      settleGoneRestores(reconciled);
       await monitorList(reconciled);
       if (!still()) return;
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
-      setStatusMessage(bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`);
+      const successMessage = options.successMessage?.();
+      if (successMessage === null) return;
+      // A restore whose monitoring failed says so, and the line clears once a retry monitors it.
+      rememberRestoreWarning(successMessage);
+      setStatusMessage(successMessage ?? (bootstrapHasPlace ? options.prefix : `${options.prefix} It may take a moment to show everywhere.`));
     } catch (error) {
       if (error instanceof AuthRequiredError) {
         router.replace("/");
@@ -417,8 +464,9 @@ export default function PlacesScreen() {
         if (!still()) return;
       }
       const failureMessage = options.failureMessage?.();
+      if (failureMessage === null) return;
       // A restore's warning is remembered, so it clears once the restored place is monitored.
-      if (failureMessage && failureMessage !== options.prefix) restoreWarning.current = failureMessage;
+      rememberRestoreWarning(failureMessage);
       setStatusMessage(failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
@@ -491,14 +539,15 @@ export default function PlacesScreen() {
   }
 
   // A restore accepted while Places couldn't refresh waits under Saved places (when the list shown
-  // lacks it). Whatever the rows show, the page retries (5 s, doubling, at most a minute apart; focus
+  // lacks it). While any restore is unmonitored, whatever the rows show and whether its list or
+  // its monitoring failed (Codex r4 on #508), the page retries (5 s, doubling, at most a minute apart; focus
   // and pull-to-refresh also count) until a list with the place has refreshed monitoring (Codex r3).
   const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);
   const hasPendingRestored = pendingRestored.length > 0;
-  const restoreMonitoringWaiting = archive.restoreMonitoringWaiting;
+  const restoreMonitoringUnresolved = archive.restoreMonitoringUnresolved;
   const [restoreRetries, setRestoreRetries] = useState(0);
   useEffect(() => {
-    if (!restoreMonitoringWaiting) {
+    if (!restoreMonitoringUnresolved) {
       setRestoreRetries(0);
       return;
     }
@@ -509,7 +558,7 @@ export default function PlacesScreen() {
       });
     }, delay);
     return () => clearTimeout(retry);
-  }, [load, restoreMonitoringWaiting, restoreRetries]);
+  }, [load, restoreMonitoringUnresolved, restoreRetries]);
 
   return (
     <SafeAreaView style={styles.safeArea}>

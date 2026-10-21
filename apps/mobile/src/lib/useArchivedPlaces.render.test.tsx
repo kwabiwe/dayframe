@@ -51,6 +51,10 @@ async function mount(refresh: Refresh, account: string | null = ACCOUNT_A) {
 
 /** A refresh that settles with `outcome`, as the page's refreshAfterPlaceChange does. */
 const settlingWith = (outcome: "applied" | "stale" | "failed"): Refresh => async (_place, settle) => { settle(outcome); };
+/** An applied refresh whose monitoring also finished, as the page's does before it resolves. */
+const appliedAndMonitored: Refresh = async (place, settle) => {
+  if (settle("applied")) latest.settleMonitoredRestored(ACCOUNT_A, [place.id]);
+};
 /** A refresh that settles only when the test says so, recording whether the page may go on. */
 function heldRefresh() {
   const held: { settle?: (outcome: "applied" | "stale" | "failed") => boolean; done?: () => void } = {};
@@ -74,7 +78,7 @@ afterEach(() => {
 describe("useArchivedPlaces (location v3 PR 15b, PRD D19 A10)", () => {
   it("restores a place: it leaves Archived as the refreshed list applies, and is announced", async () => {
     mocks.restore.mockResolvedValue({ ...gym, archivedAt: null });
-    await mount(settlingWith("applied"));
+    await mount(appliedAndMonitored);
     expect(latest.places.map((place) => place.id)).toEqual([gym.id, studio.id]);
     mocks.list.mockResolvedValue([studio]);
     await act(async () => { await latest.restore(gym); });
@@ -94,30 +98,55 @@ describe("useArchivedPlaces (location v3 PR 15b, PRD D19 A10)", () => {
     expect(latest.places.map((place) => place.id)).toEqual([studio.id]);
     expect(latest.pendingRestored).toEqual([{ id: gym.id, name: "Example Gym" }]);
     expect(mocks.announce).toHaveBeenCalledWith(expect.stringContaining("Example Gym is restored, but Places couldn't refresh"));
-    expect(latest.restoreMonitoringWaiting).toBe(true);
+    expect(latest.restoreMonitoringUnresolved).toBe(true);
     // Only a list of this account that has the place counts, and only once monitoring is refreshed.
     expect(latest.unmonitoredRestoredIn("ws-1:user-b", [{ id: gym.id }])).toEqual([]);
     expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: studio.id }])).toEqual([]);
     expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: studio.id }, { id: gym.id }])).toEqual([gym.id]);
-    let wasWaiting = false;
-    act(() => { wasWaiting = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
-    expect(wasWaiting).toBe(true);
+    // It was announced with a warning, so its recovery is named for the page to announce.
+    let recovered: string[] = [];
+    act(() => { recovered = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
+    expect(recovered).toEqual(["Example Gym"]);
     expect(latest.pendingRestored).toEqual([]);
-    expect(latest.restoreMonitoringWaiting).toBe(false);
+    expect(latest.restoreMonitoringUnresolved).toBe(false);
     expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([]);
   });
 
-  it("tracks an applied restore's monitoring without showing it as waiting (Codex r3 on #508)", async () => {
+  it("keeps retrying an applied restore whose monitoring didn't finish, says so, and names its recovery (Codex r3/r4 on #508)", async () => {
     mocks.restore.mockResolvedValue({ ...gym, archivedAt: null });
     await mount(settlingWith("applied"));
     await act(async () => { await latest.restore(gym); });
+    // Not shown as waiting (its list applied), but unresolved, so the page keeps retrying.
     expect(latest.pendingRestored).toEqual([]);
-    expect(latest.restoreMonitoringWaiting).toBe(false);
+    expect(latest.restoreMonitoringUnresolved).toBe(true);
+    expect(mocks.announce).not.toHaveBeenCalledWith("Example Gym restored.");
+    expect(mocks.announce).toHaveBeenCalledWith("Example Gym is restored, but visits there aren't noticed yet. Dayframe will keep trying.");
     expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([gym.id]);
-    let wasWaiting = true;
-    act(() => { wasWaiting = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
-    expect(wasWaiting).toBe(false);
+    let recovered: string[] = [];
+    act(() => { recovered = latest.settleMonitoredRestored(ACCOUNT_A, [gym.id]); });
+    expect(recovered).toEqual(["Example Gym"]);
+    expect(latest.restoreMonitoringUnresolved).toBe(false);
     expect(latest.unmonitoredRestoredIn(ACCOUNT_A, [{ id: gym.id }])).toEqual([]);
+  });
+
+  it("settles a restore silently once a later list lacks the place (owner follow-up on #508)", async () => {
+    mocks.restore.mockResolvedValue({ ...gym, archivedAt: null });
+    await mount(settlingWith("failed"));
+    await act(async () => { await latest.restore(gym); });
+    expect(latest.restoreMonitoringUnresolved).toBe(true);
+    // Another account's list, or one that has the place, settles nothing as gone.
+    expect(latest.settleRestoresAbsentFrom("ws-1:user-b", [])).toEqual([]);
+    expect(latest.settleRestoresAbsentFrom(ACCOUNT_A, [{ id: gym.id }])).toEqual([]);
+    let gone: string[] = [];
+    act(() => { gone = latest.settleRestoresAbsentFrom(ACCOUNT_A, [{ id: studio.id }]); });
+    expect(gone).toEqual([gym.id]);
+    expect(latest.restoreGone(gym.id)).toBe(true);
+    expect(latest.pendingRestored).toEqual([]);
+    expect(latest.restoreMonitoringUnresolved).toBe(false);
+    // Restoring it again starts afresh.
+    await act(async () => { await latest.restore(gym); });
+    expect(latest.restoreGone(gym.id)).toBe(false);
+    expect(latest.restoreMonitoringUnresolved).toBe(true);
   });
 
   it("keeps a refused restore's row with an announced reason", async () => {

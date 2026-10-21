@@ -11,6 +11,8 @@ import {
   placesPageState,
   replacePreviousNote,
   replacePreviousOffered,
+  restoredMonitoredMessage,
+  restoredNotMonitoredMessage,
   restoredNotRefreshedMessage,
   subscribeDeletedPlaces,
   takeDeletedPlaces
@@ -199,6 +201,11 @@ describe("restored places waiting for a refresh (Codex r1 on #508)", () => {
       { id: "p1", name: "Example Gym", subtitle: "Restored · pull to refresh to finish", accessibilityLabel: "Example Gym, restored, pull to refresh to finish" }
     ]);
     expect(pendingRestoredRows(pending, [{ id: "p1" }, { id: "p2" }])).toEqual([]);
+  });
+
+  it("says honestly when visits at a restored place aren't noticed yet, and when they are again (Codex r4 on #508)", () => {
+    expect(restoredNotMonitoredMessage("Example Gym")).toBe("Example Gym is restored, but visits there aren't noticed yet. Dayframe will keep trying.");
+    expect(restoredMonitoredMessage("Example Gym")).toBe("Example Gym restored. Visits there are noticed again.");
   });
 
   it("says honestly that the restore landed but the list did not", () => {
