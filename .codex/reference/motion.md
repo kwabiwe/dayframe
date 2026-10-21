@@ -645,6 +645,15 @@ The owner removed the row's Save place pill and this sheet (Location evidence po
 - Interruption and async: a held outing whose Move changed saves nothing and comes back as a fresh card (announced, as a changed single card); a refused save comes back the same way; a refusal from the server after it was saved settles quietly through the next data.
 - Reduce Motion: the deck's existing opacity-only paths.
 
+## Archive place and Replace the old place on iPhone (location v3 PR 15b, PRD D19 A10)
+
+- Trigger: the place editor's Archive place pill (then the confirmation's Archive); Places › Archived › Restore; choosing or locating a new Home/Work place within 300 m of the old one (the Replace row appears) or moving away from it (it leaves); the Replace switch.
+- Owner: `BlocksConfirmSheet`'s `SwipeDismissSheet` owns the confirmation; the route stack owns the editor's exit after an accepted archive (as Delete). The Archived group, its rows and its problem line, and the Replace rows (editor and Home and Work sheet, with the sheet's rename field) use the shared `localPresenceEntering` / `localPresenceExiting` and reflow with `localLayoutTransition`; the Home and Work sheet wraps its body in `LayoutAnimationConfig skipEntering`, so what it opens with arrives with the sheet's own entrance and only later changes fade. The switch thumb is `SettingsSwitch`'s own.
+- Entrance/update/exit: Archive shows "Archiving…" on its pill (no spinner) while the request runs, then the editor leaves; back on Places the row has gone from Saved places and the Archived group fades in (or gains the row) when its read lands, the groups below reflowing. Restore holds every Restore pill; once accepted, the row fades out of Archived in the same render that the refreshed list fades the place into Saved places (the last row takes the whole group out with it); a refusal moves nothing and fades in the reason under the group. The Replace row fades in or out as the chosen coordinate moves inside or outside 300 m.
+- Interruption: Archive, Save and Delete are one-shot and lock each other; a late answer never touches a closed editor or another account. One restore at a time; an archived read out while a restore, an archive or Replace landed (or behind a newer read) is dropped, so a restored place never flashes back under Archived; another account's list is never shown.
+- Async: the archive is accepted before anything moves; an accepted restore shows even if the refresh after it fails (the status line says to pull to refresh).
+- Accessibility: Reduce Motion keeps opacity-only presence and no layout movement; the restore and its failure are announced; Restore names its place ("Restore Example Gym"); the switch is a labelled switch with the reason as its hint; every target is at least 44 points.
+
 ## All activities picker on iPhone (TestFlight 124 fix, 20 Oct 2026)
 
 - Trigger: "All activities" in the entry sheet, the Location evidence editor ("What did you do?"), a Review card's "Log as", an Apple Health type's "Logs as" and the place editor's "Logs as"; Cancel, a pick or a created activity, the backdrop, VoiceOver escape, a swipe or the system close leaves it.

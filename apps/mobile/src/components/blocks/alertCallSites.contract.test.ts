@@ -17,7 +17,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Current location"', // current location failed
     '"Places"', // follow-up: form validation (move inline)
     '"Places"', // save failed
-    '"Places"' // delete failed
+    '"Places"' // delete or archive failed
   ],
   "app/places.tsx": [
     // Load failed is the in-page Blocks state with Try again (staging feedback B2), not an alert.

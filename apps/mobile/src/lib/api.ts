@@ -306,7 +306,8 @@ export type MobileLearnedPlace = NonNullable<MobileBootstrap["learnedPlaces"]>[n
 
 export type MobilePlaceResponse = {
   ok: true;
-  place: MobilePlace;
+  /** `previousArchived`: a create into a Home/Work slot archived the old holder ("Replace the old place"). */
+  place: MobilePlace & { previousArchived?: boolean };
 };
 
 export type PlaceMutationInput = {
@@ -1946,7 +1947,12 @@ export async function archiveCategory(id: string) {
   return readJsonResponse(response);
 }
 
-export type NewPlaceRole = { role: PlaceRole; previousPlaceName?: string | null };
+export type NewPlaceRole = {
+  role: PlaceRole;
+  previousPlaceName?: string | null;
+  /** "Replace the old place" (PRD D19 A10): archive the old holder when it is within 300 m. */
+  archivePrevious?: boolean;
+};
 
 /**
  * Creates a place in one request that returns it, so an accepted save never depends on a later
@@ -1972,8 +1978,12 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
       // Log automatically (owner decision 14 Oct 2026): only with logging on (Codex r1 on #434).
       autoLog: input.loggingEnabled !== false && input.autoLog === true,
       ...(input.learnedPlaceId ? { learnedPlaceId: input.learnedPlaceId } : {}),
-      // Added straight into the Home or Work slot, renaming the old holder if asked.
-      ...(newRole ? { role: newRole.role, previousPlaceName: newRole.previousPlaceName ?? null } : {})
+      // Added straight into the Home or Work slot, renaming (or archiving) the old holder if asked.
+      ...(newRole ? {
+        role: newRole.role,
+        previousPlaceName: newRole.previousPlaceName ?? null,
+        ...(newRole.archivePrevious ? { archivePrevious: true } : {})
+      } : {})
     })
   });
   if (response.status === 401) {
@@ -1984,26 +1994,85 @@ export async function createPlace(input: { name: string } & PlaceMutationInput, 
   return readPlaceResponse(response, fallback);
 }
 
-/** Moves the Home or Work role to `placeId` (null empties the slot); past entries never move. */
-export async function setPlaceRole(input: { role: PlaceRole; placeId: string | null; previousPlaceName: string | null }) {
+/**
+ * Moves the Home or Work role to `placeId` (null empties the slot); past entries never move.
+ * `archivePrevious` ("Replace the old place", PRD D19 A10) archives the old holder in the same step
+ * when the server finds it within 300 m of the new place; `previousArchived` says whether it did.
+ */
+export async function setPlaceRole(input: {
+  role: PlaceRole;
+  placeId: string | null;
+  previousPlaceName: string | null;
+  archivePrevious?: boolean;
+}) {
+  const { archivePrevious, ...request } = input;
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/role`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       ...(await authHeaders())
     },
-    body: JSON.stringify(input)
+    body: JSON.stringify(archivePrevious ? { ...request, archivePrevious: true } : request)
   });
   if (response.status === 401) {
     throw new AuthRequiredError();
   }
   if (!response.ok) throw await apiResponseError(response, "Unable to update this place");
-  const result = await readApiJson<{ role: PlaceRole; placeId: string | null; previousPlaceId: string | null }>(
+  const result = await readApiJson<{
+    role: PlaceRole;
+    placeId: string | null;
+    previousPlaceId: string | null;
+    previousArchived?: boolean;
+  }>(
     response,
     "Unable to update this place"
   );
   if (!result.ok) throw new Error(result.message);
   return result.payload;
+}
+
+/** An archived place (PRD D19 A10): out of every list and matcher, its history kept, restorable. */
+export type MobileArchivedPlace = { id: string; name: string; archivedAt: string };
+
+/** Places › Archived: the workspace's archived places, newest first. */
+export async function fetchArchivedPlaces(): Promise<MobileArchivedPlace[]> {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/archive`, {
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw await apiResponseError(response, "Unable to load archived places");
+  const result = await readApiJson<{ places?: MobileArchivedPlace[] }>(response, "Unable to load archived places");
+  if (!result.ok) throw new Error(result.message);
+  return result.payload.places ?? [];
+}
+
+/**
+ * Archives (true) or restores (false) a place. Archiving clears its Home/Work role; restoring brings
+ * it back without one. A busy place (409) or a missing one (404) says why in the server's words.
+ */
+export async function setPlaceArchived(id: string, archived: boolean) {
+  const fallback = archived ? "Unable to archive this place" : "Unable to restore this place";
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/archive`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(await authHeaders())
+    },
+    body: JSON.stringify({ id, archived })
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw await apiResponseError(response, fallback);
+  const result = await readApiJson<{ ok?: boolean; place?: { id: string; name: string; archivedAt: string | null } }>(
+    response,
+    fallback
+  );
+  if (!result.ok) throw new Error(result.message);
+  if (!result.payload.place || result.payload.place.id !== id) throw new Error(fallback);
+  return result.payload.place;
 }
 
 export async function ignoreLearnedPlace(id: string) {

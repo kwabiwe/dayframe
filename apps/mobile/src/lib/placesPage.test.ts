@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, notePlaceDeleted, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "./placesPage";
+import {
+  applyPlaceRoleLocally,
+  archivePlaceConfirmCopy,
+  archivedPlaceRows,
+  learnedPlaceSubtitle,
+  notePlaceDeleted,
+  placeRowSubtitle,
+  placesPageState,
+  replacePreviousNote,
+  replacePreviousOffered,
+  subscribeDeletedPlaces,
+  takeDeletedPlaces
+} from "./placesPage";
 
 const categories = [{ id: "c1", name: "Exercise" }];
 
@@ -82,6 +94,76 @@ describe("applyPlaceRoleLocally with implicit holders", () => {
       .toEqual([["Home", "home"], ["Previous home", null], ["Flat", null]]);
     expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: null }).map((place) => place.name))
       .toEqual(["Home", " HOME ", "Flat"]);
+  });
+});
+
+// Synthetic coordinates: at latitude 10, 0.001° of latitude is about 111 m.
+describe("replacePreviousOffered (Replace the old place, PRD D19 A10)", () => {
+  const oldHome = { latitude: 10, longitude: 20 };
+
+  it("offers it only within 300 m", () => {
+    expect(replacePreviousOffered(oldHome, { latitude: 10, longitude: 20 })).toBe(true);
+    expect(replacePreviousOffered(oldHome, { latitude: 10.002, longitude: 20 })).toBe(true);
+    expect(replacePreviousOffered(oldHome, { latitude: 10.003, longitude: 20 })).toBe(false);
+  });
+
+  it("never offers it when either place has no coordinates", () => {
+    expect(replacePreviousOffered(null, oldHome)).toBe(false);
+    expect(replacePreviousOffered(oldHome, null)).toBe(false);
+    expect(replacePreviousOffered({ latitude: null, longitude: null }, oldHome)).toBe(false);
+    expect(replacePreviousOffered(oldHome, { latitude: 10 })).toBe(false);
+    expect(replacePreviousOffered(oldHome, { latitude: Number.NaN, longitude: 20 })).toBe(false);
+  });
+
+  it("says why, and that it can be restored", () => {
+    expect(replacePreviousNote("home")).toBe("Your old Home is close by; archive it so the two don't overlap. You can restore it from Places.");
+    expect(replacePreviousNote("work")).toMatch(/^Your old Work is close by/);
+  });
+});
+
+describe("applyPlaceRoleLocally with Replace the old place", () => {
+  const places = [
+    { id: "a", name: "Example Flat", role: "home" as const, latitude: 10, longitude: 20 },
+    { id: "b", name: "Example Gym", role: null, latitude: 10.001, longitude: 20 },
+    { id: "c", name: "Example Office", role: null, latitude: 10.01, longitude: 20 }
+  ];
+
+  it("drops the archived old holder from the list", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "b", previousPlaceName: null, archivePrevious: true }).map((place) => [place.id, place.role]))
+      .toEqual([["b", "home"], ["c", null]]);
+  });
+
+  it("keeps an old holder farther than 300 m (the server archives nothing)", () => {
+    expect(applyPlaceRoleLocally(places, { role: "home", placeId: "c", previousPlaceName: null, archivePrevious: true }).map((place) => [place.id, place.role]))
+      .toEqual([["a", null], ["b", null], ["c", "home"]]);
+  });
+
+  it("archives a nearby implicit holder named like the role, even without a rename", () => {
+    const implicit = [{ ...places[0], name: "Home", role: null }, places[1]];
+    expect(applyPlaceRoleLocally(implicit, { role: "home", placeId: "b", previousPlaceName: null, archivePrevious: true }).map((place) => place.id))
+      .toEqual(["b"]);
+  });
+});
+
+describe("Places › Archived (PRD D19 A10)", () => {
+  it("keeps the server's order and says the history is kept", () => {
+    expect(archivedPlaceRows([{ id: "p2", name: "Example Gym" }, { id: "p1", name: "Example Studio" }])).toEqual([
+      { id: "p2", name: "Example Gym", subtitle: "History kept", accessibilityLabel: "Example Gym, archived, history kept", restoreLabel: "Restore Example Gym" },
+      { id: "p1", name: "Example Studio", subtitle: "History kept", accessibilityLabel: "Example Studio, archived, history kept", restoreLabel: "Restore Example Studio" }
+    ]);
+  });
+
+  it("confirms an archive with what it keeps and where to restore it", () => {
+    expect(archivePlaceConfirmCopy({ name: "Example Gym", role: null })).toEqual({
+      eyebrow: "Place",
+      title: "Archive Example Gym?",
+      message: "Past blocks keep its name, and it stops matching new visits. You can restore it from Places › Archived.",
+      confirmLabel: "Archive"
+    });
+    expect(archivePlaceConfirmCopy({ name: "Example Flat", role: "home" })).toEqual(expect.objectContaining({
+      title: "Archive Home?",
+      message: "Past blocks keep its name, and it stops matching new visits and stops being your Home. You can restore it from Places › Archived."
+    }));
   });
 });
 

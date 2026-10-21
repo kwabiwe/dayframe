@@ -118,6 +118,8 @@ const {
   updateCategory,
   updatePlace,
   setPlaceRole,
+  fetchArchivedPlaces,
+  setPlaceArchived,
   updateQueuedTimerStart,
   updateTimeEntry,
   archiveCategory
@@ -2325,6 +2327,79 @@ describe("mobile API client", () => {
       })
     );
     await expect(setPlaceRole({ role: "home", placeId: "place-2", previousPlaceName: null })).rejects.toThrow(/Try again/);
+  });
+
+  it("asks the role API to archive the old holder only for Replace the old place (PRD D19 A10)", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, role: "home", placeId: "place-2", previousPlaceId: "place-1", previousArchived: true }, 200)));
+    vi.stubGlobal("fetch", fetchMock);
+    const sent = () => JSON.parse(String((fetchMock.mock.lastCall as unknown as [string, RequestInit])[1].body)) as Record<string, unknown>;
+
+    await expect(setPlaceRole({ role: "home", placeId: "place-2", previousPlaceName: null, archivePrevious: true }))
+      .resolves.toEqual(expect.objectContaining({ previousArchived: true }));
+    expect(sent()).toEqual({ role: "home", placeId: "place-2", previousPlaceName: null, archivePrevious: true });
+    await setPlaceRole({ role: "home", placeId: "place-2", previousPlaceName: null, archivePrevious: false });
+    expect(sent()).toEqual({ role: "home", placeId: "place-2", previousPlaceName: null });
+  });
+
+  it("adds a place into the Home slot with Replace the old place and reads previousArchived back", async () => {
+    storeBoundSession("session-token");
+    const savedPlace = { id: "30000000-0000-4000-8000-000000000003", name: "Example Flat", role: "home", radiusMeters: 100, priority: 5, previousArchived: true };
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ ok: true, place: savedPlace }, 201)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createPlace(
+      { name: "Example Flat", latitude: 10, longitude: 20, radiusMeters: 100, priority: 5 },
+      { role: "home", previousPlaceName: null, archivePrevious: true }
+    );
+
+    expect(result.place.previousArchived).toBe(true);
+    expect(JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual(expect.objectContaining({
+      role: "home", previousPlaceName: null, archivePrevious: true
+    }));
+    await createPlace({ name: "Example Flat", latitude: 10, longitude: 20 }, { role: "home", previousPlaceName: null });
+    expect(JSON.parse((fetchMock.mock.lastCall as unknown as [string, RequestInit])[1].body as string)).not.toHaveProperty("archivePrevious");
+  });
+
+  it("lists archived places and archives or restores one through the archive API (PRD D19 A10)", async () => {
+    storeBoundSession("session-token");
+    const archived = { id: "30000000-0000-4000-8000-000000000009", name: "Example Gym", archivedAt: "2026-10-20T09:00:00.000Z" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ places: [archived] }, 200))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, place: archived }, 200))
+      .mockResolvedValueOnce(jsonResponse({ ok: true, place: { ...archived, archivedAt: null } }, 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchArchivedPlaces()).resolves.toEqual([archived]);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://dayframe.test/api/places/archive",
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer session-token" }) })
+    );
+    await expect(setPlaceArchived(archived.id, true)).resolves.toEqual(archived);
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://dayframe.test/api/places/archive",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ id: archived.id, archived: true }) })
+    );
+    await expect(setPlaceArchived(archived.id, false)).resolves.toEqual({ ...archived, archivedAt: null });
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "https://dayframe.test/api/places/archive",
+      expect.objectContaining({ body: JSON.stringify({ id: archived.id, archived: false }) })
+    );
+  });
+
+  it("says why an archive was refused in the server's words, and signs out on 401", async () => {
+    storeBoundSession("session-token");
+    const busy = "This place is busy right now, so it wasn't changed. Try again in a moment.";
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: busy, code: "place_archive_busy" }, 409))
+      .mockResolvedValueOnce(jsonResponse({ error: "Place not found." }, 404))
+      .mockResolvedValueOnce(jsonResponse({ error: "Unauthorized" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ error: "Unauthorized" }, 401)));
+
+    await expect(setPlaceArchived("30000000-0000-4000-8000-000000000009", true)).rejects.toThrow(busy);
+    await expect(setPlaceArchived("30000000-0000-4000-8000-000000000009", false)).rejects.toThrow("Place not found.");
+    await expect(setPlaceArchived("30000000-0000-4000-8000-000000000009", true)).rejects.toBeInstanceOf(AuthRequiredError);
+    await expect(fetchArchivedPlaces()).rejects.toBeInstanceOf(AuthRequiredError);
   });
 
   it("ignores learned places through the hosted API", async () => {

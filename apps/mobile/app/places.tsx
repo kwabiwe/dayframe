@@ -1,6 +1,7 @@
 import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Modal,
   Pressable,
@@ -20,14 +21,14 @@ import {
   placeDisplayName,
   placeRoleLabel,
   placeRoleSlots,
-  type PlaceRole,
-  type placeRoleRequest
+  type PlaceRole
 } from "@dayframe/shared";
 import { BlocksNavHeader, usePreviousScreenLabel } from "@/components/BlocksNavHeader";
 import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
-import { PlaceRoleSheet, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
+import { ArchivedPlacesGroup } from "@/components/places/ArchivedPlacesGroup";
+import { PlaceRoleSheet, type PlaceRoleSaveRequest, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
@@ -39,14 +40,18 @@ import {
 } from "@/components/SwipeDismissSheet";
 import {
   AuthRequiredError,
+  fetchArchivedPlaces,
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
+  setPlaceArchived,
   setPlaceRole,
+  type MobileArchivedPlace,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
+import { createArchivedReadGate } from "@/lib/activitiesPage";
 import { friendlyMobileErrorMessage, mobileFailureKind } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
@@ -95,15 +100,38 @@ export default function PlacesScreen() {
   const changeEpoch = useRef(0);
   // Only the newest page read applies (mount and focus can both be out at once).
   const readSequence = useRef(0);
+  // Places › Archived (location v3 PR 15b, PRD D19 A10): read with the page, for the account that
+  // read it, and shown only when there are some. A failed read leaves it as it was (or hidden).
+  const [archived, setArchived] = useState<{ accountKey: string; places: MobileArchivedPlace[] } | null>(null);
+  const [restoringArchivedId, setRestoringArchivedId] = useState<string | null>(null);
+  const [archivedProblem, setArchivedProblem] = useState<string | null>(null);
+  // Only the newest archived read applies, and none that was out while a restore or an archive landed.
+  const archivedReads = useRef(createArchivedReadGate()).current;
   const mounted = useRef(true);
   useEffect(() => () => {
     mounted.current = false;
   }, []);
 
+  const loadArchived = useCallback(async () => {
+    const read = archivedReads.begin();
+    const owner = await readActiveMobileAccount();
+    if (!owner) return;
+    try {
+      const places = await fetchArchivedPlaces();
+      if (!mounted.current || !archivedReads.current(read)) return;
+      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !archivedReads.current(read)) return;
+      setArchived({ accountKey: mobileAccountKey(owner), places });
+    } catch {
+      // Signed out or offline: the page read says so; this section never breaks the page.
+    }
+  }, [archivedReads]);
+
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
   const load = useCallback(async (options?: { refresh?: boolean }) => {
     if (options?.refresh) setRefreshing(true);
+    // Archived reads alongside, on its own: its failure never touches the page.
+    void loadArchived();
     const epoch = changeEpoch.current;
     const read = ++readSequence.current;
     try {
@@ -138,7 +166,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, []);
+  }, [loadArchived]);
 
   useEffect(() => {
     void load();
@@ -158,7 +186,10 @@ export default function PlacesScreen() {
     setData((current) => current && mobileAccountOwnersEqual(owner, { userId: current.user.id, workspaceId: current.workspace.id })
       ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
       : current);
-  }, []);
+    // An archived place (handed over the same way) shows under Archived from a read after it landed.
+    archivedReads.changed();
+    void loadArchived();
+  }, [archivedReads, loadArchived]);
 
   useEffect(() => subscribeDeletedPlaces(() => {
     void applyDeletedPlaces();
@@ -286,11 +317,14 @@ export default function PlacesScreen() {
     removeLearnedPlaceId?: string;
     /** Places as this page now shows them, for monitoring when the fresh read fails. */
     fallbackPlaces?: MobilePlace[];
+    /** Applied in the same render as the refreshed list (or once it fails): a restored row leaving Archived. */
+    alsoApply?: () => void;
   }) {
     const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
       if (!mounted.current) return;
+      options.alsoApply?.();
       if (epoch !== changeEpoch.current) {
         setStatusMessage(options.prefix);
         return;
@@ -306,6 +340,7 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
+      if (mounted.current) options.alsoApply?.();
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
       if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
@@ -342,13 +377,14 @@ export default function PlacesScreen() {
     router.push({ pathname: "/place-editor", params: { mode: "create", role } } as never);
   }
 
-  async function saveRole(request: ReturnType<typeof placeRoleRequest>) {
+  async function saveRole(request: PlaceRoleSaveRequest) {
     if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
     roleSaving.current = true;
     try {
       const owner = await readActiveMobileAccount();
+      let previousArchived = false;
       try {
-        await setPlaceRole(request);
+        previousArchived = (await setPlaceRole(request)).previousArchived === true;
       } catch (error) {
         if (error instanceof AuthRequiredError) {
           router.replace("/");
@@ -361,19 +397,71 @@ export default function PlacesScreen() {
       if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
       changeEpoch.current += 1;
       const shown = dataRef.current;
-      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, request) : undefined;
+      // "Replace the old place": the server archived the old holder, so it leaves Saved places too.
+      const nextPlaces = shown ? applyPlaceRoleLocally(shown.places, { ...request, archivePrevious: previousArchived }) : undefined;
       if (shown && nextPlaces) {
         const next = { ...shown, places: nextPlaces };
         dataRef.current = next;
         setData(next);
       }
+      if (previousArchived) archivedReads.changed();
       const label = placeRoleLabel(request.role);
-      await refreshAfterPlaceChange({ prefix: request.placeId ? `${label} updated.` : `${label} cleared.`, fallbackPlaces: nextPlaces });
+      const prefix = !request.placeId
+        ? `${label} cleared.`
+        : previousArchived ? `${label} updated. The old ${label.toLowerCase()} is archived.` : `${label} updated.`;
+      await refreshAfterPlaceChange({ prefix, fallbackPlaces: nextPlaces });
+      if (previousArchived) void loadArchived();
       return null;
     } finally {
       roleSaving.current = false;
     }
   }
+
+  /** Places › Archived › Restore: the place comes back under Saved places, without a Home/Work role. */
+  async function restoreArchivedPlace(place: { id: string; name: string }) {
+    if (restoringArchivedId) return;
+    setRestoringArchivedId(place.id);
+    setArchivedProblem(null);
+    const owner = await readActiveMobileAccount();
+    try {
+      await setPlaceArchived(place.id, false);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        router.replace("/");
+        return;
+      }
+      if (!mounted.current) return;
+      setRestoringArchivedId(null);
+      // The row stays where it was, with the reason under the group (no system alert: UIA-005).
+      const message = friendlyMobileErrorMessage(error, `Couldn't restore ${place.name}. Try again.`);
+      setArchivedProblem(message);
+      AccessibilityInfo.announceForAccessibility(message);
+      return;
+    }
+    if (!mounted.current) return;
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) {
+      setRestoringArchivedId(null);
+      return;
+    }
+    // Accepted: any read of either list that started before this answer is dropped. The row leaves
+    // Archived in the same render that the refreshed list brings the place back under Saved places.
+    archivedReads.changed();
+    changeEpoch.current += 1;
+    AccessibilityInfo.announceForAccessibility(`${place.name} restored.`);
+    await refreshAfterPlaceChange({
+      prefix: `${place.name} restored.`,
+      alsoApply: () => {
+        setArchived((current) => current
+          ? { ...current, places: current.places.filter((item) => item.id !== place.id) }
+          : current);
+        setRestoringArchivedId(null);
+      }
+    });
+    void loadArchived();
+  }
+
+  const shownAccountKey = data ? mobileAccountKey({ userId: data.user.id, workspaceId: data.workspace.id }) : null;
+  const archivedPlaces = archived && archived.accountKey === shownAccountKey ? archived.places : [];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -470,7 +558,7 @@ export default function PlacesScreen() {
           </SettingsBlockGroup>
 
           <SettingsBlockGroup
-            foot={places.length === 0 ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change it or delete it."}
+            foot={places.length === 0 ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change, archive or delete it."}
             theme={theme}
             title="Saved places"
           >
@@ -521,6 +609,16 @@ export default function PlacesScreen() {
               );
             })}
           </SettingsBlockGroup>
+
+          <ArchivedPlacesGroup
+            onRestore={(place) => void restoreArchivedPlace(place)}
+            places={archivedPlaces}
+            problem={archivedProblem}
+            reduceMotion={reduceMotion}
+            restoringId={restoringArchivedId}
+            styles={styles}
+            theme={theme}
+          />
 
           {learnedPlaces.length > 0 ? (
             <SettingsBlockGroup foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save." theme={theme} title="Suggested places">
