@@ -49,6 +49,7 @@ type ReviewRow = {
   outingRole?: string | null;
   outingTravelMode?: string | null;
   learnedName?: boolean | null;
+  venuePlaceId?: string | null;
 };
 
 type LegacyRow = {
@@ -136,7 +137,7 @@ export class ReviewPresentationError extends Error {
  * identity evidence required to materialise a saved Review action honestly.
  */
 /** Optional presentation fields the requesting client understands. */
-export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean };
+export type ReviewPresentationFeatures = { timeAway?: boolean; moveRoute?: boolean; outing?: boolean; outingCount?: boolean; learnedName?: boolean; venue?: boolean };
 
 export async function getReviewPresentation(
   session: RequestSession,
@@ -341,6 +342,9 @@ async function loadReviewRows(client: pg.PoolClient, session: RequestSession, in
             ae.raw_payload ->> 'outingRole' as "outingRole",
             case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
             coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
+            -- An unsaved stay's Apple venue (location v3 PR 8): the one picked, else the suggestion.
+            case when st.id is not null and st.place_id is null
+              then coalesce(st.venue_place_id, st.suggested_venue_place_id) end as "venuePlaceId",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae
@@ -490,6 +494,9 @@ async function loadReviewRowsByIds(client: pg.PoolClient, session: RequestSessio
             ae.raw_payload ->> 'outingRole' as "outingRole",
             case when ae.raw_payload ->> 'outingRole' in ('in', 'out') then nullif(ae.raw_payload ->> 'travelMode', '') end as "outingTravelMode",
             coalesce(ae.raw_payload ->> 'nameSource' = 'learned', false) as "learnedName",
+            -- An unsaved stay's Apple venue (location v3 PR 8): the one picked, else the suggestion.
+            case when st.id is not null and st.place_id is null
+              then coalesce(st.venue_place_id, st.suggested_venue_place_id) end as "venuePlaceId",
             links.entry_ids as "canonicalEntryIds"
      from review_items ri
      left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
@@ -622,6 +629,7 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
     ...(row.timeAwayStopCount == null ? {} : { timeAway: { stopCount: Number(row.timeAwayStopCount) } }),
     ...(row.routeLabel ? { routeLabel: row.routeLabel.slice(0, 200) } : {}),
     ...(row.learnedName ? { learnedName: true as const } : {}),
+    ...(row.venuePlaceId && row.venuePlaceId.length <= 200 ? { venuePlaceId: row.venuePlaceId } : {}),
     ...(row.outingKey && (row.outingRole === "stay" || row.outingRole === "in" || row.outingRole === "out") && row.outingKey.length <= 200
       ? { outing: { key: row.outingKey, role: row.outingRole,
           ...(row.outingTravelMode && row.outingTravelMode.length <= 40 ? { travelMode: row.outingTravelMode } : {}) } } : {})
@@ -637,11 +645,12 @@ function toReviewRecord(row: ReviewRow): InternalRecord {
 /** Older clients parse records strictly: optional fields go only to clients that asked for them. */
 function forClient<T>(record: T, features: ReviewPresentationFeatures): T {
   if (!record || typeof record !== "object") return record;
-  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown };
+  const rest = { ...record } as T & { timeAway?: unknown; routeLabel?: unknown; outing?: unknown; learnedName?: unknown; venuePlaceId?: unknown };
   if (!features.timeAway) delete rest.timeAway;
   if (!features.moveRoute) delete rest.routeLabel;
   if (!features.outing) delete rest.outing;
   if (!features.learnedName) delete rest.learnedName;
+  if (!features.venue) delete rest.venuePlaceId;
   return rest as T;
 }
 

@@ -18,7 +18,7 @@ concurrency:
 jobs:
   changes:
     name: Changed paths
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_SELF_HOSTED != 'false' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "macOS", "docker"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       db: ${{ steps.filter.outputs.db }}
@@ -85,25 +85,14 @@ jobs:
     name: Disposable PostGIS (${{ matrix.schema }})
     needs: changes
     if: needs.changes.outputs.db == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_SELF_HOSTED != 'false' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "macOS", "docker"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         schema: [base, ordered]
-    services:
-      postgres:
-        image: postgis/postgis:16-3.4
-        env:
-          POSTGRES_USER: dayframe
-          POSTGRES_PASSWORD: dayframe
-          POSTGRES_DB: dayframe_ci_test
-        ports: [5432:5432]
-        options: >-
-          --health-cmd "pg_isready -U dayframe -d dayframe_ci_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+      CONTAINER: dayframe-ci-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.schema }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -113,6 +102,21 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # A disposable PostGIS container on a free port, so the same steps run on GitHub's Ubuntu runners
+      # and on the self-hosted Mac mini (service containers exist only on Linux runners).
+      - name: Start disposable PostGIS
+        run: |
+          docker run -d --name "$CONTAINER" -e POSTGRES_USER=dayframe -e POSTGRES_PASSWORD=dayframe \
+            -e POSTGRES_DB=dayframe_ci_test -p 127.0.0.1::5432 postgis/postgis:16-3.4
+          # Over TCP: the image's first start runs a socket-only temporary server for initialisation and
+          # then restarts, so a socket check can pass before the real server is up.
+          for attempt in $(seq 1 60); do
+            docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U dayframe -d dayframe_ci_test >/dev/null 2>&1 && break
+            sleep 2
+          done
+          docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U dayframe -d dayframe_ci_test
+          port=$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
+          echo "DATABASE_URL=postgres://dayframe:dayframe@127.0.0.1:$port/dayframe_ci_test" >> "$GITHUB_ENV"
       - run: npx tsx scripts/setup-validation-db.ts ${{ matrix.schema }}
       - name: Integration token access control
         run: npm run validate:integration-token-security
@@ -151,29 +155,38 @@ jobs:
       - name: Home and Work place roles
         if: ${{ !cancelled() }}
         env:
-          DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+          DAYFRAME_PLACE_ROLE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/place-role-service.postgres.test.ts
       - name: Password-reset session fence
         if: ${{ !cancelled() }}
         env:
-          DAYFRAME_SESSION_FENCE_TEST_DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+          DAYFRAME_SESSION_FENCE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/auth/session-fence.postgres.test.ts
       - name: Recent learns from Review-confirmed visits (history flags)
         if: ${{ !cancelled() }}
         env:
-          DAYFRAME_HISTORY_FLAGS_TEST_DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+          DAYFRAME_HISTORY_FLAGS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/queries-history-flags.postgres.test.ts
       - name: Named patterns on Today (location v3 PR 14)
         if: ${{ !cancelled() }}
         env:
-          DAYFRAME_LOCATION_GROUPS_TEST_DATABASE_URL: postgres://dayframe:dayframe@localhost:5432/dayframe_ci_test
+          DAYFRAME_LOCATION_GROUPS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-groups.postgres.test.ts
+      - name: Venue Place IDs (location v3 PR 8)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_VENUE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/venue-place-ids.postgres.test.ts
+      # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
+      - name: Remove disposable PostGIS
+        if: always()
+        run: docker rm -fv "$CONTAINER" >/dev/null 2>&1 || true
 
   clean-ios-simulator:
     name: Clean iOS Simulator
     needs: changes
     if: needs.changes.outputs.ios == 'true'
-    runs-on: macos-26
+    runs-on: ${{ (vars.CI_SELF_HOSTED != 'false' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "macOS", "docker"]') || 'macos-26' }}
     # A cold Expo/RN build on the hosted macOS 26 image regularly exceeds
     # thirty minutes after npm and CocoaPods setup. Keep the deadline finite,
     # but leave enough room for xcodebuild to report a real result.
@@ -226,14 +239,14 @@ jobs:
       # dependencies or Xcode find none and build clean too.
       - id: pods-cache
         name: Restore CocoaPods (pull requests)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && runner.environment == 'github-hosted'
         uses: actions/cache/restore@v4
         with:
           path: apps/mobile/ios/Pods
           key: ios-pods-v4-${{ steps.xcode.outputs.key }}
       - id: ccache-cache
         name: Restore compiler cache (pull requests)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && runner.environment == 'github-hosted'
         uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/ccache
@@ -251,9 +264,19 @@ jobs:
           else
             echo "Clean build: no compiler cache restored."
           fi
+      # GitHub's image installs the frozen version with gem; the self-hosted Mac mini already has it
+      # (Homebrew) and must match exactly.
       - name: Install frozen CocoaPods version
-        run: gem install cocoapods -v 1.16.2 --no-document
-      - run: pod _1.16.2_ install
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            version=$(pod --version)
+            [ "$version" = 1.16.2 ] || { echo "CocoaPods $version on the self-hosted runner; 1.16.2 is required"; exit 1; }
+          else
+            gem install cocoapods -v 1.16.2 --no-document
+          fi
+      - name: pod install
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then pod install; else pod _1.16.2_ install; fi
         working-directory: apps/mobile/ios
       - name: Reject unrelated native dependency changes
         run: |
@@ -276,15 +299,22 @@ jobs:
       # Pods uses (${PODS_ROOT}/../../../../node_modules/react-native) from here. The wrapper runs
       # `$CCACHE_BINARY clang`, and Xcode does not pass build settings to compiler processes, so without
       # CCACHE_BINARY in the environment it silently runs plain clang.
+      # On the self-hosted runner the compiler cache persists between runs, so it is partitioned by the same
+      # native-input key as the GitHub cache (CCACHE_NAMESPACE): a warm build only reuses objects from an
+      # identical key. Pushes to main compile everything fresh and refresh it (CCACHE_RECACHE).
       - name: Clean unsigned Simulator build
-        run: >-
-          CCACHE_BINARY="$(command -v ccache)"
-          xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace
-          -scheme Dayframe -configuration Staging -sdk iphonesimulator
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data"
-          REACT_NATIVE_PATH="$GITHUB_WORKSPACE/node_modules/react-native"
-          CODE_SIGNING_ALLOWED=NO clean build
+        env:
+          CCACHE_NAMESPACE: ${{ steps.xcode.outputs.key }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = push ]; then export CCACHE_RECACHE=1; fi
+          CCACHE_BINARY="$(command -v ccache)" \
+          xcodebuild -quiet -workspace apps/mobile/ios/Dayframe.xcworkspace \
+            -scheme Dayframe -configuration Staging -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dayframe-clean-derived-data" \
+            REACT_NATIVE_PATH="$GITHUB_WORKSPACE/node_modules/react-native" \
+            CODE_SIGNING_ALLOWED=NO clean build
       - name: Verify built host and extension App Groups
         run: >-
           npm run check:ios-config -- --built-app
@@ -298,13 +328,13 @@ jobs:
           echo "Compiler calls through ccache: $calls"
           [ "$calls" -gt 0 ] || echo "::warning::No compile went through ccache; the build ran uncached."
       - name: Save compiler cache
-        if: success() && (github.event_name == 'push' || steps.ccache-cache.outputs.cache-matched-key == '')
+        if: success() && runner.environment == 'github-hosted' && (github.event_name == 'push' || steps.ccache-cache.outputs.cache-matched-key == '')
         uses: actions/cache/save@v4
         with:
           path: ~/Library/Caches/ccache
           key: ios-ccache-v5-${{ steps.xcode.outputs.key }}-${{ github.run_id }}
       - name: Save CocoaPods
-        if: success() && steps.pods-cache.outputs.cache-hit != 'true'
+        if: success() && runner.environment == 'github-hosted' && steps.pods-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: apps/mobile/ios/Pods
@@ -314,7 +344,7 @@ jobs:
     name: Validation gate
     needs: [changes, disposable-postgis, clean-ios-simulator]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.CI_SELF_HOSTED != 'false' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "macOS", "docker"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Every needed validation job passed

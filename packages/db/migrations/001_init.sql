@@ -945,3 +945,10 @@ alter table places add column if not exists matching_starts_at timestamptz;
 create index if not exists idx_stay_segments_owner_client
   on stay_segments(workspace_id, user_id, client_segment_id)
   where client_segment_id is not null;
+
+-- Keep the clean base fixture aligned with 020_stay_segment_venue_place_ids.sql (venue Place IDs).
+alter table stay_segments add column if not exists venue_place_id text;
+alter table stay_segments add column if not exists suggested_venue_place_id text;
+create index if not exists idx_stay_segments_venue_history
+  on stay_segments using gist(centre)
+  where venue_place_id is not null;

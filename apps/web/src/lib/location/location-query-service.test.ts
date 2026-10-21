@@ -19,7 +19,7 @@ describe("Location Review evidence query", () => {
     vi.resetAllMocks();
   });
 
-  it("starts independent evidence and nearby-place reads in parallel", async () => {
+  it("starts independent evidence, nearby-place and venue-history reads in parallel", async () => {
     const phaseResolvers: Array<(value: { rows: never[] }) => void> = [];
     query.mockImplementationOnce(() => Promise.resolve({ rows: [reviewRow()] }));
     query.mockImplementation(() => new Promise((resolve) => {
@@ -31,8 +31,10 @@ describe("Location Review evidence query", () => {
       session
     );
 
-    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(4));
-    expect(phaseResolvers).toHaveLength(3);
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(5));
+    expect(phaseResolvers).toHaveLength(4);
+    // The venue history (location v3 PR 8) is the person's own picks near the stay, Place IDs only.
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("venue_place_id is not null"))).toBe(true);
     for (const resolve of phaseResolvers) resolve({ rows: [] });
 
     await expect(request).resolves.toMatchObject({
