@@ -3,6 +3,7 @@ import {
   coveredActivityBars,
   coveredActivityTotals as sharedCoveredActivityTotals,
   goalCountingEntries,
+  namedPatternRuns,
   type CoveredActivityBar,
   type GoalCountingCategory
 } from "@dayframe/shared";
@@ -140,6 +141,26 @@ export function todayBlocks<T extends TodayEntry>(entries: readonly T[], dayStar
     .map((entry) => ({ entry, clip: clipEntry(entry, dayStartMs, dayEnd, nowMs) }))
     .filter((item): item is { entry: T; clip: ClippedInterval } => item.clip !== null)
     .sort((a, b) => Date.parse(b.entry.startedAt) - Date.parse(a.entry.startedAt) || b.entry.id.localeCompare(a.entry.id));
+}
+
+export type TodayBlock<T> = { entry: T; clip: ClippedInterval };
+export type TodayRow<T> =
+  | { kind: "block"; block: TodayBlock<T> }
+  /** A named A → B → A (location v3 PR 14): one row with its name; its parts open beneath it. */
+  | { kind: "named"; key: string; name: string; blocks: TodayBlock<T>[] };
+
+/** Today's rows: blocks as they are, except a named pattern's adjacent parts, which form one row. */
+export function todayRows<T extends TodayEntry & Pick<TimeEntryRow, "locationGroup">>(blocks: readonly TodayBlock<T>[]): TodayRow<T>[] {
+  const runs = namedPatternRuns(blocks.map(({ entry }) => entry));
+  const rows: TodayRow<T>[] = [];
+  for (const block of blocks) {
+    const run = runs.get(block.entry.id);
+    const last = rows.at(-1);
+    if (run && last?.kind === "named" && last.key === run.key) last.blocks.push(block);
+    else if (run) rows.push({ kind: "named", key: run.key, name: run.name, blocks: [block] });
+    else rows.push({ kind: "block", block });
+  }
+  return rows;
 }
 
 /** The prototype's row block height: 22–44 px, growing 18 px per hour. */

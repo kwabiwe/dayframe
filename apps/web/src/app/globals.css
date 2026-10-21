@@ -8665,6 +8665,91 @@ dialog.ui-dialog.df-palette {
   color: var(--text-primary);
 }
 
+/* A named A → B → A on Today (location v3 PR 14): one row with a strip of its parts, opening to the
+   parts beneath it. The panel is the disclosure's single transition owner (rows 0fr ↔ 1fr with
+   opacity, as Reports' More filters); Reduce Motion switches it off. */
+.df-erow-group {
+  display: grid;
+}
+
+.df-erow + .df-erow-group > .df-erow::before,
+.df-erow-group + .df-erow::before,
+.df-erow-group + .df-erow-group > .df-erow::before {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  left: 60px;
+  height: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.df-erow-block-named {
+  color: var(--text-primary);
+}
+
+.df-erow-text .df-erow-named-meta {
+  display: none;
+}
+
+.df-erow-text .df-erow-parts {
+  display: flex;
+  gap: 2px;
+  height: 4px;
+  margin-top: 6px;
+  overflow: visible;
+}
+
+.df-erow-parts i {
+  display: block;
+  flex-basis: 0;
+  min-width: 4px;
+  border-radius: var(--r-pill);
+  background: var(--block, var(--surface-muted));
+}
+
+.df-erow-children {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease-out;
+}
+
+.df-erow-group.is-open > .df-erow-children {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.df-erow-children-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.df-erow-children-body > .df-rows {
+  padding-left: 24px;
+}
+
+/* Shown only where rows hide their hover actions (phones). */
+.df-erow-children-delete {
+  display: none;
+  min-height: 44px;
+  margin: 2px 0 6px 24px;
+  border: 0;
+  border-radius: var(--r-pill);
+  padding: 0 16px;
+  background: var(--surface-muted);
+  color: var(--danger-text);
+  font: inherit;
+  font-size: var(--type-meta);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-erow-children {
+    transition: none;
+  }
+}
+
 .df-erow-acts {
   display: flex;
   justify-content: flex-end;
@@ -8958,6 +9043,16 @@ dialog.ui-dialog.df-palette {
   .df-erow-acts,
   .df-today-blocks-hint {
     display: none;
+  }
+
+  .df-erow-text .df-erow-named-meta {
+    display: block;
+  }
+
+  .df-erow-children-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
   }
 
   .df-toast-host {
