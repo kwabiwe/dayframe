@@ -583,6 +583,21 @@ Ask these before opening a PR:
 
 Run the Health capture lifecycle and real SQLite suites for atomic checkpoint rollback, same-ID interrupted handoff, owner/backend isolation, split-query episode reconstruction and deletion preservation. Run `npx tsx scripts/validate-health-source-decisions.ts` only against a disposable local `_test` database with the resolution-link migration. A native build is required for Expo Crypto. Physical HealthKit and staging server/mobile visibility remain separate release checks; an empty queue is not evidence of source visibility.
 
+## Apple Health background sync
+
+Automated: `healthBackgroundSync.test.ts`, `health.test.ts`, `api.test.ts` (Health scope), the mobile typecheck, `swift test` in `apps/mobile/modules/dayframe-health-background`, and a clean native iOS build. The Simulator cannot prove HealthKit background delivery or background app refresh.
+
+Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN` for each:
+
+1. Setup: Apple Health allowed for sleep and workouts in onboarding or Settings, Background App Refresh on for Dayframe, open the app once on the new build (this enables the new background delivery), then send it to the background with the Home gesture. Do not force-quit it.
+2. Walk, app backgrounded: record a 6–10-minute outdoor walk (Watch or iPhone Workout) without opening Dayframe. Within about 15 minutes of ending it, the walk is on the server (web Calendar or Today on another device, or a read-only staging check) without Dayframe having been opened.
+3. Walk, app ended by iOS: as step 2 after other heavy apps have pushed Dayframe out of memory (it is not in the app switcher's recent state, or a fresh launch shows the splash). The walk still arrives without opening Dayframe.
+4. Locked phone: end a walk with the iPhone locked in a pocket, unlock it a few minutes later without opening Dayframe; the walk arrives soon after the unlock.
+5. Sleep: go to bed with Dayframe backgrounded (not force-quit). Next morning, after the Watch or iPhone writes the night's sleep and the phone is unlocked, Sleep is on the server before Dayframe is opened.
+6. One event per sample: opening Dayframe afterwards creates no second walk or sleep block, and Review shows no duplicate card.
+7. Force-quit limitation: after swiping Dayframe away, a walk waits until Dayframe is opened again (iOS does not wake a force-quit app); recorded as expected behaviour, not a failure.
+8. Background CPU: a 30-minute background window that includes a walk stays within `.codex/reference/performance.md`'s background budget.
+
 ## Bounded mobile sync recovery
 
 Run `npm run test --workspace @dayframe/mobile` and `npm run typecheck --workspace @dayframe/mobile`, including real SQLite Review/Location tests, full JSON body/validation deadlines, receipt-envelope matching, interrupted delivery, owner replacement, force coalescing, independent due-time scheduling, partial upload and shared prefetch-consumer cancellation. Verify manual Sync with one Health type failing, Review contention, retained Location batches, a refresh already in flight, and a 45-second deadline. Verify unresolved Review intent has Check again and no ambiguous-outcome discard. Keep Settings and header state truthful under ordinary retry/backoff. Capture normal/Reduce Motion, rapid repeat, navigation, VoiceOver and Dynamic Type evidence on the selected staging build; a clean Simulator build does not establish HealthKit or physical-device behaviour.
