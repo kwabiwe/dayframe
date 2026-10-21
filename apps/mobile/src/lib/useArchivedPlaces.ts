@@ -24,10 +24,12 @@ export function useArchivedPlaces({
 }: {
   onSignedOut: () => void;
   /**
-   * The page's refresh after an accepted restore. It calls `settle` once, in the same render that
-   * applies the refreshed list ("applied"), or when another change made it stale or it failed.
+   * The page's refresh after an accepted restore. It calls `settle` once, before any side effect of
+   * its own: in the same render that applies the refreshed list ("applied"), or when another change
+   * made it stale or it failed. `settle` returns false when the restore no longer belongs to the
+   * account shown, and the page then applies and says nothing (Codex r2 on #508).
    */
-  refreshAfterRestore: (place: ArchivedPlace, settle: (outcome: RestoreRefreshOutcome) => void) => Promise<void>;
+  refreshAfterRestore: (place: ArchivedPlace, settle: (outcome: RestoreRefreshOutcome) => boolean) => Promise<void>;
   shownAccountKey: string | null;
 }) {
   const [archived, setArchived] = useState<{ accountKey: string; places: MobileArchivedPlace[] } | null>(null);
@@ -134,6 +136,11 @@ export function useArchivedPlaces({
       reads.changed();
       const settledWith: { outcome: RestoreRefreshOutcome | null } = { outcome: null };
       await refreshRef.current(place, (settled) => {
+        // Checked synchronously before anything changes: the same account lifetime, still shown.
+        if (!mounted.current || currentMobileAccountEpoch() !== epoch || shownAccountRef.current !== accountKey) {
+          clearBusy();
+          return false;
+        }
         settledWith.outcome = settled;
         setArchived((current) => current && current.accountKey === accountKey
           ? { ...current, places: current.places.filter((item) => item.id !== place.id) }
@@ -143,9 +150,11 @@ export function useArchivedPlaces({
           const waiting = pendingRef.current?.accountKey === accountKey ? pendingRef.current.places : [];
           setPending({ accountKey, places: [...waiting.filter((item) => item.id !== place.id), { id: place.id, name: place.name }] });
         }
+        return true;
       });
       clearBusy();
-      // Never settled: the session ended during the refresh, and the page is leaving for sign-in.
+      // Never settled: the session ended during the refresh (the page is leaving for sign-in), or
+      // the restore no longer belongs to the account shown.
       if (settledWith.outcome === null || !(await stillOurs())) return;
       AccessibilityInfo.announceForAccessibility(settledWith.outcome === "failed" ? restoredNotRefreshedMessage(place.name) : `${place.name} restored.`);
       void load();

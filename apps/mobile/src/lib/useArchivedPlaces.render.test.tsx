@@ -51,6 +51,12 @@ async function mount(refresh: Refresh, account: string | null = ACCOUNT_A) {
 
 /** A refresh that settles with `outcome`, as the page's refreshAfterPlaceChange does. */
 const settlingWith = (outcome: "applied" | "stale" | "failed"): Refresh => async (_place, settle) => { settle(outcome); };
+/** A refresh that settles only when the test says so, recording whether the page may go on. */
+function heldRefresh() {
+  const held: { settle?: (outcome: "applied" | "stale" | "failed") => boolean; done?: () => void } = {};
+  const refresh: Refresh = (_place, settle) => new Promise<void>((resolve) => { held.settle = settle; held.done = resolve; });
+  return { held, refresh };
+}
 
 beforeEach(() => {
   mocks.owner = { userId: "user-a", workspaceId: "ws-1" };
@@ -134,6 +140,25 @@ describe("useArchivedPlaces (location v3 PR 15b, PRD D19 A10)", () => {
     mocks.epoch = 3;
     await act(async () => { refuse(new Error("offline")); await restoring; });
     expect(latest.problem).toBeNull();
+    expect(mocks.announce).not.toHaveBeenCalled();
+  });
+
+  it("refuses a settlement from an earlier account lifetime before anything changes (Codex r2 on #508)", async () => {
+    mocks.restore.mockResolvedValue({ ...gym, archivedAt: null });
+    const { held, refresh } = heldRefresh();
+    await mount(refresh);
+    let restoring!: Promise<void>;
+    await act(async () => { restoring = latest.restore(gym); });
+    expect(held.settle).toBeDefined();
+    // Away and back: the same account key, a new lifetime.
+    mocks.epoch = 2;
+    let allowed = true;
+    act(() => { allowed = held.settle!("failed"); });
+    await act(async () => { held.done!(); await restoring; });
+    expect(allowed).toBe(false);
+    expect(latest.pendingRestored).toEqual([]);
+    expect(latest.places.map((place) => place.id)).toEqual([gym.id, studio.id]);
+    expect(latest.restoringId).toBeNull();
     expect(mocks.announce).not.toHaveBeenCalled();
   });
 

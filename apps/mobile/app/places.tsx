@@ -102,6 +102,8 @@ export default function PlacesScreen() {
   const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);
   // The status line a failed pull-to-refresh showed, cleared by the next read that lands.
   const refreshFailureMessage = useRef<string | null>(null);
+  // The "restored, but Places couldn't refresh" line, cleared when its waiting place settles.
+  const restoreWarning = useRef<string | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
   // One Home/Work change at a time across the page (a second sheet can't open mid-save).
@@ -119,11 +121,16 @@ export default function PlacesScreen() {
   // read it, and shown only when there are some. A failed read leaves it as it was (or hidden).
   const archive = useArchivedPlaces({
     onSignedOut: () => router.replace("/"),
-    refreshAfterRestore: (place, settle) => refreshAfterPlaceChange({
-      prefix: `${place.name} restored.`,
-      failureMessage: restoredNotRefreshedMessage(place.name),
-      onSettled: settle
-    }),
+    refreshAfterRestore: (place, settle) => {
+      // Accepted: every page read already out started before the place came back, so none may
+      // apply (and settle it without the place) once this restore is waiting (Codex r2 on #508).
+      changeEpoch.current += 1;
+      return refreshAfterPlaceChange({
+        prefix: `${place.name} restored.`,
+        failureMessage: restoredNotRefreshedMessage(place.name),
+        onSettled: settle
+      });
+    },
     shownAccountKey
   });
   const { changed: archivedChanged, load: loadArchived, takePendingRestored } = archive;
@@ -147,6 +154,10 @@ export default function PlacesScreen() {
       // A restored place this list now brings back is monitored again (its refresh had failed).
       if (takePendingRestored(mobileAccountKey({ userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }))) {
         void refreshGeofencesForPlaces(bootstrap.places, { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }).catch(() => 0);
+        // Recovered: the warning that asked for this refresh no longer holds (Codex r2 on #508).
+        const warning = restoreWarning.current;
+        restoreWarning.current = null;
+        if (warning) setStatusMessage((current) => (current === warning ? null : current));
       }
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
@@ -326,22 +337,24 @@ export default function PlacesScreen() {
     /** The status line when the refresh fails (instead of the generic "Pull to refresh" one). */
     failureMessage?: string;
     /**
-     * Told how the refresh ended, in the same render that applies its list ("applied"), or when a
-     * newer change overtook it ("stale") or it failed: a restored row leaves Archived with it.
+     * Told how the refresh ended, before anything else happens: in the same render that applies its
+     * list ("applied"), or when a newer change overtook it ("stale") or it failed. A restored row
+     * leaves Archived with it. False means the change no longer belongs to the account shown (a
+     * sign-out, a switch, or away and back): then nothing is applied or said (Codex r2 on #508).
      */
-    onSettled?: (outcome: RestoreRefreshOutcome) => void;
+    onSettled?: (outcome: RestoreRefreshOutcome) => boolean;
   }) {
     const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
       if (!mounted.current) return;
       if (epoch !== changeEpoch.current) {
-        options.onSettled?.("stale");
+        if (options.onSettled && !options.onSettled("stale")) return;
         setStatusMessage(options.prefix);
         return;
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
-      options.onSettled?.("applied");
+      if (options.onSettled && !options.onSettled("applied")) return;
       setData(reconciled);
       // Monitoring is refreshed from this list just below, including any restored place it settles.
       takePendingRestored(mobileAccountKey({ userId: reconciled.user.id, workspaceId: reconciled.workspace.id }));
@@ -354,12 +367,14 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (mounted.current) options.onSettled?.("failed");
+      if (!mounted.current) return;
+      if (options.onSettled && !options.onSettled("failed")) return;
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
       if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
         await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
       }
+      if (options.failureMessage) restoreWarning.current = options.failureMessage;
       setStatusMessage(options.failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }

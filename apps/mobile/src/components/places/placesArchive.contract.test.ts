@@ -10,9 +10,10 @@ const between = (from: string, to: string) => places.slice(places.indexOf(from),
 describe("Places › Archived on the page (Codex r1 on #508)", () => {
   it("settles a restore with the refresh's outcome, in the same render that applies its list", () => {
     const refresh = between("async function refreshAfterPlaceChange(", "const places = data?.places");
-    expect(refresh).toMatch(/options\.onSettled\?\.\("stale"\);/);
-    expect(refresh).toMatch(/options\.onSettled\?\.\("applied"\);\s*setData\(reconciled\);/);
-    expect(refresh).toContain('options.onSettled?.("failed")');
+    // Settled first, and nothing applied or said when it no longer belongs to the account shown (Codex r2 on #508).
+    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("stale"\)\) return;\s*setStatusMessage\(options\.prefix\);/);
+    expect(refresh).toMatch(/if \(options\.onSettled && !options\.onSettled\("applied"\)\) return;\s*setData\(reconciled\);/);
+    expect(refresh).toContain('if (options.onSettled && !options.onSettled("failed")) return;');
     expect(refresh).toContain("options.failureMessage ??");
     expect(places).toContain("failureMessage: restoredNotRefreshedMessage(place.name)");
   });
