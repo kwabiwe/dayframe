@@ -50,6 +50,16 @@ struct NearbyPointOfInterestValue: Equatable {
   enum Source: Equatable {
     case nearby
     case contextual(anchor: String)
+    /// Found by searching for the name of an area of interest the stay lies in.
+    case area(name: String)
+
+    var key: String {
+      switch self {
+      case .nearby: return "nearby"
+      case .contextual: return "contextual"
+      case .area: return "area"
+      }
+    }
   }
 
   let name: String
@@ -61,12 +71,26 @@ struct NearbyPointOfInterestValue: Equatable {
   let category: MKPointOfInterestCategory?
   let source: Source
   let localityNames: [String]
+  /// Where the place lies from the search centre, in whole metres east and north. Relative only:
+  /// the venue ranker compares places with each other (a pharmacy inside a supermarket).
+  var offsetEastMeters: Int? = nil
+  var offsetNorthMeters: Int? = nil
+
+  func withSource(_ source: Source) -> NearbyPointOfInterestValue {
+    NearbyPointOfInterestValue(
+      name: name, formattedAddress: formattedAddress, latitude: latitude, longitude: longitude,
+      distanceMeters: distanceMeters, relevanceIndex: relevanceIndex, category: category, source: source,
+      localityNames: localityNames, offsetEastMeters: offsetEastMeters, offsetNorthMeters: offsetNorthMeters
+    )
+  }
 }
 
 /// What crosses the bridge for one nearby place: an opaque id for the current generation, the
-/// title, an address line, the rounded distance and its kind of place (the Apple category without
-/// its prefix, e.g. "FitnessCenter"; the row says "Gym · 40 m"). The coordinate stays in the native
-/// registry until the person picks the place (`NearbyPointOfInterestCoordinator.resolve`).
+/// title, an address line, the rounded distance, its kind of place (the Apple category without
+/// its prefix, e.g. "FitnessCenter"; the row says "Gym · 40 m"), where it lies from the visit in
+/// whole metres east and north, and how it was found. The venue ranker (packages/shared
+/// `rankVenues`) orders them. The coordinate stays in the native registry until the person picks
+/// the place (`NearbyPointOfInterestCoordinator.resolve`).
 struct NearbyPointOfInterestSuggestionValue: Equatable {
   let id: String
   let requestId: String
@@ -74,6 +98,9 @@ struct NearbyPointOfInterestSuggestionValue: Equatable {
   let subtitle: String?
   let distanceMeters: Int
   var category: String? = nil
+  var offsetEastMeters: Int? = nil
+  var offsetNorthMeters: Int? = nil
+  var source: String = "nearby"
 
   var dictionary: [String: Any] {
     [
@@ -82,7 +109,10 @@ struct NearbyPointOfInterestSuggestionValue: Equatable {
       "title": title,
       "subtitle": subtitle as Any,
       "distanceMeters": distanceMeters,
-      "category": category as Any
+      "category": category as Any,
+      "offsetEastMeters": offsetEastMeters as Any,
+      "offsetNorthMeters": offsetNorthMeters as Any,
+      "source": source
     ]
   }
 
@@ -115,13 +145,29 @@ protocol NearbyPointOfInterestSearching: AnyObject {
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
   )
+  /// Names of the areas of interest the point lies in (a shopping centre, a campus), or none.
+  /// Calls back exactly once, with none on failure or timeout.
+  func areasOfInterest(center: CLLocationCoordinate2D, completion: @escaping ([String]) -> Void)
   func cancel()
+}
+
+/// The coordinator's internal answer, before ids are assigned.
+struct NearbyPointOfInterestSearchResult: Equatable {
+  let places: [NearbyPointOfInterestValue]
+  let areasOfInterest: [String]
+}
+
+/// One nearby search's answer: the places and the areas of interest around the visit.
+struct NearbyPointOfInterestList: Equatable {
+  let places: [NearbyPointOfInterestSuggestionValue]
+  let areasOfInterest: [String]
 }
 
 @MainActor
 final class NearbyPointOfInterestCoordinator {
-  /// The most places one search may return; callers ask for fewer.
-  nonisolated static let maximumLimit = 8
+  /// The most places one search may return: MapKit answers with the nearest ~50 whatever the
+  /// radius (owner's iOS 27.2 checks, 21 Oct 2026), plus the site and area searches.
+  nonisolated static let maximumLimit = 60
   nonisolated static let defaultLimit = 3
 
   private let searcher: NearbyPointOfInterestSearching
@@ -132,7 +178,7 @@ final class NearbyPointOfInterestCoordinator {
   private var generation = 0
   private var pending: (
     generation: Int,
-    continuation: CheckedContinuation<[NearbyPointOfInterestValue], Error>
+    continuation: CheckedContinuation<NearbyPointOfInterestSearchResult, Error>
   )?
   /// The published list: opaque id -> place, for `registryGeneration` only. Replaced by the next
   /// search and cleared by cancel and teardown, so an id from an older list never resolves.
@@ -148,16 +194,17 @@ final class NearbyPointOfInterestCoordinator {
     self.idFactory = idFactory
   }
 
-  /// Searches around the centre and publishes at most `limit` places, nearest first, as opaque
-  /// suggestions. Coordinates never leave this coordinator until `resolve`.
+  /// Searches around the centre and publishes at most `limit` places, nearest first (a site or
+  /// area found by name always kept), as opaque suggestions with the areas of interest there.
+  /// Coordinates never leave this coordinator until `resolve`.
   func suggestions(
     requestId: String,
     latitude: Double,
     longitude: Double,
     radiusMeters: Double,
     limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
-  ) async throws -> [NearbyPointOfInterestSuggestionValue] {
-    let (started, places) = try await run(
+  ) async throws -> NearbyPointOfInterestList {
+    let (started, result) = try await run(
       latitude: latitude,
       longitude: longitude,
       radiusMeters: radiusMeters,
@@ -171,7 +218,7 @@ final class NearbyPointOfInterestCoordinator {
     registry.removeAll(keepingCapacity: true)
     registryGeneration = started
     registryRequestId = requestId
-    return places.map { place in
+    let places = result.places.map { place in
       let id = idFactory()
       registry[id] = place
       return NearbyPointOfInterestSuggestionValue(
@@ -180,9 +227,13 @@ final class NearbyPointOfInterestCoordinator {
         title: place.name,
         subtitle: place.formattedAddress,
         distanceMeters: place.distanceMeters,
-        category: NearbyPointOfInterestSuggestionValue.categoryKey(place.category)
+        category: NearbyPointOfInterestSuggestionValue.categoryKey(place.category),
+        offsetEastMeters: place.offsetEastMeters,
+        offsetNorthMeters: place.offsetNorthMeters,
+        source: place.source.key
       )
     }
+    return NearbyPointOfInterestList(places: places, areasOfInterest: result.areasOfInterest)
   }
 
   /// The picked place of the current list, with its coordinate. A stale or unknown id is
@@ -211,15 +262,18 @@ final class NearbyPointOfInterestCoordinator {
     radiusMeters: Double,
     limit: Int = NearbyPointOfInterestCoordinator.defaultLimit
   ) async throws -> [NearbyPointOfInterestValue] {
-    try await run(latitude: latitude, longitude: longitude, radiusMeters: radiusMeters, limit: limit).places
+    try await run(latitude: latitude, longitude: longitude, radiusMeters: radiusMeters, limit: limit).result.places
   }
 
+  /// At most four requests per visit (design §6.3): the nearby search and the areas of interest
+  /// together, then a search for a name the nearby places share (the site), then one for an area
+  /// of interest no nearby place is named after (the centre itself).
   private func run(
     latitude: Double,
     longitude: Double,
     radiusMeters: Double,
     limit: Int
-  ) async throws -> (generation: Int, places: [NearbyPointOfInterestValue]) {
+  ) async throws -> (generation: Int, result: NearbyPointOfInterestSearchResult) {
     cancel()
     generation &+= 1
     let started = generation
@@ -232,47 +286,65 @@ final class NearbyPointOfInterestCoordinator {
           radiusMeters > 0 else {
       throw PlaceSearchCoordinatorError.searchUnavailable
     }
+    let center = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
 
-    let places: [NearbyPointOfInterestValue] = try await withCheckedThrowingContinuation { continuation in
+    let result: NearbyPointOfInterestSearchResult = try await withCheckedThrowingContinuation { continuation in
       pending = (started, continuation)
-      searcher.searchNearby(
-        center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-        radiusMeters: radiusMeters
-      ) { [weak self] result in
+      var areas: [String]?
+      var nearby: [NearbyPointOfInterestValue]?
+
+      let publish: ([NearbyPointOfInterestValue], [String]) -> Void = { [weak self] values, areas in
+        guard let self else { return }
+        self.finish(generation: started, result: .success(NearbyPointOfInterestSearchResult(
+          places: Self.presented(values, maximumDistanceMeters: nil, limit: cappedLimit),
+          areasOfInterest: areas
+        )))
+      }
+      let searchArea: ([NearbyPointOfInterestValue], [String]) -> Void = { [weak self] values, areas in
+        guard let self, self.isPending(started) else { return }
+        let named = Set(values.map { Self.normalizedName($0.name) })
+        guard let area = areas.first(where: { !named.contains(Self.normalizedName($0)) }) else {
+          publish(values, areas)
+          return
+        }
+        self.searcher.searchContext(query: area, center: center, radiusMeters: radiusMeters) { [weak self] areaResult in
+          guard let self, self.isPending(started) else { return }
+          let found = (try? areaResult.get()) ?? []
+          let matching = found
+            .filter { Self.namesArea($0.name, area) }
+            .map { $0.withSource(.area(name: area)) }
+          publish(values + matching, areas)
+        }
+      }
+      let proceed: () -> Void = { [weak self] in
+        guard let self, self.isPending(started), let areas, let nearby else { return }
+        guard let context = Self.contextQuery(from: nearby) else {
+          searchArea(nearby, areas)
+          return
+        }
+        self.searcher.searchContext(query: context, center: center, radiusMeters: radiusMeters) { [weak self] contextResult in
+          guard let self, self.isPending(started) else { return }
+          searchArea(nearby + ((try? contextResult.get()) ?? []), areas)
+        }
+      }
+
+      searcher.areasOfInterest(center: center) { [weak self] names in
+        guard let self, self.isPending(started), areas == nil else { return }
+        areas = Self.distinctAreaNames(names)
+        proceed()
+      }
+      searcher.searchNearby(center: center, radiusMeters: radiusMeters) { [weak self] result in
         guard let self, self.isPending(started) else { return }
         switch result {
         case .failure(let error):
           self.finish(generation: started, result: .failure(error))
-        case .success(let nearby):
-          guard let context = Self.contextQuery(from: nearby) else {
-            self.finish(
-              generation: started,
-              result: .success(Self.presented(nearby, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
-            )
-            return
-          }
-          self.searcher.searchContext(
-            query: context,
-            center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-            radiusMeters: radiusMeters
-          ) { [weak self] contextResult in
-            guard let self, self.isPending(started) else { return }
-            let values: [NearbyPointOfInterestValue]
-            switch contextResult {
-            case .success(let contextual):
-              values = nearby + contextual
-            case .failure:
-              values = nearby
-            }
-            self.finish(
-              generation: started,
-              result: .success(Self.presented(values, maximumDistanceMeters: radiusMeters, limit: cappedLimit))
-            )
-          }
+        case .success(let values):
+          nearby = values
+          proceed()
         }
       }
     }
-    return (started, places)
+    return (started, result)
   }
 
   func cancel() {
@@ -323,28 +395,27 @@ final class NearbyPointOfInterestCoordinator {
       .first?.key
   }
 
-  /// The places to show: the `normalized` choice, nearest first (ties by name), so the list
-  /// reads as "what is around this visit" rather than a ranking.
+  /// The places to hand to the venue ranker: the `normalized` set, nearest first (ties by name).
   static func presented(
     _ values: [NearbyPointOfInterestValue],
     maximumDistanceMeters: Double? = nil,
     limit: Int = defaultLimit
   ) -> [NearbyPointOfInterestValue] {
     normalized(values, maximumDistanceMeters: maximumDistanceMeters, limit: limit)
-      .sorted { left, right in
-        if left.distanceMeters != right.distanceMeters {
-          return left.distanceMeters < right.distanceMeters
-        }
-        return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
-      }
+      .sorted(by: nearestFirst)
   }
 
   /// Categories that are never somewhere a person spends a visit (parking, cash machines,
-  /// chargers, toilets). MapKit is asked to leave them out, and they are dropped here too.
+  /// chargers, toilets). They are dropped here on the phone: requests that ask MapKit to filter
+  /// categories have been reported failing on Apple's side (design §1.5).
   static let excludedCategories: [MKPointOfInterestCategory] = [
     .parking, .atm, .evCharger, .restroom
   ]
 
+  /// Plain hygiene before ranking (the venue ranker in packages/shared decides the order): drops
+  /// nameless and excluded places and anything beyond `maximumDistanceMeters`, keeps one place per
+  /// name (one found by name first, else the nearest), then keeps every place found by name (the
+  /// site and the area searches) and fills up to `limit` with the nearest.
   static func normalized(
     _ values: [NearbyPointOfInterestValue],
     maximumDistanceMeters: Double? = nil,
@@ -359,72 +430,60 @@ final class NearbyPointOfInterestCoordinator {
             !(value.category.map(excludedCategories.contains) ?? false),
             value.distanceMeters >= 0,
             distanceLimit.map({ value.distanceMeters <= $0 }) ?? true else { continue }
-      if let existing = bestByName[key] {
-        if candidateComesBefore(value, existing) {
-          bestByName[key] = value
-        }
-      } else {
-        bestByName[key] = value
-      }
+      if let existing = bestByName[key], !comesBefore(value, existing) { continue }
+      bestByName[key] = value
     }
-
-    let candidates = bestByName.values.sorted(by: candidateComesBefore)
-    guard !candidates.isEmpty else { return [] }
-
-    var selected: [NearbyPointOfInterestValue] = []
-    var selectedNames = Set<String>()
-    var selectedGroups = Set<DestinationGroup>()
-
-    func append(_ candidate: NearbyPointOfInterestValue?) {
-      guard selected.count < cappedLimit, let candidate else { return }
-      let name = normalizedName(candidate.name)
-      guard selectedNames.insert(name).inserted else { return }
-      selected.append(candidate)
-      selectedGroups.insert(destinationGroup(for: candidate))
-    }
-
-    let contextual = candidates.filter { value in
-      if case .contextual = value.source { return !isUtility(value) }
-      return false
-    }
-    if let primary = contextual.first(where: { value in
-      guard case .contextual(let anchor) = value.source else { return false }
-      return tokens(in: value.name).contains(anchor)
-    }) {
-      append(primary)
-      for group in contextualGroupPreference where selected.count < cappedLimit && !selectedGroups.contains(group) {
-        append(candidates.first { destinationGroup(for: $0) == group && !isUtility($0) })
-      }
-    }
-
-    for candidate in candidates where selected.count < cappedLimit && !isUtility(candidate) {
-      let group = destinationGroup(for: candidate)
-      if !selectedGroups.contains(group) {
-        append(candidate)
-      }
-    }
-    for candidate in candidates where selected.count < cappedLimit && !isUtility(candidate) {
-      append(candidate)
-    }
-    for candidate in candidates where selected.count < cappedLimit {
-      append(candidate)
-    }
-    return selected
+    let ordered = bestByName.values.sorted(by: comesBefore)
+    return Array(ordered.prefix(cappedLimit))
   }
 
-  private enum DestinationGroup: Hashable {
-    case dining
-    case activity
-    case retail
-    case lodging
-    case service
-    case other
-    case utility
+  /// Whole metres east and north from `origin` to `point` (a local flat approximation, ample
+  /// within a few hundred metres).
+  nonisolated static func offsetMeters(
+    from origin: CLLocationCoordinate2D,
+    to point: CLLocationCoordinate2D
+  ) -> (east: Int, north: Int) {
+    let metresPerDegree = 111_320.0
+    let east = (point.longitude - origin.longitude) * metresPerDegree * cos(origin.latitude * .pi / 180)
+    let north = (point.latitude - origin.latitude) * metresPerDegree
+    return (Int(east.rounded()), Int(north.rounded()))
   }
 
-  private static let contextualGroupPreference: [DestinationGroup] = [
-    .dining, .activity, .retail, .lodging, .service, .other
-  ]
+  /// Names Apple gives the areas around a point, once each, in Apple's order.
+  static func distinctAreaNames(_ names: [String]) -> [String] {
+    var seen = Set<String>()
+    return names
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty && seen.insert(normalizedName($0)).inserted }
+  }
+
+  /// Whether an area search's result is the area itself (same name, or one name holding the other).
+  static func namesArea(_ name: String, _ area: String) -> Bool {
+    let place = normalizedName(name)
+    let target = normalizedName(area)
+    guard !place.isEmpty, !target.isEmpty else { return false }
+    if place == target { return true }
+    let (short, long) = place.count < target.count ? (place, target) : (target, place)
+    return short.count >= 6 && long.contains(short)
+  }
+
+  private static func comesBefore(_ left: NearbyPointOfInterestValue, _ right: NearbyPointOfInterestValue) -> Bool {
+    let leftNamed = isFoundByName(left)
+    if leftNamed != isFoundByName(right) { return leftNamed }
+    return nearestFirst(left, right)
+  }
+
+  private static func isFoundByName(_ value: NearbyPointOfInterestValue) -> Bool {
+    if case .nearby = value.source { return false }
+    return true
+  }
+
+  private static func nearestFirst(_ left: NearbyPointOfInterestValue, _ right: NearbyPointOfInterestValue) -> Bool {
+    if left.distanceMeters != right.distanceMeters {
+      return left.distanceMeters < right.distanceMeters
+    }
+    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+  }
 
   private static let genericContextTokens: Set<String> = [
     "and", "bar", "cafe", "car", "centre", "center", "cinema", "coffee",
@@ -439,62 +498,14 @@ final class NearbyPointOfInterestCoordinator {
 
   private func finish(
     generation started: Int,
-    result: Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>
+    result: Result<NearbyPointOfInterestSearchResult, PlaceSearchCoordinatorError>
   ) {
     guard isPending(started), let pending else { return }
     self.pending = nil
     pending.continuation.resume(with: result.mapError { $0 as Error })
   }
 
-  private static func candidateComesBefore(
-    _ left: NearbyPointOfInterestValue,
-    _ right: NearbyPointOfInterestValue
-  ) -> Bool {
-    if isUtility(left) != isUtility(right) {
-      return !isUtility(left)
-    }
-    if sourcePriority(left.source) != sourcePriority(right.source) {
-      return sourcePriority(left.source) < sourcePriority(right.source)
-    }
-    if left.relevanceIndex != right.relevanceIndex {
-      return left.relevanceIndex < right.relevanceIndex
-    }
-    if left.distanceMeters != right.distanceMeters {
-      return left.distanceMeters < right.distanceMeters
-    }
-    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
-  }
-
-  private static func sourcePriority(_ source: NearbyPointOfInterestValue.Source) -> Int {
-    if case .contextual = source { return 0 }
-    return 1
-  }
-
-  private static func isUtility(_ value: NearbyPointOfInterestValue) -> Bool {
-    destinationGroup(for: value) == .utility
-  }
-
-  private static func destinationGroup(for value: NearbyPointOfInterestValue) -> DestinationGroup {
-    guard let category = value.category else { return .other }
-    if [
-      .restaurant, .cafe, .bakery, .brewery, .winery
-    ].contains(category) { return .dining }
-    if [
-      .movieTheater, .museum, .theater, .nightlife, .fitnessCenter,
-      .park, .amusementPark, .aquarium, .zoo, .stadium
-    ].contains(category) { return .activity }
-    if [.store, .foodMarket].contains(category) { return .retail }
-    if category == .hotel { return .lodging }
-    if [
-      .pharmacy, .bank, .laundry, .postOffice
-    ].contains(category) { return .service }
-    if [
-      .parking, .publicTransport, .gasStation, .atm, .evCharger, .restroom, .carRental
-    ].contains(category) { return .utility }
-    return .other
-  }
-
-  private static func normalizedName(_ value: String) -> String {
+  static func normalizedName(_ value: String) -> String {
     value.trimmingCharacters(in: .whitespacesAndNewlines)
       .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
   }
@@ -506,21 +517,58 @@ final class NearbyPointOfInterestCoordinator {
   }
 }
 
+/// Reverse geocoding for areas of interest, behind a seam so cancellation can be tested.
+@MainActor
+protocol AreaOfInterestGeocoding: AnyObject {
+  /// Calls back with the names Apple gives the areas at the location, or nil on failure.
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void)
+  func cancel()
+}
+
+@MainActor
+final class CLGeocoderAreasOfInterest: AreaOfInterestGeocoding {
+  private let geocoder = CLGeocoder()
+
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void) {
+    // CLGeocoder (and areasOfInterest) are deprecated in iOS 26/27.2 but still answer there.
+    geocoder.reverseGeocodeLocation(location) { placemarks, error in
+      DispatchQueue.main.async {
+        completion(error == nil ? placemarks?.first?.areasOfInterest ?? [] : nil)
+      }
+    }
+  }
+
+  func cancel() {
+    geocoder.cancelGeocode()
+  }
+}
+
 @MainActor
 final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching {
+  /// How long the areas of interest may take before the search goes on without them.
+  nonisolated static let areasOfInterestTimeout: TimeInterval = 2.5
+
   private var nearbySearch: MKLocalSearch?
   private var contextSearch: MKLocalSearch?
+  private var geocoder: AreaOfInterestGeocoding?
+  private var areasGeneration = 0
+  private let makeGeocoder: @MainActor () -> AreaOfInterestGeocoding
+
+  init(makeGeocoder: @escaping @MainActor () -> AreaOfInterestGeocoding = { CLGeocoderAreasOfInterest() }) {
+    self.makeGeocoder = makeGeocoder
+  }
 
   func searchNearby(
     center: CLLocationCoordinate2D,
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
   ) {
-    cancel()
+    // Replaces an earlier nearby or site search, never the areas lookup started alongside it
+    // (Codex r1 on #517: the coordinator asks for both together).
+    cancelSearches()
+    // No category filter: those requests have been reported failing on Apple's side, so the
+    // excluded kinds are dropped on the phone (NearbyPointOfInterestCoordinator.normalized).
     let request = MKLocalPointsOfInterestRequest(center: center, radius: radiusMeters)
-    request.pointOfInterestFilter = MKPointOfInterestFilter(
-      excluding: NearbyPointOfInterestCoordinator.excludedCategories
-    )
     let localSearch = MKLocalSearch(request: request)
     nearbySearch = localSearch
     let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
@@ -555,9 +603,6 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
       longitudinalMeters: radiusMeters * 2
     )
     request.resultTypes = [.pointOfInterest]
-    request.pointOfInterestFilter = MKPointOfInterestFilter(
-      excluding: NearbyPointOfInterestCoordinator.excludedCategories
-    )
     if #available(iOS 18.0, macOS 15.0, *) {
       request.regionPriority = .required
     }
@@ -579,7 +624,38 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
     }
   }
 
+  /// CLPlacemark.areasOfInterest, the only containment hint MapKit gives (deprecated in iOS 27.2
+  /// but still answering there: one area at a busy centre, none elsewhere, owner's checks on
+  /// 21 Oct 2026). Answers exactly once: the names, or none on failure, cancel or timeout.
+  func areasOfInterest(center: CLLocationCoordinate2D, completion: @escaping ([String]) -> Void) {
+    geocoder?.cancel()
+    areasGeneration &+= 1
+    let started = areasGeneration
+    let geocoder = makeGeocoder()
+    self.geocoder = geocoder
+    var answered = false
+    let answer: ([String]) -> Void = { [weak self] names in
+      guard !answered else { return }
+      answered = true
+      if self?.areasGeneration == started { self?.geocoder = nil }
+      completion(names)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.areasOfInterestTimeout) {
+      answer([])
+    }
+    geocoder.areasOfInterest(at: CLLocation(latitude: center.latitude, longitude: center.longitude)) { names in
+      answer(names ?? [])
+    }
+  }
+
   func cancel() {
+    cancelSearches()
+    geocoder?.cancel()
+    geocoder = nil
+    areasGeneration &+= 1
+  }
+
+  private func cancelSearches() {
     nearbySearch?.cancel()
     nearbySearch = nil
     contextSearch?.cancel()
@@ -600,6 +676,7 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
             let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines),
             !name.isEmpty else { return nil }
       let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+      let offset = NearbyPointOfInterestCoordinator.offsetMeters(from: origin.coordinate, to: coordinate)
       let localityNames = [
         item.placemark.locality,
         item.placemark.subLocality,
@@ -616,7 +693,9 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
         relevanceIndex: index,
         category: item.pointOfInterestCategory,
         source: source,
-        localityNames: localityNames
+        localityNames: localityNames,
+        offsetEastMeters: offset.east,
+        offsetNorthMeters: offset.north
       )
     }
   }
