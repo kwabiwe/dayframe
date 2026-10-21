@@ -66,6 +66,7 @@ import {
   readActiveMobileAccount
 } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
+import { currentTimeZoneId } from "@/lib/localeDateFormat";
 import {
   SwipeDismissSheet,
   type SwipeDismissSheetHandle
@@ -125,7 +126,7 @@ export default function PlacesScreen() {
   const [data, setData] = useState<MobileBootstrap | null>(null);
   // Each place's last visit and visits in 30 days (location v3 PR 16c), for the account whose list
   // they were read with; another account's list never shows them.
-  const [visits, setVisits] = useState<{ key: string; rows: PlaceVisitStats[]; at: number } | null>(null);
+  const [visits, setVisits] = useState<{ key: string; lifetime: string; rows: PlaceVisitStats[]; at: number } | null>(null);
   const visitsRead = useRef(0);
   const [search, setSearch] = useState("");
   const dataRef = useRef(data);
@@ -324,16 +325,22 @@ export default function PlacesScreen() {
    * visit line (a session that ended still opens sign-in).
    */
   const loadVisits = useCallback(async (list: MobileBootstrap, origin: string | null) => {
+    // Started for every list the page applies (a read or a change's refresh), so only the newest
+    // list's visits ever land (Codex r1 on #521).
     const still = lifetimeCheck();
+    const lifetime = accountLifetime();
     const read = ++visitsRead.current;
     try {
       const rows = await fetchPlaceVisits();
       if (!still() || read !== visitsRead.current) return;
-      setVisits({ key: listAccountKey(list), rows, at: Date.now() });
+      setVisits({ key: listAccountKey(list), lifetime, rows, at: Date.now() });
     } catch (error) {
-      sessionEnded(error, origin);
+      if (sessionEnded(error, origin)) return;
+      // The newest read failed: the rows lose their visit lines rather than keep older ones.
+      if (!still() || read !== visitsRead.current) return;
+      setVisits(null);
     }
-  }, [lifetimeCheck, sessionEnded]);
+  }, [accountLifetime, lifetimeCheck, sessionEnded]);
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -595,6 +602,7 @@ export default function PlacesScreen() {
       pageReads.applied(ticket);
       dataRef.current = reconciled;
       setData(reconciled);
+      void loadVisits(reconciled, activeAccountKey());
       // A restored place this list lacks is gone again; monitoring from it settles any it has.
       settleGoneRestores(reconciled);
       await monitorList(reconciled);
@@ -632,13 +640,36 @@ export default function PlacesScreen() {
   const slots = placeRoleSlots(rolePlaces);
   // Search and sections (location v3 PR 16c): one list under nine places; from nine, search and
   // Frequent / Recent above All places. Visit lines only from this account's own visits read.
-  const visitRows = visits && data && visits.key === listAccountKey(data) ? visits.rows : null;
+  // Only this account's visits from this lifetime (Codex r1 on #521): an earlier lifetime's never come back.
+  const visitRows = visits && data && visits.key === listAccountKey(data) && visits.lifetime === accountLifetime() ? visits.rows : null;
   const visitsById = useMemo(() => placeVisitsById(visitRows), [visitRows]);
   const visitsNow = useMemo(() => new Date(visits?.at ?? Date.now()), [visits?.at]);
+  // The device's zone, cached and re-read once a second at most (localeDateFormat), so labels
+  // follow a zone change without building a formatter per row.
+  const zoneId = currentTimeZoneId();
+  const deviceZone = zoneId === "local" ? undefined : zoneId;
   const layout = useMemo(() => placeListLayout(rolePlaces, visitsById, search), [rolePlaces, visitsById, search]);
   const searching = layout.searchable && search.trim().length > 0;
   const shownArchived = searching ? archive.places.filter((place) => placeMatchesSearch(place, search)) : archive.places;
   const lastSectionKey = layout.sections.at(-1)?.key ?? null;
+  const placesById = useMemo(() => new Map(places.map((place) => [place.id, place])), [places]);
+  // VoiceOver on iPhone has no live regions: the search result is announced, once per result,
+  // after typing pauses (Codex r1 on #521).
+  const searchAnnouncement = !searching ? null
+    : layout.sections.length === 0 && shownArchived.length === 0 ? `No places match ${search.trim()}.`
+    : resultCountAnnouncement((layout.sections[0]?.places.length ?? 0) + shownArchived.length);
+  const lastAnnouncement = useRef<string | null>(null);
+  useEffect(() => {
+    if (!searchAnnouncement || searchAnnouncement === lastAnnouncement.current) {
+      if (!searchAnnouncement) lastAnnouncement.current = null;
+      return;
+    }
+    const timer = setTimeout(() => {
+      lastAnnouncement.current = searchAnnouncement;
+      AccessibilityInfo.announceForAccessibility(searchAnnouncement);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [searchAnnouncement]);
   const editingSlot = roleSheet ? slots.find((slot) => slot.role === roleSheet.role) ?? null : null;
 
   const pageState = placesPageState(Boolean(data), Boolean(loadFailure));
@@ -726,12 +757,12 @@ export default function PlacesScreen() {
 
   /** One saved place's row: its name, last visit (and 30-day visits in Frequent) and details. */
   function placeRow(rolePlace: (typeof rolePlaces)[number], index: number, sectionKey: PlaceListSectionKey) {
-    const place = places.find((candidate) => candidate.id === rolePlace.id) ?? rolePlace;
+    const place = placesById.get(rolePlace.id) ?? rolePlace;
     const name = placeDisplayName(rolePlace);
     const stats = visitsById.get(rolePlace.id);
     const visitLine = [
       sectionKey === "frequent" ? placeRecentVisitsLabel(stats) : null,
-      placeLastVisitLabel(stats?.lastVisitAt, visitsNow)
+      placeLastVisitLabel(stats?.lastVisitAt, visitsNow, deviceZone)
     ].filter(Boolean).join(" · ");
     const subtitle = [visitLine, placeRowSubtitle(rolePlace, categories)].filter(Boolean).join("\n");
     return (
@@ -891,7 +922,7 @@ export default function PlacesScreen() {
             ))}
           </ReflowBlockGroup>
 
-          {layout.searchable ? <PlacesSearchField onChange={setSearch} theme={theme} /> : null}
+          {layout.searchable ? <PlacesSearchField initialValue={search} onChange={setSearch} theme={theme} /> : null}
 
           {places.length === 0 && !hasPendingRestored ? (
             <ReflowBlockGroup
@@ -1344,3 +1375,7 @@ const learnedSheetStyles = StyleSheet.create({
   half: { flex: 1 },
   pillText: { fontSize: 16, fontWeight: "700" }
 });
+
+function resultCountAnnouncement(count: number) {
+  return count === 1 ? "1 place matches." : `${count} places match.`;
+}

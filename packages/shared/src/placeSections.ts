@@ -116,7 +116,10 @@ export function placeLastVisitLabel(lastVisitAt: string | null | undefined, now:
   const time = visitTime(lastVisitAt);
   if (time === Number.NEGATIVE_INFINITY) return null;
   const at = new Date(Math.min(time, now.getTime()));
-  const zone = timeZone || undefined;
+  // The zone is part of every formatter's cache key, so a device that changes zone never reuses
+  // one made in the old zone (Codex r1 on #521). Callers on a hot path pass it (the iPhone passes
+  // its cached device zone); without one it is read here.
+  const zone = timeZone || new Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
   const days = dayNumber(now, zone) - dayNumber(at, zone);
   if (days <= 0) return "Last visit today";
   if (days === 1) return "Last visit yesterday";

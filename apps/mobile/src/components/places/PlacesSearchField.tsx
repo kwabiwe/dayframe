@@ -8,7 +8,12 @@ import type { MobileTheme } from "@/lib/mobileTheme";
  * Settings › Saved places search (location v3 PR 16c): filters the list only, never edits a place.
  * Uncontrolled, so native typing owns the text and fast input never drops characters.
  */
-export function PlacesSearchField({ onChange, theme }: { onChange: (value: string) => void; theme: MobileTheme }) {
+export function PlacesSearchField({ initialValue, onChange, theme }: {
+  /** The query already in force, so a field that remounts (the list crossing nine places) shows it. */
+  initialValue: string;
+  onChange: (value: string) => void;
+  theme: MobileTheme;
+}) {
   return (
     <View style={[styles.search, { backgroundColor: theme.surfaceInset }]}>
       <DayframeIcon color={theme.textMuted} glyph={DAYFRAME_APP_ICONS.search} size={18} />
@@ -18,6 +23,7 @@ export function PlacesSearchField({ onChange, theme }: { onChange: (value: strin
         autoCapitalize="none"
         autoCorrect={false}
         clearButtonMode="while-editing"
+        defaultValue={initialValue}
         onChangeText={onChange}
         placeholder="Search places"
         placeholderTextColor={theme.textMuted}
