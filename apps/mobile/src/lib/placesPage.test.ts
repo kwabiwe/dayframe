@@ -284,6 +284,32 @@ describe("createMonitorQueue (Codex r6/r7 on #508)", () => {
     expect(finished).toEqual([[1, true], [2, false]]);
   });
 
+  it("checks an input and starts its refresh in one synchronous step (Codex r8 on #508)", async () => {
+    const steps: string[] = [];
+    const first = deferredBoolean();
+    const queue = createMonitorQueue<string>({
+      refresh: (input) => {
+        steps.push(`start ${input}`);
+        return input === "first" ? first.promise : Promise.resolve(true);
+      },
+      runnable: (input) => {
+        steps.push(`check ${input}`);
+        // Anything queued for a microtask after the check runs only after the start.
+        queueMicrotask(() => steps.push("microtask"));
+        return true;
+      },
+      finished: () => undefined
+    });
+    void queue.request("first");
+    await Promise.resolve();
+    const queued = queue.request("queued");
+    first.resolve(true);
+    await queued;
+    expect(steps.slice(0, 2)).toEqual(["check first", "start first"]);
+    const queuedCheck = steps.indexOf("check queued");
+    expect(steps[queuedCheck + 1]).toBe("start queued");
+  });
+
   it("drops an input that is no longer runnable when its turn comes, and whatever waits on clear (Codex r7 on #508)", async () => {
     const started: string[] = [];
     const running = deferredBoolean();

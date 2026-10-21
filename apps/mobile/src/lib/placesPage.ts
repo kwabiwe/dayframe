@@ -180,8 +180,8 @@ export function createPageReadGate() {
 /**
  * Places' geofence monitoring, one refresh at a time and latest wins (Codex r6/r7 on #508): a request
  * while one runs replaces whatever was waiting, so the last input is always the newest requested.
- * Just before an input runs, `runnable` is asked again; false drops it unrun (its account lifetime
- * ended, or the page closed), and `clear` drops whatever waits. `finished` hears every refresh that
+ * `runnable` is asked in the same synchronous step that starts an input's refresh; false drops it
+ * unrun (its account lifetime ended, or the page closed), and `clear` drops whatever waits. `finished` hears every refresh that
  * ran, so retries that keep queueing newer inputs never starve settlement; it decides from the
  * page's current state, not from the input's. `request` resolves once that input has run, or was
  * replaced or dropped. `engaged`: the page has asked at least once, so every list it shows from then
@@ -202,8 +202,16 @@ export function createMonitorQueue<T>(options: {
         const job: Job = waiting;
         waiting = null;
         try {
-          if (!options.runnable(job.input)) continue;
-          const refreshed = await Promise.resolve().then(() => options.refresh(job.input)).then(() => true, () => false);
+          // Checked and started in one synchronous step: nothing can end its lifetime in between
+          // (Codex r8 on #508).
+          let started: Promise<unknown>;
+          try {
+            if (!options.runnable(job.input)) continue;
+            started = options.refresh(job.input);
+          } catch (error) {
+            started = Promise.reject(error);
+          }
+          const refreshed = await started.then(() => true, () => false);
           options.finished(job.input, refreshed);
         } finally {
           job.done();

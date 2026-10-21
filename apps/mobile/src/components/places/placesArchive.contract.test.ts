@@ -70,6 +70,9 @@ describe("Places › Archived on the page (Codex r1 on #508)", () => {
     // Nothing queued starts outside its lifetime or after the page closes (Codex r7 on #508).
     expect(places).toContain("runnable: (input) => monitorInputCurrent(input),");
     expect(places).toContain("useEffect(() => () => monitor.clear(), [monitor]);");
+    // The status line is shown only for the lifetime and account that wrote it (Codex r8 on #508).
+    expect(places).toContain("const statusMessage = status && status.owner === statusOwner() ? status.text : null;");
+    expect(places.match(/setStatus\(/g)).toHaveLength(1);
     expect(places).not.toContain("changeEpoch");
     expect(places).not.toContain("readSequence");
   });

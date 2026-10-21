@@ -14,6 +14,8 @@ type Owner = { userId: string; workspaceId: string };
 const mocks = vi.hoisted(() => ({
   owner: null as Owner | null,
   epoch: 1,
+  // Called whenever the screen reads the account lifetime (for probing the exact moment it is read).
+  onEpochRead: null as null | (() => void),
   fetchBootstrap: vi.fn(),
   fetchArchivedPlaces: vi.fn(),
   setPlaceArchived: vi.fn(),
@@ -23,7 +25,11 @@ const mocks = vi.hoisted(() => ({
 
 const factories = vi.hoisted(() => ({
   accountMock: () => ({
-    currentMobileAccountEpoch: () => mocks.epoch,
+    currentMobileAccountEpoch: () => {
+      const epoch = mocks.epoch;
+      mocks.onEpochRead?.();
+      return epoch;
+    },
     mobileAccountKey: (owner: Owner) => `${owner.workspaceId}:${owner.userId}`,
     mobileAccountOwnersEqual: (left: Owner | null | undefined, right: Owner | null | undefined) =>
       left?.userId === right?.userId && left?.workspaceId === right?.workspaceId,
@@ -151,6 +157,7 @@ async function mountFor(owner: Owner, places: unknown[]) {
 
 beforeEach(() => {
   mocks.epoch = 1;
+  mocks.onEpochRead = null;
   mocks.fetchArchivedPlaces.mockResolvedValue([archivedGym]);
   mocks.refreshGeofences.mockResolvedValue(0);
 });
@@ -735,5 +742,71 @@ describe("Places restore recovery (Codex r7 on #508)", () => {
     await act(async () => { held.resolve(1); });
     await flush();
     expect(texts()).toContain("Couldn't refresh your places. Try again.");
+  });
+});
+
+// Codex r8 on #508: a queued refresh is checked and started in one synchronous step, and the status
+// line belongs to the account lifetime that wrote it.
+describe("Places account lifetime (Codex r8 on #508)", () => {
+  it("never starts a queued refresh after its lifetime ends between the check and the start", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    const held = deferred<number>();
+    const startedIn: number[] = [];
+    mocks.refreshGeofences.mockImplementation(() => {
+      startedIn.push(mocks.epoch);
+      return startedIn.length === 1 ? held.promise : Promise.resolve(1);
+    });
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    // A newer list waits behind the running refresh.
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym, office]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(startedIn).toEqual([1]);
+    // The lifetime ends in the very next microtask after the queue's eligibility check reads it.
+    mocks.onEpochRead = () => {
+      mocks.onEpochRead = null;
+      queueMicrotask(() => { mocks.epoch += 2; });
+    };
+    await act(async () => { held.resolve(1); });
+    await flush();
+    // Whatever started, started in the lifetime that asked for it.
+    expect(startedIn.every((epoch) => epoch === 1)).toBe(true);
+  });
+
+  it("never shows the next account a restore warning naming the previous account's place", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    mocks.fetchBootstrap.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(texts().join(" ")).toContain("Example Gym is restored, but Places couldn't refresh.");
+    // Signed into B on the open page, whose places then load.
+    mocks.owner = ACCOUNT_B;
+    mocks.epoch = 2;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_B, [office]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(savedRowIds()).toEqual([office.id]);
+    expect(texts().join(" ")).not.toContain("Example Gym");
+  });
+
+  it("never shows a returning account's new lifetime the old lifetime's status line", async () => {
+    await mountFor(ACCOUNT_A, [studio]);
+    mocks.setPlaceArchived.mockResolvedValue({ ...archivedGym, archivedAt: null });
+    mocks.fetchArchivedPlaces.mockResolvedValue([]);
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    await act(async () => { restore(archivedGym); });
+    await flush();
+    expect(texts()).toContain("Example Gym restored.");
+    // Away to B and back to A: a new lifetime of A, whose list loads.
+    mocks.epoch = 3;
+    mocks.fetchBootstrap.mockResolvedValueOnce(bootstrapFor(ACCOUNT_A, [studio, gym]));
+    await act(async () => { await pullToRefresh(); });
+    await flush();
+    expect(texts()).not.toContain("Example Gym restored.");
   });
 });

@@ -112,14 +112,29 @@ export default function PlacesScreen() {
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   const [selectedLearnedPlace, setSelectedLearnedPlace] = useState<MobileLearnedPlace | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  // The status line, with the account lifetime and account it was written for: shown only while
+  // both still hold, so another account (or a later lifetime) never sees it (Codex r8 on #508).
+  const [status, setStatus] = useState<{ text: string; owner: string } | null>(null);
+  const statusOwner = useCallback(() => {
+    const shown = dataRef.current;
+    return `${currentMobileAccountEpoch()}|${shown ? listAccountKey(shown) : ""}`;
+  }, []);
+  /** Sets the status line for the lifetime and account shown now (an updater sees only a current line). */
+  const setStatusMessage = useCallback((next: string | null | ((current: string | null) => string | null)) => {
+    const owner = statusOwner();
+    setStatus((current) => {
+      const text = typeof next === "function" ? next(current?.owner === owner ? current.text : null) : next;
+      return text === null ? null : { text, owner };
+    });
+  }, [statusOwner]);
+  const statusMessage = status && status.owner === statusOwner() ? status.text : null;
   // The newest page read failed before any list was shown (staging feedback B2): an in-page state
   // with Try again instead of a system alert, and never "Nothing saved yet" for a list not read.
   const [loadFailure, setLoadFailure] = useState<{ offline: boolean } | null>(null);
   // The status line a failed pull-to-refresh showed, cleared by the next read that lands.
   const refreshFailureMessage = useRef<string | null>(null);
   // The "restored, but Places couldn't refresh" line, cleared when its waiting place settles.
-  const restoreWarning = useRef<{ placeId: string; message: string } | null>(null);
+  const restoreWarning = useRef<{ placeId: string; message: string; owner: string } | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
   const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
   // One Home/Work change at a time across the page (a second sheet can't open mid-save).
@@ -168,10 +183,16 @@ export default function PlacesScreen() {
   /** The warning line for these restores no longer holds: it clears (only if it still shows). */
   const clearRestoreWarning = useCallback((ids: readonly string[]) => {
     const warning = restoreWarning.current;
-    if (!warning || !ids.includes(warning.placeId)) return;
+    if (!warning) return;
+    // A warning from another lifetime or account is never shown again: it is simply forgotten.
+    if (warning.owner !== statusOwner()) {
+      restoreWarning.current = null;
+      return;
+    }
+    if (!ids.includes(warning.placeId)) return;
     restoreWarning.current = null;
     setStatusMessage((current) => (current === warning.message ? null : current));
-  }, []);
+  }, [setStatusMessage, statusOwner]);
 
   /**
    * An applied list (so one that started after every restore it could settle was accepted: older
@@ -285,7 +306,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, [accountLifetime, loadArchived, monitor, monitorList, pageReads, settleGoneRestores, unmonitoredRestoredIn]);
+  }, [accountLifetime, loadArchived, monitor, monitorList, pageReads, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
   useEffect(() => {
     void load();
@@ -475,7 +496,7 @@ export default function PlacesScreen() {
     const say = (message: string) => {
       if (!pageReads.isNewest(ticket)) return;
       if (message !== options.prefix && options.restoredPlaceId) {
-        restoreWarning.current = { placeId: options.restoredPlaceId, message };
+        restoreWarning.current = { placeId: options.restoredPlaceId, message, owner: statusOwner() };
       }
       setStatusMessage(message);
     };
