@@ -5,6 +5,7 @@ import {
   calendarBlockContinuationEdges,
   formatClockTime,
   layoutTimeIntervals,
+  namedPatternBrackets,
   type ClockFormat,
   type TimeIntervalLayout
 } from "@dayframe/shared";
@@ -88,7 +89,22 @@ export type NativeCalendarPresentationEntry = {
   zIndex: number;
 };
 
+/**
+ * A named pattern's bracket (location v3 PR 14b): a complete trip wholly inside the day, from its
+ * first part's start to its last part's end. Swift draws it beside the blocks, spanning its parts
+ * (`memberIds`, oldest first) as they are drawn; its parts stay blocks.
+ */
+export type NativeCalendarPresentationBracket = {
+  key: string;
+  memberIds: string[];
+  name: string;
+  startedAtMs: number;
+  stoppedAtMs: number;
+};
+
 export type NativeCalendarPresentation = {
+  /** Named patterns on this day; while there are any, the day keeps a rail left of its blocks. */
+  brackets: NativeCalendarPresentationBracket[];
   dayEndMs: number;
   dayStartMs: number;
   emptyState: string;
@@ -366,6 +382,18 @@ export function buildNativeCalendarBridgeState({
     }] as const)
   ]);
 
+  // Named patterns (location v3 PR 14b): the day's blocks in Calendar's order, as Today groups them;
+  // only a trip wholly inside the day gets a bracket (none across midnight). Each part's own label
+  // says which trip it is part of; the bracket itself is hidden from VoiceOver.
+  const brackets = namedPatternBrackets(
+    timeEntries.filter((entry) => entryOverlapsDay(entry, selectedDayKey, now)),
+    { startMs: dayStart.getTime(), endMs: dayEnd.getTime() }
+  );
+  const bracketParts = new Map<string, string>();
+  for (const bracket of brackets) {
+    bracket.memberIds.forEach((id, index) => bracketParts.set(id, `Part ${index + 1} of ${bracket.memberIds.length} of ${bracket.name}`));
+  }
+
   const reviewIds = new Set(reviewEntries.map((entry) => entry.id));
   const envelopeById = new Map(confirmedEntries.map((entry) => [entry.id, targetEnvelopeOf(entry, now, dayStart, dayEnd)] as const));
   // A logged block's hit geometry counts every Review suggestion it overlaps, and the logged blocks
@@ -398,6 +426,13 @@ export function buildNativeCalendarBridgeState({
   return {
     actionEntries: entries,
     model: {
+      brackets: brackets.map((bracket) => ({
+        key: bracket.key,
+        memberIds: bracket.memberIds,
+        name: bracket.name,
+        startedAtMs: bracket.startMs,
+        stoppedAtMs: bracket.endMs
+      })),
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "Nothing framed yet.",
@@ -415,7 +450,8 @@ export function buildNativeCalendarBridgeState({
         // Review-lane items never share a target (their lanes and crowds already use the target
         // envelope), so iOS gives each its full 44-point height even when the times overlap.
         isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : hitAnalysis(entry.id),
-        isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0
+        isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0,
+        bracketParts.get(entry.id)
       )),
       modelVersion: 4,
       monthTitle: formatMonthTitle(selectedDate, new Date(now)),
@@ -483,7 +519,9 @@ function serializeCalendarEntry(
   clockFormat: ClockFormat,
   layout?: TimeIntervalLayout,
   analysis?: { overlapCount: number; overlapSeconds: number },
-  warningOverlapCount = 0
+  warningOverlapCount = 0,
+  /** "Part 2 of 3 of School run": a named pattern's part (location v3 PR 14b). */
+  partOf?: string
 ): NativeCalendarPresentationEntry {
   const reviewNeeded = isCalendarReviewNeeded(entry);
   const startedAtMs = Date.parse(entry.startedAt);
@@ -517,7 +555,7 @@ function serializeCalendarEntry(
     actionKind,
     accessibilityLabel: entry.reviewCrowd
       ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs, clockFormat)
-      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${partOf ? `. ${partOf}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,

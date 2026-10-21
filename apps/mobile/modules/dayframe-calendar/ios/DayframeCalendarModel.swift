@@ -126,7 +126,27 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   }
 }
 
+/// A named pattern's bracket (location v3 PR 14b): drawn beside its parts, which stay blocks.
+struct DayframeCalendarBracket: Equatable, Identifiable {
+  let key: String
+  let memberIds: [String]
+  let name: String
+  let startedAtMs: Double
+  let stoppedAtMs: Double
+
+  var id: String { key }
+
+  init(_ record: DayframeCalendarBracketRecord) {
+    key = record.key
+    memberIds = record.memberIds
+    name = record.name
+    startedAtMs = record.startedAtMs
+    stoppedAtMs = record.stoppedAtMs
+  }
+}
+
 struct DayframeCalendarPresentation: Equatable {
+  let brackets: [DayframeCalendarBracket]
   let dayEndMs: Double
   let dayStartMs: Double
   let emptyState: String
@@ -156,6 +176,7 @@ struct DayframeCalendarPresentation: Equatable {
   let weekDays: [DayframeCalendarWeekDay]
 
   init(_ record: DayframeCalendarPresentationRecord) {
+    brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)
     dayEndMs = record.dayEndMs
     dayStartMs = record.dayStartMs
     emptyState = record.emptyState
@@ -185,6 +206,11 @@ struct DayframeCalendarPresentation: Equatable {
   }
 
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
+
+  /// A day with a bracket keeps its rail left of every block (render and hit geometry alike).
+  var entryLeadingInset: Double {
+    brackets.isEmpty ? 0 : DayframeCalendarConstants.bracketRailWidth
+  }
 }
 
 /// One press of the header's zoom − / + buttons. The scroll coordinator, the timeline's only

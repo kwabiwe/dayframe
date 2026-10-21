@@ -70,17 +70,30 @@ export function calendarBlockVisualGeometry({
   };
 }
 
+/**
+ * A day that draws a named pattern's bracket (location v3 PR 14b) keeps a rail this wide on the
+ * left of its column for the bracket and its name: all of that day's blocks, lanes included, share
+ * the space right of it, so the bracket never lies under a block.
+ */
+export const calendarBracketRailPx = 12;
+
 export function calendarBlockLaneInsets({
   offsetFraction,
   widthFraction
-}: Pick<TimeBlockLane, "offsetFraction" | "widthFraction">) {
+}: Pick<TimeBlockLane, "offsetFraction" | "widthFraction">, railPx = 0) {
   const before = offsetFraction * 100;
   const after = Math.max(0, (1 - offsetFraction - widthFraction) * 100);
   const innerInset = calendarBlockLaneGapPx / 2;
+  // With a rail, a lane's share is of the column right of it.
+  const share = (percent: number) => railPx
+    ? `(100% - ${railPx}px) * ${percent / 100}`
+    : `${percent}%`;
 
   return {
-    left: before === 0 ? calendarBlockOuterInsetPx : `calc(${before}% + ${innerInset}px)`,
-    right: after === 0 ? calendarBlockOuterInsetPx : `calc(${after}% + ${innerInset}px)`
+    left: before === 0
+      ? calendarBlockOuterInsetPx + railPx
+      : `calc(${railPx ? `${railPx}px + ` : ""}${share(before)} + ${innerInset}px)`,
+    right: after === 0 ? calendarBlockOuterInsetPx : `calc(${share(after)} + ${innerInset}px)`
   };
 }
 
