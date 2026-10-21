@@ -3,12 +3,15 @@ import {
   applyPlaceRoleLocally,
   archivePlaceConfirmCopy,
   archivedPlaceRows,
+  createPlaceRestoreGate,
+  pendingRestoredRows,
   learnedPlaceSubtitle,
   notePlaceDeleted,
   placeRowSubtitle,
   placesPageState,
   replacePreviousNote,
   replacePreviousOffered,
+  restoredNotRefreshedMessage,
   subscribeDeletedPlaces,
   takeDeletedPlaces
 } from "./placesPage";
@@ -164,6 +167,44 @@ describe("Places › Archived (PRD D19 A10)", () => {
       title: "Archive Home?",
       message: "Past blocks keep its name, and it stops matching new visits and stops being your Home. You can restore it from Places › Archived."
     }));
+  });
+});
+
+describe("createPlaceRestoreGate (Codex r1 on #508)", () => {
+  it("lets one restore through at a time, and only its own request unlocks it", () => {
+    const gate = createPlaceRestoreGate();
+    const first = gate.take("ws:a");
+    expect(first).not.toBeNull();
+    expect(gate.take("ws:a")).toBeNull();
+    expect(gate.release(first! + 1)).toBe(false);
+    expect(gate.take("ws:a")).toBeNull();
+    expect(gate.release(first!)).toBe(true);
+    expect(gate.take("ws:a")).not.toBeNull();
+  });
+
+  it("is taken over by another account, and the old request's release never frees the new one", () => {
+    const gate = createPlaceRestoreGate();
+    const old = gate.take("ws:a")!;
+    const other = gate.take("ws:b");
+    expect(other).not.toBeNull();
+    expect(gate.release(old)).toBe(false);
+    expect(gate.take("ws:b")).toBeNull();
+  });
+});
+
+describe("restored places waiting for a refresh (Codex r1 on #508)", () => {
+  it("shows them under Saved places until the shown list has them", () => {
+    const pending = [{ id: "p1", name: "Example Gym" }, { id: "p2", name: "Example Studio" }];
+    expect(pendingRestoredRows(pending, [{ id: "p2" }])).toEqual([
+      { id: "p1", name: "Example Gym", subtitle: "Restored · pull to refresh to finish", accessibilityLabel: "Example Gym, restored, pull to refresh to finish" }
+    ]);
+    expect(pendingRestoredRows(pending, [{ id: "p1" }, { id: "p2" }])).toEqual([]);
+  });
+
+  it("says honestly that the restore landed but the list did not", () => {
+    expect(restoredNotRefreshedMessage("Example Gym")).toBe(
+      "Example Gym is restored, but Places couldn't refresh. Pull to refresh to finish; visits there are noticed again once it shows."
+    );
   });
 });
 

@@ -1,7 +1,6 @@
 import { formatDuration } from "@dayframe/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AccessibilityInfo,
   Alert,
   Modal,
   Pressable,
@@ -28,10 +27,22 @@ import { BlocksConfirmHost, useBlocksConfirm, type BlocksConfirmController } fro
 import { BlocksEmptyState } from "@/components/blocks/BlocksEmptyState";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { ArchivedPlacesGroup } from "@/components/places/ArchivedPlacesGroup";
+import { ReflowBlockGroup } from "@/components/places/ReflowBlockGroup";
 import { PlaceRoleSheet, type PlaceRoleSaveRequest, type PlaceRoleSheetMode } from "@/components/places/PlaceRoleSheet";
 import { StoppedTripsGroup } from "@/components/places/StoppedTripsGroup";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton } from "@/components/settings/SettingsBlocks";
-import { applyPlaceRoleLocally, learnedPlaceSubtitle, placeRowSubtitle, placesPageState, subscribeDeletedPlaces, takeDeletedPlaces } from "@/lib/placesPage";
+import {
+  applyPlaceRoleLocally,
+  learnedPlaceSubtitle,
+  pendingRestoredRows,
+  placeRowSubtitle,
+  placesPageState,
+  restoredNotRefreshedMessage,
+  subscribeDeletedPlaces,
+  takeDeletedPlaces,
+  type RestoreRefreshOutcome
+} from "@/lib/placesPage";
+import { useArchivedPlaces } from "@/lib/useArchivedPlaces";
 import { mobileAccountKey, mobileAccountOwnersEqual, readActiveMobileAccount } from "@/lib/mobileAccount";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import {
@@ -40,18 +51,14 @@ import {
 } from "@/components/SwipeDismissSheet";
 import {
   AuthRequiredError,
-  fetchArchivedPlaces,
   fetchBootstrap,
   forgetLearnedPlace,
   ignoreLearnedPlace,
-  setPlaceArchived,
   setPlaceRole,
-  type MobileArchivedPlace,
   type MobileBootstrap,
   type MobileLearnedPlace,
   type MobilePlace
 } from "@/lib/api";
-import { createArchivedReadGate } from "@/lib/activitiesPage";
 import { friendlyMobileErrorMessage, mobileFailureKind } from "@/lib/friendlyError";
 import { refreshGeofencesForPlaces } from "@/lib/geofence";
 import { backfillLearnedPlaceLocations } from "@/lib/locationGeocoding";
@@ -71,6 +78,9 @@ import {
 import { formatLocaleDate } from "../src/lib/localeDateFormat";
 
 type Category = MobileBootstrap["categories"][number];
+
+/** A restore accepted while Places couldn't refresh is retried once after this long. */
+const RESTORE_REFRESH_RETRY_MS = 5_000;
 
 export default function PlacesScreen() {
   const backLabel = usePreviousScreenLabel() ?? "Settings";
@@ -100,31 +110,23 @@ export default function PlacesScreen() {
   const changeEpoch = useRef(0);
   // Only the newest page read applies (mount and focus can both be out at once).
   const readSequence = useRef(0);
-  // Places › Archived (location v3 PR 15b, PRD D19 A10): read with the page, for the account that
-  // read it, and shown only when there are some. A failed read leaves it as it was (or hidden).
-  const [archived, setArchived] = useState<{ accountKey: string; places: MobileArchivedPlace[] } | null>(null);
-  const [restoringArchivedId, setRestoringArchivedId] = useState<string | null>(null);
-  const [archivedProblem, setArchivedProblem] = useState<string | null>(null);
-  // Only the newest archived read applies, and none that was out while a restore or an archive landed.
-  const archivedReads = useRef(createArchivedReadGate()).current;
   const mounted = useRef(true);
   useEffect(() => () => {
     mounted.current = false;
   }, []);
-
-  const loadArchived = useCallback(async () => {
-    const read = archivedReads.begin();
-    const owner = await readActiveMobileAccount();
-    if (!owner) return;
-    try {
-      const places = await fetchArchivedPlaces();
-      if (!mounted.current || !archivedReads.current(read)) return;
-      if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !archivedReads.current(read)) return;
-      setArchived({ accountKey: mobileAccountKey(owner), places });
-    } catch {
-      // Signed out or offline: the page read says so; this section never breaks the page.
-    }
-  }, [archivedReads]);
+  const shownAccountKey = data ? mobileAccountKey({ userId: data.user.id, workspaceId: data.workspace.id }) : null;
+  // Places › Archived (location v3 PR 15b, PRD D19 A10): read with the page, for the account that
+  // read it, and shown only when there are some. A failed read leaves it as it was (or hidden).
+  const archive = useArchivedPlaces({
+    onSignedOut: () => router.replace("/"),
+    refreshAfterRestore: (place, settle) => refreshAfterPlaceChange({
+      prefix: `${place.name} restored.`,
+      failureMessage: restoredNotRefreshedMessage(place.name),
+      onSettled: settle
+    }),
+    shownAccountKey
+  });
+  const { changed: archivedChanged, load: loadArchived, takePendingRestored } = archive;
 
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
@@ -142,6 +144,10 @@ export default function PlacesScreen() {
         .reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), fetched);
       setData(bootstrap);
       setLoadFailure(null);
+      // A restored place this list now brings back is monitored again (its refresh had failed).
+      if (takePendingRestored(mobileAccountKey({ userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }))) {
+        void refreshGeofencesForPlaces(bootstrap.places, { userId: bootstrap.user.id, workspaceId: bootstrap.workspace.id }).catch(() => 0);
+      }
       const failedRefresh = refreshFailureMessage.current;
       refreshFailureMessage.current = null;
       if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
@@ -166,7 +172,7 @@ export default function PlacesScreen() {
     } finally {
       if (options?.refresh) setRefreshing(false);
     }
-  }, [loadArchived]);
+  }, [loadArchived, takePendingRestored]);
 
   useEffect(() => {
     void load();
@@ -187,9 +193,9 @@ export default function PlacesScreen() {
       ? deleted.reduce((next, id) => reconcileBootstrapPlaces(next, { removePlaceId: id }), current)
       : current);
     // An archived place (handed over the same way) shows under Archived from a read after it landed.
-    archivedReads.changed();
+    archivedChanged();
     void loadArchived();
-  }, [archivedReads, loadArchived]);
+  }, [archivedChanged, loadArchived]);
 
   useEffect(() => subscribeDeletedPlaces(() => {
     void applyDeletedPlaces();
@@ -317,20 +323,28 @@ export default function PlacesScreen() {
     removeLearnedPlaceId?: string;
     /** Places as this page now shows them, for monitoring when the fresh read fails. */
     fallbackPlaces?: MobilePlace[];
-    /** Applied in the same render as the refreshed list (or once it fails): a restored row leaving Archived. */
-    alsoApply?: () => void;
+    /** The status line when the refresh fails (instead of the generic "Pull to refresh" one). */
+    failureMessage?: string;
+    /**
+     * Told how the refresh ended, in the same render that applies its list ("applied"), or when a
+     * newer change overtook it ("stale") or it failed: a restored row leaves Archived with it.
+     */
+    onSettled?: (outcome: RestoreRefreshOutcome) => void;
   }) {
     const epoch = changeEpoch.current;
     try {
       const bootstrap = await fetchBootstrap();
       if (!mounted.current) return;
-      options.alsoApply?.();
       if (epoch !== changeEpoch.current) {
+        options.onSettled?.("stale");
         setStatusMessage(options.prefix);
         return;
       }
       const reconciled = reconcileBootstrapPlaces(bootstrap, options);
+      options.onSettled?.("applied");
       setData(reconciled);
+      // Monitoring is refreshed from this list just below, including any restored place it settles.
+      takePendingRestored(mobileAccountKey({ userId: reconciled.user.id, workspaceId: reconciled.workspace.id }));
       await refreshGeofencesForPlaces(reconciled.places, { userId: reconciled.user.id, workspaceId: reconciled.workspace.id }).catch(() => 0);
       const bootstrapHasPlace =
         !options.upsertPlace || bootstrap.places.some((place) => place.id === options.upsertPlace?.id);
@@ -340,13 +354,13 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (mounted.current) options.alsoApply?.();
+      if (mounted.current) options.onSettled?.("failed");
       const current = dataRef.current;
       // Only while nothing else changed since: a later delete or change already set monitoring.
       if (options.fallbackPlaces && current && epoch === changeEpoch.current) {
         await refreshGeofencesForPlaces(options.fallbackPlaces, { userId: current.user.id, workspaceId: current.workspace.id }).catch(() => 0);
       }
-      setStatusMessage(`${options.prefix} Pull to refresh if it doesn't show on another device.`);
+      setStatusMessage(options.failureMessage ?? `${options.prefix} Pull to refresh if it doesn't show on another device.`);
     }
   }
 
@@ -404,7 +418,7 @@ export default function PlacesScreen() {
         dataRef.current = next;
         setData(next);
       }
-      if (previousArchived) archivedReads.changed();
+      if (previousArchived) archivedChanged();
       const label = placeRoleLabel(request.role);
       const prefix = !request.placeId
         ? `${label} cleared.`
@@ -417,51 +431,15 @@ export default function PlacesScreen() {
     }
   }
 
-  /** Places › Archived › Restore: the place comes back under Saved places, without a Home/Work role. */
-  async function restoreArchivedPlace(place: { id: string; name: string }) {
-    if (restoringArchivedId) return;
-    setRestoringArchivedId(place.id);
-    setArchivedProblem(null);
-    const owner = await readActiveMobileAccount();
-    try {
-      await setPlaceArchived(place.id, false);
-    } catch (error) {
-      if (error instanceof AuthRequiredError) {
-        router.replace("/");
-        return;
-      }
-      if (!mounted.current) return;
-      setRestoringArchivedId(null);
-      // The row stays where it was, with the reason under the group (no system alert: UIA-005).
-      const message = friendlyMobileErrorMessage(error, `Couldn't restore ${place.name}. Try again.`);
-      setArchivedProblem(message);
-      AccessibilityInfo.announceForAccessibility(message);
-      return;
-    }
-    if (!mounted.current) return;
-    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) {
-      setRestoringArchivedId(null);
-      return;
-    }
-    // Accepted: any read of either list that started before this answer is dropped. The row leaves
-    // Archived in the same render that the refreshed list brings the place back under Saved places.
-    archivedReads.changed();
-    changeEpoch.current += 1;
-    AccessibilityInfo.announceForAccessibility(`${place.name} restored.`);
-    await refreshAfterPlaceChange({
-      prefix: `${place.name} restored.`,
-      alsoApply: () => {
-        setArchived((current) => current
-          ? { ...current, places: current.places.filter((item) => item.id !== place.id) }
-          : current);
-        setRestoringArchivedId(null);
-      }
-    });
-    void loadArchived();
-  }
-
-  const shownAccountKey = data ? mobileAccountKey({ userId: data.user.id, workspaceId: data.workspace.id }) : null;
-  const archivedPlaces = archived && archived.accountKey === shownAccountKey ? archived.places : [];
+  // A restore accepted while Places couldn't refresh waits under Saved places; try once more shortly
+  // (focus and pull-to-refresh also settle it), so monitoring resumes without the person acting.
+  const pendingRestored = pendingRestoredRows(archive.pendingRestored, places);
+  const hasPendingRestored = pendingRestored.length > 0;
+  useEffect(() => {
+    if (!hasPendingRestored) return;
+    const retry = setTimeout(() => { void load(); }, RESTORE_REFRESH_RETRY_MS);
+    return () => clearTimeout(retry);
+  }, [hasPendingRestored, load]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -529,7 +507,9 @@ export default function PlacesScreen() {
             />
           ) : (
           <>
-          <SettingsBlockGroup foot="Trips are named after these." theme={theme} title="Home and Work">
+          {/* Every group reflows with the shared layout owner, so rows fading in or out (Saved places,
+              Archived, Suggested places) never make a boundary or a footnote below them jump. */}
+          <ReflowBlockGroup foot="Trips are named after these." reduceMotion={reduceMotion} theme={theme} title="Home and Work">
             {slots.map((slot, index) => (
               <View key={slot.role} style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]} testID={`places-role-${slot.role}`}>
                 <View style={styles.placesRowMain}>
@@ -555,14 +535,15 @@ export default function PlacesScreen() {
                 </View>
               </View>
             ))}
-          </SettingsBlockGroup>
+          </ReflowBlockGroup>
 
-          <SettingsBlockGroup
-            foot={places.length === 0 ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change, archive or delete it."}
+          <ReflowBlockGroup
+            foot={places.length === 0 && !hasPendingRestored ? "No places yet. Add one by searching for an address or using where you are." : "Tap a place to change, archive or delete it."}
+            reduceMotion={reduceMotion}
             theme={theme}
             title="Saved places"
           >
-            {places.length === 0 ? (
+            {places.length === 0 && !hasPendingRestored ? (
               <View style={styles.placesEmpty}>
                 <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>Nothing saved yet</Text>
               </View>
@@ -608,57 +589,95 @@ export default function PlacesScreen() {
                 </Reanimated.View>
               );
             })}
-          </SettingsBlockGroup>
+            {/* Restored, but no refreshed list has brought it back yet (Codex r1 on #508): it waits
+                here, never in neither list, until a read lands and monitoring resumes. */}
+            {pendingRestored.map((row, index) => (
+              <Reanimated.View
+                key={`restored-${row.id}`}
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                layout={localLayoutTransition(reduceMotion)}
+              >
+                <View
+                  accessible
+                  accessibilityLabel={row.accessibilityLabel}
+                  style={[styles.placesRow, places.length + index > 0 ? styles.settingsActivityRowDivider : null]}
+                  testID={`places-restored-${row.id}`}
+                >
+                  <View style={styles.placesRowMain}>
+                    <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+                      <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                    </View>
+                    <View style={styles.settingsActivityText}>
+                      <Text {...mobileTextProps("itemTitle")} numberOfLines={1} style={styles.settingsActivityName}>{row.name}</Text>
+                      <Text {...mobileTextProps("metadata")} style={styles.settingsActivityMeta}>{row.subtitle}</Text>
+                    </View>
+                  </View>
+                </View>
+              </Reanimated.View>
+            ))}
+          </ReflowBlockGroup>
 
           <ArchivedPlacesGroup
-            onRestore={(place) => void restoreArchivedPlace(place)}
-            places={archivedPlaces}
-            problem={archivedProblem}
+            onRestore={(place) => void archive.restore(place)}
+            places={archive.places}
+            problem={archive.problem}
             reduceMotion={reduceMotion}
-            restoringId={restoringArchivedId}
+            restoringId={archive.restoringId}
             styles={styles}
             theme={theme}
           />
 
           {learnedPlaces.length > 0 ? (
-            <SettingsBlockGroup foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save." theme={theme} title="Suggested places">
-              {learnedPlaces.map((learnedPlace, index) => (
-                <Reanimated.View
-                  key={learnedPlace.id}
-                  entering={localPresenceEntering(reduceMotion)}
-                  exiting={localPresenceExiting(reduceMotion)}
-                  layout={localLayoutTransition(reduceMotion)}
-                >
-                  <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
-                    <Pressable
-                      accessibilityHint="Shows details, Ignore and Forget"
-                      accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
-                      accessibilityRole="button"
-                      onPress={() => setSelectedLearnedPlace(learnedPlace)}
-                      style={({ pressed }) => [styles.placesRowMain, pressed ? styles.placesRowPressed : null]}
-                      testID={`places-learned-${learnedPlace.id}`}
-                    >
-                      <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
-                        <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+            <Reanimated.View
+              entering={localPresenceEntering(reduceMotion)}
+              exiting={localPresenceExiting(reduceMotion)}
+              layout={localLayoutTransition(reduceMotion)}
+            >
+              <ReflowBlockGroup
+                foot="Dayframe suggests a place after repeat visits on different days. Nothing is saved until you choose Save."
+                reduceMotion={reduceMotion}
+                theme={theme}
+                title="Suggested places"
+              >
+                {learnedPlaces.map((learnedPlace, index) => (
+                  <Reanimated.View
+                    key={learnedPlace.id}
+                    entering={localPresenceEntering(reduceMotion)}
+                    exiting={localPresenceExiting(reduceMotion)}
+                    layout={localLayoutTransition(reduceMotion)}
+                  >
+                    <View style={[styles.placesRow, index > 0 ? styles.settingsActivityRowDivider : null]}>
+                      <Pressable
+                        accessibilityHint="Shows details, Ignore and Forget"
+                        accessibilityLabel={`Suggested place ${learnedPlace.name}, ${learnedPlaceSubtitle(learnedPlace)}`}
+                        accessibilityRole="button"
+                        onPress={() => setSelectedLearnedPlace(learnedPlace)}
+                        style={({ pressed }) => [styles.placesRowMain, pressed ? styles.placesRowPressed : null]}
+                        testID={`places-learned-${learnedPlace.id}`}
+                      >
+                        <View style={[styles.placesBlock, styles.placesBlockSuggested]}>
+                          <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.places} size={18} />
+                        </View>
+                        <View style={styles.settingsActivityText}>
+                          <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={styles.settingsActivityName}>{learnedPlace.name}</Text>
+                          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>{learnedPlaceSubtitle(learnedPlace)}</Text>
+                        </View>
+                      </Pressable>
+                      <View style={styles.placesRowActions}>
+                        <SettingsPillButton
+                          accessibilityLabel={`Save ${learnedPlace.name} as a place`}
+                          disabled={ignoringLearnedId === learnedPlace.id || forgettingLearnedId === learnedPlace.id}
+                          label="Save"
+                          onPress={() => beginSaveLearnedPlace(learnedPlace)}
+                          theme={theme}
+                        />
                       </View>
-                      <View style={styles.settingsActivityText}>
-                        <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={styles.settingsActivityName}>{learnedPlace.name}</Text>
-                        <Text {...mobileTextProps("metadata")} numberOfLines={2} style={styles.settingsActivityMeta}>{learnedPlaceSubtitle(learnedPlace)}</Text>
-                      </View>
-                    </Pressable>
-                    <View style={styles.placesRowActions}>
-                      <SettingsPillButton
-                        accessibilityLabel={`Save ${learnedPlace.name} as a place`}
-                        disabled={ignoringLearnedId === learnedPlace.id || forgettingLearnedId === learnedPlace.id}
-                        label="Save"
-                        onPress={() => beginSaveLearnedPlace(learnedPlace)}
-                        theme={theme}
-                      />
                     </View>
-                  </View>
-                </Reanimated.View>
-              ))}
-            </SettingsBlockGroup>
+                  </Reanimated.View>
+                ))}
+              </ReflowBlockGroup>
+            </Reanimated.View>
           ) : null}
           <StoppedTripsGroup reduceMotion={reduceMotion} styles={styles} theme={theme} />
           </>

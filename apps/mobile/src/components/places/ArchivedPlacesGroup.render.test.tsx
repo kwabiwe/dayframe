@@ -9,11 +9,16 @@ vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 vi.mock("react-native", () => ({ Text: "Text", View: "View" }));
 vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" } }));
 vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
+vi.mock("./ReflowBlockGroup", async () => {
+  const React = await import("react");
+  return {
+    ReflowBlockGroup: ({ children, foot, title }: { children: unknown; foot?: string; title: string }) =>
+      React.createElement("Group", { foot, title }, children as never)
+  };
+});
 vi.mock("@/components/settings/SettingsBlocks", async () => {
   const React = await import("react");
   return {
-    SettingsBlockGroup: ({ children, foot, title }: { children: unknown; foot?: string; title: string }) =>
-      React.createElement("Group", { foot, title }, children as never),
     SettingsPillButton: (props: { label: string; onPress: () => void; disabled?: boolean; accessibilityLabel?: string }) =>
       React.createElement("Pill", props)
   };

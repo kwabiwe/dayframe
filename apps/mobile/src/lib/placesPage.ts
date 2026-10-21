@@ -121,6 +121,52 @@ export function archivedPlaceRows(places: readonly { id: string; name: string }[
   }));
 }
 
+/** How the refresh after an accepted restore ended: its list applied, overtaken by a newer change, or failed. */
+export type RestoreRefreshOutcome = "applied" | "stale" | "failed";
+
+/**
+ * Places › Archived › Restore runs one request at a time (Codex r1 on #508). `take` is synchronous,
+ * so two taps in one frame can't both pass; only the request holding the gate releases it, so an
+ * older answer never unlocks Restore while a newer request is still out. Another account takes it
+ * over at once: a request still out for the previous account only ever releases its own token.
+ */
+export function createPlaceRestoreGate() {
+  let issued = 0;
+  let held: { token: number; accountKey: string } | null = null;
+  return {
+    take(accountKey: string) {
+      if (held && held.accountKey === accountKey) return null;
+      issued += 1;
+      held = { token: issued, accountKey };
+      return issued;
+    },
+    release(token: number) {
+      if (held?.token !== token) return false;
+      held = null;
+      return true;
+    }
+  };
+}
+
+/** Said (and announced) when a restore was accepted but Places couldn't refresh after it. */
+export function restoredNotRefreshedMessage(name: string) {
+  return `${name} is restored, but Places couldn't refresh. Pull to refresh to finish; visits there are noticed again once it shows.`;
+}
+
+/**
+ * Restored places still waiting for a refreshed list, as rows under Saved places (never in neither
+ * list): only those the shown list doesn't already have.
+ */
+export function pendingRestoredRows(pending: readonly { id: string; name: string }[], shown: readonly { id: string }[]) {
+  const shownIds = new Set(shown.map((place) => place.id));
+  return pending.filter((place) => !shownIds.has(place.id)).map((place) => ({
+    id: place.id,
+    name: place.name,
+    subtitle: "Restored · pull to refresh to finish",
+    accessibilityLabel: `${place.name}, restored, pull to refresh to finish`
+  }));
+}
+
 /** The place editor's Archive confirmation: what archiving keeps, and where it can be restored. */
 export function archivePlaceConfirmCopy(place: { name: string; role?: PlaceRole | null }) {
   const role = place.role ? placeRoleLabel(place.role) : null;

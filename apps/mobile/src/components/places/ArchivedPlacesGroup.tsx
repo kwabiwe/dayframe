@@ -2,8 +2,9 @@ import { Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { DAYFRAME_APP_ICONS } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/icons/DayframeIcon";
-import { SettingsBlockGroup, SettingsPillButton } from "@/components/settings/SettingsBlocks";
+import { SettingsPillButton } from "@/components/settings/SettingsBlocks";
 import { archivedPlaceRows } from "../../lib/placesPage";
+import { ReflowBlockGroup } from "./ReflowBlockGroup";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "@/lib/motion";
 import { mobileTextProps } from "@/lib/mobileTypography";
 import type { MobileStyles, MobileTheme } from "@/lib/mobileTheme";
@@ -38,7 +39,7 @@ export function ArchivedPlacesGroup({
   if (rows.length === 0) return null;
   return (
     <Reanimated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} layout={localLayoutTransition(reduceMotion)}>
-      <SettingsBlockGroup foot="Not matched or suggested. Past blocks keep their names." theme={theme} title="Archived">
+      <ReflowBlockGroup foot="Not matched or suggested. Past blocks keep their names." reduceMotion={reduceMotion} theme={theme} title="Archived">
         {rows.map((row, index) => (
           <Reanimated.View
             key={row.id}
@@ -75,7 +76,7 @@ export function ArchivedPlacesGroup({
             </Text>
           </Reanimated.View>
         ) : null}
-      </SettingsBlockGroup>
+      </ReflowBlockGroup>
     </Reanimated.View>
   );
 }
