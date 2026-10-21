@@ -28,6 +28,9 @@ describe("entry sheet End inference (owner, 21 Oct 2026)", () => {
     expect(inferEndOnStartDay(startGmt, endGmt)).toBe(endGmt);
     const startBst = Date.parse("2026-10-25T00:30:00Z"); // 01:30 BST, the first 01:30
     expect(inferEndOnStartDay(startBst, endGmt)).toBe(endGmt);
+    // An End from another day rebuilt into the repeated hour takes the occurrence after Start (Codex r2).
+    const nextDay0135 = Date.parse("2026-10-26T01:35:00Z");
+    expect(inferEndOnStartDay(startGmt, nextDay0135)).toBe(Date.parse("2026-10-25T01:35:00Z"));
   });
 
   it("moves End with a Start moved past it, keeping the duration", () => {
@@ -60,7 +63,8 @@ describe("the entry sheet uses it (contract)", () => {
       "endDateChosenRef.current = true;",
       "endDateChosenRef.current = true;"
     ]);
-    // A time the wheel did not show re-aims the native wheel.
-    expect(sheet).toContain("!== formatTimeInput(new Date(valueMs))) bumpTimeWheelRevision();");
+    // A time the wheel did not show re-aims the native wheel after the batch renders.
+    expect(sheet).toContain("!== formatTimeInput(new Date(valueMs))) pendingEndReaimRef.current = true;");
+    expect(sheet).toMatch(/useLayoutEffect\(\(\) => \{\s*cardIntervalRef\.current = null;\s*if \(!pendingEndReaimRef\.current\) return;\s*pendingEndReaimRef\.current = false;\s*bumpTimeWheelRevision\(\);/);
   });
 });

@@ -44,9 +44,10 @@ describe("entry sheet time wheel (A11b)", () => {
     expect((sheet.match(/bumpTimeWheelRevision\(\);/g) ?? []).length).toBeGreaterThanOrEqual(6);
     // The wheel's own spins don't, except an End whose inferred time the wheel did not show (the hour
     // skipped when the clocks go forward; owner rule 21 Oct 2026, Codex r1 on #506).
+    // That re-aim waits for the render, so a later spin in the same batch still counts (Codex r2).
     const applyCardTime = sheet.match(/function applyCardTime[\s\S]*?\n  \}\n/)?.[0] ?? "";
-    expect(applyCardTime.match(/bumpTimeWheelRevision\(\)/g)).toHaveLength(1);
-    expect(applyCardTime).toContain("if (formatTimeInput(new Date(endMs)) !== formatTimeInput(new Date(valueMs))) bumpTimeWheelRevision();");
+    expect(applyCardTime).not.toContain("bumpTimeWheelRevision");
+    expect(applyCardTime).toContain("pendingEndReaimRef.current = true;");
     // Native side: only a new presentation or revision moves the columns.
     expect(swift).toContain("if isNewPresentation || previous?.revision != next.revision {");
     expect(swift).not.toContain("|| picker.date != value");

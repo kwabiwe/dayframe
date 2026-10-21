@@ -235,6 +235,9 @@ export function ActiveTimerEditSheet({
   // The latest interval a card change applied, so wheel callbacks batched before a render read it,
   // never a stale one (Codex r1 on #506). Re-synced from the drafts after each render.
   const cardIntervalRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  // An inferred End time the wheel did not show re-aims it after the batch renders, so a later spin
+  // in the same batch still counts (Codex r2 on #506).
+  const pendingEndReaimRef = useRef(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
@@ -2204,8 +2207,9 @@ export function ActiveTimerEditSheet({
       setEnd(endMs);
       cardIntervalRef.current = { ...latest, endMs };
       // A time the wheel did not show (the hour skipped when the clocks go forward) re-aims the native
-      // End wheel; a new day at the same time needs nothing (Codex r1 on #506).
-      if (formatTimeInput(new Date(endMs)) !== formatTimeInput(new Date(valueMs))) bumpTimeWheelRevision();
+      // End wheel once the batch has rendered; a new day at the same time needs nothing (Codex r1/r2
+      // on #506).
+      if (formatTimeInput(new Date(endMs)) !== formatTimeInput(new Date(valueMs))) pendingEndReaimRef.current = true;
     } else {
       const at = new Date(valueMs);
       setDraftStartMs(valueMs);
@@ -2230,6 +2234,9 @@ export function ActiveTimerEditSheet({
 
   useLayoutEffect(() => {
     cardIntervalRef.current = null;
+    if (!pendingEndReaimRef.current) return;
+    pendingEndReaimRef.current = false;
+    bumpTimeWheelRevision();
   });
 
   const cardTimeMs = (target: "start" | "end") => target === "end"

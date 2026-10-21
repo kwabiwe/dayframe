@@ -20,7 +20,7 @@ export function inferEndOnStartDay(startMs: number, endMs: number): number {
   const wall = (date: Date) => ((date.getHours() * 60 + date.getMinutes()) * 60 + date.getSeconds()) * 1000 + date.getMilliseconds();
   const dayOffset = wall(end) > wall(start) ? 0 : 1;
   if (sameLocalDay(end, dayOffset) && endMs > startMs) return endMs;
-  return new Date(
+  const rebuilt = new Date(
     start.getFullYear(),
     start.getMonth(),
     start.getDate() + dayOffset,
@@ -29,6 +29,14 @@ export function inferEndOnStartDay(startMs: number, endMs: number): number {
     end.getSeconds(),
     end.getMilliseconds()
   ).getTime();
+  // `new Date` picks a repeated hour's first occurrence; the second one an hour later may be the one
+  // after Start (Codex r2 on #506).
+  if (rebuilt > startMs) return rebuilt;
+  const secondOccurrence = rebuilt + 3_600_000;
+  const second = new Date(secondOccurrence);
+  return second.getHours() === end.getHours() && second.getMinutes() === end.getMinutes() && secondOccurrence > startMs
+    ? secondOccurrence
+    : rebuilt;
 }
 
 /** A Start moved to or past End carries End with it, keeping the duration; otherwise null. */
