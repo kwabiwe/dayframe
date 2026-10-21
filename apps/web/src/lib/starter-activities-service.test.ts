@@ -118,13 +118,15 @@ describe("starter activities service", () => {
     expect(read?.sql).toContain("order by created_at asc");
   });
 
-  it("takes the automatic Commute, Sleep and Travel locks before reading, like automatic category creation", async () => {
+  it("takes the automatic Commute, Getting around, Sleep and legacy Travel locks before reading, like automatic category creation", async () => {
     await addMissingStarterActivities(session);
 
     const locks = db.statements.filter((statement) => statement.sql.includes("pg_advisory_xact_lock")).map((statement) => statement.params[0]);
     expect(locks).toEqual([
       `dayframe:auto-category:${session.workspaceId}:commute`,
+      `dayframe:auto-category:${session.workspaceId}:getting around`,
       `dayframe:auto-category:${session.workspaceId}:sleep`,
+      // Getting around's old name, which a server not yet updated mid-rollout still locks.
       `dayframe:auto-category:${session.workspaceId}:travel`
     ]);
     const firstRead = db.statements.findIndex((statement) => statement.sql.startsWith("select id, name, starter_key"));

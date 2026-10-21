@@ -62,6 +62,39 @@ describe("PlaceRoleSlots", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers Replace the old place when the new Home is within 300 m, on by default (PRD D19 A10)", async () => {
+    clientFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const near = { ...flat, latitude: home.latitude! + 0.002, longitude: home.longitude }; // about 222 m
+    render(<PlaceRoleSlots places={[home, near, gym]} onChanged={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Change Home" }));
+    const dialog = screen.getByRole("dialog", { name: "Set Home" });
+    expect(within(dialog).queryByRole("switch", { name: "Replace the old place" })).toBeNull();
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), near.id);
+    const replace = within(dialog).getByRole("switch", { name: "Replace the old place" }) as HTMLInputElement;
+    expect(replace.checked).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(clientFetch.mock.calls[0]![1].body)).toMatchObject({ placeId: near.id, archivePrevious: true });
+  });
+
+  it("does not archive the old Home when the person turns Replace off, or when the new one is far", async () => {
+    clientFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const near = { ...flat, latitude: home.latitude! + 0.002, longitude: home.longitude };
+    render(<PlaceRoleSlots places={[home, near, gym]} onChanged={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Change Home" }));
+    const dialog = screen.getByRole("dialog", { name: "Set Home" });
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), near.id);
+    await user.click(within(dialog).getByRole("switch", { name: "Replace the old place" }));
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), gym.id);
+    expect(within(dialog).queryByRole("switch", { name: "Replace the old place" })).toBeNull();
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Home place" }), near.id);
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(clientFetch.mock.calls[0]![1].body)).not.toHaveProperty("archivePrevious");
+  });
+
   it("clears Home keeping its name by default, and offers a new place in the slot", async () => {
     clientFetch.mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const onChanged = vi.fn();
@@ -155,8 +188,10 @@ describe("PlaceRoleSlots", () => {
 function place(overrides: Partial<PlaceRow> & Pick<PlaceRow, "id" | "name">): PlaceRow {
   return {
     role: null,
-    latitude: 51.5,
-    longitude: -0.12,
+    // Synthetic: each place about 1.1 km from the next (by the last digit of its id), so no two
+    // are close enough to offer "Replace the old place" unless a test puts them so.
+    latitude: 10 + Number(overrides.id.slice(-1)) * 0.01,
+    longitude: 20,
     radiusMeters: 100,
     priority: 5,
     defaultProjectId: null,

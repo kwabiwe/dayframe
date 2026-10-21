@@ -57,6 +57,21 @@ describe("query normalization context", () => {
     ]);
   });
 
+  it("never executes a rule at an archived place (Codex r1 on #503)", async () => {
+    mocks.query.mockImplementation(async (statement: string) => {
+      if (statement.includes("from automation_rules")) {
+        expect(statement).toContain('coalesce(pl.archived_at is not null, false) as "placeArchived"');
+        return { rows: [
+          { id: "rule-live", name: "Gym", triggerSource: "ios_shortcut", triggerType: "action", placeId: "place-1", action: "ignore_source", enabled: true, placeArchived: false },
+          { id: "rule-archived", name: "Old gym", triggerSource: "ios_shortcut", triggerType: "action", placeId: "place-2", action: "ignore_source", enabled: true, placeArchived: true }
+        ] };
+      }
+      return { rows: [] };
+    });
+    const context = await getNormalizationContext(session);
+    expect(context.automationRules.map((rule) => rule.id)).toEqual(["rule-live"]);
+  });
+
   it("reads Counts toward goal and names its migration when the column is missing (UIA-043)", async () => {
     mocks.query.mockImplementation(async (statement: string) => {
       if (statement.includes("from categories")) {

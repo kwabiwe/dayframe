@@ -5,6 +5,7 @@ import {
   enforceTypedBlockLimit,
   inferTypedFinishDate,
   isCalendarEntryCompactTimeInputReadyToSynchronize,
+  isCompleteCalendarEntryCompactTimeInput,
   keepTypedMeridiemTime,
   normalizeCalendarEntryCompactTypedTimes,
   trySynchronizeCalendarEntryCompactDraft,
@@ -12,7 +13,8 @@ import {
   type CalendarEntryCompactDraft,
   type CalendarEntryCompactSavePlan
 } from "@/lib/calendar-entry-compact-editor";
-import { maskTimeInput } from "@/lib/calendar-grid";
+import { maskTimeInput, parseTimeInput } from "@/lib/calendar-grid";
+import { dateTimeLocalInputToIsoCandidates } from "@/lib/format";
 import type { TimeEntryRow } from "@/lib/queries";
 
 export type TimelineInlineEditField = "description" | "time";
@@ -28,6 +30,8 @@ export type TimelineInlineEditDraft = {
   finishDateChosen?: boolean;
   /** The End time was typed in this edit, so a later Start re-reads its day. */
   finishTyped?: boolean;
+  /** The edge edited last: only a Start edited last may carry End on commit (Codex r6 on #504). */
+  lastEdge?: TimelineInlineTimeEdge;
 };
 
 export function createTimelineInlineEditDraft(
@@ -71,7 +75,7 @@ export function updateTimelineInlineTime(
     const reread = edit.finishTyped && !edit.finishDateChosen && ready
       ? inferTypedFinishDate({ ...edit.draft, startedAtTime: value })
       : null;
-    return updateTimelineInlineTemporalEdge(edit, edge, {
+    return updateTimelineInlineTemporalEdge({ ...edit, lastEdge: "start" }, edge, {
       startedAtTime: value,
       ...(reread && reread.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: reread.stoppedAtDate } : {})
     });
@@ -79,7 +83,7 @@ export function updateTimelineInlineTime(
   // A typed End reads against Start's time of day, as in the block editor (owner, 21 Oct 2026); only
   // a complete time moves the day.
   const inferred = edit.finishDateChosen || !ready ? null : inferTypedFinishDate({ ...edit.draft, stoppedAtTime: value });
-  return updateTimelineInlineTemporalEdge({ ...edit, finishTyped: !edit.finishDateChosen }, edge, {
+  return updateTimelineInlineTemporalEdge({ ...edit, finishTyped: !edit.finishDateChosen, lastEdge: "finish" }, edge, {
     stoppedAtTime: value,
     ...(inferred && inferred.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: inferred.stoppedAtDate } : {})
   });
@@ -91,8 +95,8 @@ export function updateTimelineInlineDate(
   edge: TimelineInlineTimeEdge,
   date: string
 ): TimelineInlineEditDraft {
-  if (edge === "start") return updateTimelineInlineTemporalEdge(edit, edge, { startedAtDate: date });
-  return updateTimelineInlineTemporalEdge({ ...edit, finishDateChosen: true }, edge, { stoppedAtDate: date });
+  if (edge === "start") return updateTimelineInlineTemporalEdge({ ...edit, lastEdge: "start" }, edge, { startedAtDate: date });
+  return updateTimelineInlineTemporalEdge({ ...edit, finishDateChosen: true, lastEdge: "finish" }, edge, { stoppedAtDate: date });
 }
 
 export function buildTimelineInlineSavePlan(
@@ -102,11 +106,10 @@ export function buildTimelineInlineSavePlan(
 ): CalendarEntryCompactSavePlan {
   // Saving commits typed times with the shared reader (`15:1` → 15:10; owner, 15 Oct 2026).
   const normalized = normalizeCalendarEntryCompactTypedTimes(typedEdit.draft);
-  // Shorthand ("21:3", "6") reads its day only once committed (Codex r2 on #504).
-  const edit = {
-    ...typedEdit,
-    draft: typedEdit.finishTyped && !typedEdit.finishDateChosen ? inferTypedFinishDate(normalized) : normalized
-  };
+  // Shorthand ("21:3", "6", "23:3") reads its day, and a Start past End carries End, only once
+  // committed (Codex r2/r3 on #504): the same rules as a complete time typed live.
+  const inferred = typedEdit.finishTyped && !typedEdit.finishDateChosen ? inferTypedFinishDate(normalized) : normalized;
+  const edit = { ...typedEdit, draft: committedInlineDraft(typedEdit, inferred) };
   if (edit.field === "time") {
     const sourceEntry: TimeEntryRow = {
       ...entry,
@@ -121,7 +124,8 @@ export function buildTimelineInlineSavePlan(
     if (!timeChanged) return unchangedTimelineInlineSavePlan(entry, now);
 
     // Typed times keep the block within 24 h unless the End date was chosen (Codex r1 on #504).
-    const typedTimes = !edit.finishDateChosen && (edit.dirty.startedAtTime || edit.dirty.stoppedAtTime);
+    // A running row has no End date to choose, so its live elapsed time is never limited (Codex r5).
+    const typedTimes = Boolean(edit.sourceStoppedAt) && !edit.finishDateChosen && (edit.dirty.startedAtTime || edit.dirty.stoppedAtTime);
     const sourcePlan = enforceTypedBlockLimit(buildCalendarEntryCompactSavePlan({
       draft: edit.draft,
       dirty: edit.dirty,
@@ -147,6 +151,23 @@ export function buildTimelineInlineSavePlan(
     entry,
     now
   });
+}
+
+/**
+ * A readable End that exists on the clock, so a Start past it may carry it; a blank, invalid or
+ * skipped-hour End stays an error (Codex r4/r5 on #504).
+ */
+function hasReadableFinish(draft: CalendarEntryCompactDraft) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.stoppedAtDate) || !isCompleteCalendarEntryCompactTimeInput(draft.stoppedAtTime)) return false;
+  const time = parseTimeInput(draft.stoppedAtTime);
+  return Boolean(time) && dateTimeLocalInputToIsoCandidates(`${draft.stoppedAtDate}T${time}`).length > 0;
+}
+
+function committedInlineDraft(edit: TimelineInlineEditDraft, draft: CalendarEntryCompactDraft): CalendarEntryCompactDraft {
+  if (edit.field !== "time" || !edit.sourceStoppedAt || edit.lastEdge !== "start" || !edit.dirty.startedAtTime || !hasReadableFinish(draft)) return draft;
+  const source = { originalStartedAt: edit.sourceStartedAt, originalStoppedAt: edit.sourceStoppedAt };
+  if (trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "finish" }, owner: "finish" })) return draft;
+  return trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "start" }, owner: "start" }) ?? draft;
 }
 
 function updateTimelineInlineTemporalEdge(
@@ -175,7 +196,7 @@ function updateTimelineInlineTemporalEdge(
       })
     : null;
   // A Start typed past End moves End forward, keeping the duration (owner, 21 Oct 2026).
-  const synchronized = fixedEdges ?? (canSynchronize && edge === "start" && edit.sourceStoppedAt
+  const synchronized = fixedEdges ?? (canSynchronize && edge === "start" && edit.sourceStoppedAt && hasReadableFinish(nextDraft)
     ? trySynchronizeCalendarEntryCompactDraft({
         draft: { ...nextDraft, temporalOwner: "start" },
         originalStartedAt: edit.sourceStartedAt,

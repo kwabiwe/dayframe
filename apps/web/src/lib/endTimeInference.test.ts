@@ -125,4 +125,44 @@ describe("typed edits stay within 24 h (Codex r1 on #504)", () => {
     const six = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "finish", "6");
     expect(buildTimelineInlineSavePlan(six, hour, new Date(2026, 7, 4)).payload).toEqual({ stoppedAt: new Date(2026, 7, 3, 6, 0).toISOString() });
   });
+
+  it("carries End with a committed shorthand Start past it (Codex r3 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    const edit = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "23:3");
+    expect(buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4)).payload).toEqual({
+      startedAt: new Date(2026, 7, 2, 23, 30).toISOString(),
+      stoppedAt: new Date(2026, 7, 3, 0, 30).toISOString()
+    });
+  });
+
+  it("never lets a Start carry a blank or unreadable End (Codex r4 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    for (const end of ["", "99:99"]) {
+      const start = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "21:3");
+      const edit = updateTimelineInlineTime(start, hour, "finish", end);
+      expect(() => buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4)), end || "blank").toThrow();
+    }
+  });
+
+  it("keeps a skipped-hour End an error rather than carrying it (Codex r5 on #504)", () => {
+    process.env.TZ = "Europe/London";
+    const early = block(new Date(2026, 2, 29, 0, 0), new Date(2026, 2, 29, 0, 30));
+    const start = updateTimelineInlineTime(createTimelineInlineEditDraft(early, "time"), early, "start", "00:1");
+    const edit = updateTimelineInlineTime(start, early, "finish", "01:30");
+    expect(() => buildTimelineInlineSavePlan(edit, early, new Date(2026, 2, 30))).toThrow();
+  });
+
+  it("never limits a running row's elapsed time (Codex r5 on #504)", () => {
+    const running = { ...block(new Date(2026, 7, 3, 9, 0), new Date(2026, 7, 3, 10, 0)), stoppedAt: null } as unknown as TimeEntryRow;
+    const edit = updateTimelineInlineTime(createTimelineInlineEditDraft(running, "time"), running, "start", "09:30");
+    expect(buildTimelineInlineSavePlan(edit, running, new Date(2026, 7, 4, 12)).payload).toEqual({ startedAt: new Date(2026, 7, 3, 9, 30).toISOString() });
+  });
+
+  it("lets a later End choice stand: a reversed End after a Start edit stays an error (Codex r6 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    const start = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "21:30");
+    const picked = updateTimelineInlineDate(start, hour, "finish", "2026-08-02");
+    const edit = updateTimelineInlineTime(picked, hour, "finish", "20:00");
+    expect(() => buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4))).toThrow();
+  });
 });
