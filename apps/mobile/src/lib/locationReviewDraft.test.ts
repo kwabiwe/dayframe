@@ -179,6 +179,14 @@ describe("Location Review editor draft", () => {
       name: "Example Sports Centre",
       edit
     });
+    // A picked nearby venue carries Apple's Place ID (location v3 PR 8); a search or pin never does.
+    const save = (applePlaceId?: string | null) => buildLocationReviewResolutionAction({
+      baselinePlaceId: null, edit, selectedSavedPlaceId: null,
+      newPlace: { name: "Example Sports Centre", formattedAddress: null, latitude: 10.735, longitude: 20.45, applePlaceId }
+    });
+    expect(save("ISYNTHETICSPORTS")).toMatchObject({ action: "save_place_and_confirm", applePlaceId: "ISYNTHETICSPORTS" });
+    expect(save(null)).not.toHaveProperty("applePlaceId");
+    expect(save()).not.toHaveProperty("applePlaceId");
   });
 
   it("derives familiar display-only glyphs", () => {

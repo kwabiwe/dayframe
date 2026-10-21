@@ -310,6 +310,20 @@ describe("nearby point of interest controller", () => {
     expect(visible.map((place) => [place.title, place.inside])).toEqual([["Freshway Pharmacy", []]]);
   });
 
+  it("counts a venue you picked near here before, by its Place ID (location v3 PR 8)", () => {
+    const evidence = (history: string[]) => ({
+      segment: { startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:40:00.000Z" },
+      map: { centre: { type: "Point", coordinates: [0, 50] }, stayRadiusMeters: 120, acceptedSamples: [] },
+      venue: { confirmedPlaceId: null, suggestedPlaceId: null, historyPlaceIds: history }
+    }) as unknown as Parameters<typeof venueStayFromEvidence>[0];
+    const cafes = [
+      { ...poi("Alder Café", 18), category: "Cafe", offsetEastMeters: 15, offsetNorthMeters: 10, placeId: "IALDER" },
+      { ...poi("Birch Café", 14), category: "Cafe", offsetEastMeters: 12, offsetNorthMeters: 8, placeId: "IBIRCH" }
+    ];
+    expect(rankedNearbyPlaces(cafes, [], venueStayFromEvidence(evidence([])))[0].title).toBe("Birch Café");
+    expect(rankedNearbyPlaces(cafes, [], venueStayFromEvidence(evidence(["IALDER"])))[0].title).toBe("Alder Café");
+  });
+
   it("resolves a picked place from the current list only", async () => {
     const resolve = vi.fn().mockResolvedValue(resolved);
     const search = answering([poi("Example Cafe", 40, "a")], [poi("Example Cafe", 40, "b")]);

@@ -14,6 +14,8 @@ export type LocationReviewNewPlace = {
   formattedAddress: string | null;
   latitude: number;
   longitude: number;
+  /** Apple's Place ID of a picked nearby venue (location v3 PR 8); none for search, pin or saved. */
+  applePlaceId?: string | null;
 };
 
 export type LocationReviewWindowDraft = {
@@ -193,7 +195,8 @@ export function buildLocationReviewResolutionAction({
       latitude: newPlace.latitude,
       longitude: newPlace.longitude,
       radiusMeters: 80,
-      edit
+      edit,
+      ...(newPlace.applePlaceId ? { applePlaceId: newPlace.applePlaceId } : {})
     };
   }
   if (selectedSavedPlaceId !== baselinePlaceId) {

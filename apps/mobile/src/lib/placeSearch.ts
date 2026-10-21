@@ -594,13 +594,16 @@ export type {
  * readings spread from the centre (their median distance; not the stay's matching radius, which
  * is a fixed 120 m for an unknown place, Codex r1 on #517).
  */
-export function venueStayFromEvidence(evidence: Pick<LocationReviewEvidenceDto, "segment" | "map">): VenueStay {
+export function venueStayFromEvidence(evidence: Pick<LocationReviewEvidenceDto, "segment" | "map" | "venue">): VenueStay {
   const median = (values: number[]) => {
     const sorted = values.filter((value) => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
     return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
   };
   const centre = evidence.map.centre;
+  // Venues you picked for this stay or near it before count four times (location v3 PR 8).
+  const picked = new Set([...(evidence.venue?.historyPlaceIds ?? []), ...(evidence.venue?.confirmedPlaceId ? [evidence.venue.confirmedPlaceId] : [])]);
   return {
+    ...(picked.size ? { pickedBefore: (candidate: { placeId?: string | null }) => Boolean(candidate.placeId && picked.has(candidate.placeId)) } : {}),
     startedAt: evidence.segment.startedAt,
     stoppedAt: evidence.segment.stoppedAt,
     now: new Date(),

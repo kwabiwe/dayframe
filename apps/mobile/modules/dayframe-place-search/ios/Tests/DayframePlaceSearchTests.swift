@@ -276,7 +276,7 @@ final class DayframePlaceSearchTests: XCTestCase {
     for suggestion in suggestions {
       let dictionary = suggestion.dictionary
       // The kind of place and its offset from the visit cross too; never a coordinate.
-      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters", "category", "offsetEastMeters", "offsetNorthMeters", "source"])
+      XCTAssertEqual(Set(dictionary.keys), ["id", "requestId", "title", "subtitle", "distanceMeters", "category", "offsetEastMeters", "offsetNorthMeters", "source", "placeId"])
       XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: dictionary))
     }
     let resolved = try coordinator.resolve(id: "poi-2", requestId: "nearby-1")
@@ -568,6 +568,20 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertEqual(geocoder.cancelCount, 1) // only the outstanding second lookup
   }
 
+  // Location v3 PR 8b: Apple's Place ID crosses with the place (what the server may keep).
+  func testNearbySuggestionCarriesApplesPlaceId() async throws {
+    let searcher = FakeNearbySearcher()
+    let coordinator = NearbyPointOfInterestCoordinator(searcher: searcher, idFactory: { "poi-1" })
+    let task = Task {
+      try await coordinator.suggestions(requestId: "nearby-1", latitude: 10, longitude: 20, radiusMeters: 400, limit: 5)
+    }
+    await Task.yield()
+    searcher.completeNearby(.success([nearby("Synthetic store", distance: 30, relevance: 0, category: .foodMarket, placeId: "ISYNTHETIC")]))
+    let list = try await task.value
+    XCTAssertEqual(list.places.first?.placeId, "ISYNTHETIC")
+    XCTAssertEqual(list.places.first?.dictionary["placeId"] as? String, "ISYNTHETIC")
+  }
+
   func testRapidReplacementKeepsOnlyLatestRegistry() async throws {
     let resolved = ResolvedPlaceSearchValue(
       title: "Home",
@@ -730,7 +744,8 @@ private func nearby(
   category: MKPointOfInterestCategory? = nil,
   source: NearbyPointOfInterestValue.Source = .nearby,
   localityNames: [String] = [],
-  address: String? = nil
+  address: String? = nil,
+  placeId: String? = nil
 ) -> NearbyPointOfInterestValue {
   NearbyPointOfInterestValue(
     name: name,
@@ -743,7 +758,8 @@ private func nearby(
     source: source,
     localityNames: localityNames,
     offsetEastMeters: 30,
-    offsetNorthMeters: -20
+    offsetNorthMeters: -20,
+    placeId: placeId
   )
 }
 

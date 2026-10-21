@@ -21,6 +21,8 @@ export type VenueCandidate = {
   offsetNorthMeters?: number | null;
   /** "area": found by searching for an area of interest's own name. */
   source?: "nearby" | "contextual" | "area" | null;
+  /** Apple's Place ID, when iOS gives one: how "picked here before" recognises a venue. */
+  placeId?: string | null;
 };
 
 export type VenueStay = {

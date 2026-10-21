@@ -24,6 +24,7 @@ import {
   createCategory,
   fetchBootstrap,
   normaliseLocationReviewRequestError,
+  reportVenueSuggestion,
   resolveLocationReviewItem,
   type MobileBootstrap,
   type MobileReviewItem
@@ -80,6 +81,9 @@ export default function LocationReviewDetailScreen() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [reloadSequence, setReloadSequence] = useState(0);
   const loadGenerationRef = useRef(0);
+  // The account the evidence on screen was read for: a venue suggestion goes only under it. State,
+  // so the editor reports once it is known (Codex r4 on #522).
+  const [evidenceOwner, setEvidenceOwner] = useState<{ userId: string; workspaceId: string } | null>(null);
   const hydrationFeedbackCancelRef = useRef<(() => void) | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const routeFocusedRef = useRef(false);
@@ -157,6 +161,10 @@ export default function LocationReviewDetailScreen() {
         finishHydrationFeedback(generation);
       }
 
+      // Cached evidence is never paired with an account read separately (another account may have
+      // become active between the two reads, Codex r2 on #522): only evidence read from the network
+      // for an explicit account can report a venue suggestion.
+      setEvidenceOwner(null);
       const contextRequest = refreshContext(generation, signal);
       let owner = cachedOwner;
       if (!owner) {
@@ -181,6 +189,7 @@ export default function LocationReviewDetailScreen() {
           signal
         });
         if (!isCurrent(generation, signal)) return;
+        setEvidenceOwner({ userId: owner.userId, workspaceId: owner.workspaceId });
         setScreenState({
           status: "ready",
           evidence: refreshed.evidence,
@@ -327,6 +336,7 @@ export default function LocationReviewDetailScreen() {
         ) {
           return;
         }
+        setEvidenceOwner({ userId: owner.userId, workspaceId: owner.workspaceId });
         setScreenState({
           status: "ready",
           evidence: refreshed.evidence,
@@ -501,6 +511,10 @@ export default function LocationReviewDetailScreen() {
           isFocused={isFocused}
           onCreateActivity={createActivity}
           onResolve={perform}
+          onVenueSuggested={evidenceOwner ? (reviewItemId, placeId) => {
+            // Only under the account this evidence was read for (Codex r1 on #522).
+            void reportVenueSuggestion(reviewItemId, placeId, evidenceOwner);
+          } : undefined}
           places={data?.places ?? []}
           recentActivityIds={recentActivities}
           reviewItem={reviewItem}

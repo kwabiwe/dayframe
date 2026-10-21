@@ -102,6 +102,7 @@ export function LocationReviewCorrectionEditor({
   isFocused,
   onCreateActivity,
   onResolve,
+  onVenueSuggested,
   places,
   recentActivityIds = [],
   reviewItem,
@@ -115,6 +116,12 @@ export function LocationReviewCorrectionEditor({
   /** All activities' Create: resolves to the new activity's id, or a message to show. */
   onCreateActivity?: (name: string) => Promise<{ id: string } | { error: string }>;
   onResolve: (action: LocationReviewAction, successMessage: string) => Promise<void>;
+  /**
+   * The ranker is confident about this Apple venue for the unsaved stay (location v3 PR 8). Given
+   * only while a report can go out (the evidence's account is known); absent, nothing is reported
+   * and the card is not counted as reported (Codex r4 on #522).
+   */
+  onVenueSuggested?: (reviewItemId: string, placeId: string) => void;
   places: Place[];
   /** Activities used most recently first, for the chips and the picker's Recent. */
   recentActivityIds?: readonly string[];
@@ -412,6 +419,22 @@ export function LocationReviewCorrectionEditor({
     };
   }, [isFocused, nearbyProvider, visitLatitude, visitLongitude]);
 
+  // The venue the ranker is confident about goes to the server as an Apple Place ID (location v3
+  // PR 8): at most once per card while this screen is open, only for an open card on an unsaved
+  // stay that isn't being decided, and only when it differs from the stored one (Codex r1 on #522).
+  const reportedCardsRef = useRef(new Set<string>());
+  const onVenueSuggestedRef = useRef(onVenueSuggested);
+  onVenueSuggestedRef.current = onVenueSuggested;
+  const suggestedVenue = nearbyState.places.find((place) => place.suggested && place.placeId) ?? null;
+  const cardOpen = reviewItem?.status === "open";
+  const canReport = Boolean(onVenueSuggested);
+  useEffect(() => {
+    if (!canReport || evidence.segment.kind !== "stay" || baselinePlaceId || !suggestedVenue?.placeId || !cardOpen || saving) return;
+    if (reportedCardsRef.current.has(evidence.reviewItemId) || evidence.venue?.suggestedPlaceId === suggestedVenue.placeId) return;
+    reportedCardsRef.current.add(evidence.reviewItemId);
+    onVenueSuggestedRef.current?.(evidence.reviewItemId, suggestedVenue.placeId);
+  }, [baselinePlaceId, canReport, cardOpen, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, saving, suggestedVenue?.placeId]);
+
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(
     nearbyState.places,
@@ -625,7 +648,9 @@ export function LocationReviewCorrectionEditor({
         name: result.name?.trim() || result.title.trim(),
         formattedAddress: result.formattedAddress || result.subtitle,
         latitude: result.latitude,
-        longitude: result.longitude
+        longitude: result.longitude,
+        // Kept so the server can remember the venue by Apple's ID, never its name (PR 8).
+        applePlaceId: place.placeId ?? null
       });
       setSaveForFuture(false);
       setSelectedSavedPlaceId(null);
@@ -747,7 +772,7 @@ export function LocationReviewCorrectionEditor({
     const edit = parsedEdit();
     if (!edit) return;
     const action: LocationReviewAction = newPlace && !saveForFuture
-      ? { action: "record_poi_once", name: newPlace.name, edit }
+      ? { action: "record_poi_once", name: newPlace.name, edit, ...(newPlace.applePlaceId ? { applePlaceId: newPlace.applePlaceId } : {}) }
       : buildLocationReviewResolutionAction({
           baselinePlaceId,
           edit,
