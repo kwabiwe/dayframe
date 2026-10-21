@@ -114,7 +114,7 @@ describe("Apple Health wake runner", () => {
       starts.push(() => resolve(queued));
     });
     const captureWorkouts = (options: HealthCaptureOptions) => options.fresh
-      ? coalescer.runFresh("owner:workout", work)
+      ? coalescer.runFresh("owner:workout", work, options.signal)
       : coalescer.run("owner:workout", work, options.observerChange);
     const deps = dependencies({ captureWorkouts: vi.fn(captureWorkouts) });
     deps.complete.mockImplementation(async (id: string) => { events.push(`complete ${id}`); return true; });
@@ -132,6 +132,7 @@ describe("Apple Health wake runner", () => {
     starts[1]();
     await vi.waitFor(() => expect(starts).toHaveLength(3));
     runner.receive({ id: "w3", kind: "workout", reason: "observer" });
+    void captureWorkouts({ observerChange: true }); // and the third change
     starts[2]();
     await vi.waitFor(() => expect(starts).toHaveLength(4));
     starts[3]();
@@ -141,6 +142,26 @@ describe("Apple Health wake runner", () => {
     expect(starts).toHaveLength(4);                 // nothing starts after the wakes are finished
     expect(events.slice(-3)).toEqual(["complete w1", "complete w2", "complete w3"]);
     expect(events.indexOf("start 4")).toBeLessThan(events.indexOf("complete w1"));
+  });
+
+  it("never starts a capture after its wait for Today's capture was cut off", async () => {
+    vi.useFakeTimers();
+    const coalescer = createHealthCaptureCoalescer();
+    const starts: Array<() => void> = [];
+    const work = () => new Promise<HealthImportStatus>((resolve) => { starts.push(() => resolve(queued)); });
+    const captureWorkouts = (options: HealthCaptureOptions) => options.fresh
+      ? coalescer.runFresh("owner:workout", work, options.signal)
+      : coalescer.run("owner:workout", work, options.observerChange);
+    const deps = dependencies({ captureWorkouts: vi.fn(captureWorkouts) });
+    const runner = createHealthWakeRunner(deps);
+    void captureWorkouts({});                       // Today's capture, still running at the deadline
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await vi.advanceTimersByTimeAsync(HEALTH_WAKE_CAPTURE_MS);
+    await runner.idle();
+    expect(deps.complete).toHaveBeenCalledWith("w1", false);
+    starts[0]();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(starts).toHaveLength(1);
   });
 
   it("finishes the wake when the automatic-sync check stalls past the capture deadline", async () => {

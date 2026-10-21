@@ -355,7 +355,7 @@ async function captureHealthKind(
   const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
   const capture = () => captureHealthKindUnsafe(owner, kind, options);
   return options.fresh
-    ? activeHealthCaptures.runFresh(key, capture)
+    ? activeHealthCaptures.runFresh(key, capture, options.signal)
     : activeHealthCaptures.run(key, capture, options.observerChange);
 }
 
