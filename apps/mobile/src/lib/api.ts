@@ -9,6 +9,7 @@ import {
   REVIEW_COUNT_CARDS,
   REVIEW_COUNT_REQUEST_HEADER,
   type ActivityEventInput,
+  type PlaceVisitStats,
   type ActivityEventType,
   type CategoryUsageRank,
   type EventSource,
@@ -2060,6 +2061,26 @@ export async function fetchArchivedPlaces(): Promise<MobileArchivedPlace[]> {
   const result = await readApiJson<{ places?: MobileArchivedPlace[] }>(response, "Unable to load archived places");
   if (!result.ok) throw new Error(result.message);
   return result.payload.places ?? [];
+}
+
+/**
+ * Places' last visit and sections (location v3 PR 16c): the person's last visit and visits in the
+ * last 30 days for each active saved place. Times and counts only; a failure only means the rows
+ * show no visit line.
+ */
+export async function fetchPlaceVisits(): Promise<PlaceVisitStats[]> {
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/visits`, {
+    headers: await authHeaders()
+  });
+  if (response.status === 401) {
+    throw new AuthRequiredError();
+  }
+  if (!response.ok) throw await apiResponseError(response, "Unable to load place visits");
+  const result = await readApiJson<{ visits?: PlaceVisitStats[] }>(response, "Unable to load place visits");
+  if (!result.ok) throw new Error(result.message);
+  return (result.payload.visits ?? []).filter((row) =>
+    typeof row?.placeId === "string" && (row.lastVisitAt === null || typeof row.lastVisitAt === "string") &&
+    Number.isFinite(row.visitsLast30Days));
 }
 
 /**

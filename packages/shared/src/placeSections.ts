@@ -120,13 +120,9 @@ export function placeLastVisitLabel(lastVisitAt: string | null | undefined, now:
   const days = dayNumber(now, zone) - dayNumber(at, zone);
   if (days <= 0) return "Last visit today";
   if (days === 1) return "Last visit yesterday";
-  if (days < 7) return `Last visit ${new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: zone }).format(at)}`;
-  const sameYear = new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone: zone }).format(at)
-    === new Intl.DateTimeFormat("en-GB", { year: "numeric", timeZone: zone }).format(now);
-  const date = new Intl.DateTimeFormat("en-GB", sameYear
-    ? { day: "numeric", month: "short", timeZone: zone }
-    : { day: "numeric", month: "short", year: "numeric", timeZone: zone }).format(at);
-  return `Last visit ${date}`;
+  if (days < 7) return `Last visit ${formatter("weekday", zone).format(at)}`;
+  const sameYear = formatter("year", zone).format(at) === formatter("year", zone).format(now);
+  return `Last visit ${formatter(sameYear ? "dayMonth" : "dayMonthYear", zone).format(at)}`;
 }
 
 /** "3 visits in 30 days"; null under two (Frequent's own threshold). */
@@ -135,9 +131,29 @@ export function placeRecentVisitsLabel(stats: PlaceVisitStats | undefined) {
   return count >= PLACE_FREQUENT_MIN_VISITS ? `${count} visits in 30 days` : null;
 }
 
+const FORMATS = {
+  weekday: { weekday: "long" },
+  year: { year: "numeric" },
+  dayMonth: { day: "numeric", month: "short" },
+  dayMonthYear: { day: "numeric", month: "short", year: "numeric" },
+  calendarDay: { year: "numeric", month: "2-digit", day: "2-digit" }
+} as const satisfies Record<string, Intl.DateTimeFormatOptions>;
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/** One formatter per kind and time zone, built once: Places renders a label per row (iPhone too). */
+function formatter(kind: keyof typeof FORMATS, timeZone: string | undefined) {
+  const key = `${kind}|${timeZone ?? ""}`;
+  let cached = formatters.get(key);
+  if (!cached) {
+    cached = new Intl.DateTimeFormat(kind === "calendarDay" ? "en-CA" : "en-GB", { ...FORMATS[kind], timeZone });
+    formatters.set(key, cached);
+  }
+  return cached;
+}
+
 /** Days since the epoch of the calendar date `date` falls on in `timeZone`. */
 function dayNumber(date: Date, timeZone: string | undefined) {
-  const parts = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone }).formatToParts(date);
+  const parts = formatter("calendarDay", timeZone).formatToParts(date);
   const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
   return Math.round(Date.UTC(value("year"), value("month") - 1, value("day")) / 86_400_000);
 }
