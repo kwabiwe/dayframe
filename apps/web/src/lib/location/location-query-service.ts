@@ -441,9 +441,11 @@ function evidenceGaps(rows: Array<EvidenceMapRow & { longitude: number; latitude
   });
 }
 
-async function nearbySavedPlaces(session: RequestSession, latitude: number, longitude: number) {
-  const result = await query<NearbyPlaceRow>(
-    `select id, ${placeDisplayNameSql("places")} as name, longitude, latitude, radius_meters as "radiusMeters",
+/**
+ * Saved places within 500 m of a point ($2 longitude, $3 latitude). The ST_DWithin expression is
+ * exactly `idx_places_geography`'s, so the search uses that index (places at scale, PR 16).
+ */
+export const NEARBY_SAVED_PLACES_SQL = `select id, ${placeDisplayNameSql("places")} as name, longitude, latitude, radius_meters as "radiusMeters",
             ST_Distance(
               ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography,
               ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
@@ -456,9 +458,10 @@ async function nearbySavedPlaces(session: RequestSession, latitude: number, long
          500
        )
      order by "distanceMeters", priority desc, id
-     limit 12`,
-    [session.workspaceId, longitude, latitude]
-  );
+     limit 12`;
+
+async function nearbySavedPlaces(session: RequestSession, latitude: number, longitude: number) {
+  const result = await query<NearbyPlaceRow>(NEARBY_SAVED_PLACES_SQL, [session.workspaceId, longitude, latitude]);
   return result.rows.map((place) => ({
     id: place.id,
     name: place.name,

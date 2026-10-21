@@ -7,6 +7,7 @@ import type { RecentActivitySuggestion, RecentActivitySuggestionCandidate } from
 import { X } from "lucide-react";
 import { ActivityChipGroup, editorChipCategories } from "@/components/blocks/ActivityChipGroup";
 import { ConfirmDialog } from "@/components/blocks/ConfirmDialog";
+import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { CategoryPicker, type CreateCategoryOutcome } from "@/components/CategoryPicker";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { InlineTagInput } from "@/components/InlineTagInput";
@@ -24,6 +25,8 @@ import {
   isCalendarEntryCompactTimeInputReadyToSynchronize,
   isCompleteCalendarEntryCompactDurationInput,
   keepTypedMeridiemTime,
+  enforceTypedBlockLimit,
+  inferTypedFinishDate,
   normalizeCalendarEntryCompactTypedTimes,
   synchronizeCalendarEntryCompactDraft,
   trySynchronizeCalendarEntryCompactDraft,
@@ -107,6 +110,11 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
       : calendarEntryCompactCreateInitialDraft(props.source)
   ));
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // An End date chosen in the date picker always wins over the typed End time's inferred day.
+  const finishDateChosenRef = useRef(false);
+  // A typed End (no date chosen) keeps the block within 24 h.
+  const [finishTyped, setFinishTyped] = useState(false);
+  const finishTypedRef = useRef(false);
   const descriptionRef = useRef<HTMLInputElement | null>(null);
   const descriptionInteractionRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -134,14 +142,14 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     try {
       return {
         error: null,
-        plan: entry
+        plan: enforceTypedBlockLimit(entry
           ? buildCalendarEntryCompactSavePlan({ draft, dirty, entry, now })
           : buildCalendarEntryCompactCreatePlan({
               allowLaterToday,
               draft,
               now,
               source: createSource as CalendarEntryCompactCreateSource
-            })
+            }), finishTyped)
       };
     } catch (previewError) {
       return {
@@ -149,7 +157,7 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
         plan: null
       };
     }
-  }, [allowLaterToday, createSource, dirty, draft, entry, now]);
+  }, [allowLaterToday, createSource, dirty, draft, entry, finishTyped, now]);
   const hasUnsavedChanges = useMemo(
     () => calendarEntryCompactDraftsHaveChanges(initialDraft, draft, { running: Boolean(entry && !entry.stoppedAt) }),
     [draft, entry, initialDraft]
@@ -243,12 +251,22 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
   ) => {
     if (busyRef.current) return;
     setActiveTemporalOwner(commit ? null : owner);
+    if (key === "stoppedAtDate") {
+      finishDateChosenRef.current = true;
+      finishTypedRef.current = false;
+      setFinishTyped(false);
+    } else if (key === "stoppedAtTime" && !finishDateChosenRef.current) {
+      finishTypedRef.current = true;
+      setFinishTyped(true);
+    }
     setDraft((current) => {
-      const next = { ...current, [key]: value, temporalOwner: owner };
+      const typed = { ...current, [key]: value, temporalOwner: owner };
       const isComplete = commit || (owner === "duration"
         ? isCompleteCalendarEntryCompactDurationInput(value)
         : isCalendarEntryCompactTimeInputReadyToSynchronize(value));
-      if (!isComplete) return next;
+      if (!isComplete) return typed;
+      // Only a complete time moves the day ("21:3" never drops the +1 early; Codex r1 on #504).
+      const next = key === "stoppedAtTime" && !finishDateChosenRef.current ? inferTypedFinishDate(typed) : typed;
       const synchronized = trySynchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: next, owner });
       if (!synchronized) return next;
       return !commit && (key === "startedAtTime" || key === "stoppedAtTime")
@@ -265,7 +283,8 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     setDraft((current) => {
       if (current.temporalOwner !== owner) return current;
       // Leaving a time field commits what the shared reader understands (`15:1` → 15:10).
-      const committed = owner === "duration" ? current : normalizeCalendarEntryCompactTypedTimes(current);
+      const normalized = owner === "duration" ? current : normalizeCalendarEntryCompactTypedTimes(current);
+      const committed = owner === "finish" && !finishDateChosenRef.current ? inferTypedFinishDate(normalized) : normalized;
       try {
         return synchronizeCalendarEntryCompactDraft({ ...temporalSource, draft: committed, owner });
       } catch {
@@ -479,10 +498,11 @@ export function useTimeEntryQuickEditor(props: TimeEntryQuickEditorProps) {
     try {
       const saveNow = new Date();
       // Save commits typed times as leaving the field does (`15:1` → 15:10).
-      const committed = normalizeCalendarEntryCompactTypedTimes(draft);
-      plan = props.mode === "entry"
+      const normalized = normalizeCalendarEntryCompactTypedTimes(draft);
+      const committed = finishTypedRef.current && !finishDateChosenRef.current ? inferTypedFinishDate(normalized) : normalized;
+      plan = enforceTypedBlockLimit(props.mode === "entry"
         ? buildCalendarEntryCompactSavePlan({ draft: committed, dirty, entry: props.entry, now: saveNow })
-        : buildCalendarEntryCompactCreatePlan({ allowLaterToday: props.allowLaterToday, draft: committed, now: saveNow, source: props.source });
+        : buildCalendarEntryCompactCreatePlan({ allowLaterToday: props.allowLaterToday, draft: committed, now: saveNow, source: props.source }), finishTypedRef.current);
     } catch (planError) {
       setError(planError instanceof Error ? planError.message : "Check the time values.");
       return;
@@ -742,9 +762,39 @@ export function TimeEntryQuickEditorPanel({
             </p>
           ) : null}
         </div>
+        {/* The block's own actions as icon buttons, top right (owner, 21 Oct 2026, superseding
+            WUI-006's footer pills): ↺ Start again · trash Delete (Discard while running) · gap · ✕,
+            with the registry glyphs and tooltips the List and Today rows use. */}
         <div className="calendar-compact-editor-icons">
+          {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
+            <button
+              className="calendar-compact-icon-action"
+              type="button"
+              aria-label={`Start again: ${title}`}
+              aria-busy={busyAction === "start" || undefined}
+              data-tip="Start again"
+              disabled={controlsDisabled || props.isTimerBusy}
+              onClick={() => void controller.startAgain()}
+            >
+              <DayframeIcon glyph="rotate-ccw" size={18} />
+            </button>
+          ) : null}
+          {props.mode === "entry" && props.onDelete ? (
+            <button
+              className="calendar-compact-icon-action is-danger"
+              type="button"
+              // The tooltip's word leads the name (WCAG 2.5.3), then which block.
+              aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
+              aria-busy={busyAction === "delete" || undefined}
+              data-tip={isRunning ? "Discard" : "Delete"}
+              disabled={controlsDisabled}
+              onClick={() => void controller.deleteEntry()}
+            >
+              <DayframeIcon glyph="trash-2" size={18} />
+            </button>
+          ) : null}
           <button
-            className="calendar-compact-icon-action"
+            className="calendar-compact-icon-action is-close"
             type="button"
             aria-label="Close editor"
             data-tip="Close"
@@ -938,9 +988,8 @@ export function TimeEntryQuickEditorPanel({
         </div>
       </div>
 
-      {/* Footer (prototype "Edit block", audit WUI-004/WUI-006): a note (an error or an overlap) on
-          its own line above the actions, never squeezing them; the block's own actions as labelled
-          pills on the left (Delete or Discard, Start again), Cancel and Save on the right. */}
+      {/* Footer (prototype "Edit block", WUI-004): a note (an error or an overlap) on its own line
+          above the actions, never squeezing them; then just Cancel and Save on the right. */}
       <div className="calendar-compact-editor-footer df-ed-foot" data-feedback-mode={feedbackMode}>
         <div
           className={`df-ed-note${feedbackMode === "error" || feedbackMode === "overlap" ? " is-shown" : ""}`}
@@ -964,33 +1013,6 @@ export function TimeEntryQuickEditorPanel({
           </div>
         </div>
         <div className="df-ed-actions">
-          <div className="df-ed-actions-start">
-            {props.mode === "entry" && props.onDelete ? (
-              <button
-                className="df-ed-pill is-danger"
-                type="button"
-                // The visible word leads the name (WCAG 2.5.3), then which block.
-                aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}
-                aria-busy={busyAction === "delete" || undefined}
-                disabled={controlsDisabled}
-                onClick={() => void controller.deleteEntry()}
-              >
-                {isRunning ? "Discard" : "Delete"}
-              </button>
-            ) : null}
-            {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
-              <button
-                className="df-ed-pill"
-                type="button"
-                aria-label={`Start again: ${title}`}
-                aria-busy={busyAction === "start" || undefined}
-                disabled={controlsDisabled || props.isTimerBusy}
-                onClick={() => void controller.startAgain()}
-              >
-                Start again
-              </button>
-            ) : null}
-          </div>
           <div className="df-ed-actions-end">
             {cancelButton()}
             {saveButton()}
