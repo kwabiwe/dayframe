@@ -1795,7 +1795,7 @@ export function normalizeActivityEvent(
     const fromName = stringFromPayload(event.rawPayload.fromPlaceName) ?? "previous place";
     const toName = stringFromPayload(event.rawPayload.toPlaceName) ?? stringFromPayload(event.rawPayload.placeName) ?? "next place";
     const commuteCategory = findStarterCategory(context.categories, "commute", "Commute")
-      ?? findStarterCategory(context.categories, "travel", "Travel");
+      ?? findStarterCategory(context.categories, "travel", "Getting around");
     const fromPlaceId = stringFromPayload(event.rawPayload.fromPlaceId);
     const toPlaceId = stringFromPayload(event.rawPayload.toPlaceId);
     const fromSavedPlace = fromPlaceId ? context.places.find((candidate) => candidate.id === fromPlaceId) : undefined;

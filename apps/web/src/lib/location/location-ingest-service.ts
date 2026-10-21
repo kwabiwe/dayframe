@@ -468,7 +468,7 @@ async function emitSemanticSegment(
     ? await trustedPlaceContext(client, session, segment)
     : null;
   // Moves are named from their ends and mode; Commute only between Home and Work, Errands (if the
-  // workspace has it) with a stop, Travel otherwise (PRD D19, as in the Review batch emitter).
+  // workspace has it) with a stop, Getting around otherwise (PRD D19, as in the Review batch emitter).
   const move = segment.kind === "commute" ? await segmentMoveName(client, session, segment, stayIds) : null;
   const suggestedCategoryId = move
     ? move.activity === "commute" ? await ensureCommuteCategoryId(client, session)

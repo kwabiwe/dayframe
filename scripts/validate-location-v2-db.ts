@@ -1192,8 +1192,8 @@ async function validateEnabledTrustedCommuteAutomation() {
       semanticReason: automaticCommute.semanticReason
     },
     {
-      // A Move between two places that are not Home and Work suggests Travel (PRD D19).
-      categoryName: "travel",
+      // A Move between two places that are not Home and Work suggests Getting around (PRD D19; "Travel" until 20 Oct 2026).
+      categoryName: "getting around",
       placeId: null,
       description: null,
       confidence: "medium_high",
