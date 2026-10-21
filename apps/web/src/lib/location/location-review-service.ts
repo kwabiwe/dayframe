@@ -597,6 +597,7 @@ async function performAction(
       if (item.segmentKind !== "stay") {
         throw new ReviewResolutionError("invalid_action", "Only a visit can use a one-time place.", { status: 422 });
       }
+      await rememberPickedVenue(client, item, action.applePlaceId, session);
       return confirmReview(
         client,
         item,
@@ -618,6 +619,24 @@ async function performAction(
     default:
       throw new ReviewResolutionError("invalid_action", "Use the standard review action for this operation.", { status: 400 });
   }
+}
+
+/**
+ * Keeps the Apple Place ID of the venue picked for this stay (location v3 PR 8): its ID only,
+ * never Apple's name or address, so the venue ranker can say "you picked it here before".
+ */
+async function rememberPickedVenue(
+  client: pg.PoolClient,
+  item: LockedReview,
+  applePlaceId: string | undefined,
+  session: RequestSession
+) {
+  if (!applePlaceId || item.segmentKind !== "stay") return;
+  await client.query(
+    `update stay_segments set venue_place_id = $1, updated_at = now()
+     where id = $2 and workspace_id = $3 and user_id = $4`,
+    [applePlaceId, item.segmentId, session.workspaceId, session.userId]
+  );
 }
 
 async function ignoreLocationReview(
@@ -857,6 +876,7 @@ async function savePlaceAndConfirm(
     defaultCategoryId, loggingEnabled: suggestVisits, autoLog: suggestVisits && (action.autoLog ?? false)
   }, session);
   const place = { rows: [{ id: created.id }] };
+  await rememberPickedVenue(client, item, action.applePlaceId, session);
   await client.query(
     `update stay_segments set place_id = $1, learned_place_id = null,
        continuity_status = 'manual', metadata = metadata || '{"placeMatchKind":"saved"}'::jsonb,

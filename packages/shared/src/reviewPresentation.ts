@@ -23,6 +23,11 @@ export const REVIEW_PRESENTATION_OUTING_FEATURE = "outing";
 export const REVIEW_PRESENTATION_OUTING_COUNT_FEATURE = "outing-count";
 /** Feature: a Review item named by a learned name carries `learnedName: true` (Location evidence offers it). */
 export const REVIEW_PRESENTATION_LEARNED_NAME_FEATURE = "learned-name";
+/**
+ * Feature: an unsaved stay's Review item carries `venuePlaceId`, the Apple venue picked for it or
+ * the iPhone's suggestion (location v3 PR 8); the iPhone looks the name up next to an Apple map.
+ */
+export const REVIEW_PRESENTATION_VENUE_FEATURE = "venue";
 export const REVIEW_PRESENTATION_DEFAULT_LIMIT = 100;
 export const REVIEW_PRESENTATION_MAX_LIMIT = 200;
 export const REVIEW_PRESENTATION_MAX_IDS = 100;
@@ -195,6 +200,8 @@ export const ReviewProposalPresentationSchema = z
     /** The outing the card belongs to and its part in it (only for clients sending the outing feature). */
     /** Its title is a name Dayframe learned (only for clients sending the learned-name feature). */
     learnedName: z.literal(true).optional(),
+    /** An Apple Place ID for an unsaved stay (only for clients sending the venue feature). */
+    venuePlaceId: z.string().min(1).max(200).optional(),
     outing: z.object({
       key: z.string().min(1).max(200),
       role: z.enum(["stay", "in", "out"]),

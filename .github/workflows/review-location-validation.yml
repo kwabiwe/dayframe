@@ -172,6 +172,11 @@ jobs:
         env:
           DAYFRAME_LOCATION_GROUPS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-groups.postgres.test.ts
+      - name: Venue Place IDs (location v3 PR 8)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_VENUE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/venue-place-ids.postgres.test.ts
       # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
         if: always()

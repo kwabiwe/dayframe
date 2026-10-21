@@ -48,8 +48,8 @@ export async function validateComplexReviewMutations(session: RequestSession, ca
   const actions: ReviewMutation[] = [
     { action: 'confirm' }, { action: 'ignore_once_location' }, { action: 'edit_and_confirm', edit },
     { action: 'change_place_and_confirm', placeId, edit }, { action: 'record_once', edit },
-    { action: 'record_poi_once', name: 'Synthetic one-time POI', edit },
-    { action: 'save_place_and_confirm', name: 'Synthetic saved POI', latitude:51.5,longitude:-0.1,radiusMeters:80,edit },
+    { action: 'record_poi_once', name: 'Synthetic one-time POI', edit, applePlaceId: 'ISYNTHETICPOI1' },
+    { action: 'save_place_and_confirm', name: 'Synthetic saved POI', latitude:51.5,longitude:-0.1,radiusMeters:80,edit, applePlaceId: 'ISYNTHETICPOI2' },
     { action: 'split', splitAt:'2026-08-28T08:30:00.000Z' },
     { action: 'split_and_confirm', splitAt:'2026-08-28T08:30:00.000Z', left:{ categoryId }, right:{ categoryId } },
     { action:'merge', adjacentReviewItemId:randomUUID(), acknowledgeContradictoryEvidence:false },
@@ -60,6 +60,13 @@ export async function validateComplexReviewMutations(session: RequestSession, ca
     if (mutation.action === 'merge' || mutation.action === 'merge_and_confirm') mutation.adjacentReviewItemId = await source(stream, stop, '2026-08-28T10:00:00.000Z');
     const envelope = { clientMutationId:randomUUID(), mutation };
     const first = await resolveIdempotentReviewMutation(id,envelope,session);
+    if ('applePlaceId' in mutation && mutation.applePlaceId) {
+      // The picked venue's Apple Place ID (location v3 PR 8) lands on the stay, in the same step.
+      const venue = await pool.query<{ venue: string | null }>(
+        `select st.venue_place_id as venue from review_items ri join stay_segments st on st.id = ri.location_segment_id
+          where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3`, [id, session.workspaceId, session.userId]);
+      assert.equal(venue.rows[0]?.venue, mutation.applePlaceId, `${mutation.action} kept the picked venue's Place ID`);
+    }
     const after = await counts();
     assert.deepEqual(await resolveIdempotentReviewMutation(id,envelope,session),first,`${mutation.action} lost-response replay changed IDs/results`);
     assert.deepEqual(await counts(),after,`${mutation.action} replay duplicated side effects`);
@@ -75,5 +82,11 @@ export async function validateComplexReviewMutations(session: RequestSession, ca
   const failure={clientMutationId:randomUUID(),mutation:{action:'save_place_and_confirm',name:'Synthetic must rollback',latitude:51.5,longitude:-0.1,radiusMeters:80,edit:{categoryId:randomUUID()}}};
   await assert.rejects(()=>resolveIdempotentReviewMutation(failureId,failure,session));
   assert.deepEqual(await counts(),before,'Failed place correction left side effects/receipt');
+  // A failed save keeps no Place ID either (one transaction).
+  const failedVenueId = await source(randomUUID());
+  await assert.rejects(()=>resolveIdempotentReviewMutation(failedVenueId,{clientMutationId:randomUUID(),mutation:{action:'save_place_and_confirm',name:'Synthetic must rollback',latitude:51.5,longitude:-0.1,radiusMeters:80,edit:{categoryId:randomUUID()},applePlaceId:'ISYNTHETICROLLBACK'}},session));
+  const rolledBack = await pool.query<{ venue: string | null }>(
+    `select st.venue_place_id as venue from review_items ri join stay_segments st on st.id = ri.location_segment_id where ri.id = $1`, [failedVenueId]);
+  assert.equal(rolledBack.rows[0]?.venue, null, 'A failed save kept a Place ID');
   console.log('Complex Review: all 11 actions, exact receipt replay, payload identity, unproven equivalence and save-place rollback passed.');
 }

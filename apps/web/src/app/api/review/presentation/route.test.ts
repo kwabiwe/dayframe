@@ -51,7 +51,7 @@ describe("POST /api/review/presentation", () => {
       session,
       expect.objectContaining({ mode: "lookup", limit: 100 }),
       expect.objectContaining({ signal: expect.any(AbortSignal), deadlineAt: expect.any(Number) }),
-      { timeAway: false, moveRoute: false, outing: false, outingCount: false, learnedName: false }
+      { timeAway: false, moveRoute: false, outing: false, outingCount: false, learnedName: false, venue: false }
     );
   });
 
@@ -61,30 +61,35 @@ describe("POST /api/review/presentation", () => {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "other, time-away" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: false, outing: false, outingCount: false, learnedName: false });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: false, outing: false, outingCount: false, learnedName: false, venue: false });
     await POST(new Request("https://dayframe.test/api/review/presentation", {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "time-away,move-route" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: false, outingCount: false, learnedName: false });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: false, outingCount: false, learnedName: false, venue: false });
     // One card per outing (PRD D19, PR 12b): only a client that asks learns a card's outing.
     await POST(new Request("https://dayframe.test/api/review/presentation", {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "time-away,move-route,outing" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: true, outingCount: false, learnedName: false });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: true, outingCount: false, learnedName: false, venue: false });
     // One count per outing (PR 12c): only a client that asks gets counts of cards.
     await POST(new Request("https://dayframe.test/api/review/presentation", {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "time-away,move-route,outing,outing-count" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: true, outingCount: true, learnedName: false });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: true, moveRoute: true, outing: true, outingCount: true, learnedName: false, venue: false });
     // Only a client that asks learns that a title is a learned name.
     await POST(new Request("https://dayframe.test/api/review/presentation", {
       method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "outing,learned-name" },
       body: JSON.stringify(body)
     }));
-    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: false, moveRoute: false, outing: true, outingCount: false, learnedName: true });
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: false, moveRoute: false, outing: true, outingCount: false, learnedName: true, venue: false });
+    await POST(new Request("https://dayframe.test/api/review/presentation", {
+      method: "POST", headers: { "Content-Type": "application/json", "x-dayframe-review-features": "venue" },
+      body: JSON.stringify(body)
+    }));
+    expect(mocks.getReviewPresentation).toHaveBeenLastCalledWith(session, expect.anything(), expect.anything(), { timeAway: false, moveRoute: false, outing: false, outingCount: false, learnedName: false, venue: true });
   });
 
   it("rejects a chunked body larger than the fixed 64 KiB bound", async () => {
