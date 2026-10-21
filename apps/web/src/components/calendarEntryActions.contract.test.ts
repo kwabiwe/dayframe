@@ -82,9 +82,11 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-compact-temporal-fields \{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s);
     expect(styles).toMatch(/@container time-entry-editor \(max-width: 380px\)[\s\S]*repeat\(2, minmax\(0, 1fr\)\)/s);
     expect(styles).toMatch(/@container time-entry-editor \(max-width: 280px\)[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/s);
-    // Time boxes (WUI-001): one inset box per field with the focus ring on the box, not an inner row.
-    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \* \{[^}]*border-radius:\s*12px;[^}]*padding:\s*7px 12px 6px;[^}]*background:\s*var\(--surface-inset\);/s);
-    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \*:focus-within \{[^}]*var\(--web-focus-border\)/s);
+    // Time boxes (owner, 21 Oct 2026, superseding WUI-001): the label above, a transparent field, and
+    // the value in a 44 px inset box with the 1 px idle line and the focus ring on the box.
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-temporal-fields > \* \{[^}]*gap:\s*6px;[^}]*padding:\s*0;[^}]*background:\s*transparent;/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-time-controls,\n\.calendar-compact-editor-panel \.calendar-compact-duration-input input,\n\.calendar-compact-editor-panel \.calendar-compact-duration,\n\.calendar-compact-editor-panel \.calendar-compact-running-value \{[^}]*min-height:\s*44px;[^}]*border-radius:\s*12px;[^}]*background:\s*var\(--surface-inset\);[^}]*box-shadow:\s*inset 0 0 0 var\(--web-control-border-width\) var\(--control-border\);/s);
+    expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-time-controls:focus-within,\n\.calendar-compact-editor-panel \.calendar-compact-duration-input input:focus \{[^}]*var\(--web-focus-border\)/s);
     // The date glyph keeps a full 44 × 44 target (Codex r1 on #465).
     expect(styles).toMatch(/\.calendar-compact-editor-panel \.calendar-compact-date-trigger \{[^}]*width:\s*44px;[^}]*height:\s*44px;/s);
     // The uppercase field labels are the editor panel's own: Add time keeps its labels (Codex r1 on #465).
@@ -121,15 +123,21 @@ describe("shared web time-entry quick editor", () => {
     expect(timeline).toContain("useTimelineDeleteUndo");
   });
 
-  it("keeps Close alone in the head, puts Delete and Start again as labelled footer pills, and neutral selection in shared controls (WUI-006, UIA-205)", () => {
-    expect(quick).toMatch(/className="calendar-compact-editor-icons">\s*<button[\s\S]*?aria-label="Close editor"[\s\S]*?<\/button>\s*<\/div>/);
-    expect(quick).toMatch(/className="df-ed-actions-start"[\s\S]*?className="df-ed-pill is-danger"[\s\S]*?\{isRunning \? "Discard" : "Delete"\}[\s\S]*?className="df-ed-pill"[\s\S]*?Start again/);
+  it("puts Start again and Delete as header icons before Close, leaves Cancel and Save in the footer, and neutral selection in shared controls (owner 21 Oct 2026, UIA-205)", () => {
+    const icons = quick.slice(quick.indexOf('className="calendar-compact-editor-icons"'), quick.indexOf('aria-label="Close editor"'));
+    expect(icons).toMatch(/data-tip="Start again"[\s\S]*?<DayframeIcon glyph="rotate-ccw"[\s\S]*?data-tip=\{isRunning \? "Discard" : "Delete"\}[\s\S]*?<DayframeIcon glyph="trash-2"/);
+    expect(icons).toContain("aria-label={isRunning ? `Discard ${title}` : `Delete ${title}`}");
+    expect(icons).toContain("aria-label={`Start again: ${title}`}");
+    expect(quick).toContain('className="calendar-compact-icon-action is-close"');
+    expect(quick).not.toContain("df-ed-pill");
+    expect(quick).not.toContain("df-ed-actions-start");
+    expect(styles).toMatch(/\.calendar-compact-editor-icons > \.is-close:not\(:first-child\) \{[^}]*margin-left: 10px;/);
     expect(quick).not.toContain("calendar-compact-start-again");
     expect(quick).not.toContain("df-ed-lead");
     expect(quick).toContain('{entry ? "Save" : "Add"}');
     expect(quick).toContain("<ActivityChipGroup");
     expect(quick).toContain('variant="more"');
-    expect(styles).toMatch(/\.df-ed-pill\.is-danger \{[^}]*color: var\(--danger-text\);/);
+    expect(styles).not.toContain(".df-ed-pill");
     expect(styles).toMatch(/\.df-rbtn--danger \{[^}]*background: var\(--danger\);[^}]*color: var\(--on-danger\);/);
     for (const selected of [
       /\.ui-segmented-control button\[aria-pressed="true"\] \{([^}]*)\}/,
