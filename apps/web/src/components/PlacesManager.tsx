@@ -4,7 +4,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info, Search, X } from "lucide-react";
-import { useId, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import {
   placeDisplayName,
   placeLastVisitLabel,
@@ -64,6 +64,14 @@ export function PlacesManager({
   const searching = layout.searchable && search.trim().length > 0;
   const shownArchived = searching ? archivedPlaces.filter((place) => placeMatchesSearch(place, search)) : archivedPlaces;
   const pageNow = useMemo(() => new Date(now), [now]);
+  // Day labels need the viewer's time zone. Without the cookie the server and the browser would
+  // each use their own, so both render in UTC first and the browser switches to its zone after
+  // hydration (Codex r1 on #516).
+  const [browserZone, setBrowserZone] = useState<string | null>(null);
+  useEffect(() => {
+    if (!timeZone) setBrowserZone(Intl.DateTimeFormat().resolvedOptions().timeZone || null);
+  }, [timeZone]);
+  const labelZone = timeZone ?? browserZone ?? "UTC";
 
   function refresh(message: string) {
     setStatus(message);
@@ -214,9 +222,10 @@ export function PlacesManager({
         </div>
       ) : null}
 
-      {searching ? (
+      {layout.searchable ? (
+        // Mounted (empty) before any search, so the first count is announced (Codex r1 on #516).
         <p className="sr-only" role="status">
-          {resultCount(layout.sections[0]?.places.length ?? 0, shownArchived.length)}
+          {searching ? resultCount(layout.sections[0]?.places.length ?? 0, shownArchived.length) : ""}
         </p>
       ) : null}
 
@@ -234,7 +243,7 @@ export function PlacesManager({
               const stats = visitsById.get(place.id);
               const visitLine = [
                 section.key === "frequent" ? placeRecentVisitsLabel(stats) : null,
-                placeLastVisitLabel(stats?.lastVisitAt, pageNow, timeZone)
+                placeLastVisitLabel(stats?.lastVisitAt, pageNow, labelZone)
               ].filter(Boolean).join(" · ");
               return (
                 <article

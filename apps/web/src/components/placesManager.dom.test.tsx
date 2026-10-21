@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act } from "react";
+import { hydrateRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PlaceRow } from "@/lib/queries";
 
@@ -155,4 +158,39 @@ describe("Places search, sections and last visit (location v3 PR 16c)", () => {
     expect((input as HTMLInputElement).value).toBe("");
     expect(document.activeElement).toBe(input);
   });
+
+  it("keeps the search status mounted before typing, so the first count is announced", () => {
+    render(<PlacesManager learnedPlaces={[]} now={NOW} places={many} visits={visits} />);
+    const status = screen.getAllByRole("status").find((node) => node.classList.contains("sr-only"))!;
+    expect(status.textContent).toBe("");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search places" }), { target: { value: "cedar" } });
+    expect(screen.getAllByRole("status")).toContain(status);
+    expect(status.textContent).toBe("1 place matches.");
+  });
+
+  it("hydrates without a time zone cookie, then shows the browser's own day", async () => {
+    // 00:30 UTC: the 22:30 UTC visit was yesterday in UTC, but today in New York.
+    const props = {
+      learnedPlaces: [], now: "2026-10-21T00:30:00.000Z", places: [place], timeZone: null,
+      visits: [{ placeId: place.id, lastVisitAt: "2026-10-20T22:30:00.000Z", visitsLast30Days: 1 }]
+    };
+    const html = renderToString(<PlacesManager {...props} />);
+    expect(html).toContain("Last visit yesterday");
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    const recoverable = vi.fn();
+    const zone = vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ ...new Intl.DateTimeFormat("en-GB", { timeZone: "UTC" }).resolvedOptions(), timeZone: "America/New_York" });
+    let root: ReturnType<typeof hydrateRoot> | null = null;
+    await act(async () => {
+      root = hydrateRoot(container, <PlacesManager {...props} />, { onRecoverableError: recoverable });
+    });
+    expect(recoverable).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Last visit today");
+    zone.mockRestore();
+    act(() => root?.unmount());
+    container.remove();
+  });
 });
+
