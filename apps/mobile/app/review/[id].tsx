@@ -160,7 +160,10 @@ export default function LocationReviewDetailScreen() {
         finishHydrationFeedback(generation);
       }
 
-      if (cachedEvidence) evidenceOwner.current = cachedOwner ? { userId: cachedOwner.userId, workspaceId: cachedOwner.workspaceId } : null;
+      // Cached evidence is never paired with an account read separately (another account may have
+      // become active between the two reads, Codex r2 on #522): only evidence read from the network
+      // for an explicit account can report a venue suggestion.
+      evidenceOwner.current = null;
       const contextRequest = refreshContext(generation, signal);
       let owner = cachedOwner;
       if (!owner) {
