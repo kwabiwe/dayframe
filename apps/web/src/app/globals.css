@@ -3433,6 +3433,21 @@ dialog.ui-dialog.df-range-custom {
   gap: 8px;
 }
 
+/* Places search (location v3 PR 16c): the place editor's search field, shown from nine places. */
+.places-search {
+  display: grid;
+}
+
+.place-list-copy .place-list-visit {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.places-search-empty {
+  border-radius: var(--web-radius-group);
+  background: var(--surface);
+}
+
 /* Empty states are one muted sentence in the card (WUI-030): 14 px secondary text. */
 .places-empty-state {
   display: grid;

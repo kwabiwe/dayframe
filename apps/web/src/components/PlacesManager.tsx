@@ -3,24 +3,50 @@
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Info } from "lucide-react";
-import { useState, useTransition } from "react";
-import { placeDisplayName, placeRoleLabel, placeSecondaryName } from "@dayframe/shared";
+import { Info, Search, X } from "lucide-react";
+import { useId, useMemo, useRef, useState, useTransition } from "react";
+import {
+  placeDisplayName,
+  placeLastVisitLabel,
+  placeListLayout,
+  placeMatchesSearch,
+  placeRecentVisitsLabel,
+  placeRoleLabel,
+  placeSecondaryName,
+  placeVisitsById,
+  type PlaceListSectionKey,
+  type PlaceVisitStats
+} from "@dayframe/shared";
 import type { ArchivedPlaceRow, LearnedPlaceRow, PlaceRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { PlaceRoleSlots } from "./PlaceRoleSlots";
 import { StoppedTripsSection } from "./StoppedTripsSection";
-import { Button, ModalDialog } from "./ui/Primitives";
+import { Button, IconButton, ModalDialog } from "./ui/Primitives";
+
+const SECTION_NOTES: Record<PlaceListSectionKey, string> = {
+  results: "Saved places whose name matches.",
+  frequent: "Most visits in the last 30 days.",
+  recent: "By your last visit.",
+  all: "Saved locations Dayframe can recognise."
+};
 
 export function PlacesManager({
   archivedPlaces = [],
   learnedPlaces,
-  places
+  now,
+  places,
+  timeZone = null,
+  visits = []
 }: {
   /** Archived places (PRD D19 A10): restorable, out of every list and matcher meanwhile. */
   archivedPlaces?: ArchivedPlaceRow[];
   learnedPlaces: LearnedPlaceRow[];
+  /** The server's time when the page was read, so "Last visit today" renders the same on both sides. */
+  now: string;
   places: PlaceRow[];
+  timeZone?: string | null;
+  /** The person's visits per place (location v3 PR 16c): last visit and visits in 30 days. */
+  visits?: PlaceVisitStats[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -30,6 +56,14 @@ export function PlacesManager({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const searchId = useId();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const visitsById = useMemo(() => placeVisitsById(visits), [visits]);
+  const layout = useMemo(() => placeListLayout(places, visitsById, search), [places, visitsById, search]);
+  const searching = layout.searchable && search.trim().length > 0;
+  const shownArchived = searching ? archivedPlaces.filter((place) => placeMatchesSearch(place, search)) : archivedPlaces;
+  const pageNow = useMemo(() => new Date(now), [now]);
 
   function refresh(message: string) {
     setStatus(message);
@@ -139,78 +173,159 @@ export function PlacesManager({
 
       <PlaceRoleSlots places={places} onChanged={refresh} />
 
-      <section className="places-list-section">
-        <header>
-          <div>
-            <h2>Your places</h2>
-            <p>Saved locations Dayframe can recognise.</p>
+      {layout.searchable ? (
+        <div className="places-search" role="search">
+          <label className="sr-only" htmlFor={searchId}>Search places</label>
+          <div className="ui-compound-control place-search-control">
+            <Search aria-hidden="true" size={18} />
+            <input
+              autoComplete="off"
+              className="place-search-input"
+              id={searchId}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && search) {
+                  event.preventDefault();
+                  setSearch("");
+                }
+              }}
+              enterKeyHint="search"
+              placeholder="Search places"
+              ref={searchRef}
+              // A text field, not type="search": the field has its own 44 px clear button, and
+              // the browser's own clear button can't be hidden through the CSS pipeline.
+              role="searchbox"
+              type="text"
+              value={search}
+            />
+            {search ? (
+              <IconButton
+                className="place-search-clear"
+                label="Clear search"
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
+              >
+                <X aria-hidden="true" size={17} />
+              </IconButton>
+            ) : null}
           </div>
-          <span>{places.length}</span>
-        </header>
-        <div className="places-list">
-          {places.map((place) => (
-            <article className="place-list-row" id={`place-${place.id}`} key={place.id}>
-              <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
-              <div className="place-list-copy">
-                <h3>{placeDisplayName(place)}</h3>
-                {placeSecondaryName(place) ? <p>{placeSecondaryName(place)}</p> : null}
-                <p>
-                  {place.radiusMeters}m radius
-                  {" · "}
-                  {place.loggingEnabled === false ? "Visit suggestions off" : "Suggest visits"}
-                </p>
-                {place.loggingEnabled !== false &&
-                (place.defaultCategoryName || place.defaultActivityDescription) ? (
-                  <p>
-                    {[place.defaultCategoryName, place.defaultActivityDescription]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                ) : null}
-              </div>
-              <div className="place-list-actions">
-                <Link
-                  aria-label={`Edit ${placeDisplayName(place)}`}
-                  className="df-rbtn df-rbtn--sm df-rbtn--ghost"
-                  href={`/places/${encodeURIComponent(place.id)}/edit`}
+        </div>
+      ) : null}
+
+      {searching ? (
+        <p className="sr-only" role="status">
+          {resultCount(layout.sections[0]?.places.length ?? 0, shownArchived.length)}
+        </p>
+      ) : null}
+
+      {layout.sections.map((section) => (
+        <section className="places-list-section" aria-labelledby={`places-${section.key}-title`} key={section.key}>
+          <header>
+            <div>
+              <h2 id={`places-${section.key}-title`}>{section.title}</h2>
+              <p>{SECTION_NOTES[section.key]}</p>
+            </div>
+            <span>{section.places.length}</span>
+          </header>
+          <div className="places-list">
+            {section.places.map((place) => {
+              const stats = visitsById.get(place.id);
+              const visitLine = [
+                section.key === "frequent" ? placeRecentVisitsLabel(stats) : null,
+                placeLastVisitLabel(stats?.lastVisitAt, pageNow, timeZone)
+              ].filter(Boolean).join(" · ");
+              return (
+                <article
+                  className="place-list-row"
+                  // One anchor per place: the All (or Results) row, which always lists it.
+                  id={section.key === "all" || section.key === "results" ? `place-${place.id}` : undefined}
+                  key={place.id}
                 >
-                  Edit
-                </Link>
-                <button
-                  aria-label={`Delete ${placeDisplayName(place)}`}
-                  className="df-icon-action df-icon-action--44"
-                  onClick={() => {
-                    setDeleteError(null);
-                    setDeletingPlace(place);
-                  }}
-                  type="button"
-                >
-                  <DayframeIcon glyph="trash-2" size={16}/>
-                </button>
-              </div>
-            </article>
-          ))}
-          {places.length === 0 ? (
+                  <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
+                  <div className="place-list-copy">
+                    <h3>{placeDisplayName(place)}</h3>
+                    {placeSecondaryName(place) ? <p>{placeSecondaryName(place)}</p> : null}
+                    {visitLine ? <p className="place-list-visit">{visitLine}</p> : null}
+                    <p>
+                      {place.radiusMeters}m radius
+                      {" · "}
+                      {place.loggingEnabled === false ? "Visit suggestions off" : "Suggest visits"}
+                    </p>
+                    {place.loggingEnabled !== false &&
+                    (place.defaultCategoryName || place.defaultActivityDescription) ? (
+                      <p>
+                        {[place.defaultCategoryName, place.defaultActivityDescription]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="place-list-actions">
+                    <Link
+                      aria-label={`Edit ${placeDisplayName(place)}`}
+                      className="df-rbtn df-rbtn--sm df-rbtn--ghost"
+                      href={`/places/${encodeURIComponent(place.id)}/edit`}
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      aria-label={`Delete ${placeDisplayName(place)}`}
+                      className="df-icon-action df-icon-action--44"
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeletingPlace(place);
+                      }}
+                      type="button"
+                    >
+                      <DayframeIcon glyph="trash-2" size={16}/>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+
+      {places.length === 0 ? (
+        <section className="places-list-section">
+          <header>
+            <div>
+              <h2>Your places</h2>
+              <p>Saved locations Dayframe can recognise.</p>
+            </div>
+            <span>0</span>
+          </header>
+          <div className="places-list">
             <div className="places-empty-state">
               <DayframeIcon glyph="map-pin" size={22}/>
               <strong>No saved places yet</strong>
               <span>Search for a place to add your first one.</span>
             </div>
-          ) : null}
-        </div>
-      </section>
+          </div>
+        </section>
+      ) : null}
 
-      {archivedPlaces.length ? (
+      {searching && !layout.sections.length && !shownArchived.length ? (
+        <div className="places-empty-state places-search-empty">
+          <strong>No places match “{search.trim()}”</strong>
+          <span>Try another name, or clear the search.</span>
+        </div>
+      ) : null}
+
+      {shownArchived.length ? (
         <section className="places-list-section" aria-labelledby="places-archived-title">
           <header>
             <div>
               <h2 id="places-archived-title">Archived</h2>
               <p>Not matched or suggested. Past blocks keep their names.</p>
             </div>
-            <span>{archivedPlaces.length}</span>
+            <span>{shownArchived.length}</span>
           </header>
           <div className="places-list">
-            {archivedPlaces.map((place) => (
+            {shownArchived.map((place) => (
               <article className="place-list-row" key={place.id}>
                 <span className="place-list-icon"><DayframeIcon glyph="map-pin" size={19}/></span>
                 <div className="place-list-copy">
@@ -377,6 +492,12 @@ export function PlacesManager({
       {isPending ? <span className="sr-only" role="status">Refreshing places…</span> : null}
     </div>
   );
+}
+
+function resultCount(active: number, archived: number) {
+  const total = active + archived;
+  if (!total) return "No places match.";
+  return `${total} place${total === 1 ? "" : "s"} match${total === 1 ? "es" : ""}${archived ? `, ${archived} archived` : ""}.`;
 }
 
 function learnedEvidenceSummary(place: LearnedPlaceRow) {
