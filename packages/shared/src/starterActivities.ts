@@ -20,7 +20,9 @@ export const DAYFRAME_STARTER_ACTIVITIES = [
   { starterKey: "family", name: "Family", color: "rose", icon: "family", isPinned: false, countsTowardGoal: true },
   { starterKey: "social", name: "Social", color: "magenta", icon: "social", isPinned: false, countsTowardGoal: true },
   { starterKey: "commute", name: "Commute", color: "graphite", icon: "commute", isPinned: false, countsTowardGoal: true },
-  { starterKey: "travel", name: "Travel", color: "rust", icon: "travel", isPinned: false, countsTowardGoal: true }
+  // "Getting around" (owner, 20 Oct 2026; was "Travel"): every Move that is not Home ↔ Work. The
+  // key stays `travel`, so workspaces that already have it keep finding it.
+  { starterKey: "travel", name: "Getting around", color: "rust", icon: "journey", isPinned: false, countsTowardGoal: true }
 ] as const satisfies ReadonlyArray<{
   starterKey: string;
   name: string;

@@ -6,24 +6,48 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../node_modules/react/index.js");
 });
-const mocks = vi.hoisted(() => ({ dismiss: vi.fn() }));
-vi.mock("react-native", () => ({
+const mocks = vi.hoisted(() => ({
+  blur: vi.fn(),
+  dismiss: vi.fn(),
+  events: [] as string[],
+  focus: vi.fn(),
+  keyboardDismiss: vi.fn(),
+  sheetProps: null as null | Record<string, unknown>,
+}));
+vi.mock("react-native", async () => {
+  const React = await import("react");
+  return {
   ActivityIndicator: "ActivityIndicator",
+  Keyboard: { dismiss: mocks.keyboardDismiss },
   Modal: "Modal",
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   StyleSheet: { create: <T,>(styles: T) => styles },
   Text: "Text",
-  TextInput: "TextInput",
+  // A host input with the native focus methods, so the sheet's focus hand-off can be observed.
+  TextInput: React.forwardRef(function TextInput(props: Record<string, unknown>, ref) {
+    useImperativeHandle(ref, () => ({ blur: mocks.blur, focus: mocks.focus }));
+    return React.createElement("TextInput", props);
+  }),
   View: "View",
-}));
+  };
+});
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 34, left: 0, right: 0, top: 59 }) }));
 vi.mock("./SwipeDismissSheet", async () => {
   const React = await import("react");
   return {
-    SwipeDismissSheet: forwardRef(function Sheet({ children }: { children: unknown }, ref) {
-      useImperativeHandle(ref, () => ({ dismiss: mocks.dismiss }));
-      return React.createElement("Sheet", null, children as never);
+    // The shared presence owner: dismiss() runs its exit, which calls onDismissStart at once and
+    // onDismiss only when the exit has finished (the tests call that themselves).
+    SwipeDismissSheet: forwardRef(function Sheet(props: Record<string, unknown>, ref) {
+      mocks.sheetProps = props;
+      useImperativeHandle(ref, () => ({
+        dismiss: () => {
+          mocks.dismiss();
+          mocks.events.push("exit-start");
+          (props.onDismissStart as (() => void) | undefined)?.();
+        },
+      }));
+      return React.createElement("Sheet", null, props.children as never);
     }),
   };
 });
@@ -39,7 +63,10 @@ const activities = [
 ];
 
 function render(overrides: Record<string, unknown> = {}) {
-  mocks.dismiss.mockClear();
+  for (const fn of [mocks.blur, mocks.dismiss, mocks.focus, mocks.keyboardDismiss]) fn.mockClear();
+  mocks.events.length = 0;
+  mocks.blur.mockImplementation(() => mocks.events.push("blur"));
+  mocks.keyboardDismiss.mockImplementation(() => mocks.events.push("keyboard-dismiss"));
   const props = { activities, onClose: vi.fn(), onCreate: vi.fn(), onPick: vi.fn(), recentIds: ["learn"], reduceMotion: false, selectedId: "work", styles: {} as never, theme, ...overrides };
   let tree!: ReturnType<typeof create>;
   act(() => {
@@ -51,6 +78,46 @@ function render(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ActivityPickerSheet", () => {
+  // Owner, TestFlight 124 (20 Oct 2026): the picker rose under a keyboard coming up with it, and on
+  // Cancel the sheet slid away behind the keyboard, which stayed up until the exit spring settled.
+  it("is presented by the shared SwipeDismissSheet owner and focuses search once it has landed", () => {
+    const { tree } = render({ reduceMotion: true });
+    expect(mocks.sheetProps).toMatchObject({ reduceMotion: true, testID: "activity-picker", visible: true });
+    const input = tree.root.findByProps({ testID: "activity-picker-search" });
+    expect(input.props.autoFocus).toBeUndefined();
+    expect(mocks.focus).not.toHaveBeenCalled();
+    act(() => (mocks.sheetProps!.onPresented as () => void)());
+    expect(mocks.focus).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  it("drops the keyboard as Cancel starts the exit, and closes only when the exit has run", () => {
+    const { props, tree } = render();
+    act(() => tree.root.findByProps({ testID: "activity-picker-cancel" }).props.onPress());
+    expect(mocks.events).toEqual(["exit-start", "blur", "keyboard-dismiss"]);
+    // No instant unmount: the caller hears onClose only from the sheet's finished exit.
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(mocks.sheetProps!.onDismiss).toBe(props.onClose);
+    // A late presentation callback never refocuses a leaving sheet.
+    act(() => (mocks.sheetProps!.onPresented as () => void)());
+    expect(mocks.focus).not.toHaveBeenCalled();
+    act(() => tree.unmount());
+  });
+
+  it("drops the keyboard on every other way out: a pick, the backdrop or a swipe", () => {
+    const { tree } = render();
+    act(() => tree.root.findByProps({ testID: "activity-picker-row-recent-learn" }).props.onPress());
+    expect(mocks.events).toEqual(["exit-start", "blur", "keyboard-dismiss"]);
+    // The backdrop, accessibility escape and a committed swipe reach the same onDismissStart.
+    mocks.events.length = 0;
+    act(() => (mocks.sheetProps!.onDismissStart as () => void)());
+    expect(mocks.events).toEqual(["blur", "keyboard-dismiss"]);
+    mocks.keyboardDismiss.mockClear();
+    act(() => (mocks.sheetProps!.onGestureStart as () => void)());
+    expect(mocks.keyboardDismiss).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
   it("never picks a created activity after the picker was cancelled", async () => {
     let resolveCreate!: (value: { id: string }) => void;
     const onCreate = vi.fn(() => new Promise<{ id: string }>((resolve) => { resolveCreate = resolve; }));

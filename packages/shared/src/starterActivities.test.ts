@@ -12,7 +12,7 @@ describe("starter activities", () => {
   it("are the 16 agreed activities, Errands included, with five pinned", () => {
     expect(DAYFRAME_STARTER_ACTIVITIES.map((starter) => starter.name)).toEqual([
       "Work", "Admin", "Learning", "Exercise", "Walk", "Sleep", "Mindfulness", "Meals",
-      "Chores", "Errands", "Personal", "Hobbies", "Family", "Social", "Commute", "Travel"
+      "Chores", "Errands", "Personal", "Hobbies", "Family", "Social", "Commute", "Getting around"
     ]);
     expect(DAYFRAME_STARTER_ACTIVITIES.filter((starter) => starter.isPinned).map((starter) => starter.name)).toEqual([
       "Work", "Admin", "Learning", "Exercise", "Personal"
@@ -32,6 +32,8 @@ describe("starter activities", () => {
     expect(starterActivityByKey("errands")).toMatchObject({ name: "Errands", color: "chartreuse", icon: "errands" });
     expect(starterActivityByKey("sleep")).toMatchObject({ name: "Sleep", color: "blue-bold", icon: "sleep" });
     expect(starterActivityByKey("commute")).toMatchObject({ name: "Commute", color: "graphite", icon: "commute" });
+    // Was "Travel" (owner, 20 Oct 2026); the key stays so existing workspaces still find it.
+    expect(starterActivityByKey("travel")).toMatchObject({ name: "Getting around", icon: "journey" });
     expect(isStarterActivityKey("general")).toBe(false);
   });
 

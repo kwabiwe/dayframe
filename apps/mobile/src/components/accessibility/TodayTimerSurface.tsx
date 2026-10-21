@@ -47,7 +47,10 @@ export function TodayTimerSurface({
   /** The Stop flight's ghost has taken the live block's place: it is hidden at once, not faded. */
   liveHidden?: boolean;
   liveLanding: LandingRequest | null;
-  /** Today is covered (another tab or a pushed screen): the live block's looping motion holds still. */
+  /**
+   * Today is covered (another tab or a pushed screen): the live block's looping motion holds still,
+   * and uncovering it settles the quick-start tiles at rest.
+   */
   motionPaused?: boolean;
   onAddTime: () => void;
   onOpenActiveTimer: () => void;
@@ -108,6 +111,7 @@ export function TodayTimerSurface({
       <Reanimated.View layout={layout} testID="today-quick-start-slot">
         <QuickStartMosaic
           columns={quickStartColumns}
+          focused={!motionPaused}
           onOpenRunning={onOpenActiveTimer}
           onStartActivity={onStartActivity}
           reduceMotion={reduceMotion}
