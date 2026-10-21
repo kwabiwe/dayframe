@@ -98,13 +98,14 @@ export function useArchivedPlaces({
 
   const load = useCallback(async () => {
     const read = reads.begin();
+    const epoch = currentMobileAccountEpoch();
     const owner = await readActiveMobileAccount();
     if (!owner) return;
     try {
       const places = await fetchArchivedPlaces();
       if (!mounted.current || !reads.current(read)) return;
       const now = await readActiveMobileAccount();
-      if (!now || mobileAccountKey(now) !== mobileAccountKey(owner) || !reads.current(read)) return;
+      if (!now || mobileAccountKey(now) !== mobileAccountKey(owner) || currentMobileAccountEpoch() !== epoch || !reads.current(read)) return;
       archivedReadsApplied.current += 1;
       setArchived({ accountKey: mobileAccountKey(owner), places });
     } catch {

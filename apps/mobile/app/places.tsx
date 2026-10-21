@@ -109,6 +109,7 @@ export default function PlacesScreen() {
   const dataRef = useRef(data);
   dataRef.current = data;
   const [refreshing, setRefreshing] = useState(false);
+  const refreshPull = useRef(0);
   const [ignoringLearnedId, setIgnoringLearnedId] = useState<string | null>(null);
   const [forgettingLearnedId, setForgettingLearnedId] = useState<string | null>(null);
   // The learned place whose sheet is open, with the account lifetime it was opened in (Codex r9 on #508).
@@ -140,9 +141,13 @@ export default function PlacesScreen() {
   // The "restored, but Places couldn't refresh" line, cleared when its waiting place settles.
   const restoreWarning = useRef<{ placeId: string; message: string; owner: string } | null>(null);
   // Home and Work (Blocks 7a): which slot's sheet is open, and whether it sets or clears.
-  const [roleSheet, setRoleSheet] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode } | null>(null);
-  // One Home/Work change at a time across the page (a second sheet can't open mid-save).
-  const roleSaving = useRef(false);
+  // Bound to the account lifetime that opened it, with its draft (Codex r10 on #508): another
+  // account, or a later lifetime, never sees it, and opening it again starts a fresh draft.
+  const [roleSheetState, setRoleSheetState] = useState<{ role: PlaceRole; mode: PlaceRoleSheetMode; owner: string } | null>(null);
+  const roleSheet = roleSheetState && roleSheetState.owner === statusOwner() ? roleSheetState : null;
+  // One Home/Work change at a time in an account lifetime (a second sheet can't open mid-save); a
+  // save still out from an earlier lifetime never holds a later one (Codex r10 on #508).
+  const roleSaving = useRef<string | null>(null);
   // The one gate every list read goes through (Codex r5/r6 on #508): a read's list applies, settles
   // restores and refreshes monitoring only if no change was accepted and no newer list was applied
   // since it started, in the same account lifetime. Every accepted change calls `pageReads.changed()`.
@@ -265,7 +270,9 @@ export default function PlacesScreen() {
   // `refresh` is the person's own pull-to-refresh; every other read (opening, focus, Try again)
   // fails quietly over the list already shown.
   const load = useCallback(async (options?: { refresh?: boolean }) => {
-    if (options?.refresh) setRefreshing(true);
+    // The spinner belongs to the newest pull-to-refresh: an older one ending never stops it.
+    const pull = options?.refresh ? ++refreshPull.current : null;
+    if (pull !== null) setRefreshing(true);
     // Archived reads alongside, on its own: its failure never touches the page.
     void loadArchived();
     const ticket = pageReads.begin(accountLifetime());
@@ -290,7 +297,7 @@ export default function PlacesScreen() {
       if (failedRefresh) setStatusMessage((current) => (current === failedRefresh ? null : current));
       void backfillLearnedPlaceLocations(bootstrap.learnedPlaces ?? []).then((resolved) => {
         // Only onto this list while it is what the page shows.
-        if (resolved.length === 0 || !mounted.current || !pageReads.isCurrent(ticket)) return;
+        if (resolved.length === 0 || !mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isCurrent(ticket)) return;
         setData((current) => current ? mergeLearnedPlaceResolutions(current, resolved) : current);
       });
     } catch (error) {
@@ -298,7 +305,8 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      if (!mounted.current || !pageReads.isNewest(ticket)) return;
+      // Only the newest read's failure, and only in the lifetime it started in.
+      if (!mounted.current || ticket.lifetime !== accountLifetime() || !pageReads.isNewest(ticket)) return;
       if (!dataRef.current) {
         setLoadFailure({ offline: mobileFailureKind(error) === "offline" });
       } else if (options?.refresh) {
@@ -308,7 +316,7 @@ export default function PlacesScreen() {
         setStatusMessage(message);
       }
     } finally {
-      if (options?.refresh) setRefreshing(false);
+      if (pull !== null && pull === refreshPull.current) setRefreshing(false);
     }
   }, [accountLifetime, loadArchived, monitor, monitorList, pageReads, setStatusMessage, settleGoneRestores, unmonitoredRestoredIn]);
 
@@ -323,8 +331,10 @@ export default function PlacesScreen() {
    * apply comes from after it. True when nothing was shown yet, so a read must start again.
    */
   const applyDeletedPlaces = useCallback(async () => {
+    const epoch = currentMobileAccountEpoch();
     const owner = await readActiveMobileAccount();
-    if (!mounted.current || !owner) return false;
+    // Read for the lifetime it started in: another one takes its deletes at its own focus.
+    if (!mounted.current || !owner || currentMobileAccountEpoch() !== epoch) return false;
     const sameAccount = (list: MobileBootstrap) =>
       mobileAccountOwnersEqual(owner, { userId: list.user.id, workspaceId: list.workspace.id });
     const current = dataRef.current;
@@ -401,15 +411,21 @@ export default function PlacesScreen() {
   }
 
   async function ignoreLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    // Every write after an await is for the account lifetime this started in (Codex r10 on #508).
+    const still = lifetimeCheck();
     setIgnoringLearnedId(learnedPlace.id);
     try {
       await applyAfterSuccessfulMutation(
         () => ignoreLearnedPlace(learnedPlace.id),
-        () => removeLocalLearnedPlace(learnedPlace.id)
+        () => {
+          if (still()) removeLocalLearnedPlace(learnedPlace.id);
+        }
       );
+      if (!still()) return false;
       await refreshAfterPlaceChange({
         prefix: "Learned place ignored.",
-        removeLearnedPlaceId: learnedPlace.id
+        removeLearnedPlaceId: learnedPlace.id,
+        still
       });
       return true;
     } catch (error) {
@@ -417,10 +433,10 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't ignore this suggestion. Try again."));
+      if (still()) Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't ignore this suggestion. Try again."));
       return false;
     } finally {
-      setIgnoringLearnedId(null);
+      setIgnoringLearnedId((current) => (current === learnedPlace.id ? null : current));
     }
   }
 
@@ -443,15 +459,21 @@ export default function PlacesScreen() {
   }
 
   async function forgetLearnedCandidate(learnedPlace: MobileLearnedPlace) {
+    // Every write after an await is for the account lifetime this started in (Codex r10 on #508).
+    const still = lifetimeCheck();
     setForgettingLearnedId(learnedPlace.id);
     try {
       await applyAfterSuccessfulMutation(
         () => forgetLearnedPlace(learnedPlace.id),
-        () => removeLocalLearnedPlace(learnedPlace.id)
+        () => {
+          if (still()) removeLocalLearnedPlace(learnedPlace.id);
+        }
       );
+      if (!still()) return false;
       await refreshAfterPlaceChange({
         prefix: "Learned place forgotten.",
-        removeLearnedPlaceId: learnedPlace.id
+        removeLearnedPlaceId: learnedPlace.id,
+        still
       });
       return true;
     } catch (error) {
@@ -459,10 +481,10 @@ export default function PlacesScreen() {
         router.replace("/");
         return;
       }
-      Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't forget this suggestion. Try again."));
+      if (still()) Alert.alert("Places", friendlyMobileErrorMessage(error, "Couldn't forget this suggestion. Try again."));
       return false;
     } finally {
-      setForgettingLearnedId(null);
+      setForgettingLearnedId((current) => (current === learnedPlace.id ? null : current));
     }
   }
 
@@ -484,6 +506,8 @@ export default function PlacesScreen() {
     successMessage?: () => string | null;
     /** The restored place a warning line from this refresh is about (it clears when that settles). */
     restoredPlaceId?: string;
+    /** The account lifetime of the change this follows (else the one shown when it starts). */
+    still?: () => boolean;
     /**
      * Told how the refresh ended, before anything else happens: in the same render that applies its
      * list ("applied"), or when a newer change overtook it ("stale") or it failed. A restored row
@@ -504,10 +528,12 @@ export default function PlacesScreen() {
       }
       setStatusMessage(message);
     };
+    // Every write below an await first checks the change still belongs to the account lifetime it
+    // started in; a change from an ended lifetime refreshes nothing.
+    const still = options.still ?? lifetimeCheck();
+    if (!still()) return;
     // Starts after the change it follows, so it is newer than every read already out.
     const ticket = pageReads.begin(accountLifetime());
-    // Every write below an await first checks the change still belongs to the account shown.
-    const still = lifetimeCheck();
     try {
       const bootstrap = await fetchBootstrap();
       // Another account (or lifetime) is shown now, or this list is another account's: that page's.
@@ -570,14 +596,14 @@ export default function PlacesScreen() {
 
   function openRole(role: PlaceRole, mode: PlaceRoleSheetMode) {
     // Only from a list that was read: an unknown list never sends Set straight to adding a place.
-    if (roleSaving.current || !dataRef.current) return;
+    if (roleSaving.current === statusOwner() || !dataRef.current) return;
     setStatusMessage(null);
     // Nothing saved to choose from yet: go straight to adding the place into the slot.
     if (mode === "choose" && places.length === 0) {
       beginAddRolePlace(role);
       return;
     }
-    setRoleSheet({ role, mode });
+    setRoleSheetState({ role, mode, owner: statusOwner() });
   }
 
   function beginAddRolePlace(role: PlaceRole) {
@@ -585,8 +611,12 @@ export default function PlacesScreen() {
   }
 
   async function saveRole(request: PlaceRoleSaveRequest) {
-    if (roleSaving.current) return "Another change is still saving. Try again in a moment.";
-    roleSaving.current = true;
+    const lifetime = statusOwner();
+    if (roleSaving.current === lifetime) return "Another change is still saving. Try again in a moment.";
+    roleSaving.current = lifetime;
+    // The account lifetime this change belongs to (Codex r10 on #508): its answer is applied,
+    // monitored and said only while that lifetime and its account are still shown.
+    const still = lifetimeCheck();
     try {
       const owner = await readActiveMobileAccount();
       let previousArchived = false;
@@ -597,11 +627,11 @@ export default function PlacesScreen() {
           router.replace("/");
           return null;
         }
-        return friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.");
+        return still() ? friendlyMobileErrorMessage(error, "Couldn't update this place. Try again.") : null;
       }
-      // Accepted: shown at once (only for the account that asked, while Places is open), and any
-      // read that started before this answer is dropped.
-      if (!mounted.current || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return null;
+      // Accepted: shown at once (only for the account lifetime that asked, while Places is open),
+      // and any read that started before this answer is dropped.
+      if (!still() || !mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !still()) return null;
       pageReads.changed();
       const shown = dataRef.current;
       // "Replace the old place": the server archived the old holder, so it leaves Saved places too.
@@ -616,11 +646,11 @@ export default function PlacesScreen() {
       const prefix = !request.placeId
         ? `${label} cleared.`
         : previousArchived ? `${label} updated. The old ${label.toLowerCase()} is archived.` : `${label} updated.`;
-      await refreshAfterPlaceChange({ prefix, fallbackPlaces: nextPlaces });
-      if (previousArchived) void loadArchived();
+      await refreshAfterPlaceChange({ prefix, fallbackPlaces: nextPlaces, still });
+      if (previousArchived && still()) void loadArchived();
       return null;
     } finally {
-      roleSaving.current = false;
+      if (roleSaving.current === lifetime) roleSaving.current = null;
     }
   }
 
@@ -905,10 +935,10 @@ export default function PlacesScreen() {
       />
       {roleSheet && editingSlot ? (
         <PlaceRoleSheet
-          key={`${roleSheet.role}-${roleSheet.mode}`}
+          key={`${roleSheet.role}-${roleSheet.mode}-${roleSheet.owner}`}
           mode={roleSheet.mode}
           onAddNew={beginAddRolePlace}
-          onClose={() => setRoleSheet(null)}
+          onClose={() => setRoleSheetState(null)}
           onSave={saveRole}
           places={rolePlaces}
           reduceMotion={reduceMotion}

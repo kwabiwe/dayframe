@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   fetchBootstrap: vi.fn(),
   fetchArchivedPlaces: vi.fn(),
   setPlaceArchived: vi.fn(),
+  setPlaceRole: vi.fn(),
+  ignoreLearnedPlace: vi.fn(),
   refreshGeofences: vi.fn(),
   announce: vi.fn()
 }));
@@ -42,9 +44,9 @@ const factories = vi.hoisted(() => ({
       fetchArchivedPlaces: () => mocks.fetchArchivedPlaces(),
       fetchBootstrap: () => mocks.fetchBootstrap(),
       forgetLearnedPlace: vi.fn(),
-      ignoreLearnedPlace: vi.fn(),
+      ignoreLearnedPlace: (id: string) => mocks.ignoreLearnedPlace(id),
       setPlaceArchived: (id: string, archived: boolean) => mocks.setPlaceArchived(id, archived),
-      setPlaceRole: vi.fn()
+      setPlaceRole: (request: unknown) => mocks.setPlaceRole(request)
     };
   },
   friendlyMock: () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback, mobileFailureKind: () => "other" })
@@ -83,7 +85,11 @@ vi.mock("react-native-safe-area-context", async () => {
   return { SafeAreaView: (props: { children?: unknown }) => React.createElement("SafeAreaView", null, props.children as never) };
 });
 vi.mock("@/components/BlocksNavHeader", () => ({ BlocksNavHeader: () => null, usePreviousScreenLabel: () => "Settings" }));
-vi.mock("@/components/blocks/BlocksConfirmSheet", () => ({ BlocksConfirmHost: () => null, useBlocksConfirm: () => ({ confirm: vi.fn() }) }));
+// A confirmation is confirmed at once.
+vi.mock("@/components/blocks/BlocksConfirmSheet", () => ({
+  BlocksConfirmHost: () => null,
+  useBlocksConfirm: () => ({ confirm: (options: { onConfirm: () => void }) => options.onConfirm() })
+}));
 vi.mock("@/components/blocks/BlocksEmptyState", () => ({ BlocksEmptyState: () => null }));
 vi.mock("@/components/icons/DayframeIcon", () => ({ DayframeIcon: () => null }));
 vi.mock("@/components/places/ArchivedPlacesGroup", async () => {
@@ -94,9 +100,25 @@ vi.mock("@/components/places/ReflowBlockGroup", async () => {
   const React = await import("react");
   return { ReflowBlockGroup: (props: { children?: unknown; title: string }) => React.createElement("Group", { title: props.title }, props.children as never) };
 });
-vi.mock("@/components/places/PlaceRoleSheet", () => ({ PlaceRoleSheet: () => null }));
+// The Home/Work sheet keeps a draft (a typed rename) for as long as it stays mounted.
+vi.mock("@/components/places/PlaceRoleSheet", async () => {
+  const React = await import("react");
+  return {
+    PlaceRoleSheet: (props: Record<string, unknown>) => {
+      const [draft, setDraft] = React.useState("");
+      return React.createElement("RoleSheet", { ...props, draft, setDraft });
+    }
+  };
+});
 vi.mock("@/components/places/StoppedTripsGroup", () => ({ StoppedTripsGroup: () => null }));
-vi.mock("@/components/settings/SettingsBlocks", () => ({ SettingsBlockGroup: () => null, SettingsBlockRow: () => null, SettingsPillButton: () => null }));
+vi.mock("@/components/settings/SettingsBlocks", async () => {
+  const React = await import("react");
+  return {
+    SettingsBlockGroup: () => null,
+    SettingsBlockRow: () => null,
+    SettingsPillButton: (props: Record<string, unknown>) => React.createElement("Pill", props)
+  };
+});
 vi.mock("@/components/SwipeDismissSheet", () => ({ SwipeDismissSheet: () => null }));
 vi.mock("@/lib/placesPage", () => import("../../lib/placesPage"));
 vi.mock("@/lib/useArchivedPlaces", () => import("../../lib/useArchivedPlaces"));
@@ -109,9 +131,12 @@ vi.mock("@/lib/friendlyError", () => factories.friendlyMock());
 vi.mock("../../lib/friendlyError", () => factories.friendlyMock());
 vi.mock("@/lib/geofence", () => ({ refreshGeofencesForPlaces: (places: unknown, owner: unknown) => mocks.refreshGeofences(places, owner) }));
 vi.mock("@/lib/locationGeocoding", () => ({ backfillLearnedPlaceLocations: async () => [] }));
-vi.mock("@/lib/localMutation", () => ({ applyAfterSuccessfulMutation: vi.fn() }));
+vi.mock("@/lib/localMutation", () => import("../../lib/localMutation"));
 vi.mock("@/lib/places", () => ({ withRole: <T extends { role?: unknown }>(place: T) => ({ ...place, role: place.role ?? null }) }));
-vi.mock("@/lib/learnedPlaces", () => ({ copyLearnedPlaceDetail: vi.fn(), learnedPlaceDetailValues: vi.fn() }));
+vi.mock("@/lib/learnedPlaces", () => ({
+  copyLearnedPlaceDetail: vi.fn(),
+  learnedPlaceDetailValues: (place: { name: string }) => ({ name: place.name, address: null, coordinates: null })
+}));
 vi.mock("@/lib/mobileTheme", () => ({ pressable: (value: unknown) => value, useMobileTheme: () => ({ styles: {}, theme: {} }) }));
 vi.mock("@/lib/motion", () => ({
   localLayoutTransition: () => null,
@@ -129,8 +154,8 @@ const gym = { id: "30000000-0000-4000-8000-000000000009", name: "Example Gym", r
 const studio = { id: "30000000-0000-4000-8000-000000000008", name: "Example Studio", radiusMeters: 100, priority: 5, latitude: 10.01, longitude: 20 };
 const office = { id: "30000000-0000-4000-8000-000000000007", name: "Example Office", radiusMeters: 100, priority: 5, latitude: 11, longitude: 20 };
 const archivedGym = { id: gym.id, name: gym.name, archivedAt: "2026-10-20T09:00:00.000Z" };
-const bootstrapFor = (owner: Owner, places: unknown[]) => ({
-  user: { id: owner.userId }, workspace: { id: owner.workspaceId }, places, learnedPlaces: [], categories: []
+const bootstrapFor = (owner: Owner, places: unknown[], learnedPlaces: unknown[] = []) => ({
+  user: { id: owner.userId }, workspace: { id: owner.workspaceId }, places, learnedPlaces, categories: []
 });
 
 function deferred<T>() {
@@ -170,6 +195,8 @@ afterEach(() => {
   mocks.fetchArchivedPlaces.mockReset();
   mocks.setPlaceArchived.mockReset();
   mocks.refreshGeofences.mockReset();
+  mocks.setPlaceRole.mockReset();
+  mocks.ignoreLearnedPlace.mockReset();
 });
 
 describe("Places › Archived › Restore on the screen (Codex r2 on #508)", () => {
@@ -841,6 +868,9 @@ describe("Places state per account and lifetime (Codex r9 on #508)", () => {
     bActs: () => Promise<void>;
     afterAReturns?: () => Promise<void>;
     expectA: () => void;
+    /** A's places at first, and on returning (the server's word by then); default Studio, then Studio and Gym. */
+    aPlaces?: unknown[];
+    aPlacesOnReturn?: unknown[];
   };
   const rows: Row[] = [
     {
@@ -931,14 +961,144 @@ describe("Places state per account and lifetime (Codex r9 on #508)", () => {
       }
     }
   ];
+  // Codex r10 on #508: the Home/Work sheet and its draft, role saves and Replace, the learned-place
+  // sheet and its Ignore, and the place editor's hand-off follow the same rule.
+  const homeA = { id: "30000000-0000-4000-8000-000000000011", name: "Example House", role: "home", radiusMeters: 100, priority: 5, latitude: 10, longitude: 30 };
+  const homeB = { id: "30000000-0000-4000-8000-000000000012", name: "Example Flat", role: null, radiusMeters: 100, priority: 5, latitude: 10.001, longitude: 30 };
+  const homeC = { id: "30000000-0000-4000-8000-000000000013", name: "Example Loft", role: "home", radiusMeters: 100, priority: 5, latitude: 10.002, longitude: 30 };
+  const learnedCafe = {
+    id: "40000000-0000-4000-8000-000000000001", name: "Example Cafe", classification: "place_candidate", visitCount: 3,
+    distinctDayCount: 2, lastSeenAt: "2026-10-19T09:00:00.000Z", radiusMeters: 80, totalDwellSeconds: 3_600, longestDwellSeconds: 1_800
+  };
+  const roleSheets = () => all("RoleSheet");
+  const pill = (label: string) => all("Pill").find((node) => node.props.accessibilityLabel === label);
+  const learnedSheet = () => tree!.root.findAll((node: ReactTestInstance) => typeof node.type === "function" && "onIgnore" in node.props)[0];
+  rows.push(
+    {
+      name: "the Home/Work sheet and its draft stay in the lifetime that opened them",
+      aActs: async () => {
+        await act(async () => { (pill("Set Home")!.props.onPress as () => void)(); });
+        await act(async () => { (roleSheets()[0].props.setDraft as (value: string) => void)("Old home name"); });
+        expect(roleSheets()[0].props.draft).toBe("Old home name");
+      },
+      bActs: async () => {
+        expect(roleSheets()).toHaveLength(0);
+      },
+      expectA: () => undefined,
+      afterAReturns: async () => {
+        expect(roleSheets()).toHaveLength(0);
+        // Opened again, it starts a fresh draft.
+        await act(async () => { (pill("Set Home")!.props.onPress as () => void)(); });
+        expect(roleSheets()).toHaveLength(1);
+        expect(roleSheets()[0].props.draft).toBe("");
+      }
+    },
+    {
+      name: "a Replace answered in a later lifetime never changes the returning account's newer Home",
+      aPlaces: [homeA, homeB],
+      aPlacesOnReturn: [homeB, homeC],
+      aActs: async () => {
+        mocks.setPlaceRole.mockReturnValueOnce(answerA.promise);
+        await act(async () => { (pill("Change Home")!.props.onPress as () => void)(); });
+        const onSave = roleSheets()[0].props.onSave as (request: unknown) => Promise<string | null>;
+        void onSave({ role: "home", placeId: homeB.id, previousPlaceName: null, archivePrevious: true });
+        await flush();
+      },
+      bActs: async () => undefined,
+      expectA: () => {
+        expect(savedRowIds()).toEqual(ids([homeB, homeC]));
+        expect(texts().join(" ")).not.toContain("Home updated");
+        expect(mocks.refreshGeofences.mock.calls.filter(([list]) => (list as { id: string }[]).every((place) => place.id !== homeC.id))).toHaveLength(0);
+      },
+      afterAReturns: async () => {
+        mocks.refreshGeofences.mockClear();
+        mocks.fetchBootstrap.mockRejectedValueOnce(offline());
+        await act(async () => { answerA.resolve({ ok: true, previousArchived: true }); });
+        await flush();
+      }
+    },
+    {
+      name: "a Home/Work save still out never holds a later lifetime's sheet",
+      aPlaces: [homeA, homeB],
+      aPlacesOnReturn: [homeA, homeB],
+      aActs: async () => {
+        mocks.setPlaceRole.mockReturnValueOnce(new Promise(() => undefined));
+        await act(async () => { (pill("Change Home")!.props.onPress as () => void)(); });
+        await act(async () => { (roleSheets()[0].props.setDraft as (value: string) => void)("Old home name"); });
+        const onSave = roleSheets()[0].props.onSave as (request: unknown) => Promise<string | null>;
+        void onSave({ role: "home", placeId: homeB.id, previousPlaceName: null });
+        await flush();
+      },
+      bActs: async () => undefined,
+      expectA: () => {
+        // A fresh sheet opened in the new lifetime.
+        expect(roleSheets()).toHaveLength(1);
+        expect(roleSheets()[0].props.draft).toBe("");
+      },
+      afterAReturns: async () => {
+        await act(async () => { (pill("Change Home")!.props.onPress as () => void)(); });
+      }
+    },
+    {
+      name: "the learned-place sheet stays in the lifetime that opened it",
+      aActs: async () => {
+        await act(async () => { (tree!.root.findAll((node: ReactTestInstance) => node.props.testID === `places-learned-${learnedCafe.id}` && (node.type as unknown) === "Pressable")[0].props.onPress as () => void)(); });
+        expect(learnedSheet().props.learnedPlace).toEqual(learnedCafe);
+      },
+      bActs: async () => {
+        expect(learnedSheet().props.learnedPlace).toBeNull();
+      },
+      expectA: () => {
+        expect(learnedSheet().props.learnedPlace).toBeNull();
+      }
+    },
+    {
+      name: "a learned place's Ignore answered in a later lifetime changes and says nothing",
+      aActs: async () => {
+        mocks.ignoreLearnedPlace.mockReturnValueOnce(answerA.promise);
+        await act(async () => { (tree!.root.findAll((node: ReactTestInstance) => node.props.testID === `places-learned-${learnedCafe.id}` && (node.type as unknown) === "Pressable")[0].props.onPress as () => void)(); });
+        await act(async () => { (learnedSheet().props.onIgnore as (place: unknown, done: () => void) => void)(learnedCafe, () => undefined); });
+        await flush();
+      },
+      bActs: async () => undefined,
+      expectA: () => {
+        expect(texts().join(" ")).not.toContain("Learned place ignored");
+      },
+      afterAReturns: async () => {
+        const reads = mocks.fetchBootstrap.mock.calls.length;
+        await act(async () => { answerA.resolve({ ok: true }); });
+        await flush();
+        // No refresh after it either.
+        expect(mocks.fetchBootstrap.mock.calls.length).toBe(reads);
+      }
+    },
+    {
+      name: "the place editor's late archive for A never touches B's list",
+      aActs: async () => undefined,
+      bActs: async () => {
+        const { notePlaceDeleted } = await import("../../lib/placesPage");
+        await act(async () => { notePlaceDeleted("ws-1:user-a", studio.id); });
+        await flush();
+        expect(savedRowIds()).toEqual([ACCOUNT_B_PLACE.id]);
+      },
+      expectA: () => undefined,
+      afterAReturns: async () => {
+        // A's hand-off still waits for A's Places (taken here so nothing carries into later tests).
+        const { takeDeletedPlaces } = await import("../../lib/placesPage");
+        expect(takeDeletedPlaces("ws-1:user-a")).toEqual([studio.id]);
+      }
+    }
+  );
   let answerA: ReturnType<typeof deferred<unknown>>;
 
   it.each(rows)("$name", async (row) => {
     answerA = deferred<unknown>();
-    placesOf = { "user-a": [studio], "user-b": [ACCOUNT_B_PLACE] };
+    placesOf = { "user-a": row.aPlaces ?? [studio], "user-b": [ACCOUNT_B_PLACE] };
     const archivedOf: Record<string, unknown[]> = { "user-a": [archivedGym], "user-b": [archivedOffice] };
     await mountFor(ACCOUNT_A, [studio]);
-    mocks.fetchBootstrap.mockImplementation(async () => bootstrapFor(mocks.owner!, placesOf[mocks.owner!.userId]));
+    mocks.fetchBootstrap.mockImplementation(async () => bootstrapFor(
+      mocks.owner!, placesOf[mocks.owner!.userId], mocks.owner!.userId === "user-a" ? [learnedCafe] : []
+    ));
     mocks.fetchArchivedPlaces.mockImplementation(async () => archivedOf[mocks.owner!.userId]);
     mocks.setPlaceArchived.mockResolvedValue({ archivedAt: null });
     await showAccount(ACCOUNT_A, 1);
@@ -949,7 +1109,7 @@ describe("Places state per account and lifetime (Codex r9 on #508)", () => {
     await row.bActs();
     expect(screenText()).not.toContain("Example Gym");
     // A returns in a new lifetime; the server now has A's restored place active.
-    placesOf["user-a"] = [studio, gym];
+    placesOf["user-a"] = row.aPlacesOnReturn ?? [studio, gym];
     archivedOf["user-a"] = [];
     mocks.announce.mockClear();
     await showAccount(ACCOUNT_A, 3);
@@ -957,6 +1117,7 @@ describe("Places state per account and lifetime (Codex r9 on #508)", () => {
     // Nothing of B's touches A.
     expect(screenText()).not.toContain("Example Office");
     expect(screenText()).not.toContain("Example Library");
+    expect(roleSheets().every((sheet) => !String(sheet.props.draft).includes("Old home name"))).toBe(true);
     row.expectA();
   });
 });
