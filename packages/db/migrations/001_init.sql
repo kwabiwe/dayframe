@@ -784,6 +784,9 @@ create index if not exists idx_stay_segments_user_time on stay_segments(workspac
 create index if not exists idx_stay_segments_centre on stay_segments using gist(centre);
 create index if not exists idx_place_match_feedback_user_place on place_match_feedback(workspace_id, user_id, place_id, last_corrected_at desc);
 create index if not exists idx_place_match_feedback_anchor on place_match_feedback using gist(anchor);
+create index if not exists idx_places_geography
+  on places using gist ((ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography))
+  where latitude is not null and longitude is not null;
 
 create or replace function dayframe_delete_expired_location_evidence()
 returns bigint
