@@ -163,7 +163,10 @@ describe("native Calendar production contract", () => {
     // Drawn in the entries layer (the day's transition, zoom and scroll) with the blocks' own maths.
     expect(entriesLayer).toContain("ForEach(presentation.brackets)");
     expect(entriesLayer).toContain("DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)");
-    expect(entriesLayer).toContain("startedAtMs: bracket.startedAtMs");
+    // Its bounds are its parts as drawn, part by part, never the trip measured as one block.
+    expect(entriesLayer).toContain("DayframeCalendarBracketMath.span(");
+    expect(entriesLayer).toContain("bracket.memberIds.contains($0.entryId)");
+    expect(entriesLayer).not.toContain("startedAtMs: bracket.startedAtMs");
     expect(entriesLayer).toContain(".opacity.animation(.easeOut(duration: 0.21))");
     // Never takes a touch or a VoiceOver stop; the parts' labels name the trip.
     expect(entriesLayer).toContain(".allowsHitTesting(false)");

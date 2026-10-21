@@ -907,6 +907,49 @@ public enum DayframeCalendarBlockMath {
   }
 }
 
+public struct DayframeCalendarBracketSpan: Equatable {
+  public let top: Double
+  public let height: Double
+
+  public init(top: Double, height: Double) {
+    self.top = top
+    self.height = height
+  }
+}
+
+public enum DayframeCalendarBracketMath {
+  /// A named pattern's bracket (location v3 PR 14b) runs from its first part's drawn top to its last
+  /// part's drawn bottom: each part measured as the block it is (its minimum height, a clock change's
+  /// wall-clock place), never the trip as one block, so it stays beside its parts at every zoom.
+  public static func span(
+    parts: [(startedAtMs: Double, stoppedAtMs: Double?)],
+    nowMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    hourHeight: Double,
+    calendar: Calendar = .current
+  ) -> DayframeCalendarBracketSpan? {
+    let blocks = parts.compactMap { part in
+      DayframeCalendarBlockMath.metrics(
+        startedAtMs: part.startedAtMs,
+        stoppedAtMs: part.stoppedAtMs,
+        nowMs: nowMs,
+        dayStartMs: dayStartMs,
+        dayEndMs: dayEndMs,
+        hourHeight: hourHeight,
+        calendar: calendar
+      )
+    }
+    guard
+      let top = blocks.map(\.top).min(),
+      let bottom = blocks.map({ $0.top + $0.height }).max()
+    else {
+      return nil
+    }
+    return DayframeCalendarBracketSpan(top: top, height: bottom - top)
+  }
+}
+
 public enum DayframeCalendarActionKind: String, Equatable {
   case active
   case completed

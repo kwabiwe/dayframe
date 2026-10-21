@@ -77,5 +77,10 @@ export function namedPatternBrackets(
     brackets.push({ key: run.key, name: run.name, startMs, endMs, memberIds: [item.id] });
     open = true;
   }
-  return within ? brackets.filter((bracket) => bracket.startMs >= within.startMs && bracket.endMs <= within.endMs) : brackets;
+  return within ? bracketsWithin(brackets, within) : brackets;
+}
+
+/** The brackets wholly inside one day's `[startMs, endMs)`: found once for a week, then given to each day. */
+export function bracketsWithin(brackets: readonly NamedPatternBracket[], within: { startMs: number; endMs: number }) {
+  return brackets.filter((bracket) => bracket.startMs >= within.startMs && bracket.endMs <= within.endMs);
 }

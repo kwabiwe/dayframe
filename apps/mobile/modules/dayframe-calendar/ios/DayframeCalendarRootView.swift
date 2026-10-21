@@ -462,13 +462,15 @@ private struct DayframeCalendarEntriesLayer: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
-      // Named patterns (location v3 PR 14b): each bracket in the rail left of the blocks, from the
-      // same time-to-point maths, so zoom, scroll and a day change carry it with them. It comes and
-      // goes like a block (the same fade, none under Reduce Motion) and never takes a touch.
+      // Named patterns (location v3 PR 14b): each bracket in the rail left of the blocks, spanning
+      // its parts as they are drawn (the blocks' own maths, part by part), so zoom, scroll and a
+      // day change carry it with them. It comes and goes like a block (the same fade, none under
+      // Reduce Motion) and never takes a touch.
       ForEach(presentation.brackets) { bracket in
-        if let metrics = DayframeCalendarBlockMath.metrics(
-          startedAtMs: bracket.startedAtMs,
-          stoppedAtMs: bracket.stoppedAtMs,
+        if let metrics = DayframeCalendarBracketMath.span(
+          parts: presentation.entries
+            .filter { bracket.memberIds.contains($0.entryId) }
+            .map { (startedAtMs: $0.startedAtMs, stoppedAtMs: $0.stoppedAtMs) },
           nowMs: presentation.nowMs,
           dayStartMs: presentation.dayStartMs,
           dayEndMs: presentation.dayEndMs,

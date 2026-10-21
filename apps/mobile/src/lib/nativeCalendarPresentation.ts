@@ -91,10 +91,12 @@ export type NativeCalendarPresentationEntry = {
 
 /**
  * A named pattern's bracket (location v3 PR 14b): a complete trip wholly inside the day, from its
- * first part's start to its last part's end. Swift draws it beside the blocks; its parts stay blocks.
+ * first part's start to its last part's end. Swift draws it beside the blocks, spanning its parts
+ * (`memberIds`, oldest first) as they are drawn; its parts stay blocks.
  */
 export type NativeCalendarPresentationBracket = {
   key: string;
+  memberIds: string[];
   name: string;
   startedAtMs: number;
   stoppedAtMs: number;
@@ -426,6 +428,7 @@ export function buildNativeCalendarBridgeState({
     model: {
       brackets: brackets.map((bracket) => ({
         key: bracket.key,
+        memberIds: bracket.memberIds,
         name: bracket.name,
         startedAtMs: bracket.startMs,
         stoppedAtMs: bracket.endMs

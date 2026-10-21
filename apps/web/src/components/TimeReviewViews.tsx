@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -778,9 +778,11 @@ export function CalendarReview({
     const byDay = new Map<string, NamedPatternBracket[]>();
     const parts = new Map<string, string>();
     const members = new Map(gridEntries.map((entry) => [entry.id, entry]));
+    // The trips are found once for the shown period (Codex r1 on #511), then given to their days.
+    const trips = namedPatternBrackets(gridEntries);
     for (const day of visibleDays) {
       const dayStart = startOfDay(day);
-      const brackets = namedPatternBrackets(gridEntries, { startMs: dayStart.getTime(), endMs: addDays(dayStart, 1).getTime() });
+      const brackets = bracketsWithin(trips, { startMs: dayStart.getTime(), endMs: addDays(dayStart, 1).getTime() });
       byDay.set(formatCalendarDateKey(day), brackets);
       for (const bracket of brackets) {
         bracket.memberIds.forEach((id, index) => parts.set(id, `Part ${index + 1} of ${bracket.memberIds.length} of ${bracket.name}.`));

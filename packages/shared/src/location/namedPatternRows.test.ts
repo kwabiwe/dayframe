@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { namedPatternBrackets, namedPatternRuns, type NamedPatternItem } from "./namedPatternRows";
+import { bracketsWithin, namedPatternBrackets, namedPatternRuns, type NamedPatternItem } from "./namedPatternRows";
 
 const tag = { key: "named:stay", name: "School run", parts: 3 };
 const item = (id: string, start: string, stop: string | null, locationGroup: NamedPatternItem["locationGroup"] = tag): NamedPatternItem =>
@@ -61,5 +61,8 @@ describe("named pattern brackets on Calendar (location v3 PR 14b)", () => {
     expect(namedPatternBrackets(trip, day)).toHaveLength(1);
     expect(namedPatternBrackets(trip, { startMs: day.startMs, endMs: at("08:35") })).toEqual([]);
     expect(namedPatternBrackets(trip, { startMs: at("08:05"), endMs: day.endMs })).toEqual([]);
+    // Found once, then given to a day: the same answer.
+    expect(bracketsWithin(namedPatternBrackets(trip), day)).toEqual(namedPatternBrackets(trip, day));
+    expect(bracketsWithin(namedPatternBrackets(trip), { startMs: day.startMs, endMs: at("08:35") })).toEqual([]);
   });
 });

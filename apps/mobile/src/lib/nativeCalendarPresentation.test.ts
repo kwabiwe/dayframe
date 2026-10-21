@@ -1081,12 +1081,16 @@ describe("native Calendar Blocks presentation", () => {
       const state = build(at(12, 0), bootstrap([...trip(), entry({ id: "work", startedAt: iso(at(9, 0)), stoppedAt: iso(at(11, 0)) })]));
       expect(state.model.brackets).toEqual([{
         key: "named:trip-1",
+        memberIds: ["there", "stay", "back"],
         name: "School run",
         startedAtMs: at(8, 0),
         stoppedAtMs: at(8, 40)
       }]);
       expect(state.model.entries.map((item) => item.entryId)).toEqual(["there", "stay", "back", "work"]);
       expect(JSON.parse(JSON.stringify(state.model)).brackets).toEqual(state.model.brackets);
+      // Swift spans the bracket over these parts as drawn, so each must be one of the model's blocks.
+      const drawn = new Set(state.model.entries.map((item) => item.entryId));
+      expect(state.model.brackets[0].memberIds.every((id) => drawn.has(id))).toBe(true);
     });
 
     it("says each part's place in the trip once, in that part's own label", () => {

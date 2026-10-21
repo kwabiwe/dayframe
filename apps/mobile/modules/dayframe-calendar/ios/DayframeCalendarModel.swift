@@ -129,6 +129,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
 /// A named pattern's bracket (location v3 PR 14b): drawn beside its parts, which stay blocks.
 struct DayframeCalendarBracket: Equatable, Identifiable {
   let key: String
+  let memberIds: [String]
   let name: String
   let startedAtMs: Double
   let stoppedAtMs: Double
@@ -137,6 +138,7 @@ struct DayframeCalendarBracket: Equatable, Identifiable {
 
   init(_ record: DayframeCalendarBracketRecord) {
     key = record.key
+    memberIds = record.memberIds
     name = record.name
     startedAtMs = record.startedAtMs
     stoppedAtMs = record.stoppedAtMs
