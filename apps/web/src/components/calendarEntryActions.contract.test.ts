@@ -131,7 +131,7 @@ describe("shared web time-entry quick editor", () => {
     expect(quick).toContain('className="calendar-compact-icon-action is-close"');
     expect(quick).not.toContain("df-ed-pill");
     expect(quick).not.toContain("df-ed-actions-start");
-    expect(styles).toMatch(/\.calendar-compact-editor-icons > \.is-close:not\(:first-child\) \{[^}]*margin-left: 10px;/);
+    expect(styles).toMatch(/\.calendar-compact-editor-icons > \.is-close:not\(:first-child\) \{[^}]*margin-left: 8px;/);
     expect(quick).not.toContain("calendar-compact-start-again");
     expect(quick).not.toContain("df-ed-lead");
     expect(quick).toContain('{entry ? "Save" : "Add"}');

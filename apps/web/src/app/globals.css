@@ -12108,9 +12108,10 @@ dialog.ui-dialog.df-palette {
   margin: -10px -12px 0 0;
 }
 
-/* ↺ Start again · trash Delete, then a gap before ✕ (owner, 21 Oct 2026). */
+/* ↺ Start again · trash Delete, then a 10 px gap before ✕ (owner, 21 Oct 2026). */
 .calendar-compact-editor-icons > .is-close:not(:first-child) {
-  margin-left: 10px;
+  /* 8 px plus the row's 2 px gap: 10 px before ✕ (Codex r1 on #505). */
+  margin-left: 8px;
 }
 
 .calendar-compact-editor-panel .calendar-compact-editor-fields {

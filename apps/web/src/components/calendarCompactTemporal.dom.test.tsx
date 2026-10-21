@@ -490,7 +490,7 @@ describe("End time inference and the long-block note (owner, 21 Oct 2026)", () =
     const finish = await screen.findByLabelText("End time, one day after Start") as HTMLInputElement;
     const duration = screen.getByLabelText("Duration") as HTMLInputElement;
     expect(duration.value).toBe("9h 4m");
-    expect(screen.getByRole("status").textContent).toBe("Long block · 9h 4m. Is the end right?");
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("Long block · 9h 4m. Is the end right?");
 
     await user.clear(finish);
     await user.type(finish, "21:30");
@@ -523,6 +523,20 @@ describe("End time inference and the long-block note (owner, 21 Oct 2026)", () =
     await user.type(finish, "23:15");
     expect(duration.value).toBe("2h 15m");
     expect(document.querySelector(".calendar-compact-day-offset")).toBeNull();
+  });
+
+  it("keeps the +1 while an End is half typed, and announces the note only once the time settles", async () => {
+    const user = userEvent.setup();
+    renderEditor({ capturedNow: new Date(2026, 7, 3, 12), sourceEntry: entry("2026-08-02T21:00", "2026-08-03T06:04") });
+    const finish = await screen.findByLabelText("End time, one day after Start") as HTMLInputElement;
+    await user.clear(finish);
+    await user.type(finish, "21:3");
+    expect(document.querySelector(".calendar-compact-day-offset")?.textContent).toBe("+1");
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("");
+    await user.clear(finish);
+    await user.type(finish, "07:00");
+    await user.tab();
+    expect(document.querySelector(".calendar-compact-long-note-live")?.textContent).toBe("Long block · 10h. Is the end right?");
   });
 
   it("moves End forward with Start, keeping the duration", async () => {
