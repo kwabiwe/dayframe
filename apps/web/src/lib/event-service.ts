@@ -1736,7 +1736,7 @@ export async function createPlace(
       input,
       session
     );
-    const assigned = await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id });
+    const assigned = await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id, targetIsNew: true });
     await client.query("commit");
     return { ...place, role: newRole.role, ...previousArchivedOf(assigned) };
   } catch (error) {
@@ -1789,7 +1789,7 @@ export async function createPlaceFromLearnedPlace(
          and user_id = $3`,
       [learnedPlaceId, session.workspaceId, session.userId, place.id]
     );
-    const assigned = newRole ? await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id }) : null;
+    const assigned = newRole ? await assignPlaceRoleWith(client, session, { ...newRole, placeId: place.id, targetIsNew: true }) : null;
     await client.query("commit");
     return newRole ? { ...place, role: newRole.role, ...previousArchivedOf(assigned) } : place;
   } catch (error) {

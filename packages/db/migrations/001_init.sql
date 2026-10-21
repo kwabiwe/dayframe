@@ -939,3 +939,4 @@ alter table users add column if not exists log_trips_automatically boolean not n
 
 -- Keep the clean base fixture aligned with 016_place_archive.sql (Archive place).
 alter table places add column if not exists archived_at timestamptz;
+alter table places add column if not exists matching_starts_at timestamptz;
