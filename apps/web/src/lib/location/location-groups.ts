@@ -12,11 +12,16 @@ import type { RequestSession } from "../session";
  * A Stay corrected in Review (split or merged) is a new segment: its block stands for the stays it
  * came from (a split's parent, a merge's originals), which the Moves either side still name. The
  * Stay blocks that stand for the same stays form one middle; a split Stay's two parts both join,
- * and only together: every part meets the next within a minute.
+ * and only together: every part meets the next.
  */
 export type LocationGroup = { key: string; name: string; parts: number };
 
 export const LOCATION_GROUP_MAX_SPAN_MS = 3 * 60 * 60 * 1000;
+/**
+ * How closely a named trip's parts must meet. Below the shortest part a Review split can leave (one
+ * minute), so a missing part always shows as a gap (Codex r3 on #501); engine blocks meet exactly.
+ */
+export const LOCATION_GROUP_JOIN_TOLERANCE_MS = 30_000;
 /** Two ends of a trip at an unsaved place count as the same place within this distance. */
 export const LOCATION_GROUP_SAME_END_METERS = 150;
 
@@ -174,8 +179,8 @@ function isStayRow(row: Pick<BlockRow, "eventType">) {
 /**
  * Pure: the A → B → A chains around a named Stay. Stay blocks that stand for a shared stay are one
  * middle (a split's two parts, or a merge standing for both originals); the Move into it and the
- * Move out of it must be unique, back to the same place, meet it within a minute either side, and
- * all within three hours.
+ * Move out of it must be unique, back to the same place, meet it (LOCATION_GROUP_JOIN_TOLERANCE_MS),
+ * and all within three hours.
  */
 export function groupNamedPatterns(blocks: LocationGroupBlock[], endOf: (segmentId: string) => StayEnd | null) {
   const groups = new Map<string, LocationGroup>();
@@ -207,10 +212,11 @@ export function groupNamedPatterns(blocks: LocationGroupBlock[], endOf: (segment
     if (into.length !== 1 || outOf.length !== 1 || into[0] === outOf[0]) continue;
     const [there, back] = [into[0], outOf[0]];
     const first = middle[0];
-    // Every part is here: each block meets the next within a minute, so a deleted or unlogged part
-    // (a split's other half) leaves the trip ungrouped rather than a smaller group (Codex r2 on #501).
+    // Every part is here: each block meets the next, so a deleted or unlogged part (a split's other
+    // half) leaves the trip ungrouped rather than a smaller group (Codex r2–r3 on #501).
     const parts = [there, ...middle, back];
-    if (parts.some((part, index) => index > 0 && Math.abs(part.startedAtMs - parts[index - 1].stoppedAtMs) > 60_000)) continue;
+    if (parts.some((part, index) => index > 0
+      && Math.abs(part.startedAtMs - parts[index - 1].stoppedAtMs) > LOCATION_GROUP_JOIN_TOLERANCE_MS)) continue;
     if (back.stoppedAtMs - there.startedAtMs > LOCATION_GROUP_MAX_SPAN_MS) continue;
     if (!there.fromStay || !back.toStay || !sameEnd(endOf(there.fromStay), endOf(back.toStay))) continue;
     if (parts.some((block) => groups.has(block.id))) continue;

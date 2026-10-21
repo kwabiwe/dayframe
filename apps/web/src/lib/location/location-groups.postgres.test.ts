@@ -101,7 +101,13 @@ describeWithDatabase("named patterns on disposable PostgreSQL (location v3 PR 14
     const client = await database!.connect();
     try {
       await client.query("begin");
-      await client.query("set local enable_seqscan = off");
+      // A long history, so the planner weighs the indexes as it would for a real person.
+      await client.query(
+        `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, started_at, stopped_at)
+         select $1, $2, 'seg-history-' || n, 'device-1', $3::timestamptz - n * interval '1 hour', $3::timestamptz - n * interval '1 hour' + interval '20 minutes'
+           from generate_series(1, 3000) n`,
+        [workspaceId, userId, at(-120)]);
+      await client.query("analyze stay_segments");
       const plan = await client.query<{ "QUERY PLAN": string }>(
         `explain select client_segment_id from stay_segments
           where workspace_id = $1 and user_id = $2 and client_segment_id = any($3::text[])`,

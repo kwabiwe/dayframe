@@ -78,6 +78,21 @@ describe("named patterns on Today (location v3 PR 14)", () => {
       .toEqual({ key: "named:left", name: "School run", parts: 5 });
   });
 
+  it("notices a missing one-minute part, the shortest a split leaves (Codex r3 on #501)", () => {
+    const [there, stay, back] = chain();
+    const homeEnds = ends({ "home-before": home, "home-after": home });
+    // 08:10–08:30 split at 08:11: the one-minute first part is gone.
+    expect(groupNamedPatterns([there, { ...stay, startedAtMs: at(11), covers: ["school-right", "school"] }, back], homeEnds).size).toBe(0);
+    // …or the one-minute last part.
+    expect(groupNamedPatterns([there, { ...stay, stoppedAtMs: at(29), covers: ["school-left", "school"] }, back], homeEnds).size).toBe(0);
+    // …or a one-minute middle part.
+    const left = { ...stay, id: "left", stoppedAtMs: at(15), covers: ["school-left", "school"] };
+    const right = { ...stay, id: "right", startedAtMs: at(16), covers: ["school-right", "school"], name: null };
+    expect(groupNamedPatterns([there, left, right, back], homeEnds).size).toBe(0);
+    // Blocks a few seconds apart still meet.
+    expect(groupNamedPatterns([there, { ...stay, startedAtMs: at(10) + 20_000 }, back], homeEnds).size).toBe(3);
+  });
+
   it("treats unsaved ends within 150 m as one place, and a saved end never as an unsaved one", () => {
     const unsaved = { placeId: null, learnedPlaceId: null, latitude: 10, longitude: 20 };
     expect(sameEnd(unsaved, { ...unsaved, latitude: 10.001 })).toBe(true); // about 111 m
