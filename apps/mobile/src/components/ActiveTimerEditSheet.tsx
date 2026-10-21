@@ -47,6 +47,7 @@ import type { DayframeTimeWheelChange } from "../../modules/dayframe-time-wheel"
 import { TIME_WHEEL_PANEL_CHROME, TIME_WHEEL_PANEL_MARGIN_TOP, TimeWheelPanel } from "@/components/TimeWheelPanel";
 import { timeWheelAccessibilityStep } from "@/lib/timeWheel";
 import { entryDatePickerMaxDate } from "@/lib/entryDatePickerLimit";
+import { endFollowingStart, inferEndOnStartDay } from "@/lib/entryEndInference";
 import { addLocalDays, formatLocalDateKey, parseLocalDate } from "@/lib/reportsRanges";
 import {
   HistoricalSuggestionsOverlay,
@@ -229,6 +230,8 @@ export function ActiveTimerEditSheet({
   const [stoppedTimeText, setStoppedTimeText] = useState("");
   const [draftStartMs, setDraftStartMs] = useState(0);
   const [draftEndMs, setDraftEndMs] = useState(0);
+  // An End date chosen on the date sheet wins over the End wheel's inferred day (owner, 21 Oct 2026).
+  const endDateChosenRef = useRef(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
@@ -736,6 +739,7 @@ export function ActiveTimerEditSheet({
     });
     setDraftRevision(0);
     setDateDraftKey(null);
+    endDateChosenRef.current = false;
     setDatePickerTarget("start");
     setStartTimeEdited(false);
     // Only the running block's sheet is given one (Dashboard).
@@ -2177,19 +2181,33 @@ export function ActiveTimerEditSheet({
     setValidationError(null);
   }
 
-  // A11b: the wheel (or VoiceOver's adjustable card) moved one card's time. Only that card changes;
-  // End before Start stays flagged rather than crossing midnight (owner decision 3).
+  // A11b: the wheel (or VoiceOver's adjustable card) moved one card's time. The End reads against
+  // Start's time of day (owner, 21 Oct 2026, superseding decision 3's flagged End before Start): later
+  // is Start's day, at or before it the next day, unless the End date was chosen on the date sheet.
+  // A Start moved to or past End carries End with it, keeping the duration.
   function applyCardTime(target: "start" | "end", valueMs: number) {
-    const at = new Date(valueMs);
+    const startMs = parsedStart.date?.getTime() ?? draftStartMs;
     if (target === "end") {
-      setDraftEndMs(valueMs);
-      setStoppedDateText(formatDateInput(at));
-      setStoppedTimeText(formatTimeInput(at));
+      const endMs = endDateChosenRef.current ? valueMs : inferEndOnStartDay(startMs, valueMs);
+      const end = new Date(endMs);
+      setDraftEndMs(endMs);
+      setStoppedDateText(formatDateInput(end));
+      setStoppedTimeText(formatTimeInput(end));
     } else {
+      const at = new Date(valueMs);
       setDraftStartMs(valueMs);
       setDateText(formatDateInput(at));
       setTimeText(formatTimeInput(at));
       if (isRunningMode) setStartTimeEdited(true);
+      const movedEndMs = hasStoppedTime
+        ? endFollowingStart(startMs, parsedStop.date?.getTime() ?? draftEndMs, valueMs)
+        : null;
+      if (movedEndMs !== null) {
+        const end = new Date(movedEndMs);
+        setDraftEndMs(movedEndMs);
+        setStoppedDateText(formatDateInput(end));
+        setStoppedTimeText(formatTimeInput(end));
+      }
     }
     setDraftRevision((current) => current + 1);
     setValidationError(null);
@@ -2355,6 +2373,7 @@ export function ActiveTimerEditSheet({
         return false;
       }
       const parsedDate = new Date(merged.timestampMs);
+      endDateChosenRef.current = true;
       setDraftEndMs(merged.timestampMs);
       setDraftRevision((current) => current + 1);
       bumpTimeWheelRevision();
