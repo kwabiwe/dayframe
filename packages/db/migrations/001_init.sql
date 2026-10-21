@@ -784,6 +784,9 @@ create index if not exists idx_stay_segments_user_time on stay_segments(workspac
 create index if not exists idx_stay_segments_centre on stay_segments using gist(centre);
 create index if not exists idx_place_match_feedback_user_place on place_match_feedback(workspace_id, user_id, place_id, last_corrected_at desc);
 create index if not exists idx_place_match_feedback_anchor on place_match_feedback using gist(anchor);
+create index if not exists idx_places_geography
+  on places using gist ((ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography))
+  where latitude is not null and longitude is not null;
 
 create or replace function dayframe_delete_expired_location_evidence()
 returns bigint
@@ -937,3 +940,8 @@ alter table users add column if not exists log_trips_automatically boolean not n
 -- Keep the clean base fixture aligned with 016_place_archive.sql (Archive place).
 alter table places add column if not exists archived_at timestamptz;
 alter table places add column if not exists matching_starts_at timestamptz;
+
+-- Keep the clean base fixture aligned with 017_stay_segment_owner_client_index.sql (named patterns).
+create index if not exists idx_stay_segments_owner_client
+  on stay_segments(workspace_id, user_id, client_segment_id)
+  where client_segment_id is not null;

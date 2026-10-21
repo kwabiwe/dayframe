@@ -28,6 +28,66 @@ function classRank(value: LocationMatchClass) {
   return value === "strong" ? 0 : value === "plausible" ? 1 : 2;
 }
 
+/**
+ * Places at scale (location v3 PR 16, PRD D19 A10 §11.1): saved or learned places sorted by
+ * latitude once per engine run, so each reading is compared only with the places in its latitude
+ * band. A great-circle distance is never shorter than its north–south part (R·|Δlatitude|), so a
+ * place outside the band is farther than any radius plus accuracy allowance plus boundary
+ * tolerance reaches: "outside" for certain, which no decision uses. Matching is unchanged.
+ */
+export type PlaceLatitudeIndex<T extends SavedPlaceForMatching> = {
+  places: T[];
+  order: number[];
+  latitudes: number[];
+  /** Null when a catalogue value breaks the band's proof: every reading then meets every place. */
+  bandDegrees: number | null;
+};
+
+const EARTH_RADIUS_METERS = 6_371_008.8;
+
+export function indexPlacesByLatitude<T extends SavedPlaceForMatching>(
+  places: readonly T[],
+  config: Pick<LocationEngineConfig, "maxAccuracyAllowanceMeters">
+): PlaceLatitudeIndex<T> {
+  // A latitude outside ±90°, a longitude that isn't finite or a radius that isn't finite gives no
+  // band to prove against (the haversine matcher still answers), so nothing is left out.
+  const usable = Number.isFinite(config.maxAccuracyAllowanceMeters) && places.every((place) =>
+    Number.isFinite(place.latitude) && Math.abs(place.latitude) <= 90 && Number.isFinite(place.longitude)
+      && Number.isFinite(place.radiusMeters));
+  const order = places.map((_place, index) => index);
+  if (usable) order.sort((a, b) => places[a].latitude - places[b].latitude || a - b);
+  const reachMeters = Math.max(0, ...places.map((place) => Math.max(20, place.radiusMeters)))
+    + Math.max(0, config.maxAccuracyAllowanceMeters) + MATCH_BOUNDARY_TOLERANCE_METERS + 1;
+  return {
+    places: [...places],
+    order,
+    latitudes: order.map((index) => places[index].latitude),
+    bandDegrees: usable ? (reachMeters / EARTH_RADIUS_METERS) * (180 / Math.PI) : null
+  };
+}
+
+/** The indexed places that can match a reading at `latitude`, in their original order. */
+export function placesNearLatitude<T extends SavedPlaceForMatching>(index: PlaceLatitudeIndex<T>, latitude: number): T[] {
+  if (index.bandDegrees === null || !Number.isFinite(latitude) || Math.abs(latitude) > 90) return index.places;
+  const lowest = lowerBound(index.latitudes, latitude - index.bandDegrees);
+  const picked: number[] = [];
+  for (let position = lowest; position < index.latitudes.length && index.latitudes[position] <= latitude + index.bandDegrees; position += 1) {
+    picked.push(index.order[position]);
+  }
+  return picked.sort((a, b) => a - b).map((original) => index.places[original]);
+}
+
+function lowerBound(sorted: number[], value: number) {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (sorted[middle] < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 export function matchLocationToPlaces(
   input: MatchInput,
   savedPlaces: SavedPlaceForMatching[],
@@ -53,9 +113,12 @@ export function matchLocationToPlaces(
     };
   });
 
-  // Canonical input order also makes near-equal distance comparisons stable.
+  // Canonical input order also makes near-equal distance comparisons stable. Places that can match
+  // are ranked among themselves: the 5 % distance tolerance below is not transitive, so one sort
+  // over every place let far-away "outside" places change the winner, and places at scale (PR 16)
+  // leaves those out of the catalogue (Codex r1 on #507).
   candidates.sort((a, b) => a.id.localeCompare(b.id) || a.source.localeCompare(b.source));
-  candidates.sort((a, b) => {
+  const rank = (a: PlaceMatchCandidate, b: PlaceMatchCandidate) => {
     const classDifference = classRank(a.matchClass) - classRank(b.matchClass);
     if (classDifference !== 0) return classDifference;
     const hintA = a.id === input.savedPlaceIdHint ? 1 : 0;
@@ -69,10 +132,12 @@ export function matchLocationToPlaces(
     if (a.priority !== b.priority) return b.priority - a.priority;
     if (a.source !== b.source) return a.source === "saved" ? -1 : 1;
     return a.id.localeCompare(b.id);
-  });
+  };
 
-  const plausible = candidates.filter((candidate) => candidate.matchClass !== "outside");
-  if (plausible.length === 0) return { kind: "unknown", placeId: null, candidates };
+  const plausible = candidates.filter((candidate) => candidate.matchClass !== "outside").sort(rank);
+  if (plausible.length === 0) {
+    return { kind: "unknown", placeId: null, candidates: candidates.sort(rank) };
+  }
 
   const top = plausible[0];
 
