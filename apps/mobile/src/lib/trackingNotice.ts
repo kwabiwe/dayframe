@@ -29,6 +29,8 @@ export async function readTrackingNoticeEnabled() {
 }
 
 export async function setTrackingNoticeEnabled(enabled: boolean) {
+  // Off stands the notice down before anything is stored or read.
+  if (!enabled) disarm();
   await AsyncStorage.setItem(TRACKING_NOTICE_ENABLED_KEY, enabled ? "true" : "false");
   await syncTrackingNoticeArming();
 }

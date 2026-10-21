@@ -101,6 +101,25 @@ describe("tracking-stopped notice arming", () => {
     expect(lastArmed(deps.setArmed)).toBe(false);
   });
 
+  it("disarms at once when the switch is turned off, before a held read settles", async () => {
+    let release!: () => void;
+    const { deps, lifecycle } = harness();
+    await syncTrackingNoticeArming();
+    expect(lastArmed(deps.setArmed)).toBe(true);
+    deps.readNotificationPermission.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve("granted"); }));
+    void syncTrackingNoticeArming();
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const turnedOff = setTrackingNoticeEnabled(false);
+    expect(lastArmed(deps.setArmed)).toBe(false);
+    for (const listener of lifecycle.appState) listener();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lastArmed(deps.setArmed)).toBe(false);
+    release();
+    await turnedOff;
+    await syncTrackingNoticeArming();
+    expect(deps.setArmed.mock.calls.slice(1).map(([armed]) => armed)).not.toContain(true);
+  });
+
   it("never lets one account's reads arm another", async () => {
     let release!: () => void;
     let account = "account-a";
