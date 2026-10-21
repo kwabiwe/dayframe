@@ -1,0 +1,12 @@
+{
+  "name": "dayframe-tracking-notice",
+  "version": "0.1.0",
+  "description": "Dayframe's local notice when iOS ends the app while location tracking is on",
+  "main": "index.ts",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*",
+    "react": "*",
+    "react-native": "*"
+  }
+}

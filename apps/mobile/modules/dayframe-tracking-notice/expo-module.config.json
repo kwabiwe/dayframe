@@ -1,0 +1,8 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["DayframeTrackingNoticeModule"],
+    "appDelegateSubscribers": ["DayframeTrackingNoticeAppDelegateSubscriber"],
+    "podspecPath": "./ios/DayframeTrackingNotice.podspec"
+  }
+}
