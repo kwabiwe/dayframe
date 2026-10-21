@@ -243,4 +243,3 @@ describe("rankVenues: Codex r2 on #517", () => {
     expect(ranking.suggestion?.candidate.id).not.toBe(carPark.id);
   });
 });
-
