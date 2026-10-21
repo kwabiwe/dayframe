@@ -44,7 +44,7 @@ export type VenueKind =
   | "shopping_centre" | "park" | "campus" | "hospital" | "stadium" | "school" | "station"
   | "bus_stop" | "supermarket" | "large_store" | "gym" | "activity" | "entertainment"
   | "dining" | "nightlife" | "hotel" | "religious" | "library" | "beauty" | "service"
-  | "small_shop" | "petrol" | "motoring" | "other";
+  | "small_shop" | "petrol" | "motoring" | "parking" | "other";
 
 type VenueKindSpec = {
   /** How far the venue reaches from its point: a stay this close counts as inside. */
@@ -82,6 +82,8 @@ export const VENUE_KINDS: Readonly<Record<VenueKind, VenueKindSpec>> = {
   petrol: { footprintMeters: 25, prior: 0.2, medianMinutes: 6 },
   motoring: { footprintMeters: 25, prior: 0.3, medianMinutes: 40 },
   bus_stop: { footprintMeters: 10, prior: 0.1, medianMinutes: 5 },
+  // A car park known only by its name (Apple's Parking category is dropped before ranking).
+  parking: { footprintMeters: 10, prior: 0.05, medianMinutes: null },
   // No kind from Apple and no hint in the name: a neutral prior, and length says nothing.
   other: { footprintMeters: 20, prior: 0.6, medianMinutes: null }
 };
@@ -111,8 +113,11 @@ const CATEGORY_KINDS: Readonly<Record<string, VenueKind>> = {
   GasStation: "petrol", AutomotiveRepair: "motoring", CarRental: "motoring", RVPark: "motoring"
 };
 
-// Words that say what a place is when Apple gives no kind (or a vague one). Whole words only.
+// Words that say what a place is when Apple gives no kind (or a vague one). Whole words only,
+// most specific first ("Shell Service Station" is petrol, not a station; "Car park" is not a park).
 const NAME_KINDS: readonly [RegExp, VenueKind][] = [
+  [/\b(car park|parking|multi storey|multistorey)\b/, "parking"],
+  [/\b(petrol|filling station|service station|services)\b/, "petrol"],
   [/\b(shopping (centre|center)|mall|retail park|outlet (centre|village)|arcade)\b/, "shopping_centre"],
   [/\b(superstore|supermarket|hypermarket|food hall)\b/, "supermarket"],
   [/\b(megastore|department store|warehouse|home centre|garden centre|retail warehouse)\b/, "large_store"],
@@ -128,14 +133,20 @@ const NAME_KINDS: readonly [RegExp, VenueKind][] = [
   [/\b(pharmacy|chemist|bank|post office|launderette|dry cleaner)\b/, "service"],
   [/\b(salon|barber|barbers|hairdresser|nails|beauty|spa)\b/, "beauty"],
   [/\b(church|chapel|mosque|temple|synagogue|gurdwara|cathedral)\b/, "religious"],
-  [/\b(library)\b/, "library"],
-  [/\b(petrol|filling station|service station)\b/, "petrol"]
+  [/\b(library)\b/, "library"]
 ];
+
+// A street named after a place ("Park Lane", "Station Road", "School Street") is not that place,
+// so its name says nothing about its kind.
+const STREET_NAME = /\b(road|rd|street|st|lane|ln|avenue|ave|way|close|drive|crescent|terrace|grove|row|walk|hill|place|square|parade|mews)$/;
+
 
 /** What kind of venue a candidate is: its Apple category, refined or filled in by its name. */
 export function venueKind(candidate: Pick<VenueCandidate, "title" | "category">): VenueKind {
-  const name = searchText(candidate.title);
-  const fromName = NAME_KINDS.find(([pattern]) => pattern.test(name))?.[1] ?? null;
+  const name = searchText(candidate.title).replace(/[^\p{L}\p{N}&' ]+/gu, " ").replace(/\s+/g, " ").trim();
+  const fromName = STREET_NAME.test(name) && !/\b(car park|parking)\b/.test(name)
+    ? null
+    : NAME_KINDS.find(([pattern]) => pattern.test(name))?.[1] ?? null;
   const fromCategory = candidate.category ? CATEGORY_KINDS[candidate.category] ?? null : null;
   if (candidate.category === "PublicTransport") {
     // Apple files bus stops and stations alike; a stop is not a destination.
@@ -151,6 +162,8 @@ export function venueKind(candidate: Pick<VenueCandidate, "title" | "category">)
 export type RankedVenue = {
   candidate: VenueCandidate;
   kind: VenueKind;
+  /** Named like an area of interest the stay lies in (so it is where the stay is, however far its pin). */
+  insideArea: boolean;
   /** This venue's share of the evidence, children included (0–1, top-level venues sum to 1). */
   share: number;
   /** Places inside it, most likely first (a shop in a centre, a counter in a supermarket). */
@@ -175,6 +188,8 @@ const DWELL_FLOOR = 0.2;
 const UNKNOWN_KIND_DWELL = 0.7;
 const CLOSED_HOURS_FACTOR = 0.4;
 const HISTORY_FACTOR = 4;
+/** Never the place someone went: listed after every destination and never suggested. */
+const NON_DESTINATIONS: ReadonlySet<VenueKind> = new Set(["bus_stop", "parking"]);
 /** Small counters that fold into a store sharing a distinctive word with them. */
 const COUNTER_KINDS: ReadonlySet<VenueKind> = new Set(["service", "dining", "beauty", "small_shop"]);
 const STORE_KINDS: ReadonlySet<VenueKind> = new Set(["supermarket", "large_store"]);
@@ -206,7 +221,7 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
     if (insideArea(candidate) && !VENUE_KINDS[kinds.get(candidate.id)!].container) kinds.set(candidate.id, "shopping_centre");
   }
 
-  const sigma = Math.max(MIN_SIGMA_METERS, Math.hypot(stay.accuracyMeters ?? 0, stay.spreadMeters ?? 0));
+  const sigma = Math.max(MIN_SIGMA_METERS, Math.hypot(finiteOrZero(stay.accuracyMeters), finiteOrZero(stay.spreadMeters)));
   const minutes = stayMinutes(stay);
   const local = localTime(stay);
   const own = new Map<string, number>();
@@ -240,12 +255,15 @@ export function rankVenues(candidates: readonly VenueCandidate[], stay: VenueSta
     .map((candidate): RankedVenue => ({
       candidate,
       kind: kinds.get(candidate.id)!,
+      insideArea: insideArea(candidate),
       share: total > 0 ? score(candidate) / total : 0,
       children: (children.get(candidate.id) ?? []).sort((a, b) => own.get(b.id)! - own.get(a.id)! || byDistanceThenName(a, b))
     }))
-    .sort((a, b) => b.share - a.share || byDistanceThenName(a.candidate, b.candidate));
+    // Destinations first (a bus stop or car park never leads, Codex r1 on #517), then by share.
+    .sort((a, b) => Number(NON_DESTINATIONS.has(a.kind)) - Number(NON_DESTINATIONS.has(b.kind)) ||
+      b.share - a.share || byDistanceThenName(a.candidate, b.candidate));
   const [first, second] = venues;
-  const suggestion = first && first.share >= VENUE_SUGGESTION_MIN_SHARE &&
+  const suggestion = first && !NON_DESTINATIONS.has(first.kind) && first.share >= VENUE_SUGGESTION_MIN_SHARE &&
     (!second || first.share >= VENUE_SUGGESTION_MIN_LEAD * second.share) ? first : null;
   return { venues, suggestion };
 }
@@ -272,7 +290,10 @@ function assignParents(
   const stores = candidates.filter((candidate) => STORE_KINDS.has(kinds.get(candidate.id)!));
   const parents = new Set<string>();
 
-  for (const candidate of candidates) {
+  // Biggest first, then nearest: a place is offered as a parent before it could be folded into a
+  // smaller one, so the result never depends on the order MapKit listed them in.
+  const ordered = [...candidates].sort((a, b) => spec(b).footprintMeters - spec(a).footprintMeters || byDistanceThenName(a, b));
+  for (const candidate of ordered) {
     const own = spec(candidate);
     const container = containers.find((parent) => parent.id !== candidate.id && !parentOf.has(parent.id) &&
       own.footprintMeters < spec(parent).footprintMeters &&
@@ -349,6 +370,10 @@ function byDistanceThenName(a: VenueCandidate, b: VenueCandidate) {
   return a.distanceMeters - b.distanceMeters || a.title.localeCompare(b.title) || a.id.localeCompare(b.id);
 }
 
+function finiteOrZero(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
 function stayMinutes(stay: VenueStay) {
   const start = Date.parse(stay.startedAt);
   const end = stay.stoppedAt ? Date.parse(stay.stoppedAt) : stay.now.getTime();
@@ -362,7 +387,13 @@ function localTime(stay: VenueStay) {
   const end = stay.stoppedAt ? Date.parse(stay.stoppedAt) : stay.now.getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   const middle = new Date(start + Math.max(0, end - start) / 2);
-  const parts = weekdayHourFormatter(stay.timeZone || undefined).formatToParts(middle);
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = weekdayHourFormatter(stay.timeZone || undefined).formatToParts(middle);
+  } catch {
+    // An unknown time zone: the phone's own.
+    parts = weekdayHourFormatter(undefined).formatToParts(middle);
+  }
   const hour = Number(parts.find((part) => part.type === "hour")?.value);
   const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
   return Number.isFinite(hour) ? { hour, weekend: weekday === "Sat" || weekday === "Sun" } : null;

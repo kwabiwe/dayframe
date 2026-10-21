@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { rankVenues, type VenueStay } from "@dayframe/shared";
+import { distanceMeters, rankVenues, type LocationReviewEvidenceDto, type VenueStay } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
@@ -42,6 +42,8 @@ export type NearbyVenue = NearbyPointOfInterest & {
   share: number;
   /** The ranker is confident the visit was here (design §6.3). */
   suggested: boolean;
+  /** Named like an area of interest the visit lies in: listed however far Apple's pin for it is. */
+  inArea: boolean;
 };
 
 const normalisePlaceName = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -65,7 +67,8 @@ export function rankedNearbyPlaces(
     ...byId.get(venue.candidate.id)!,
     inside: venue.children.map((child) => child.title),
     share: venue.share,
-    suggested: ranking.suggestion?.candidate.id === venue.candidate.id
+    suggested: ranking.suggestion?.candidate.id === venue.candidate.id,
+    inArea: venue.insideArea
   }));
 }
 
@@ -84,11 +87,11 @@ export function nearbyInsideLine(inside: readonly string[]) {
 
 /**
  * Presentation-only filtering of the ranked list (already in order): drops malformed rows,
- * anything outside the radius (except an area of interest the visit lies in, whose point can be
- * farther), repeated names and names already on screen as saved places (`hiddenNames`), and keeps
+ * anything outside the radius (except an area of interest the visit lies in, whose pin can be
+ * farther, however it was found), repeated names and names already on screen as saved places (`hiddenNames`), and keeps
  * at most five. Never changes saved radii or engine matching.
  */
-export function visibleNearbyPlaces<T extends NearbyPointOfInterest>(
+export function visibleNearbyPlaces<T extends NearbyPointOfInterest & { inArea?: boolean }>(
   places: readonly T[],
   hiddenNames: readonly string[] = []
 ) {
@@ -97,7 +100,8 @@ export function visibleNearbyPlaces<T extends NearbyPointOfInterest>(
   for (const place of places) {
     if (
       !isNearbyRow(place) ||
-      (place.source !== "area" && place.distanceMeters > NEARBY_POI_RADIUS_METERS)
+      // The area the visit lies in stays, however it was found (Codex r1 on #517).
+      (!place.inArea && place.source !== "area" && place.distanceMeters > NEARBY_POI_RADIUS_METERS)
     ) continue;
     const key = normalisePlaceName(place.title);
     if (seen.has(key)) continue;
@@ -580,3 +584,28 @@ export type {
   PlaceSearchSuggestionsResult,
   ResolvedPlaceSearchResult
 };
+
+/**
+ * The stay as the venue ranker weighs it: times, the typical reading accuracy and how far the
+ * readings spread from the centre (their median distance; not the stay's matching radius, which
+ * is a fixed 120 m for an unknown place, Codex r1 on #517).
+ */
+export function venueStayFromEvidence(evidence: Pick<LocationReviewEvidenceDto, "segment" | "map">): VenueStay {
+  const median = (values: number[]) => {
+    const sorted = values.filter((value) => Number.isFinite(value) && value >= 0).sort((a, b) => a - b);
+    return sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+  };
+  const centre = evidence.map.centre;
+  return {
+    startedAt: evidence.segment.startedAt,
+    stoppedAt: evidence.segment.stoppedAt,
+    now: new Date(),
+    accuracyMeters: median(evidence.map.acceptedSamples
+      .map((sample) => sample.accuracyMeters)
+      .filter((value): value is number => typeof value === "number")),
+    spreadMeters: centre ? median(evidence.map.acceptedSamples.map((sample) => distanceMeters(
+      { latitude: centre.coordinates[1], longitude: centre.coordinates[0] },
+      { latitude: sample.point.coordinates[1], longitude: sample.point.coordinates[0] }
+    ))) : null
+  };
+}

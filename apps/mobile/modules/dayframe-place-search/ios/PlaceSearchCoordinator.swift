@@ -517,6 +517,32 @@ final class NearbyPointOfInterestCoordinator {
   }
 }
 
+/// Reverse geocoding for areas of interest, behind a seam so cancellation can be tested.
+@MainActor
+protocol AreaOfInterestGeocoding: AnyObject {
+  /// Calls back with the names Apple gives the areas at the location, or nil on failure.
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void)
+  func cancel()
+}
+
+@MainActor
+final class CLGeocoderAreasOfInterest: AreaOfInterestGeocoding {
+  private let geocoder = CLGeocoder()
+
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void) {
+    // CLGeocoder (and areasOfInterest) are deprecated in iOS 26/27.2 but still answer there.
+    geocoder.reverseGeocodeLocation(location) { placemarks, error in
+      DispatchQueue.main.async {
+        completion(error == nil ? placemarks?.first?.areasOfInterest ?? [] : nil)
+      }
+    }
+  }
+
+  func cancel() {
+    geocoder.cancelGeocode()
+  }
+}
+
 @MainActor
 final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching {
   /// How long the areas of interest may take before the search goes on without them.
@@ -524,15 +550,22 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
 
   private var nearbySearch: MKLocalSearch?
   private var contextSearch: MKLocalSearch?
-  private var geocoder: CLGeocoder?
+  private var geocoder: AreaOfInterestGeocoding?
   private var areasGeneration = 0
+  private let makeGeocoder: @MainActor () -> AreaOfInterestGeocoding
+
+  init(makeGeocoder: @escaping @MainActor () -> AreaOfInterestGeocoding = { CLGeocoderAreasOfInterest() }) {
+    self.makeGeocoder = makeGeocoder
+  }
 
   func searchNearby(
     center: CLLocationCoordinate2D,
     radiusMeters: CLLocationDistance,
     completion: @escaping (Result<[NearbyPointOfInterestValue], PlaceSearchCoordinatorError>) -> Void
   ) {
-    cancel()
+    // Replaces an earlier nearby or site search, never the areas lookup started alongside it
+    // (Codex r1 on #517: the coordinator asks for both together).
+    cancelSearches()
     // No category filter: those requests have been reported failing on Apple's side, so the
     // excluded kinds are dropped on the phone (NearbyPointOfInterestCoordinator.normalized).
     let request = MKLocalPointsOfInterestRequest(center: center, radius: radiusMeters)
@@ -595,10 +628,10 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
   /// but still answering there: one area at a busy centre, none elsewhere, owner's checks on
   /// 21 Oct 2026). Answers exactly once: the names, or none on failure, cancel or timeout.
   func areasOfInterest(center: CLLocationCoordinate2D, completion: @escaping ([String]) -> Void) {
-    geocoder?.cancelGeocode()
+    geocoder?.cancel()
     areasGeneration &+= 1
     let started = areasGeneration
-    let geocoder = CLGeocoder()
+    let geocoder = makeGeocoder()
     self.geocoder = geocoder
     var answered = false
     let answer: ([String]) -> Void = { [weak self] names in
@@ -610,21 +643,23 @@ final class MapKitNearbyPointOfInterestSearcher: NearbyPointOfInterestSearching 
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.areasOfInterestTimeout) {
       answer([])
     }
-    geocoder.reverseGeocodeLocation(CLLocation(latitude: center.latitude, longitude: center.longitude)) { placemarks, _ in
-      DispatchQueue.main.async {
-        answer(placemarks?.first?.areasOfInterest ?? [])
-      }
+    geocoder.areasOfInterest(at: CLLocation(latitude: center.latitude, longitude: center.longitude)) { names in
+      answer(names ?? [])
     }
   }
 
   func cancel() {
+    cancelSearches()
+    geocoder?.cancel()
+    geocoder = nil
+    areasGeneration &+= 1
+  }
+
+  private func cancelSearches() {
     nearbySearch?.cancel()
     nearbySearch = nil
     contextSearch?.cancel()
     contextSearch = nil
-    geocoder?.cancelGeocode()
-    geocoder = nil
-    areasGeneration &+= 1
   }
 
   private static func values(

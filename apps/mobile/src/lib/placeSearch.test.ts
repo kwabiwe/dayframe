@@ -28,6 +28,7 @@ const {
   PLACE_SEARCH_MAX_LOCATION_AGE_MS,
   nearbyInsideLine,
   rankedNearbyPlaces,
+  venueStayFromEvidence,
   PlaceSearchController,
   friendlyPlaceSearchError,
   isSuitableLastKnownLocation,
@@ -227,7 +228,7 @@ describe("nearby point of interest controller", () => {
     expect(states.at(-1)?.places.map((place) => place.title)).toEqual(["Place 1", "Place 2", "Place 3", "Place 4", "Place 5"]);
     // Only opaque ids, titles, address lines, distances and the ranking reach the screen: no coordinates.
     for (const place of states.at(-1)?.places ?? []) {
-      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "inside", "requestId", "share", "subtitle", "suggested", "title"]);
+      expect(Object.keys(place).sort()).toEqual(["distanceMeters", "id", "inArea", "inside", "requestId", "share", "subtitle", "suggested", "title"]);
     }
     controller.dispose();
   });
@@ -275,6 +276,29 @@ describe("nearby point of interest controller", () => {
     expect(visible.map((place) => place.title)).toEqual(["Northgate Shopping Centre"]);
     expect(nearbyInsideLine(visible[0].inside)).toBe("Inside: Unit Shop 1, Unit Shop 2 +3");
     expect(nearbyInsideLine([])).toBeNull();
+  });
+
+  it("keeps the area the visit lies in beyond 400 m even when it came from the nearby search (Codex r1 on #517)", () => {
+    const shop = { ...poi("Unit Shop", 20), category: "Store", offsetEastMeters: 20, offsetNorthMeters: 0 };
+    const centre = { ...poi("Northgate Shopping Centre", 420), source: "nearby" as const, offsetEastMeters: 420, offsetNorthMeters: 0 };
+    const visible = visibleNearbyPlaces(rankedNearbyPlaces([shop, centre], ["Northgate Shopping Centre"], {
+      startedAt: "2026-10-21T13:00:00.000Z", stoppedAt: "2026-10-21T14:00:00.000Z", now: new Date("2026-10-21T15:00:00.000Z")
+    }));
+    expect(visible.map((place) => [place.title, place.inside])).toEqual([["Northgate Shopping Centre", ["Unit Shop"]]]);
+  });
+
+  it("measures the visit's spread from its readings, not its matching radius (Codex r1 on #517)", () => {
+    const at = (east: number, accuracyMeters: number | null) => ({
+      id: `s${east}`, point: { type: "Point" as const, coordinates: [east / 71_700, 50] as [number, number] },
+      occurredAt: "2026-10-21T10:00:00.000Z", accuracyMeters, kind: "location", role: null
+    });
+    const stay = venueStayFromEvidence({
+      segment: { startedAt: "2026-10-21T10:00:00.000Z", stoppedAt: "2026-10-21T10:30:00.000Z" },
+      map: { centre: { type: "Point", coordinates: [0, 50] }, stayRadiusMeters: 120, acceptedSamples: [at(4, 5), at(6, 8), at(10, null)] }
+    } as unknown as Parameters<typeof venueStayFromEvidence>[0]);
+    expect(stay.accuracyMeters).toBe(8);
+    expect(stay.spreadMeters).toBeGreaterThan(5);
+    expect(stay.spreadMeters).toBeLessThan(8);
   });
 
   it("resolves a picked place from the current list only", async () => {

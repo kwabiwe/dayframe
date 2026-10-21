@@ -48,6 +48,7 @@ import {
   createNativePlaceSearchProvider,
   friendlyPlaceSearchError,
   nearbyInsideLine,
+  venueStayFromEvidence,
   visibleNearbyPlaces,
   NearbyPointOfInterestController,
   PlaceSearchController,
@@ -381,8 +382,12 @@ export function LocationReviewCorrectionEditor({
   listedSavedPlaceNamesRef.current = listedSavedPlaceNames;
   // The visit the venue ranker weighs places against (location v3 PR 7): its times, how accurate
   // its readings were and how far they spread. Read when the list loads, never stored.
-  const venueStayRef = useRef<VenueStay | null>(null);
-  venueStayRef.current = evidence.segment.kind === "stay" ? venueStayFromEvidence(evidence) : null;
+  const venueStay = useMemo(
+    () => evidence.segment.kind === "stay" ? venueStayFromEvidence(evidence) : null,
+    [evidence]
+  );
+  const venueStayRef = useRef<VenueStay | null>(venueStay);
+  venueStayRef.current = venueStay;
 
   // D3: every stay (a saved match included) lists the nearest few Apple places around the visit
   // under the empty search field. The search runs once per visit centre while the screen is focused;
@@ -1915,18 +1920,3 @@ const resultRowStyles = StyleSheet.create({
 
 /** How far a touch may move and still be a tap (points); more is a scroll. */
 const TAP_SLOP = 10;
-
-/** The stay as the venue ranker weighs it: times, typical reading accuracy and spread. */
-function venueStayFromEvidence(evidence: LocationReviewEvidenceDto): VenueStay {
-  const accuracies = evidence.map.acceptedSamples
-    .map((sample) => sample.accuracyMeters)
-    .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0)
-    .sort((a, b) => a - b);
-  return {
-    startedAt: evidence.segment.startedAt,
-    stoppedAt: evidence.segment.stoppedAt,
-    now: new Date(),
-    accuracyMeters: accuracies.length ? accuracies[Math.floor(accuracies.length / 2)] : null,
-    spreadMeters: evidence.map.stayRadiusMeters
-  };
-}

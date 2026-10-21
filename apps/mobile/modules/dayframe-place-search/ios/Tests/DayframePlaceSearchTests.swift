@@ -551,6 +551,23 @@ final class DayframePlaceSearchTests: XCTestCase {
     XCTAssertFalse(NearbyPointOfInterestCoordinator.namesArea("Gate", "Northgate Shopping Centre"))
   }
 
+  // Codex r1 on #517: the real searcher's nearby search must not cancel the areas lookup the
+  // coordinator starts alongside it; only a full cancel does.
+  func testNearbySearchKeepsTheAreasLookupStartedAlongsideIt() {
+    let geocoder = FakeAreaGeocoder()
+    let searcher = MapKitNearbyPointOfInterestSearcher(makeGeocoder: { geocoder })
+    let center = CLLocationCoordinate2D(latitude: 10, longitude: 20)
+    var areas: [String]?
+    searcher.areasOfInterest(center: center) { areas = $0 }
+    searcher.searchNearby(center: center, radiusMeters: 400) { _ in }
+    XCTAssertEqual(geocoder.cancelCount, 0)
+    geocoder.answer(["Synthetic Centre"])
+    XCTAssertEqual(areas, ["Synthetic Centre"])
+    searcher.areasOfInterest(center: center) { _ in }
+    searcher.cancel()
+    XCTAssertEqual(geocoder.cancelCount, 1) // only the outstanding second lookup
+  }
+
   func testRapidReplacementKeepsOnlyLatestRegistry() async throws {
     let resolved = ResolvedPlaceSearchValue(
       title: "Home",
@@ -741,5 +758,24 @@ private func XCTAssertThrowsErrorAsync<T>(
     XCTFail("Expected expression to throw", file: file, line: line)
   } catch {
     errorHandler(error)
+  }
+}
+
+@MainActor
+private final class FakeAreaGeocoder: AreaOfInterestGeocoding {
+  var cancelCount = 0
+  private var completion: (([String]?) -> Void)?
+
+  func areasOfInterest(at location: CLLocation, completion: @escaping ([String]?) -> Void) {
+    self.completion = completion
+  }
+
+  func answer(_ names: [String]?) {
+    completion?(names)
+    completion = nil
+  }
+
+  func cancel() {
+    cancelCount += 1
   }
 }

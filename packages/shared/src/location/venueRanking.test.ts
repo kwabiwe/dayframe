@@ -171,3 +171,53 @@ describe("rankVenues: input hygiene", () => {
     expect(titles(rankVenues([place("Bean Corner", "Cafe", 8, 5), place("Peak Fitness", "FitnessCenter", 25, 30)], open))[0]).toBe("Peak Fitness");
   });
 });
+
+describe("rankVenues: Codex r1 on #517", () => {
+  it("never makes a car park, or a street named after a place, a container or a suggestion", () => {
+    const carPark = place("Car park Lane", null, 10, 5);
+    const shops = [place("Alder Books", "Store", 20, 10), place("Birch Gifts", "Store", -15, 20)];
+    const ranking = rankVenues([carPark, ...shops], stay(20, 12));
+    expect(ranking.venues.every((venue) => venue.children.length === 0)).toBe(true);
+    expect(ranking.venues.at(-1)?.candidate.title).toBe("Car park Lane");
+    expect(ranking.suggestion?.candidate.title).not.toBe("Car park Lane");
+    expect(venueKind({ title: "Car park Lane", category: null })).toBe("parking");
+    expect(venueKind({ title: "Park Lane", category: null })).toBe("other");
+    expect(venueKind({ title: "Station Road", category: null })).toBe("other");
+    expect(venueKind({ title: "Shell Service Station", category: null })).toBe("petrol");
+    expect(venueKind({ title: "Exampleton Station", category: null })).toBe("station");
+  });
+
+  it("never lets a bus stop lead or be suggested, even when it is far nearer", () => {
+    const stop = place("Market Street (Stop K)", "PublicTransport", 3, 4);
+    const shop = place("Alder Books", "Store", 300, 180);
+    const ranking = rankVenues([stop, shop], stay(25, 12, { spreadMeters: 120 }));
+    expect(titles(ranking)).toEqual(["Alder Books", "Market Street (Stop K)"]);
+    expect(ranking.suggestion?.candidate.title).not.toBe("Market Street (Stop K)");
+  });
+
+  it("folds the same way whatever order MapKit listed the places in", () => {
+    const centre = place("Northgate Shopping Centre", null, 40, 40);
+    const store = place("Freshway Superstore", "FoodMarket", 50, 30);
+    const pharmacy = place("Freshway Pharmacy", "Pharmacy", 55, 25);
+    const shape = (list: VenueCandidate[]) => {
+      const ranking = rankVenues(list, stay(40, 11));
+      return ranking.venues.map((venue) => [venue.candidate.title, venue.children.map((child) => child.title).sort()]);
+    };
+    const expected = shape([centre, store, pharmacy]);
+    for (const order of [[pharmacy, store, centre], [store, pharmacy, centre], [pharmacy, centre, store], [store, centre, pharmacy]]) {
+      expect(shape(order)).toEqual(expected);
+    }
+  });
+
+  it("survives non-finite accuracy and spread and an unknown time zone", () => {
+    const ranking = rankVenues([place("Alder Books", null, 10, 0), place("Birch Café", "Cafe", 30, 0)],
+      stay(30, 11, { accuracyMeters: Number.NaN, spreadMeters: Number.POSITIVE_INFINITY, timeZone: "Not/AZone" }));
+    expect(ranking.venues.reduce((sum, venue) => sum + venue.share, 0)).toBeCloseTo(1, 10);
+  });
+
+  it("reports which venue is the area the stay lies in", () => {
+    const centre = place("Northgate Shopping Centre", null, 380, 150);
+    const ranking = rankVenues([centre, place("Unit Shop", "Store", 20, 0)], stay(60, 14, { areasOfInterest: ["Northgate Shopping Centre"] }));
+    expect(ranking.venues[0]).toMatchObject({ insideArea: true });
+  });
+});
