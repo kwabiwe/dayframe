@@ -30,6 +30,8 @@ export type TimelineInlineEditDraft = {
   finishDateChosen?: boolean;
   /** The End time was typed in this edit, so a later Start re-reads its day. */
   finishTyped?: boolean;
+  /** The edge edited last: only a Start edited last may carry End on commit (Codex r6 on #504). */
+  lastEdge?: TimelineInlineTimeEdge;
 };
 
 export function createTimelineInlineEditDraft(
@@ -73,7 +75,7 @@ export function updateTimelineInlineTime(
     const reread = edit.finishTyped && !edit.finishDateChosen && ready
       ? inferTypedFinishDate({ ...edit.draft, startedAtTime: value })
       : null;
-    return updateTimelineInlineTemporalEdge(edit, edge, {
+    return updateTimelineInlineTemporalEdge({ ...edit, lastEdge: "start" }, edge, {
       startedAtTime: value,
       ...(reread && reread.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: reread.stoppedAtDate } : {})
     });
@@ -81,7 +83,7 @@ export function updateTimelineInlineTime(
   // A typed End reads against Start's time of day, as in the block editor (owner, 21 Oct 2026); only
   // a complete time moves the day.
   const inferred = edit.finishDateChosen || !ready ? null : inferTypedFinishDate({ ...edit.draft, stoppedAtTime: value });
-  return updateTimelineInlineTemporalEdge({ ...edit, finishTyped: !edit.finishDateChosen }, edge, {
+  return updateTimelineInlineTemporalEdge({ ...edit, finishTyped: !edit.finishDateChosen, lastEdge: "finish" }, edge, {
     stoppedAtTime: value,
     ...(inferred && inferred.stoppedAtDate !== edit.draft.stoppedAtDate ? { stoppedAtDate: inferred.stoppedAtDate } : {})
   });
@@ -93,8 +95,8 @@ export function updateTimelineInlineDate(
   edge: TimelineInlineTimeEdge,
   date: string
 ): TimelineInlineEditDraft {
-  if (edge === "start") return updateTimelineInlineTemporalEdge(edit, edge, { startedAtDate: date });
-  return updateTimelineInlineTemporalEdge({ ...edit, finishDateChosen: true }, edge, { stoppedAtDate: date });
+  if (edge === "start") return updateTimelineInlineTemporalEdge({ ...edit, lastEdge: "start" }, edge, { startedAtDate: date });
+  return updateTimelineInlineTemporalEdge({ ...edit, finishDateChosen: true, lastEdge: "finish" }, edge, { stoppedAtDate: date });
 }
 
 export function buildTimelineInlineSavePlan(
@@ -162,7 +164,7 @@ function hasReadableFinish(draft: CalendarEntryCompactDraft) {
 }
 
 function committedInlineDraft(edit: TimelineInlineEditDraft, draft: CalendarEntryCompactDraft): CalendarEntryCompactDraft {
-  if (edit.field !== "time" || !edit.sourceStoppedAt || !edit.dirty.startedAtTime || !hasReadableFinish(draft)) return draft;
+  if (edit.field !== "time" || !edit.sourceStoppedAt || edit.lastEdge !== "start" || !edit.dirty.startedAtTime || !hasReadableFinish(draft)) return draft;
   const source = { originalStartedAt: edit.sourceStartedAt, originalStoppedAt: edit.sourceStoppedAt };
   if (trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "finish" }, owner: "finish" })) return draft;
   return trySynchronizeCalendarEntryCompactDraft({ ...source, draft: { ...draft, temporalOwner: "start" }, owner: "start" }) ?? draft;

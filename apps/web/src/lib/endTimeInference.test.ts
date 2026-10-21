@@ -157,4 +157,12 @@ describe("typed edits stay within 24 h (Codex r1 on #504)", () => {
     const edit = updateTimelineInlineTime(createTimelineInlineEditDraft(running, "time"), running, "start", "09:30");
     expect(buildTimelineInlineSavePlan(edit, running, new Date(2026, 7, 4, 12)).payload).toEqual({ startedAt: new Date(2026, 7, 3, 9, 30).toISOString() });
   });
+
+  it("lets a later End choice stand: a reversed End after a Start edit stays an error (Codex r6 on #504)", () => {
+    const hour = block(new Date(2026, 7, 2, 21, 0), new Date(2026, 7, 2, 22, 0));
+    const start = updateTimelineInlineTime(createTimelineInlineEditDraft(hour, "time"), hour, "start", "21:30");
+    const picked = updateTimelineInlineDate(start, hour, "finish", "2026-08-02");
+    const edit = updateTimelineInlineTime(picked, hour, "finish", "20:00");
+    expect(() => buildTimelineInlineSavePlan(edit, hour, new Date(2026, 7, 4))).toThrow();
+  });
 });
