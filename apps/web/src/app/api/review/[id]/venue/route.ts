@@ -19,6 +19,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const body = bodySchema.parse(await request.json().catch(() => ({})));
     const result = await setSuggestedVenue(id, body.placeId, session);
     if (!result) return NextResponse.json({ error: "Review item not found." }, { status: 404 });
+    // A decision is being saved for this card right now: the suggestion no longer matters.
+    if (result === "busy") return NextResponse.json({ error: "This card is being decided.", code: "review_busy" }, { status: 409 });
     return NextResponse.json({ ok: true });
   } catch (error) {
     const response = authErrorResponse(error);

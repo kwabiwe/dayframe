@@ -66,6 +66,22 @@ export async function validateComplexReviewMutations(session: RequestSession, ca
         `select st.venue_place_id as venue from review_items ri join stay_segments st on st.id = ri.location_segment_id
           where ri.id = $1 and ri.workspace_id = $2 and ri.user_id = $3`, [id, session.workspaceId, session.userId]);
       assert.equal(venue.rows[0]?.venue, mutation.applePlaceId, `${mutation.action} kept the picked venue's Place ID`);
+      if (mutation.action === 'record_poi_once') {
+        // A new request naming another venue is not "already done" (Codex r1 on #519); the same
+        // venue, or an older app sending none, still is.
+        const before = await counts();
+        await assert.rejects(()=>resolveIdempotentReviewMutation(id,{clientMutationId:randomUUID(),mutation:{...mutation,applePlaceId:'IANOTHERVENUE'}},session), (error:unknown)=>Boolean(error && typeof error==='object' && 'code' in error && error.code==='resolution_conflict'));
+        const same = await resolveIdempotentReviewMutation(id,{clientMutationId:randomUUID(),mutation},session) as { equivalent?: boolean };
+        assert.equal(same.equivalent, true, 'Same venue retry is equivalent');
+        const { applePlaceId: _omitted, ...older } = mutation;
+        const legacy = await resolveIdempotentReviewMutation(id,{clientMutationId:randomUUID(),mutation:older as ReviewMutation},session) as { equivalent?: boolean };
+        assert.equal(legacy.equivalent, true, 'An older app without a Place ID is still equivalent');
+        const venueAfter = await pool.query<{ venue: string | null }>(
+          `select st.venue_place_id as venue from review_items ri join stay_segments st on st.id = ri.location_segment_id where ri.id = $1`, [id]);
+        assert.equal(venueAfter.rows[0]?.venue, mutation.applePlaceId, 'Retries never change the kept venue');
+        const after2 = await counts();
+        assert.equal(after2.time_entries, before.time_entries, 'Retries wrote no entries');
+      }
     }
     const after = await counts();
     assert.deepEqual(await resolveIdempotentReviewMutation(id,envelope,session),first,`${mutation.action} lost-response replay changed IDs/results`);
