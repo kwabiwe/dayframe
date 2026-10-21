@@ -61,7 +61,7 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 | Render counts: over two minutes the Dashboard renders only at minute boundaries with Today, Calendar or Settings in front (or nothing running), at most once a second with Reports, a running entry's sheet or its Calendar editor open, never in the background; the live block once a second (plus at most two minute-boundary renders over the two minutes), never per frame | `renderBudgets.render.test.tsx` (#405) |
 | No per-call `Intl` formatters: dates go through `formatLocaleDate` / `localeDateFormatter`, or a module-level constant | `intlFormatters.contract.test.ts` (#404) |
 | Every journal and upload-outbox statement in the location store searches an index, never scans the table | `store.sqlite.test.ts` query-plan guard (#398, #406) |
-| An Apple Health wake runs one bounded pass: at most four query pages per kind, capture stopped at 12 s, the pass at 20 s (native finishes the wake at 25 s), wakes during a pass share one follow-up, and only Health events upload in the background | `healthBackgroundSync.test.ts`, `health.test.ts` page cap, `api.test.ts` Health scope, `DayframeHealthWakeLedgerTests` (`swift test` in the module) |
+| An Apple Health wake runs one bounded pass: at most four query pages per kind, capture stopped at 12 s, the pass at 20 s, both from the wake's arrival (native finishes the wake at 25 s), wakes during capture join the pass, and only Health events upload in the background | `healthBackgroundSync.test.ts`, `health.test.ts` page cap, `api.test.ts` Health scope, `DayframeHealthWakeLedgerTests` (`swift test` in the module) |
 
 A new hot path adds its guard here in the PR that creates it.
 

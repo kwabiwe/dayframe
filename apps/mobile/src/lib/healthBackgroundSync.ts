@@ -7,7 +7,8 @@
 import type { DayframeHealthWake } from "../../modules/dayframe-health-background";
 import type { HealthCaptureOptions, HealthImportStatus } from "./health";
 
-export type HealthWake = Pick<DayframeHealthWake, "id" | "kind" | "reason">;
+/** `receivedAt` (epoch ms, when native got the wake) anchors the pass deadlines; it defaults to now. */
+export type HealthWake = Pick<DayframeHealthWake, "id" | "kind" | "reason"> & { receivedAt?: number };
 
 export const HEALTH_SLEEP_CHANGE_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 export const HEALTH_WORKOUT_CHANGE_TYPE = "HKWorkoutTypeIdentifier";
@@ -15,7 +16,10 @@ export type HealthChangeType =
   | typeof HEALTH_SLEEP_CHANGE_TYPE
   | typeof HEALTH_WORKOUT_CHANGE_TYPE;
 
-/** Capture stops reading new pages after this, leaving time to upload what it journaled. */
+/**
+ * Measured from when the earliest wake of a pass reached native, so a follow-up pass never runs
+ * past its own wake: capture stops waiting after this, leaving time to upload what it journaled.
+ */
 export const HEALTH_WAKE_CAPTURE_MS = 12_000;
 /** The whole pass, upload included; native finishes the wake at 25 s whatever happens. */
 export const HEALTH_WAKE_PASS_MS = 20_000;
@@ -26,7 +30,8 @@ export type HealthWakeDependencies = {
   isAutomaticSyncEnabled(): Promise<boolean>;
   captureSleep(options: HealthCaptureOptions): Promise<HealthImportStatus>;
   captureWorkouts(options: HealthCaptureOptions): Promise<HealthImportStatus>;
-  uploadHealthEvents(signal: AbortSignal): Promise<unknown>;
+  /** Resolves true only when every queued Health event was sent. */
+  uploadHealthEvents(signal: AbortSignal): Promise<boolean>;
   complete(id: string, success: boolean): Promise<unknown>;
 };
 
@@ -61,47 +66,93 @@ function announceChange(wake: HealthWake) {
   }
 }
 
+function wakeKinds(wake: HealthWake): Array<"sleep" | "workout"> {
+  return wake.kind === "all" ? ["sleep", "workout"] : [wake.kind];
+}
+
+/** Resolves when the signal aborts (at once if it already has). */
+function whenAborted(signal: AbortSignal) {
+  return new Promise<"aborted">((resolve) => {
+    if (signal.aborted) resolve("aborted");
+    else signal.addEventListener("abort", () => resolve("aborted"), { once: true });
+  });
+}
+
+type ActivePass = {
+  wakes: HealthWake[];
+  captures: Promise<unknown>[];
+  captureSignal: AbortSignal;
+  /** Still waiting for captures: a new wake joins this pass instead of queueing behind it. */
+  capturing: boolean;
+};
+
 export function createHealthWakeRunner(deps: HealthWakeDependencies): HealthWakeRunner {
   let pending: HealthWake[] = [];
   let running: Promise<void> | null = null;
+  let active: ActivePass | null = null;
+
+  function startCaptures(pass: ActivePass, wake: HealthWake) {
+    const options: HealthCaptureOptions = {
+      observerChange: true,
+      signal: pass.captureSignal,
+      maxPages: HEALTH_WAKE_MAX_PAGES
+    };
+    for (const kind of wakeKinds(wake)) {
+      // A capture already running (a foreground one included) is joined, with one follow-up.
+      const capture = kind === "sleep" ? deps.captureSleep(options) : deps.captureWorkouts(options);
+      // A capture the pass stopped waiting for still settles somewhere.
+      capture.catch(() => undefined);
+      pass.captures.push(capture);
+    }
+  }
 
   async function runPass(batch: HealthWake[]) {
+    const anchoredAt = Math.min(...batch.map((wake) => wake.receivedAt ?? Date.now()));
     const capture = new AbortController();
     const pass = new AbortController();
-    const captureTimer = setTimeout(() => capture.abort(), HEALTH_WAKE_CAPTURE_MS);
-    const passTimer = setTimeout(() => pass.abort(), HEALTH_WAKE_PASS_MS);
+    const captureTimer = setTimeout(() => capture.abort(), Math.max(0, anchoredAt + HEALTH_WAKE_CAPTURE_MS - Date.now()));
+    const passTimer = setTimeout(() => pass.abort(), Math.max(0, anchoredAt + HEALTH_WAKE_PASS_MS - Date.now()));
+    const current: ActivePass = { wakes: [...batch], captures: [], captureSignal: capture.signal, capturing: true };
     let success = true;
     try {
       if (!(await deps.isAutomaticSyncEnabled())) return;
-      const kinds = new Set(batch.flatMap((wake) =>
-        wake.kind === "all" ? ["sleep", "workout"] : [wake.kind]
-      ));
-      const options: HealthCaptureOptions = {
-        observerChange: true,
-        signal: capture.signal,
-        maxPages: HEALTH_WAKE_MAX_PAGES
-      };
-      const captures = await Promise.allSettled([
-        ...(kinds.has("sleep") ? [deps.captureSleep(options)] : []),
-        ...(kinds.has("workout") ? [deps.captureWorkouts(options)] : [])
-      ]);
-      if (captures.some((result) => result.status === "rejected")) success = false;
+      active = current;
+      for (const wake of batch) startCaptures(current, wake);
+      // Wait for every capture, including those a joining wake starts, but never past the capture
+      // deadline: a joined capture keeps its own caller's options, and its journal is durable.
+      let waited = 0;
+      while (waited < current.captures.length) {
+        const slice = current.captures.slice(waited);
+        waited = current.captures.length;
+        const outcome = await Promise.race([Promise.allSettled(slice), whenAborted(capture.signal)]);
+        if (outcome === "aborted") {
+          success = false;
+          break;
+        }
+        if (outcome.some((result) => result.status === "rejected")) success = false;
+      }
+      current.capturing = false;
       // Upload even when this pass found nothing new: an earlier wake may have journaled and
       // queued Health events that could not be sent then.
-      if (!pass.signal.aborted) await deps.uploadHealthEvents(pass.signal);
+      const uploaded = pass.signal.aborted
+        ? "aborted"
+        : await Promise.race([deps.uploadHealthEvents(pass.signal), whenAborted(pass.signal)]);
+      if (uploaded !== true) success = false;
     } catch {
       success = false;
     } finally {
+      current.capturing = false;
+      if (active === current) active = null;
       clearTimeout(captureTimer);
       clearTimeout(passTimer);
-      await Promise.all(batch.map((wake) =>
+      await Promise.all(current.wakes.map((wake) =>
         deps.complete(wake.id, success).catch(() => undefined)
       ));
     }
   }
 
   async function drain() {
-    // Wakes that arrive during a pass share one follow-up pass.
+    // A wake that arrives once a pass has stopped capturing gets a follow-up pass.
     while (pending.length) {
       const batch = pending;
       pending = [];
@@ -110,9 +161,15 @@ export function createHealthWakeRunner(deps: HealthWakeDependencies): HealthWake
   }
 
   return {
-    receive(wake) {
-      pending.push(wake);
+    receive(input) {
+      const wake = { ...input, receivedAt: input.receivedAt ?? Date.now() };
       announceChange(wake);
+      if (active?.capturing && !active.captureSignal.aborted) {
+        active.wakes.push(wake);
+        startCaptures(active, wake);
+        return;
+      }
+      pending.push(wake);
       if (!running) {
         running = drain().finally(() => {
           running = null;
@@ -148,8 +205,10 @@ export function installHealthBackgroundSync(native: NativeHealthBackground | nul
       (await import("./health")).isHealthKitAutomaticSyncEnabled(),
     captureSleep: async (options) => (await import("./health")).importHealthKitSleep(options),
     captureWorkouts: async (options) => (await import("./health")).importHealthKitWorkouts(options),
-    uploadHealthEvents: async (signal) =>
-      (await import("./api")).syncQueue({ eventScope: "health", signal }),
+    uploadHealthEvents: async (signal) => {
+      const result = await (await import("./api")).syncQueue({ eventScope: "health", signal });
+      return !result.firstError && !result.stopped && result.remainingCount === 0;
+    },
     complete: (id, success) => native.complete(id, success)
   });
   native.addWakeListener((wake) => runner.receive(wake));

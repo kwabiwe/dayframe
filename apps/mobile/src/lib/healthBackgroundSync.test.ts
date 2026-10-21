@@ -17,7 +17,7 @@ function dependencies(overrides: Partial<HealthWakeDependencies> = {}) {
     isAutomaticSyncEnabled: vi.fn(async () => true),
     captureSleep: vi.fn(async (_options: HealthCaptureOptions) => queued),
     captureWorkouts: vi.fn(async (_options: HealthCaptureOptions) => queued),
-    uploadHealthEvents: vi.fn(async (_signal: AbortSignal): Promise<unknown> => undefined),
+    uploadHealthEvents: vi.fn(async (_signal: AbortSignal): Promise<boolean> => true),
     complete: vi.fn(async (_id: string, _success: boolean): Promise<unknown> => true)
   };
   // Overrides are mocks too; the cast keeps their mock helpers visible to the tests.
@@ -31,7 +31,7 @@ describe("Apple Health wake runner", () => {
     const deps = dependencies();
     const order: string[] = [];
     deps.captureWorkouts.mockImplementation(async () => { order.push("capture"); return queued; });
-    deps.uploadHealthEvents.mockImplementation(async () => { order.push("upload"); });
+    deps.uploadHealthEvents.mockImplementation(async () => { order.push("upload"); return true; });
     deps.complete.mockImplementation(async () => { order.push("complete"); return true; });
     const runner = createHealthWakeRunner(deps);
     runner.receive({ id: "w1", kind: "workout", reason: "observer" });
@@ -83,7 +83,7 @@ describe("Apple Health wake runner", () => {
     expect(deps.complete).toHaveBeenCalledWith("w1", false);
   });
 
-  it("joins wakes that arrive during a pass into one follow-up pass", async () => {
+  it("lets wakes that arrive while a pass captures join it, and finishes them together", async () => {
     let release!: () => void;
     const deps = dependencies();
     deps.captureWorkouts.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(queued); }));
@@ -92,12 +92,73 @@ describe("Apple Health wake runner", () => {
     await vi.waitFor(() => expect(deps.captureWorkouts).toHaveBeenCalledTimes(1));
     runner.receive({ id: "w2", kind: "workout", reason: "observer" });
     runner.receive({ id: "w3", kind: "sleep", reason: "observer" });
-    release();
-    await runner.idle();
     expect(deps.captureWorkouts).toHaveBeenCalledTimes(2);
     expect(deps.captureSleep).toHaveBeenCalledTimes(1);
-    expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(2);
+    expect(deps.complete).not.toHaveBeenCalled();
+    release();
+    await runner.idle();
+    expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(1);
     expect(deps.complete.mock.calls.map(([id]) => id)).toEqual(["w1", "w2", "w3"]);
+  });
+
+  it("gives a wake that arrives during the upload a follow-up pass", async () => {
+    let release!: () => void;
+    const deps = dependencies();
+    deps.uploadHealthEvents.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve(true); }));
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await vi.waitFor(() => expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(1));
+    runner.receive({ id: "w2", kind: "sleep", reason: "observer" });
+    release();
+    await runner.idle();
+    expect(deps.captureSleep).toHaveBeenCalledTimes(1);
+    expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(2);
+    expect(deps.complete.mock.calls.map(([id]) => id)).toEqual(["w1", "w2"]);
+  });
+
+  it("stops waiting for a joined capture that ignores the wake's signal, and still uploads", async () => {
+    vi.useFakeTimers();
+    // A foreground capture already running keeps its own options: it never sees this signal.
+    const deps = dependencies({ captureWorkouts: vi.fn(() => new Promise<HealthImportStatus>(() => undefined)) });
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await vi.advanceTimersByTimeAsync(HEALTH_WAKE_CAPTURE_MS);
+    await runner.idle();
+    expect(deps.uploadHealthEvents).toHaveBeenCalledOnce();
+    expect(deps.complete).toHaveBeenCalledWith("w1", false);
+  });
+
+  it("anchors a follow-up pass's deadlines to when its own wake arrived", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    let followUpSignal: AbortSignal | undefined;
+    const deps = dependencies({
+      uploadHealthEvents: vi.fn((signal: AbortSignal) => {
+        if (!release) return new Promise<boolean>((resolve) => { release = () => resolve(true); });
+        followUpSignal = signal;
+        return new Promise<boolean>((resolve) => signal.addEventListener("abort", () => resolve(false)));
+      })
+    });
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "w1", kind: "workout", reason: "observer" });
+    await vi.waitFor(() => expect(deps.uploadHealthEvents).toHaveBeenCalledTimes(1));
+    runner.receive({ id: "w2", kind: "workout", reason: "observer" });
+    await vi.advanceTimersByTimeAsync(15_000);
+    release();
+    await vi.waitFor(() => expect(followUpSignal).toBeDefined());
+    // w2 arrived about 15 s before its pass began, so only about 5 s of its 20 s remain.
+    await vi.advanceTimersByTimeAsync(HEALTH_WAKE_PASS_MS - 15_000);
+    await runner.idle();
+    expect(followUpSignal?.aborted).toBe(true);
+    expect(deps.complete).toHaveBeenLastCalledWith("w2", false);
+  });
+
+  it("reports an upload that left Health events unsent as unsuccessful", async () => {
+    const deps = dependencies({ uploadHealthEvents: vi.fn(async () => false) });
+    const runner = createHealthWakeRunner(deps);
+    runner.receive({ id: "r1", kind: "all", reason: "refresh" });
+    await runner.idle();
+    expect(deps.complete).toHaveBeenCalledWith("r1", false);
   });
 
   it("stops capture and upload at their deadlines and still finishes the wake", async () => {
@@ -109,9 +170,9 @@ describe("Apple Health wake runner", () => {
         captureSignal = options.signal;
         options.signal?.addEventListener("abort", () => resolve(queued));
       })),
-      uploadHealthEvents: vi.fn((signal: AbortSignal) => new Promise<void>((resolve) => {
+      uploadHealthEvents: vi.fn((signal: AbortSignal) => new Promise<boolean>((resolve) => {
         uploadSignal = signal;
-        signal.addEventListener("abort", () => resolve());
+        signal.addEventListener("abort", () => resolve(true));
       }))
     });
     const runner = createHealthWakeRunner(deps);
@@ -122,7 +183,8 @@ describe("Apple Health wake runner", () => {
     await vi.advanceTimersByTimeAsync(HEALTH_WAKE_PASS_MS - HEALTH_WAKE_CAPTURE_MS);
     await runner.idle();
     expect(uploadSignal?.aborted).toBe(true);
-    expect(deps.complete).toHaveBeenCalledWith("w1", true);
+    // The capture was cut short and the upload ran out of time.
+    expect(deps.complete).toHaveBeenCalledWith("w1", false);
   });
 
   it("tells mounted screens about observer changes, not about refreshes", async () => {
