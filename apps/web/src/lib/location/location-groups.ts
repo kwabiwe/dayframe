@@ -11,7 +11,8 @@ import type { RequestSession } from "../session";
  *
  * A Stay corrected in Review (split or merged) is a new segment: its block stands for the stays it
  * came from (a split's parent, a merge's originals), which the Moves either side still name. The
- * Stay blocks that stand for the same stays form one middle; a split Stay's two parts both join.
+ * Stay blocks that stand for the same stays form one middle; a split Stay's two parts both join,
+ * and only together: every part meets the next within a minute.
  */
 export type LocationGroup = { key: string; name: string; parts: number };
 
@@ -20,6 +21,36 @@ export const LOCATION_GROUP_MAX_SPAN_MS = 3 * 60 * 60 * 1000;
 export const LOCATION_GROUP_SAME_END_METERS = 150;
 
 const LOCATION_SOURCES = ["location_learning", "location_auto_log"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Corrections of corrections a block is followed back through (Codex r2 on #501). */
+export const LINEAGE_MAX_DEPTH = 8;
+
+/**
+ * The client segment ids each corrected segment ($3, uuids) stands for: itself and its ancestors
+ * through `parent_segment_id` and a merge's `metadata.mergedSegmentIds`, all this person's ($1, $2).
+ */
+export const STAY_LINEAGE_SQL = `with recursive lineage(root, id, depth) as (
+    select s.id, s.id, 0
+      from stay_segments s
+     where s.workspace_id = $1 and s.user_id = $2 and s.id = any($3::uuid[])
+    union
+    select lineage.root, ancestor.id, lineage.depth + 1
+      from lineage
+      join stay_segments child on child.id = lineage.id and child.workspace_id = $1 and child.user_id = $2
+      cross join lateral (
+        select child.parent_segment_id as id where child.parent_segment_id is not null
+        union
+        select original::uuid
+          from jsonb_array_elements_text(coalesce(child.metadata -> 'mergedSegmentIds', '[]'::jsonb)) original
+         where original ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      ) ancestor
+     where lineage.depth < ${LINEAGE_MAX_DEPTH}
+  )
+  select lineage.root::text as id,
+         array_agg(distinct segment.client_segment_id) filter (where segment.client_segment_id is not null) as covers
+    from lineage
+    join stay_segments segment on segment.id = lineage.id and segment.workspace_id = $1 and segment.user_id = $2
+   group by lineage.root`;
 
 type EntryLike = { id: string; source: string; startedAt: string | Date; stoppedAt: string | Date | null };
 
@@ -96,24 +127,14 @@ export async function getLocationGroups(db: Queryable, session: RequestSession, 
       order by pattern_key, uses desc, last_used_at desc nulls last, band`,
     [session.workspaceId, session.userId, stayKeys]
   );
-  // A corrected Stay's segment, by primary key: the stays it came from (a split's parent, a
-  // merge's originals) as the Moves name them.
-  const correctedIds = [...new Set(stayRows.flatMap((row) => row.correctedSegmentId ? [row.correctedSegmentId] : []))];
+  // A corrected Stay's segment and every stay it came from, however many corrections ago (a
+  // split's parent, a merge's originals, then theirs), as the Moves name them. Each step reads one
+  // of this person's segments by primary key, at most LINEAGE_MAX_DEPTH steps from the block.
+  const correctedIds = [...new Set(stayRows.flatMap((row) => row.correctedSegmentId && UUID.test(row.correctedSegmentId)
+    ? [row.correctedSegmentId.toLowerCase()] : []))];
   const corrected = correctedIds.length === 0
     ? { rows: [] as { id: string; covers: string[] | null }[] }
-    : await db.query<{ id: string; covers: string[] | null }>(
-      `select s.id::text as id,
-              array_remove(array[s.client_segment_id, parent.client_segment_id]
-                || coalesce((select array_agg(original.client_segment_id)
-                               from stay_segments original
-                              where original.workspace_id = s.workspace_id and original.user_id = s.user_id
-                                and original.id::text in (select jsonb_array_elements_text(coalesce(s.metadata -> 'mergedSegmentIds', '[]'::jsonb)))),
-                            array[]::text[]), null) as covers
-         from stay_segments s
-         left join stay_segments parent on parent.id = s.parent_segment_id and parent.workspace_id = s.workspace_id
-        where s.workspace_id = $1 and s.user_id = $2 and s.id::text = any($3::text[])`,
-      [session.workspaceId, session.userId, correctedIds]
-    );
+    : await db.query<{ id: string; covers: string[] | null }>(STAY_LINEAGE_SQL, [session.workspaceId, session.userId, correctedIds]);
   // The Moves' ends, by owner and client segment id (`idx_stay_segments_owner_client`).
   const ends = await db.query<StayEndRow>(
     `select client_segment_id as "segmentId", place_id as "placeId", learned_place_id as "learnedPlaceId",
@@ -125,13 +146,13 @@ export async function getLocationGroups(db: Queryable, session: RequestSession, 
   );
 
   const nameByKey = new Map(names.rows.map((row) => [row.patternKey, row.name] as const));
-  const coversById = new Map(corrected.rows.map((row) => [row.id, row.covers ?? []] as const));
+  const coversById = new Map(corrected.rows.map((row) => [row.id.toLowerCase(), row.covers ?? []] as const));
   const endBySegment = new Map(ends.rows.map((row) => [row.segmentId, row] as const));
   const input: LocationGroupBlock[] = blocks.rows.flatMap((row) => {
     const entry = candidates.get(row.id);
     if (!entry?.stoppedAt) return [];
     const stay = isStayRow(row);
-    const covers = !stay ? [] : row.correctedSegmentId ? coversById.get(row.correctedSegmentId) ?? [] : row.segmentId ? [row.segmentId] : [];
+    const covers = !stay ? [] : row.correctedSegmentId ? coversById.get(row.correctedSegmentId.toLowerCase()) ?? [] : row.segmentId ? [row.segmentId] : [];
     return [{
       id: row.id,
       kind: stay ? "stay" as const : "move" as const,
@@ -153,7 +174,8 @@ function isStayRow(row: Pick<BlockRow, "eventType">) {
 /**
  * Pure: the A → B → A chains around a named Stay. Stay blocks that stand for a shared stay are one
  * middle (a split's two parts, or a merge standing for both originals); the Move into it and the
- * Move out of it must be unique, back to the same place, and all within three hours.
+ * Move out of it must be unique, back to the same place, meet it within a minute either side, and
+ * all within three hours.
  */
 export function groupNamedPatterns(blocks: LocationGroupBlock[], endOf: (segmentId: string) => StayEnd | null) {
   const groups = new Map<string, LocationGroup>();
@@ -185,14 +207,15 @@ export function groupNamedPatterns(blocks: LocationGroupBlock[], endOf: (segment
     if (into.length !== 1 || outOf.length !== 1 || into[0] === outOf[0]) continue;
     const [there, back] = [into[0], outOf[0]];
     const first = middle[0];
-    const last = middle[middle.length - 1];
-    if (there.stoppedAtMs > first.startedAtMs + 60_000 || back.startedAtMs < last.stoppedAtMs - 60_000) continue;
+    // Every part is here: each block meets the next within a minute, so a deleted or unlogged part
+    // (a split's other half) leaves the trip ungrouped rather than a smaller group (Codex r2 on #501).
+    const parts = [there, ...middle, back];
+    if (parts.some((part, index) => index > 0 && Math.abs(part.startedAtMs - parts[index - 1].stoppedAtMs) > 60_000)) continue;
     if (back.stoppedAtMs - there.startedAtMs > LOCATION_GROUP_MAX_SPAN_MS) continue;
     if (!there.fromStay || !back.toStay || !sameEnd(endOf(there.fromStay), endOf(back.toStay))) continue;
-    const members = [there, ...middle, back];
-    if (members.some((block) => groups.has(block.id))) continue;
-    const group = { key: `named:${first.id}`, name, parts: members.length };
-    for (const block of members) groups.set(block.id, group);
+    if (parts.some((block) => groups.has(block.id))) continue;
+    const group = { key: `named:${first.id}`, name, parts: parts.length };
+    for (const block of parts) groups.set(block.id, group);
   }
   return groups;
 }

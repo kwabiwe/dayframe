@@ -62,6 +62,22 @@ describe("named patterns on Today (location v3 PR 14)", () => {
       .toEqual({ key: "named:merged", name: "School run", parts: 3 });
   });
 
+  it("leaves a split trip ungrouped while one of its parts is missing, never as a smaller group (Codex r2 on #501)", () => {
+    const [there, stay, back] = chain();
+    const left = { ...stay, id: "left", stoppedAtMs: at(20), covers: ["school-left", "school"] };
+    const right = { ...stay, id: "right", startedAtMs: at(20), covers: ["school-right", "school"], name: null };
+    const homeEnds = ends({ "home-before": home, "home-after": home });
+    // Either half deleted (or never logged): the remaining blocks no longer meet.
+    expect(groupNamedPatterns([there, left, back], homeEnds).size).toBe(0);
+    expect(groupNamedPatterns([there, right, back], homeEnds).size).toBe(0);
+    // A three-way split missing its middle part.
+    const first = { ...left, stoppedAtMs: at(15) };
+    const last = { ...right, startedAtMs: at(25) };
+    expect(groupNamedPatterns([there, first, last, back], homeEnds).size).toBe(0);
+    expect(groupNamedPatterns([there, first, { ...stay, id: "middle", startedAtMs: at(15), stoppedAtMs: at(25), covers: ["school-mid", "school"], name: null }, last, back], homeEnds).get("middle"))
+      .toEqual({ key: "named:left", name: "School run", parts: 5 });
+  });
+
   it("treats unsaved ends within 150 m as one place, and a saved end never as an unsaved one", () => {
     const unsaved = { placeId: null, learnedPlaceId: null, latitude: 10, longitude: 20 };
     expect(sameEnd(unsaved, { ...unsaved, latitude: 10.001 })).toBe(true); // about 111 m
@@ -100,7 +116,7 @@ describe("named patterns on Today (location v3 PR 14)", () => {
         return { rows: [{ patternKey: "k-school", name: "School run" }] };
       }
       // A Stay corrected in Review stands for the stay it came from (Codex r1 on #501).
-      if (sql.includes("left join stay_segments parent")) return { rows: [{ id: "70000000-0000-4000-8000-000000000099", covers: ["school-left", "school"] }] };
+      if (sql.includes("with recursive lineage")) return { rows: [{ id: "70000000-0000-4000-8000-000000000099", covers: ["school-left", "school"] }] };
       if (sql.includes("from stay_segments")) {
         return { rows: [
           { segmentId: "home-before", placeId: "place-home", learnedPlaceId: null, latitude: 10, longitude: 20 },

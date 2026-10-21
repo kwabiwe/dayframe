@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { getLocationGroups } from "./location-groups";
+import { getLocationGroups, STAY_LINEAGE_SQL } from "./location-groups";
 import type { RequestSession } from "../session";
 
 // Run with DAYFRAME_LOCATION_GROUPS_TEST_DATABASE_URL pointing at a disposable local *_test database
@@ -156,6 +156,95 @@ describeWithDatabase("named patterns on disposable PostgreSQL (location v3 PR 14
        values ($1, $2, 'hashed-park-key', 'morning', 'Park run', 1)`, [workspaceId, userId]);
     const groups = await getLocationGroups(database!, session, await listed());
     expect(ids.map((id) => groups.get(id))).toEqual(ids.map(() => ({ key: `named:${ids[1]}`, name: "Park run", parts: 4 })));
+  });
+
+  /** A stay segment of this person's (or `owner`'s); returns its id. */
+  async function segment(clientId: string, start: number, stop: number,
+    extra: { parent?: string; merged?: string[]; placeId?: string; owner?: string } = {}) {
+    return (await database!.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, place_id, started_at, stopped_at,
+         parent_segment_id, source, metadata, centre)
+       values ($1, $2, $3, 'device-1', $4, $5, $6, $7, $8, $9::jsonb, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography) returning id`,
+      [workspaceId, extra.owner ?? userId, clientId, extra.placeId ?? null, at(start), at(stop), extra.parent ?? null,
+        extra.merged ? "manual_merge" : extra.parent ? "manual_split" : "engine",
+        JSON.stringify(extra.merged ? { mergedSegmentIds: extra.merged } : {})])).rows[0].id;
+  }
+  /** A logged block from an event with this payload. */
+  async function block(id: string, eventType: string, payload: Record<string, unknown>, start: number, stop: number) {
+    const eventId = (await database!.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, 'location_learning', $3, $4, 'medium', $5::jsonb) returning id`,
+      [workspaceId, userId, eventType, at(start), JSON.stringify(payload)])).rows[0].id;
+    await database!.query(
+      `insert into time_entries (id, workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
+       values ($1, $2, $3, 'location_learning', $4, $5, $6)`,
+      [id, workspaceId, userId, at(start), at(stop), eventId]);
+  }
+  /** Home before and after, and the two Moves naming `stay`; returns the Moves' ids. */
+  async function trip(prefix: string, stay: string, start: number, end: number) {
+    await segment(`${prefix}-home-before`, start - 20, start, { placeId: homeId });
+    await segment(`${prefix}-home-after`, end + 10, end + 20, { placeId: homeId });
+    const ids = [`63000000-0000-4000-8000-000000000${prefix}1`, `63000000-0000-4000-8000-000000000${prefix}9`];
+    await block(ids[0], "commute_detected", { clientSegmentId: `${prefix}-m1`, fromStaySegmentId: `${prefix}-home-before`, toStaySegmentId: stay }, start, start + 10);
+    await block(ids[1], "commute_detected", { clientSegmentId: `${prefix}-m2`, fromStaySegmentId: stay, toStaySegmentId: `${prefix}-home-after` }, end, end + 10);
+    return ids;
+  }
+  async function named(key: string, name: string) {
+    await database!.query(
+      `insert into location_name_patterns (workspace_id, user_id, pattern_key, band, name, uses) values ($1, $2, $3, 'morning', $4, 1)`,
+      [workspaceId, userId, key, name]);
+  }
+
+  it("groups a stay split and then merged back: the merge stands for the stay the Moves name (Codex r2 on #501)", async () => {
+    const parent = await segment("seg-lib", 310, 360);
+    const left = await segment("seg-lib-left", 310, 335, { parent });
+    const right = await segment("seg-lib-right", 335, 360, { parent });
+    const merged = await segment("seg-lib-merged", 310, 360, { parent: left, merged: [left, right] });
+    const [there, back] = await trip("40", "seg-lib", 300, 360);
+    const stay = "63000000-0000-4000-8000-000000000405";
+    await block(stay, "unknown_stay", { segmentId: merged, correction: true, namePatternKey: "hashed-lib-key" }, 310, 360);
+    await named("hashed-lib-key", "Library");
+    const groups = await getLocationGroups(database!, session, await listed());
+    expect([there, stay, back].map((id) => groups.get(id))).toEqual([there, stay, back].map(() => ({ key: `named:${stay}`, name: "Library", parts: 3 })));
+  });
+
+  it("groups a stay split twice, every part present (Codex r2 on #501)", async () => {
+    const parent = await segment("seg-pool", 510, 570);
+    const left = await segment("seg-pool-left", 510, 530, { parent });
+    const right = await segment("seg-pool-right", 530, 570, { parent });
+    const rightLeft = await segment("seg-pool-rl", 530, 550, { parent: right });
+    const rightRight = await segment("seg-pool-rr", 550, 570, { parent: right });
+    const [there, back] = await trip("50", "seg-pool", 500, 570);
+    const parts = ["63000000-0000-4000-8000-000000000502", "63000000-0000-4000-8000-000000000503", "63000000-0000-4000-8000-000000000504"];
+    for (const [id, segmentId, start, stop] of [[parts[0], left, 510, 530], [parts[1], rightLeft, 530, 550], [parts[2], rightRight, 550, 570]] as const) {
+      await block(id, "unknown_stay", { segmentId, correction: true, namePatternKey: "hashed-pool-key" }, start, stop);
+    }
+    await named("hashed-pool-key", "Swim");
+    const groups = await getLocationGroups(database!, session, await listed());
+    expect([there, ...parts, back].map((id) => groups.get(id)?.parts)).toEqual([5, 5, 5, 5, 5]);
+    // One part deleted: the trip is no longer whole, so nothing of it groups.
+    await database!.query("delete from time_entries where id = $1", [parts[1]]);
+    const after = await getLocationGroups(database!, session, await listed());
+    expect([there, parts[0], parts[2], back].some((id) => after.has(id))).toBe(false);
+  });
+
+  it("follows only this person's segments, by primary key (Codex r2 on #501)", async () => {
+    const theirs = await segment("seg-theirs", 700, 710, { owner: otherUserId });
+    const mine = await segment("seg-mine-merged", 700, 710, { merged: [theirs] });
+    const lineage = await database!.query<{ id: string; covers: string[] }>(STAY_LINEAGE_SQL, [workspaceId, userId, [mine]]);
+    expect(lineage.rows).toEqual([{ id: mine, covers: ["seg-mine-merged"] }]);
+    expect((await database!.query(STAY_LINEAGE_SQL, [workspaceId, otherUserId, [mine]])).rows).toEqual([]);
+    const client = await database!.connect();
+    try {
+      await client.query("begin");
+      await client.query("set local enable_seqscan = off");
+      const plan = (await client.query<{ "QUERY PLAN": string }>(`explain ${STAY_LINEAGE_SQL}`, [workspaceId, userId, [mine]]))
+        .rows.map((row) => row["QUERY PLAN"]).join("\n");
+      expect(plan).not.toMatch(/Seq Scan on stay_segments/);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
   });
 
   it("never uses another person's names or blocks", async () => {
