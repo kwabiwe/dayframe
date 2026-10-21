@@ -4,7 +4,7 @@ import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info, Search, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
+import { useId, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import {
   placeDisplayName,
   placeLastVisitLabel,
@@ -65,12 +65,9 @@ export function PlacesManager({
   const shownArchived = searching ? archivedPlaces.filter((place) => placeMatchesSearch(place, search)) : archivedPlaces;
   const pageNow = useMemo(() => new Date(now), [now]);
   // Day labels need the viewer's time zone. Without the cookie the server and the browser would
-  // each use their own, so both render in UTC first and the browser switches to its zone after
-  // hydration (Codex r1 on #516).
-  const [browserZone, setBrowserZone] = useState<string | null>(null);
-  useEffect(() => {
-    if (!timeZone) setBrowserZone(Intl.DateTimeFormat().resolvedOptions().timeZone || null);
-  }, [timeZone]);
+  // each use their own, so both render in UTC first (the server snapshot, also used while
+  // hydrating) and the browser then switches to its own zone (Codex r1 on #516).
+  const browserZone = useSyncExternalStore(subscribeToNothing, browserTimeZone, noBrowserTimeZone);
   const labelZone = timeZone ?? browserZone ?? "UTC";
 
   function refresh(message: string) {
@@ -502,6 +499,10 @@ export function PlacesManager({
     </div>
   );
 }
+
+const subscribeToNothing = () => () => {};
+const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+const noBrowserTimeZone = () => null;
 
 function resultCount(active: number, archived: number) {
   const total = active + archived;
