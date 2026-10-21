@@ -157,7 +157,7 @@ const NAME_RULES: ReadonlyArray<readonly [RegExp, DayframeActivityIconKey]> = [
   [/\b(walks?|walking|steps|stroll\w*)\b/, "walk"],
   [/\b(swim\w*|pool)\b/, "swimming"],
   [/\b(bus|buses)\b/, "bus"],
-  [/\b(drive|driving|journeys?|taxi|cab|uber|car rides?)\b/, "journey"],
+  [/\b(drive|driving|journeys?|getting around|taxi|cab|uber|car rides?)\b/, "journey"],
   [/\b(laundry|ironing)\b/, "laundry"],
   [/\b(health|therapy|menstrual)\b/, "health"],
   [/\b(cycling|cycles?|cycle rides?|bikes?|biking|bike rides?)\b/, "cycling"],

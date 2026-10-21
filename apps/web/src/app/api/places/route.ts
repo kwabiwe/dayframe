@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError, z } from "zod";
 import { PlaceRoleSchema } from "@dayframe/shared";
 import { authErrorResponse } from "@/lib/api-errors";
+import { MissingRequiredColumnError } from "@/lib/db";
 import {
   createPlace,
   createPlaceFromLearnedPlace,
@@ -34,6 +35,8 @@ const placeCreateSchema = placeFieldsSchema.extend({
   // Adding a place straight into the Home or Work slot; the old holder can be renamed.
   role: PlaceRoleSchema.optional(),
   previousPlaceName: z.string().trim().min(1).max(120).nullable().optional(),
+  // "Replace the old place" (PRD D19 A10): archive the old holder when it is within 300 m.
+  archivePrevious: z.boolean().optional(),
   radiusMeters: z.number().int().min(25).max(2000).default(100),
   priority: z.number().int().min(0).max(100).default(5)
 });
@@ -58,9 +61,9 @@ export async function POST(request: Request) {
   try {
     const session = await resolveRequestSession(request);
     const body = placeCreateSchema.parse(await request.json());
-    const { learnedPlaceId, role, previousPlaceName, ...placeInput } = body;
+    const { learnedPlaceId, role, previousPlaceName, archivePrevious, ...placeInput } = body;
     const normalizedPlaceInput = normalizePlaceLoggingInput(placeInput);
-    const newRole = role ? { role, previousPlaceName } : undefined;
+    const newRole = role ? { role, previousPlaceName, archivePrevious } : undefined;
     const place = learnedPlaceId
       ? await createPlaceFromLearnedPlace(learnedPlaceId, normalizedPlaceInput, session, newRole)
       : await createPlace(normalizedPlaceInput, session, newRole);
@@ -73,6 +76,7 @@ export async function POST(request: Request) {
     if (error instanceof PlaceRoleConflictError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
     }
+    if (error instanceof MissingRequiredColumnError) return NextResponse.json({ error: error.message }, { status: 500 });
     throw error;
   }
 }

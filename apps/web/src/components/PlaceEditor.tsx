@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  distanceMeters,
   leavingRoleHolder,
   placeRoleLabel,
   placeRoleRequest,
@@ -87,6 +88,14 @@ export function PlaceEditor({
   const roleSlot = newRole ? placeRoleSlots(places).find((slot) => slot.role === newRole) ?? null : null;
   const roleHolder = roleSlot ? leavingRoleHolder(roleSlot, null) : null;
   const [previousPlaceName, setPreviousPlaceName] = useState(newRole && roleHolder ? previousRolePlaceName(newRole) : "");
+  // "Replace the old place" (PRD D19 A10): offered when the old Home or Work is within 300 m of
+  // the new one, where two circles would overlap; on by default, the server checks the distance too.
+  const [replacePrevious, setReplacePrevious] = useState(true);
+  const holderCoordinate = roleHolder ? coordinateFromEntity(places.find((candidate) => candidate.id === roleHolder.id) ?? null) : null;
+  const chosenLatitude = Number.parseFloat(latitude);
+  const chosenLongitude = Number.parseFloat(longitude);
+  const holderIsNearby = Boolean(holderCoordinate && Number.isFinite(chosenLatitude) && Number.isFinite(chosenLongitude)
+    && distanceMeters(holderCoordinate, { latitude: chosenLatitude, longitude: chosenLongitude }) <= 300);
   const shownRole = newRole ?? place?.role ?? null;
   const saveInFlight = useRef(false);
   const nameTouched = useRef(mode !== "create");
@@ -207,6 +216,7 @@ export function PlaceEditor({
           autoStart: false,
           ...(newRole ? {
             role: newRole,
+            ...(holderIsNearby && replacePrevious ? { archivePrevious: true } : {}),
             previousPlaceName: placeRoleRequest({ role: newRole, targetId: null, holder: roleHolder, previousPlaceName }).previousPlaceName
           } : {})
         })
@@ -321,6 +331,24 @@ export function PlaceEditor({
             value={previousPlaceName}
             onChange={(event) => setPreviousPlaceName(event.target.value)}
           />
+        ) : null}
+        {newRole && roleHolder && holderIsNearby ? (
+          <label className="place-suggestion-toggle">
+            <span>
+              <strong>Replace the old place</strong>
+              <small id="place-replace-help">
+                The old {placeRoleLabel(newRole).toLowerCase()} is within 300 m, so its circle would overlap this one. Archive it: past blocks keep its name, and you can restore it from Places.
+              </small>
+            </span>
+            <input
+              aria-describedby="place-replace-help"
+              aria-label="Replace the old place"
+              checked={replacePrevious}
+              role="switch"
+              type="checkbox"
+              onChange={(event) => setReplacePrevious(event.target.checked)}
+            />
+          </label>
         ) : null}
       </EditorGroup>
 

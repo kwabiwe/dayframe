@@ -1,3 +1,4 @@
+import { namedPatternRuns } from "@dayframe/shared";
 import type { MobileTimeEntry } from "./api";
 
 export type HistoryDayEntry = {
@@ -16,9 +17,15 @@ export type HistoryDaySection = {
 export type HistoryEntryGroup = {
   entries: HistoryDayEntry[];
   key: string;
+  /** A named A → B → A (location v3 PR 14): the row reads as this name and is never started again. */
+  name?: string;
   representative: HistoryDayEntry;
   totalSeconds: number;
 };
+
+/** Blocks a location suggestion made; they group only as a named A → B → A, never by activity. */
+const LOCATION_SOURCES = new Set(["location_learning", "location_auto_log"]);
+
 
 export function buildHistoryDaySections({
   days = 60,
@@ -89,9 +96,11 @@ export function buildHistoryDaySections({
 
 export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntryGroup[] {
   const groups = new Map<string, HistoryEntryGroup>();
+  const named = namedPatternRuns(entries.map(({ entry }) => entry));
 
   for (const historyEntry of entries) {
-    const key = historyEntryGroupKey(historyEntry.entry);
+    const run = named.get(historyEntry.entry.id);
+    const key = run?.key ?? historyEntryGroupKey(historyEntry.entry);
     const existing = groups.get(key);
     if (existing) {
       existing.entries.push(historyEntry);
@@ -101,6 +110,7 @@ export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntry
     groups.set(key, {
       entries: [historyEntry],
       key,
+      ...(run ? { name: run.name } : {}),
       representative: historyEntry,
       totalSeconds: historyEntry.overlapSeconds
     });
@@ -110,6 +120,10 @@ export function groupHistoryDayEntries(entries: HistoryDayEntry[]): HistoryEntry
 }
 
 function historyEntryGroupKey(entry: MobileTimeEntry) {
+  // Location blocks leave the activity-and-name grouping, or every Travel move would fold into one
+  // row (location v3 PR 14); outside a named pattern each is its own row.
+  if (LOCATION_SOURCES.has(entry.source)) return `entry:${entry.id}`;
+
   const categoryNameKey = normalizeGroupText(entry.categoryName);
   const descriptionKey = normalizeGroupText(entry.description);
   const placeKey = normalizeGroupText(entry.placeName);

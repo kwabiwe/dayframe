@@ -339,7 +339,7 @@ describe("event normalization", () => {
     expect(candidate.reviewStatus).toBe("needs_review");
   });
 
-  it("keeps uncertain commute learning review-first and prefers a Travel category when present", () => {
+  it("keeps uncertain commute learning review-first and prefers a Getting around category when present", () => {
     const candidate = normalizeActivityEvent(
       {
         source: "location_learning",
@@ -354,7 +354,7 @@ describe("event normalization", () => {
       },
       {
         ...context,
-        categories: [...context.categories, { id: "20000000-0000-4000-8000-000000000010", name: "Travel" }]
+        categories: [...context.categories, { id: "20000000-0000-4000-8000-000000000010", name: "Getting around" }]
       }
     );
 

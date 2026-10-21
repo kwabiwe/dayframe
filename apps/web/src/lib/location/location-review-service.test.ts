@@ -232,7 +232,7 @@ describe("location review confirmation semantics", () => {
           return { rows: [{ id: "segment-1" }] };
         }
         if (statement.includes("select 1 from categories")) return { rows: [{ ok: true }] };
-        if (statement.includes("select 1 from places")) return { rows: [{ ok: true }] };
+        if (statement.includes("as archived from places")) return { rows: [{ archived: false }] };
         if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-1" }] };
         return { rows: [] };
       })
@@ -270,6 +270,44 @@ describe("location review confirmation semantics", () => {
       "2026-08-12T08:25:30.004Z",
       "event-1"
     ]);
+  });
+
+  describe("archived places (location v3 PR 15, PRD D19 A10)", () => {
+    const archivedPlaceId = "60000000-0000-4000-8000-0000000000aa";
+    const clientFor = (card: Record<string, unknown>) => ({
+      query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update of ri, ae nowait")) return { rows: [{ ...lockedStay(), ...card }] };
+        if (statement.includes("from stay_segments") && statement.includes("for update nowait")) return { rows: [{ id: "segment-1" }] };
+        if (statement.includes("as archived from places")) return { rows: [{ archived: true }] };
+        // A learned place linked to an archived saved place.
+        if (statement.includes("from learned_places lp")) return { rows: [{ archived: true }] };
+        if (statement.includes("insert into time_entries")) return { rows: [{ id: "entry-archived" }] };
+        return { rows: [] };
+      })
+    }) as unknown as import("pg").PoolClient & { query: ReturnType<typeof vi.fn> };
+    const archivedLearnedId = "60000000-0000-4000-8000-0000000000bb";
+
+    it("refuses a learned place linked to an archived place as a new pick, but keeps the Stay's own (Codex r1 on #503)", async () => {
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({}), "review-1", { action: "change_place_and_confirm", placeId: null, learnedPlaceId: archivedLearnedId }, session
+      )).rejects.toMatchObject({ code: "invalid_action", message: "Learned place was not found." });
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({ learnedPlaceId: archivedLearnedId }), "review-1",
+        { action: "change_place_and_confirm", placeId: null, learnedPlaceId: archivedLearnedId }, session
+      )).resolves.toMatchObject({ entryId: "entry-archived" });
+    });
+
+    it("refuses an archived place as a new pick", async () => {
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({}), "review-1", { action: "change_place_and_confirm", placeId: archivedPlaceId, learnedPlaceId: null }, session
+      )).rejects.toMatchObject({ code: "invalid_action", message: "Place was not found." });
+    });
+
+    it("still confirms a card whose own place was archived since", async () => {
+      await expect(resolveLocationReviewActionWithClient(
+        clientFor({ suggestedPlaceId: archivedPlaceId }), "review-1", { action: "confirm" }, session
+      )).resolves.toMatchObject({ entryId: "entry-archived" });
+    });
   });
 
   it("records a POI name once without provider metadata or a saved place", async () => {

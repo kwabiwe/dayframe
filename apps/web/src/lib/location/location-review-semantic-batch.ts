@@ -337,7 +337,7 @@ export async function emitReviewSemanticSegments(
     changes.count += reopened.size;
   }
   // Commute only between Home and Work, Errands (if the workspace has it) for a Move with a stop,
-  // Travel for every other Move (PRD D19, A5). Commute's lock comes before Travel's.
+  // Getting around for every other Move (PRD D19, A5). Commute's lock comes before its.
   const moveActivities = new Set(eligible.flatMap((row) => row.segment.kind === "commute" ? [context(row.segment).move?.activity] : []));
   const commuteCategoryId = moveActivities.has("commute") ? await ensureCommuteCategoryId(client, session, changes) : null;
   const errandsCategoryId = moveActivities.has("errand") ? await findErrandsCategoryId(client, session) : null;
