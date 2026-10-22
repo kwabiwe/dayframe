@@ -18,8 +18,43 @@ function swiftSources(directory: string): string[] {
   });
 }
 
-/** Each closure that follows `marker`, found by matching braces. */
-function closuresAfter(source: string, marker: RegExp) {
+/**
+ * Swift source with comments and string literals blanked to spaces (positions kept), so a brace or a
+ * hop inside either never changes which closure is checked (Codex r1 on #530).
+ */
+export function codeOnly(source: string) {
+  let out = "";
+  let index = 0;
+  while (index < source.length) {
+    const rest = source.slice(index, index + 3);
+    if (rest.startsWith("//")) {
+      const end = source.indexOf("\n", index);
+      const stop = end === -1 ? source.length : end;
+      out += " ".repeat(stop - index);
+      index = stop;
+    } else if (rest.startsWith("/*")) {
+      const end = source.indexOf("*/", index + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      out += source.slice(index, stop).replace(/[^\n]/g, " ");
+      index = stop;
+    } else if (rest === '"""' || source[index] === '"') {
+      const quote = rest === '"""' ? '"""' : '"';
+      let cursor = index + quote.length;
+      while (cursor < source.length && !source.startsWith(quote, cursor)) cursor += source[cursor] === "\\" ? 2 : 1;
+      const stop = Math.min(source.length, cursor + quote.length);
+      out += source.slice(index, stop).replace(/[^\n]/g, " ");
+      index = stop;
+    } else {
+      out += source[index];
+      index += 1;
+    }
+  }
+  return out;
+}
+
+/** Each closure that follows `marker`, found by matching braces in code only. */
+function closuresAfter(original: string, marker: RegExp) {
+  const source = codeOnly(original);
   const bodies: string[] = [];
   for (const match of source.matchAll(new RegExp(marker, "g"))) {
     const open = source.indexOf("{", match.index! + match[0].length - 1);
@@ -35,6 +70,20 @@ function closuresAfter(source: string, marker: RegExp) {
   }
   return bodies;
 }
+
+describe("expiry handler scanning", () => {
+  it("ignores braces and hops inside comments and strings", () => {
+    const tricky = [
+      "beginBackgroundTask(withName: \"a } b\") {",
+      "  // }",
+      "  /* } */ Task { @MainActor in expire() }",
+      "}"
+    ].join("\n");
+    const [body] = closuresAfter(tricky, /beginBackgroundTask\(/);
+    expect(body).toContain("Task {");
+    expect(codeOnly('let x = "Task { }" // DispatchQueue.main.async')).not.toMatch(/Task|DispatchQueue/);
+  });
+});
 
 describe("background task expiry handlers", () => {
   const files = ["ios/Dayframe", "modules"].flatMap((root) => swiftSources(`${mobileRoot}${root}`));
