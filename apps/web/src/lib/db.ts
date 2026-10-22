@@ -19,6 +19,32 @@ if (process.env.NODE_ENV !== "production") {
   globalForPg.dayframePool = pool;
 }
 
+/**
+ * A connection the pooler or Postgres ends (maintenance, a network reset, an idle socket dropped while
+ * the instance was suspended) is reported as an `error` event outside any awaited promise. With no
+ * listener, Node throws it and the whole function instance crashes with every request on it (stability
+ * audit 22 Oct 2026, SERVER-2; production logged "Connection terminated unexpectedly" on 20 Oct). The
+ * pool and every client it creates get a listener for their whole life, checked out or idle; the query
+ * that was running still rejects normally, and pg-pool drops the broken client on release.
+ */
+export function observeDatabaseErrors(target: pg.Pool) {
+  const observed = target as pg.Pool & { dayframeErrorsObserved?: boolean };
+  if (observed.dayframeErrorsObserved) return;
+  observed.dayframeErrorsObserved = true;
+  target.on("error", (error) => logDroppedConnection("idle", error));
+  target.on("connect", (client) => {
+    client.on("error", (error) => logDroppedConnection("client", error));
+  });
+}
+
+function logDroppedConnection(state: "idle" | "client", error: unknown) {
+  // The code and message only: never a query, its parameters or a connection string.
+  const candidate = error as { code?: string; message?: string } | null;
+  console.error(`[db] ${state} connection error`, candidate?.code ?? "", candidate?.message?.slice(0, 120) ?? "");
+}
+
+observeDatabaseErrors(pool);
+
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
   params: unknown[] = []
