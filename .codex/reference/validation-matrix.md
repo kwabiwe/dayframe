@@ -613,6 +613,17 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 7. Force-quit limitation: after swiping Dayframe away, a walk waits until Dayframe is opened again (iOS does not wake a force-quit app); recorded as expected behaviour, not a failure.
 8. Background CPU: a 30-minute background window that includes a walk stays within `.codex/reference/performance.md`'s background budget.
 
+## App Group file locks (0xDEAD10CC)
+
+Automated: `sharedContainerLock.contract.test.ts`, `shortcuts.test.ts`, `bash scripts/validate-ios-shared-storage.sh` (compiles and runs `DayframeSharedFileLock` on macOS: the assertion wraps the lock, no assertion means no lock, a held lock is waited on for a bounded time), and a clean native iOS build. The Simulator cannot prove suspension behaviour.
+
+Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN`:
+
+1. With Dayframe in the background (not force-quit), run the Start and then the Stop Shortcut; both blocks land on the server, and opening Dayframe shows no duplicate block.
+2. Same with Dayframe in front, and Stop from the Live Activity on the Lock Screen.
+3. Airplane mode: run a Start Shortcut, reopen Dayframe after reconnecting; the queued Start is delivered once.
+4. Leave Dayframe backgrounded with location on for several days of normal use: no new `0xdead10cc` report in Settings › Privacy & Security › Analytics Data or in App Store Connect.
+
 ## Bounded mobile sync recovery
 
 Run `npm run test --workspace @dayframe/mobile` and `npm run typecheck --workspace @dayframe/mobile`, including real SQLite Review/Location tests, full JSON body/validation deadlines, receipt-envelope matching, interrupted delivery, owner replacement, force coalescing, independent due-time scheduling, partial upload and shared prefetch-consumer cancellation. Verify manual Sync with one Health type failing, Review contention, retained Location batches, a refresh already in flight, and a 45-second deadline. Verify unresolved Review intent has Check again and no ambiguous-outcome discard. Keep Settings and header state truthful under ordinary retry/backoff. Capture normal/Reduce Motion, rapid repeat, navigation, VoiceOver and Dynamic Type evidence on the selected staging build; a clean Simulator build does not establish HealthKit or physical-device behaviour.

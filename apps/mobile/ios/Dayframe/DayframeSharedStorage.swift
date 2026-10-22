@@ -238,33 +238,39 @@ enum DayframeNativeShortcutQueue {
 
   static func append(_ event: DayframeShortcutEvent) -> Bool {
     processLock.withLock {
+      let legacy = legacyEvents()
       guard let result = withSharedQueueLock({ queueURL in
-        var queue = readSharedUnlocked(queueURL: queueURL)
-        queue = merge(queue, legacyEvents())
-        guard !queue.contains(where: { $0.localId == event.localId }) else {
-          clearLegacyEvents()
-          return true
-        }
-        queue.append(event)
-        let written = writeSharedUnlocked(queue, queueURL: queueURL)
-        if written { clearLegacyEvents() }
-        return written
+        let shared = readSharedUnlocked(queueURL: queueURL)
+        let queue = merge(shared, legacy)
+        let next = queue.contains(where: { $0.localId == event.localId }) ? queue : queue + [event]
+        // Legacy events are cleared only once they are in the shared file.
+        return next.count == shared.count || writeSharedUnlocked(next, queueURL: queueURL)
       }) else {
         return appendLegacy(event)
       }
+      if result { clearLegacyEvents() }
       return result
     }
   }
 
+  /// Reads without the file lock: every write replaces the file atomically, so a read sees one whole
+  /// queue. Only an unmigrated legacy queue takes the lock, to move its events into the shared file.
   static func pendingDictionaries() -> [[String: Any]] {
     processLock.withLock {
-      let events = withSharedQueueLock { queueURL in
-        let merged = merge(readSharedUnlocked(queueURL: queueURL), legacyEvents())
-        if writeSharedUnlocked(merged, queueURL: queueURL) {
+      let legacy = legacyEvents()
+      var events = sharedQueueURL.map { readSharedUnlocked(queueURL: $0) } ?? []
+      if !legacy.isEmpty {
+        let migrated = withSharedQueueLock { queueURL -> [DayframeShortcutEvent]? in
+          let merged = merge(readSharedUnlocked(queueURL: queueURL), legacy)
+          return writeSharedUnlocked(merged, queueURL: queueURL) ? merged : nil
+        } ?? nil
+        if let migrated {
           clearLegacyEvents()
+          events = migrated
+        } else {
+          events = merge(events, legacy)
         }
-        return merged
-      } ?? legacyEvents()
+      }
       guard
         let data = try? JSONEncoder.dayframe.encode(events),
         let object = try? JSONSerialization.jsonObject(with: data),
@@ -283,42 +289,44 @@ enum DayframeNativeShortcutQueue {
     }
 
     return processLock.withLock {
-      if let removed = withSharedQueueLock({ queueURL in
-        let queue = merge(readSharedUnlocked(queueURL: queueURL), legacyEvents())
+      let legacy = legacyEvents()
+      if let removed = withSharedQueueLock({ queueURL -> Int? in
+        let shared = readSharedUnlocked(queueURL: queueURL)
+        let queue = merge(shared, legacy)
         let next = queue.filter { !ids.contains($0.localId) }
         let removed = queue.count - next.count
-        guard removed > 0 else {
-          clearLegacyEvents()
+        guard removed > 0 || queue.count > shared.count else {
           return 0
         }
-        guard writeSharedUnlocked(next, queueURL: queueURL) else {
-          return 0
-        }
-        clearLegacyEvents()
-        return removed
+        return writeSharedUnlocked(next, queueURL: queueURL) ? removed : nil
       }) {
+        // Legacy events are in the shared file now (or were never there); UserDefaults changes only
+        // after the file lock is released.
+        guard let removed else { return 0 }
+        clearLegacyEvents()
         return removed
       }
       return removeLegacy(localIds: ids)
     }
   }
 
+  private static var sharedQueueURL: URL? {
+    DayframeSharedStorageConfiguration.containerURL?.appendingPathComponent(queueFileName, isDirectory: false)
+  }
+
+  /// The body runs under the cross-process file lock and inside a finite background assertion (see
+  /// `DayframeSharedFileLock`); it must do only file I/O, never UserDefaults or a bridge call.
   private static func withSharedQueueLock<T>(_ body: (URL) -> T) -> T? {
-    guard let containerURL = DayframeSharedStorageConfiguration.containerURL else {
+    guard
+      let containerURL = DayframeSharedStorageConfiguration.containerURL,
+      let queueURL = sharedQueueURL
+    else {
       return nil
     }
     let lockURL = containerURL.appendingPathComponent(lockFileName, isDirectory: false)
-    let queueURL = containerURL.appendingPathComponent(queueFileName, isDirectory: false)
-    let descriptor = open(lockURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-    guard descriptor >= 0 else {
-      return nil
+    return DayframeSharedFileLock.withExclusiveLock(at: lockURL, name: "Dayframe shortcut queue") {
+      body(queueURL)
     }
-    defer { close(descriptor) }
-    guard flock(descriptor, LOCK_EX) == 0 else {
-      return nil
-    }
-    defer { flock(descriptor, LOCK_UN) }
-    return body(queueURL)
   }
 
   private static func readSharedUnlocked(queueURL: URL) -> [DayframeShortcutEvent] {
@@ -393,7 +401,10 @@ enum DayframeNativeShortcutQueue {
     return UserDefaults.standard.synchronize()
   }
 
+  /// Removing a key posts a UserDefaults change, which React Native answers by sending every default to
+  /// JS, so only an existing legacy queue is removed.
   private static func clearLegacyEvents() {
+    guard UserDefaults.standard.object(forKey: legacyKey) != nil else { return }
     UserDefaults.standard.removeObject(forKey: legacyKey)
   }
 }

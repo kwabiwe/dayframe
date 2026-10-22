@@ -13,6 +13,7 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -48,6 +49,44 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+}
+
+/// The app's assertion for `DayframeSharedFileLock`: a finite UIKit background task, ended exactly once
+/// by whichever comes first, the lock's release or the system's expiry.
+private final class DayframeSharedFileLockBackgroundTask: @unchecked Sendable {
+  private let lock = NSLock()
+  private var identifier: UIBackgroundTaskIdentifier = .invalid
+  private var ended = false
+
+  static func begin(name: String) -> (() -> Void)? {
+    let task = DayframeSharedFileLockBackgroundTask()
+    let identifier = UIApplication.shared.beginBackgroundTask(withName: name) { task.end() }
+    guard identifier != .invalid else {
+      return nil
+    }
+    let endedEarly = task.lock.withLock { () -> Bool in
+      if task.ended { return true }
+      task.identifier = identifier
+      return false
+    }
+    if endedEarly {
+      UIApplication.shared.endBackgroundTask(identifier)
+      return nil
+    }
+    return { task.end() }
+  }
+
+  private func end() {
+    let identifier = lock.withLock { () -> UIBackgroundTaskIdentifier in
+      ended = true
+      let identifier = self.identifier
+      self.identifier = .invalid
+      return identifier
+    }
+    if identifier != .invalid {
+      UIApplication.shared.endBackgroundTask(identifier)
+    }
   }
 }
 

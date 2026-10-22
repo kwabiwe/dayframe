@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   enqueueEvent: vi.fn(),
   pendingShortcutEvents: vi.fn(),
   removeShortcutEvents: vi.fn(),
+  settingsWrites: vi.fn(),
   settingsStore: new Map<string, unknown>()
 }));
 
@@ -18,6 +19,7 @@ vi.mock("react-native", () => ({
   Settings: {
     get: (key: string) => mocks.settingsStore.get(key),
     set: (settings: Record<string, unknown>) => {
+      mocks.settingsWrites(settings);
       for (const [key, value] of Object.entries(settings)) {
         mocks.settingsStore.set(key, value);
       }
@@ -39,6 +41,7 @@ vi.mock("./mobileAccount", () => ({
 
 const {
   clearActiveOwnerNativeShortcutQueue,
+  clearShortcutCatalog,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
   syncShortcutCatalog
@@ -54,6 +57,27 @@ describe("native Shortcut bridge", () => {
     mocks.removeShortcutEvents.mockReset();
     mocks.removeShortcutEvents.mockResolvedValue(0);
     mocks.settingsStore.clear();
+    mocks.settingsWrites.mockReset();
+  });
+
+  it("writes UserDefaults only when the catalog changes", () => {
+    const bootstrap = {
+      user: { id: "user-1", email: "user@example.com", name: "User" },
+      workspace: { id: "workspace-1", name: "Personal" },
+      categories: [{ id: "category-1", name: "Focus", color: "lime", isPinned: true }]
+    };
+
+    syncShortcutCatalog(bootstrap);
+    syncShortcutCatalog({ ...bootstrap, categories: [...bootstrap.categories] });
+    expect(mocks.settingsWrites).toHaveBeenCalledTimes(1);
+
+    syncShortcutCatalog({ ...bootstrap, workspace: { id: "workspace-1", name: "Renamed" } });
+    expect(mocks.settingsWrites).toHaveBeenCalledTimes(2);
+
+    clearShortcutCatalog();
+    clearShortcutCatalog();
+    expect(mocks.settingsWrites).toHaveBeenCalledTimes(3);
+    expect(mocks.settingsStore.get("dayframe.shortcutCatalog.v1")).toBe("");
   });
 
   it("mirrors non-secret native Shortcut config with the catalog", () => {

@@ -55,7 +55,7 @@ export function syncShortcutCatalog(
   };
 
   try {
-    Settings.set({ [SHORTCUT_CATALOG_KEY]: JSON.stringify(catalog) });
+    writeShortcutCatalog(JSON.stringify(catalog));
   } catch {
     // Shortcut options are a convenience cache; timer actions still work without it.
   }
@@ -64,10 +64,17 @@ export function syncShortcutCatalog(
 export function clearShortcutCatalog() {
   if (Platform.OS !== "ios") return;
   try {
-    Settings.set({ [SHORTCUT_CATALOG_KEY]: "" });
+    writeShortcutCatalog("");
   } catch {
     // The catalog contains no secret; clearing it is a best-effort logout boundary.
   }
+}
+
+/** Every UserDefaults write makes React Native send every default to JS, so an unchanged catalog is not
+ * written again (AGENTS.md Mobile Patterns). */
+function writeShortcutCatalog(value: string) {
+  if (Settings.get(SHORTCUT_CATALOG_KEY) === value) return;
+  Settings.set({ [SHORTCUT_CATALOG_KEY]: value });
 }
 
 export async function clearActiveOwnerNativeShortcutQueue(owner: MobileAccountOwner) {
