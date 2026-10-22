@@ -129,15 +129,21 @@ export async function ingestLocationEvidence(
     const duplicateBatch = eventResult.rows[0]?.inserted === false;
     const expiresAt = new Date(Date.parse(processingAt) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
     // A reading may name a saved place deleted (or never in this workspace) since the phone last
-    // refreshed its places: it is kept unlinked, so the owner-link check never fails the whole batch,
-    // which the phone would otherwise retry hourly forever (stability audit 22 Oct 2026, location-1).
-    const namedPlaceIds = [...new Set(batch.evidence.flatMap((item) => item.savedPlaceId ? [item.savedPlaceId] : []))];
+    // refreshed its places. It never fails the whole batch, which the phone would otherwise retry
+    // hourly forever (stability audit 22 Oct 2026, location-1): a geofence callback for that place
+    // means nothing without it and is rejected on its own (an unlinked one would break the
+    // same-region snapshot pairing that physical stops rely on; Codex r1 on #528); any other reading
+    // is kept, unlinked. IDs compare in Postgres's lowercase form.
+    const namedPlaceIds = [...new Set(batch.evidence.flatMap((item) => item.savedPlaceId ? [item.savedPlaceId.toLowerCase()] : []))];
     const knownPlaceIds = new Set(namedPlaceIds.length
       ? (await client.query<{ id: string }>(
           "select id from places where workspace_id = $1 and id = any($2::uuid[])",
           [session.workspaceId, namedPlaceIds]
-        )).rows.map((row) => row.id)
+        )).rows.map((row) => row.id.toLowerCase())
       : []);
+    const unknownPlace = (evidence: (typeof batch.evidence)[number]) =>
+      Boolean(evidence.savedPlaceId && !knownPlaceIds.has(evidence.savedPlaceId.toLowerCase()));
+    const geofenceKinds = new Set(["geofence_enter", "geofence_exit", "geofence_state"]);
     observeLocationStage(options, "bulk_evidence_write");
     const parameters: unknown[] = [];
     const rows: string[] = [];
@@ -146,7 +152,8 @@ export async function ingestLocationEvidence(
       // Preserve the original loop's first persisted row and classifier decisions.
       if (seen.has(evidence.clientEvidenceId)) continue;
       seen.add(evidence.clientEvidenceId);
-      const rejectionReason = rejected.get(evidence.clientEvidenceId) ?? null;
+      const rejectionReason = rejected.get(evidence.clientEvidenceId) ??
+        (unknownPlace(evidence) && geofenceKinds.has(evidence.kind) ? "unknown_saved_place" : null);
       const retainCoordinate = !rejectionReason;
       const placeholders = Array.from({ length: 24 }, (_, index) => `$${parameters.length + index + 1}`);
       parameters.push(...[
@@ -168,7 +175,7 @@ export async function ingestLocationEvidence(
           retainCoordinate && evidence.courseDegrees != null && evidence.courseDegrees >= 0
             ? evidence.courseDegrees
             : null,
-          evidence.savedPlaceId && knownPlaceIds.has(evidence.savedPlaceId) ? evidence.savedPlaceId : null,
+          evidence.savedPlaceId && !unknownPlace(evidence) ? evidence.savedPlaceId : null,
           evidence.geofenceIdentifier ?? null,
           !rejectionReason,
           rejectionReason,
@@ -197,12 +204,15 @@ export async function ingestLocationEvidence(
     );
 
     const unlinked = namedPlaceIds.filter((id) => !knownPlaceIds.has(id)).length;
+    const unknownPlaceCallbacks = batch.evidence.filter((item) =>
+      !rejected.has(item.clientEvidenceId) && unknownPlace(item) && geofenceKinds.has(item.kind)).length;
+    const retainedWithoutCoordinates = rejected.size + unknownPlaceCallbacks;
     const warnings = [
-      ...(rejected.size > 0
-        ? [`${rejected.size} evidence item(s) were retained without coordinates for diagnostics.`]
+      ...(retainedWithoutCoordinates > 0
+        ? [`${retainedWithoutCoordinates} evidence item(s) were retained without coordinates for diagnostics.`]
         : []),
       ...(unlinked > 0
-        ? [`${unlinked} saved place(s) named by this batch no longer exist; their readings were kept unlinked.`]
+        ? [`${unlinked} saved place(s) named by this batch no longer exist; their geofence callbacks were rejected and other readings kept unlinked.`]
         : []),
       ...(rollout.effectiveMode === "v2_shadow"
         ? ["V2 shadow mode stored evidence without emitting user-visible semantics."]

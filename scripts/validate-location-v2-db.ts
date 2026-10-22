@@ -287,15 +287,28 @@ async function validateOutOfOrderAndIdempotency() {
 async function validateIngestPerReadingFailures() {
   await clearDerivedLocationState();
   const goneId = "30000000-0000-4000-8000-0000000000aa";
+  const keptId = "30000000-0000-4000-8000-0000000000ab";
   const home = LOCATION_ACCEPTANCE_PLACES[0]!;
+  await pool.query(
+    `insert into places (id, workspace_id, name, latitude, longitude, radius_meters, priority, logging_enabled)
+     values ($1, $2, 'Per-reading place', $3, $4, 80, 1, false) on conflict (id) do nothing`,
+    [keptId, WORKSPACE_ID, home.latitude, home.longitude]
+  );
   const reading = (id: string, occurredAt: string, patch: Partial<LocationEvidence> = {}): LocationEvidence => ({
     clientEvidenceId: `per-reading-${id}`, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
     kind: "standard_location", occurredAt, latitude: home.latitude, longitude: home.longitude,
     horizontalAccuracyMeters: 10, receivedAt: PROCESSING_AT, timeZone: "Europe/London", ...patch
   });
+  const callback = { latitude: null, longitude: null, horizontalAccuracyMeters: null } as const;
   const evidence = [
     reading("fix", "2026-07-20T19:00:00.000Z"),
-    reading("gone-place", "2026-07-20T19:05:00.000Z", { kind: "geofence_exit", latitude: null, longitude: null, horizontalAccuracyMeters: null, savedPlaceId: goneId }),
+    // A same-region exit/entry snapshot for a place that no longer exists: rejected, never unlinked.
+    reading("gone-exit", "2026-07-20T19:05:00.000Z", { ...callback, kind: "geofence_exit", savedPlaceId: goneId }),
+    reading("gone-enter", "2026-07-20T19:05:01.000Z", { ...callback, kind: "geofence_enter", savedPlaceId: goneId }),
+    // Any other reading naming it is kept, unlinked, with its coordinate.
+    reading("gone-fix", "2026-07-20T19:06:00.000Z", { savedPlaceId: goneId }),
+    // An existing place named in upper case keeps its link (Codex r1 on #528).
+    reading("upper", "2026-07-20T19:07:00.000Z", { ...callback, kind: "geofence_enter", savedPlaceId: keptId.toUpperCase() }),
     reading("future", "2026-07-20T22:00:00.000Z"),
     reading("too-old", "2026-06-01T12:00:00.000Z")
   ];
@@ -303,30 +316,38 @@ async function validateIngestPerReadingFailures() {
   assert.deepEqual(
     [...result.acknowledgedEvidenceIds].sort(),
     evidence.map((item) => item.clientEvidenceId).sort(),
-    "Every reading of a batch with one bad reading must be acknowledged."
+    "Every reading of a batch with bad readings must be acknowledged."
   );
   const rows = (await pool.query<{
     id: string; accepted: boolean; reason: string | null; placeId: string | null; hasCoordinate: boolean;
   }>(
-    `select client_evidence_id as id, accepted, rejection_reason as reason, saved_place_id as "placeId",
+    `select client_evidence_id as id, accepted, rejection_reason as reason, saved_place_id::text as "placeId",
             coordinate is not null as "hasCoordinate"
        from location_evidence where workspace_id = $1 and user_id = $2 and client_batch_id = 'db-per-reading'
       order by client_evidence_id`,
     [WORKSPACE_ID, USER_ID]
   )).rows;
   const byId = new Map(rows.map((row) => [row.id.replace("per-reading-", ""), row]));
-  assert.equal(rows.length, 4, "Every reading must be stored.");
+  assert.equal(rows.length, evidence.length, "Every reading must be stored.");
   assert.equal(byId.get("fix")?.accepted, true, "A good reading beside bad ones must be accepted.");
   assert.equal(byId.get("fix")?.hasCoordinate, true, "A good reading keeps its coordinate.");
-  assert.equal(byId.get("gone-place")?.accepted, true, "A reading for a deleted place is kept.");
-  assert.equal(byId.get("gone-place")?.placeId, null, "A reading for a deleted place is unlinked.");
+  for (const id of ["gone-exit", "gone-enter"]) {
+    assert.equal(byId.get(id)?.accepted, false, `The ${id} callback for a deleted place must be rejected.`);
+    assert.equal(byId.get(id)?.reason, "unknown_saved_place", `The ${id} callback must say why.`);
+  }
+  assert.equal(byId.get("gone-fix")?.accepted, true, "A fix naming a deleted place is kept.");
+  assert.equal(byId.get("gone-fix")?.placeId, null, "A fix naming a deleted place is unlinked.");
+  assert.equal(byId.get("gone-fix")?.hasCoordinate, true, "A fix naming a deleted place keeps its coordinate.");
+  assert.equal(byId.get("upper")?.accepted, true, "An upper-case ID of an existing place is accepted.");
+  assert.equal(byId.get("upper")?.placeId, keptId, "An upper-case ID of an existing place keeps its link.");
   for (const id of ["future", "too-old"]) {
     assert.equal(byId.get(id)?.accepted, false, `The ${id} reading must be rejected on its own.`);
     assert.equal(byId.get(id)?.reason, "outside_replay_window", `The ${id} reading must say why.`);
     assert.equal(byId.get(id)?.hasCoordinate, false, `The ${id} reading keeps no coordinate.`);
   }
-  assert(result.warnings.some((warning) => warning.includes("no longer exist")), "The unlinked place is reported.");
+  assert(result.warnings.some((warning) => warning.includes("no longer exist")), "The deleted place is reported.");
   await clearDerivedLocationState();
+  await pool.query("delete from places where id = $1", [keptId]);
 }
 
 async function validateSemanticIdempotencyAndRollback() {
