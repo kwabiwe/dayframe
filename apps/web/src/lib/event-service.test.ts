@@ -161,8 +161,8 @@ describe("category persistence", () => {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("client_event_id = $3")) return { rows: [] };
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stop-1" }] };
-        if (statement.includes('"personSetEnd"')) {
-          return { rows: [{ startedAt: new Date("2026-08-06T09:00:00.000Z"), stoppedAt: null, personSetEnd: false, health: false }] };
+        if (statement.includes('as "health"')) {
+          return { rows: [{ startedAt: new Date("2026-08-06T09:00:00.000Z"), stoppedAt: null, health: false }] };
         }
         if (statement.includes("set stopped_at = $1")) {
           return { rows: [{ id: targetEntryId }], rowCount: 1 };
@@ -262,8 +262,8 @@ describe("category persistence", () => {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stale-stop" }] };
         // The newer timer ended the old block at its start, before this stale Stop was pressed.
-        if (statement.includes('"personSetEnd"')) {
-          return { rows: [{ startedAt: new Date("2026-08-13T13:00:00.000Z"), stoppedAt: new Date("2026-08-13T13:40:00.000Z"), personSetEnd: false, health: false }] };
+        if (statement.includes('as "health"')) {
+          return { rows: [{ startedAt: new Date("2026-08-13T13:00:00.000Z"), stoppedAt: new Date("2026-08-13T13:40:00.000Z"), health: false }] };
         }
         if (statement.includes("set stopped_at = $1")) return { rows: [], rowCount: 0 };
         return { rows: [] };
@@ -287,9 +287,11 @@ describe("category persistence", () => {
 
     expect(result).toMatchObject({ stopOutcome: "superseded" });
     expect(client.query).toHaveBeenCalledWith(
-      expect.stringContaining("time_entry.end_set"),
+      expect.stringContaining("for update of te"),
       [session.workspaceId, session.userId, oldEntryId]
     );
+    // An end already earlier than the Stop needs no provenance read (Codex r4 on #531).
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes('"personSetEnd"'))).toBe(false);
     expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))).toBe(false);
   });
 
@@ -299,7 +301,7 @@ describe("category persistence", () => {
         if (statement.includes("insert into activity_events")) {
           return { rows: [{ id: "event-busy-stop" }] };
         }
-        if (statement.includes('"personSetEnd"') || statement.includes("set stopped_at = $1")) {
+        if (statement.includes('as "health"') || statement.includes("set stopped_at = $1")) {
           throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
         }
         return { rows: [] };
@@ -3495,7 +3497,9 @@ describe("grouped time entry descriptions", () => {
             { id: "entry-2", stoppedAt: "2026-08-11T10:00:00.000Z" }
           ]
         })
+        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: "entry-1" }, { id: "entry-2" }] })
+        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [] }),
       release: vi.fn()
     };
@@ -3506,6 +3510,11 @@ describe("grouped time entry descriptions", () => {
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("set description = $2"),
       [["entry-1", "entry-2"], "Planning", session.workspaceId, session.userId]
+    );
+    // Recorded as a details edit, so it never reads as a legacy end edit (Codex r4 on #531).
+    expect(client.query).toHaveBeenCalledWith(
+      expect.stringContaining("insert into audit_log"),
+      [["entry-1", "entry-2"], session.workspaceId, session.userId, []]
     );
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
@@ -3561,6 +3570,7 @@ describe("grouped time entry descriptions", () => {
             { id: "entry-2", stoppedAt: "2026-08-11T10:00:00.000Z" }
           ]
         })
+        .mockResolvedValueOnce({ rows: [] })
         .mockResolvedValueOnce({ rows: [{ id: "entry-1" }] })
         .mockResolvedValueOnce({ rows: [] }),
       release: vi.fn()
@@ -3586,6 +3596,7 @@ describe("time entry partial timestamp validation", () => {
   it("validates a stoppedAt-only update against the stored start inside the transaction", async () => {
     const client = {
       query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
         if (statement.includes('select started_at as "startedAt"')) {
           return {
             rows: [{
@@ -3616,6 +3627,7 @@ describe("time entry partial timestamp validation", () => {
     const stoppedAt = new Date(Date.now() + 60_000).toISOString();
     const client = {
       query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
         if (statement.includes('select started_at as "startedAt"')) {
           return { rows: [{ startedAt, stoppedAt: null }] };
         }
@@ -3644,6 +3656,7 @@ describe("time entry partial timestamp validation", () => {
     const stoppedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     const client = {
       query: vi.fn(async (statement: string) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
         if (statement.includes('select started_at as "startedAt"')) {
           return { rows: [{ startedAt, stoppedAt: null }] };
         }
@@ -3674,6 +3687,10 @@ describe("time entry tag transactions", () => {
   it("preserves one-time labels for ordinary edits and clears them for explicit saved-place edits", async () => {
     const client = {
       query: vi.fn(async (statement: string, _values?: unknown[]) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
+        if (statement.includes('"legacyPersonSetEnd"')) {
+          return { rows: [{ startedAt: "2026-08-12T10:00:00.000Z", stoppedAt: "2026-08-12T11:00:00.000Z", endChanged: false, legacyPersonSetEnd: false }] };
+        }
         if (statement.includes("update time_entries")) {
           return { rows: [{ id: "entry-1", updatedAt: "2026-08-12T12:00:00.000Z" }] };
         }
@@ -3692,6 +3709,10 @@ describe("time entry tag transactions", () => {
     vi.resetAllMocks();
     const savedPlaceClient = {
       query: vi.fn(async (statement: string, _values?: unknown[]) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
+        if (statement.includes('"legacyPersonSetEnd"')) {
+          return { rows: [{ startedAt: "2026-08-12T10:00:00.000Z", stoppedAt: "2026-08-12T11:00:00.000Z", endChanged: false, legacyPersonSetEnd: false }] };
+        }
         if (statement.includes("update time_entries")) {
           return { rows: [{ id: "entry-1", updatedAt: "2026-08-12T12:01:00.000Z" }] };
         }
@@ -3712,6 +3733,7 @@ describe("time entry tag transactions", () => {
   it("saves an overlapping manual edit without querying for a time conflict", async () => {
     const client = {
       query: vi.fn(async (statement: string, values?: unknown[]) => {
+        if (statement.includes("for update")) return { rows: [{ id: "entry-1" }] };
         if (statement.includes("update time_entries")) {
           return { rows: [{ id: "entry-1", updatedAt: "2026-07-27T12:00:00.000Z" }] };
         }

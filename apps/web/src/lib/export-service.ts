@@ -33,7 +33,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     locationEvidence,
     placeMatchFeedback,
     locationNamePatterns,
-    importRuns
+    importRuns,
+    timeEntryEdits
   ] = await Promise.all([
     table("clients", session),
     table("projects", session),
@@ -50,7 +51,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     locationEvidenceTable(session),
     table("place_match_feedback", session),
     table("location_name_patterns", session),
-    table("import_runs", session)
+    table("import_runs", session),
+    timeEntryEditsTable(session)
   ]);
 
   return {
@@ -71,7 +73,8 @@ export async function buildWorkspaceExport(session: RequestSession) {
     locationEvidence,
     placeMatchFeedback,
     locationNamePatterns,
-    importRuns
+    importRuns,
+    timeEntryEdits
   };
 }
 
@@ -153,6 +156,22 @@ async function timeEntriesTable(session: RequestSession) {
      left join places pl on pl.id = te.place_id and pl.workspace_id = te.workspace_id
      where te.workspace_id = $1 and te.user_id = $2
      order by te.started_at desc, te.id desc`,
+    [session.workspaceId, session.userId]
+  );
+  return result.rows;
+}
+
+/**
+ * Which blocks a person edited, and the end they set: an earlier queued Stop never pulls back such an
+ * end (Codex r4 on #531). Only the entry, the action, the end and when; no other audit history.
+ */
+async function timeEntryEditsTable(session: RequestSession) {
+  const result = await query(
+    `select entity_id as time_entry_id, action, metadata->>'stoppedAt' as stopped_at, created_at
+     from audit_log
+     where workspace_id = $1 and user_id = $2 and entity_type = 'time_entry'
+       and action in ('time_entry.end_set', 'time_entry.edited')
+     order by created_at, id`,
     [session.workspaceId, session.userId]
   );
   return result.rows;

@@ -37,6 +37,16 @@ async function main() {
     const result = await pool.query(`select * from ${table} where workspace_id = $1`, [workspaceId]);
     exportData[table] = result.rows;
   }
+  // Which blocks a person edited, and the end they set: an earlier queued Stop never pulls back such an
+  // end. Only the entry, the action, the end and when; no other audit history.
+  const edits = await pool.query(
+    `select entity_id as time_entry_id, action, metadata->>'stoppedAt' as stopped_at, created_at
+     from audit_log
+     where workspace_id = $1 and entity_type = 'time_entry' and action in ('time_entry.end_set', 'time_entry.edited')
+     order by created_at, id`,
+    [workspaceId]
+  );
+  exportData.time_entry_edits = edits.rows;
 
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(exportData, null, 2)}\n`);
