@@ -789,6 +789,9 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
     const body = JSON.parse(fetchMock.clientFetch.mock.calls[0][1].body as string);
     expect(body.stoppedAt).toBe(new Date(2026, 7, 2, 9, 25).toISOString());
     expect(body.startedAt).toBe(entry.startedAt);
+    // Times only: this tab's activity, place and description may be older than another device's edit,
+    // and the PATCH applies every field it is sent (stability audit WEB-UI-1).
+    expect(Object.keys(body).sort()).toEqual(["startedAt", "stoppedAt"]);
   });
 
   it("keeps a 5-minute minimum and Escape aborts a resize without saving", async () => {
