@@ -73,6 +73,17 @@ export function codeOnly(source: string) {
       index = cursor;
       continue;
     }
+    // An extended regex literal (#/…/#, ##/…/##) is blanked to its matching close; bare /…/ regexes
+    // need -enable-bare-slash-regex, which the Swift 5 pods don't set (Codex r4 on #530).
+    const regex = /^(#+)\//.exec(source.slice(index, index + 64));
+    if (regex) {
+      const close = "/" + regex[1]!;
+      const end = source.indexOf(close, index + regex[0].length);
+      const stop = end === -1 ? source.length : end + close.length;
+      out += blank(source.slice(index, stop));
+      index = stop;
+      continue;
+    }
     const literal = /^(#*)("""|")/.exec(source.slice(index, index + 64));
     if (literal) {
       out += blank(literal[0]);
@@ -131,7 +142,9 @@ describe("expiry handler scanning", () => {
     for (const decoy of [
       "/* outer /* inner */ } */", 'let _ = #"" } ""#', 'let _ = #"\\" } "#', 'let _ = ##"""\n } "\n"""##',
       // Interpolation with a nested literal (Codex r3 on #530), and one nested twice.
-      'let _ = "\\("}")"', 'let _ = "a \\(f("\\(")")")) b }"', 'let _ = #"\\#("}")"#'
+      'let _ = "\\("}")"', 'let _ = "a \\(f("\\(")")")) b }"', 'let _ = #"\\#("}")"#',
+      // Extended regex literals (Codex r4 on #530).
+      "let _ = #/}/#", "let _ = ##/ } /# } /##"
     ]) {
       const [handler] = closuresAfter(`beginBackgroundTask(withName: "a") {\n  ${decoy}\n  DispatchQueue.main.async { end() }\n}`, /beginBackgroundTask\(/);
       expect(handler, decoy).toContain("DispatchQueue.main.async");
