@@ -158,8 +158,12 @@ When changing a boundary above:
 
 ### Location reliability observations and bounded writes
 
-Evidence upload validates/classifies the complete batch before the existing
-workspace/user lock, bounded retention cleanup and coordinate-free event summary.
+Evidence upload validates the batch and marks out-of-window readings before the
+existing workspace/user lock; under the lock it runs bounded retention cleanup,
+the coordinate-free event summary, one lookup of the saved places the batch
+names, and classification of the readings not already rejected on their own
+(outside the replay window, or a geofence callback for a place that no longer
+exists).
 One parameterised evidence insert writes up to 100 observations in that same
 transaction. First occurrence, conflict acknowledgement and original expiry are
 preserved. Upload does not emit journey semantics; retained-evidence replay does.
