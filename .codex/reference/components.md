@@ -205,6 +205,8 @@ zero-size hidden probes never affect scrolling, focus or touch targets.
 - For inline iOS forms near the bottom of a scroll view, keep the focused input mounted, apply the native keyboard inset, and reveal the complete required control group—not only the text field—above the keyboard at normal and Dynamic Type sizes.
 - When timer state is mirrored to a native system surface, serialize reconciliation and make the latest requested state win; optimistic and persisted entry updates must not race separate native lifecycle calls.
 
+- An edit sends only the fields the person changed (as `buildCalendarEntryCompactSavePlan` does), never the row echoed back: `PATCH /api/time-entries/[id]` applies every field present, and a tab's copy can predate another device's edit, so echoing a field silently reverts it (Calendar resize, stability audit 22 Oct 2026, WEB-UI-1).
+
 ## Motion Ownership And State
 
 - Read `.codex/reference/motion.md` whenever a component introduces visible movement or changes layout over time.
