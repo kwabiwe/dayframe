@@ -23,14 +23,40 @@ function swiftSources(directory: string): string[] {
  * hop inside either never changes which closure is checked (Codex r1 on #530).
  */
 export function codeOnly(source: string) {
-  const blank = (from: number, to: number) => source.slice(from, to).replace(/[^\n]/g, " ");
+  type Context =
+    | { kind: "code"; interpolation: boolean; depth: number }
+    | { kind: "string"; quote: string; hashes: string };
+  const stack: Context[] = [{ kind: "code", interpolation: false, depth: 0 }];
+  const blank = (text: string) => text.replace(/[^\n]/g, " ");
   let out = "";
   let index = 0;
   while (index < source.length) {
+    const top = stack[stack.length - 1]!;
+    if (top.kind === "string") {
+      // Inside a literal: `\(` (or `\#(` in a raw string) opens interpolated code, an escape covers the
+      // next character, the matching quote and #s close it; everything else is blanked.
+      const escape = "\\" + top.hashes;
+      if (source.startsWith(escape + "(", index)) {
+        out += blank(escape + "(");
+        index += escape.length + 1;
+        stack.push({ kind: "code", interpolation: true, depth: 0 });
+      } else if (source.startsWith(escape, index)) {
+        out += blank(source.slice(index, index + escape.length + 1));
+        index += escape.length + 1;
+      } else if (source.startsWith(top.quote + top.hashes, index)) {
+        out += blank(top.quote + top.hashes);
+        index += top.quote.length + top.hashes.length;
+        stack.pop();
+      } else {
+        out += blank(source[index]!);
+        index += 1;
+      }
+      continue;
+    }
     if (source.startsWith("//", index)) {
       const end = source.indexOf("\n", index);
       const stop = end === -1 ? source.length : end;
-      out += blank(index, stop);
+      out += blank(source.slice(index, stop));
       index = stop;
       continue;
     }
@@ -43,26 +69,27 @@ export function codeOnly(source: string) {
         if (source.startsWith("*/", cursor)) { depth -= 1; cursor += 2; if (depth === 0) break; continue; }
         cursor += 1;
       }
-      out += blank(index, cursor);
+      out += blank(source.slice(index, cursor));
       index = cursor;
       continue;
     }
     const literal = /^(#*)("""|")/.exec(source.slice(index, index + 64));
     if (literal) {
-      // A raw string (#"…"#, ##"""…"""##) ends only at its quote followed by the same number of #s,
-      // and a backslash escapes only when followed by those #s.
-      const hashes = literal[1]!;
-      const quote = literal[2]!;
-      const close = quote + hashes;
-      const escape = "\\" + hashes;
-      let cursor = index + hashes.length + quote.length;
-      while (cursor < source.length && !source.startsWith(close, cursor)) {
-        cursor += source.startsWith(escape, cursor) ? escape.length + 1 : 1;
-      }
-      const stop = Math.min(source.length, cursor + close.length);
-      out += blank(index, stop);
-      index = stop;
+      out += blank(literal[0]);
+      index += literal[0].length;
+      stack.push({ kind: "string", quote: literal[2]!, hashes: literal[1]! });
       continue;
+    }
+    if (top.interpolation && source[index] === "(") top.depth += 1;
+    if (top.interpolation && source[index] === ")") {
+      if (top.depth === 0) {
+        // The interpolation ends: back inside its string.
+        out += " ";
+        index += 1;
+        stack.pop();
+        continue;
+      }
+      top.depth -= 1;
     }
     out += source[index];
     index += 1;
@@ -101,7 +128,11 @@ describe("expiry handler scanning", () => {
     expect(body).toContain("Task {");
     expect(codeOnly('let x = "Task { }" // DispatchQueue.main.async')).not.toMatch(/Task|DispatchQueue/);
     // Nested block comments and raw strings (Codex r2 on #530).
-    for (const decoy of ["/* outer /* inner */ } */", 'let _ = #"" } ""#', 'let _ = #"\\" } "#', 'let _ = ##"""\n } "\n"""##']) {
+    for (const decoy of [
+      "/* outer /* inner */ } */", 'let _ = #"" } ""#', 'let _ = #"\\" } "#', 'let _ = ##"""\n } "\n"""##',
+      // Interpolation with a nested literal (Codex r3 on #530), and one nested twice.
+      'let _ = "\\("}")"', 'let _ = "a \\(f("\\(")")")) b }"', 'let _ = #"\\#("}")"#'
+    ]) {
       const [handler] = closuresAfter(`beginBackgroundTask(withName: "a") {\n  ${decoy}\n  DispatchQueue.main.async { end() }\n}`, /beginBackgroundTask\(/);
       expect(handler, decoy).toContain("DispatchQueue.main.async");
     }
