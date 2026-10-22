@@ -156,6 +156,28 @@ Temporal invariants:
   Never use this rule for distinct saved/learned places or vehicle evidence,
   and never enlarge the global unknown or saved-place matching radii to infer
   site identity.
+- Inside the stay's own completed Visit (`insideOwnCompletedVisit`, 22 Oct
+  2026 stability audit). iOS reports one completed Visit for a long stay in a
+  large building even while the phone walks round it. An unknown stay keeps an
+  unknown reading beyond `unknownStayBaseRadiusMeters` when the stay holds a
+  genuine completed Visit that arrived within it (`occurredAt` at or after the
+  stay's start, never one from an earlier episode), the reading comes no later
+  than that Visit's departure, and it lies within the Visit's reported radius
+  (its horizontal accuracy, at most the accepted `200m`) plus the reading's own
+  accuracy of the Visit's coordinate. Only accurate (`highQualityHorizontalAccuracyMeters`,
+  `65m`), genuine, non-Visit fixes count, whatever their speed or the Motion
+  & Fitness activity: walking inside the building is still the stay. An
+  arrival-only Visit, a broad fix, a fix beyond the Visit's circle or after its
+  departure still ends the stay as before, and saved/learned stays are
+  unchanged. Before this, the first accurate fix 150–170 m across the building
+  after a long silence closed the stay at the midpoint of that silence, and
+  the remaining sparse fixes (none reaching ten minutes) became the route of a
+  phantom Move that ran until the next stop: on 22 Oct a 10:37–14:24 stay
+  became 10:37–11:55 plus a 2.5-hour "Move". The fix applies once iOS delivers
+  the completion (it can arrive hours later); earlier replays keep the split
+  and are superseded. The global 120 m radius stays: 150 m and 180 m changed
+  three other days in the owner's 15–22 Oct trace with no agreement gain
+  against an independent timeline, and the sweep and corpora were neutral.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

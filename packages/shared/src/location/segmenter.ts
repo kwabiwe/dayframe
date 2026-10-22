@@ -268,6 +268,28 @@ function accurateCoordinate(item: ClassifiedEvidence, input: LocationEngineInput
     item.evidence.horizontalAccuracyMeters <= input.config.highQualityHorizontalAccuracyMeters;
 }
 
+/**
+ * Whether an unknown stay's own completed iOS Visit covers this reading in time and space: a genuine,
+ * completed Visit that arrived within the stay, a reading before that Visit's departure, and a point
+ * within the Visit's reported radius (its horizontal accuracy) plus the reading's own accuracy. iOS
+ * judged the whole interval one visit, so movement inside it (walking round a large building, or indoor
+ * drift) is not a second place, whatever the reading's speed. Only accurate, genuine fixes count; an
+ * arrival-only Visit, a Visit from an earlier episode, or a reading after the departure never does.
+ */
+function insideOwnCompletedVisit(active: WorkingStay, item: ClassifiedEvidence, input: LocationEngineInput) {
+  const point = pointFor(item.evidence);
+  if (!point || item.evidence.kind === "visit" || item.evidence.isSimulated === true || !accurateCoordinate(item, input)) return false;
+  const atMs = Date.parse(item.evidence.occurredAt);
+  const startedAtMs = Date.parse(active.startedAt);
+  return active.evidence.some(({ evidence: visit }) => {
+    const centre = pointFor(visit);
+    return visit.kind === "visit" && visit.endedAt != null && visit.isSimulated !== true && centre != null &&
+      visit.horizontalAccuracyMeters != null && Date.parse(visit.occurredAt) >= startedAtMs &&
+      atMs <= Date.parse(visit.endedAt) &&
+      distanceMeters(centre, point) <= visit.horizontalAccuracyMeters + item.evidence.horizontalAccuracyMeters!;
+  });
+}
+
 type UnknownVisitArrivalBound = {
   lower: string;
   upper: string | null;
@@ -1722,7 +1744,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const sameEdgeCluster = itemKey === "unknown" && active.placeMatchKind === "saved" && stationaryFix(item, input) &&
       !active.pendingExit && active.outside.length === 0 &&
       edgeOnly(active, input) && nearEdgeCluster(active, item, input, input.config.unknownStayBaseRadiusMeters);
-    if (sameKnownPlace || sameUnknown || sameEdgeCluster) {
+    // Inside the stay's own completed Visit (see insideOwnCompletedVisit): the same unknown stay.
+    const insideOwnVisit = itemKey === "unknown" && active.key === "unknown" && !sameUnknown &&
+      insideOwnCompletedVisit(active, item, input);
+    if (sameKnownPlace || sameUnknown || sameEdgeCluster || insideOwnVisit) {
       active.evidence.push(item);
       markArrivalPresence(active, item);
       capDeferredPresence(active, item);
