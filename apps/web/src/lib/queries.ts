@@ -288,6 +288,38 @@ export type BootstrapData = {
   weekSeries: DashboardSeriesPoint[];
 };
 
+/**
+ * Bootstrap's reads, at most `BOOTSTRAP_READ_CONCURRENCY` at a time. Fired all at once they took every
+ * connection of the 10-connection pool, so a second bootstrap or a timer write waiting behind them hit
+ * the 1.5 s connect timeout (production 21 Oct 2026, "timeout exceeded when trying to connect";
+ * stability audit SERVER-3). Results keep their positions.
+ */
+export const BOOTSTRAP_READ_CONCURRENCY = 4;
+
+export async function runBootstrapReads<const Reads extends readonly (() => Promise<unknown>)[]>(
+  reads: Reads,
+  concurrency = BOOTSTRAP_READ_CONCURRENCY
+): Promise<{ -readonly [Index in keyof Reads]: Awaited<ReturnType<Reads[Index]>> }> {
+  const results = new Array<unknown>(reads.length);
+  let next = 0;
+  let failed = false;
+  const lane = async () => {
+    while (!failed && next < reads.length) {
+      const index = next;
+      next += 1;
+      try {
+        results[index] = await reads[index]!();
+      } catch (error) {
+        // The bootstrap fails as before; the remaining reads are not started.
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, reads.length) }, lane));
+  return results as { -readonly [Index in keyof Reads]: Awaited<ReturnType<Reads[Index]>> };
+}
+
 export async function getBootstrapData(
   session: RequestSession = getDevSession(),
   options: {
@@ -326,44 +358,44 @@ export async function getBootstrapData(
     { taskSuggestions, taskSuggestionCandidates },
     stats,
     reviewOutingStays
-  ] = await Promise.all([
-    getUser(session),
-    getWorkspaces(session),
-    getClients(session),
-    getCategories(session),
-    getGoalExcludedCategoryIds(session),
-    getProjects(session),
-    getTags(session),
-    getPlaces(session),
-    getLearnedPlaces(session),
-    getAutomationRules(session),
-    getTimeEntries(session, { capturedNow }),
-    getTimeEntries(session, {
+  ] = await runBootstrapReads([
+    () => getUser(session),
+    () => getWorkspaces(session),
+    () => getClients(session),
+    () => getCategories(session),
+    () => getGoalExcludedCategoryIds(session),
+    () => getProjects(session),
+    () => getTags(session),
+    () => getPlaces(session),
+    () => getLearnedPlaces(session),
+    () => getAutomationRules(session),
+    () => getTimeEntries(session, { capturedNow }),
+    () => getTimeEntries(session, {
       overlappingFrom: historyStart,
       startedBefore: dateRange.dayEnd,
       limit: 2000,
       capturedNow
     }),
-    getTimeEntries(session, {
+    () => getTimeEntries(session, {
       overlappingFrom: dateRange.dayStart,
       startedBefore: dateRange.dayEnd,
       limit: 100,
       capturedNow
     }),
-    getTimeEntries(session, {
+    () => getTimeEntries(session, {
       overlappingFrom: dateRange.weekStart,
       startedBefore: dateRange.weekEnd,
       limit: 300,
       capturedNow
     }),
-    getActiveEntry(session),
-    getReviewItems(session),
-    getActivityEvents(session),
-    getCategoryUsageRanks(session),
-    getTaskSuggestionSets(session),
-    getDashboardStats(session, dateRange, capturedNow),
-    getReviewOutingStays(session)
-  ]);
+    () => getActiveEntry(session),
+    () => getReviewItems(session),
+    () => getActivityEvents(session),
+    () => getCategoryUsageRanks(session),
+    () => getTaskSuggestionSets(session),
+    () => getDashboardStats(session, dateRange, capturedNow),
+    () => getReviewOutingStays(session)
+  ] as const);
 
   // Named patterns (PR 14): one read over every list's location blocks, then each list is tagged.
   const locationGroups = await getLocationGroups({ query }, session, [...entries, ...historyEntries, ...dayEntries, ...weekEntries]);

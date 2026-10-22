@@ -109,6 +109,9 @@ describe("Start at the previous end through the real runtime", () => {
     await waitFor(() => expect(server.patches).toHaveLength(1));
     expect(server.patches[0].url).toBe("/api/time-entries/started-1");
     expect(server.patches[0].body.startedAt).toBe(server.finished[0].stoppedAt);
+    // Only the start: echoing this tab's `stoppedAt: null` would reopen a block stopped on another
+    // device meanwhile (stability audit 22 Oct 2026).
+    expect(server.patches[0].body).not.toHaveProperty("stoppedAt");
     expect(server.active?.startedAt).toBe(server.finished[0].stoppedAt);
   });
 

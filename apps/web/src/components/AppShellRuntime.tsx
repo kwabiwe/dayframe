@@ -830,10 +830,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         const response = await clientFetch(`/api/time-entries/${serverEntryId(snapshot.activeEntry!.id) ?? snapshot.activeEntry!.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          // No `stoppedAt`: this tab's copy says "running", and echoing that would reopen a block
+          // another device stopped meanwhile; the server checks the start against the row's own end
+          // (stability audit 22 Oct 2026, Codex on #527).
           body: JSON.stringify({
             ...(patch?.body ?? {}),
-            startedAt,
-            stoppedAt: snapshot.activeEntry!.stoppedAt
+            startedAt
           })
         });
         if (response.status === 409) {
