@@ -8,6 +8,9 @@ import { setJsTaskSink, type JsTaskLabel } from "./jsTasks";
 export type NativeDiagnostics = {
   jsAnswered(): void;
   setJsTasks(tasks: JsTaskLabel[], last: JsTaskLabel | null): void;
+  /** The last few pauses and the report count, without payloads (Sync help's line). */
+  overview(): Promise<NativeDiagnosticsSnapshot>;
+  /** Everything, for "Copy details for support". */
   snapshot(): Promise<NativeDiagnosticsSnapshot>;
   clear(): Promise<void>;
 };
@@ -25,7 +28,9 @@ export type NativeStallRecord = {
 
 export type NativeDiagnosticsSnapshot = {
   stalls: NativeStallRecord[];
+  /** MetricKit reports, already reduced natively to an allowlist (no exception messages). */
   reports: Array<{ receivedAt?: string; summary?: Array<Record<string, unknown>>; payload?: unknown }>;
+  reportCount?: number;
 };
 
 type AppStateLike = {
@@ -71,7 +76,8 @@ export function installStallWatchdog(
 }
 
 /** For Sync help's support details: stalls in full (labels and times only), MetricKit summaries, and
- * the newest few full reports (call stacks of binary images and offsets, no user data). */
+ * the newest few full reports (allowlisted natively: call stacks of binary images and offsets, named
+ * metadata, an exception's type and name but never its message). */
 export function supportFreezeDiagnostics(snapshot: NativeDiagnosticsSnapshot | null, fullReports = 3) {
   if (!snapshot) return null;
   return {
@@ -89,15 +95,16 @@ export function freezeDiagnosticsSummary(
   snapshot: NativeDiagnosticsSnapshot | null,
   formatTime: (at: Date) => string
 ) {
-  if (!snapshot || (!snapshot.stalls.length && !snapshot.reports.length)) return null;
+  const reportCount = snapshot?.reportCount ?? snapshot?.reports.length ?? 0;
+  if (!snapshot || (!snapshot.stalls.length && !reportCount)) return null;
   const parts: string[] = [];
   if (snapshot.stalls.length) {
     const latest = snapshot.stalls[snapshot.stalls.length - 1]!;
     const count = snapshot.stalls.length;
     parts.push(`${count} ${count === 1 ? "pause" : "pauses"}, last ${formatTime(new Date(latest.startedAt))} for ${Math.round(latest.durationMs / 1000)} s`);
   }
-  if (snapshot.reports.length) {
-    const count = snapshot.reports.length;
+  if (reportCount) {
+    const count = reportCount;
     parts.push(`${count} system ${count === 1 ? "report" : "reports"}`);
   }
   return parts.join(" · ");

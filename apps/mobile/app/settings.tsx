@@ -284,6 +284,10 @@ function readFreezeDiagnostics(): Promise<NativeDiagnosticsSnapshot | null> {
   return nativeDiagnostics?.snapshot().catch(() => null) ?? Promise.resolve(null);
 }
 
+function readFreezeOverview(): Promise<NativeDiagnosticsSnapshot | null> {
+  return nativeDiagnostics?.overview().catch(() => null) ?? Promise.resolve(null);
+}
+
 function defaultSettingsSnapshot(): SettingsSnapshot {
   return {
     data: null,
@@ -1225,17 +1229,19 @@ export default function SettingsScreen() {
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
-  // Sync help › Pauses and crashes, read when Settings opens (kept on this iPhone until shared).
+  // Sync help › Pauses and crashes: a light overview (no payloads), read on each visit once the
+  // opening transition has finished (kept on this iPhone until shared).
   const [freezeSnapshot, setFreezeSnapshot] = useState<NativeDiagnosticsSnapshot | null>(null);
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    if (!transitionReady) return undefined;
     let current = true;
-    void readFreezeDiagnostics().then((snapshot) => {
+    void readFreezeOverview().then((snapshot) => {
       if (current) setFreezeSnapshot(snapshot);
     });
     return () => {
       current = false;
     };
-  }, []);
+  }, [transitionReady]));
   const appleMaps = useMapKitChecks({ onNote: setSyncHelpNote });
   const syncHelpIssueKey = [
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
@@ -1640,6 +1646,7 @@ export default function SettingsScreen() {
         readFreezeDiagnostics()
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
+      if (freezes) setFreezeSnapshot(freezes);
       const snapshot = {
         exportedAt: new Date().toISOString(),
         build: mobileBuildDiagnostics(),

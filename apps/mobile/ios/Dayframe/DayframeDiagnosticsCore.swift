@@ -31,88 +31,96 @@ struct DayframeStallRecord: Codable, Equatable {
   var appBuild: String?
 }
 
-/// Detects a thread that stops answering its once-a-second probe while Dayframe is in front. Times
-/// are `systemUptime` seconds, so a wall clock change never makes or hides a stall.
+/// What a new stall record is stamped with.
+struct DayframeStallContext {
+  var date: Date
+  /// For a JS stall: every label running since JS last answered (a label can end just before JS
+  /// answers again, so the current set alone would miss the work that held it).
+  var jsTasks: [String]
+  var lastJsTask: String?
+  var appBuild: String?
+  var makeId: () -> String
+}
+
+/// Detects a thread that stops answering while Dayframe is in front. Main is probed: a probe sent and
+/// not answered for `threshold` is a stall, timed from the probe, so a late watchdog tick never counts
+/// as main being blocked. JS answers on its own once-a-second timer: a gap of `threshold` between its
+/// answers is a stall. A gap found only when the answer arrives (between two checks), or when Dayframe
+/// leaves the front, is still recorded. Times are `systemUptime` seconds, so a wall clock change never
+/// makes or hides a stall.
 struct DayframeStallTracker {
   static let threshold: TimeInterval = 3
   /// An open stall is saved again at most this often, so a force-close keeps its length.
   static let persistInterval: TimeInterval = 5
 
   private(set) var active = false
-  private var lastAnswer: [DayframeStallThread: TimeInterval] = [:]
+  private var pendingMainProbe: TimeInterval?
+  private var lastJsAnswer: TimeInterval?
   private var open: [DayframeStallThread: DayframeStallRecord] = [:]
   private var lastPersisted: [DayframeStallThread: TimeInterval] = [:]
-  /// JS answers only once its watchdog is installed; until then it is never reported.
-  private var jsSeen = false
 
-  /// Coming to the front starts every probe afresh: time in the background is never a stall.
+  /// Coming to the front starts every probe afresh: time in the background is never a stall. JS is
+  /// watched only after its first answer in front (its watchdog may not be installed yet).
   mutating func becameActive(uptime: TimeInterval) {
     active = true
-    lastAnswer = [.main: uptime, .js: uptime]
+    pendingMainProbe = nil
+    lastJsAnswer = nil
     open = [:]
     lastPersisted = [:]
   }
 
-  /// Leaving the front ends every open stall as `left`; the caller saves what comes back.
-  mutating func resignedActive(uptime: TimeInterval) -> [DayframeStallRecord] {
-    active = false
-    let ended = open.values.map { record -> DayframeStallRecord in
-      var record = record
-      record.outcome = .left
-      record.durationMs = durationMs(record.thread, uptime: uptime)
-      return record
+  /// Leaving the front ends every stall, open or overdue, as `left`; the caller saves what comes back.
+  mutating func resignedActive(uptime: TimeInterval, context: DayframeStallContext) -> [DayframeStallRecord] {
+    guard active else { return [] }
+    var ended: [DayframeStallRecord] = []
+    for thread in [DayframeStallThread.js, .main] {
+      if let record = finish(thread, uptime: uptime, outcome: .left, context: context) {
+        ended.append(record)
+      }
     }
+    active = false
+    pendingMainProbe = nil
+    lastJsAnswer = nil
     open = [:]
     lastPersisted = [:]
-    return ended.sorted { $0.thread.rawValue < $1.thread.rawValue }
+    return ended
   }
 
-  /// A probe answered; an open stall on that thread ends as `recovered`.
-  mutating func answered(_ thread: DayframeStallThread, uptime: TimeInterval) -> DayframeStallRecord? {
-    if thread == .js { jsSeen = true }
+  /// The watchdog asked main to answer; a probe already waiting keeps its time.
+  mutating func sentMainProbe(uptime: TimeInterval) {
+    guard active, pendingMainProbe == nil else { return }
+    pendingMainProbe = uptime
+  }
+
+  /// A thread answered. A stall on it ends as `recovered`, including one that started and ended
+  /// between two checks.
+  mutating func answered(
+    _ thread: DayframeStallThread,
+    uptime: TimeInterval,
+    context: DayframeStallContext
+  ) -> DayframeStallRecord? {
     guard active else { return nil }
-    defer { lastAnswer[thread] = uptime }
-    guard var record = open.removeValue(forKey: thread) else { return nil }
-    lastPersisted[thread] = nil
-    record.outcome = .recovered
-    record.durationMs = durationMs(thread, uptime: uptime)
+    let record = finish(thread, uptime: uptime, outcome: .recovered, context: context)
+    if thread == .main { pendingMainProbe = nil } else { lastJsAnswer = uptime }
     return record
   }
 
   /// Opens a stall for a thread silent for `threshold`, and returns new or lengthened open stalls
   /// that are due to be saved.
-  mutating func check(
-    uptime: TimeInterval,
-    date: Date,
-    jsTasks: [String],
-    lastJsTask: String?,
-    appBuild: String?,
-    makeId: () -> String
-  ) -> [DayframeStallRecord] {
+  mutating func check(uptime: TimeInterval, context: DayframeStallContext) -> [DayframeStallRecord] {
     guard active else { return [] }
     var due: [DayframeStallRecord] = []
     for thread in [DayframeStallThread.main, .js] {
-      if thread == .js && !jsSeen { continue }
-      guard let last = lastAnswer[thread] else { continue }
-      let silent = uptime - last
+      guard let since = silentSince(thread) else { continue }
       if var record = open[thread] {
-        record.durationMs = durationMs(thread, uptime: uptime)
+        record.durationMs = milliseconds(uptime - since)
         open[thread] = record
         if uptime - (lastPersisted[thread] ?? 0) >= Self.persistInterval {
           lastPersisted[thread] = uptime
           due.append(record)
         }
-      } else if silent >= Self.threshold {
-        let record = DayframeStallRecord(
-          id: makeId(),
-          thread: thread,
-          startedAt: date.addingTimeInterval(-silent),
-          durationMs: Int((silent * 1000).rounded()),
-          outcome: nil,
-          jsTasks: jsTasks,
-          lastJsTask: lastJsTask,
-          appBuild: appBuild
-        )
+      } else if uptime - since >= Self.threshold {
+        let record = newRecord(thread, since: since, uptime: uptime, context: context)
         open[thread] = record
         lastPersisted[thread] = uptime
         due.append(record)
@@ -121,13 +129,56 @@ struct DayframeStallTracker {
     return due
   }
 
-  private func durationMs(_ thread: DayframeStallThread, uptime: TimeInterval) -> Int {
-    Int((max(0, uptime - (lastAnswer[thread] ?? uptime)) * 1000).rounded())
+  private func silentSince(_ thread: DayframeStallThread) -> TimeInterval? {
+    thread == .main ? pendingMainProbe : lastJsAnswer
+  }
+
+  private mutating func finish(
+    _ thread: DayframeStallThread,
+    uptime: TimeInterval,
+    outcome: DayframeStallOutcome,
+    context: DayframeStallContext
+  ) -> DayframeStallRecord? {
+    lastPersisted[thread] = nil
+    guard let since = silentSince(thread) else { return nil }
+    if var record = open.removeValue(forKey: thread) {
+      record.outcome = outcome
+      record.durationMs = milliseconds(uptime - since)
+      return record
+    }
+    guard uptime - since >= Self.threshold else { return nil }
+    var record = newRecord(thread, since: since, uptime: uptime, context: context)
+    record.outcome = outcome
+    return record
+  }
+
+  private func newRecord(
+    _ thread: DayframeStallThread,
+    since: TimeInterval,
+    uptime: TimeInterval,
+    context: DayframeStallContext
+  ) -> DayframeStallRecord {
+    DayframeStallRecord(
+      id: context.makeId(),
+      thread: thread,
+      startedAt: context.date.addingTimeInterval(-(uptime - since)),
+      durationMs: milliseconds(uptime - since),
+      outcome: nil,
+      jsTasks: context.jsTasks,
+      lastJsTask: context.lastJsTask,
+      appBuild: context.appBuild
+    )
+  }
+
+  private func milliseconds(_ seconds: TimeInterval) -> Int {
+    Int((max(0, seconds) * 1000).rounded())
   }
 }
 
-/// MetricKit diagnostics reduced to what support needs at a glance. The full payload (call stacks of
-/// binary images and offsets, no user data) is kept alongside, capped in size.
+/// MetricKit diagnostics, kept as an allowlist: call stacks (binary names, UUIDs, offsets, addresses,
+/// sample counts) and named metadata only. Exception messages, format strings and arguments, which can
+/// carry app data, and any field Apple adds later, are dropped before anything is saved (Codex r1 on
+/// #525).
 enum DayframeMetricKitSummary {
   static let kinds = [
     "crashDiagnostics": "crash",
@@ -136,11 +187,39 @@ enum DayframeMetricKitSummary {
     "diskWriteExceptionDiagnostics": "diskWrite",
     "appLaunchDiagnostics": "launch"
   ]
-  private static let metaDataKeys = [
+  private static let summaryKeys = [
     "appBuildVersion", "appVersion", "osVersion", "exceptionType", "exceptionCode", "signal",
     "terminationReason", "hangDuration", "launchDuration", "totalCPUTime", "totalSampledTime",
     "writesCaused"
   ]
+  private static let metaDataKeys = Set(summaryKeys + ["deviceType", "platformArchitecture", "isTestFlightApp", "lowPowerModeEnabled"])
+  /// Only the exception's type and name, never its message, format string or arguments.
+  private static let exceptionReasonKeys: Set<String> = ["exceptionType", "exceptionName", "className"]
+  private static let frameKeys: Set<String> = [
+    "binaryUUID", "binaryName", "offsetIntoBinaryTextSegment", "address", "sampleCount"
+  ]
+
+  /// The payload reduced to the allowlist; every report is saved and shared only in this form.
+  static func sanitize(_ payload: [String: Any]) -> [String: Any] {
+    var clean: [String: Any] = [:]
+    for key in ["timeStampBegin", "timeStampEnd"] {
+      if let value = payload[key] as? String { clean[key] = value }
+    }
+    for key in kinds.keys {
+      guard let diagnostics = payload[key] as? [[String: Any]] else { continue }
+      clean[key] = diagnostics.map { diagnostic -> [String: Any] in
+        var item: [String: Any] = [:]
+        if let metaData = diagnostic["diagnosticMetaData"] as? [String: Any] {
+          item["diagnosticMetaData"] = sanitizeMetaData(metaData)
+        }
+        if let tree = diagnostic["callStackTree"] as? [String: Any] {
+          item["callStackTree"] = sanitizeTree(tree)
+        }
+        return item
+      }
+    }
+    return clean
+  }
 
   static func summarize(_ payload: [String: Any]) -> [[String: Any]] {
     let begin = payload["timeStampBegin"] as? String
@@ -152,8 +231,8 @@ enum DayframeMetricKitSummary {
         if let begin { summary["timeStampBegin"] = begin }
         if let end { summary["timeStampEnd"] = end }
         let metaData = diagnostic["diagnosticMetaData"] as? [String: Any] ?? [:]
-        for name in metaDataKeys {
-          if let value = metaData[name], value is String || value is NSNumber {
+        for name in summaryKeys {
+          if let value = metaData[name], isScalar(value) {
             summary[name] = value
           }
         }
@@ -162,17 +241,51 @@ enum DayframeMetricKitSummary {
     }
   }
 
-  /// The same payload can be delivered more than once (live, then again in past payloads).
+  /// The same payload can be delivered more than once (live, then again in past payloads); distinct
+  /// payloads that share a window and counts are still distinct. FNV-1a over the canonical JSON.
   static func identity(_ payload: [String: Any]) -> String {
-    let counts = kinds.keys.sorted().map { "\($0)=\((payload[$0] as? [Any])?.count ?? 0)" }
-    let key = ([payload["timeStampBegin"] as? String ?? "", payload["timeStampEnd"] as? String ?? ""] + counts)
-      .joined(separator: "|")
+    let data = (try? JSONSerialization.data(withJSONObject: sanitize(payload), options: [.sortedKeys])) ?? Data()
     var hash: UInt64 = 0xcbf29ce484222325
-    for byte in key.utf8 {
+    for byte in data {
       hash ^= UInt64(byte)
       hash = hash &* 0x100000001b3
     }
     return String(hash, radix: 16)
+  }
+
+  private static func sanitizeMetaData(_ metaData: [String: Any]) -> [String: Any] {
+    var clean: [String: Any] = [:]
+    for (key, value) in metaData where metaDataKeys.contains(key) && isScalar(value) {
+      clean[key] = value
+    }
+    if let reason = metaData["objectiveCexceptionReason"] as? [String: Any] {
+      clean["objectiveCexceptionReason"] = reason.filter { exceptionReasonKeys.contains($0.key) && isScalar($0.value) }
+    }
+    return clean
+  }
+
+  private static func sanitizeTree(_ tree: [String: Any]) -> [String: Any] {
+    var clean: [String: Any] = [:]
+    if let perThread = tree["callStackPerThread"], isScalar(perThread) { clean["callStackPerThread"] = perThread }
+    if let stacks = tree["callStacks"] as? [[String: Any]] {
+      clean["callStacks"] = stacks.map { stack -> [String: Any] in
+        var item: [String: Any] = [:]
+        if let attributed = stack["threadAttributed"], isScalar(attributed) { item["threadAttributed"] = attributed }
+        if let frames = stack["callStackRootFrames"] as? [[String: Any]] { item["callStackRootFrames"] = frames.map(sanitizeFrame) }
+        return item
+      }
+    }
+    return clean
+  }
+
+  private static func sanitizeFrame(_ frame: [String: Any]) -> [String: Any] {
+    var clean = frame.filter { frameKeys.contains($0.key) && isScalar($0.value) }
+    if let subFrames = frame["subFrames"] as? [[String: Any]] { clean["subFrames"] = subFrames.map(sanitizeFrame) }
+    return clean
+  }
+
+  private static func isScalar(_ value: Any) -> Bool {
+    value is String || value is NSNumber
   }
 }
 
@@ -214,10 +327,11 @@ struct DayframeDiagnosticsStore {
       isDirectory: false
     )
     if FileManager.default.fileExists(atPath: url.path) { return true }
+    let clean = DayframeMetricKitSummary.sanitize(payload)
     var report: [String: Any] = [
       "receivedAt": ISO8601DateFormatter().string(from: receivedAt),
-      "summary": DayframeMetricKitSummary.summarize(payload),
-      "payload": payload
+      "summary": DayframeMetricKitSummary.summarize(clean),
+      "payload": clean
     ]
     var data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
     if (data?.count ?? Int.max) > Self.maxReportBytes {
@@ -241,6 +355,11 @@ struct DayframeDiagnosticsStore {
       }
       return object
     }
+  }
+
+  /// For Sync help's line: no payloads, so nothing large crosses to JS on every visit.
+  func overview() -> (stalls: [DayframeStallRecord], reportCount: Int) {
+    (Array(stalls().suffix(3)), reportURLs().count)
   }
 
   func clear() {

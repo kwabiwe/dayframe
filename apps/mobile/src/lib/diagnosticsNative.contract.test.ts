@@ -23,7 +23,12 @@ describe("native freeze and crash diagnostics", () => {
     const core = read("ios/Dayframe/DayframeDiagnosticsCore.swift");
 
     expect(service).toContain("MXMetricManager.shared.add(self)");
-    expect(service).toContain("MXMetricManager.shared.pastDiagnosticPayloads");
+    // Past payloads are read on the diagnostics queue, not on the launch path.
+    const start = service.slice(service.indexOf("func start()"), service.indexOf("func didReceive"));
+    expect(start).toContain("self.ingest(MXMetricManager.shared.pastDiagnosticPayloads)");
+    expect(start.indexOf("queue.async")).toBeLessThan(start.indexOf("pastDiagnosticPayloads"));
+    // Reports are saved only in their allowlisted form.
+    expect(read("ios/Dayframe/DayframeDiagnosticsCore.swift")).toContain("let clean = DayframeMetricKitSummary.sanitize(payload)");
     expect(service).toContain(".applicationSupportDirectory");
     expect(service + core).not.toMatch(/forSecurityApplicationGroupIdentifier|DayframeSharedStorageConfiguration/);
     expect(core).toContain("values.isExcludedFromBackup = true");
@@ -34,7 +39,9 @@ describe("native freeze and crash diagnostics", () => {
     const setActive = service.slice(service.indexOf("private func setActive"), service.indexOf("private func probe"));
 
     expect(setActive).toContain("timer?.cancel()");
-    expect(setActive).toContain("tracker.resignedActive(uptime: uptime).forEach(save)");
+    expect(setActive).toContain("tracker.resignedActive(uptime: uptime, context: context(for: .js)).forEach(save)");
+    // Main is timed from an unanswered probe, so a late tick never counts against it (Codex r1 on #525).
+    expect(service.indexOf("tracker.sentMainProbe(uptime: uptime)")).toBeLessThan(service.indexOf("DispatchQueue.main.async { [weak self] in"));
     expect(service).toContain("UIApplication.willResignActiveNotification");
     expect(service).toContain("@objc var methodQueue: DispatchQueue { DayframeDiagnosticsService.shared.queue }");
   });

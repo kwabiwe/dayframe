@@ -27,6 +27,7 @@ function fakeNative() {
   return {
     jsAnswered: vi.fn<() => void>(),
     setJsTasks: vi.fn<(tasks: JsTaskLabel[], last: JsTaskLabel | null) => void>(),
+    overview: vi.fn(async () => ({ stalls: [], reports: [], reportCount: 0 })),
     snapshot: vi.fn(async () => ({ stalls: [], reports: [] })),
     clear: vi.fn(async () => undefined)
   } satisfies NativeDiagnostics;
@@ -97,5 +98,7 @@ describe("JS stall watchdog", () => {
     expect(freezeDiagnosticsSummary({ stalls: [stall], reports: [{ summary: [] }] }, () => "06:36")).toBe(
       "1 pause, last 06:36 for 42 s · 1 system report"
     );
+    // The overview carries a count instead of the reports themselves.
+    expect(freezeDiagnosticsSummary({ stalls: [], reports: [], reportCount: 2 }, () => "x")).toBe("2 system reports");
   });
 });

@@ -8,57 +8,76 @@ func check(_ condition: Bool, _ label: String) {
 }
 
 var ids = 0
-func makeId() -> String {
-  ids += 1
-  return "stall-\(ids)"
-}
 let date = Date(timeIntervalSince1970: 1_800_000_000)
-func check(_ tracker: inout DayframeStallTracker, at uptime: TimeInterval, tasks: [String] = []) -> [DayframeStallRecord] {
-  tracker.check(
-    uptime: uptime, date: date.addingTimeInterval(uptime), jsTasks: tasks, lastJsTask: tasks.last,
-    appBuild: "126", makeId: makeId
+func context(_ uptime: TimeInterval, tasks: [String] = []) -> DayframeStallContext {
+  DayframeStallContext(
+    date: date.addingTimeInterval(uptime), jsTasks: tasks, lastJsTask: tasks.last, appBuild: "126",
+    makeId: { ids += 1; return "stall-\(ids)" }
   )
 }
 
 // Nothing is watched in the background, and time there is never a stall.
 var tracker = DayframeStallTracker()
-check(check(&tracker, at: 100).isEmpty, "inactive: no stalls")
+check(tracker.check(uptime: 100, context: context(100)).isEmpty, "inactive: no stalls")
+tracker.sentMainProbe(uptime: 100)
+check(tracker.answered(.main, uptime: 200, context: context(200)) == nil, "inactive: answers record nothing")
 tracker.becameActive(uptime: 100)
-check(check(&tracker, at: 102.9).isEmpty, "under the threshold: no stall")
 
-// Main silent for 3 s opens a stall dated from its last answer, with the JS tasks then running.
-var due = check(&tracker, at: 103, tasks: ["bootstrap", "sync-queue"])
+// Main: a probe unanswered for 3 s opens a stall timed from the probe, with the JS tasks then running.
+tracker.sentMainProbe(uptime: 100)
+check(tracker.check(uptime: 102.9, context: context(102.9)).isEmpty, "under the threshold: no stall")
+tracker.sentMainProbe(uptime: 101.9)
+var due = tracker.check(uptime: 103, context: context(103, tasks: ["bootstrap", "sync-queue"]))
 check(due.count == 1 && due[0].thread == .main, "main stall opens: \(due)")
-check(due[0].startedAt == date.addingTimeInterval(100), "dated from the last answer")
+check(due[0].startedAt == date.addingTimeInterval(100), "timed from the first unanswered probe")
 check(due[0].durationMs == 3000 && due[0].outcome == nil, "open, 3 s so far")
 check(due[0].jsTasks == ["bootstrap", "sync-queue"] && due[0].lastJsTask == "sync-queue", "tasks recorded")
 check(due[0].appBuild == "126", "build recorded")
-
-// JS has never answered (watchdog not installed yet): no JS stall however long.
-check(check(&tracker, at: 104).isEmpty, "open stall not re-saved within 5 s")
-due = check(&tracker, at: 108)
+check(tracker.check(uptime: 104, context: context(104)).isEmpty, "open stall not re-saved within 5 s")
+due = tracker.check(uptime: 108, context: context(108))
 check(due.count == 1 && due[0].id == "stall-1" && due[0].durationMs == 8000, "open stall re-saved after 5 s: \(due)")
-
-// Main answers: the stall ends as recovered with its full length.
-let recovered = tracker.answered(.main, uptime: 109.5)
+let recovered = tracker.answered(.main, uptime: 109.5, context: context(109.5))
 check(recovered?.id == "stall-1" && recovered?.outcome == .recovered && recovered?.durationMs == 9500, "recovered: \(String(describing: recovered))")
-check(tracker.answered(.main, uptime: 110) == nil, "an answer with no open stall returns nothing")
+check(tracker.answered(.main, uptime: 110, context: context(110)) == nil, "an answer with nothing waiting returns nothing")
 
-// JS answers once, then goes silent while main keeps answering: a JS stall.
-_ = tracker.answered(.js, uptime: 110)
-_ = tracker.answered(.main, uptime: 113)
-due = check(&tracker, at: 113.5, tasks: ["location-foreground"])
-check(due.count == 1 && due[0].thread == .js && due[0].lastJsTask == "location-foreground", "JS stall: \(due)")
+// A late watchdog tick is not a main stall: the probe is sent late, and main answers it at once
+// (Codex r1 on #525).
+check(tracker.check(uptime: 115, context: context(115)).isEmpty, "a 5 s gap between ticks with no probe waiting is nothing")
+tracker.sentMainProbe(uptime: 115)
+check(tracker.answered(.main, uptime: 115.01, context: context(115.01)) == nil, "a prompt answer to a late probe is nothing")
 
-// Leaving the front ends the open stall as `left` (a force-close passes through here).
-let left = tracker.resignedActive(uptime: 120)
-check(left.count == 1 && left[0].outcome == .left && left[0].durationMs == 10_000, "left: \(left)")
-check(check(&tracker, at: 200).isEmpty, "inactive again: nothing")
-check(tracker.answered(.js, uptime: 200) == nil, "answers in the background record nothing")
+// JS has not answered yet (watchdog not installed): never reported.
+check(tracker.check(uptime: 130, context: context(130)).isEmpty, "no JS stall before JS first answers")
+
+// JS: a gap of 3 s between answers opens a stall.
+_ = tracker.answered(.js, uptime: 130, context: context(130))
+due = tracker.check(uptime: 133.5, context: context(133.5, tasks: ["location-replay"]))
+check(due.count == 1 && due[0].thread == .js && due[0].lastJsTask == "location-replay", "JS stall: \(due)")
+let jsRecovered = tracker.answered(.js, uptime: 134, context: context(134))
+check(jsRecovered?.outcome == .recovered && jsRecovered?.durationMs == 4000, "JS recovered: \(String(describing: jsRecovered))")
+
+// A JS pause that starts and ends between two checks is still recorded (Codex r1 on #525).
+check(tracker.check(uptime: 134.25, context: context(134.25)).isEmpty, "fresh after the answer")
+check(tracker.check(uptime: 136.75, context: context(136.75)).isEmpty, "2.75 s at the check: nothing yet")
+let between = tracker.answered(.js, uptime: 137.5, context: context(137.5, tasks: ["health-wake"]))
+check(between?.outcome == .recovered && between?.durationMs == 3500 && between?.jsTasks == ["health-wake"], "recorded on the late answer: \(String(describing: between))")
+check(between?.startedAt == date.addingTimeInterval(134), "dated from the previous answer")
+
+// Leaving the front ends an open stall as `left`, and also one overdue but not yet checked.
+due = tracker.check(uptime: 141, context: context(141))
+check(due.count == 1 && due[0].thread == .js, "JS stall open before leaving")
+tracker.sentMainProbe(uptime: 141)
+let left = tracker.resignedActive(uptime: 145, context: context(145))
+check(left.count == 2 && left.allSatisfy { $0.outcome == .left }, "both end as left: \(left)")
+check(left.first { $0.thread == .js }?.durationMs == 7500, "JS left with its full length")
+check(left.first { $0.thread == .main }?.durationMs == 4000, "an overdue main probe is recorded when leaving")
+check(tracker.check(uptime: 200, context: context(200)).isEmpty, "inactive again: nothing")
+check(tracker.answered(.js, uptime: 200, context: context(200)) == nil, "answers in the background record nothing")
 
 // Coming back starts afresh: the background gap is not a stall.
 tracker.becameActive(uptime: 500)
-check(check(&tracker, at: 501).isEmpty, "fresh after becoming active")
+check(tracker.check(uptime: 501, context: context(501)).isEmpty, "fresh after becoming active")
+check(tracker.answered(.js, uptime: 502, context: context(502)) == nil, "the first JS answer after becoming active is never a stall")
 
 // Store: bounded, private, survives a restart, an open stall is replaced by its later save.
 let directory = FileManager.default.temporaryDirectory
@@ -107,13 +126,49 @@ check(summary.contains {
   $0["kind"] as? String == "crash" && ($0["terminationReason"] as? String)?.contains("dead10cc") == true
     && $0["regionFormat"] == nil
 }, "crash summarised without other metadata")
+// Only allowlisted fields survive: no exception message, format string, arguments or unknown keys.
+let leaky: [String: Any] = [
+  "timeStampBegin": "2026-10-22 08:00:00", "timeStampEnd": "2026-10-22 09:00:00", "newApplePayloadField": "x",
+  "crashDiagnostics": [[
+    "unknownDiagnosticField": "secret",
+    "diagnosticMetaData": [
+      "exceptionType": 1, "appBuildVersion": "126", "someFutureKey": "secret",
+      "objectiveCexceptionReason": [
+        "composedMessage": "secret entry title", "formatString": "%@", "arguments": ["secret"],
+        "exceptionType": "NSInvalidArgumentException", "exceptionName": "NSInvalidArgumentException", "className": "NSException"
+      ]
+    ],
+    "callStackTree": ["callStackPerThread": true, "callStacks": [[
+      "threadAttributed": true,
+      "callStackRootFrames": [["binaryName": "Dayframe", "binaryUUID": "U", "offsetIntoBinaryTextSegment": 10, "address": 11, "sampleCount": 1, "label": "secret",
+        "subFrames": [["binaryName": "UIKitCore", "address": 12, "extra": "secret"]]]]
+    ]]]
+  ]]
+]
+let clean = DayframeMetricKitSummary.sanitize(leaky)
+let cleanText = String(data: try JSONSerialization.data(withJSONObject: clean, options: [.sortedKeys]), encoding: .utf8)!
+check(!cleanText.contains("secret") && !cleanText.contains("%@") && !cleanText.contains("newApplePayloadField"), "sanitized: \(cleanText)")
+check(cleanText.contains("NSInvalidArgumentException") && cleanText.contains("UIKitCore") && cleanText.contains("\"offsetIntoBinaryTextSegment\":10"), "stack and exception type kept: \(cleanText)")
+check(store.saveReport(leaky, receivedAt: date), "leaky report saved")
+let savedText = String(data: try JSONSerialization.data(withJSONObject: store.reports(), options: [.sortedKeys]), encoding: .utf8)!
+check(!savedText.contains("secret"), "nothing unsanitized is saved")
+store.clear()
+
+// Different payloads that share a window and counts are both kept (Codex r1 on #525).
+var otherHang = payload
+otherHang["hangDiagnostics"] = [["diagnosticMetaData": ["hangDuration": "9 sec"], "callStackTree": ["callStacks": []]]]
+check(DayframeMetricKitSummary.identity(payload) != DayframeMetricKitSummary.identity(otherHang), "distinct payloads, distinct identities")
+check(store.saveReport(otherHang, receivedAt: date), "other hang saved")
+
 check(store.saveReport(payload, receivedAt: date), "report saved")
 check(store.saveReport(payload, receivedAt: date.addingTimeInterval(60)), "duplicate accepted")
-check(store.reports().count == 1, "duplicate stored once")
+check(store.reports().count == 2, "duplicate stored once, distinct payload kept")
+check(store.overview().reportCount == 2 && store.overview().stalls.count <= 3, "overview counts without payloads")
 check(store.reports()[0]["payload"] != nil, "small payload kept whole")
+let frame: [String: Any] = ["binaryName": String(repeating: "b", count: 200), "binaryUUID": "U", "offsetIntoBinaryTextSegment": 1, "address": 2, "sampleCount": 1]
 let huge: [String: Any] = [
   "timeStampBegin": "2026-10-23 06:00:00", "timeStampEnd": "2026-10-23 07:00:00",
-  "crashDiagnostics": [["callStackTree": ["frames": String(repeating: "x", count: 500_000)], "diagnosticMetaData": [:]]]
+  "crashDiagnostics": [["callStackTree": ["callStacks": [["threadAttributed": true, "callStackRootFrames": Array(repeating: frame, count: 3000)]]], "diagnosticMetaData": [:]]]
 ]
 check(store.saveReport(huge, receivedAt: date), "huge report saved")
 let newest = store.reports()[0]

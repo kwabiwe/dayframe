@@ -17,6 +17,8 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   private var timer: DispatchSourceTimer?
   private var jsTasks: [String] = []
   private var lastJsTask: String?
+  /// Every label running at some point since JS last answered.
+  private var jsTasksSinceAnswer: Set<String> = []
   private var started = false
   private let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
 
@@ -26,7 +28,6 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     started = true
     let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("DayframeDiagnostics", isDirectory: true)
-    let past = MXMetricManager.shared.pastDiagnosticPayloads
     MXMetricManager.shared.add(self)
     let center = NotificationCenter.default
     center.addObserver(self, selector: #selector(didBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
@@ -34,8 +35,9 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     let activeNow = UIApplication.shared.applicationState == .active
     queue.async {
       self.store = directory.map { DayframeDiagnosticsStore(directory: $0) }
-      self.ingest(past)
       if activeNow { self.setActive(true) }
+      // Read off the main thread, after launch work (Codex r1 on #525).
+      self.ingest(MXMetricManager.shared.pastDiagnosticPayloads)
     }
   }
 
@@ -46,25 +48,25 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   // MARK: React Native (called on `queue`)
 
   func jsAnswered() {
-    _ = tracker.answered(.js, uptime: ProcessInfo.processInfo.systemUptime).map(save)
+    _ = tracker.answered(.js, uptime: ProcessInfo.processInfo.systemUptime, context: context(for: .js)).map(save)
+    jsTasksSinceAnswer = Set(jsTasks)
   }
 
   func setJsTasks(_ tasks: [String], last: String?) {
     jsTasks = Array(tasks.prefix(8))
     lastJsTask = last
+    jsTasksSinceAnswer.formUnion(jsTasks)
+  }
+
+  /// Sync help's line: the last few pauses and how many reports, without payloads.
+  func overview() -> [String: Any] {
+    let overview = store?.overview() ?? (stalls: [], reportCount: 0)
+    return ["stalls": overview.stalls.compactMap(Self.dictionary), "reports": [], "reportCount": overview.reportCount]
   }
 
   func snapshot() -> [String: Any] {
-    let stalls = (store?.stalls() ?? []).compactMap { record -> [String: Any]? in
-      guard
-        let data = try? Self.encoder.encode(record),
-        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-      else {
-        return nil
-      }
-      return object
-    }
-    return ["stalls": stalls, "reports": store?.reports() ?? []]
+    let reports = store?.reports() ?? []
+    return ["stalls": (store?.stalls() ?? []).compactMap(Self.dictionary), "reports": reports, "reportCount": reports.count]
   }
 
   func clear() {
@@ -94,27 +96,44 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     } else {
       timer?.cancel()
       timer = nil
-      tracker.resignedActive(uptime: uptime).forEach(save)
+      tracker.resignedActive(uptime: uptime, context: context(for: .js)).forEach(save)
     }
   }
 
   /// Once a second in front: ask the main thread to answer, and look for silent threads.
+  /// Once a second in front: look for silent threads, then ask main to answer. A main stall is timed
+  /// from an unanswered probe, so a late tick here never counts against main.
   private func probe() {
+    let uptime = ProcessInfo.processInfo.systemUptime
+    tracker.check(uptime: uptime, context: context(for: .js)).forEach(save)
+    tracker.sentMainProbe(uptime: uptime)
     DispatchQueue.main.async { [weak self] in
-      let uptime = ProcessInfo.processInfo.systemUptime
+      let answeredAt = ProcessInfo.processInfo.systemUptime
       self?.queue.async {
         guard let self else { return }
-        _ = self.tracker.answered(.main, uptime: uptime).map(self.save)
+        _ = self.tracker.answered(.main, uptime: answeredAt, context: self.context(for: .main)).map(self.save)
       }
     }
-    tracker.check(
-      uptime: ProcessInfo.processInfo.systemUptime,
+  }
+
+  private func context(for thread: DayframeStallThread) -> DayframeStallContext {
+    DayframeStallContext(
       date: Date(),
-      jsTasks: jsTasks,
+      jsTasks: thread == .js ? jsTasksSinceAnswer.sorted() : jsTasks,
       lastJsTask: lastJsTask,
       appBuild: appBuild,
       makeId: { UUID().uuidString }
-    ).forEach(save)
+    )
+  }
+
+  private static func dictionary(_ record: DayframeStallRecord) -> [String: Any]? {
+    guard
+      let data = try? encoder.encode(record),
+      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else {
+      return nil
+    }
+    return object
   }
 
   private func save(_ record: DayframeStallRecord) {
@@ -152,6 +171,11 @@ final class DayframeDiagnosticsModule: NSObject {
   @objc(setJsTasks:last:)
   func setJsTasks(_ tasks: [String], last: String?) {
     DayframeDiagnosticsService.shared.setJsTasks(tasks, last: last)
+  }
+
+  @objc(overview:rejecter:)
+  func overview(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    resolve(DayframeDiagnosticsService.shared.overview())
   }
 
   @objc(snapshot:rejecter:)
