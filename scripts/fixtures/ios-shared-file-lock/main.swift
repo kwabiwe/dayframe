@@ -192,4 +192,15 @@ let normalAssertion = DayframeSharedFileLock.expiringActivityAssertion("test") {
 normalAssertion?.end()
 check(normal.returned.wait(timeout: .now() + 2) == .success, "ending the assertion ends the activity")
 
+// Taking the kernel lock and recording it are one step: an expiry right after finds it and releases
+// it before the assertion ends; an expiry right before means no lock is taken (Codex r3 on #524).
+let raceDescriptor = open(lockURL.path, O_RDWR)
+var raceEnds: [Bool] = []
+let racing = DayframeSharedFileLockAssertion { raceEnds.append(isLockedElsewhere()) }
+check(racing.tryLock(raceDescriptor) == .locked && isLockedElsewhere(), "tryLock takes the lock")
+racing.expire()
+check(raceEnds == [false], "an expiry right after the lock releases it before ending: \(raceEnds)")
+check(racing.tryLock(raceDescriptor) == .expired && !isLockedElsewhere(), "after expiry no lock is taken")
+close(raceDescriptor)
+
 print("Native shared file lock validation passed: \(checks) checks.")

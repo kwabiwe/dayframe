@@ -42,7 +42,7 @@ enum DayframeSharedFileLock {
       return nil
     }
     defer { close(descriptor) }
-    guard acquire(descriptor, timeout: timeout, stop: { assertion.isExpired }) else {
+    guard acquire(descriptor, timeout: timeout, assertion: assertion) else {
       return nil
     }
     // Unlock, then let the assertion forget the descriptor, before it is closed and before the
@@ -51,25 +51,26 @@ enum DayframeSharedFileLock {
       flock(descriptor, LOCK_UN)
       assertion.unlocked()
     }
-    guard assertion.locked(descriptor) else {
-      return nil
-    }
     return body()
   }
 
-  private static func acquire(_ descriptor: Int32, timeout: TimeInterval, stop: () -> Bool) -> Bool {
+  private static func acquire(
+    _ descriptor: Int32,
+    timeout: TimeInterval,
+    assertion: DayframeSharedFileLockAssertion
+  ) -> Bool {
     let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, timeout) * 1_000_000_000)
-    while !stop() {
-      if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+    while true {
+      switch assertion.tryLock(descriptor) {
+      case .locked:
         return true
-      }
-      let failure = errno
-      guard failure == EWOULDBLOCK || failure == EINTR, DispatchTime.now().uptimeNanoseconds < deadline else {
+      case .expired, .failed:
         return false
+      case .busy:
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return false }
+        usleep(10_000)
       }
-      usleep(10_000)
     }
-    return false
   }
 
   /// An assertion from an expiring-activity API shaped like `ProcessInfo.performExpiringActivity`: its
@@ -147,13 +148,25 @@ final class DayframeSharedFileLockAssertion: @unchecked Sendable {
     lock.withLock { expired }
   }
 
-  /// Records the locked descriptor so an expiry can release it; false once expired (the caller then
-  /// unlocks and runs nothing).
-  func locked(_ descriptor: Int32) -> Bool {
+  enum Attempt {
+    case locked
+    case busy
+    case expired
+    case failed
+  }
+
+  /// One non-blocking attempt at the file lock. The attempt and the record of the locked descriptor
+  /// happen under this assertion's lock, so an expiry is either before it (no lock is taken) or after
+  /// it (the expiry releases the lock); never between the two (Codex r3 on #524).
+  func tryLock(_ descriptor: Int32) -> Attempt {
     lock.withLock {
-      guard !expired && !ended else { return false }
-      lockedDescriptor = descriptor
-      return true
+      guard !expired && !ended else { return .expired }
+      if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+        lockedDescriptor = descriptor
+        return .locked
+      }
+      let failure = errno
+      return failure == EWOULDBLOCK || failure == EINTR ? .busy : .failed
     }
   }
 
