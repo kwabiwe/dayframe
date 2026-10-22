@@ -1,5 +1,5 @@
 import * as Location from "expo-location";
-import { distanceMeters, rankVenues, venueNamedLikeArea, type LocationReviewEvidenceDto, type VenueStay } from "@dayframe/shared";
+import { distanceMeters, rankVenues, venueNamedLikeArea, type LocationReviewEvidenceDto, type VenueKind, type VenueStay } from "@dayframe/shared";
 import {
   addSearchErrorListener,
   addSuggestionsListener,
@@ -44,6 +44,8 @@ export type NearbyVenue = NearbyPointOfInterest & {
   suggested: boolean;
   /** Named like an area of interest the visit lies in: listed however far Apple's pin for it is. */
   inArea: boolean;
+  /** The ranker's kind of place ("station", "supermarket", …); the transit guess reads it. */
+  kind: VenueKind;
 };
 
 const normalisePlaceName = (name: string) => name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -72,7 +74,8 @@ export function rankedNearbyPlaces(
     inside: venue.children.map((child) => child.title),
     share: venue.share,
     suggested: ranking.suggestion?.candidate.id === venue.candidate.id,
-    inArea: venue.insideArea
+    inArea: venue.insideArea,
+    kind: venue.kind
   }));
 }
 

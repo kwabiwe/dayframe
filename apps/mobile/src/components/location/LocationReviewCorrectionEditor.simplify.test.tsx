@@ -82,6 +82,7 @@ vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: () => null }));
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("expo-location", () => ({ getForegroundPermissionsAsync: vi.fn(), getLastKnownPositionAsync: vi.fn() }));
 vi.mock("@/lib/placeSearch", () => import("../../lib/placeSearch"));
+vi.mock("@/lib/transitGuess", () => import("../../lib/transitGuess"));
 
 const picker = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 vi.mock("../ActivityPickerSheet", () => ({
@@ -108,6 +109,7 @@ const categories = [
   { id: "cat-gym", name: "Training", color: "orange", icon: null, isPinned: false },
   { id: "cat-read", name: "Reading", color: "purple", icon: null, isPinned: false }
 ] as never[];
+let categoryList = categories;
 
 function stay({ matched }: { matched: boolean }) {
   return {
@@ -166,7 +168,7 @@ function editor(evidence: LocationReviewEvidenceDto, recent: string[] = [], revi
   return (
     <LocationReviewCorrectionEditor
       adjacentReview={undefined}
-      categories={categories}
+      categories={categoryList}
       evidence={evidence}
       isFocused={focused}
       onCreateActivity={async () => ({ id: "cat-new" })}
@@ -640,6 +642,62 @@ describe("What did you do? (D1)", () => {
       native.searchNearby.mockImplementation(async (request: { requestId: string }) => confident(request));
       await render(stay({ matched: true }));
       expect(onVenueSuggested).not.toHaveBeenCalled();
+    });
+  });
+
+  // Transit, a best guess only (owner, 21 Oct 2026, option A).
+  describe("transit best guess", () => {
+    beforeEach(() => {
+      categoryList = [...categories, { id: "cat-around", name: "Getting around", color: "rust", icon: null, isPinned: false, starterKey: "travel" } as never];
+    });
+    afterEach(() => {
+      categoryList = categories;
+    });
+    const drive = (travelMode: string | null = "automotive") => {
+      const evidence = journey() as unknown as { segment: Record<string, unknown>; map: Record<string, unknown> };
+      evidence.segment.travelMode = travelMode;
+      evidence.map.route = { type: "LineString", coordinates: [[20, 10], [20.015, 10], [20.03, 10]] };
+      return evidence as unknown as LocationReviewEvidenceDto;
+    };
+    const stations = (first: string, second: string) => {
+      let call = 0;
+      return async (request: { requestId: string }) => ({
+        requestId: request.requestId,
+        areasOfInterest: [],
+        places: [{ id: `s${call}`, requestId: request.requestId, title: call++ === 0 ? first : second, subtitle: null, distanceMeters: 60,
+          category: "PublicTransport", offsetEastMeters: 60, offsetNorthMeters: 0, source: "nearby" }]
+      });
+    };
+
+    it("says it looks like public transport and offers the chip, which fills the name and Getting around", async () => {
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Kelp Station"));
+      await render(drive());
+      expect(native.searchNearby).toHaveBeenCalledTimes(2);
+      expect(text(byTestId("location-evidence-transit-line")[0])).toBe("Looks like public transport · Exampleton Station → Kelp Station");
+      await press(byTestId("location-evidence-transit-chip")[0]);
+      // Applied: the chip goes, the line stays.
+      expect(byTestId("location-evidence-transit-chip")).toHaveLength(0);
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(1);
+      await press(primary());
+      expect(onResolve.mock.calls[0][0]).toMatchObject({ edit: expect.objectContaining({ description: "Public transport", categoryId: "cat-around" }) });
+    });
+
+    it("changes nothing without a tap and offers nothing when an end is no station", async () => {
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Alder Books (Stop K)"));
+      await render(drive(null));
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(0);
+      await press(primary());
+      expect(onResolve.mock.calls[0][0]).not.toMatchObject({ edit: expect.objectContaining({ description: "Public transport" }) });
+    });
+
+    it("never checks a walk, a ride or a run", async () => {
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Kelp Station"));
+      for (const mode of ["walking", "cycling", "running"]) {
+        await render(drive(mode));
+        act(() => tree!.unmount());
+        tree = undefined;
+      }
+      expect(native.searchNearby).not.toHaveBeenCalled();
     });
   });
 });

@@ -81,6 +81,7 @@ vi.mock("../TimeWheelPanel", () => ({
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("expo-location", () => ({ getForegroundPermissionsAsync: vi.fn(), getLastKnownPositionAsync: vi.fn() }));
 vi.mock("@/lib/placeSearch", () => import("../../lib/placeSearch"));
+vi.mock("@/lib/transitGuess", () => import("../../lib/transitGuess"));
 
 const picker = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 vi.mock("../ActivityPickerSheet", () => ({

@@ -48,6 +48,8 @@ vi.mock("@/lib/motion", () => ({
   localPresenceEntering: () => ({ marker: "local-enter" }),
   localPresenceExiting: () => ({ marker: "local-exit" })
 }));
+// The transit guess never runs here (no native nearby provider).
+vi.mock("@/lib/transitGuess", () => ({ guessTransit: async () => null, TRANSIT_NAME: "Public transport", transitGuessEndpoints: () => null, transitGuessLine: () => "" }));
 vi.mock("@/lib/placeSearch", () => ({
   createNativeNearbyPointOfInterestProvider: () => null,
   createNativePlaceSearchProvider: () => null,
