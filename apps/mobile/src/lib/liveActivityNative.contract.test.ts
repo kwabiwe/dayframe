@@ -209,7 +209,9 @@ describe("native Live Activity presentation contract", () => {
         /<key>DayframeSharedAppGroupIdentifier<\/key>\s*<string>\$\(DAYFRAME_APP_GROUP\)<\/string>/
       );
     }
-    expect(sharedStorage).toContain("flock(descriptor, LOCK_EX)");
+    // The cross-process queue lock lives in DayframeSharedFileLock (sharedContainerLock.contract.test.ts).
+    expect(project.match(/DayframeSharedFileLock\.swift in Sources/g)).toHaveLength(4);
+    expect(sharedStorage).toContain("DayframeSharedFileLock.withExclusiveLock(at: lockURL");
     expect(sharedStorage).toContain("options: .atomic");
     expect(sharedStorage).toContain("completeUntilFirstUserAuthentication");
     expect(sharedStorage).toContain('legacyKey = "dayframe.nativeShortcutQueue.v1"');

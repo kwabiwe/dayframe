@@ -95,6 +95,16 @@ class DayframeLiveActivityModule: NSObject {
     }
   }
 
+  @objc(setShortcutCatalog:resolver:rejecter:)
+  func setShortcutCatalog(
+    value: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DayframeShortcutCatalogStore.set(value)
+    resolve(nil)
+  }
+
   @objc(pendingShortcutEvents:rejecter:)
   func pendingShortcutEvents(
     resolve: @escaping RCTPromiseResolveBlock,

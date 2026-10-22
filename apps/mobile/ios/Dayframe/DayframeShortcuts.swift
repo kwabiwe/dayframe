@@ -377,10 +377,17 @@ private struct DayframeWorkspaceOptionsProvider: DynamicOptionsProvider {
   }
 }
 
-private enum DayframeShortcutCatalogStore {
+enum DayframeShortcutCatalogStore {
   private static let key = "dayframe.shortcutCatalog.v1"
 
-  static var catalog: DayframeShortcutCatalog {
+  /// The app mirrors its bootstrap here. Natively, and only when it changed: React Native's `Settings`
+  /// module would forward every later UserDefaults change to JS (TestFlight 124 0xDEAD10CC).
+  static func set(_ value: String) {
+    guard UserDefaults.standard.string(forKey: key) != value else { return }
+    UserDefaults.standard.set(value, forKey: key)
+  }
+
+  fileprivate static var catalog: DayframeShortcutCatalog {
     guard
       let value = UserDefaults.standard.string(forKey: key),
       let data = value.data(using: .utf8),
