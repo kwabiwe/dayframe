@@ -68,6 +68,7 @@ import {
   withTimerBackgroundExecutionReservation
 } from "./timerBackgroundExecution";
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
+import { withJsTask } from "./jsTasks";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -551,7 +552,11 @@ function noteReviewCountQuietly(owner: MobileAccountOwner | null, count: unknown
   void import("./reviewNudge").then(({ noteReviewCount }) => noteReviewCount(owner, count)).catch(() => undefined);
 }
 
-export async function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
+export function fetchBootstrap(options: { date?: string; signal?: AbortSignal; deadlineAt?: number } = {}): Promise<MobileBootstrap> {
+  return withJsTask("bootstrap", () => fetchBootstrapNow(options));
+}
+
+async function fetchBootstrapNow(options: { date?: string; signal?: AbortSignal; deadlineAt?: number }): Promise<MobileBootstrap> {
   const logoutAllowsResponse = captureBootstrapLogoutGuard();
   const requireLogoutAllowsResponse = () => { if (!logoutAllowsResponse()) throw new StaleMobileSessionResponseError(); };
   requireLogoutAllowsResponse();
@@ -1081,7 +1086,11 @@ export async function clearFailedQueuedEvents() {
   });
 }
 
-export async function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResult> {
+export function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResult> {
+  return withJsTask("sync-queue", () => syncQueueNow(options));
+}
+
+async function syncQueueNow(options: SyncQueueOptions): Promise<SyncQueueResult> {
   const { sync } = await withQueueMutation(async () => {
     const owner = await readActiveMobileAccount();
     if (!owner) {

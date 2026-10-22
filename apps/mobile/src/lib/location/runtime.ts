@@ -38,6 +38,7 @@ import {
 import { captureMotionActivitySafelyUnsafe } from "./motionActivity";
 import { createSerialMutationQueue } from "./mutationQueue";
 import { MAX_LOCATION_NATIVE_DRAIN_PASSES } from "./uploadPolicy";
+import { withJsTask } from "../jsTasks";
 
 const DEVICE_ID_KEY = "dayframe.location.deviceId.v2";
 // All OS start/stop/clear operations (including drains) share this runtime lane.
@@ -274,11 +275,13 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
   if (ownerIsCurrent(owner, revision)) void syncLocationEvidence().catch(recordLocationStoreError);
 }
 
-export async function syncLocationIntelligenceOnForeground(options: LocationSyncOptions = {}) {
-  if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
-  await drainNativeLocationSignalsInBatches();
-  await refreshLocalJournalReplayIfDue();
-  return syncLocationEvidence({ forceReplay: true, ...options });
+export function syncLocationIntelligenceOnForeground(options: LocationSyncOptions = {}) {
+  return withJsTask("location-foreground", async () => {
+    if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
+    await drainNativeLocationSignalsInBatches();
+    await withJsTask("location-replay", () => refreshLocalJournalReplayIfDue());
+    return syncLocationEvidence({ forceReplay: true, ...options });
+  });
 }
 
 // Call only inside withLocationCaptureLifecycle; all callers are in geofence.ts.
@@ -307,7 +310,9 @@ export async function getNativeLocationIntelligenceStatus() {
 export function drainNativeLocationSignals(limit = 100) {
   // Snapshot before waiting for the lifecycle lane; queued work cannot adopt B.
   const capture = captureLocationOwnership();
-  return withLocationCaptureLifecycle(() => drainNativeLocationSignalsUnsafe(limit, capture));
+  return withJsTask("location-drain", () =>
+    withLocationCaptureLifecycle(() => drainNativeLocationSignalsUnsafe(limit, capture))
+  );
 }
 
 async function drainNativeLocationSignalsUnsafe(limit = 100,

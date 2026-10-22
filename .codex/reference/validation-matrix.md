@@ -625,6 +625,17 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 3. Airplane mode: run a Start Shortcut, reopen Dayframe after reconnecting; the queued Start is delivered once.
 4. Leave Dayframe backgrounded with location on for several days of normal use: no new `0xdead10cc` report in Settings › Privacy & Security › Analytics Data or in App Store Connect.
 
+## Freeze and crash diagnostics (iPhone)
+
+Automated: `stallWatchdog.test.ts`, `jsTasks.test.ts`, `diagnosticsNative.contract.test.ts`, `bash scripts/validate-ios-diagnostics.sh` (compiles and runs `DayframeDiagnosticsCore` on macOS: stall thresholds, foreground-only watching, `left` on leaving, bounded private storage, MetricKit summaries and de-duplication), and a clean native iOS build.
+
+Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN`:
+
+1. Settings › Sync help shows "Pauses and crashes" with "None recorded on this iPhone" on a fresh install, and the list does not move when it loads.
+2. "Copy details for support" includes a `freezes` section (empty lists at first) and nothing else changed.
+3. After a day or two of normal use, the row or the export shows any MetricKit reports Apple delivered (none is also a pass).
+4. Background CPU over a 30-minute background window stays within the budget in `.codex/reference/performance.md` (the watchdog does nothing in the background).
+
 ## Bounded mobile sync recovery
 
 Run `npm run test --workspace @dayframe/mobile` and `npm run typecheck --workspace @dayframe/mobile`, including real SQLite Review/Location tests, full JSON body/validation deadlines, receipt-envelope matching, interrupted delivery, owner replacement, force coalescing, independent due-time scheduling, partial upload and shared prefetch-consumer cancellation. Verify manual Sync with one Health type failing, Review contention, retained Location batches, a refresh already in flight, and a 45-second deadline. Verify unresolved Review intent has Check again and no ambiguous-outcome discard. Keep Settings and header state truthful under ordinary retry/backoff. Capture normal/Reduce Motion, rapid repeat, navigation, VoiceOver and Dynamic Type evidence on the selected staging build; a clean Simulator build does not establish HealthKit or physical-device behaviour.
