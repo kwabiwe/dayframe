@@ -23,31 +23,49 @@ function swiftSources(directory: string): string[] {
  * hop inside either never changes which closure is checked (Codex r1 on #530).
  */
 export function codeOnly(source: string) {
+  const blank = (from: number, to: number) => source.slice(from, to).replace(/[^\n]/g, " ");
   let out = "";
   let index = 0;
   while (index < source.length) {
-    const rest = source.slice(index, index + 3);
-    if (rest.startsWith("//")) {
+    if (source.startsWith("//", index)) {
       const end = source.indexOf("\n", index);
       const stop = end === -1 ? source.length : end;
-      out += " ".repeat(stop - index);
+      out += blank(index, stop);
       index = stop;
-    } else if (rest.startsWith("/*")) {
-      const end = source.indexOf("*/", index + 2);
-      const stop = end === -1 ? source.length : end + 2;
-      out += source.slice(index, stop).replace(/[^\n]/g, " ");
-      index = stop;
-    } else if (rest === '"""' || source[index] === '"') {
-      const quote = rest === '"""' ? '"""' : '"';
-      let cursor = index + quote.length;
-      while (cursor < source.length && !source.startsWith(quote, cursor)) cursor += source[cursor] === "\\" ? 2 : 1;
-      const stop = Math.min(source.length, cursor + quote.length);
-      out += source.slice(index, stop).replace(/[^\n]/g, " ");
-      index = stop;
-    } else {
-      out += source[index];
-      index += 1;
+      continue;
     }
+    if (source.startsWith("/*", index)) {
+      // Swift block comments nest.
+      let depth = 0;
+      let cursor = index;
+      while (cursor < source.length) {
+        if (source.startsWith("/*", cursor)) { depth += 1; cursor += 2; continue; }
+        if (source.startsWith("*/", cursor)) { depth -= 1; cursor += 2; if (depth === 0) break; continue; }
+        cursor += 1;
+      }
+      out += blank(index, cursor);
+      index = cursor;
+      continue;
+    }
+    const literal = /^(#*)("""|")/.exec(source.slice(index, index + 64));
+    if (literal) {
+      // A raw string (#"…"#, ##"""…"""##) ends only at its quote followed by the same number of #s,
+      // and a backslash escapes only when followed by those #s.
+      const hashes = literal[1]!;
+      const quote = literal[2]!;
+      const close = quote + hashes;
+      const escape = "\\" + hashes;
+      let cursor = index + hashes.length + quote.length;
+      while (cursor < source.length && !source.startsWith(close, cursor)) {
+        cursor += source.startsWith(escape, cursor) ? escape.length + 1 : 1;
+      }
+      const stop = Math.min(source.length, cursor + close.length);
+      out += blank(index, stop);
+      index = stop;
+      continue;
+    }
+    out += source[index];
+    index += 1;
   }
   return out;
 }
@@ -82,6 +100,11 @@ describe("expiry handler scanning", () => {
     const [body] = closuresAfter(tricky, /beginBackgroundTask\(/);
     expect(body).toContain("Task {");
     expect(codeOnly('let x = "Task { }" // DispatchQueue.main.async')).not.toMatch(/Task|DispatchQueue/);
+    // Nested block comments and raw strings (Codex r2 on #530).
+    for (const decoy of ["/* outer /* inner */ } */", 'let _ = #"" } ""#', 'let _ = #"\\" } "#', 'let _ = ##"""\n } "\n"""##']) {
+      const [handler] = closuresAfter(`beginBackgroundTask(withName: "a") {\n  ${decoy}\n  DispatchQueue.main.async { end() }\n}`, /beginBackgroundTask\(/);
+      expect(handler, decoy).toContain("DispatchQueue.main.async");
+    }
   });
 });
 
