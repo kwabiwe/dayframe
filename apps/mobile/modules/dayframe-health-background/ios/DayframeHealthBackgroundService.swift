@@ -170,9 +170,9 @@ final class DayframeHealthBackgroundService {
       task.setTaskCompleted(success: success)
     }
     task.expirationHandler = {
-      DispatchQueue.main.async {
-        DayframeHealthBackgroundService.shared.finish(id: id, success: false)
-      }
+      // Completed before the handler returns (iphone-native-1): the wake state is main-confined.
+      let finish = { _ = DayframeHealthBackgroundService.shared.finish(id: id, success: false) }
+      if Thread.isMainThread { finish() } else { DispatchQueue.main.sync(execute: finish) }
     }
   }
 
