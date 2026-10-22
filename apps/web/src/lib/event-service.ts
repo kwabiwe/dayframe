@@ -203,6 +203,22 @@ export class ReviewResolutionError extends Error {
   }
 }
 
+/**
+ * A Stop dated at or before the start of the block it stops (another device's clock, or the start
+ * edited later than the Stop). It used to break the stops-after-start constraint and answer a generic
+ * 500, so the phone retried the same moment forever while the block kept running (stability audit
+ * SERVER-4). It is refused as a permanent validation error; the phone restores server truth.
+ */
+export class TimerStopBeforeStartError extends Error {
+  status = 422;
+  code = "timer_stop_before_start";
+
+  constructor(message = "This Stop is earlier than the block's start.") {
+    super(message);
+    this.name = "TimerStopBeforeStartError";
+  }
+}
+
 export class TimerReplacementWindowError extends Error {
   status = 409;
 
@@ -794,17 +810,8 @@ async function processActivityEventWithClient(
             [parsed.occurredAt, parsed.workspaceId, parsed.userId]
           )
         : stopScope.mode === "entry"
-        ? await client.query<{ id: string }>(
-            `update time_entries
-             set stopped_at = $1, updated_at = now()
-             where workspace_id = $2
-               and user_id = $3
-               and id = $4
-               and stopped_at is null
-             returning id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId, stopScope.targetEntryId]
-          )
-        : await client.query<{ id: string }>(
+        ? await stopEntryAt(client, parsed, stopScope.targetEntryId)
+        : await assertCurrentTimerStartsBefore(client, parsed).then(() => client.query<{ id: string }>(
             `with current_timer as (
                select id
                from time_entries
@@ -819,7 +826,7 @@ async function processActivityEventWithClient(
              where te.id = current_timer.id
              returning te.id`,
             [parsed.occurredAt, parsed.workspaceId, parsed.userId]
-          );
+          ));
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
       }
@@ -840,8 +847,11 @@ async function processActivityEventWithClient(
       // offline, or the app delivered it after a Stop). It then fills its own slot instead of replacing
       // the running block: the block it interrupted ends at its start, and it ends where the next block
       // starts or where the earliest later Stop ran (owner decision 14 Oct, #403 option c).
-      const lateStart = parsed.source === "shortcut" && isExplicitStartEvent(parsed.type)
-        ? await lateShortcutStartWindow(client, session, startedAt)
+      // A Start made in the iPhone app and queued offline gets the same placement (owner decision
+      // 22 Oct, PR A option a); it used to fail on every retry and hold every later timer change behind it.
+      const lateStart = (parsed.source === "shortcut" || parsed.source === "mobile_app") &&
+          isExplicitStartEvent(parsed.type)
+        ? await lateShortcutStartWindow(client, session, startedAt, { sameStartSupersedes: parsed.source === "shortcut" })
         : null;
       if (lateStart?.kind === "same_start") {
         startOutcome = "superseded";
@@ -1237,7 +1247,10 @@ const LATE_SHORTCUT_START_MS = 10_000;
 async function lateShortcutStartWindow(
   client: pg.PoolClient,
   session: RequestSession,
-  startedAt: string | Date
+  startedAt: string | Date,
+  // The phone needs a block for every in-app Start it delivers, so only a Shortcut Start at the same
+  // moment as an existing block is folded into it.
+  options: { sameStartSupersedes: boolean } = { sameStartSupersedes: true }
 ): Promise<
   | { kind: "window"; stoppedAt: Date; interruptedEntryIds: string[] }
   | { kind: "same_start" }
@@ -1246,13 +1259,15 @@ async function lateShortcutStartWindow(
   const startedMs = new Date(startedAt).getTime();
   if (!Number.isFinite(startedMs)) return null;
   const at = new Date(startedMs);
-  const sameStart = await client.query(
-    `select 1 from time_entries
-     where workspace_id = $1 and user_id = $2 and started_at = $3${TIMELINE_BLOCK_FILTER}
-     limit 1`,
-    [session.workspaceId, session.userId, at]
-  );
-  if (sameStart.rows.length) return { kind: "same_start" };
+  if (options.sameStartSupersedes) {
+    const sameStart = await client.query(
+      `select 1 from time_entries
+       where workspace_id = $1 and user_id = $2 and started_at = $3${TIMELINE_BLOCK_FILTER}
+       limit 1`,
+      [session.workspaceId, session.userId, at]
+    );
+    if (sameStart.rows.length) return { kind: "same_start" };
+  }
   // Lock what covers the Start's moment first, so a concurrent entry-scoped Stop (which does not take the
   // timer lock) either commits before these rows are read or waits for this transaction.
   const covering = await client.query<{ id: string; stoppedAt: string | Date | null }>(
@@ -1301,6 +1316,51 @@ async function lateShortcutStartWindow(
     stoppedAt: new Date(Math.min(...bounds)),
     interruptedEntryIds: covering.rows.map((row) => row.id),
   };
+}
+
+async function stopEntryAt(
+  client: pg.PoolClient,
+  event: { occurredAt: string | Date; workspaceId: string; userId: string },
+  targetEntryId: string
+) {
+  const target = await client.query<{ startedAt: string | Date }>(
+    `select started_at as "startedAt" from time_entries
+     where workspace_id = $1 and user_id = $2 and id = $3 and stopped_at is null
+     for update`,
+    [event.workspaceId, event.userId, targetEntryId]
+  );
+  const running = target.rows[0];
+  if (running && new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
+    throw new TimerStopBeforeStartError();
+  }
+  return client.query<{ id: string }>(
+    `update time_entries
+     set stopped_at = $1, updated_at = now()
+     where workspace_id = $2
+       and user_id = $3
+       and id = $4
+       and stopped_at is null
+     returning id`,
+    [event.occurredAt, event.workspaceId, event.userId, targetEntryId]
+  );
+}
+
+/** The unscoped Stop's own check: it stops the newest running block, never one started at or after it. */
+async function assertCurrentTimerStartsBefore(
+  client: pg.PoolClient,
+  event: { occurredAt: string | Date; workspaceId: string; userId: string }
+) {
+  const current = await client.query<{ startedAt: string | Date }>(
+    `select started_at as "startedAt" from time_entries
+     where workspace_id = $1 and user_id = $2 and stopped_at is null
+     order by started_at desc
+     limit 1`,
+    [event.workspaceId, event.userId]
+  );
+  const running = current.rows[0];
+  if (running && new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
+    throw new TimerStopBeforeStartError();
+  }
 }
 
 async function closeActiveTimersForReplacement(

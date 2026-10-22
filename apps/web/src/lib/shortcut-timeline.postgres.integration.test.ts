@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pool } from "./db";
-import { processActivityEvent } from "./event-service";
+import { processActivityEvent, TimerReplacementWindowError, TimerStopBeforeStartError } from "./event-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -65,6 +65,27 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
       occurredAt: at(minute),
       rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" },
       source: "shortcut",
+      type: "timer_stop"
+    }, session);
+  }
+
+  function appStart(minute: number, description: string) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`,
+      occurredAt: at(minute),
+      rawPayload: { origin: "mobile_timer_start", startedAt: at(minute).toISOString(), tagNames: [] },
+      description,
+      source: "mobile_app",
+      type: "timer_start"
+    }, session);
+  }
+
+  function appStop(minute: number, targetEntryId?: string) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`,
+      occurredAt: at(minute),
+      rawPayload: targetEntryId ? { origin: "mobile_home", stopScope: "entry", targetEntryId } : { origin: "mobile_home" },
+      source: "mobile_app",
       type: "timer_stop"
     }, session);
   }
@@ -192,6 +213,38 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
       `select description from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]
     );
     expect(running.rows).toEqual([{ description: "A" }]);
+  });
+
+  // Owner decision 22 Oct 2026 (PR A option a): a Start made in the iPhone app that reaches the server
+  // late is placed like a Shortcut Start; it used to fail on every retry (stability audit SERVER-1).
+  it("places an in-app Start older than a block started elsewhere in its own slot", async () => {
+    await block(20, null, "web", "W");
+    const result = await appStart(10, "Y");
+    expect(result).toMatchObject({ startOutcome: "recorded_completed" });
+    expect(typeof result.timeEntryId).toBe("string");
+    expect(await timeline()).toEqual([["Y", 10, 20], ["W", 20, null]]);
+  });
+
+  it("an in-app Start newer than the running block still replaces it", async () => {
+    await block(0, null, "web", "P");
+    const result = await appStart(10, "Y");
+    expect(result.startOutcome).toBeUndefined();
+    expect(await timeline()).toEqual([["P", 0, 10], ["Y", 10, null]]);
+  });
+
+  it("refuses an in-app Start at a running block's own start with a typed error, never a silent drop", async () => {
+    await block(10, null, "web", "W");
+    await expect(appStart(10, "Y")).rejects.toBeInstanceOf(TimerReplacementWindowError);
+    expect(await timeline()).toEqual([["W", 10, null]]);
+  });
+
+  it("refuses a Stop earlier than its block's start instead of failing the database rule", async () => {
+    const running = await block(20, null, "web", "W");
+    await expect(appStop(10, running)).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    await expect(appStop(10)).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    expect(await timeline()).toEqual([["W", 20, null]]);
+    await expect(appStop(30, running)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["W", 20, 30]]);
   });
 
   it("never stops a running Health entry", async () => {
