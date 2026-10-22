@@ -448,7 +448,7 @@ Block pull-to-refresh:
 - Trigger: both ends of a driven or unknown-mode trip turn out to be stations (two nearby searches while the screen is open); a tap on "Public transport".
 - Owner: the editor's existing presence and layout helpers, as for the learned-name chip: the line and chip fade in under the name field and the chips below move with the layout transition.
 - Entrance/update/exit: the line and chip arrive together once both answers are in (never one end first); tapping the chip fills the name and Getting around, and the chip leaves while the line stays; clearing the name brings the chip back. Leaving the screen cancels the searches.
-- Interruption and async: a guess from an earlier screen or trip never shows (keyed by the trip's ends); a failed search shows nothing.
+- Interruption and async: a guess from an earlier screen or trip never shows (keyed by the trip's ends); a fresh check that finds nothing or fails clears an older guess; going to the background cancels the searches and nothing continues. The chip has its own presence (it leaves when applied and returns when the name is cleared) while the line stays; with no Getting around activity nothing is offered.
 - Accessibility: Reduce Motion uses the helpers' immediate path; the chip is a 38-point pill with 6 points of hit slop above and below (a 50-point target, as the learned-name chip), a button labelled "Public transport", hinting that it fills the name and chooses Getting around; the line is plain text read in order.
 
 ## Web popovers and sheets (web UI audit WUI-022/WUI-026, 17 Oct 2026)

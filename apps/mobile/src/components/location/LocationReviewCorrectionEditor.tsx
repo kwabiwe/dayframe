@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
+  AppState,
   Keyboard,
   Platform,
   Pressable,
@@ -447,25 +448,40 @@ export function LocationReviewCorrectionEditor({
   const [transitGuess, setTransitGuess] = useState<{ key: string; from: string; to: string } | null>(null);
   useEffect(() => {
     const endpoints = transitEndpointsRef.current;
-    if (!isFocused || !nearbyProvider || !transitKey || !endpoints) return;
+    if (!isFocused || !nearbyProvider || !transitKey || !endpoints || AppState.currentState !== "active") return;
     let current = true;
-    void guessTransit(nearbyProvider, endpoints, () => current)
-      .then((guess) => {
-        if (current && guess) setTransitGuess({ key: transitKey, ...guess });
-      })
-      .catch(() => undefined);
-    return () => {
+    // Foreground only (Codex r1 on #523): going to the background stops it, and nothing continues.
+    const stop = () => {
+      if (!current) return;
       current = false;
       void nearbyProvider.cancel();
     };
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state !== "active") stop();
+    });
+    void guessTransit(nearbyProvider, endpoints, () => current && AppState.currentState === "active")
+      .then((guess) => {
+        // A fresh check that finds nothing (or fails) clears an older guess.
+        if (current) setTransitGuess(guess ? { key: transitKey, ...guess } : null);
+      })
+      .catch(() => {
+        if (current) setTransitGuess(null);
+      });
+    return () => {
+      appState.remove();
+      stop();
+    };
   }, [isFocused, nearbyProvider, transitKey]);
-  const shownTransit = transitGuess && transitGuess.key === transitKey ? transitGuess : null;
+  // Offered only with the existing Getting around activity to log under (owner, 21 Oct 2026; Codex
+  // r1 on #523): without it the chip would change the name alone.
+  const shownTransitGuess = transitGuess && transitGuess.key === transitKey ? transitGuess : null;
   const gettingAround = useMemo(
     () => categories.find((category) => category.starterKey === "travel") ??
       categories.find((category) => category.name.toLowerCase() === "getting around") ?? null,
     [categories]
   );
-  const transitApplied = description.trim() === TRANSIT_NAME && (!gettingAround || selectedCategoryId === gettingAround.id);
+  const shownTransit = shownTransitGuess && gettingAround ? shownTransitGuess : null;
+  const transitApplied = Boolean(gettingAround) && description.trim() === TRANSIT_NAME && selectedCategoryId === gettingAround?.id;
 
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(
@@ -1233,10 +1249,15 @@ export function LocationReviewCorrectionEditor({
                   <Text {...mobileTextProps("metadata")} style={[editorStyles.helperText, { color: theme.textSecondary }]} testID="location-evidence-transit-line">
                     {transitGuessLine(shownTransit)}
                   </Text>
-                  {!transitApplied ? (
-                    <View style={editorStyles.learnedNameRow}>
+                  {!transitApplied && gettingAround ? (
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion)}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                      style={editorStyles.learnedNameRow}
+                    >
                       <Pressable
-                        accessibilityHint={gettingAround ? `Fills in the name and chooses ${gettingAround.name}` : "Fills in the name"}
+                        accessibilityHint={`Fills in the name and chooses ${gettingAround.name}`}
                         accessibilityLabel={TRANSIT_NAME}
                         accessibilityRole="button"
                         disabled={saving}
@@ -1244,17 +1265,18 @@ export function LocationReviewCorrectionEditor({
                         onPress={() => {
                           setDescription(TRANSIT_NAME);
                           setDescriptionTouched(true);
-                          if (gettingAround) {
-                            setSelectedCategoryId(gettingAround.id);
-                            setCategoryTouched(true);
-                          }
+                          // Shown as the chosen chip even when unpinned and not recent, as a pick
+                          // from All activities is (Codex r1 on #523).
+                          setSelectedCategoryId(gettingAround.id);
+                          setCategoryTouched(true);
+                          setChipAnchorId(gettingAround.id);
                         }}
                         style={({ pressed }) => [editorStyles.learnedNameChip, pressed ? { opacity: 0.72 } : null]}
                         testID="location-evidence-transit-chip"
                       >
                         <Text {...mobileTextProps("control")} numberOfLines={1} style={editorStyles.learnedNameText}>{TRANSIT_NAME}</Text>
                       </Pressable>
-                    </View>
+                    </Reanimated.View>
                   ) : null}
                 </Reanimated.View>
               ) : null}

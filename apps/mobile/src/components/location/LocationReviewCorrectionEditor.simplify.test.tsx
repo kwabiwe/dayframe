@@ -12,7 +12,23 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 const keyboard = vi.hoisted(() => ({ listeners: new Map<string, (event?: unknown) => void>() }));
+const appState = vi.hoisted(() => {
+  const listeners = new Set<(state: string) => void>();
+  return {
+    currentState: "active",
+    listeners,
+    addEventListener: (_type: string, listener: (state: string) => void) => {
+      listeners.add(listener);
+      return { remove: () => listeners.delete(listener) };
+    },
+    set(state: string) {
+      this.currentState = state;
+      for (const listener of [...listeners]) listener(state);
+    }
+  };
+});
 vi.mock("react-native", () => ({
+  AppState: appState,
   AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
@@ -141,6 +157,7 @@ let tree: ReturnType<typeof create> | undefined;
 let onResolve: Mock<(action: LocationReviewAction, message: string) => Promise<void>>;
 let onVenueSuggested = vi.fn();
 beforeEach(() => {
+  appState.currentState = "active";
   focused = true;
   saving = false;
   onResolve = vi.fn(async (_action: LocationReviewAction, _message: string) => undefined);
@@ -688,6 +705,48 @@ describe("What did you do? (D1)", () => {
       expect(byTestId("location-evidence-transit-line")).toHaveLength(0);
       await press(primary());
       expect(onResolve.mock.calls[0][0]).not.toMatchObject({ edit: expect.objectContaining({ description: "Public transport" }) });
+    });
+
+    it("stops when the app goes to the background between the two ends (Codex r1 on #523)", async () => {
+      let resolveFirst!: (value: unknown) => void;
+      native.searchNearby.mockImplementationOnce((request: { requestId: string }) => new Promise((resolve) => {
+        resolveFirst = () => resolve(stations("Exampleton Station", "Kelp Station")(request));
+      }));
+      native.searchNearby.mockImplementation(stations("Kelp Station", "Kelp Station"));
+      await render(drive());
+      await act(async () => { appState.set("background"); });
+      await act(async () => { resolveFirst(undefined); });
+      expect(native.searchNearby).toHaveBeenCalledTimes(1);
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(0);
+    });
+
+    it("shows Getting around as the chosen chip once applied, even unpinned and not recent (Codex r1 on #523)", async () => {
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Kelp Station"));
+      await render(drive());
+      await press(byTestId("location-evidence-transit-chip")[0]);
+      const chosen = tree!.root.findAll((node) => typeof node.type === "string" && node.props.accessibilityState?.selected === true &&
+        String(node.props.accessibilityLabel ?? "").includes("Getting around"));
+      expect(chosen.length).toBeGreaterThan(0);
+    });
+
+    it("offers nothing without the Getting around activity (Codex r1 on #523)", async () => {
+      categoryList = categories;
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Kelp Station"));
+      await render(drive());
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(0);
+      expect(byTestId("location-evidence-transit-chip")).toHaveLength(0);
+    });
+
+    it("drops an earlier guess when a fresh check finds nothing (Codex r1 on #523)", async () => {
+      native.searchNearby.mockImplementation(stations("Exampleton Station", "Kelp Station"));
+      await render(drive());
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(1);
+      native.searchNearby.mockImplementation(async () => { throw new Error("offline"); });
+      focused = false;
+      await act(async () => tree!.update(editor(drive())));
+      focused = true;
+      await act(async () => tree!.update(editor(drive())));
+      expect(byTestId("location-evidence-transit-line")).toHaveLength(0);
     });
 
     it("never checks a walk, a ride or a run", async () => {
