@@ -76,9 +76,19 @@ export async function ingestLocationEvidence(
     batch.rolloutMode,
     batch.semanticModeAcknowledgedAt
   );
-  validateEvidenceTimes(batch, processingAt);
-  const classification = classifyForStorage(batch, processingAt);
-  const rejected = new Map(classification.rejectedEvidence.map((item) => [item.clientEvidenceId, item.reason]));
+  validateSemanticAcknowledgementTime(batch.semanticModeAcknowledgedAt, processingAt);
+  // A reading outside the replay window is rejected on its own, kept without coordinates like any
+  // other rejected reading, and still acknowledged; it never fails the readings beside it (stability
+  // audit 22 Oct 2026, location-2).
+  const outsideWindow = evidenceOutsideReplayWindow(batch, processingAt);
+  const classification = classifyForStorage(
+    { ...batch, evidence: batch.evidence.filter((item) => !outsideWindow.has(item.clientEvidenceId)) },
+    processingAt
+  );
+  const rejected = new Map<string, string>([
+    ...classification.rejectedEvidence.map((item) => [item.clientEvidenceId, item.reason] as [string, string]),
+    ...[...outsideWindow].map((id) => [id, "outside_replay_window"] as [string, string])
+  ]);
   return withSyncTransaction("location_evidence", async ({ client, phase }) => {
     phase("owner_lock");
     await client.query(
@@ -99,7 +109,7 @@ export async function ingestLocationEvidence(
       [session.workspaceId, session.userId, processingAt]
     );
     observeLocationStage(options, "summary_write");
-    const summary = evidenceBatchSummary(batch, rollout.effectiveMode);
+    const summary = evidenceBatchSummary(batch, rollout.effectiveMode, outsideWindow, processingAt);
     const eventResult = await client.query<{ id: string; inserted: boolean }>(
       `insert into activity_events (
          workspace_id, user_id, client_event_id, source, event_type, occurred_at,
@@ -118,6 +128,16 @@ export async function ingestLocationEvidence(
     );
     const duplicateBatch = eventResult.rows[0]?.inserted === false;
     const expiresAt = new Date(Date.parse(processingAt) + LOCATION_ENGINE_V2_CONFIG.rawEvidenceRetentionDays * 86_400_000).toISOString();
+    // A reading may name a saved place deleted (or never in this workspace) since the phone last
+    // refreshed its places: it is kept unlinked, so the owner-link check never fails the whole batch,
+    // which the phone would otherwise retry hourly forever (stability audit 22 Oct 2026, location-1).
+    const namedPlaceIds = [...new Set(batch.evidence.flatMap((item) => item.savedPlaceId ? [item.savedPlaceId] : []))];
+    const knownPlaceIds = new Set(namedPlaceIds.length
+      ? (await client.query<{ id: string }>(
+          "select id from places where workspace_id = $1 and id = any($2::uuid[])",
+          [session.workspaceId, namedPlaceIds]
+        )).rows.map((row) => row.id)
+      : []);
     observeLocationStage(options, "bulk_evidence_write");
     const parameters: unknown[] = [];
     const rows: string[] = [];
@@ -148,7 +168,7 @@ export async function ingestLocationEvidence(
           retainCoordinate && evidence.courseDegrees != null && evidence.courseDegrees >= 0
             ? evidence.courseDegrees
             : null,
-          evidence.savedPlaceId ?? null,
+          evidence.savedPlaceId && knownPlaceIds.has(evidence.savedPlaceId) ? evidence.savedPlaceId : null,
           evidence.geofenceIdentifier ?? null,
           !rejectionReason,
           rejectionReason,
@@ -176,9 +196,13 @@ export async function ingestLocationEvidence(
       parameters
     );
 
+    const unlinked = namedPlaceIds.filter((id) => !knownPlaceIds.has(id)).length;
     const warnings = [
-      ...(classification.rejectedEvidence.length > 0
-        ? [`${classification.rejectedEvidence.length} evidence item(s) were retained without coordinates for diagnostics.`]
+      ...(rejected.size > 0
+        ? [`${rejected.size} evidence item(s) were retained without coordinates for diagnostics.`]
+        : []),
+      ...(unlinked > 0
+        ? [`${unlinked} saved place(s) named by this batch no longer exist; their readings were kept unlinked.`]
         : []),
       ...(rollout.effectiveMode === "v2_shadow"
         ? ["V2 shadow mode stored evidence without emitting user-visible semantics."]
@@ -360,21 +384,15 @@ function locationReplayWarnings(
   ];
 }
 
-function validateEvidenceTimes(batch: LocationEvidenceBatchRequest, processingAt: string) {
+/** Readings older than 30 days or more than 10 minutes ahead of the server. */
+function evidenceOutsideReplayWindow(batch: LocationEvidenceBatchRequest, processingAt: string) {
   const now = Date.parse(processingAt);
   const earliest = now - 30 * 86_400_000;
   const latest = now + 10 * 60_000;
-  for (const evidence of batch.evidence) {
+  return new Set(batch.evidence.flatMap((evidence) => {
     const time = Date.parse(evidence.occurredAt);
-    if (!Number.isFinite(time) || time < earliest || time > latest) {
-      throw new LocationIngestError(
-        "Location evidence timestamp falls outside the accepted replay window.",
-        422,
-        "invalid_evidence_time"
-      );
-    }
-  }
-  validateSemanticAcknowledgementTime(batch.semanticModeAcknowledgedAt, processingAt);
+    return !Number.isFinite(time) || time < earliest || time > latest ? [evidence.clientEvidenceId] : [];
+  }));
 }
 
 function validateSemanticAcknowledgementTime(
@@ -413,9 +431,15 @@ function batchEventId(batch: LocationEvidenceBatchRequest) {
 
 function evidenceBatchSummary(
   batch: LocationEvidenceBatchRequest,
-  effectiveRolloutMode: LocationRolloutMode
+  effectiveRolloutMode: LocationRolloutMode,
+  outsideWindow: ReadonlySet<string> = new Set(),
+  processingAt?: string
 ) {
-  const sorted = [...batch.evidence].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
+  // The batch event is dated by its readings inside the replay window; a batch with none is dated now.
+  const timed = batch.evidence.filter((item) => !outsideWindow.has(item.clientEvidenceId));
+  const sorted = timed.length || !processingAt
+    ? [...(timed.length ? timed : batch.evidence)].sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt))
+    : [{ occurredAt: processingAt }];
   const evidenceKinds = batch.evidence.reduce<Record<string, number>>((counts, item) => {
     counts[item.kind] = (counts[item.kind] ?? 0) + 1;
     return counts;

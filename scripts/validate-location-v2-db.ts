@@ -282,6 +282,53 @@ async function validateOutOfOrderAndIdempotency() {
   assert.equal(await count("time_entries"), 0, "Shadow mode created time entries.");
 }
 
+// Stability audit 22 Oct 2026 (location-1/2): one reading naming a saved place that no longer exists,
+// or one outside the replay window, never fails or drops the readings beside it.
+async function validateIngestPerReadingFailures() {
+  await clearDerivedLocationState();
+  const goneId = "30000000-0000-4000-8000-0000000000aa";
+  const home = LOCATION_ACCEPTANCE_PLACES[0]!;
+  const reading = (id: string, occurredAt: string, patch: Partial<LocationEvidence> = {}): LocationEvidence => ({
+    clientEvidenceId: `per-reading-${id}`, deviceId: DEVICE_ID, algorithmVersion: LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+    kind: "standard_location", occurredAt, latitude: home.latitude, longitude: home.longitude,
+    horizontalAccuracyMeters: 10, receivedAt: PROCESSING_AT, timeZone: "Europe/London", ...patch
+  });
+  const evidence = [
+    reading("fix", "2026-07-20T19:00:00.000Z"),
+    reading("gone-place", "2026-07-20T19:05:00.000Z", { kind: "geofence_exit", latitude: null, longitude: null, horizontalAccuracyMeters: null, savedPlaceId: goneId }),
+    reading("future", "2026-07-20T22:00:00.000Z"),
+    reading("too-old", "2026-06-01T12:00:00.000Z")
+  ];
+  const result = await storeLocationEvidence(batch("db-per-reading", evidence, "v2_shadow"), session, PROCESSING_AT);
+  assert.deepEqual(
+    [...result.acknowledgedEvidenceIds].sort(),
+    evidence.map((item) => item.clientEvidenceId).sort(),
+    "Every reading of a batch with one bad reading must be acknowledged."
+  );
+  const rows = (await pool.query<{
+    id: string; accepted: boolean; reason: string | null; placeId: string | null; hasCoordinate: boolean;
+  }>(
+    `select client_evidence_id as id, accepted, rejection_reason as reason, saved_place_id as "placeId",
+            coordinate is not null as "hasCoordinate"
+       from location_evidence where workspace_id = $1 and user_id = $2 and client_batch_id = 'db-per-reading'
+      order by client_evidence_id`,
+    [WORKSPACE_ID, USER_ID]
+  )).rows;
+  const byId = new Map(rows.map((row) => [row.id.replace("per-reading-", ""), row]));
+  assert.equal(rows.length, 4, "Every reading must be stored.");
+  assert.equal(byId.get("fix")?.accepted, true, "A good reading beside bad ones must be accepted.");
+  assert.equal(byId.get("fix")?.hasCoordinate, true, "A good reading keeps its coordinate.");
+  assert.equal(byId.get("gone-place")?.accepted, true, "A reading for a deleted place is kept.");
+  assert.equal(byId.get("gone-place")?.placeId, null, "A reading for a deleted place is unlinked.");
+  for (const id of ["future", "too-old"]) {
+    assert.equal(byId.get(id)?.accepted, false, `The ${id} reading must be rejected on its own.`);
+    assert.equal(byId.get(id)?.reason, "outside_replay_window", `The ${id} reading must say why.`);
+    assert.equal(byId.get(id)?.hasCoordinate, false, `The ${id} reading keeps no coordinate.`);
+  }
+  assert(result.warnings.some((warning) => warning.includes("no longer exist")), "The unlinked place is reported.");
+  await clearDerivedLocationState();
+}
+
 async function validateSemanticIdempotencyAndRollback() {
   await clearDerivedLocationState();
   process.env.DAYFRAME_LOCATION_ROLLOUT_MODE = "v2_review";
@@ -3370,6 +3417,7 @@ async function main() {
     await seedOwner();
     await validateCommuteCategoryConcurrency();
     await validateOutOfOrderAndIdempotency();
+    await validateIngestPerReadingFailures();
     await validateMotionActivityEvidence();
     await validateMotionOnlyReviewRetirement();
     await validateTimeAwayReview();
@@ -3392,7 +3440,7 @@ async function main() {
     await validateFinalisationWithoutNewEvidence();
     await validateSupersededReviewReactivation();
     await validateV1Compatibility();
-    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, Moves that log themselves in Review mode (the switch, overlap and stopped-pattern fallbacks, replay moving the block), per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
+    console.log("Location V2 database validation passed: ordered replay, duplicate ingest, per-reading ingest failures (deleted places, out-of-window times), coordinate-free Motion & Fitness evidence, time away from a saved place, learned names for Stays and Moves (corrections, splits, merges, bands), deleting a place with same-place journeys, Health walks winning over the Moves they cover, shadow cutover, no-new-evidence finalisation, semantic idempotency, Commute category concurrency/emission/replay/confirmation, uncertainty bounds, description semantics, isolation, trusted-place and trusted-commute automation, Moves that log themselves in Review mode (the switch, overlap and stopped-pattern fallbacks, replay moving the block), per-place Log automatically in Review mode (the stored switch guard, blocks instead of Review, overlap and running-timer fallbacks and the reason each card stores, idempotency, same-ID and changed-ID moves, removal with a vanished visit, earlier Review cards kept, ageing evidence, cutover-held and not-yet-finalised replacements and v2_enabled never removing a block, a finalised replacement taking its block beside an unfinished stay elsewhere, learned places linked to a saved place holding it, week-long blocks overlapping, interleaved entry-lock contention, edited and deleted blocks kept, including a deletion landing mid-replay), deliberate advisory/Review-row/exact-segment contention bounds, overlap fallback, terminal-decision preservation, superseded-Review reactivation, automatic-entry deletion safety, automatic-entry idempotency, atomic rollback, concurrent retry, split, merge, incompatible-merge rejection, the Recent owner-authored signal for every Review decision path and across replay retitles, and V1 compatibility.");
   } finally {
     if (process.env.KEEP_LOCATION_V2_DB_FIXTURE !== "1") {
       await pool.query("delete from workspaces where id = $1", [WORKSPACE_ID]).catch(() => undefined);
