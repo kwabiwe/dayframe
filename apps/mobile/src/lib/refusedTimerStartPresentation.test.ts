@@ -16,7 +16,8 @@ describe("presenting a refused queued Start", () => {
   });
 
   it("dismisses a Calendar editor open on the refused block, and only that one", () => {
-    expect(refusedTimerStartPresentation({ ...base, calendarEditorEntryId: "optimistic-y" })).toMatchObject({ dismissCalendarEditor: true });
+    // Its row may already be gone after a refresh: the open editor still counts as seen (Codex r2 on #532).
+    expect(refusedTimerStartPresentation({ ...base, calendarEditorEntryId: "optimistic-y" })).toEqual({ run: true, alert: true, dismissCalendarEditor: true });
     expect(refusedTimerStartPresentation({ ...base, calendarEditorEntryId: "other" })).toMatchObject({ dismissCalendarEditor: false });
   });
 });

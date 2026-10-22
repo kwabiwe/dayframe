@@ -108,6 +108,23 @@ export function createDeletionCoordinator<Entry extends { id: string }, Snapshot
     return invalidate(pending.token);
   }
 
+  /**
+   * Drops one entry from the pending deletion (a block whose Start the server refused, Codex r2 on
+   * #532) while the rest keep their Undo window and token; the deletion is invalidated only when that
+   * entry was its last. Returns "removed", "invalidated", or false when it wasn't pending.
+   */
+  function removePendingEntry(entryId: string): "removed" | "invalidated" | false {
+    if (disposed || !pending || !pending.entryIds.includes(entryId)) return false;
+    const entries = pending.entries.filter((entry) => entry.id !== entryId);
+    if (entries.length === 0) return invalidate(pending.token) ? "invalidated" : false;
+    publish({
+      ...pending,
+      entries,
+      entryIds: pending.entryIds.filter((id) => id !== entryId)
+    });
+    return "removed";
+  }
+
   function prepare(entries: Entry[], snapshot: Snapshot) {
     if (disposed || entries.length === 0) return null;
 
@@ -260,6 +277,7 @@ export function createDeletionCoordinator<Entry extends { id: string }, Snapshot
     reconcileExternalActiveEntry,
     reconcileForeground,
     registerPendingId,
+    removePendingEntry,
     undo
   };
 }

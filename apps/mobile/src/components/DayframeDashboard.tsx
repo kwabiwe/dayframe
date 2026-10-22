@@ -609,7 +609,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       shown: Boolean(current && (optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
         current.entries.some((entry) => entry.id === localId))),
       deletionPending: Boolean(deletionCoordinator.current?.current()?.entryIds.includes(localId)),
-      calendarEditorEntryId: calendarEditEntryRef.current?.id ?? null
+      // Only an editor still on screen counts (its row may already be gone after a refresh).
+      calendarEditorEntryId: calendarEditPresentationRef.current ? calendarEditEntryRef.current?.id ?? null : null
     });
     if (!decision.run) return;
     if (decision.dismissCalendarEditor && calendarEditPresentationRef.current) {
@@ -2313,10 +2314,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       optimisticId,
       previousData
     );
+    // Only this block leaves a pending deletion; any saved blocks deleted with it keep their Undo
+    // (Codex r2 on #532). A deletion left with nothing to delete releases its sheet token.
     const pending = deletionCoordinator.current?.current();
-    if (pending?.entryIds.includes(optimisticId)) {
+    if (pending && deletionCoordinator.current?.removePendingEntry(optimisticId) === "invalidated") {
       clearSheetDeletionToken(pending.token);
-      deletionCoordinator.current?.invalidatePendingEntry(optimisticId);
     }
 
     // Any queued Save/Stop/Delete work captured an older generation and must

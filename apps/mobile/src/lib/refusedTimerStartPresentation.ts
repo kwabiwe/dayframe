@@ -10,7 +10,7 @@ export type RefusedTimerStartPresentationInput = {
   shown: boolean;
   /** A delete of the block is pending (hidden, with Undo). */
   deletionPending: boolean;
-  /** The entry an open Calendar editor is showing, if any. */
+  /** The entry a Calendar editor still on screen is showing, if any. */
   calendarEditorEntryId: string | null;
 };
 
@@ -20,9 +20,12 @@ export type RefusedTimerStartPresentation =
 
 export function refusedTimerStartPresentation(input: RefusedTimerStartPresentationInput): RefusedTimerStartPresentation {
   if (!input.ownerMatches) return { run: false };
+  const dismissCalendarEditor = input.calendarEditorEntryId === input.localId;
   return {
     run: true,
-    alert: input.shown || input.deletionPending,
-    dismissCalendarEditor: input.calendarEditorEntryId === input.localId
+    // An editor open on the block is on screen even when a refresh already took its row (Codex r2 on
+    // #532), so it never closes without the explanation.
+    alert: input.shown || input.deletionPending || dismissCalendarEditor,
+    dismissCalendarEditor
   };
 }

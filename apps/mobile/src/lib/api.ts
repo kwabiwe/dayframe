@@ -1006,11 +1006,14 @@ export async function removeQueuedEvent(localId: string) {
     const owner = await readActiveMobileAccount();
     if (!owner) return false;
     const all = await readAllQueue(owner);
-    const next = all.filter((item) =>
-      !queuedEventMatchesOwner(item, owner) || item.localId !== localId
-    );
-    if (next.length !== all.length) await writeAllQueue(next);
-    return next.length !== all.length;
+    const target = all.find((item) => queuedEventMatchesOwner(item, owner) && item.localId === localId);
+    if (!target) return false;
+    // A refused Start leaves only once what waits on it is settled (Codex r2 on #532).
+    if (isRefusedTimerStart(target) && !await settleRefusedTimerStart(refusedTimerStartOf(target, owner))) {
+      return false;
+    }
+    await writeAllQueue(all.filter((item) => item !== target));
+    return true;
   });
 }
 
@@ -1067,12 +1070,20 @@ export async function clearFailedQueuedEvents() {
   return withQueueMutation(async () => {
     const owner = await readActiveMobileAccount();
     if (!owner) {
-      return { removed: [], remaining: [], removedCount: 0, remainingCount: 0 };
+      return { removed: [], remaining: [], removedCount: 0, remainingCount: 0, heldCount: 0 };
     }
     const all = await readAllQueue(owner);
     const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
-    const remaining = queue.filter((item) => !isClearableFailedEvent(item));
-    const removed = queue.filter(isClearableFailedEvent);
+    // A refused Start leaves only once its Stops are removed and its Edits and Deletes settled; if
+    // that storage write fails it stays (and the next pass or Clear settles it), so its Edit can never
+    // be left waiting for a block that was never saved (Codex r2 on #532).
+    const held = new Set<QueuedEvent>();
+    for (const item of queue) {
+      if (!isClearableFailedEvent(item) || !isRefusedTimerStart(item)) continue;
+      if (!await settleRefusedTimerStart(refusedTimerStartOf(item, owner))) held.add(item);
+    }
+    const remaining = queue.filter((item) => !isClearableFailedEvent(item) || held.has(item));
+    const removed = queue.filter((item) => isClearableFailedEvent(item) && !held.has(item));
     await writeAllQueue([
       ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining
@@ -1081,7 +1092,8 @@ export async function clearFailedQueuedEvents() {
       removed,
       remaining,
       removedCount: removed.length,
-      remainingCount: remaining.length
+      remainingCount: remaining.length,
+      heldCount: held.size
     };
   });
 }
@@ -1343,7 +1355,9 @@ async function syncQueueItems(
         const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
-        if (failureKind === "permanent" && item.type === "timer_start") {
+        // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
+        // is refused again, and the person was already told (Codex r2 on #532).
+        if (failureKind === "permanent" && item.type === "timer_start" && !isPermanentlyFailedEvent(item)) {
           refusedStarts.push({ localId: item.localId, message, owner });
         }
         if (failureKind !== "permanent") {
@@ -1406,11 +1420,11 @@ async function syncQueueItems(
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).
   const stillRefused = reconciledRemaining.filter((item) =>
-    item.type === "timer_start" && item.failureKind === "permanent" && queuedEventMatchesOwner(item, owner)
+    isRefusedTimerStart(item) && queuedEventMatchesOwner(item, owner)
   );
   if (stillRefused.length || refusedStarts.length) {
     await settleRefusedTimerStarts(
-      stillRefused.map((item) => ({ localId: item.localId, message: item.lastError ?? "", owner })),
+      stillRefused.map((item) => refusedTimerStartOf(item, owner)),
       new Set(refusedStarts.map((start) => start.localId))
     );
   }
@@ -1442,21 +1456,9 @@ export function subscribeRefusedTimerStarts(listener: (start: RefusedTimerStart)
  * no caller since 22 Aug, and one such Edit held the account's whole Edit/Delete outbox).
  */
 async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[], newlyRefused: ReadonlySet<string>) {
-  const [{ removePendingTimerStopsForTarget }, { refuseTimeEntryCommandsForOptimisticEntry }] = await Promise.all([
-    import("./timerStopOutbox"),
-    import("./timeEntryOutbox")
-  ]);
   for (const start of refused) {
-    try {
-      await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
-      await refuseTimeEntryCommandsForOptimisticEntry(
-        start.owner,
-        start.localId,
-        "The block this change was for was never saved."
-      );
-    } catch {
-      // Storage failed: the next pass settles this Start again.
-    }
+    // Storage failed: the Start stays queued, so the next pass (or a Clear) settles it again.
+    await settleRefusedTimerStart(start);
     if (!newlyRefused.has(start.localId)) continue;
     for (const listener of refusedTimerStartListeners) {
       try {
@@ -1466,6 +1468,33 @@ async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[], n
       }
     }
   }
+}
+
+/** Removes a refused Start's Stops and settles its Edits and Deletes; false when storage failed. */
+async function settleRefusedTimerStart(start: RefusedTimerStart) {
+  try {
+    const [{ removePendingTimerStopsForTarget }, { refuseTimeEntryCommandsForOptimisticEntry }] = await Promise.all([
+      import("./timerStopOutbox"),
+      import("./timeEntryOutbox")
+    ]);
+    await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
+    await refuseTimeEntryCommandsForOptimisticEntry(
+      start.owner,
+      start.localId,
+      "The block this change was for was never saved."
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRefusedTimerStart(item: QueuedEvent) {
+  return item.type === "timer_start" && isPermanentlyFailedEvent(item);
+}
+
+function refusedTimerStartOf(item: QueuedEvent, owner: MobileAccountOwner): RefusedTimerStart {
+  return { localId: item.localId, message: item.lastError ?? "", owner };
 }
 
 function queueEventMatchesScope(

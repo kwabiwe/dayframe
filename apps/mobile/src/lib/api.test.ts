@@ -864,6 +864,75 @@ describe("mobile API client", () => {
     });
   });
 
+  // Codex r2 on #532: a failed settlement write, then Clear in Sync help, left the refused Start's Edit
+  // waiting forever (`dependency_wait`) and holding unrelated Edits behind it.
+  it("settles a refused Start's Edit before Clear removes the Start, holding it while storage fails", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "optimistic-cleared", source: "mobile_app", type: "timer_start",
+      occurredAt: new Date("2026-10-22T10:00:00.000Z"), rawPayload: { origin: "mobile_timer_start" }
+    });
+    const outbox = await import("./timeEntryOutbox");
+    await outbox.enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-cleared" }, patch: { description: "Typed after Start" } });
+    await outbox.enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { targetEntryId: "entry-saved" }, patch: { description: "Unrelated" } });
+    const fetchMock = vi.fn(async (url: string) => String(url).includes("/api/events")
+      ? jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)
+      : new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let failOutboxWrites = 2;
+    vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
+      if (key === "dayframe.timeEntryOutbox.v1" && failOutboxWrites > 0) {
+        failOutboxWrites -= 1;
+        throw new Error("disk full");
+      }
+      asyncStore.set(key, value);
+    });
+
+    try {
+      // The pass's settlement write fails, and so does the first Clear's: the Start is held, not dropped.
+      await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+      await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 0, heldCount: 1 });
+      expect((await readQueue()).map((item) => item.localId)).toEqual(["optimistic-cleared"]);
+
+      // Storage recovers: Clear settles the Edit, then removes the Start.
+      await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1, heldCount: 0 });
+      expect(await readQueue()).toEqual([]);
+      expect(await outbox.listTimeEntrySyncIssues(TIMER_STOP_OWNER)).toEqual([
+        expect.objectContaining({ optimisticEntryId: "optimistic-cleared", refusedStart: true })
+      ]);
+      await expect(outbox.synchroniseTimeEntryCommands({ owner: TIMER_STOP_OWNER, correlations: new Map(), force: true }))
+        .resolves.toMatchObject({ deliveredCount: 1 });
+      expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain("https://dayframe.test/api/time-entries/entry-saved");
+    } finally {
+      vi.mocked(AsyncStorage.setItem).mockImplementation((key: string, value: string) => {
+        asyncStore.set(key, value);
+        return Promise.resolve();
+      });
+    }
+  });
+
+  // Codex r2 on #532: Sync help's Retry of a Start already refused announced it a second time.
+  it("announces a refused Start once, not again when it is retried and refused again", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "optimistic-retried", source: "mobile_app", type: "timer_start",
+      occurredAt: new Date("2026-10-22T10:00:00.000Z"), rawPayload: { origin: "mobile_timer_start" }
+    });
+    const fetchMock = vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422));
+    vi.stubGlobal("fetch", fetchMock);
+    const { subscribeRefusedTimerStarts } = await import("./api");
+    const refused = vi.fn();
+    const unsubscribe = subscribeRefusedTimerStarts(refused);
+    try {
+      await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+      await retryFailedQueuedEvents();
+    } finally {
+      unsubscribe();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refused).toHaveBeenCalledOnce();
+  });
+
   it("keeps a queued Shortcut Stop that names its own time replayable (#403)", async () => {
     asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
       storedQueuedEvent({

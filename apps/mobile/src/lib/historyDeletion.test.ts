@@ -269,6 +269,59 @@ describe("deletion coordinator", () => {
     expect(harness.coordinator.undo(pending.token)).toBe(false);
   });
 
+  // Codex r2 on #532: a refused Start in a group delete took Undo away from the saved blocks with it.
+  it("drops only a refused member from a group deletion, keeping Undo and the window for the rest", () => {
+    const harness = coordinatorHarness();
+    const pending = required(harness.coordinator.prepare(
+      [entry("optimistic-start"), entry("saved-entry")],
+      { entryIds: ["optimistic-start", "saved-entry"] }
+    ));
+    harness.coordinator.activate(pending.token);
+    const expiresAt = harness.coordinator.current()?.expiresAt;
+    harness.clock.advanceBy(1_000);
+
+    expect(harness.coordinator.removePendingEntry("other-entry")).toBe(false);
+    expect(harness.coordinator.removePendingEntry("optimistic-start")).toBe("removed");
+    expect(harness.coordinator.current()).toMatchObject({
+      entryIds: ["saved-entry"],
+      expiresAt,
+      phase: "active",
+      token: pending.token
+    });
+    expect(harness.coordinator.current()?.entries.map(({ id }) => id)).toEqual(["saved-entry"]);
+    expect(harness.coordinator.undo(pending.token)).toBe(true);
+    expect(harness.restores.map(({ entryIds }) => entryIds)).toEqual([["saved-entry"]]);
+    expect(harness.commits).toEqual([]);
+  });
+
+  it("commits the rest of a group deletion without the refused member when its window ends", () => {
+    const harness = coordinatorHarness();
+    const pending = required(harness.coordinator.prepare(
+      [entry("optimistic-start"), entry("saved-entry")],
+      { entryIds: ["optimistic-start", "saved-entry"] }
+    ));
+    harness.coordinator.activate(pending.token);
+    harness.coordinator.removePendingEntry("optimistic-start");
+
+    harness.clock.advanceBy(DELETION_UNDO_MS);
+    expect(harness.commits.map(({ entryIds }) => entryIds)).toEqual([["saved-entry"]]);
+  });
+
+  it("invalidates a deletion whose only member was refused", () => {
+    const harness = coordinatorHarness();
+    const pending = required(harness.coordinator.prepare(
+      [entry("optimistic-start")],
+      snapshot("optimistic-start")
+    ));
+    harness.coordinator.activate(pending.token);
+
+    expect(harness.coordinator.removePendingEntry("optimistic-start")).toBe("invalidated");
+    expect(harness.coordinator.current()).toBeNull();
+    expect(harness.clock.pendingTimerCount()).toBe(0);
+    expect(harness.commits).toEqual([]);
+    expect(harness.restores).toEqual([]);
+  });
+
   it("supports explicit commit and invalidation semantics", () => {
     const committed = coordinatorHarness();
     const commitPending = required(committed.coordinator.prepare([entry("commit")], snapshot("commit")));

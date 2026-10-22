@@ -204,7 +204,8 @@ describe("Today rows swipe-to-delete contract", () => {
       dashboardSource.indexOf("async function deleteActiveTimer(")
     );
 
-    expect(rejectionSource).toContain("invalidatePendingEntry(optimisticId)");
+    // Only the refused block leaves a group deletion; the rest keep Undo (Codex r2 on #532).
+    expect(rejectionSource).toContain("removePendingEntry(optimisticId)");
     expect(rejectionSource).toContain("nextTimerMutationVersion(optimisticId)");
     expect(rejectionSource).toContain("rollbackRejectedOptimisticTimerStart(");
     expect(rejectionSource).toContain("rejectedOptimisticStartExit.current.schedule(");
