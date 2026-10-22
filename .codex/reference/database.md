@@ -50,6 +50,11 @@ Before declaring hosted auth/timer/event changes ready, verify:
 - Deploy `supabase/migrations/202608010001_health_sleep_session_reconciliation.sql` before server code that queries `user_edited_at`. Its historical backfill intentionally protects all previously changed Health sleep rows. It does not merge or delete historical duplicates.
 - Reporting coverage must clip intervals to the requested range and use a gaps-and-islands union. Do not infer covered time by subtracting pairwise intersections.
 
+## Connection Pool
+
+- The web pool (`apps/web/src/lib/db.ts`, 10 connections, 1.5 s to connect or to wait for a free one) and every client it creates have `error` listeners for their whole life (`observeDatabaseErrors`): a connection the pooler or Postgres ends emits `error` outside any awaited promise, and without a listener Node crashes the function instance (stability audit 22 Oct 2026, SERVER-2). The running query still rejects; release a broken client with `client.release(true)`.
+- No request fans out across the whole pool. Bootstrap's reads go through `runBootstrapReads` (at most `BOOTSTRAP_READ_CONCURRENCY` = 4 at once), so two bootstraps and a timer write fit together (production 21 Oct 2026: "timeout exceeded when trying to connect"). A new parallel read set uses the same limit, and `bootstrapReads.test.ts` keeps twice the limit under the pool size.
+
 ## Session And Personal-Report Reads
 
 - Root layout/page consumers must share one request-scoped optional-session result. Do not create separate `cache()` wrappers or a cross-request user-session cache.
