@@ -111,7 +111,8 @@ check(endedWhileWaiting == 1, "the expired assertion ends exactly once: \(endedW
 flock(other, LOCK_UN)
 close(other)
 
-// Expiry while the lock is held: the assertion ends only after the unlock.
+// Expiry while the lock is held, even by work slower than any grace period: the expiry itself releases
+// the lock, then the assertion ends; the work finishes unlocked (Codex r2 on #524).
 var events: [String] = []
 let eventsLock = NSLock()
 func record(_ event: String) { eventsLock.withLock { events.append(event) } }
@@ -123,17 +124,19 @@ DayframeSharedFileLock.install { _ in
 }
 let expiryDone = DispatchSemaphore(value: 0)
 let heldResult = DayframeSharedFileLock.withExclusiveLock(at: lockURL, name: "test") { () -> Int in
+  record("body start locked=\(isLockedElsewhere())")
   DispatchQueue.global().async {
     heldAssertion?.expire()
     expiryDone.signal()
   }
-  Thread.sleep(forTimeInterval: 0.2)
+  expiryDone.wait()
+  Thread.sleep(forTimeInterval: 1.2)
   record("body done locked=\(isLockedElsewhere())")
   return 3
 }
-expiryDone.wait()
 check(heldResult == 3, "a body already running finishes")
-check(events == ["body done locked=true", "end locked=false"], "the lock is released before the assertion ends: \(events)")
+check(events == ["body start locked=true", "end locked=false", "body done locked=false"], "the lock is released before the assertion ends: \(events)")
+check(!isLockedElsewhere(), "nothing left locked")
 
 // Expired before the lock is taken: nothing runs and no lock is taken.
 DayframeSharedFileLock.install { _ in
@@ -152,5 +155,52 @@ twice.end()
 twice.expire()
 twice.end()
 check(platformEnds == 1, "exactly-once end: \(platformEnds)")
+
+// The extension's expiring activity: granted, then expired by the system.
+final class FakeActivity: @unchecked Sendable {
+  var block: (@Sendable (Bool) -> Void)?
+  var returned = DispatchSemaphore(value: 0)
+}
+let granted = FakeActivity()
+let grantedAssertion = DayframeSharedFileLock.expiringActivityAssertion("test") { _, block in
+  granted.block = block
+  DispatchQueue.global().async {
+    block(false)
+    granted.returned.signal()
+  }
+}
+check(grantedAssertion != nil, "a granted activity gives an assertion")
+check(granted.returned.wait(timeout: .now() + 0.1) == .timedOut, "the activity is held while the assertion lives")
+DispatchQueue.global().async { granted.block?(true) }
+check(granted.returned.wait(timeout: .now() + 2) == .success, "the system's expiry ends the activity")
+check(grantedAssertion?.isExpired == true, "and expires the assertion")
+
+// Not granted: no assertion, and the lock helper runs nothing.
+let denied = DayframeSharedFileLock.expiringActivityAssertion("test") { _, block in
+  DispatchQueue.global().async { block(true) }
+}
+check(denied == nil, "a refused activity gives no assertion")
+
+// Granted, then ended normally: the activity's block returns.
+let normal = FakeActivity()
+let normalAssertion = DayframeSharedFileLock.expiringActivityAssertion("test") { _, block in
+  DispatchQueue.global().async {
+    block(false)
+    normal.returned.signal()
+  }
+}
+normalAssertion?.end()
+check(normal.returned.wait(timeout: .now() + 2) == .success, "ending the assertion ends the activity")
+
+// Taking the kernel lock and recording it are one step: an expiry right after finds it and releases
+// it before the assertion ends; an expiry right before means no lock is taken (Codex r3 on #524).
+let raceDescriptor = open(lockURL.path, O_RDWR)
+var raceEnds: [Bool] = []
+let racing = DayframeSharedFileLockAssertion { raceEnds.append(isLockedElsewhere()) }
+check(racing.tryLock(raceDescriptor) == .locked && isLockedElsewhere(), "tryLock takes the lock")
+racing.expire()
+check(raceEnds == [false], "an expiry right after the lock releases it before ending: \(raceEnds)")
+check(racing.tryLock(raceDescriptor) == .expired && !isLockedElsewhere(), "after expiry no lock is taken")
+close(raceDescriptor)
 
 print("Native shared file lock validation passed: \(checks) checks.")
