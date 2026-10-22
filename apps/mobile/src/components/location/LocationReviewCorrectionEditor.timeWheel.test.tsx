@@ -13,6 +13,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
   AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Alert: { alert: vi.fn() },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
@@ -81,6 +82,7 @@ vi.mock("../TimeWheelPanel", () => ({
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("expo-location", () => ({ getForegroundPermissionsAsync: vi.fn(), getLastKnownPositionAsync: vi.fn() }));
 vi.mock("@/lib/placeSearch", () => import("../../lib/placeSearch"));
+vi.mock("@/lib/transitGuess", () => import("../../lib/transitGuess"));
 
 const picker = vi.hoisted(() => ({ props: null as null | Record<string, unknown> }));
 vi.mock("../ActivityPickerSheet", () => ({

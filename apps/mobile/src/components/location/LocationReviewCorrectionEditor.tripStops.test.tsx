@@ -10,6 +10,7 @@ vi.mock("react", async () => {
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 vi.mock("react-native", () => ({
+  AppState: { currentState: "active", addEventListener: () => ({ remove() {} }) },
   AccessibilityInfo: { announceForAccessibility: vi.fn(), addEventListener: () => ({ remove() {} }), isReduceMotionEnabled: async () => true, isScreenReaderEnabled: async () => false },
   Animated: { Value: class { setValue() {} interpolate() { return 0; } }, View: "AnimatedView", timing: () => ({ start() {}, stop() {} }) },
   Easing: { cubic: () => 0, out: (easing: unknown) => easing },
@@ -48,6 +49,8 @@ vi.mock("@/lib/motion", () => ({
   localPresenceEntering: () => ({ marker: "local-enter" }),
   localPresenceExiting: () => ({ marker: "local-exit" })
 }));
+// The transit guess never runs here (no native nearby provider).
+vi.mock("@/lib/transitGuess", () => ({ guessTransit: async () => null, TRANSIT_NAME: "Public transport", transitGuessEndpoints: () => null, transitGuessLine: () => "" }));
 vi.mock("@/lib/placeSearch", () => ({
   createNativeNearbyPointOfInterestProvider: () => null,
   createNativePlaceSearchProvider: () => null,

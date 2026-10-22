@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
   Alert,
+  AppState,
   Keyboard,
   Platform,
   Pressable,
@@ -56,6 +57,7 @@ import {
   type NearbyPointOfInterestState,
   type PlaceSearchState
 } from "@/lib/placeSearch";
+import { guessTransit, TRANSIT_NAME, transitGuessEndpoints, transitGuessLine } from "@/lib/transitGuess";
 import { pressable, useMobileTheme, type MobileTheme } from "@/lib/mobileTheme";
 import { MOBILE_DISPLAY_FONT, mobileTextProps } from "@/lib/mobileTypography";
 import { SettingsBlockGroup, SettingsBlockRow, SettingsPillButton, SettingsSwitch } from "../settings/SettingsBlocks";
@@ -434,6 +436,52 @@ export function LocationReviewCorrectionEditor({
     reportedCardsRef.current.add(evidence.reviewItemId);
     onVenueSuggestedRef.current?.(evidence.reviewItemId, suggestedVenue.placeId);
   }, [baselinePlaceId, canReport, cardOpen, evidence.reviewItemId, evidence.segment.kind, evidence.venue?.suggestedPlaceId, saving, suggestedVenue?.placeId]);
+
+  // Transit, a best guess only (owner, 21 Oct 2026): for a vehicle Move, its two ends are checked
+  // against Apple's places while this screen is open; both stations → a quiet line and a chip.
+  const transitEndpoints = useMemo(() => transitGuessEndpoints(evidence), [evidence]);
+  const transitKey = transitEndpoints
+    ? [transitEndpoints.start.latitude, transitEndpoints.start.longitude, transitEndpoints.end.latitude, transitEndpoints.end.longitude].join(",")
+    : null;
+  const transitEndpointsRef = useRef(transitEndpoints);
+  transitEndpointsRef.current = transitEndpoints;
+  const [transitGuess, setTransitGuess] = useState<{ key: string; from: string; to: string } | null>(null);
+  useEffect(() => {
+    const endpoints = transitEndpointsRef.current;
+    if (!isFocused || !nearbyProvider || !transitKey || !endpoints || AppState.currentState !== "active") return;
+    let current = true;
+    // Foreground only (Codex r1 on #523): going to the background stops it, and nothing continues.
+    const stop = () => {
+      if (!current) return;
+      current = false;
+      void nearbyProvider.cancel();
+    };
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state !== "active") stop();
+    });
+    void guessTransit(nearbyProvider, endpoints, () => current && AppState.currentState === "active")
+      .then((guess) => {
+        // A fresh check that finds nothing (or fails) clears an older guess.
+        if (current) setTransitGuess(guess ? { key: transitKey, ...guess } : null);
+      })
+      .catch(() => {
+        if (current) setTransitGuess(null);
+      });
+    return () => {
+      appState.remove();
+      stop();
+    };
+  }, [isFocused, nearbyProvider, transitKey]);
+  // Offered only with the existing Getting around activity to log under (owner, 21 Oct 2026; Codex
+  // r1 on #523): without it the chip would change the name alone.
+  const shownTransitGuess = transitGuess && transitGuess.key === transitKey ? transitGuess : null;
+  const gettingAround = useMemo(
+    () => categories.find((category) => category.starterKey === "travel") ??
+      categories.find((category) => category.name.toLowerCase() === "getting around") ?? null,
+    [categories]
+  );
+  const shownTransit = shownTransitGuess && gettingAround ? shownTransitGuess : null;
+  const transitApplied = Boolean(gettingAround) && description.trim() === TRANSIT_NAME && selectedCategoryId === gettingAround?.id;
 
   // The chosen new place is the selected row above, so the list under the field does not repeat it.
   const nearbyChoices = visibleNearbyPlaces(
@@ -1189,6 +1237,49 @@ export function LocationReviewCorrectionEditor({
                 style={styles.textInput}
                 value={description}
               />
+              {/* Transit, a best guess only (owner, 21 Oct 2026): both ends of this vehicle trip are
+                  stations, so public transport is offered; it changes nothing until tapped. */}
+              {shownTransit ? (
+                <Reanimated.View
+                  entering={localPresenceEntering(reduceMotion)}
+                  exiting={localPresenceExiting(reduceMotion)}
+                  layout={localLayoutTransition(reduceMotion)}
+                  style={editorStyles.transitBlock}
+                >
+                  <Text {...mobileTextProps("metadata")} style={[editorStyles.helperText, { color: theme.textSecondary }]} testID="location-evidence-transit-line">
+                    {transitGuessLine(shownTransit)}
+                  </Text>
+                  {!transitApplied && gettingAround ? (
+                    <Reanimated.View
+                      entering={localPresenceEntering(reduceMotion)}
+                      exiting={localPresenceExiting(reduceMotion)}
+                      layout={localLayoutTransition(reduceMotion)}
+                      style={editorStyles.learnedNameRow}
+                    >
+                      <Pressable
+                        accessibilityHint={`Fills in the name and chooses ${gettingAround.name}`}
+                        accessibilityLabel={TRANSIT_NAME}
+                        accessibilityRole="button"
+                        disabled={saving}
+                        hitSlop={{ top: 6, bottom: 6 }}
+                        onPress={() => {
+                          setDescription(TRANSIT_NAME);
+                          setDescriptionTouched(true);
+                          // Shown as the chosen chip even when unpinned and not recent, as a pick
+                          // from All activities is (Codex r1 on #523).
+                          setSelectedCategoryId(gettingAround.id);
+                          setCategoryTouched(true);
+                          setChipAnchorId(gettingAround.id);
+                        }}
+                        style={({ pressed }) => [editorStyles.learnedNameChip, pressed ? { opacity: 0.72 } : null]}
+                        testID="location-evidence-transit-chip"
+                      >
+                        <Text {...mobileTextProps("control")} numberOfLines={1} style={editorStyles.learnedNameText}>{TRANSIT_NAME}</Text>
+                      </Pressable>
+                    </Reanimated.View>
+                  ) : null}
+                </Reanimated.View>
+              ) : null}
               {/* A name Dayframe learned for this kind of visit or trip, one tap away when the field
                   doesn't hold it (owner, 17 Oct 2026). Using it is the person's own choice. */}
               {learnedName && description.trim() !== learnedName ? (
@@ -1789,6 +1880,7 @@ function createEditorStyles(theme: MobileTheme) {
     evidenceLineRow: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 6 },
     evidenceDetails: { gap: 4 },
     learnedNameRow: { flexDirection: "row" },
+    transitBlock: { gap: 6 },
     learnedNameChip: {
       minHeight: 38, maxWidth: "100%", paddingHorizontal: 14, borderRadius: DAYFRAME_BLOCKS.radius.pill,
       alignItems: "center", justifyContent: "center", backgroundColor: theme.surfaceInset
