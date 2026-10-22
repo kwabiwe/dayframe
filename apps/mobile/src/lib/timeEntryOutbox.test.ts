@@ -212,6 +212,38 @@ describe("durable time-entry outbox", () => {
     expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
   });
 
+  // Stability audit 22 Oct 2026 (iphone-timer-sync-3): one Edit waiting for a block that never got a
+  // server id held the account's whole outbox.
+  it("lets a command still waiting for its block hold only that block's later commands", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({ clientCommandId: "waits", optimisticEntryId: "optimistic-y", targetEntryId: null }),
+      commandFixture({ clientCommandId: "other-block", targetEntryId: "entry-x" }),
+      commandFixture({ clientCommandId: "same-block-later", optimisticEntryId: "optimistic-y", targetEntryId: null })
+    ]));
+    const fetchMock = vi.fn((_url: string) => Promise.resolve(new Response(null, { status: 204 })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({ deliveredCount: 1, reason: "dependency_wait", waitingCount: 2 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/time-entries/entry-x");
+  });
+
+  it("turns the Edits for a refused Start into issues the person can see and discard", async () => {
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({ clientCommandId: "for-refused", optimisticEntryId: "optimistic-y", targetEntryId: null }),
+      commandFixture({ clientCommandId: "other-account", optimisticEntryId: "optimistic-y", targetEntryId: null, ...OWNER_B }),
+      commandFixture({ clientCommandId: "other-block", targetEntryId: "entry-x" })
+    ]));
+
+    await expect(outbox.refuseTimeEntryCommandsForOptimisticEntry(OWNER_A, "optimistic-y", "never saved")).resolves.toBe(1);
+    expect((await outbox.listTimeEntrySyncIssues(OWNER_A)).map((issue) => issue.clientCommandId)).toEqual(["for-refused"]);
+    expect((await outbox.listTimeEntrySyncIssues(OWNER_B))).toEqual([]);
+  });
+
   it("does not dispatch when the durable owner and bearer owner differ", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,

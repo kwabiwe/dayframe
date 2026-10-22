@@ -1250,6 +1250,7 @@ async function syncQueueItems(
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
+  const refusedStarts: RefusedTimerStart[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
@@ -1333,6 +1334,9 @@ async function syncQueueItems(
         const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
+        if (failureKind === "permanent" && item.type === "timer_start") {
+          refusedStarts.push({ localId: item.localId, message, owner });
+        }
         if (failureKind !== "permanent") {
           remaining.push(...queue.slice(index + 1));
           stopped = true;
@@ -1390,6 +1394,7 @@ async function syncQueueItems(
     remaining,
     synced
   });
+  if (refusedStarts.length) await settleRefusedTimerStarts(refusedStarts);
   return queueSyncResult(
     synced,
     reconciledRemaining.filter((item) => queueEventMatchesScope(item, options.eventScope)),
@@ -1397,6 +1402,46 @@ async function syncQueueItems(
     stopped,
     timerEntryIdCorrelations
   );
+}
+
+export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner };
+
+const refusedTimerStartListeners = new Set<(start: RefusedTimerStart) => void>();
+
+/** Told once when the server permanently refuses a queued Start (its block is never created). */
+export function subscribeRefusedTimerStarts(listener: (start: RefusedTimerStart) => void) {
+  refusedTimerStartListeners.add(listener);
+  return () => {
+    refusedTimerStartListeners.delete(listener);
+  };
+}
+
+/**
+ * A queued Start the server refused never gets a block, so what waits on it can never be delivered: its
+ * Stops are removed, its Edits and Deletes become sync issues the person can see and discard, and the
+ * Dashboard rolls the block back (stability audit 22 Oct 2026, iphone-timer-sync-3: the rollback had had
+ * no caller since 22 Aug, and one such Edit held the account's whole Edit/Delete outbox).
+ */
+async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[]) {
+  const [{ removePendingTimerStopsForTarget }, { refuseTimeEntryCommandsForOptimisticEntry }] = await Promise.all([
+    import("./timerStopOutbox"),
+    import("./timeEntryOutbox")
+  ]);
+  for (const start of refused) {
+    await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId }).catch(() => []);
+    await refuseTimeEntryCommandsForOptimisticEntry(
+      start.owner,
+      start.localId,
+      "The block this change was for was never saved."
+    ).catch(() => 0);
+    for (const listener of refusedTimerStartListeners) {
+      try {
+        listener(start);
+      } catch {
+        // A listener's failure never stops the others or the sync pass.
+      }
+    }
+  }
 }
 
 function queueEventMatchesScope(

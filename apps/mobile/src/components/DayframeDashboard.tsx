@@ -122,6 +122,7 @@ import {
   resolveTimerEntryIdAfterQueueBarrier,
   requestPasswordReset,
   signup,
+  subscribeRefusedTimerStarts,
   syncQueue,
   type MobileBootstrap,
   type MobileReviewItem,
@@ -588,6 +589,21 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     setPendingTimerStops([]);
     setAuthState("signedOut");
   }, [clearTodayNotice]);
+
+  // A queued Start the server refused (stability audit 22 Oct 2026, iphone-timer-sync-3): its Stops and
+  // Edits are already settled by the sync layer; here the block shown for it is rolled back and Today
+  // refreshes from the server. The rollback restores nothing from the Start's own time (it may be hours
+  // old): server truth replaces it.
+  const rejectOptimisticTimerStartRef = useRef<(id: string, previous: MobileBootstrap | null, error: unknown) => void>(() => undefined);
+  useEffect(() => subscribeRefusedTimerStarts(({ localId, message, owner }) => {
+    const current = latestData.current;
+    if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
+    const shown = optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
+      current.entries.some((entry) => entry.id === localId);
+    if (!shown) return;
+    rejectOptimisticTimerStartRef.current(localId, null, new Error(message));
+    queueDashboardRefreshAfterConflict();
+  }), []);
 
   useEffect(() => subscribeMobileSignedOut(() => transitionToSignedOut({
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
@@ -2269,6 +2285,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return true;
   }
 
+  rejectOptimisticTimerStartRef.current = rejectOptimisticTimerStart;
   function rejectOptimisticTimerStart(
     optimisticId: string,
     previousData: MobileBootstrap | null,

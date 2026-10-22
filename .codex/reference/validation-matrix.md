@@ -210,6 +210,7 @@ binary are not physical acceptance.
 
 Required checks:
 
+- Late and refused queued Starts (PRD D20, stability PR A): in airplane mode start a block on the iPhone, start a different block on the web, then reconnect the iPhone. The iPhone block lands completed, ending where the web block starts, and the web block keeps running. Nothing waits in Sync help, and later iPhone Starts and Stops reach the server. A refused Start (rare: same-second collision) shows "Block not started", disappears from Today after a refresh, and its typed edits appear in Sync help to discard.
 - Web start timer.
 - Web stop timer.
 - Mobile start timer.

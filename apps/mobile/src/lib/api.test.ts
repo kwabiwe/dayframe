@@ -823,6 +823,32 @@ describe("mobile API client", () => {
     expect(await readQueue()).toHaveLength(1);
   });
 
+  // Stability audit 22 Oct 2026 (iphone-timer-sync-3): the rollback for a refused queued Start had no
+  // caller, so its Stops waited forever and one of its Edits held the account's Edit/Delete outbox.
+  it("settles what waits on a queued Start the server permanently refuses", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "optimistic-refused", source: "mobile_app", type: "timer_start",
+      occurredAt: new Date("2026-10-22T10:00:00.000Z"), rawPayload: { origin: "mobile_timer_start" }
+    });
+    await persistPendingTimerStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-refused" } });
+    const { enqueueTimeEntryUpdate, listTimeEntrySyncIssues } = await import("./timeEntryOutbox");
+    await enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-refused" }, patch: { description: "Typed after Start" } });
+    const { subscribeRefusedTimerStarts } = await import("./api");
+    const refused = vi.fn();
+    const unsubscribe = subscribeRefusedTimerStarts(refused);
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)));
+
+    await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+    unsubscribe();
+
+    expect(refused).toHaveBeenCalledOnce();
+    expect(refused).toHaveBeenCalledWith(expect.objectContaining({ localId: "optimistic-refused", owner: TIMER_STOP_OWNER }));
+    const { readPendingTimerStops } = await import("./timerStopOutbox");
+    expect((await readPendingTimerStops()).filter((stop) => stop.optimisticEntryId === "optimistic-refused")).toEqual([]);
+    expect((await listTimeEntrySyncIssues(TIMER_STOP_OWNER)).map((issue) => issue.lastError)).toEqual(["The block this change was for was never saved."]);
+  });
+
   it("keeps a queued Shortcut Stop that names its own time replayable (#403)", async () => {
     asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
       storedQueuedEvent({

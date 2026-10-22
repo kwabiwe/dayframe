@@ -151,6 +151,65 @@ export async function releaseTimeEntryCommands(
   });
 }
 
+/**
+ * The first command that can go now. A command still waiting for its block's server id holds only the
+ * later commands for that same block, never other blocks' (stability audit 22 Oct 2026,
+ * iphone-timer-sync-3: one such Edit used to hold the account's whole outbox).
+ */
+function nextDeliverableCommand(
+  commands: readonly PendingTimeEntryCommand[],
+  owner: MobileAccountOwner,
+  correlations: ReadonlyMap<string, string>
+) {
+  const held = new Set<string>();
+  let waiting = false;
+  for (const command of commands) {
+    if (!mobileAccountOwnersEqual(command, owner) || command.failureKind === "permanent") continue;
+    const target = command.targetEntryId ??
+      (command.optimisticEntryId ? correlations.get(command.optimisticEntryId) : undefined);
+    const keys = [command.targetEntryId, command.optimisticEntryId, target].filter((key): key is string => Boolean(key));
+    if (keys.some((key) => held.has(key))) continue;
+    if (!target) {
+      waiting = true;
+      for (const key of keys) held.add(key);
+      continue;
+    }
+    return { command, waiting };
+  }
+  return { command: undefined, waiting };
+}
+
+/**
+ * A queued Start the server refused never gets a block: the Edits and Deletes made for it become sync
+ * issues (permanent) that the person can see and discard in Sync help.
+ */
+export async function refuseTimeEntryCommandsForOptimisticEntry(
+  owner: MobileAccountOwner,
+  optimisticEntryId: string,
+  message: string
+) {
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    const now = new Date().toISOString();
+    let refusedCount = 0;
+    const next = all.map((command) => {
+      if (
+        !mobileAccountOwnersEqual(command, owner) ||
+        command.optimisticEntryId !== optimisticEntryId ||
+        command.targetEntryId ||
+        command.failureKind === "permanent"
+      ) {
+        return command;
+      }
+      refusedCount += 1;
+      const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
+      return { ...rest, failureKind: "permanent" as const, lastError: message, updatedAt: now };
+    });
+    if (refusedCount > 0) await writeAllCommands(next);
+    return refusedCount;
+  });
+}
+
 export async function removeTimeEntryCommands(clientCommandIds: readonly string[]) {
   const ids = new Set(clientCommandIds);
   if (ids.size === 0) return 0;
@@ -422,16 +481,15 @@ async function runTimeEntryCommandDrain(input: {
     if (input.signal?.aborted) {
       return currentOutboxResult(input.owner, deliveredCount, true, "retryable_failure");
     }
-    const { all, command: original } = await withMutation(async () => {
+    const { all, command: original, waiting } = await withMutation(async () => {
       const current = await readAllCommands();
-      return {
-        all: current,
-        command: current.find((command) =>
-          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent"
-        )
-      };
+      return { all: current, ...nextDeliverableCommand(current, input.owner, input.control.correlations) };
     });
-    if (!original) return outboxResult(all, input.owner, deliveredCount, false);
+    if (!original) {
+      return waiting
+        ? outboxResult(all, input.owner, deliveredCount, true, "dependency_wait")
+        : outboxResult(all, input.owner, deliveredCount, false);
+    }
     if (original.deliverAfter && Date.parse(original.deliverAfter) > now.getTime()) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
