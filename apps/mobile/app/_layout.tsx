@@ -1,6 +1,6 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { AppState, StatusBar, StyleSheet, View } from "react-native";
+import { AppState, NativeModules, StatusBar, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectivityStatusProvider } from "@/components/ConnectivityStatusStrip";
@@ -15,6 +15,7 @@ import { createNavigationColors } from "@/lib/navigationTheme";
 import { primeSettingsLastKnown } from "@/lib/settingsLastKnown";
 import { installHealthBackgroundSync } from "@/lib/healthBackgroundSync";
 import { installTrackingNotice } from "@/lib/trackingNotice";
+import { installStallWatchdog, type NativeDiagnostics } from "@/lib/stallWatchdog";
 
 // Apple Health wakes (new sleep or workouts, or a background app refresh) are handled from module
 // evaluation, so a cold background launch captures and uploads without any screen becoming active.
@@ -23,6 +24,11 @@ installHealthBackgroundSync();
 // The tracking-stopped notice's armed flag is kept current from module evaluation (headless
 // launches included), because iOS reads it natively while ending Dayframe.
 installTrackingNotice();
+
+// The freeze watchdog's JS half (staging freeze, 22 Oct 2026): JS answers native once a second while in
+// front, and labelled JS work is named in any stall native records. Installed at module evaluation so
+// a freeze during the first screen is caught too.
+installStallWatchdog(NativeModules.DayframeDiagnosticsModule as NativeDiagnostics | undefined, AppState);
 
 // A4 (Codex r1 on #365): Settings' last-known display values start loading when this module is
 // evaluated, before any screen renders, so Settings opened by the user finds them ready on its
