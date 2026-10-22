@@ -1403,7 +1403,17 @@ async function syncQueueItems(
     remaining,
     synced
   });
-  if (refusedStarts.length) await settleRefusedTimerStarts(refusedStarts);
+  // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
+  // is retried; only the newly refused are announced (Codex r1 on #532).
+  const stillRefused = reconciledRemaining.filter((item) =>
+    item.type === "timer_start" && item.failureKind === "permanent" && queuedEventMatchesOwner(item, owner)
+  );
+  if (stillRefused.length || refusedStarts.length) {
+    await settleRefusedTimerStarts(
+      stillRefused.map((item) => ({ localId: item.localId, message: item.lastError ?? "", owner })),
+      new Set(refusedStarts.map((start) => start.localId))
+    );
+  }
   return queueSyncResult(
     synced,
     reconciledRemaining.filter((item) => queueEventMatchesScope(item, options.eventScope)),
@@ -1431,18 +1441,23 @@ export function subscribeRefusedTimerStarts(listener: (start: RefusedTimerStart)
  * Dashboard rolls the block back (stability audit 22 Oct 2026, iphone-timer-sync-3: the rollback had had
  * no caller since 22 Aug, and one such Edit held the account's whole Edit/Delete outbox).
  */
-async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[]) {
+async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[], newlyRefused: ReadonlySet<string>) {
   const [{ removePendingTimerStopsForTarget }, { refuseTimeEntryCommandsForOptimisticEntry }] = await Promise.all([
     import("./timerStopOutbox"),
     import("./timeEntryOutbox")
   ]);
   for (const start of refused) {
-    await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId }).catch(() => []);
-    await refuseTimeEntryCommandsForOptimisticEntry(
-      start.owner,
-      start.localId,
-      "The block this change was for was never saved."
-    ).catch(() => 0);
+    try {
+      await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
+      await refuseTimeEntryCommandsForOptimisticEntry(
+        start.owner,
+        start.localId,
+        "The block this change was for was never saved."
+      );
+    } catch {
+      // Storage failed: the next pass settles this Start again.
+    }
+    if (!newlyRefused.has(start.localId)) continue;
     for (const listener of refusedTimerStartListeners) {
       try {
         listener(start);

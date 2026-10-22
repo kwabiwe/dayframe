@@ -2728,13 +2728,17 @@ export default function SettingsScreen() {
                   ))}
                   {timeEntrySyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
+                      detail={issue.refusedStart
+                        // Its block's Start was refused, so there is nothing to change and nothing to retry
+                        // (Codex r1 on #532): Discard only.
+                        ? `From ${formatQueueTime(issue.updatedAt, clockFormat)}. The block this was for was never saved, so there's nothing to change.`
+                        : `From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
                       title={issue.operation === "delete" ? "Couldn't delete a block" : "Couldn't save an edit"}
                     >
-                      <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
                       <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)} theme={theme} />
                     </SettingsIssueRow>
                   ))}

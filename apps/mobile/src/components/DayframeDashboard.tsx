@@ -129,6 +129,7 @@ import {
   type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
+import { refusedTimerStartPresentation } from "@/lib/refusedTimerStartPresentation";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { useShortcutStopHandoff } from "@/components/useShortcutStopHandoff";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
@@ -284,6 +285,8 @@ type RejectedOptimisticStart = {
   error: unknown;
   optimisticId: string;
   previousData: MobileBootstrap | null;
+  /** False when the block was never on screen (a refused queued Start nobody could see). */
+  alert?: boolean;
 };
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
@@ -347,6 +350,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [selectedDayKey, setSelectedDayKey] = useState(() => formatDateKey(new Date()));
   const [calendarEditEntry, setCalendarEditEntry] = useState<NativeCalendarEntry | null>(null);
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
+  const [calendarEditDismissRequestId, setCalendarEditDismissRequestId] = useState<number | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
   // A rejected change badges the avatar, which then opens Settings › Sync help.
@@ -445,6 +449,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const sheetPresentationSequence = useRef(0);
   const activeEditPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
   const calendarEditPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
+  const calendarEditEntryRef = useRef<NativeCalendarEntry | null>(null);
+  calendarEditEntryRef.current = calendarEditEntry;
   const manualEntryPresentationRef = useRef<TimeEntrySheetPresentation | null>(null);
   const pendingNativeShortcutLocalIds = useRef<Set<string>>(new Set());
   const timerMutationQueue = useRef(createSerializedMutationQueue());
@@ -594,14 +600,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Edits are already settled by the sync layer; here the block shown for it is rolled back and Today
   // refreshes from the server. The rollback restores nothing from the Start's own time (it may be hours
   // old): server truth replaces it.
-  const rejectOptimisticTimerStartRef = useRef<(id: string, previous: MobileBootstrap | null, error: unknown) => void>(() => undefined);
+  const rejectOptimisticTimerStartRef = useRef<(id: string, previous: MobileBootstrap | null, error: unknown, alert?: boolean) => void>(() => undefined);
   useEffect(() => subscribeRefusedTimerStarts(({ localId, message, owner }) => {
     const current = latestData.current;
-    if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
-    const shown = optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
-      current.entries.some((entry) => entry.id === localId);
-    if (!shown) return;
-    rejectOptimisticTimerStartRef.current(localId, null, new Error(message));
+    const decision = refusedTimerStartPresentation({
+      localId,
+      ownerMatches: Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner)),
+      shown: Boolean(current && (optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
+        current.entries.some((entry) => entry.id === localId))),
+      deletionPending: Boolean(deletionCoordinator.current?.current()?.entryIds.includes(localId)),
+      calendarEditorEntryId: calendarEditEntryRef.current?.id ?? null
+    });
+    if (!decision.run) return;
+    if (decision.dismissCalendarEditor && calendarEditPresentationRef.current) {
+      // Leaves by its own exit (motion and Reduce Motion as for Cancel); its Delete can't run on a
+      // block that was never saved.
+      setCalendarEditDismissRequestId(calendarEditPresentationRef.current.id);
+    }
+    rejectOptimisticTimerStartRef.current(localId, null, new Error(message), decision.alert);
     queueDashboardRefreshAfterConflict();
   }), []);
 
@@ -1104,6 +1120,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function completeCalendarEntryExit(presentationId: number) {
     if (calendarEditPresentationRef.current?.id !== presentationId) return;
+    setCalendarEditDismissRequestId((current) => current === presentationId ? null : current);
     activateSheetDeletion(calendarSheetDeletionToken, presentationId);
     calendarEditPresentationRef.current = null;
     setCalendarEditPresentation((current) => current?.id === presentationId ? null : current);
@@ -2289,7 +2306,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   function rejectOptimisticTimerStart(
     optimisticId: string,
     previousData: MobileBootstrap | null,
-    error: unknown
+    error: unknown,
+    alert = true
   ) {
     const rollbackSnapshot = supersededStopRollbackTracker.current.consume(
       optimisticId,
@@ -2328,7 +2346,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (failedPresentation && activeEditorEntryId.current === optimisticId) {
       const scheduled = rejectedOptimisticStartExit.current.schedule(
         failedPresentation.id,
-        { error, optimisticId, previousData: rollbackSnapshot }
+        { error, optimisticId, previousData: rollbackSnapshot, alert }
       );
       if (
         scheduled ||
@@ -2342,20 +2360,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     finalizeRejectedOptimisticStart({
       error,
       optimisticId,
-      previousData: rollbackSnapshot
+      previousData: rollbackSnapshot,
+      alert
     });
   }
 
   function finalizeRejectedOptimisticStart({
     optimisticId,
-    previousData
+    previousData,
+    alert = true
   }: RejectedOptimisticStart) {
     updateDashboardData((current) => rollbackRejectedOptimisticTimerStart(
       current,
       previousData,
       optimisticId
     ));
-    Alert.alert(
+    if (alert) Alert.alert(
       "Block not started",
       "Dayframe could not start this block because the saved request was rejected. Check Settings › Sync help for details."
     );
@@ -3511,6 +3531,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         historicalEntries={historySourceEntries}
         lastStoppedAt={null}
         mode="entry"
+        dismissRequestId={calendarEditDismissRequestId}
         onCancel={completeCalendarEntryExit}
         onCreateActivity={createSheetActivity}
         onCreateTag={createTimerSheetTag}

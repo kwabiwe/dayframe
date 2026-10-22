@@ -43,6 +43,8 @@ export type PendingTimeEntryCommand = MobileAccountOwner & {
   lastError?: string;
   lastStatusCode?: number;
   failureKind?: "retryable" | "permanent";
+  /** Its block's queued Start was refused, so it can never be delivered: Discard only. */
+  refusedStart?: boolean;
 };
 
 export type TimeEntryCommandTarget =
@@ -152,36 +154,10 @@ export async function releaseTimeEntryCommands(
 }
 
 /**
- * The first command that can go now. A command still waiting for its block's server id holds only the
- * later commands for that same block, never other blocks' (stability audit 22 Oct 2026,
- * iphone-timer-sync-3: one such Edit used to hold the account's whole outbox).
- */
-function nextDeliverableCommand(
-  commands: readonly PendingTimeEntryCommand[],
-  owner: MobileAccountOwner,
-  correlations: ReadonlyMap<string, string>
-) {
-  const held = new Set<string>();
-  let waiting = false;
-  for (const command of commands) {
-    if (!mobileAccountOwnersEqual(command, owner) || command.failureKind === "permanent") continue;
-    const target = command.targetEntryId ??
-      (command.optimisticEntryId ? correlations.get(command.optimisticEntryId) : undefined);
-    const keys = [command.targetEntryId, command.optimisticEntryId, target].filter((key): key is string => Boolean(key));
-    if (keys.some((key) => held.has(key))) continue;
-    if (!target) {
-      waiting = true;
-      for (const key of keys) held.add(key);
-      continue;
-    }
-    return { command, waiting };
-  }
-  return { command: undefined, waiting };
-}
-
-/**
  * A queued Start the server refused never gets a block: the Edits and Deletes made for it become sync
- * issues (permanent) that the person can see and discard in Sync help.
+ * issues (permanent, `refusedStart`) that the person can see and discard in Sync help, never retry.
+ * Holding them permanent also keeps them from holding the account's outbox. Idempotent: the sync
+ * pass runs it for every refused Start until it succeeds.
  */
 export async function refuseTimeEntryCommandsForOptimisticEntry(
   owner: MobileAccountOwner,
@@ -203,7 +179,7 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
       }
       refusedCount += 1;
       const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
-      return { ...rest, failureKind: "permanent" as const, lastError: message, updatedAt: now };
+      return { ...rest, failureKind: "permanent" as const, refusedStart: true, lastError: message, updatedAt: now };
     });
     if (refusedCount > 0) await writeAllCommands(next);
     return refusedCount;
@@ -363,6 +339,7 @@ export async function retryTimeEntrySyncIssue(
       if (
         command.clientCommandId !== clientCommandId ||
         command.failureKind !== "permanent" ||
+        command.refusedStart ||
         !mobileAccountOwnersEqual(command, resolvedOwner)
       ) {
         return command;
@@ -481,15 +458,16 @@ async function runTimeEntryCommandDrain(input: {
     if (input.signal?.aborted) {
       return currentOutboxResult(input.owner, deliveredCount, true, "retryable_failure");
     }
-    const { all, command: original, waiting } = await withMutation(async () => {
+    const { all, command: original } = await withMutation(async () => {
       const current = await readAllCommands();
-      return { all: current, ...nextDeliverableCommand(current, input.owner, input.control.correlations) };
+      return {
+        all: current,
+        command: current.find((command) =>
+          mobileAccountOwnersEqual(command, input.owner) && command.failureKind !== "permanent"
+        )
+      };
     });
-    if (!original) {
-      return waiting
-        ? outboxResult(all, input.owner, deliveredCount, true, "dependency_wait")
-        : outboxResult(all, input.owner, deliveredCount, false);
-    }
+    if (!original) return outboxResult(all, input.owner, deliveredCount, false);
     if (original.deliverAfter && Date.parse(original.deliverAfter) > now.getTime()) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
@@ -946,7 +924,8 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
       : {}),
     ...(item.failureKind === "retryable" || item.failureKind === "permanent"
       ? { failureKind: item.failureKind }
-      : {})
+      : {}),
+    ...(item.refusedStart === true ? { refusedStart: true } : {})
   };
 }
 

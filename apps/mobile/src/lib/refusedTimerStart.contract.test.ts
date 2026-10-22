@@ -12,16 +12,23 @@ const dashboard = readFileSync(
 );
 
 describe("refused queued Starts", () => {
-  it("roll the shown block back through the Dashboard's rejection path", () => {
+  const subscription = dashboard.slice(dashboard.indexOf("useEffect(() => subscribeRefusedTimerStarts("));
+  const body = subscription.slice(0, subscription.indexOf("}), []);"));
+
+  it("roll the block back through the Dashboard's rejection path, decided by refusedTimerStartPresentation", () => {
     expect(dashboard).toContain("rejectOptimisticTimerStartRef.current = rejectOptimisticTimerStart;");
-    const subscription = dashboard.slice(dashboard.indexOf("useEffect(() => subscribeRefusedTimerStarts("));
-    const body = subscription.slice(0, subscription.indexOf("}), []);"));
-    expect(body).toContain("rejectOptimisticTimerStartRef.current(localId, null, new Error(message));");
+    expect(body).toContain("const decision = refusedTimerStartPresentation({");
+    expect(body).toContain("rejectOptimisticTimerStartRef.current(localId, null, new Error(message), decision.alert);");
     expect(body).toContain("queueDashboardRefreshAfterConflict();");
+    expect(body).toContain("deletionPending: Boolean(deletionCoordinator.current?.current()?.entryIds.includes(localId))");
   });
 
-  it("never restores the Start's own (possibly hours-old) snapshot", () => {
-    const subscription = dashboard.slice(dashboard.indexOf("useEffect(() => subscribeRefusedTimerStarts("));
-    expect(subscription.slice(0, subscription.indexOf("}), []);"))).not.toMatch(/previousData|snapshot/);
+  it("dismiss a Calendar editor open on the refused block through its own exit", () => {
+    expect(body).toContain("setCalendarEditDismissRequestId(calendarEditPresentationRef.current.id);");
+    expect(dashboard).toContain("dismissRequestId={calendarEditDismissRequestId}");
+  });
+
+  it("never restore the Start's own (possibly hours-old) snapshot", () => {
+    expect(body).not.toMatch(/previousData|snapshot/);
   });
 });

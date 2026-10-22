@@ -838,7 +838,18 @@ describe("mobile API client", () => {
     const refused = vi.fn();
     const unsubscribe = subscribeRefusedTimerStarts(refused);
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)));
+    // The first settlement can't write the Edit/Delete outbox; the next pass settles it (Codex r1 on #532).
+    let failOutboxOnce = true;
+    vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
+      if (key === "dayframe.timeEntryOutbox.v1" && failOutboxOnce) {
+        failOutboxOnce = false;
+        throw new Error("disk full");
+      }
+      asyncStore.set(key, value);
+    });
 
+    await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+    expect(await listTimeEntrySyncIssues(TIMER_STOP_OWNER)).toEqual([]);
     await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
     unsubscribe();
 
@@ -847,6 +858,10 @@ describe("mobile API client", () => {
     const { readPendingTimerStops } = await import("./timerStopOutbox");
     expect((await readPendingTimerStops()).filter((stop) => stop.optimisticEntryId === "optimistic-refused")).toEqual([]);
     expect((await listTimeEntrySyncIssues(TIMER_STOP_OWNER)).map((issue) => issue.lastError)).toEqual(["The block this change was for was never saved."]);
+    vi.mocked(AsyncStorage.setItem).mockImplementation((key: string, value: string) => {
+      asyncStore.set(key, value);
+      return Promise.resolve();
+    });
   });
 
   it("keeps a queued Shortcut Stop that names its own time replayable (#403)", async () => {

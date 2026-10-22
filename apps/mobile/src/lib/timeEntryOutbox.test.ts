@@ -212,24 +212,27 @@ describe("durable time-entry outbox", () => {
     expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
   });
 
-  // Stability audit 22 Oct 2026 (iphone-timer-sync-3): one Edit waiting for a block that never got a
-  // server id held the account's whole outbox.
-  it("lets a command still waiting for its block hold only that block's later commands", async () => {
+  // Stability audit 22 Oct 2026 (iphone-timer-sync-3): an Edit for a Start that was refused used to wait
+  // for a block that never comes and hold the account's whole outbox.
+  it("lets a refused Start's Edits stop holding the outbox, discardable but never retried", async () => {
     storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
-      commandFixture({ clientCommandId: "waits", optimisticEntryId: "optimistic-y", targetEntryId: null }),
-      commandFixture({ clientCommandId: "other-block", targetEntryId: "entry-x" }),
-      commandFixture({ clientCommandId: "same-block-later", optimisticEntryId: "optimistic-y", targetEntryId: null })
+      commandFixture({ clientCommandId: "for-refused", optimisticEntryId: "optimistic-y", targetEntryId: null }),
+      commandFixture({ clientCommandId: "other-block", targetEntryId: "entry-x" })
     ]));
     const fetchMock = vi.fn((_url: string) => Promise.resolve(new Response(null, { status: 204 })));
     vi.stubGlobal("fetch", fetchMock);
+    await expect(outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 0, reason: "dependency_wait" });
 
-    await expect(outbox.synchroniseTimeEntryCommands({
-      owner: OWNER_A,
-      correlations: new Map(),
-      force: true
-    })).resolves.toMatchObject({ deliveredCount: 1, reason: "dependency_wait", waitingCount: 2 });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    await outbox.refuseTimeEntryCommandsForOptimisticEntry(OWNER_A, "optimistic-y", "never saved");
+    await expect(outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 1 });
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/time-entries/entry-x");
+
+    await expect(outbox.retryTimeEntrySyncIssue("for-refused", OWNER_A)).resolves.toBe(false);
+    expect((await outbox.listTimeEntrySyncIssues(OWNER_A))[0]).toMatchObject({ clientCommandId: "for-refused", refusedStart: true });
+    await expect(outbox.discardTimeEntrySyncIssue("for-refused", OWNER_A)).resolves.toBe(true);
+    expect(await outbox.listTimeEntrySyncIssues(OWNER_A)).toEqual([]);
   });
 
   it("turns the Edits for a refused Start into issues the person can see and discard", async () => {
