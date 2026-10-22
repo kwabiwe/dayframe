@@ -1311,16 +1311,13 @@ async function stopEntryAt(
   event: { occurredAt: string | Date; workspaceId: string; userId: string },
   targetEntryId: string
 ) {
-  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; endedByNextBlock: boolean }>(
-    `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
-            exists (
-              select 1 from time_entries next
-              where next.workspace_id = te.workspace_id and next.user_id = te.user_id
-                and next.id <> te.id and next.started_at = te.stopped_at
-            ) as "endedByNextBlock"
-     from time_entries te
-     where te.workspace_id = $1 and te.user_id = $2 and te.id = $3
-     for update of te`,
+  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; personEdited: boolean; health: boolean }>(
+    `select started_at as "startedAt", stopped_at as "stoppedAt",
+            user_edited_at is not null as "personEdited",
+            source in ('health_sleep', 'health_workout') as "health"
+     from time_entries
+     where workspace_id = $1 and user_id = $2 and id = $3
+     for update`,
     [event.workspaceId, event.userId, targetEntryId]
   );
   const block = target.rows[0];
@@ -1330,12 +1327,14 @@ async function stopEntryAt(
   if (block.stoppedAt === null) {
     if (startedMs >= stopMs) throw new TimerStopBeforeStartError();
   } else {
-    // A block the server ended at the next block's start (a later Start replaced it, or a late Start was
-    // placed before it) still ends where its own Stop ran, when that Stop arrives afterwards: the phone
-    // queued it first (PRD D20; Codex r1 on #531, stability audit iphone-timer-sync-2). Any other end —
-    // one a person set, or an earlier Stop — stays.
-    const laterServerEnd = block.endedByNextBlock && new Date(block.stoppedAt).getTime() > stopMs && startedMs < stopMs;
-    if (!laterServerEnd) return { rows: [] as Array<{ id: string }> };
+    // A block that already ended later than its own Stop, without anyone editing it (a later Start
+    // replaced it, a late Start was placed or bounded, or another device stopped it later), ends where
+    // this Stop ran: the phone queued it first (PRD D20; Codex r1–r2 on #531, stability audit
+    // iphone-timer-sync-2). A block a person edited, a Health entry, or an earlier end stays. The facts
+    // come from the locked row itself, so a concurrent replacement can't hide them.
+    const pullBack = !block.personEdited && !block.health &&
+      new Date(block.stoppedAt).getTime() > stopMs && startedMs < stopMs;
+    if (!pullBack) return { rows: [] as Array<{ id: string }> };
   }
   return client.query<{ id: string }>(
     `update time_entries

@@ -263,11 +263,76 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 30, null]]);
   });
 
-  it("keeps an end a person set, or an earlier Stop, when a later Stop for the block arrives", async () => {
-    const edited = await block(0, 15, "web", "E");
-    await block(40, null, "web", "N");
+  it("keeps an end a person set, even one equal to the next block's start (Codex r2 on #531)", async () => {
+    const edited = await block(0, 20, "web", "E");
+    await pool.query("update time_entries set user_edited_at = now() where id = $1", [edited]);
+    await block(20, null, "web", "N");
     await expect(appStop(10, edited)).resolves.toMatchObject({ stopOutcome: "superseded" });
-    expect(await timeline()).toEqual([["E", 0, 15], ["N", 40, null]]);
+    expect(await timeline()).toEqual([["E", 0, 20], ["N", 20, null]]);
+  });
+
+  it("keeps an earlier end when a later Stop for the block arrives", async () => {
+    const finished = await block(0, 15, "web", "E");
+    await expect(appStop(30, finished)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["E", 0, 15]]);
+  });
+
+  it("ends a late Start bounded by a recorded Stop where its own Stop ran (Codex r2 on #531)", async () => {
+    await block(0, null, "mobile_app", "P");
+    await shortcutStop(20);
+    const y = await appStart(5, "Y");
+    expect(await timeline()).toEqual([["P", 0, 5], ["Y", 5, 20]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["P", 0, 5], ["Y", 5, 10]]);
+  });
+
+  it("sees a replacement committed while the Stop waited for the block's lock (Codex r2 on #531)", async () => {
+    const y = await block(0, null, "mobile_app", "Y");
+    const replacer = await pool.connect();
+    try {
+      await replacer.query("begin");
+      await replacer.query("update time_entries set stopped_at = $1 where id = $2", [at(20), y]);
+      await replacer.query(
+        `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
+         values ($1, $2, $3, 'web', 'high', 'confirmed', 'Z', $4)`,
+        [randomUUID(), workspaceId, userId, at(20)]
+      );
+      const replacerPid = (await replacer.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      const stop = appStop(10, y);
+      for (let tries = 0; tries < 200; tries += 1) {
+        const waiting = await pool.query(
+          "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+          [replacerPid]
+        );
+        if (waiting.rows.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await replacer.query("commit");
+      await expect(stop).resolves.toMatchObject({ stopOutcome: "stopped" });
+    } finally {
+      replacer.release();
+    }
+    expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 20, null]]);
+  });
+
+  it("an in-app Start delivered within ten seconds still replaces the running block", async () => {
+    const runningSince = new Date(Date.now() - 30 * 60_000);
+    await pool.query(
+      `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
+       values ($1, $2, $3, 'web', 'high', 'confirmed', 'P', $4)`,
+      [randomUUID(), workspaceId, userId, runningSince]
+    );
+    const now = new Date(Date.now() - 2_000);
+    const result = await processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`, occurredAt: now, description: "Y", source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start", startedAt: now.toISOString(), tagNames: [] }
+    }, session);
+    expect(result.startOutcome).toBeUndefined();
+    const rows = (await pool.query<{ description: string; stopped: boolean }>(
+      "select description, stopped_at is not null as stopped from time_entries where workspace_id = $1 order by started_at",
+      [workspaceId]
+    )).rows;
+    expect(rows).toEqual([{ description: "P", stopped: true }, { description: "Y", stopped: false }]);
   });
 
   it("refuses an in-app Start at another block's exact start even when a later bound exists (Codex r1 on #531)", async () => {
