@@ -64,3 +64,62 @@ describe("unknown stay inside its own completed iOS Visit (large building)", () 
     }
   });
 });
+
+// Synthetic relative-metre geometry on a made-up equatorial origin; minutes after an arbitrary origin.
+const ORIGIN_MS = Date.UTC(2026, 0, 19, 9);
+const atMinute = (minutes: number) => new Date(ORIGIN_MS + Math.round(minutes * 60_000)).toISOString();
+const DEVICE = "20000000-0000-4000-8000-000000000032";
+function reading(id: string, minutes: number, north: number, accuracy: number, patch: Partial<LocationEvidence> = {}): LocationEvidence {
+  return {
+    clientEvidenceId: id, deviceId: DEVICE, algorithmVersion: fixture().config.algorithmVersion,
+    kind: "standard_location", occurredAt: atMinute(minutes), sourceTimestamp: atMinute(minutes), receivedAt: atMinute(minutes),
+    timeZone: "UTC", latitude: north / 110_574, longitude: 0, horizontalAccuracyMeters: accuracy,
+    speedMetersPerSecond: 0, isSimulated: false, ...patch
+  };
+}
+const visitAt = (id: string, minutes: number, endsAt: number, north: number, accuracy: number) =>
+  reading(id, minutes, north, accuracy, { kind: "visit", endedAt: atMinute(endsAt), speedMetersPerSecond: null, receivedAt: atMinute(endsAt) });
+function runEvidence(evidence: LocationEvidence[], processingMinutes: number) {
+  const base = fixture();
+  const output = runLocationEngine({ ...base, savedPlaces: [], evidence, processingAt: atMinute(processingMinutes) });
+  return output.segmentUpserts.filter((s): s is StaySegment => s.kind === "stay");
+}
+
+describe("which completed Visit covers a reading", () => {
+  // Visit A (broad, 0–120) holds a narrower Visit B (30–60) at the same centre. B is iOS's latest
+  // completed judgement: after B's departure the older, broader A no longer holds the stay together.
+  const nested = (withNarrow: boolean) => [
+    visitAt("visit-a", 0, 120, 0, 200),
+    ...[1, 4, 7, 10, 13, 16, 19, 22, 25, 28].map((m) => reading(`core-${m}`, m, 0, 10)),
+    ...(withNarrow ? [visitAt("visit-b", 30, 60, 0, 20)] : []),
+    ...[31, 35, 40, 45, 50, 55, 59].map((m) => reading(`core-${m}`, m, 0, 10)),
+    ...[70, 75, 80, 85, 90, 95].map((m) => reading(`far-${m}`, m, 220, 65))
+  ];
+  const farIds = [70, 75, 80, 85, 90, 95].map((m) => `far-${m}`);
+
+  it("ends cover from an older Visit at a newer, nested Visit's departure", () => {
+    // Control: with only the broad Visit, the far readings lie within its circle before its departure.
+    const broadOnly = runEvidence(nested(false), 240);
+    expect(broadOnly.find((stay) => stay.startedAt === atMinute(0))!.evidenceIds).toEqual(expect.arrayContaining(farIds));
+    expect(broadOnly.find((stay) => stay.startedAt === atMinute(70))).toBeUndefined();
+    const stays = runEvidence(nested(true), 240);
+    const first = stays.find((stay) => stay.startedAt === atMinute(0))!;
+    for (const id of farIds) expect(first.evidenceIds).not.toContain(id);
+    expect(stays.find((stay) => stay.startedAt === atMinute(70))?.evidenceIds).toEqual(expect.arrayContaining(farIds));
+  });
+
+  it("never lets a Visit-kept reading move the centre that ordinary continuation is measured from", () => {
+    // The Visit (0 m, 200 m accuracy) ends at 60. The +190 m fix is kept only by the Visit; the
+    // +270 m fix comes after the departure and outside the Visit's circle, so it starts a new stay.
+    const stays = runEvidence([
+      visitAt("drift-visit", 0, 60, 0, 200),
+      ...[1, 2, 3].map((m) => reading(`drift-core-${m}`, m, -70, 65)),
+      reading("drift-kept", 30, 190, 5),
+      ...[65, 70, 75, 80].map((m) => reading(`drift-after-${m}`, m, 270, 10))
+    ], 240);
+    const first = stays.find((stay) => stay.startedAt === atMinute(0))!;
+    expect(first.evidenceIds).toContain("drift-kept");
+    expect(first.evidenceIds).not.toContain("drift-after-65");
+    expect(stays.find((stay) => stay.startedAt === atMinute(65))?.evidenceIds).toEqual(expect.arrayContaining(["drift-after-65", "drift-after-80"]));
+  });
+});

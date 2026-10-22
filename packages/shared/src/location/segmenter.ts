@@ -74,6 +74,10 @@ type WorkingStay = {
   arrivalPresenceFromAt?: string;
   /** Set while that Visit is an early arrival attached at its observed arrival. */
   arrivalPresenceDeferred?: boolean;
+  /** Readings kept only by insideOwnCompletedVisit: stay presence, never the centre ordinary matching uses. */
+  visitKept?: Set<ClassifiedEvidence>;
+  /** Incremental list of the stay's Visits for insideOwnCompletedVisit; reset when evidence is spliced. */
+  visitScan?: { index: number; visits: ClassifiedEvidence[] };
 };
 
 function pointFor(evidence: LocationEvidence) {
@@ -136,8 +140,18 @@ function evidenceCentre(items: ClassifiedEvidence[]) {
   );
 }
 
+/**
+ * The evidence ordinary unknown-cluster matching centres on: everything but readings kept only by the
+ * stay's own completed Visit, so those never move the centre that authorises continuation outside
+ * that Visit's interval and circle.
+ */
+function matchingEvidence(active: WorkingStay) {
+  const kept = active.visitKept;
+  return kept ? active.evidence.filter((item) => !kept.has(item)) : active.evidence;
+}
+
 function sameUnknownCluster(active: WorkingStay, item: ClassifiedEvidence, radius: number) {
-  const centre = evidenceCentre(active.evidence);
+  const centre = evidenceCentre(matchingEvidence(active));
   const point = pointFor(item.evidence);
   return Boolean(centre && point && distanceMeters(centre, point) <= radius);
 }
@@ -268,26 +282,44 @@ function accurateCoordinate(item: ClassifiedEvidence, input: LocationEngineInput
     item.evidence.horizontalAccuracyMeters <= input.config.highQualityHorizontalAccuracyMeters;
 }
 
+/** The stay's Visits, scanned incrementally (evidence only grows; a splice resets the scan). */
+function stayVisits(active: WorkingStay) {
+  const scan = active.visitScan ??= { index: 0, visits: [] };
+  for (; scan.index < active.evidence.length; scan.index += 1) {
+    const item = active.evidence[scan.index];
+    if (item.evidence.kind === "visit") scan.visits.push(item);
+  }
+  return scan.visits;
+}
+
 /**
- * Whether an unknown stay's own completed iOS Visit covers this reading in time and space: a genuine,
- * completed Visit that arrived within the stay, a reading before that Visit's departure, and a point
- * within the Visit's reported radius (its horizontal accuracy) plus the reading's own accuracy. iOS
- * judged the whole interval one visit, so movement inside it (walking round a large building, or indoor
- * drift) is not a second place, whatever the reading's speed. Only accurate, genuine fixes count; an
- * arrival-only Visit, a Visit from an earlier episode, or a reading after the departure never does.
+ * Whether an unknown stay's own completed iOS Visit covers this reading in time and space. The covering
+ * Visit is iOS's latest completed judgement at the reading: of the genuine, completed Visits that arrived
+ * within the stay and no later than the reading, the most recently arrived (on a tie, the earliest
+ * departure). It covers a reading no later than its departure and within its reported radius (its
+ * horizontal accuracy) plus the reading's own accuracy. iOS judged that interval one visit, so movement
+ * inside it (walking round a large building, or indoor drift) is not a second place, whatever the
+ * reading's speed. A newer Visit's departure ends the cover an older, broader one gave, as iOS reports
+ * one Visit at a time; arrival-only callbacks carry no departure and neither give nor end cover. Only
+ * accurate, genuine fixes count; a Visit from an earlier episode, or a reading after the covering
+ * Visit's departure, never does.
  */
 function insideOwnCompletedVisit(active: WorkingStay, item: ClassifiedEvidence, input: LocationEngineInput) {
   const point = pointFor(item.evidence);
   if (!point || item.evidence.kind === "visit" || item.evidence.isSimulated === true || !accurateCoordinate(item, input)) return false;
   const atMs = Date.parse(item.evidence.occurredAt);
   const startedAtMs = Date.parse(active.startedAt);
-  return active.evidence.some(({ evidence: visit }) => {
-    const centre = pointFor(visit);
-    return visit.kind === "visit" && visit.endedAt != null && visit.isSimulated !== true && centre != null &&
-      visit.horizontalAccuracyMeters != null && Date.parse(visit.occurredAt) >= startedAtMs &&
-      atMs <= Date.parse(visit.endedAt) &&
-      distanceMeters(centre, point) <= visit.horizontalAccuracyMeters + item.evidence.horizontalAccuracyMeters!;
-  });
+  let covering: LocationEvidence | null = null;
+  for (const { evidence: visit } of stayVisits(active)) {
+    if (visit.endedAt == null || visit.isSimulated === true || !pointFor(visit)) continue;
+    const arrivedMs = Date.parse(visit.occurredAt);
+    if (arrivedMs < startedAtMs || arrivedMs > atMs) continue;
+    const coveringArrivedMs = covering ? Date.parse(covering.occurredAt) : -Infinity;
+    if (arrivedMs > coveringArrivedMs ||
+      (arrivedMs === coveringArrivedMs && Date.parse(visit.endedAt) < Date.parse(covering!.endedAt!))) covering = visit;
+  }
+  return covering != null && covering.horizontalAccuracyMeters != null && atMs <= Date.parse(covering.endedAt!) &&
+    distanceMeters(pointFor(covering)!, point) <= covering.horizontalAccuracyMeters + item.evidence.horizontalAccuracyMeters!;
 }
 
 type UnknownVisitArrivalBound = {
@@ -694,7 +726,7 @@ function edgeStayFromClusterStart(working: WorkingStay, input: LocationEngineInp
   if (start === 0) return working;
   const evidence = working.evidence.slice(start);
   const startedAt = evidence[0].evidence.occurredAt;
-  return { ...working, evidence, startedAt, startLowerBoundAt: startedAt, startUpperBoundAt: startedAt, edgeScan: undefined };
+  return { ...working, evidence, startedAt, startLowerBoundAt: startedAt, startUpperBoundAt: startedAt, edgeScan: undefined, visitScan: undefined };
 }
 
 function stayFromWorking(
@@ -1441,6 +1473,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const arrivalIndex = stay.evidence.lastIndexOf(item);
     const before = accurateCoordinate(completion, input) && acceptedOrder.get(completion)! < acceptedOrder.get(item)!;
     stay.evidence.splice(before ? arrivalIndex : arrivalIndex + 1, 0, completion);
+    stay.visitScan = undefined;
     stay.supportedByVisit = true;
     if (!stay.visitSupportUntilAt || Date.parse(endedAt) > Date.parse(stay.visitSupportUntilAt)) stay.visitSupportUntilAt = endedAt;
     if (Date.parse(completion.evidence.occurredAt) >= Date.parse(stay.startedAt) &&
@@ -1749,6 +1782,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
       insideOwnCompletedVisit(active, item, input);
     if (sameKnownPlace || sameUnknown || sameEdgeCluster || insideOwnVisit) {
       active.evidence.push(item);
+      if (insideOwnVisit) (active.visitKept ??= new Set()).add(item);
       markArrivalPresence(active, item);
       capDeferredPresence(active, item);
       attachEarlyArrival(active, item);
@@ -1811,7 +1845,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     }
 
     active.outside.push(item);
-    const activeCentre = evidenceCentre(active.evidence);
+    const activeCentre = evidenceCentre(matchingEvidence(active));
     const displaced = activeCentre && point
       ? distanceMeters(activeCentre, point) >= input.config.movementDisplacementThresholdMeters
       : false;

@@ -159,25 +159,37 @@ Temporal invariants:
 - Inside the stay's own completed Visit (`insideOwnCompletedVisit`, 22 Oct
   2026 stability audit). iOS reports one completed Visit for a long stay in a
   large building even while the phone walks round it. An unknown stay keeps an
-  unknown reading beyond `unknownStayBaseRadiusMeters` when the stay holds a
-  genuine completed Visit that arrived within it (`occurredAt` at or after the
-  stay's start, never one from an earlier episode), the reading comes no later
-  than that Visit's departure, and it lies within the Visit's reported radius
-  (its horizontal accuracy, at most the accepted `200m`) plus the reading's own
-  accuracy of the Visit's coordinate. Only accurate (`highQualityHorizontalAccuracyMeters`,
-  `65m`), genuine, non-Visit fixes count, whatever their speed or the Motion
-  & Fitness activity: walking inside the building is still the stay. An
-  arrival-only Visit, a broad fix, a fix beyond the Visit's circle or after its
-  departure still ends the stay as before, and saved/learned stays are
-  unchanged. Before this, the first accurate fix 150–170 m across the building
-  after a long silence closed the stay at the midpoint of that silence, and
-  the remaining sparse fixes (none reaching ten minutes) became the route of a
-  phantom Move that ran until the next stop: on 22 Oct a 10:37–14:24 stay
-  became 10:37–11:55 plus a 2.5-hour "Move". The fix applies once iOS delivers
-  the completion (it can arrive hours later); earlier replays keep the split
-  and are superseded. The global 120 m radius stays: 150 m and 180 m changed
-  three other days in the owner's 15–22 Oct trace with no agreement gain
-  against an independent timeline, and the sweep and corpora were neutral.
+  unknown reading beyond `unknownStayBaseRadiusMeters` when its covering Visit
+  covers it. The covering Visit is iOS's latest completed judgement at the
+  reading: of the genuine completed Visits that arrived within the stay
+  (`occurredAt` at or after the stay's start, never one from an earlier
+  episode) and no later than the reading, the most recently arrived (on a tie,
+  the earliest departure). It covers a reading no later than its departure
+  and within its reported radius (its horizontal accuracy, at most the
+  accepted `200m`) plus the reading's own accuracy of its coordinate. So a
+  newer, nested Visit's departure ends the cover an older, broader Visit gave
+  (iOS reports one Visit at a time), and arrival-only callbacks, which carry no
+  departure, neither give nor end cover. Only accurate
+  (`highQualityHorizontalAccuracyMeters`, `65m`), genuine, non-Visit fixes
+  count, whatever their speed or the Motion & Fitness activity: walking inside
+  the building is still the stay. A reading kept this way is stay presence
+  (evidence, last-inside time) but never moves the centre that ordinary
+  matching (`sameUnknownCluster`, sparse continuity, outside displacement)
+  measures from, so it cannot authorise ordinary continuation outside the
+  Visit's interval and circle. The stay's Visits are scanned incrementally, so
+  each reading checks only those few. An arrival-only Visit, a broad fix, a fix
+  beyond the covering Visit's circle or after its departure still ends the
+  stay as before, and saved/learned stays are unchanged. Before this, the
+  first accurate fix 150–170 m across the building after a long silence closed
+  the stay at the midpoint of that silence, and the remaining sparse fixes
+  (none reaching ten minutes) became the route of a phantom Move that ran
+  until the next stop: on 22 Oct a 10:37–14:24 stay became 10:37–11:55 plus a
+  2.5-hour "Move"; the replay now gives one stay ending at the Visit's
+  departure (14:27). The fix applies once iOS delivers the completion (it can
+  arrive hours later); earlier replays keep the split and are superseded. The
+  global 120 m radius stays: 150 m and 180 m changed three other days in the
+  owner's 15–22 Oct trace with no agreement gain against an independent
+  timeline, and the sweep and corpora were neutral.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity
