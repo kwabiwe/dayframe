@@ -14,6 +14,7 @@ class AppDelegate: ExpoAppDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
     DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
+    DayframeDiagnosticsService.shared.start()
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()

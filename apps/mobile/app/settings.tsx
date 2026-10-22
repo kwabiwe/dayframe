@@ -1,6 +1,7 @@
 import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCurrent, subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
+import { freezeDiagnosticsSummary, supportFreezeDiagnostics, type NativeDiagnostics, type NativeDiagnosticsSnapshot } from "@/lib/stallWatchdog";
 import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, subscribeActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { afterSettingsTransition, createFocusedTransitionReady, type TransitionGate } from "@/lib/settingsTransition";
 import {
@@ -24,6 +25,7 @@ import {
   Keyboard,
   Linking,
   Modal,
+  NativeModules,
   Platform,
   Pressable,
   RefreshControl,
@@ -275,6 +277,12 @@ type SettingsSnapshot = {
 };
 
 let cachedSettingsSnapshot: SettingsSnapshot | null = null;
+
+const nativeDiagnostics = NativeModules.DayframeDiagnosticsModule as NativeDiagnostics | undefined;
+
+function readFreezeDiagnostics(): Promise<NativeDiagnosticsSnapshot | null> {
+  return nativeDiagnostics?.snapshot().catch(() => null) ?? Promise.resolve(null);
+}
 
 function defaultSettingsSnapshot(): SettingsSnapshot {
   return {
@@ -1217,6 +1225,17 @@ export default function SettingsScreen() {
   // Sync help: a short note about the page's own last action (never cached), cleared whenever the
   // page opens or what it lists changes, so it can't contradict the status above it.
   const [syncHelpNote, setSyncHelpNote] = useState<string | null>(null);
+  // Sync help › Pauses and crashes, read when Settings opens (kept on this iPhone until shared).
+  const [freezeSnapshot, setFreezeSnapshot] = useState<NativeDiagnosticsSnapshot | null>(null);
+  useEffect(() => {
+    let current = true;
+    void readFreezeDiagnostics().then((snapshot) => {
+      if (current) setFreezeSnapshot(snapshot);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
   const appleMaps = useMapKitChecks({ onNote: setSyncHelpNote });
   const syncHelpIssueKey = [
     ...timerStopSyncIssues.map((issue) => issue.clientEventId),
@@ -1611,13 +1630,14 @@ export default function SettingsScreen() {
       if (!owner) return;
       const [
         latestQueue, review, location, native, health, manual,
-        timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues
+        timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues, freezes
       ] = await Promise.all([
         readQueue(owner), readReviewSupportExportForOwner(owner),
         getLocationStoreDiagnostics(owner), getNativeLocationIntelligenceStatus().catch(() => null),
         getHealthImportStatus(), getLastManualSyncResult(owner),
         getTimeEntryOutboxDiagnostics(owner), listTimeEntrySyncIssues(owner),
-        getTimerStopOutboxDiagnostics(owner), listTimerStopSyncIssues(owner)
+        getTimerStopOutboxDiagnostics(owner), listTimerStopSyncIssues(owner),
+        readFreezeDiagnostics()
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       const snapshot = {
@@ -1663,6 +1683,8 @@ export default function SettingsScreen() {
         } : null,
         presentationCache: getLocationReviewEvidencePrefetchDiagnostics(owner),
         quickStart: readQuickStartDiagnostics(),
+        // Pauses of 3 s or more (thread, times, fixed task labels) and MetricKit hang/crash reports.
+        freezes: supportFreezeDiagnostics(freezes),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2828,6 +2850,14 @@ export default function SettingsScreen() {
                   testID="sync-help-quick-start"
                   theme={theme}
                   title="Today's quick start"
+                />
+                <SettingsBlockRow
+                  // Always shown, so the list never moves when the summary arrives; included in the
+                  // support details above.
+                  subtitle={freezeDiagnosticsSummary(freezeSnapshot, (at) => formatQueueTime(at, clockFormat)) ?? "None recorded on this iPhone"}
+                  testID="sync-help-freezes"
+                  theme={theme}
+                  title="Pauses and crashes"
                 />
               </SettingsBlockGroup>
             </View>

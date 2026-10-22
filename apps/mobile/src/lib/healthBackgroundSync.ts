@@ -6,6 +6,7 @@
 // event stay foreground-owned.
 import type { DayframeHealthWake } from "../../modules/dayframe-health-background";
 import type { HealthCaptureOptions, HealthImportStatus } from "./health";
+import { withJsTask } from "./jsTasks";
 
 /** `receivedAt` (epoch ms, when native got the wake) anchors the pass deadlines; it defaults to now. */
 export type HealthWake = Pick<DayframeHealthWake, "id" | "kind" | "reason"> & { receivedAt?: number };
@@ -124,7 +125,11 @@ export function createHealthWakeRunner(deps: HealthWakeDependencies): HealthWake
     }
   }
 
-  async function runPass(batch: HealthWake[]) {
+  function runPass(batch: HealthWake[]) {
+    return withJsTask("health-wake", () => runPassNow(batch));
+  }
+
+  async function runPassNow(batch: HealthWake[]) {
     const now = Date.now();
     // Native times the wake on a monotonic clock; a wall clock set back since then must never
     // lengthen the budget, so the anchor is at most now.
