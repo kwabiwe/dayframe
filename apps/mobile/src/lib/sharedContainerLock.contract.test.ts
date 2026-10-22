@@ -66,16 +66,23 @@ describe("App Group file locks", () => {
 
   it("holds the lock only inside a granted, finite background assertion with a bounded wait", () => {
     const helper = functionBody(read(lockHelper), "static func withExclusiveLock");
-    const assertion = helper.indexOf("guard let endAssertion = beginAssertion(name) else");
-    const endsAssertion = helper.indexOf("defer { endAssertion() }");
+    const assertion = helper.indexOf("guard let assertion = beginAssertion(name) else");
+    const endsAssertion = helper.indexOf("defer { assertion.end() }");
+    const holds = helper.indexOf("guard assertion.hold() else");
+    const releasesHold = helper.indexOf("defer { assertion.releaseHold() }");
     const opens = helper.indexOf("open(lockURL.path");
     const unlocks = helper.indexOf("defer { flock(descriptor, LOCK_UN) }");
 
     expect(assertion).toBeGreaterThan(-1);
     expect(endsAssertion).toBeGreaterThan(assertion);
-    // Deferred calls run in reverse: the lock is released before the assertion ends.
-    expect(opens).toBeGreaterThan(endsAssertion);
+    // Deferred calls run in reverse: unlock, then the hold an expiry waits for, then the assertion.
+    expect(holds).toBeGreaterThan(endsAssertion);
+    expect(releasesHold).toBeGreaterThan(holds);
+    expect(opens).toBeGreaterThan(releasesHold);
     expect(unlocks).toBeGreaterThan(opens);
+    // An expiry stops the wait and is checked again once the lock is held (Codex r1 on #524).
+    expect(helper).toContain("stop: { assertion.isExpired }");
+    expect(helper.indexOf("guard !assertion.isExpired else")).toBeGreaterThan(unlocks);
     expect(read(lockHelper)).toContain("flock(descriptor, LOCK_EX | LOCK_NB)");
     expect(read(lockHelper)).not.toMatch(/flock\(descriptor, LOCK_EX\)/);
   });
@@ -86,7 +93,8 @@ describe("App Group file locks", () => {
 
     expect(install).toBeGreaterThan(-1);
     expect(install).toBeLessThan(appDelegate.indexOf("factory.startReactNative"));
-    expect(appDelegate).toContain("guard identifier != .invalid else");
+    expect(appDelegate).toContain("guard granted != .invalid else");
+    expect(appDelegate).toContain("beginBackgroundTask(withName: name) { assertion.expire() }");
   });
 
   it("does only file I/O while the shortcut queue's lock is held", () => {
@@ -130,7 +138,7 @@ describe("App Group file locks", () => {
       .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name));
     for (const name of scripts) {
       const source = readFileSync(`${mobileRoot}src/lib/${name}`, "utf8");
-      expect(source, name).not.toMatch(/appleSharedContainers|openDatabase(Async|Sync)\([^)]*,[^)]*,/);
+      expect(source, name).not.toMatch(/appleSharedContainers|forSecurityApplicationGroupIdentifier/);
     }
   });
 });
