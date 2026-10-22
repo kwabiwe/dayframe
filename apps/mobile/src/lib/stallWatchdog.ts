@@ -31,6 +31,8 @@ export type NativeDiagnosticsSnapshot = {
   /** MetricKit reports, already reduced natively to an allowlist (no exception messages). */
   reports: Array<{ receivedAt?: string; summary?: Array<Record<string, unknown>>; payload?: unknown }>;
   reportCount?: number;
+  /** Every stored pause; the overview lists only the last few. */
+  stallCount?: number;
 };
 
 type AppStateLike = {
@@ -96,11 +98,12 @@ export function freezeDiagnosticsSummary(
   formatTime: (at: Date) => string
 ) {
   const reportCount = snapshot?.reportCount ?? snapshot?.reports.length ?? 0;
-  if (!snapshot || (!snapshot.stalls.length && !reportCount)) return null;
+  const stallCount = snapshot?.stallCount ?? snapshot?.stalls.length ?? 0;
+  if (!snapshot || (!stallCount && !reportCount)) return null;
   const parts: string[] = [];
-  if (snapshot.stalls.length) {
-    const latest = snapshot.stalls[snapshot.stalls.length - 1]!;
-    const count = snapshot.stalls.length;
+  const latest = snapshot.stalls[snapshot.stalls.length - 1];
+  if (stallCount && latest) {
+    const count = stallCount;
     parts.push(`${count} ${count === 1 ? "pause" : "pauses"}, last ${formatTime(new Date(latest.startedAt))} for ${Math.round(latest.durationMs / 1000)} s`);
   }
   if (reportCount) {

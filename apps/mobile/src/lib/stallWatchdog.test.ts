@@ -100,5 +100,9 @@ describe("JS stall watchdog", () => {
     );
     // The overview carries a count instead of the reports themselves.
     expect(freezeDiagnosticsSummary({ stalls: [], reports: [], reportCount: 2 }, () => "x")).toBe("2 system reports");
+    // The overview lists the last few pauses but counts them all (Codex r2 on #525).
+    expect(freezeDiagnosticsSummary({ stalls: [stall], reports: [], stallCount: 10 }, () => "06:36")).toBe(
+      "10 pauses, last 06:36 for 42 s"
+    );
   });
 });

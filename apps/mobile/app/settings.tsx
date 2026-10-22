@@ -1235,11 +1235,17 @@ export default function SettingsScreen() {
   useFocusEffect(useCallback(() => {
     if (!transitionReady) return undefined;
     let current = true;
-    void readFreezeOverview().then((snapshot) => {
+    const read = () => void readFreezeOverview().then((snapshot) => {
       if (current) setFreezeSnapshot(snapshot);
+    });
+    read();
+    // Also on a return to the foreground while Settings stays open (Codex r2 on #525).
+    const appState = AppState.addEventListener("change", (state) => {
+      if (state === "active") read();
     });
     return () => {
       current = false;
+      appState.remove();
     };
   }, [transitionReady]));
   const appleMaps = useMapKitChecks({ onNote: setSyncHelpNote });

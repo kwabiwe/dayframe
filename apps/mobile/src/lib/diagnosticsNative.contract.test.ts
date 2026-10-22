@@ -44,6 +44,15 @@ describe("native freeze and crash diagnostics", () => {
     expect(service.indexOf("tracker.sentMainProbe(uptime: uptime)")).toBeLessThan(service.indexOf("DispatchQueue.main.async { [weak self] in"));
     expect(service).toContain("UIApplication.willResignActiveNotification");
     expect(service).toContain("@objc var methodQueue: DispatchQueue { DayframeDiagnosticsService.shared.queue }");
+    // File work never runs on the queue that times JS answers (Codex r2 on #525).
+    const save = service.slice(service.indexOf("private func save("), service.indexOf("/// On `ioQueue`."));
+    expect(save).toContain("ioQueue.async { self.store?.save(record) }");
+    for (const name of ["func overview(_ completion", "func snapshot(_ completion", "func clear(_ completion"]) {
+      const body = service.slice(service.indexOf(name), service.indexOf(name) + 200);
+      expect(body, name).toContain("ioQueue.async");
+    }
+    expect(service).toContain("self.ingest(MXMetricManager.shared.pastDiagnosticPayloads)");
+    expect(service.slice(service.indexOf("func didReceive"), service.indexOf("func didReceive") + 120)).toContain("ioQueue.async");
   });
 
   it("compiles the diagnostics into the app target only and runs the core fixture in CI", () => {

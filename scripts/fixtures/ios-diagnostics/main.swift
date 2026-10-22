@@ -79,6 +79,17 @@ tracker.becameActive(uptime: 500)
 check(tracker.check(uptime: 501, context: context(501)).isEmpty, "fresh after becoming active")
 check(tracker.answered(.js, uptime: 502, context: context(502)) == nil, "the first JS answer after becoming active is never a stall")
 
+// Once JS has ever answered, it is watched from the moment Dayframe returns: a JS thread stuck on
+// return is caught even though it never answers (Codex r2 on #525).
+check(tracker.resignedActive(uptime: 503, context: context(503)).isEmpty, "leaving with nothing overdue")
+tracker.becameActive(uptime: 600)
+tracker.sentMainProbe(uptime: 600)
+_ = tracker.answered(.main, uptime: 600.01, context: context(600.01))
+due = tracker.check(uptime: 603, context: context(603))
+check(due.count == 1 && due[0].thread == .js && due[0].startedAt == date.addingTimeInterval(600), "a JS stall from the return: \(due)")
+let frozenOnReturn = tracker.answered(.js, uptime: 631, context: context(631))
+check(frozenOnReturn?.outcome == .recovered && frozenOnReturn?.durationMs == 31_000, "its full length when JS answers: \(String(describing: frozenOnReturn))")
+
 // Store: bounded, private, survives a restart, an open stall is replaced by its later save.
 let directory = FileManager.default.temporaryDirectory
   .appendingPathComponent("dayframe-diagnostics-\(UUID().uuidString)", isDirectory: true)
@@ -135,7 +146,7 @@ let leaky: [String: Any] = [
       "exceptionType": 1, "appBuildVersion": "126", "someFutureKey": "secret",
       "objectiveCexceptionReason": [
         "composedMessage": "secret entry title", "formatString": "%@", "arguments": ["secret"],
-        "exceptionType": "NSInvalidArgumentException", "exceptionName": "NSInvalidArgumentException", "className": "NSException"
+        "exceptionType": "NSInvalidArgumentException", "exceptionName": "RCTFatalException: Unhandled JS Exception: secret task title", "className": "NSException"
       ]
     ],
     "callStackTree": ["callStackPerThread": true, "callStacks": [[
@@ -148,6 +159,8 @@ let leaky: [String: Any] = [
 let clean = DayframeMetricKitSummary.sanitize(leaky)
 let cleanText = String(data: try JSONSerialization.data(withJSONObject: clean, options: [.sortedKeys]), encoding: .utf8)!
 check(!cleanText.contains("secret") && !cleanText.contains("%@") && !cleanText.contains("newApplePayloadField"), "sanitized: \(cleanText)")
+check(cleanText.contains("\"exceptionName\":\"RCTFatalException\""), "an exception name is cut to its identifier: \(cleanText)")
+check(DayframeMetricKitSummary.leadingIdentifier(": secret") == nil && DayframeMetricKitSummary.leadingIdentifier("NSRangeException") == "NSRangeException", "leading identifiers")
 check(cleanText.contains("NSInvalidArgumentException") && cleanText.contains("UIKitCore") && cleanText.contains("\"offsetIntoBinaryTextSegment\":10"), "stack and exception type kept: \(cleanText)")
 check(store.saveReport(leaky, receivedAt: date), "leaky report saved")
 let savedText = String(data: try JSONSerialization.data(withJSONObject: store.reports(), options: [.sortedKeys]), encoding: .utf8)!
@@ -164,6 +177,10 @@ check(store.saveReport(payload, receivedAt: date), "report saved")
 check(store.saveReport(payload, receivedAt: date.addingTimeInterval(60)), "duplicate accepted")
 check(store.reports().count == 2, "duplicate stored once, distinct payload kept")
 check(store.overview().reportCount == 2 && store.overview().stalls.count <= 3, "overview counts without payloads")
+for index in 0..<5 {
+  store.save(DayframeStallRecord(id: "o\(index)", thread: .js, startedAt: date.addingTimeInterval(Double(index)), durationMs: 3000, outcome: .recovered, jsTasks: [], lastJsTask: nil, appBuild: nil))
+}
+check(store.overview().stallCount == 5 && store.overview().stalls.count == 3, "the overview's total counts every pause (Codex r2 on #525)")
 check(store.reports()[0]["payload"] != nil, "small payload kept whole")
 let frame: [String: Any] = ["binaryName": String(repeating: "b", count: 200), "binaryUUID": "U", "offsetIntoBinaryTextSegment": 1, "address": 2, "sampleCount": 1]
 let huge: [String: Any] = [
@@ -173,6 +190,16 @@ let huge: [String: Any] = [
 check(store.saveReport(huge, receivedAt: date), "huge report saved")
 let newest = store.reports()[0]
 check(newest["payload"] == nil && newest["payloadOmitted"] != nil && newest["summary"] != nil, "huge payload reduced to its summary")
+// The cap holds even when the summary alone would exceed it (Codex r2 on #525).
+let hugeReason: [String: Any] = [
+  "timeStampBegin": "2026-10-24 06:00:00", "timeStampEnd": "2026-10-24 07:00:00",
+  "crashDiagnostics": Array(repeating: ["diagnosticMetaData": ["terminationReason": String(repeating: "r", count: 600_000)]], count: 3)
+]
+check(store.saveReport(hugeReason, receivedAt: date), "an oversized summary is still saved")
+let directoryFiles = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey])
+let largest = try directoryFiles.map { try $0.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0 }.max() ?? 0
+check(largest <= DayframeDiagnosticsStore.maxReportBytes, "no report file over the cap: \(largest)")
+
 for day in 0..<20 {
   store.saveReport(["timeStampBegin": "day \(day)", "timeStampEnd": "end", "hangDiagnostics": [[:]]], receivedAt: date)
 }

@@ -9,8 +9,11 @@ import UIKit
 final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   static let shared = DayframeDiagnosticsService()
 
-  /// Owns every field below; the React Native module runs its methods here too.
+  /// Owns the watchdog's fields below and runs the React Native module's methods. Only cheap work
+  /// runs here, so a JS answer is never timed late because this queue was busy (Codex r2 on #525).
   let queue = DispatchQueue(label: "com.layereight.dayframe.diagnostics", qos: .utility)
+  /// Owns `store`: every file read and write, and MetricKit's payloads.
+  private let ioQueue = DispatchQueue(label: "com.layereight.dayframe.diagnostics.io", qos: .utility)
 
   private var tracker = DayframeStallTracker()
   private var store: DayframeDiagnosticsStore?
@@ -33,16 +36,16 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     center.addObserver(self, selector: #selector(didBecomeActive), name: UIApplication.didBecomeActiveNotification, object: nil)
     center.addObserver(self, selector: #selector(willResignActive), name: UIApplication.willResignActiveNotification, object: nil)
     let activeNow = UIApplication.shared.applicationState == .active
-    queue.async {
+    if activeNow { queue.async { self.setActive(true) } }
+    ioQueue.async {
       self.store = directory.map { DayframeDiagnosticsStore(directory: $0) }
-      if activeNow { self.setActive(true) }
       // Read off the main thread, after launch work (Codex r1 on #525).
       self.ingest(MXMetricManager.shared.pastDiagnosticPayloads)
     }
   }
 
   func didReceive(_ payloads: [MXDiagnosticPayload]) {
-    queue.async { self.ingest(payloads) }
+    ioQueue.async { self.ingest(payloads) }
   }
 
   // MARK: React Native (called on `queue`)
@@ -58,22 +61,40 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     jsTasksSinceAnswer.formUnion(jsTasks)
   }
 
-  /// Sync help's line: the last few pauses and how many reports, without payloads.
-  func overview() -> [String: Any] {
-    let overview = store?.overview() ?? (stalls: [], reportCount: 0)
-    return ["stalls": overview.stalls.compactMap(Self.dictionary), "reports": [], "reportCount": overview.reportCount]
+  /// Sync help's line: the last few pauses and the totals, without payloads.
+  func overview(_ completion: @escaping ([String: Any]) -> Void) {
+    ioQueue.async {
+      let overview = self.store?.overview() ?? (stalls: [], stallCount: 0, reportCount: 0)
+      completion([
+        "stalls": overview.stalls.compactMap(Self.dictionary),
+        "stallCount": overview.stallCount,
+        "reports": [],
+        "reportCount": overview.reportCount
+      ])
+    }
   }
 
-  func snapshot() -> [String: Any] {
-    let reports = store?.reports() ?? []
-    return ["stalls": (store?.stalls() ?? []).compactMap(Self.dictionary), "reports": reports, "reportCount": reports.count]
+  func snapshot(_ completion: @escaping ([String: Any]) -> Void) {
+    ioQueue.async {
+      let stalls = self.store?.stalls() ?? []
+      let reports = self.store?.reports() ?? []
+      completion([
+        "stalls": stalls.compactMap(Self.dictionary),
+        "stallCount": stalls.count,
+        "reports": reports,
+        "reportCount": reports.count
+      ])
+    }
   }
 
-  func clear() {
-    store?.clear()
+  func clear(_ completion: @escaping () -> Void) {
+    ioQueue.async {
+      self.store?.clear()
+      completion()
+    }
   }
 
-  // MARK: Private (on `queue`)
+  // MARK: Private (on `queue`, file work handed to `ioQueue`)
 
   @objc private func didBecomeActive() {
     queue.async { self.setActive(true) }
@@ -137,9 +158,10 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   }
 
   private func save(_ record: DayframeStallRecord) {
-    store?.save(record)
+    ioQueue.async { self.store?.save(record) }
   }
 
+  /// On `ioQueue`.
   private func ingest(_ payloads: [MXDiagnosticPayload]) {
     let receivedAt = Date()
     for payload in payloads {
@@ -175,17 +197,16 @@ final class DayframeDiagnosticsModule: NSObject {
 
   @objc(overview:rejecter:)
   func overview(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    resolve(DayframeDiagnosticsService.shared.overview())
+    DayframeDiagnosticsService.shared.overview { resolve($0) }
   }
 
   @objc(snapshot:rejecter:)
   func snapshot(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    resolve(DayframeDiagnosticsService.shared.snapshot())
+    DayframeDiagnosticsService.shared.snapshot { resolve($0) }
   }
 
   @objc(clear:rejecter:)
   func clear(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    DayframeDiagnosticsService.shared.clear()
-    resolve(nil)
+    DayframeDiagnosticsService.shared.clear { resolve(nil) }
   }
 }

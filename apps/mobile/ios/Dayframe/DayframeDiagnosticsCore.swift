@@ -56,15 +56,18 @@ struct DayframeStallTracker {
   private(set) var active = false
   private var pendingMainProbe: TimeInterval?
   private var lastJsAnswer: TimeInterval?
+  /// JS has answered at least once in this process (its watchdog is installed).
+  private var jsInstalled = false
   private var open: [DayframeStallThread: DayframeStallRecord] = [:]
   private var lastPersisted: [DayframeStallThread: TimeInterval] = [:]
 
   /// Coming to the front starts every probe afresh: time in the background is never a stall. JS is
-  /// watched only after its first answer in front (its watchdog may not be installed yet).
+  /// watched from this moment once its watchdog has ever answered, so a JS thread that is stuck when
+  /// Dayframe returns is caught (Codex r2 on #525); before its first answer it is not watched.
   mutating func becameActive(uptime: TimeInterval) {
     active = true
     pendingMainProbe = nil
-    lastJsAnswer = nil
+    lastJsAnswer = jsInstalled ? uptime : nil
     open = [:]
     lastPersisted = [:]
   }
@@ -101,7 +104,12 @@ struct DayframeStallTracker {
   ) -> DayframeStallRecord? {
     guard active else { return nil }
     let record = finish(thread, uptime: uptime, outcome: .recovered, context: context)
-    if thread == .main { pendingMainProbe = nil } else { lastJsAnswer = uptime }
+    if thread == .main {
+      pendingMainProbe = nil
+    } else {
+      lastJsAnswer = uptime
+      jsInstalled = true
+    }
     return record
   }
 
@@ -193,7 +201,9 @@ enum DayframeMetricKitSummary {
     "writesCaused"
   ]
   private static let metaDataKeys = Set(summaryKeys + ["deviceType", "platformArchitecture", "isTestFlightApp", "lowPowerModeEnabled"])
-  /// Only the exception's type and name, never its message, format string or arguments.
+  /// Only the exception's type, name and class, each cut to its leading identifier, never its message,
+  /// format string or arguments: React Native builds a fatal exception's name from the JS error's
+  /// text ("RCTFatalException: Unhandled JS Exception: …"; Codex r2 on #525).
   private static let exceptionReasonKeys: Set<String> = ["exceptionType", "exceptionName", "className"]
   private static let frameKeys: Set<String> = [
     "binaryUUID", "binaryName", "offsetIntoBinaryTextSegment", "address", "sampleCount"
@@ -232,8 +242,10 @@ enum DayframeMetricKitSummary {
         if let end { summary["timeStampEnd"] = end }
         let metaData = diagnostic["diagnosticMetaData"] as? [String: Any] ?? [:]
         for name in summaryKeys {
-          if let value = metaData[name], isScalar(value) {
-            summary[name] = value
+          if let text = metaData[name] as? String {
+            summary[name] = String(text.prefix(200))
+          } else if let number = metaData[name] as? NSNumber {
+            summary[name] = number
           }
         }
         return summary
@@ -259,7 +271,11 @@ enum DayframeMetricKitSummary {
       clean[key] = value
     }
     if let reason = metaData["objectiveCexceptionReason"] as? [String: Any] {
-      clean["objectiveCexceptionReason"] = reason.filter { exceptionReasonKeys.contains($0.key) && isScalar($0.value) }
+      var names: [String: Any] = [:]
+      for key in exceptionReasonKeys {
+        if let value = reason[key] as? String, let identifier = leadingIdentifier(value) { names[key] = identifier }
+      }
+      clean["objectiveCexceptionReason"] = names
     }
     return clean
   }
@@ -282,6 +298,17 @@ enum DayframeMetricKitSummary {
     var clean = frame.filter { frameKeys.contains($0.key) && isScalar($0.value) }
     if let subFrames = frame["subFrames"] as? [[String: Any]] { clean["subFrames"] = subFrames.map(sanitizeFrame) }
     return clean
+  }
+
+  /// "RCTFatalException: Unhandled JS Exception: …" → "RCTFatalException"; nil when it starts with
+  /// anything but an identifier.
+  static func leadingIdentifier(_ value: String) -> String? {
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_."))
+    let scalars = value.unicodeScalars.prefix { $0.isASCII && allowed.contains($0) }.prefix(80)
+    guard let first = scalars.first, CharacterSet.letters.union(CharacterSet(charactersIn: "_")).contains(first) else {
+      return nil
+    }
+    return String(String.UnicodeScalarView(scalars))
   }
 
   private static func isScalar(_ value: Any) -> Bool {
@@ -337,6 +364,12 @@ struct DayframeDiagnosticsStore {
     if (data?.count ?? Int.max) > Self.maxReportBytes {
       report["payload"] = nil
       report["payloadOmitted"] = "over \(Self.maxReportBytes) bytes"
+      report["summary"] = Array((report["summary"] as? [[String: Any]] ?? []).prefix(20))
+      data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+    }
+    // The summary's strings are bounded, but the cap is checked again whatever it holds (Codex r2).
+    if (data?.count ?? Int.max) > Self.maxReportBytes {
+      report["summary"] = []
       data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
     }
     guard let data, (try? data.write(to: url, options: .atomic)) != nil else { return false }
@@ -358,8 +391,9 @@ struct DayframeDiagnosticsStore {
   }
 
   /// For Sync help's line: no payloads, so nothing large crosses to JS on every visit.
-  func overview() -> (stalls: [DayframeStallRecord], reportCount: Int) {
-    (Array(stalls().suffix(3)), reportURLs().count)
+  func overview() -> (stalls: [DayframeStallRecord], stallCount: Int, reportCount: Int) {
+    let all = stalls()
+    return (Array(all.suffix(3)), all.count, reportURLs().count)
   }
 
   func clear() {
