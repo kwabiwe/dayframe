@@ -1021,10 +1021,9 @@ export function CalendarReview({
     const response = await clientFetch(`/api/time-entries/${entry.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
+      // Only the times: the PATCH applies every field present, and this tab's copy of the activity,
+      // place and description can predate an edit made on another device (stability audit WEB-UI-1).
       body: JSON.stringify({
-        categoryId: entry.categoryId,
-        placeId: entry.placeId,
-        description: entry.description,
         startedAt: draft.startedAt,
         stoppedAt: draft.stoppedAt
       })
