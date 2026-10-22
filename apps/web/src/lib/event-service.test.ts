@@ -161,6 +161,9 @@ describe("category persistence", () => {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("client_event_id = $3")) return { rows: [] };
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stop-1" }] };
+        if (statement.includes('"endedByNextBlock"')) {
+          return { rows: [{ startedAt: new Date("2026-08-06T09:00:00.000Z"), stoppedAt: null, endedByNextBlock: false }] };
+        }
         if (statement.includes("set stopped_at = $1")) {
           return { rows: [{ id: targetEntryId }], rowCount: 1 };
         }
@@ -258,6 +261,10 @@ describe("category persistence", () => {
     const client = {
       query: vi.fn(async (statement: string) => {
         if (statement.includes("insert into activity_events")) return { rows: [{ id: "event-stale-stop" }] };
+        // The newer timer ended the old block at its start, before this stale Stop was pressed.
+        if (statement.includes('"endedByNextBlock"')) {
+          return { rows: [{ startedAt: new Date("2026-08-13T13:00:00.000Z"), stoppedAt: new Date("2026-08-13T13:40:00.000Z"), endedByNextBlock: true }] };
+        }
         if (statement.includes("set stopped_at = $1")) return { rows: [], rowCount: 0 };
         return { rows: [] };
       }),
@@ -280,9 +287,10 @@ describe("category persistence", () => {
 
     expect(result).toMatchObject({ stopOutcome: "superseded" });
     expect(client.query).toHaveBeenCalledWith(
-      expect.stringContaining("and id = $4"),
-      [expect.any(Date), session.workspaceId, session.userId, oldEntryId]
+      expect.stringContaining("for update of te"),
+      [session.workspaceId, session.userId, oldEntryId]
     );
+    expect(client.query.mock.calls.some(([statement]) => String(statement).includes("set stopped_at = $1"))).toBe(false);
   });
 
   it("turns bounded entry-row contention into a retryable timer error", async () => {
@@ -291,7 +299,7 @@ describe("category persistence", () => {
         if (statement.includes("insert into activity_events")) {
           return { rows: [{ id: "event-busy-stop" }] };
         }
-        if (statement.includes("set stopped_at = $1")) {
+        if (statement.includes('"endedByNextBlock"') || statement.includes("set stopped_at = $1")) {
           throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
         }
         return { rows: [] };

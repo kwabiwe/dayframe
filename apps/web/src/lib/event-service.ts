@@ -811,22 +811,7 @@ async function processActivityEventWithClient(
           )
         : stopScope.mode === "entry"
         ? await stopEntryAt(client, parsed, stopScope.targetEntryId)
-        : await assertCurrentTimerStartsBefore(client, parsed).then(() => client.query<{ id: string }>(
-            `with current_timer as (
-               select id
-               from time_entries
-               where workspace_id = $2 and user_id = $3 and stopped_at is null
-               order by started_at desc
-               limit 1
-               for update
-             )
-             update time_entries te
-             set stopped_at = $1, updated_at = now()
-             from current_timer
-             where te.id = current_timer.id
-             returning te.id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
-          ));
+        : await stopCurrentTimerAt(client, parsed);
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
       }
@@ -1134,7 +1119,7 @@ async function duplicateShortcutStartOutcome(
   session: RequestSession,
   execute: typeof query = query
 ): Promise<{ startOutcome?: "recorded_completed" | "superseded" }> {
-  if (event.source !== "shortcut" || !isExplicitStartEvent(event.type)) return {};
+  if ((event.source !== "shortcut" && event.source !== "mobile_app") || !isExplicitStartEvent(event.type)) return {};
   if (!timeEntryId) return { startOutcome: "superseded" };
   const result = await execute<{ stopped: boolean }>(
     `select stopped_at is not null as stopped from time_entries
@@ -1259,14 +1244,17 @@ async function lateShortcutStartWindow(
   const startedMs = new Date(startedAt).getTime();
   if (!Number.isFinite(startedMs)) return null;
   const at = new Date(startedMs);
-  if (options.sameStartSupersedes) {
-    const sameStart = await client.query(
-      `select 1 from time_entries
-       where workspace_id = $1 and user_id = $2 and started_at = $3${TIMELINE_BLOCK_FILTER}
-       limit 1`,
-      [session.workspaceId, session.userId, at]
-    );
-    if (sameStart.rows.length) return { kind: "same_start" };
+  const sameStart = await client.query(
+    `select 1 from time_entries
+     where workspace_id = $1 and user_id = $2 and started_at = $3${TIMELINE_BLOCK_FILTER}
+     limit 1`,
+    [session.workspaceId, session.userId, at]
+  );
+  if (sameStart.rows.length) {
+    // An in-app Start at exactly another block's start is refused rather than placed beside it (Codex r1
+    // on #531): the phone needs a block of its own for it, and two blocks can't share a start.
+    if (!options.sameStartSupersedes) throw new TimerReplacementWindowError();
+    return { kind: "same_start" };
   }
   // Lock what covers the Start's moment first, so a concurrent entry-scoped Stop (which does not take the
   // timer lock) either commits before these rows are read or waits for this transaction.
@@ -1323,15 +1311,31 @@ async function stopEntryAt(
   event: { occurredAt: string | Date; workspaceId: string; userId: string },
   targetEntryId: string
 ) {
-  const target = await client.query<{ startedAt: string | Date }>(
-    `select started_at as "startedAt" from time_entries
-     where workspace_id = $1 and user_id = $2 and id = $3 and stopped_at is null
-     for update`,
+  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; endedByNextBlock: boolean }>(
+    `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
+            exists (
+              select 1 from time_entries next
+              where next.workspace_id = te.workspace_id and next.user_id = te.user_id
+                and next.id <> te.id and next.started_at = te.stopped_at
+            ) as "endedByNextBlock"
+     from time_entries te
+     where te.workspace_id = $1 and te.user_id = $2 and te.id = $3
+     for update of te`,
     [event.workspaceId, event.userId, targetEntryId]
   );
-  const running = target.rows[0];
-  if (running && new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
-    throw new TimerStopBeforeStartError();
+  const block = target.rows[0];
+  if (!block) return { rows: [] as Array<{ id: string }> };
+  const startedMs = new Date(block.startedAt).getTime();
+  const stopMs = new Date(event.occurredAt).getTime();
+  if (block.stoppedAt === null) {
+    if (startedMs >= stopMs) throw new TimerStopBeforeStartError();
+  } else {
+    // A block the server ended at the next block's start (a later Start replaced it, or a late Start was
+    // placed before it) still ends where its own Stop ran, when that Stop arrives afterwards: the phone
+    // queued it first (PRD D20; Codex r1 on #531, stability audit iphone-timer-sync-2). Any other end —
+    // one a person set, or an earlier Stop — stays.
+    const laterServerEnd = block.endedByNextBlock && new Date(block.stoppedAt).getTime() > stopMs && startedMs < stopMs;
+    if (!laterServerEnd) return { rows: [] as Array<{ id: string }> };
   }
   return client.query<{ id: string }>(
     `update time_entries
@@ -1339,28 +1343,38 @@ async function stopEntryAt(
      where workspace_id = $2
        and user_id = $3
        and id = $4
-       and stopped_at is null
      returning id`,
     [event.occurredAt, event.workspaceId, event.userId, targetEntryId]
   );
 }
 
-/** The unscoped Stop's own check: it stops the newest running block, never one started at or after it. */
-async function assertCurrentTimerStartsBefore(
+/**
+ * The unscoped Stop: the newest running block, locked before its start is checked so a concurrent start
+ * edit can't move it past the Stop between the check and the update (Codex r1 on #531).
+ */
+async function stopCurrentTimerAt(
   client: pg.PoolClient,
   event: { occurredAt: string | Date; workspaceId: string; userId: string }
 ) {
-  const current = await client.query<{ startedAt: string | Date }>(
-    `select started_at as "startedAt" from time_entries
+  const current = await client.query<{ id: string; startedAt: string | Date }>(
+    `select id, started_at as "startedAt" from time_entries
      where workspace_id = $1 and user_id = $2 and stopped_at is null
      order by started_at desc
-     limit 1`,
+     limit 1
+     for update`,
     [event.workspaceId, event.userId]
   );
   const running = current.rows[0];
-  if (running && new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
+  if (!running) return { rows: [] as Array<{ id: string }> };
+  if (new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
     throw new TimerStopBeforeStartError();
   }
+  return client.query<{ id: string }>(
+    `update time_entries set stopped_at = $1, updated_at = now()
+     where workspace_id = $2 and user_id = $3 and id = $4 and stopped_at is null
+     returning id`,
+    [event.occurredAt, event.workspaceId, event.userId, running.id]
+  );
 }
 
 async function closeActiveTimersForReplacement(

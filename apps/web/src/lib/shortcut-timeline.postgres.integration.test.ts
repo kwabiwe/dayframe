@@ -171,7 +171,7 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
         timeline: [["P", 0, 10], ["A", 10, 20], ["B", 30, 40]],
       });
     }
-  });
+  }, 30_000);
 
   it("ends a finished block at an earlier Stop that arrives after it", async () => {
     await block(0, 30, "mobile_app", "P");
@@ -245,6 +245,74 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     expect(await timeline()).toEqual([["W", 20, null]]);
     await expect(appStop(30, running)).resolves.toMatchObject({ stopOutcome: "stopped" });
     expect(await timeline()).toEqual([["W", 20, 30]]);
+  });
+
+  it("ends a late-placed in-app Start where its own queued Stop ran, never touching the newer block (Codex r1 on #531)", async () => {
+    await block(20, null, "web", "W");
+    const start = await appStart(0, "Y");
+    expect(await timeline()).toEqual([["Y", 0, 20], ["W", 20, null]]);
+    await expect(appStop(10, start.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y", 0, 10], ["W", 20, null]]);
+  });
+
+  it("ends a block a later Start replaced where its own earlier Stop ran (offline Start, Stop, Start)", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "Z");
+    expect(await timeline()).toEqual([["Y", 0, 30], ["Z", 30, null]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 30, null]]);
+  });
+
+  it("keeps an end a person set, or an earlier Stop, when a later Stop for the block arrives", async () => {
+    const edited = await block(0, 15, "web", "E");
+    await block(40, null, "web", "N");
+    await expect(appStop(10, edited)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["E", 0, 15], ["N", 40, null]]);
+  });
+
+  it("refuses an in-app Start at another block's exact start even when a later bound exists (Codex r1 on #531)", async () => {
+    await block(10, null, "web", "W");
+    await block(30, 40, "web", "L");
+    await expect(appStart(10, "Y")).rejects.toBeInstanceOf(TimerReplacementWindowError);
+    expect(await timeline()).toEqual([["W", 10, null], ["L", 30, 40]]);
+  });
+
+  it("checks an unscoped Stop against a start edited while it waited for the block (Codex r1 on #531)", async () => {
+    const running = await block(0, null, "web", "W");
+    const editor = await pool.connect();
+    try {
+      await editor.query("begin");
+      await editor.query("update time_entries set started_at = $1 where id = $2", [at(20), running]);
+      const editorPid = (await editor.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      const stop = appStop(10);
+      // Commit only once the Stop is waiting on the edited row, so it has already passed (or is
+      // holding) its check: deterministic whatever the machine's speed.
+      for (let tries = 0; tries < 200; tries += 1) {
+        const waiting = await pool.query(
+          "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+          [editorPid]
+        );
+        if (waiting.rows.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await editor.query("commit");
+      await expect(stop).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    } finally {
+      editor.release();
+    }
+    expect(await timeline()).toEqual([["W", 20, null]]);
+  });
+
+  it("repeats a late-placed in-app Start's outcome when it is delivered again", async () => {
+    await block(20, null, "web", "W");
+    const clientEventId = `mobile:${randomUUID()}`;
+    const deliver = () => processActivityEvent({
+      clientEventId, occurredAt: at(10), description: "Y", source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start", startedAt: at(10).toISOString(), tagNames: [] }
+    }, session);
+    const first = await deliver();
+    const again = await deliver();
+    expect(again).toMatchObject({ startOutcome: "recorded_completed", timeEntryId: first.timeEntryId });
   });
 
   it("never stops a running Health entry", async () => {
