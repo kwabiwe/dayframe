@@ -17,6 +17,9 @@
 		DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */; };
 		DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */; };
 		DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */; };
+		DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */; };
+		DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */; };
+		DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */; };
 		DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */; };
 		DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */; };
 		DFA7120001BC49B8811A0007 /* DayframeTimerLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */; };
@@ -87,6 +90,9 @@
 		DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityController.swift; path = Dayframe/DayframeLiveActivityController.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeLiveActivityModule.swift; path = Dayframe/DayframeLiveActivityModule.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeLiveActivityModuleBridge.m; path = Dayframe/DayframeLiveActivityModuleBridge.m; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnosticsCore.swift; path = Dayframe/DayframeDiagnosticsCore.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeDiagnostics.swift; path = Dayframe/DayframeDiagnostics.swift; sourceTree = "<group>"; };
+		DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DayframeDiagnosticsModuleBridge.m; path = Dayframe/DayframeDiagnosticsModuleBridge.m; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0015 /* DayframeLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeLiveActivityBundle.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0016 /* DayframeTimerLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeTimerLiveActivity.swift; sourceTree = "<group>"; };
 		DFA7120001BC49B8811A0017 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -154,6 +160,9 @@
 				DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */,
 				DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */,
 				DFA7120001BC49B8811A0014 /* DayframeLiveActivityModuleBridge.m */,
+				DFB0200001BC49B8811A0011 /* DayframeDiagnosticsCore.swift */,
+				DFB0200001BC49B8811A0012 /* DayframeDiagnostics.swift */,
+				DFB0200001BC49B8811A0013 /* DayframeDiagnosticsModuleBridge.m */,
 				F11748442D0722820044C1D9 /* Dayframe-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -532,6 +541,9 @@
 				DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */,
 				DFA7120001BC49B8811A0004 /* DayframeLiveActivityModuleBridge.m in Sources */,
+				DFB0200001BC49B8811A0001 /* DayframeDiagnosticsCore.swift in Sources */,
+				DFB0200001BC49B8811A0002 /* DayframeDiagnostics.swift in Sources */,
+				DFB0200001BC49B8811A0003 /* DayframeDiagnosticsModuleBridge.m in Sources */,
 				04BED18508AD6E4F9E2FCC38 /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -42,6 +42,7 @@ import type {
 } from "./api";
 import { createSerialMutationQueue } from "./location/mutationQueue";
 import { isLocationReviewItem } from "./review";
+import { withJsTask } from "./jsTasks";
 
 const DATABASE_NAME = "dayframe-review-sync.db";
 const DATABASE_VERSION = 9;
@@ -620,7 +621,11 @@ export function createReviewClientMutationId() {
   ].join("-");
 }
 
-export async function processReviewBootstrap(bootstrap: MobileBootstrap) {
+export function processReviewBootstrap(bootstrap: MobileBootstrap) {
+  return withJsTask("review-bootstrap", () => processReviewBootstrapNow(bootstrap));
+}
+
+async function processReviewBootstrapNow(bootstrap: MobileBootstrap) {
   const parsedAccount = {
     workspaceId: bootstrap.workspace.id,
     userId: bootstrap.user.id
