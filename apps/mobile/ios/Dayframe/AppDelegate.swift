@@ -13,6 +13,7 @@ class AppDelegate: ExpoAppDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
+    DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -48,6 +49,46 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+}
+
+/// The app's assertion for `DayframeSharedFileLock`: a finite UIKit background task. Its expiry goes
+/// through `DayframeSharedFileLockAssertion.expire()`, which releases a held lock before the task ends;
+/// the identifier is ended exactly once, even when the expiry races the begin.
+private enum DayframeSharedFileLockBackgroundTask {
+  static func begin(name: String) -> DayframeSharedFileLockAssertion? {
+    let identifier = Identifier()
+    let assertion = DayframeSharedFileLockAssertion { identifier.end() }
+    let granted = UIApplication.shared.beginBackgroundTask(withName: name) { assertion.expire() }
+    guard granted != .invalid else {
+      return nil
+    }
+    identifier.set(granted)
+    return assertion
+  }
+
+  private final class Identifier: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+
+    func set(_ granted: UIBackgroundTaskIdentifier) {
+      let endNow = lock.withLock { () -> Bool in
+        if ended { return true }
+        value = granted
+        return false
+      }
+      if endNow { UIApplication.shared.endBackgroundTask(granted) }
+    }
+
+    func end() {
+      let current = lock.withLock { () -> UIBackgroundTaskIdentifier in
+        ended = true
+        defer { value = .invalid }
+        return value
+      }
+      if current != .invalid { UIApplication.shared.endBackgroundTask(current) }
+    }
   }
 }
 

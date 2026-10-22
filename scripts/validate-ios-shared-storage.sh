@@ -8,3 +8,8 @@ xcrun swiftc \
   "$repository_root/scripts/fixtures/ios-shared-storage/main.swift" \
   -o "$test_directory/validate-shared-storage"
 "$test_directory/validate-shared-storage"
+xcrun swiftc \
+  "$repository_root/apps/mobile/ios/Dayframe/DayframeSharedFileLock.swift" \
+  "$repository_root/scripts/fixtures/ios-shared-file-lock/main.swift" \
+  -o "$test_directory/validate-shared-file-lock"
+"$test_directory/validate-shared-file-lock"

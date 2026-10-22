@@ -31,6 +31,8 @@
 		DFA7200001BC49B8811A0002 /* SheetQAHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */; };
 		DFA9080001BC49B8811A0001 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
 		DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */; };
+		DFB0100001BC49B8811A0001 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
+		DFB0100001BC49B8811A0002 /* DayframeSharedFileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */; };
 		DFB2000001BC49B8811A0002 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
 		DFB2000001BC49B8811A0004 /* BricolageGrotesque-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */; };
 		DFB2000001BC49B8811A0005 /* BricolageGrotesque-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */; };
@@ -96,6 +98,7 @@
 		DFA7200001BC49B8811A0013 /* DayframeSheetQATests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayframeSheetQATests.swift; sourceTree = "<group>"; };
 		DFA7200001BC49B8811A0014 /* SheetQAHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SheetQAHarness.swift; sourceTree = "<group>"; };
 		DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedStorageConfiguration.swift; path = Dayframe/DayframeSharedStorageConfiguration.swift; sourceTree = "<group>"; };
+		DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DayframeSharedFileLock.swift; path = Dayframe/DayframeSharedFileLock.swift; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0001 /* BricolageGrotesque-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-Bold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-Bold.ttf"; sourceTree = "<group>"; };
 		DFB2000001BC49B8811A0003 /* BricolageGrotesque-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "BricolageGrotesque-ExtraBold.ttf"; path = "Dayframe/Fonts/BricolageGrotesque-ExtraBold.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -146,6 +149,7 @@
 				DFA7140001BC49B8811A0003 /* DayframeShortcutDirectEventClient.swift */,
 				DFA7150001BC49B8811A0003 /* DayframeSharedStorage.swift */,
 				DFA9080001BC49B8811A0003 /* DayframeSharedStorageConfiguration.swift */,
+				DFB0100001BC49B8811A0003 /* DayframeSharedFileLock.swift */,
 				DFA7120001BC49B8811A0011 /* DayframeLiveActivityAttributes.swift */,
 				DFA7120001BC49B8811A0012 /* DayframeLiveActivityController.swift */,
 				DFA7120001BC49B8811A0013 /* DayframeLiveActivityModule.swift */,
@@ -523,6 +527,7 @@
 				DFA7140001BC49B8811A0001 /* DayframeShortcutDirectEventClient.swift in Sources */,
 				DFA7150001BC49B8811A0001 /* DayframeSharedStorage.swift in Sources */,
 				DFA9080001BC49B8811A0001 /* DayframeSharedStorageConfiguration.swift in Sources */,
+				DFB0100001BC49B8811A0001 /* DayframeSharedFileLock.swift in Sources */,
 				DFA7120001BC49B8811A0001 /* DayframeLiveActivityAttributes.swift in Sources */,
 				DFA7120001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0003 /* DayframeLiveActivityModule.swift in Sources */,
@@ -539,6 +544,7 @@
 				DFA7140001BC49B8811A0002 /* DayframeShortcutDirectEventClient.swift in Sources */,
 				DFA7150001BC49B8811A0002 /* DayframeSharedStorage.swift in Sources */,
 				DFA9080001BC49B8811A0002 /* DayframeSharedStorageConfiguration.swift in Sources */,
+				DFB0100001BC49B8811A0002 /* DayframeSharedFileLock.swift in Sources */,
 				DFA7120001BC49B8811A0005 /* DayframeLiveActivityAttributes.swift in Sources */,
 				DFA7130001BC49B8811A0002 /* DayframeLiveActivityController.swift in Sources */,
 				DFA7120001BC49B8811A0006 /* DayframeLiveActivityBundle.swift in Sources */,

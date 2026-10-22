@@ -1,4 +1,4 @@
-import { NativeModules, Platform, Settings } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import { enqueueEvent, type MobileBootstrap } from "./api";
 import {
@@ -6,8 +6,6 @@ import {
   readActiveMobileAccount,
   type MobileAccountOwner
 } from "./mobileAccount";
-
-const SHORTCUT_CATALOG_KEY = "dayframe.shortcutCatalog.v1";
 
 type NativeShortcutQueuedEvent = {
   localId: string;
@@ -24,6 +22,7 @@ type NativeShortcutQueuedEvent = {
 type NativeShortcutEventType = "shortcut_action" | "timer_stop";
 
 type NativeShortcutQueueModule = {
+  setShortcutCatalog?: (value: string) => Promise<void>;
   pendingShortcutEvents?: () => Promise<unknown>;
   removeShortcutEvents?: (localIds: string[]) => Promise<number>;
 };
@@ -55,7 +54,7 @@ export function syncShortcutCatalog(
   };
 
   try {
-    Settings.set({ [SHORTCUT_CATALOG_KEY]: JSON.stringify(catalog) });
+    writeShortcutCatalog(JSON.stringify(catalog));
   } catch {
     // Shortcut options are a convenience cache; timer actions still work without it.
   }
@@ -64,10 +63,16 @@ export function syncShortcutCatalog(
 export function clearShortcutCatalog() {
   if (Platform.OS !== "ios") return;
   try {
-    Settings.set({ [SHORTCUT_CATALOG_KEY]: "" });
+    writeShortcutCatalog("");
   } catch {
     // The catalog contains no secret; clearing it is a best-effort logout boundary.
   }
+}
+
+/** Written natively, which skips an unchanged value: React Native's `Settings` module would forward
+ * every UserDefaults change to JS (AGENTS.md Mobile Patterns). */
+function writeShortcutCatalog(value: string) {
+  void nativeShortcutQueue?.setShortcutCatalog?.(value).catch(() => undefined);
 }
 
 export async function clearActiveOwnerNativeShortcutQueue(owner: MobileAccountOwner) {

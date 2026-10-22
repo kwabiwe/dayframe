@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   enqueueEvent: vi.fn(),
   pendingShortcutEvents: vi.fn(),
   removeShortcutEvents: vi.fn(),
+  setShortcutCatalog: vi.fn(),
+  settingsWrites: vi.fn(),
   settingsStore: new Map<string, unknown>()
 }));
 
@@ -11,13 +13,15 @@ vi.mock("react-native", () => ({
   NativeModules: {
     DayframeLiveActivityModule: {
       pendingShortcutEvents: mocks.pendingShortcutEvents,
-      removeShortcutEvents: mocks.removeShortcutEvents
+      removeShortcutEvents: mocks.removeShortcutEvents,
+      setShortcutCatalog: mocks.setShortcutCatalog
     }
   },
   Platform: { OS: "ios" },
   Settings: {
     get: (key: string) => mocks.settingsStore.get(key),
     set: (settings: Record<string, unknown>) => {
+      mocks.settingsWrites(settings);
       for (const [key, value] of Object.entries(settings)) {
         mocks.settingsStore.set(key, value);
       }
@@ -39,6 +43,7 @@ vi.mock("./mobileAccount", () => ({
 
 const {
   clearActiveOwnerNativeShortcutQueue,
+  clearShortcutCatalog,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
   syncShortcutCatalog
@@ -54,6 +59,27 @@ describe("native Shortcut bridge", () => {
     mocks.removeShortcutEvents.mockReset();
     mocks.removeShortcutEvents.mockResolvedValue(0);
     mocks.settingsStore.clear();
+    mocks.settingsWrites.mockReset();
+    mocks.setShortcutCatalog.mockReset();
+    mocks.setShortcutCatalog.mockImplementation(async (value: string) => {
+      mocks.settingsStore.set("dayframe.shortcutCatalog.v1", value);
+    });
+  });
+
+  it("writes the catalog natively, never through React Native's Settings", () => {
+    const bootstrap = {
+      user: { id: "user-1", email: "user@example.com", name: "User" },
+      workspace: { id: "workspace-1", name: "Personal" },
+      categories: [{ id: "category-1", name: "Focus", color: "lime", isPinned: true }]
+    };
+
+    syncShortcutCatalog(bootstrap);
+    expect(mocks.setShortcutCatalog).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(mocks.setShortcutCatalog.mock.calls[0]?.[0])).workspace.id).toBe("workspace-1");
+
+    clearShortcutCatalog();
+    expect(mocks.setShortcutCatalog).toHaveBeenLastCalledWith("");
+    expect(mocks.settingsWrites).not.toHaveBeenCalled();
   });
 
   it("mirrors non-secret native Shortcut config with the catalog", () => {
