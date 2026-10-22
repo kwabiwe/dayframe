@@ -81,14 +81,6 @@ export async function ingestLocationEvidence(
   // other rejected reading, and still acknowledged; it never fails the readings beside it (stability
   // audit 22 Oct 2026, location-2).
   const outsideWindow = evidenceOutsideReplayWindow(batch, processingAt);
-  const classification = classifyForStorage(
-    { ...batch, evidence: batch.evidence.filter((item) => !outsideWindow.has(item.clientEvidenceId)) },
-    processingAt
-  );
-  const rejected = new Map<string, string>([
-    ...classification.rejectedEvidence.map((item) => [item.clientEvidenceId, item.reason] as [string, string]),
-    ...[...outsideWindow].map((id) => [id, "outside_replay_window"] as [string, string])
-  ]);
   return withSyncTransaction("location_evidence", async ({ client, phase }) => {
     phase("owner_lock");
     await client.query(
@@ -144,6 +136,25 @@ export async function ingestLocationEvidence(
     const unknownPlace = (evidence: (typeof batch.evidence)[number]) =>
       Boolean(evidence.savedPlaceId && !knownPlaceIds.has(evidence.savedPlaceId.toLowerCase()));
     const geofenceKinds = new Set(["geofence_enter", "geofence_exit", "geofence_state"]);
+    const unknownPlaceCallbacks = new Set(batch.evidence
+      .filter((item) => !outsideWindow.has(item.clientEvidenceId) && unknownPlace(item) && geofenceKinds.has(item.kind))
+      .map((item) => item.clientEvidenceId));
+    // Readings rejected on their own never take part in classifying the others: a callback with a
+    // coordinate could otherwise make a good fix next to it look like an implausible jump (Codex r2
+    // on #528).
+    const classification = classifyForStorage(
+      {
+        ...batch,
+        evidence: batch.evidence.filter((item) =>
+          !outsideWindow.has(item.clientEvidenceId) && !unknownPlaceCallbacks.has(item.clientEvidenceId))
+      },
+      processingAt
+    );
+    const rejected = new Map<string, string>([
+      ...classification.rejectedEvidence.map((item) => [item.clientEvidenceId, item.reason] as [string, string]),
+      ...[...outsideWindow].map((id) => [id, "outside_replay_window"] as [string, string]),
+      ...[...unknownPlaceCallbacks].map((id) => [id, "unknown_saved_place"] as [string, string])
+    ]);
     observeLocationStage(options, "bulk_evidence_write");
     const parameters: unknown[] = [];
     const rows: string[] = [];
@@ -152,8 +163,7 @@ export async function ingestLocationEvidence(
       // Preserve the original loop's first persisted row and classifier decisions.
       if (seen.has(evidence.clientEvidenceId)) continue;
       seen.add(evidence.clientEvidenceId);
-      const rejectionReason = rejected.get(evidence.clientEvidenceId) ??
-        (unknownPlace(evidence) && geofenceKinds.has(evidence.kind) ? "unknown_saved_place" : null);
+      const rejectionReason = rejected.get(evidence.clientEvidenceId) ?? null;
       const retainCoordinate = !rejectionReason;
       const placeholders = Array.from({ length: 24 }, (_, index) => `$${parameters.length + index + 1}`);
       parameters.push(...[
@@ -204,12 +214,9 @@ export async function ingestLocationEvidence(
     );
 
     const unlinked = namedPlaceIds.filter((id) => !knownPlaceIds.has(id)).length;
-    const unknownPlaceCallbacks = batch.evidence.filter((item) =>
-      !rejected.has(item.clientEvidenceId) && unknownPlace(item) && geofenceKinds.has(item.kind)).length;
-    const retainedWithoutCoordinates = rejected.size + unknownPlaceCallbacks;
     const warnings = [
-      ...(retainedWithoutCoordinates > 0
-        ? [`${retainedWithoutCoordinates} evidence item(s) were retained without coordinates for diagnostics.`]
+      ...(rejected.size > 0
+        ? [`${rejected.size} evidence item(s) were retained without coordinates for diagnostics.`]
         : []),
       ...(unlinked > 0
         ? [`${unlinked} saved place(s) named by this batch no longer exist; their geofence callbacks were rejected and other readings kept unlinked.`]

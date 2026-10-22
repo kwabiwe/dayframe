@@ -305,6 +305,12 @@ async function validateIngestPerReadingFailures() {
     // A same-region exit/entry snapshot for a place that no longer exists: rejected, never unlinked.
     reading("gone-exit", "2026-07-20T19:05:00.000Z", { ...callback, kind: "geofence_exit", savedPlaceId: goneId }),
     reading("gone-enter", "2026-07-20T19:05:01.000Z", { ...callback, kind: "geofence_enter", savedPlaceId: goneId }),
+    // A callback that carries a coordinate about 220 m away must not make the good fix one second
+    // later look like an implausible jump (Codex r2 on #528).
+    reading("gone-located", "2026-07-20T19:05:30.000Z", {
+      kind: "geofence_exit", savedPlaceId: goneId, latitude: home.latitude + 0.002, longitude: home.longitude
+    }),
+    reading("after-callback", "2026-07-20T19:05:31.000Z"),
     // Any other reading naming it is kept, unlinked, with its coordinate.
     reading("gone-fix", "2026-07-20T19:06:00.000Z", { savedPlaceId: goneId }),
     // An existing place named in upper case keeps its link (Codex r1 on #528).
@@ -331,7 +337,9 @@ async function validateIngestPerReadingFailures() {
   assert.equal(rows.length, evidence.length, "Every reading must be stored.");
   assert.equal(byId.get("fix")?.accepted, true, "A good reading beside bad ones must be accepted.");
   assert.equal(byId.get("fix")?.hasCoordinate, true, "A good reading keeps its coordinate.");
-  for (const id of ["gone-exit", "gone-enter"]) {
+  assert.equal(byId.get("after-callback")?.accepted, true, "A good fix beside a rejected callback must be accepted.");
+  assert.equal(byId.get("after-callback")?.reason, null, "A good fix beside a rejected callback has no rejection reason.");
+  for (const id of ["gone-exit", "gone-enter", "gone-located"]) {
     assert.equal(byId.get(id)?.accepted, false, `The ${id} callback for a deleted place must be rejected.`);
     assert.equal(byId.get(id)?.reason, "unknown_saved_place", `The ${id} callback must say why.`);
   }
