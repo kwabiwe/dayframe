@@ -17,9 +17,10 @@ final class DayframeBackgroundExecutionService {
     let identifier = UIApplication.shared.beginBackgroundTask(
       withName: normalizedName(name),
       expirationHandler: { [weak self] in
-        Task { @MainActor in
-          self?.expire(generation: generation)
-        }
+        // UIKit calls this on the main thread and needs the task ended before it returns: a hop to
+        // a later main-actor turn let a busy main thread overrun the assertion, and iOS kills the
+        // app for that (stability audit 22 Oct 2026, iphone-native-1).
+        self?.expire(generation: generation)
       }
     )
     guard identifier != .invalid else {
