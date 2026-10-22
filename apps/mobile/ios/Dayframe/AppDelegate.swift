@@ -52,40 +52,42 @@ class AppDelegate: ExpoAppDelegate {
   }
 }
 
-/// The app's assertion for `DayframeSharedFileLock`: a finite UIKit background task, ended exactly once
-/// by whichever comes first, the lock's release or the system's expiry.
-private final class DayframeSharedFileLockBackgroundTask: @unchecked Sendable {
-  private let lock = NSLock()
-  private var identifier: UIBackgroundTaskIdentifier = .invalid
-  private var ended = false
-
-  static func begin(name: String) -> (() -> Void)? {
-    let task = DayframeSharedFileLockBackgroundTask()
-    let identifier = UIApplication.shared.beginBackgroundTask(withName: name) { task.end() }
-    guard identifier != .invalid else {
+/// The app's assertion for `DayframeSharedFileLock`: a finite UIKit background task. Its expiry goes
+/// through `DayframeSharedFileLockAssertion.expire()`, which releases a held lock before the task ends;
+/// the identifier is ended exactly once, even when the expiry races the begin.
+private enum DayframeSharedFileLockBackgroundTask {
+  static func begin(name: String) -> DayframeSharedFileLockAssertion? {
+    let identifier = Identifier()
+    let assertion = DayframeSharedFileLockAssertion { identifier.end() }
+    let granted = UIApplication.shared.beginBackgroundTask(withName: name) { assertion.expire() }
+    guard granted != .invalid else {
       return nil
     }
-    let endedEarly = task.lock.withLock { () -> Bool in
-      if task.ended { return true }
-      task.identifier = identifier
-      return false
-    }
-    if endedEarly {
-      UIApplication.shared.endBackgroundTask(identifier)
-      return nil
-    }
-    return { task.end() }
+    identifier.set(granted)
+    return assertion
   }
 
-  private func end() {
-    let identifier = lock.withLock { () -> UIBackgroundTaskIdentifier in
-      ended = true
-      let identifier = self.identifier
-      self.identifier = .invalid
-      return identifier
+  private final class Identifier: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: UIBackgroundTaskIdentifier = .invalid
+    private var ended = false
+
+    func set(_ granted: UIBackgroundTaskIdentifier) {
+      let endNow = lock.withLock { () -> Bool in
+        if ended { return true }
+        value = granted
+        return false
+      }
+      if endNow { UIApplication.shared.endBackgroundTask(granted) }
     }
-    if identifier != .invalid {
-      UIApplication.shared.endBackgroundTask(identifier)
+
+    func end() {
+      let current = lock.withLock { () -> UIBackgroundTaskIdentifier in
+        ended = true
+        defer { value = .invalid }
+        return value
+      }
+      if current != .invalid { UIApplication.shared.endBackgroundTask(current) }
     }
   }
 }
