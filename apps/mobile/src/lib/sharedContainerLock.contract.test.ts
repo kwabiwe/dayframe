@@ -68,21 +68,24 @@ describe("App Group file locks", () => {
     const helper = functionBody(read(lockHelper), "static func withExclusiveLock");
     const assertion = helper.indexOf("guard let assertion = beginAssertion(name) else");
     const endsAssertion = helper.indexOf("defer { assertion.end() }");
-    const holds = helper.indexOf("guard assertion.hold() else");
-    const releasesHold = helper.indexOf("defer { assertion.releaseHold() }");
     const opens = helper.indexOf("open(lockURL.path");
-    const unlocks = helper.indexOf("defer { flock(descriptor, LOCK_UN) }");
+    const acquires = helper.indexOf("acquire(descriptor, timeout: timeout, stop: { assertion.isExpired })");
+    const unlocks = helper.indexOf("flock(descriptor, LOCK_UN)\n      assertion.unlocked()");
+    const registers = helper.indexOf("guard assertion.locked(descriptor) else");
 
     expect(assertion).toBeGreaterThan(-1);
+    // Deferred calls run in reverse: unlock, close, then end the assertion.
     expect(endsAssertion).toBeGreaterThan(assertion);
-    // Deferred calls run in reverse: unlock, then the hold an expiry waits for, then the assertion.
-    expect(holds).toBeGreaterThan(endsAssertion);
-    expect(releasesHold).toBeGreaterThan(holds);
-    expect(opens).toBeGreaterThan(releasesHold);
-    expect(unlocks).toBeGreaterThan(opens);
-    // An expiry stops the wait and is checked again once the lock is held (Codex r1 on #524).
-    expect(helper).toContain("stop: { assertion.isExpired }");
-    expect(helper.indexOf("guard !assertion.isExpired else")).toBeGreaterThan(unlocks);
+    expect(opens).toBeGreaterThan(endsAssertion);
+    // An expiry stops the wait, and releases a lock it finds held before the assertion ends (Codex r1/r2 on #524).
+    expect(acquires).toBeGreaterThan(opens);
+    expect(unlocks).toBeGreaterThan(acquires);
+    expect(registers).toBeGreaterThan(unlocks);
+    const expire = functionBody(read(lockHelper), "func expire()");
+    expect(expire.indexOf("flock(descriptor, LOCK_UN)")).toBeGreaterThan(-1);
+    expect(expire.indexOf("flock(descriptor, LOCK_UN)")).toBeLessThan(expire.indexOf("end()"));
+    // Extensions use an expiring activity, not a plain power-management activity.
+    expect(read(lockHelper)).toContain("ProcessInfo.processInfo.performExpiringActivity(withReason: reason, using: block)");
     expect(read(lockHelper)).toContain("flock(descriptor, LOCK_EX | LOCK_NB)");
     expect(read(lockHelper)).not.toMatch(/flock\(descriptor, LOCK_EX\)/);
   });
