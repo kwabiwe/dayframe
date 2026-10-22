@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pool } from "./db";
-import { processActivityEvent, TimerReplacementWindowError, TimerStopBeforeStartError } from "./event-service";
+import { processActivityEvent, TimerReplacementWindowError, TimerStopBeforeStartError, updateTimeEntry } from "./event-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -264,11 +264,40 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
   });
 
   it("keeps an end a person set, even one equal to the next block's start (Codex r2 on #531)", async () => {
-    const edited = await block(0, 20, "web", "E");
-    await pool.query("update time_entries set user_edited_at = now() where id = $1", [edited]);
+    const edited = await block(0, 15, "web", "E");
+    await updateTimeEntry(edited, { stoppedAt: at(20).toISOString() }, session);
     await block(20, null, "web", "N");
     await expect(appStop(10, edited)).resolves.toMatchObject({ stopOutcome: "superseded" });
     expect(await timeline()).toEqual([["E", 0, 20], ["N", 20, null]]);
+  });
+
+  // Codex r3 on #531: a saved title, activity or tags is not an end a person chose.
+  it("ends a block at its own earlier Stop after a person edited only its details", async () => {
+    const y = await appStart(0, "Y");
+    await updateTimeEntry(y.timeEntryId!, { description: "Y titled", tagNames: ["focus"] }, session);
+    await appStart(20, "W");
+    expect(await timeline()).toEqual([["Y titled", 0, 20], ["W", 20, null]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y titled", 0, 10], ["W", 20, null]]);
+  });
+
+  it("ends a block at its own earlier Stop after a details save that resent its unchanged times", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(20, "W");
+    await updateTimeEntry(y.timeEntryId!, {
+      description: "Y titled", startedAt: at(0).toISOString(), stoppedAt: at(20).toISOString()
+    }, session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y titled", 0, 10], ["W", 20, null]]);
+  });
+
+  it("keeps an end a person set through an edit, also after a later details-only save", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await updateTimeEntry(y.timeEntryId!, { stoppedAt: at(25).toISOString() }, session);
+    await updateTimeEntry(y.timeEntryId!, { description: "Y titled" }, session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["Y titled", 0, 25], ["W", 30, null]]);
   });
 
   it("keeps an earlier end when a later Stop for the block arrives", async () => {
@@ -315,24 +344,54 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 20, null]]);
   });
 
-  it("an in-app Start delivered within ten seconds still replaces the running block", async () => {
-    const runningSince = new Date(Date.now() - 30 * 60_000);
+  // Codex r3 on #531: a block another client stopped a second ago bounds an in-app Start only once the
+  // Start is more than ten seconds old, so a phone clock a little behind never finishes a fresh Start.
+  async function stoppedElsewhereJustNow(now: number) {
+    const id = randomUUID();
     await pool.query(
       `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
-       values ($1, $2, $3, 'web', 'high', 'confirmed', 'P', $4)`,
-      [randomUUID(), workspaceId, userId, runningSince]
+       values ($1, $2, $3, 'manual_app', 'high', 'confirmed', 'P', $4)`,
+      [id, workspaceId, userId, new Date(now - 30 * 60_000)]
     );
-    const now = new Date(Date.now() - 2_000);
-    const result = await processActivityEvent({
-      clientEventId: `mobile:${randomUUID()}`, occurredAt: now, description: "Y", source: "mobile_app", type: "timer_start",
-      rawPayload: { origin: "mobile_timer_start", startedAt: now.toISOString(), tagNames: [] }
+    await expect(processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: new Date(now - 1_000),
+      rawPayload: { origin: "web_timer_stop", stopScope: "entry", targetEntryId: id },
+      source: "manual_app", type: "timer_stop"
+    }, session)).resolves.toMatchObject({ stopOutcome: "stopped" });
+  }
+
+  function appStartAt(startedAt: Date) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`, occurredAt: startedAt, description: "Y", source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start", startedAt: startedAt.toISOString(), tagNames: [] }
     }, session);
+  }
+
+  async function runningDescriptions() {
+    return (await pool.query<{ description: string }>(
+      "select description from time_entries where workspace_id = $1 and stopped_at is null", [workspaceId]
+    )).rows.map((row) => row.description);
+  }
+
+  it("an in-app Start delivered within ten seconds runs even just before a Stop recorded elsewhere", async () => {
+    const now = Date.now();
+    await stoppedElsewhereJustNow(now);
+    const result = await appStartAt(new Date(now - 4_000));
     expect(result.startOutcome).toBeUndefined();
-    const rows = (await pool.query<{ description: string; stopped: boolean }>(
-      "select description, stopped_at is not null as stopped from time_entries where workspace_id = $1 order by started_at",
-      [workspaceId]
-    )).rows;
-    expect(rows).toEqual([{ description: "P", stopped: true }, { description: "Y", stopped: false }]);
+    expect(await runningDescriptions()).toEqual(["Y"]);
+  });
+
+  it("an in-app Start more than ten seconds old ends at a Stop recorded elsewhere after it", async () => {
+    const now = Date.now();
+    await stoppedElsewhereJustNow(now);
+    const startedAt = new Date(now - 20_000);
+    const result = await appStartAt(startedAt);
+    expect(result.startOutcome).toBe("recorded_completed");
+    expect(await runningDescriptions()).toEqual([]);
+    const y = (await pool.query<{ startedAt: Date; stoppedAt: Date }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries where id = $1`, [result.timeEntryId]
+    )).rows[0]!;
+    expect([y.startedAt.getTime(), y.stoppedAt.getTime()]).toEqual([startedAt.getTime(), now - 1_000]);
   });
 
   it("refuses an in-app Start at another block's exact start even when a later bound exists (Codex r1 on #531)", async () => {

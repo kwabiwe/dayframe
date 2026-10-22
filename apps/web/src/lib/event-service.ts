@@ -1306,18 +1306,32 @@ async function lateShortcutStartWindow(
   };
 }
 
+/**
+ * The audit action recorded when a person moves a block's end through an edit. Only an end still equal
+ * to the one recorded counts: one a later Stop or Start has since moved is no longer the person's.
+ * `user_edited_at` can't tell this apart, since a saved title, activity or tags sets it too (Codex r3 on
+ * #531).
+ */
+const PERSON_SET_END_ACTION = "time_entry.end_set";
+const PERSON_SET_END_SQL = `exists (
+  select 1 from audit_log a
+  where a.workspace_id = te.workspace_id and a.entity_type = 'time_entry' and a.entity_id = te.id
+    and a.action = '${PERSON_SET_END_ACTION}'
+    and (a.metadata->>'stoppedAt')::timestamptz = te.stopped_at
+)`;
+
 async function stopEntryAt(
   client: pg.PoolClient,
   event: { occurredAt: string | Date; workspaceId: string; userId: string },
   targetEntryId: string
 ) {
-  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; personEdited: boolean; health: boolean }>(
-    `select started_at as "startedAt", stopped_at as "stoppedAt",
-            user_edited_at is not null as "personEdited",
-            source in ('health_sleep', 'health_workout') as "health"
-     from time_entries
-     where workspace_id = $1 and user_id = $2 and id = $3
-     for update`,
+  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; personSetEnd: boolean; health: boolean }>(
+    `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
+            ${PERSON_SET_END_SQL} as "personSetEnd",
+            te.source in ('health_sleep', 'health_workout') as "health"
+     from time_entries te
+     where te.workspace_id = $1 and te.user_id = $2 and te.id = $3
+     for update of te`,
     [event.workspaceId, event.userId, targetEntryId]
   );
   const block = target.rows[0];
@@ -1327,12 +1341,13 @@ async function stopEntryAt(
   if (block.stoppedAt === null) {
     if (startedMs >= stopMs) throw new TimerStopBeforeStartError();
   } else {
-    // A block that already ended later than its own Stop, without anyone editing it (a later Start
+    // A block that already ended later than its own Stop, at an end no person chose (a later Start
     // replaced it, a late Start was placed or bounded, or another device stopped it later), ends where
-    // this Stop ran: the phone queued it first (PRD D20; Codex r1–r2 on #531, stability audit
-    // iphone-timer-sync-2). A block a person edited, a Health entry, or an earlier end stays. The facts
-    // come from the locked row itself, so a concurrent replacement can't hide them.
-    const pullBack = !block.personEdited && !block.health &&
+    // this Stop ran: the phone queued it first (PRD D20; Codex r1–r3 on #531, stability audit
+    // iphone-timer-sync-2). An end a person set, a Health entry, or an earlier end stays; a saved title,
+    // activity or tags is not an end a person chose. The facts come from the locked row itself, so a
+    // concurrent replacement can't hide them.
+    const pullBack = !block.personSetEnd && !block.health &&
       new Date(block.stoppedAt).getTime() > stopMs && startedMs < stopMs;
     if (!pullBack) return { rows: [] as Array<{ id: string }> };
   }
@@ -2426,6 +2441,7 @@ export async function updateTimeEntry(
       if (!current) throw new TimeEntryNotFoundError();
       if (detailsChangedSince(current, input.expectedDetails)) throw new TimeEntryConflictError();
     }
+    let endChanged = false;
     if (hasStartedAt || hasStoppedAt) {
       const existing = await client.query<{
         startedAt: string | Date;
@@ -2443,6 +2459,9 @@ export async function updateTimeEntry(
         startedAt: hasStartedAt ? input.startedAt : current.startedAt,
         stoppedAt: hasStoppedAt ? input.stoppedAt ?? null : current.stoppedAt
       });
+      // Clients resend unchanged times with a details save, so only a different end is one a person set.
+      endChanged = hasStoppedAt && input.stoppedAt != null &&
+        (current.stoppedAt === null || new Date(input.stoppedAt).getTime() !== new Date(current.stoppedAt).getTime());
     }
     const result = await client.query<{ id: string; updatedAt: string | Date }>(
       `update time_entries
@@ -2476,6 +2495,16 @@ export async function updateTimeEntry(
       ]
     );
     if (!result.rows[0]) throw new TimeEntryNotFoundError();
+    if (endChanged) {
+      // Recorded so an earlier queued Stop never pulls back an end a person chose (see stopEntryAt).
+      await client.query(
+        `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata)
+         select workspace_id, user_id, $4, 'time_entry', id, jsonb_build_object('stoppedAt', stopped_at)
+         from time_entries
+         where id = $1 and workspace_id = $2 and user_id = $3 and stopped_at is not null`,
+        [id, session.workspaceId, session.userId, PERSON_SET_END_ACTION]
+      );
+    }
     if (hasTagNames) {
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
