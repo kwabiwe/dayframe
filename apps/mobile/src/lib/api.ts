@@ -422,6 +422,8 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   lastAttemptedAt?: string;
   nextRetryAt?: string;
   failureKind?: QueueFailureKind;
+  /** When the server first refused this queued Start; kept across Retries so it is announced once. */
+  refusedStartAt?: string;
 };
 
 export type QueueFailureKind = "network" | "server" | "permanent";
@@ -1352,12 +1354,19 @@ async function syncQueueItems(
       if (!response.ok) {
         const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
         const message = formatApiError((payload ?? {}) as ApiErrorPayload) ?? "Unable to sync queued event";
-        const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
+        // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
+        // is refused again, and the person was already told (Codex r2 on #532). The refusal is kept on
+        // the item, so a transient failure between Retries (422, 500, 422) can't announce it twice
+        // (Codex r3 on #532).
+        const refusedStart = failureKind === "permanent" && item.type === "timer_start";
+        const firstRefusal = refusedStart && !item.refusedStartAt && !isPermanentlyFailedEvent(item);
+        const failedItem = {
+          ...markQueueFailure(item, message, attemptedAt, failureKind, response.status),
+          ...(refusedStart && !item.refusedStartAt ? { refusedStartAt: attemptedAt } : {})
+        };
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
-        // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
-        // is refused again, and the person was already told (Codex r2 on #532).
-        if (failureKind === "permanent" && item.type === "timer_start" && !isPermanentlyFailedEvent(item)) {
+        if (firstRefusal) {
           refusedStarts.push({ localId: item.localId, message, owner });
         }
         if (failureKind !== "permanent") {
@@ -1478,11 +1487,9 @@ async function settleRefusedTimerStart(start: RefusedTimerStart) {
       import("./timeEntryOutbox")
     ]);
     await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
-    await refuseTimeEntryCommandsForOptimisticEntry(
-      start.owner,
-      start.localId,
-      "The block this change was for was never saved."
-    );
+    // Also fences the block's ID, so an Edit or Delete written for it later is refused as it is
+    // written, even after Clear has removed the Start (Codex r3 on #532).
+    await refuseTimeEntryCommandsForOptimisticEntry(start.owner, start.localId);
     return true;
   } catch {
     return false;
@@ -2564,7 +2571,8 @@ function reconcileActivityQueueDrain(input: {
           : { lastStatusCode: processed.lastStatusCode }),
         ...(processed.lastAttemptedAt ? { lastAttemptedAt: processed.lastAttemptedAt } : {}),
         ...(processed.nextRetryAt ? { nextRetryAt: processed.nextRetryAt } : {}),
-        ...(processed.failureKind ? { failureKind: processed.failureKind } : {})
+        ...(processed.failureKind ? { failureKind: processed.failureKind } : {}),
+        ...(processed.refusedStartAt ? { refusedStartAt: processed.refusedStartAt } : {})
       }];
     });
     await writeAllQueue(next);

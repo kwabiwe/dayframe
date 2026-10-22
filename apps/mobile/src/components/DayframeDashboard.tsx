@@ -122,14 +122,13 @@ import {
   resolveTimerEntryIdAfterQueueBarrier,
   requestPasswordReset,
   signup,
-  subscribeRefusedTimerStarts,
   syncQueue,
   type MobileBootstrap,
   type MobileReviewItem,
   type SyncQueueResult,
   type TimeEntryUpdatePatch
 } from "@/lib/api";
-import { refusedTimerStartPresentation } from "@/lib/refusedTimerStartPresentation";
+import { useRefusedTimerStartRollback } from "@/lib/useRefusedTimerStartRollback";
 import { handleDayframeUrl } from "@/lib/deepLinks";
 import { useShortcutStopHandoff } from "@/components/useShortcutStopHandoff";
 import { DAYFRAME_BACKEND_ID } from "@/lib/backendIdentity";
@@ -600,27 +599,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   // Edits are already settled by the sync layer; here the block shown for it is rolled back and Today
   // refreshes from the server. The rollback restores nothing from the Start's own time (it may be hours
   // old): server truth replaces it.
-  const rejectOptimisticTimerStartRef = useRef<(id: string, previous: MobileBootstrap | null, error: unknown, alert?: boolean) => void>(() => undefined);
-  useEffect(() => subscribeRefusedTimerStarts(({ localId, message, owner }) => {
-    const current = latestData.current;
-    const decision = refusedTimerStartPresentation({
-      localId,
-      ownerMatches: Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner)),
-      shown: Boolean(current && (optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
-        current.entries.some((entry) => entry.id === localId))),
-      deletionPending: Boolean(deletionCoordinator.current?.current()?.entryIds.includes(localId)),
-      // Only an editor still on screen counts (its row may already be gone after a refresh).
-      calendarEditorEntryId: calendarEditPresentationRef.current ? calendarEditEntryRef.current?.id ?? null : null
-    });
-    if (!decision.run) return;
-    if (decision.dismissCalendarEditor && calendarEditPresentationRef.current) {
-      // Leaves by its own exit (motion and Reduce Motion as for Cancel); its Delete can't run on a
-      // block that was never saved.
-      setCalendarEditDismissRequestId(calendarEditPresentationRef.current.id);
-    }
-    rejectOptimisticTimerStartRef.current(localId, null, new Error(message), decision.alert);
-    queueDashboardRefreshAfterConflict();
-  }), []);
+  useRefusedTimerStartRollback({
+    describe: ({ localId, owner }) => {
+      const current = latestData.current;
+      return {
+        localId,
+        ownerMatches: Boolean(current && sameTimerStopOwner(timerStopOwner(current), owner)),
+        shown: Boolean(current && (optimisticTimerIds.current.has(localId) || current.activeEntry?.id === localId ||
+          current.entries.some((entry) => entry.id === localId))),
+        deletionPending: Boolean(deletionCoordinator.current?.current()?.entryIds.includes(localId)),
+        // Only an editor still on screen counts (its row may already be gone after a refresh).
+        calendarEditorEntryId: calendarEditPresentationRef.current ? calendarEditEntryRef.current?.id ?? null : null
+      };
+    },
+    // Leaves by its own exit (motion and Reduce Motion as for Cancel); its Delete can't run on a
+    // block that was never saved.
+    dismissCalendarEditor: () => {
+      const presentation = calendarEditPresentationRef.current;
+      if (presentation) setCalendarEditDismissRequestId(presentation.id);
+    },
+    reject: (localId, error, alert) => rejectOptimisticTimerStart(localId, null, error, alert),
+    refresh: () => queueDashboardRefreshAfterConflict()
+  });
 
   useEffect(() => subscribeMobileSignedOut(() => transitionToSignedOut({
     preserveAuthPassword: preserveAuthPasswordOnSignedOut.current
@@ -2303,7 +2303,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     return true;
   }
 
-  rejectOptimisticTimerStartRef.current = rejectOptimisticTimerStart;
   function rejectOptimisticTimerStart(
     optimisticId: string,
     previousData: MobileBootstrap | null,

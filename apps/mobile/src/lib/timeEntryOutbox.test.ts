@@ -247,6 +247,48 @@ describe("durable time-entry outbox", () => {
     expect((await outbox.listTimeEntrySyncIssues(OWNER_B))).toEqual([]);
   });
 
+  // Codex r3 on #532: the refusal fence. A command written for a refused Start after settlement is a
+  // sync issue at once (never deferred, never waiting), only for that account, and the fence is bounded.
+  it("refuses an Edit or Delete written for a fenced Start as it is written, for that account only", async () => {
+    await outbox.refuseTimeEntryCommandsForOptimisticEntry(OWNER_A, "optimistic-z");
+    const late = await outbox.enqueueTimeEntryDelete({
+      owner: OWNER_A,
+      target: { optimisticEntryId: "optimistic-z" },
+      deliverAfter: "2026-08-22T12:00:06.000Z",
+      requestImmediateDelivery: true
+    });
+    expect(late).toMatchObject({ failureKind: "permanent", refusedStart: true, lastError: outbox.REFUSED_START_COMMAND_MESSAGE });
+    expect(late.deliverAfter).toBeUndefined();
+    expect(getTimerBackgroundExecutionSnapshot().activeLeaseCount).toBe(0);
+    await outbox.enqueueTimeEntryUpdate({ owner: OWNER_A, target: { targetEntryId: "entry-x" }, patch: { description: "Unrelated" } });
+    vi.stubGlobal("fetch", vi.fn((_url: string) => Promise.resolve(new Response(null, { status: 204 }))));
+    await expect(outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 1, waitingCount: 0, needsAttentionCount: 1 });
+
+    // Another account's block with the same local ID is not fenced.
+    await account.activateMobileAccount(OWNER_B);
+    const other = await outbox.enqueueTimeEntryUpdate({ owner: OWNER_B, target: { optimisticEntryId: "optimistic-z" }, patch: { description: "B" } });
+    expect(other.failureKind).toBeUndefined();
+  });
+
+  it("keeps the refusal fence bounded: records older than 30 days and beyond 200 are dropped", async () => {
+    storage.set("dayframe.timeEntryOutbox.refusedStarts.v1", JSON.stringify([
+      { ...OWNER_A, optimisticEntryId: "optimistic-old", message: "never saved", refusedAt: "2026-07-01T12:00:00.000Z" },
+      ...Array.from({ length: 200 }, (_, index) => ({
+        ...OWNER_A, optimisticEntryId: `optimistic-${index}`, message: "never saved", refusedAt: "2026-08-22T11:00:00.000Z"
+      }))
+    ]));
+    const old = await outbox.enqueueTimeEntryUpdate({ owner: OWNER_A, target: { optimisticEntryId: "optimistic-old" }, patch: { description: "Old" } });
+    expect(old.failureKind).toBeUndefined();
+
+    await outbox.refuseTimeEntryCommandsForOptimisticEntry(OWNER_A, "optimistic-new");
+    const fence = JSON.parse(storage.get("dayframe.timeEntryOutbox.refusedStarts.v1") as string) as Array<{ optimisticEntryId: string }>;
+    expect(fence).toHaveLength(200);
+    expect(fence.map((record) => record.optimisticEntryId)).not.toContain("optimistic-old");
+    expect(fence.map((record) => record.optimisticEntryId)).not.toContain("optimistic-0");
+    expect(fence.at(-1)?.optimisticEntryId).toBe("optimistic-new");
+  });
+
   it("does not dispatch when the durable owner and bearer owner differ", async () => {
     await outbox.enqueueTimeEntryUpdate({
       owner: OWNER_A,

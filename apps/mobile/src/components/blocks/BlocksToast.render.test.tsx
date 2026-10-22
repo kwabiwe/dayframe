@@ -22,6 +22,10 @@ vi.mock("../../lib/blocksMotion", () => ({
   blocksToastEntering: (reduceMotion: boolean) => ({ kind: "entering", spring: reduceMotion ? null : "pop", reduceMotion }),
   blocksToastExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion })
 }));
+vi.mock("../../lib/motion", () => ({
+  localLayoutTransition: (reduceMotion: boolean) => ({ kind: "layout", reduceMotion }),
+  localPresenceEntering: (reduceMotion: boolean) => ({ kind: "contentFade", reduceMotion })
+}));
 vi.mock("../../lib/mobileTypography", () => ({ MOBILE_TEXT_CAP: { control: 1.3 }, mobileTextProps: () => ({}) }));
 
 const { BLOCKS_TOAST_DURATION_MS, BLOCKS_TOAST_METRICS, BlocksToast, useBlocksNotice } = await import("./BlocksToast");
@@ -39,7 +43,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const host = () => tree!.root.find((node: ReactTestInstance) => (node.type as unknown) === "ReanimatedView");
+// The pill is the outermost Reanimated view (its content is another, keyed by what it says).
+const host = () => tree!.root.findAll((node: ReactTestInstance) => (node.type as unknown) === "ReanimatedView")[0];
 const byTestId = (id: string) => tree!.root.find((node: ReactTestInstance) => node.props.testID === id && typeof node.type === "string");
 const flatStyle = (node: ReactTestInstance) => {
   const style = typeof node.props.style === "function" ? node.props.style({ pressed: false }) : node.props.style;
@@ -173,6 +178,43 @@ describe("BlocksToast (UIA-003)", () => {
     });
     expect(host().props.entering).toEqual({ kind: "entering", spring: null, reduceMotion: true });
     expect(host().props.exiting).toEqual({ kind: "exiting", reduceMotion: true });
+  });
+
+  // Codex r3 on #532: a group delete that loses a refused member changes the mounted toast's words
+  // ("Deleted 2 blocks" to "Deleted Deep work") under the same key, deadline and Undo.
+  it("owns a content update: the new words fade in and the pill's layout transition carries the size", () => {
+    const onUndo = vi.fn();
+    const render = (message: string, swatchColor: string | null, reduceMotion = false) => (
+      <BlocksToast actionLabel="Undo" actionTestID="toast-undo" message={message} onAction={onUndo}
+        reduceMotion={reduceMotion} swatchColor={swatchColor} testID="toast" theme={theme} />
+    );
+    act(() => { tree = create(render("Deleted 2 blocks", null)); });
+    const pill = host();
+    expect(pill.props.layout).toEqual({ kind: "layout", reduceMotion: false });
+    // The first words never fade: the entrance is the only motion on mount.
+    expect(byTestId("toast-content").props.entering).toBeUndefined();
+
+    act(() => tree!.update(render("Deleted Deep work", "#4C8DFF")));
+    // The same pill (not re-mounted: no second entrance, no exit), the new words fading in.
+    expect(host()).toBe(pill);
+    expect(byTestId("toast-content").props.entering).toEqual({ kind: "contentFade", reduceMotion: false });
+    expect(texts()).toEqual(["Deleted Deep work", "Undo"]);
+    expect(flatStyle(byTestId("toast-swatch")).backgroundColor).toBe("#4C8DFF");
+    expect(byTestId("toast-label").props.accessibilityLabel).toBe("Deleted Deep work");
+    // Undo is the same action.
+    act(() => byTestId("toast-undo").props.onPress());
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("swaps a content update at once under Reduce Motion", () => {
+    const render = (message: string) => (
+      <BlocksToast actionLabel="Undo" message={message} onAction={vi.fn()} reduceMotion testID="toast" theme={theme} />
+    );
+    act(() => { tree = create(render("Deleted 2 blocks")); });
+    expect(host().props.layout).toEqual({ kind: "layout", reduceMotion: true });
+    act(() => tree!.update(render("Deleted Deep work")));
+    expect(byTestId("toast-content").props.entering).toBeUndefined();
+    expect(texts()).toEqual(["Deleted Deep work", "Undo"]);
   });
 
   it("never uses the coral accent (source guard)", () => {

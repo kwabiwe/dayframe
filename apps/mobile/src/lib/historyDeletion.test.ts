@@ -307,6 +307,25 @@ describe("deletion coordinator", () => {
     expect(harness.commits.map(({ entryIds }) => entryIds)).toEqual([["saved-entry"]]);
   });
 
+  // Codex r3 on #532: the toast's words change with the removal, but never its deadline or Undo.
+  it("keeps the original deadline when a member leaves late in the window", () => {
+    const harness = coordinatorHarness();
+    const pending = required(harness.coordinator.prepare(
+      [entry("saved-entry"), entry("optimistic-start")],
+      { entryIds: ["saved-entry", "optimistic-start"] }
+    ));
+    harness.coordinator.activate(pending.token);
+    harness.clock.advanceBy(DELETION_UNDO_MS - 1_000);
+    harness.coordinator.removePendingEntry("optimistic-start");
+    expect(harness.clock.pendingTimerCount()).toBe(1);
+
+    harness.clock.advanceBy(999);
+    expect(harness.commits).toEqual([]);
+    expect(harness.coordinator.current()?.token).toBe(pending.token);
+    harness.clock.advanceBy(1);
+    expect(harness.commits.map(({ entryIds }) => entryIds)).toEqual([["saved-entry"]]);
+  });
+
   it("invalidates a deletion whose only member was refused", () => {
     const harness = coordinatorHarness();
     const pending = required(harness.coordinator.prepare(

@@ -911,6 +911,123 @@ describe("mobile API client", () => {
     }
   });
 
+  // Codex r3 on #532: a group deletion whose first write was paused wrote its refused member's Delete
+  // after settlement and Clear, so it waited for a Start that no longer existed (`dependency_wait`)
+  // and held an unrelated Edit behind it. The refusal fence refuses it as it is written.
+  it("refuses a Delete written for a refused Start after settlement and Clear, so it holds nothing", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "optimistic-late", source: "mobile_app", type: "timer_start",
+      occurredAt: new Date("2026-10-22T10:00:00.000Z"), rawPayload: { origin: "mobile_timer_start" }
+    });
+    await persistPendingTimerStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-late" } });
+    const outbox = await import("./timeEntryOutbox");
+    const fetchMock = vi.fn(async (url: string) => String(url).includes("/api/events")
+      ? jsonResponse({ code: "timer_start_before_running_block", error: "late" }, 422)
+      : new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    // The group deletion's first outbox write is paused (a slow disk) while the refusal arrives.
+    let releaseFirstWrite!: () => void;
+    const firstWriteGate = new Promise<void>((resolve) => { releaseFirstWrite = resolve; });
+    let firstWriteStarted!: () => void;
+    const firstWriteBegan = new Promise<void>((resolve) => { firstWriteStarted = resolve; });
+    let stopsSettled = false;
+    let pauseNextOutboxWrite = true;
+    vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
+      if (key === "dayframe.timeEntryOutbox.v1" && pauseNextOutboxWrite) {
+        pauseNextOutboxWrite = false;
+        firstWriteStarted();
+        await firstWriteGate;
+      }
+      if (key === "dayframe.timerStopOutbox.v1") stopsSettled = true;
+      asyncStore.set(key, value);
+    });
+
+    try {
+      // The Dashboard's persistPreparedDeletion: one Delete per member, written in turn.
+      const deletion = (async () => {
+        for (const target of [{ targetEntryId: "entry-saved" }, { optimisticEntryId: "optimistic-late" }] as const) {
+          await outbox.enqueueTimeEntryDelete({ owner: TIMER_STOP_OWNER, target });
+        }
+      })();
+      await firstWriteBegan;
+      const pass = syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+      await vi.waitFor(() => expect(stopsSettled).toBe(true));
+      // Clear in Sync help while the write is still paused: its settlement, like the pass's, runs
+      // before the loop writes the refused member's Delete.
+      const clear = clearFailedQueuedEvents();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      releaseFirstWrite();
+      await deletion;
+      await pass;
+      await expect(clear).resolves.toMatchObject({ removedCount: 1, heldCount: 0 });
+      expect(await readQueue()).toEqual([]);
+      await outbox.enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { targetEntryId: "entry-other" }, patch: { description: "Unrelated" } });
+
+      expect(await outbox.listTimeEntrySyncIssues(TIMER_STOP_OWNER)).toEqual([
+        expect.objectContaining({ operation: "delete", optimisticEntryId: "optimistic-late", refusedStart: true })
+      ]);
+      const result = await outbox.synchroniseTimeEntryCommands({ owner: TIMER_STOP_OWNER, correlations: new Map(), force: true });
+      expect(result).toMatchObject({ deliveredCount: 2, waitingCount: 0, needsAttentionCount: 1 });
+      expect(result.reason).toBeUndefined();
+      const delivered = fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/api/time-entries/"));
+      expect(delivered).toEqual([
+        "https://dayframe.test/api/time-entries/entry-saved",
+        "https://dayframe.test/api/time-entries/entry-other"
+      ]);
+    } finally {
+      releaseFirstWrite();
+      vi.mocked(AsyncStorage.setItem).mockImplementation((key: string, value: string) => {
+        asyncStore.set(key, value);
+        return Promise.resolve();
+      });
+    }
+  });
+
+  // Codex r3 on #532: a Delete already waiting when the fence was written (from storage older than the
+  // fence) is refused by the drain rather than waited for.
+  it("refuses, rather than waits for, a command whose Start was fenced", async () => {
+    const outbox = await import("./timeEntryOutbox");
+    await outbox.enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-fenced" }, patch: { description: "Typed" } });
+    const stored = asyncStore.get("dayframe.timeEntryOutbox.v1") as string;
+    await outbox.refuseTimeEntryCommandsForOptimisticEntry(TIMER_STOP_OWNER, "optimistic-fenced", "The block this change was for was never saved.");
+    // Put the command back as it was before settlement, as a device restored from an older write would.
+    asyncStore.set("dayframe.timeEntryOutbox.v1", stored);
+    storeBoundSession("session-token");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+
+    await expect(outbox.synchroniseTimeEntryCommands({ owner: TIMER_STOP_OWNER, correlations: new Map(), force: true }))
+      .resolves.toMatchObject({ deliveredCount: 0, waitingCount: 0, needsAttentionCount: 1 });
+    expect(await outbox.listTimeEntrySyncIssues(TIMER_STOP_OWNER)).toEqual([
+      expect.objectContaining({ optimisticEntryId: "optimistic-fenced", refusedStart: true })
+    ]);
+  });
+
+  // Codex r3 on #532: 422, Retry 500, Retry 422 announced the same refusal twice.
+  it("announces a refused Start once across a transient failure between Retries", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      owner: TIMER_STOP_OWNER, localId: "optimistic-flaky", source: "mobile_app", type: "timer_start",
+      occurredAt: new Date("2026-10-22T10:00:00.000Z"), rawPayload: { origin: "mobile_timer_start" }
+    });
+    const statuses = [422, 500, 422];
+    const fetchMock = vi.fn(async () => jsonResponse({ code: "timer_start_before_running_block", error: "late" }, statuses.shift() ?? 422));
+    vi.stubGlobal("fetch", fetchMock);
+    const { subscribeRefusedTimerStarts } = await import("./api");
+    const refused = vi.fn();
+    const unsubscribe = subscribeRefusedTimerStarts(refused);
+    try {
+      await syncQueue({ eventScope: "timer_mutations", forceRetry: true });
+      await retryFailedQueuedEvents();
+      await retryFailedQueuedEvents();
+    } finally {
+      unsubscribe();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(refused).toHaveBeenCalledOnce();
+    expect((await readQueue())[0]).toMatchObject({ failureKind: "permanent", localId: "optimistic-flaky" });
+  });
+
   // Codex r2 on #532: Sync help's Retry of a Start already refused announced it a second time.
   it("announces a refused Start once, not again when it is retried and refused again", async () => {
     storeBoundSession("session-token");

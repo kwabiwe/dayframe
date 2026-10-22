@@ -4,6 +4,7 @@ import Reanimated, { useSharedValue } from "react-native-reanimated";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { colorWithAlpha } from "../today/todayBlocksLayout";
 import { blocksToastEntering, blocksToastExiting, type ToastPhase } from "../../lib/blocksMotion";
+import { localLayoutTransition, localPresenceEntering } from "../../lib/motion";
 import { toastAccessibilityText, type BlocksToastCopy } from "../../lib/blocksToastCopy";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_TEXT_CAP, mobileTextProps } from "../../lib/mobileTypography";
@@ -77,6 +78,13 @@ export type BlocksToastProps = {
  * Its owner keeps the notice's lifetime and token and renders it with `key={token}`, so a
  * replacing notice re-mounts (a fresh entrance) and a stale exit can never hide a newer one.
  * Reanimated owns the presence: rise + fade in, fade out; Reduce Motion fades only.
+ *
+ * It also owns a content update while it stays mounted (same key): a group delete that loses a
+ * member whose Start was refused goes from "Deleted 2 blocks" to "Deleted Deep work" with the same
+ * deadline and Undo (Codex r3 on #532). The new swatch and lines fade in over 140 ms (no exit fade:
+ * the old words go at once, so two sentences never overlap) while the pill's layout transition
+ * carries any height change from its anchored edge; Reduce Motion swaps the content and settles the
+ * size at once. The first content never fades, so the entrance stays the only motion on mount.
  */
 export function BlocksToast({
   appearSettled = false,
@@ -98,36 +106,48 @@ export function BlocksToast({
   const phase = useSharedValue<ToastPhase["value"]>(appearSettled ? "settled" : "entering");
   const hasAction = Boolean(actionLabel && onAction);
   const label = toastAccessibilityText({ accessibilityLabel, detail, message });
+  // The content's identity: a change re-mounts only the swatch and lines (the VoiceOver element and
+  // the action stay), and any content but the first fades in.
+  const contentKey = JSON.stringify([message, detail ?? null, swatchColor ?? null]);
+  const [firstContentKey] = useState(contentKey);
+  const contentUpdated = contentKey !== firstContentKey;
   const main = (
     <>
       {/* The swatch and both lines are one VoiceOver element reading one sentence. */}
       <View accessibilityLabel={label} accessible style={toastStyles.label} testID={testID ? `${testID}-label` : undefined}>
-        <View
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          style={[toastStyles.swatch, { backgroundColor: swatchColor ?? theme.textMuted }]}
-          testID={testID ? `${testID}-swatch` : undefined}
-        />
-        <View style={toastStyles.lines}>
-          <Text
-            {...mobileTextProps("control")}
-            numberOfLines={BLOCKS_TOAST_METRICS.messageMaxLines}
-            style={[toastStyles.message, { color: theme.background }]}
-            testID={testID ? `${testID}-message` : undefined}
-          >
-            {message}
-          </Text>
-          {detail ? (
+        <Reanimated.View
+          entering={contentUpdated && !reduceMotion ? localPresenceEntering(false) : undefined}
+          key={contentKey}
+          style={toastStyles.content}
+          testID={testID ? `${testID}-content` : undefined}
+        >
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={[toastStyles.swatch, { backgroundColor: swatchColor ?? theme.textMuted }]}
+            testID={testID ? `${testID}-swatch` : undefined}
+          />
+          <View style={toastStyles.lines}>
             <Text
               {...mobileTextProps("control")}
-              numberOfLines={BLOCKS_TOAST_METRICS.detailMaxLines}
-              style={[toastStyles.detail, { color: colorWithAlpha(theme.background, 0.72) }]}
-              testID={testID ? `${testID}-detail` : undefined}
+              numberOfLines={BLOCKS_TOAST_METRICS.messageMaxLines}
+              style={[toastStyles.message, { color: theme.background }]}
+              testID={testID ? `${testID}-message` : undefined}
             >
-              {detail}
+              {message}
             </Text>
-          ) : null}
-        </View>
+            {detail ? (
+              <Text
+                {...mobileTextProps("control")}
+                numberOfLines={BLOCKS_TOAST_METRICS.detailMaxLines}
+                style={[toastStyles.detail, { color: colorWithAlpha(theme.background, 0.72) }]}
+                testID={testID ? `${testID}-detail` : undefined}
+              >
+                {detail}
+              </Text>
+            ) : null}
+          </View>
+        </Reanimated.View>
       </View>
       {hasAction ? (
         <Pressable
@@ -152,6 +172,7 @@ export function BlocksToast({
       accessibilityLiveRegion="polite"
       entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
       exiting={blocksToastExiting(reduceMotion, phase)}
+      layout={localLayoutTransition(reduceMotion)}
       style={[
         toastStyles.toast,
         hasAction ? toastStyles.toastWithAction : toastStyles.toastWithoutAction,
@@ -302,6 +323,13 @@ const toastStyles = StyleSheet.create({
     flexDirection: "row",
     gap: BLOCKS_TOAST_METRICS.swatchGap,
     minHeight: 44,
+    minWidth: 0
+  },
+  content: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: BLOCKS_TOAST_METRICS.swatchGap,
     minWidth: 0
   },
   swatch: {
