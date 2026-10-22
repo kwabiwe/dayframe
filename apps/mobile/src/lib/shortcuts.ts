@@ -1,4 +1,4 @@
-import { NativeModules, Platform, Settings } from "react-native";
+import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
 import { enqueueEvent, type MobileBootstrap } from "./api";
 import {
@@ -6,8 +6,6 @@ import {
   readActiveMobileAccount,
   type MobileAccountOwner
 } from "./mobileAccount";
-
-const SHORTCUT_CATALOG_KEY = "dayframe.shortcutCatalog.v1";
 
 type NativeShortcutQueuedEvent = {
   localId: string;
@@ -24,6 +22,7 @@ type NativeShortcutQueuedEvent = {
 type NativeShortcutEventType = "shortcut_action" | "timer_stop";
 
 type NativeShortcutQueueModule = {
+  setShortcutCatalog?: (value: string) => Promise<void>;
   pendingShortcutEvents?: () => Promise<unknown>;
   removeShortcutEvents?: (localIds: string[]) => Promise<number>;
 };
@@ -70,11 +69,10 @@ export function clearShortcutCatalog() {
   }
 }
 
-/** Every UserDefaults write makes React Native send every default to JS, so an unchanged catalog is not
- * written again (AGENTS.md Mobile Patterns). */
+/** Written natively, which skips an unchanged value: React Native's `Settings` module would forward
+ * every UserDefaults change to JS (AGENTS.md Mobile Patterns). */
 function writeShortcutCatalog(value: string) {
-  if (Settings.get(SHORTCUT_CATALOG_KEY) === value) return;
-  Settings.set({ [SHORTCUT_CATALOG_KEY]: value });
+  void nativeShortcutQueue?.setShortcutCatalog?.(value).catch(() => undefined);
 }
 
 export async function clearActiveOwnerNativeShortcutQueue(owner: MobileAccountOwner) {

@@ -110,6 +110,20 @@ describe("App Group file locks", () => {
     );
   });
 
+  it("never loads React Native's Settings module, which forwards every UserDefaults change to JS", () => {
+    const sources = ["src", "app"]
+      .flatMap((root) => readdirSync(`${mobileRoot}${root}`, { recursive: true }).map((name) => `${root}/${String(name)}`))
+      .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path));
+    const offenders = sources.filter((path) =>
+      /import\s*\{[^}]*\bSettings\b[^}]*\}\s*from\s*"react-native"|NativeModules\.SettingsManager/.test(read(path))
+    );
+
+    expect(offenders).toEqual([]);
+    expect(functionBody(read("ios/Dayframe/DayframeShortcuts.swift"), "static func set(_ value: String)")).toContain(
+      "guard UserDefaults.standard.string(forKey: key) != value else { return }"
+    );
+  });
+
   it("keeps the app's SQLite databases out of the App Group container", () => {
     const scripts = readdirSync(`${mobileRoot}src/lib`, { recursive: true })
       .map(String)
