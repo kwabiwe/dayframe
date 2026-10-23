@@ -648,8 +648,8 @@ private struct DayframeCalendarBlockView: View {
           }
 
           // Room for more: the place, then the tags, only as many lines as fit the block.
-          // (An older bundle's blocks keep their old rule: both lines whenever the detail line shows.)
-          let extraLines = !showsMeta ? 0 : legacy ? 2 : DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))
+          // Older bundles' blocks too: never more lines than fit (Codex r5 on #548).
+          let extraLines = !showsMeta ? 0 : DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))
           let extras = [("place", entry.placeText), ("tag", entry.tagText)]
             .compactMap { (pair: (String, String?)) -> (String, String)? in
               guard let text = pair.1, !text.isEmpty else { return nil }
