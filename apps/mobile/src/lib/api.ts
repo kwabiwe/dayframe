@@ -237,7 +237,19 @@ export type MobileReviewItem = {
   linkedEntryIds?: string[];
 };
 
+/**
+ * The journey in progress (location v4 step 5, "Travelling since…"): never a block and never
+ * logged. Older servers omit it.
+ */
+export type MobileOpenTrip = {
+  startedAt: string;
+  lastObservedAt: string;
+  fromPlaceId: string | null;
+  travelMode: "walking" | "running" | "cycling" | "automotive" | null;
+};
+
 export type MobileBootstrap = {
+  openTrip?: MobileOpenTrip | null;
   serverBuild?: {sourceSha:string|null;deploymentId:string|null;backendId:string|null;environment:string;syncContractVersion:number};
   user: {
     id: string;

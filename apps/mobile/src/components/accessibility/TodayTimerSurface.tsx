@@ -9,6 +9,9 @@ import type { QuickStartColumn } from "../../lib/quickStartMosaic";
 import { QuickStartMosaic } from "../today/QuickStartMosaic";
 import { TodayIdleCard } from "../today/TodayIdleCard";
 import { TodayLiveBlock, type TodayLiveBlockPresentation } from "../today/TodayLiveBlock";
+import { TodayOpenTripLine } from "../today/TodayOpenTripLine";
+import type { ClockFormat } from "@dayframe/shared";
+import type { MobileOpenTrip } from "../../lib/api";
 
 export type TodayActiveTimerPresentation = TodayLiveBlockPresentation;
 
@@ -19,12 +22,15 @@ export type TodayActiveTimerPresentation = TodayLiveBlockPresentation;
  * Native's native driver runs the live block's breathing ring and rolling digits. The card slot and
  * the mosaic animate their own layout changes, and
  * idle and live cards crossfade at the same geometry. With Reduce Motion the cards swap in place and
- * the live block's content fade is the single opacity change.
+ * the live block's content fade is the single opacity change. The "Travelling since…" line (location
+ * v4 step 5) sits in the card slot under the card: it fades in and out (Reanimated presence) while the
+ * slot's layout transition moves the mosaic; with Reduce Motion it appears and goes at once.
  */
 export function TodayTimerSurface({
   active,
   activeTimerActionsStyle,
   activeTimerDetailsStyle,
+  clockFormat = "24h",
   diagnostic,
   liveHidden = false,
   liveLanding,
@@ -35,11 +41,16 @@ export function TodayTimerSurface({
   onStartBlank,
   onStop,
   onSwitch,
+  openTrip = null,
   quickStartColumns,
   reduceMotion,
   runningActivityId,
   theme,
 }: {
+  /** How the "Travelling since…" time reads (the Dashboard passes the user's setting). */
+  clockFormat?: ClockFormat;
+  /** The journey in progress, already checked for freshness; null hides the line. */
+  openTrip?: MobileOpenTrip | null;
   active: TodayActiveTimerPresentation | null;
   activeTimerActionsStyle?: ComponentProps<typeof Animated.View>["style"];
   activeTimerDetailsStyle?: ComponentProps<typeof Animated.View>["style"];
@@ -107,6 +118,16 @@ export function TodayTimerSurface({
             <TodayIdleCard diagnostic={diagnostic} onAddTime={onAddTime} onStartBlank={onStartBlank} theme={theme} />
           )}
         </Reanimated.View>
+        {openTrip ? (
+          <Reanimated.View
+            entering={painted.current && !reduceMotion ? cardEntering : undefined}
+            exiting={cardExiting}
+            style={styles.openTrip}
+            testID="today-open-trip-slot"
+          >
+            <TodayOpenTripLine clockFormat={clockFormat} openTrip={openTrip} theme={theme} />
+          </Reanimated.View>
+        ) : null}
       </Reanimated.View>
       <Reanimated.View layout={layout} testID="today-quick-start-slot">
         <QuickStartMosaic
@@ -127,4 +148,5 @@ export function TodayTimerSurface({
 const styles = StyleSheet.create({
   stack: { gap: 22 },
   hidden: { opacity: 0 },
+  openTrip: { marginTop: 10 },
 });

@@ -214,6 +214,38 @@ Temporal invariants:
   Scored with the location v4 harness: the 15–22 Oct week is identical (89),
   the capture sweep is 0 worse, and the staging-week and near-radius corpora
   are identical.
+- Open trip, "Travelling since…" (location v4 step 5; `deriveOpenTrip` in
+  `commute.ts`, `LocationEngineOutput.openTrip`). When no stay is open, the
+  journey after the last stay is in progress once, since its departure (found
+  as for a finished journey: latest origin support, then the Fix B guard),
+  the device was seen moving (a credible reading at or above
+  `movementSpeedThresholdMps`) and away (an accurate reading beyond the
+  origin's radius plus its accuracy), its latest observation is within
+  `maxContinuityGapMs` of replay time, the origin ended within
+  `commuteMaximumDurationMs`, and nothing after its last movement shows an
+  arrival (a Visit, a saved-place entry, or an accurate reading at a saved or
+  learned place). It is never a segment: replay stores it only under the
+  origin stay's `openTrip` metadata key (times, counts, metres, mode; no
+  coordinates), clearing every other stay's key, so it can never be logged,
+  reviewed or reported; `commute_segments` cannot hold it (its destination
+  and end are NOT NULL), hence no migration. Bootstrap returns it while its
+  latest observation is within the same limit, and the iPhone checks again
+  on the minute. Replay stamps it with its own time (`asOf`), and a replay
+  with no journey leaves the stamp on the device's latest stay, so an older
+  replay never overwrites, clears or brings back a journey (replay's stay
+  rewrite keeps a newer key too). When a decided origin keeps a different end
+  from the engine's, the journey is derived again against the persisted end
+  (none if it no longer qualifies); a persisted origin that is still open
+  holds none; a short unknown stop a journey reached is inside it (the
+  journey runs from the place before). The bootstrap read never depends on
+  the origin's own fields, and reads and cleanup look only at stays begun
+  within 14 days. A change in what Today shows counts in the reply's
+  `semanticChangeCount`, so the phone refreshes at once. Replaying the 15–22 Oct week as received every 5
+  minutes against the Google answer key: of the moments it shows, 80 % are
+  travel by Google (precision); of the travel moments with no finished trip
+  yet, it shows at 73 % (recall); its start is within 0.3 min of Google's
+  (median). Most misses are the minutes after arrival before the stay forms,
+  and journeys whose first reading arrives late.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

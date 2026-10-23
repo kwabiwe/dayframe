@@ -1,5 +1,5 @@
 import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
-import { assembleTripsThroughStops, deriveCommutes } from "./commute";
+import { assembleTripsThroughStops, deriveCommutes, deriveOpenTrip } from "./commute";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { indexPlacesByLatitude, matchLocationToPlaces, placesNearLatitude } from "./placeMatcher";
@@ -2014,6 +2014,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     rejectedEvidence,
     segmentUpserts: segments,
     finalisedSegments,
+    openTrip: activeStay ? null : deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
     diagnostics: {
       inputCount: input.evidence.length,
       acceptedCount: acceptedWithMotion.length,
