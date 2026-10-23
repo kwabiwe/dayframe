@@ -2502,9 +2502,14 @@ export async function updateTimeEntry(
     expectedDetails?: ExpectedDetails;
     /** The block's version this edit was based on: refused (409) if it has been written since. */
     expectedUpdatedAt?: string;
+    /**
+     * The iPhone outbox's stable command id for this edit (item 17). Recorded with the edit; a resend
+     * of one already recorded for this block is answered `replayed` and applies nothing.
+     */
+    clientCommandId?: string;
   },
   session: RequestSession = getDevSession()
-) {
+): Promise<{ id: string; updatedAt: string | null; replayed?: true }> {
   const hasProjectId = Object.prototype.hasOwnProperty.call(input, "projectId");
   const hasCategoryId = Object.prototype.hasOwnProperty.call(input, "categoryId");
   const hasPlaceId = Object.prototype.hasOwnProperty.call(input, "placeId");
@@ -2527,7 +2532,26 @@ export async function updateTimeEntry(
        for update`,
       [id, session.workspaceId, session.userId]
     );
-    if (!locked.rows[0]) throw new TimeEntryNotFoundError();
+    if (!locked.rows[0]) {
+      // A resend of an edit that landed before the block was deleted: delivered, not a false rejection.
+      if (input.clientCommandId && await timeEntryCommandRecorded(client, id, input.clientCommandId, session)) {
+        await client.query("rollback");
+        return { id, updatedAt: null, replayed: true };
+      }
+      throw new TimeEntryNotFoundError();
+    }
+    if (input.clientCommandId && await timeEntryCommandRecorded(client, id, input.clientCommandId, session)) {
+      // Already applied (its response was lost): applying it again would revert any newer edit. Read
+      // under the lock, so of two concurrent resends only the first applies.
+      const version = await client.query<{ updatedAt: string | Date }>(
+        `select updated_at as "updatedAt" from time_entries
+         where id = $1 and workspace_id = $2 and user_id = $3`,
+        [id, session.workspaceId, session.userId]
+      );
+      await client.query("commit");
+      const updatedAt = version.rows[0]?.updatedAt;
+      return { id, updatedAt: updatedAt ? new Date(updatedAt).toISOString() : null, replayed: true };
+    }
     if (input.expectedUpdatedAt) {
       // A fresh statement after the lock, as below: it sees a write that committed while this one waited.
       const version = await client.query<{ updatedAt: string | Date }>(
@@ -2620,7 +2644,13 @@ export async function updateTimeEntry(
     // Every edit is recorded so an earlier queued Stop never pulls back an end a person chose, and a
     // details edit is never read as a legacy one (see stopEntryAt). An end edited before edits were
     // recorded keeps its protection through this edit too (Codex r4 on #531).
-    await recordTimeEntryEdits(client, [id], session, current.endChanged || current.legacyPersonSetEnd ? [id] : []);
+    await recordTimeEntryEdits(
+      client,
+      [id],
+      session,
+      current.endChanged || current.legacyPersonSetEnd ? [id] : [],
+      input.clientCommandId
+    );
     if (hasTagNames) {
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
@@ -2637,25 +2667,50 @@ export async function updateTimeEntry(
 /**
  * Records a person's edit of these blocks in the same transaction as the edit: `time_entry.end_set` with
  * the block's end for the blocks in `endSetIds` (only an ended block), else `time_entry.edited`.
- * `created_at` is the block's `user_edited_at`, which the edit has just set.
+ * `created_at` is the block's `user_edited_at`, which the edit has just set. A `clientCommandId` (the
+ * iPhone outbox's, item 17) is kept in the same row's metadata as the edit's receipt.
  */
 async function recordTimeEntryEdits(
   client: pg.PoolClient,
   ids: string[],
   session: RequestSession,
-  endSetIds: string[]
+  endSetIds: string[],
+  clientCommandId?: string
 ) {
   await client.query(
     `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
      select workspace_id, user_id,
             case when id = any($4::uuid[]) and stopped_at is not null then '${PERSON_SET_END_ACTION}' else '${PERSON_EDIT_ACTION}' end,
             'time_entry', id,
-            case when id = any($4::uuid[]) and stopped_at is not null then jsonb_build_object('stoppedAt', stopped_at) else '{}'::jsonb end,
+            (case when id = any($4::uuid[]) and stopped_at is not null then jsonb_build_object('stoppedAt', stopped_at) else '{}'::jsonb end)
+              || case when $5::text is null then '{}'::jsonb else jsonb_build_object('clientCommandId', $5::text) end,
             user_edited_at
      from time_entries
      where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3 and user_edited_at is not null`,
-    [ids, session.workspaceId, session.userId, endSetIds]
+    [ids, session.workspaceId, session.userId, endSetIds, clientCommandId ?? null]
   );
+}
+
+/**
+ * Whether this person's edit with this outbox command id is already recorded for this block (item 17).
+ * Audit rows outlive the block, so this also answers for a block deleted since. `audit_log` has no
+ * index yet (a later migration); the scan is per block and runs under its row lock.
+ */
+async function timeEntryCommandRecorded(
+  client: pg.PoolClient,
+  id: string,
+  clientCommandId: string,
+  session: RequestSession
+) {
+  const recorded = await client.query(
+    `select 1 from audit_log
+     where workspace_id = $1 and user_id = $2 and entity_type = 'time_entry' and entity_id = $3
+       and action in ('${PERSON_SET_END_ACTION}', '${PERSON_EDIT_ACTION}')
+       and metadata->>'clientCommandId' = $4
+     limit 1`,
+    [session.workspaceId, session.userId, id, clientCommandId]
+  );
+  return (recorded.rowCount ?? 0) > 0;
 }
 
 export class TimeEntryNotFoundError extends Error {

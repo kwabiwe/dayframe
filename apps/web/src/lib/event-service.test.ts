@@ -3528,7 +3528,7 @@ describe("grouped time entry descriptions", () => {
     // Recorded as a details edit, so it never reads as a legacy end edit (Codex r4 on #531).
     expect(client.query).toHaveBeenCalledWith(
       expect.stringContaining("insert into audit_log"),
-      [["entry-1", "entry-2"], session.workspaceId, session.userId, []]
+      [["entry-1", "entry-2"], session.workspaceId, session.userId, [], null]
     );
     expect(client.query).toHaveBeenCalledWith("commit");
     expect(client.release).toHaveBeenCalled();
