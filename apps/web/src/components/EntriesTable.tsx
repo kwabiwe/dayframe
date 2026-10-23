@@ -47,6 +47,14 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
+import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline } from "@dayframe/shared";
+import {
+  LocationListRowView,
+  ShowEveryPlaceToggle,
+  TripLegRows,
+  TripLegsToggle,
+  TripModesLine
+} from "@/components/location/LocationListRows";
 
 type TimelineInlineEditorState = TimelineInlineEditDraft & {
   entryId: string;
@@ -214,7 +222,8 @@ export function EntriesTable({
   onScroll,
   scrollContainerRef,
   displayRange,
-  capturedNow = new Date()
+  capturedNow = new Date(),
+  locationTimeline = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -226,6 +235,8 @@ export function EntriesTable({
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   displayRange?: DateRange;
   capturedNow?: Date;
+  /** The shown day's location timeline (location v4 step 10); null for a week, or until it loads. */
+  locationTimeline?: LocationTimeline | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -256,6 +267,15 @@ export function EntriesTable({
   // empty list; the rows appear once the page has hydrated, without motion (React #418).
   const localTimeReady = useIsHydrated();
   const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
+  const [showEveryPlace, setShowEveryPlace] = useState(false);
+  const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
+  const nowMs = capturedNow.getTime();
+  // Read-only location rows in time order beside the blocks (placement A); none before hydration.
+  const locationRows = useMemo(
+    () => (localTimeReady ? locationListRows(locationTimeline, entries, { nowMs, showAll: showEveryPlace }) : []),
+    [entries, localTimeReady, locationTimeline, nowMs, showEveryPlace]
+  );
+  const tripByBlock = useMemo(() => tripsByBlockId(locationTimeline), [locationTimeline]);
 
   useEffect(() => {
     inlineEditorRef.current = inlineEditor;
@@ -304,6 +324,17 @@ export function EntriesTable({
       )
     }));
   }, [capturedNow, displayRange, displayedEntries]);
+  // Location rows go before the first group that started before them (newest first, like the blocks).
+  const locationRowsByGroup = useMemo(() => {
+    const before: LocationListRow[][] = grouped.map(() => []);
+    const after: LocationListRow[] = [];
+    for (const row of locationRows) {
+      const index = grouped.findIndex((group) => row.atMs >= Date.parse(group.representative.startedAt));
+      if (index >= 0) before[index].push(row);
+      else after.push(row);
+    }
+    return { after, before };
+  }, [grouped, locationRows]);
   // Each day heading carries that day's time: every block's shown interval clipped to the local day
   // (an overnight block counts on both days; a running one up to the captured time).
   const dayTotals = useMemo(
@@ -790,6 +821,9 @@ export function EntriesTable({
                       </td>
                     </tr>
                   ) : null}
+                  {locationRowsByGroup.before[index].map((row) => (
+                    <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+                  ))}
                 <tr
                   className={[
                     "motion-row timeline-list-row align-middle",
@@ -827,6 +861,9 @@ export function EntriesTable({
                           {entry.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
                           <TagMetadata compact tagNames={entry.tagNames} />
                         </span>
+                        {!isGrouped && tripByBlock.get(entry.id) ? (
+                          <TripModesLine legs={tripByBlock.get(entry.id)!.legs} route={tripByBlock.get(entry.id)!.route} />
+                        ) : null}
                         {renderInlineStatus(entry)}
                         {overlappingOccurrences.length > 0 ? (
                           <span
@@ -865,6 +902,18 @@ export function EntriesTable({
                   <td className="tabular px-3 py-3 timeline-list-duration">
                     <div className="timeline-list-duration-content">
                       {isGrouped ? formatDuration(group.totalSeconds) : renderDuration(entry, group.totalSeconds)}
+                      {!isGrouped && tripByBlock.get(entry.id) ? (
+                        <TripLegsToggle
+                          expanded={expandedTrips.has(entry.id)}
+                          onToggle={() => setExpandedTrips((current) => {
+                            const next = new Set(current);
+                            if (next.has(entry.id)) next.delete(entry.id);
+                            else next.add(entry.id);
+                            return next;
+                          })}
+                          title={timeEntryTitle(entry)}
+                        />
+                      ) : null}
                     </div>
                   </td>
                   <td className="px-3 py-3">
@@ -906,6 +955,9 @@ export function EntriesTable({
                     </div>
                   </td>
                 </tr>
+                {!isGrouped && expandedTrips.has(entry.id) && tripByBlock.get(entry.id)
+                  ? <TripLegRows clock={clock} legs={tripByBlock.get(entry.id)!.legs} />
+                  : null}
                 {isExpanded ? group.entries.map((occurrence) => {
                   const occurrenceInterval = timelineEntryDisplayInterval(occurrence, displayRange, capturedNow);
                   const highlighted = highlightedEntryId === occurrence.id;
@@ -988,6 +1040,9 @@ export function EntriesTable({
                 </Fragment>
               );
             })}
+            {locationRowsByGroup.after.map((row) => (
+              <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+            ))}
             {groupByDay && grouped.length
               ? continuedDays
                 .filter((day) => day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
@@ -995,6 +1050,9 @@ export function EntriesTable({
               : null}
           </tbody>
         </table>
+        {localTimeReady && hasLocationPlaces(locationTimeline) ? (
+          <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
+        ) : null}
       </div>
       {editingEntry ? (
         <TimeEntryQuickEditorModal

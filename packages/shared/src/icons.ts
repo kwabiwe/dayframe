@@ -125,7 +125,9 @@ export const DAYFRAME_APP_ICONS = {
   syncDone: "cloud-check",
   syncAttention: "cloud-alert",
   // A journey in progress, "Travelling since…" (location v4 step 5).
-  openTrip: "route"
+  openTrip: "route",
+  // A place you were at that has no name yet, and is not in a block (location v4 step 10).
+  placeUnknown: "circle-question-mark"
 } as const satisfies Record<string, DayframeGlyph>;
 
 /** A trip leg's mode (location v4 §4, §8): the glyph Calendar, Reports and the leg editor show. */

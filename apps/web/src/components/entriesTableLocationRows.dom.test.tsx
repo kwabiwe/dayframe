@@ -1,0 +1,88 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { LocationTimeline } from "@/lib/location/location-timeline-service";
+import type { TimeEntryRow } from "@/lib/queries";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams()
+}));
+vi.mock("@/components/AppShellRuntime", () => ({
+  useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
+}));
+vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: vi.fn() }));
+
+const { EntriesTable } = await import("./EntriesTable");
+
+// Location v4 step 10: synthetic day, made-up names.
+const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 11, hour, minute)).toISOString();
+const entry = (id: string, description: string, start: string, stop: string): TimeEntryRow => ({
+  id, projectId: null, projectName: null, projectColor: null, clientName: null, categoryId: null, categoryName: null, categoryColor: null,
+  placeId: null, placeName: null, source: id === "trip-block" ? "location_learning" : "manual_web", confidence: "1",
+  reviewStatus: "accepted", description, startedAt: start, stoppedAt: stop, updatedAt: stop, durationSeconds: 1_800, tagNames: [], tags: []
+});
+const timeline: LocationTimeline = {
+  date: "2026-08-11", timeZone: "UTC", dayStart: at(0), dayEnd: at(24), gaps: [],
+  items: [
+    { kind: "place", id: "home", status: "finalised", startedAt: at(0), stoppedAt: at(8), placeId: "p-home", learnedPlaceId: null,
+      name: "Home", role: "home", matchKind: "saved", confidence: "high", blockIds: [] },
+    { kind: "trip", id: "trip", status: "finalised", startedAt: at(8), stoppedAt: at(8, 40), fromId: "home", toId: "cafe", mode: "automotive",
+      stopIds: [], distanceMeters: 12_000, confidence: "medium", reason: null, blockIds: ["trip-block"], legs: [
+        { startedAt: at(8), stoppedAt: at(8, 10), mode: "walking", confidence: "sure", distanceMeters: 700 },
+        { startedAt: at(8, 12), stoppedAt: at(8, 40), mode: "underground", confidence: "unsure", runnerUp: "train", unobserved: true, distanceMeters: 11_000 }] },
+    { kind: "place", id: "cafe", status: "finalised", startedAt: at(8, 40), stoppedAt: at(10), placeId: null, learnedPlaceId: null,
+      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] }
+  ],
+  openTrip: { kind: "open_trip", fromId: "cafe", startedAt: at(10), lastObservedAt: at(11, 50), mode: "walking", legs: [] }
+};
+
+function renderList(locationTimeline: LocationTimeline | null) {
+  return render(
+    <EntriesTable capturedNow={new Date(at(11, 55))} categories={[]} groupByDay locationTimeline={locationTimeline}
+      // Newest first, as bootstrap sends them.
+      entries={[entry("planning", "Planning", at(11), at(11, 30)), entry("trip-block", "Getting around", at(8), at(8, 40))]}
+      onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+  );
+}
+
+describe("Calendar › List location rows (location v4 step 10)", () => {
+  afterEach(cleanup);
+
+  it("adds the journey in progress and an unlogged unknown place in time order, newest first, beside the blocks", async () => {
+    renderList(timeline);
+    const rows = await screen.findAllByRole("row");
+    const text = rows.map((row) => row.textContent ?? "");
+    const index = (needle: string) => text.findIndex((value) => value.includes(needle));
+    expect(index("Planning")).toBeLessThan(index("Travelling since"));
+    expect(index("Travelling since")).toBeLessThan(index("not in a block"));
+    expect(index("not in a block")).toBeLessThan(index("Getting around"));
+    expect(text[index("not in a block")]).toContain("Unknown place1h 20m not in a block");
+    expect(text[index("Travelling since")]).toContain("Logs when you arrive");
+    expect(screen.queryByText(/Home ·/)).toBeNull();
+  });
+
+  it("shows a trip block's route and legs, opening into leg rows", async () => {
+    renderList(timeline);
+    expect((await screen.findByLabelText(/Home → Unknown place\. Legs: Walk, Underground or train\?/)).textContent).toContain("Underground?");
+    fireEvent.click(screen.getByRole("button", { name: "Show the legs of Getting around" }));
+    expect(screen.getByRole("list", { name: "Legs" }).textContent).toContain("Underground or train? · 28m");
+    expect(screen.getByRole("list", { name: "Legs" }).textContent).toContain("no GPS underground, guessed from the gap");
+  });
+
+  it("shows Home and logged places as faint rows only with Show Home and every place", async () => {
+    renderList(timeline);
+    const toggle = await screen.findByRole("button", { name: "Show Home and every place" });
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Home · /)).toBeTruthy();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("is the List as before without a timeline", async () => {
+    renderList(null);
+    await screen.findByText("Planning");
+    expect(screen.queryByText(/Travelling since/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show Home and every place" })).toBeNull();
+  });
+});
