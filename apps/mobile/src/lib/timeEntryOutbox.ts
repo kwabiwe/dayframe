@@ -99,8 +99,25 @@ const listeners = new Set<() => void>();
  * Undo opens only once the sheet has left, which can be long after the delete was written (the app
  * backgrounded mid-dismiss). The durable `deliverAfter` stays the fallback after a force-quit, when
  * no Undo can follow.
+ *
+ * Every hold belongs to a lease, the lifetime of the Undo owner (Codex r1 on #540): ending the lease
+ * (sign-out, the dashboard going away) drops its holds, including those of writes still in flight, and
+ * a write that starts after it ended is not held at all. No hold outlasts its durable deadline by more
+ * than `HOLD_LAPSE_MARGIN_MS`: the drain then tells the lease (which retires that Undo) and delivers.
  */
-const heldCommandIds = new Set<string>();
+type HoldLeaseState = {
+  ended: boolean;
+  ids: Set<string>;
+  onLapse?: (clientCommandId: string) => void;
+};
+type CommandHold = { deadlineMs: number; lease: HoldLeaseState };
+export type TimeEntryCommandHoldLease = {
+  readonly ended: boolean;
+  /** Drops every hold this lease owns, now and for writes still in flight; durable commands stay. */
+  end(): void;
+};
+export const HOLD_LAPSE_MARGIN_MS = 30_000;
+const heldCommands = new Map<string, CommandHold>();
 /** Commands a request was sent for in this process, so an Undo can tell it is too late. */
 const dispatchedCommandIds = new Set<string>();
 const DISPATCHED_COMMAND_IDS_MAX = 500;
@@ -124,8 +141,11 @@ export async function enqueueTimeEntryDelete(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   deliverAfter?: string;
-  /** Held in this process until released or removed (an Undo window), not just until `deliverAfter`. */
-  holdUntilReleased?: boolean;
+  /**
+   * Held in this process until released or removed (an Undo window), not just until `deliverAfter`,
+   * for as long as this lease lasts and at most `HOLD_LAPSE_MARGIN_MS` past `deliverAfter`.
+   */
+  holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
@@ -133,9 +153,33 @@ export async function enqueueTimeEntryDelete(input: {
     target: input.target,
     operation: "delete",
     deliverAfter: input.deliverAfter,
-    holdUntilReleased: input.holdUntilReleased,
+    holdLease: input.holdLease,
     requestImmediateDelivery: input.requestImmediateDelivery
   });
+}
+
+const leaseStates = new WeakMap<TimeEntryCommandHoldLease, HoldLeaseState>();
+
+/** One Undo owner's lifetime. `onLapse` runs, before delivery, for a hold that ran out its bound. */
+export function createTimeEntryCommandHoldLease(
+  options: { onLapse?: (clientCommandId: string) => void } = {}
+): TimeEntryCommandHoldLease {
+  const state: HoldLeaseState = { ended: false, ids: new Set(), onLapse: options.onLapse };
+  const lease: TimeEntryCommandHoldLease = {
+    get ended() {
+      return state.ended;
+    },
+    end() {
+      if (state.ended) return;
+      state.ended = true;
+      for (const id of state.ids) {
+        if (heldCommands.get(id)?.lease === state) heldCommands.delete(id);
+      }
+      state.ids.clear();
+    }
+  };
+  leaseStates.set(lease, state);
+  return lease;
 }
 
 /**
@@ -154,25 +198,22 @@ export async function extendTimeEntryCommandHold(
     const all = await readAllCommands();
     let extendedCount = 0;
     const next = all.map((command) => {
+      const held = heldCommands.get(command.clientCommandId);
       if (
         !ids.has(command.clientCommandId) ||
-        !heldCommandIds.has(command.clientCommandId) ||
+        !held ||
         !command.deliverAfter ||
         Date.parse(command.deliverAfter) >= until
       ) {
         return command;
       }
+      held.deadlineMs = Math.max(held.deadlineMs, until);
       extendedCount += 1;
       return { ...command, deliverAfter, updatedAt: new Date().toISOString() };
     });
     if (extendedCount > 0) await writeAllCommands(next);
     return extendedCount;
   });
-}
-
-/** Drops this process's hold (the Undo owner went away); the durable `deliverAfter` still applies. */
-export function unholdTimeEntryCommands(clientCommandIds: readonly string[]) {
-  for (const id of clientCommandIds) heldCommandIds.delete(id);
 }
 
 /** True when a request for any of these commands was sent in this process: Undo is too late. */
@@ -195,7 +236,7 @@ export async function releaseTimeEntryCommands(
     let rewritten = false;
     const next = all.map((command) => {
       if (!ids.has(command.clientCommandId)) return command;
-      const wasHeld = heldCommandIds.delete(command.clientCommandId);
+      const wasHeld = dropHold(command.clientCommandId);
       if (!command.deliverAfter) {
         if (wasHeld) releasedCount += 1;
         return command;
@@ -205,7 +246,7 @@ export async function releaseTimeEntryCommands(
       const { deliverAfter: _deliverAfter, ...released } = command;
       return { ...released, updatedAt: new Date().toISOString() };
     });
-    for (const id of ids) heldCommandIds.delete(id);
+    for (const id of ids) dropHold(id);
     if (releasedCount > 0) {
       if (rewritten) await writeAllCommands(next);
       if (
@@ -273,7 +314,7 @@ export async function removeTimeEntryCommands(clientCommandIds: readonly string[
   const ids = new Set(clientCommandIds);
   if (ids.size === 0) return 0;
   return withMutation(async () => {
-    for (const id of ids) heldCommandIds.delete(id);
+    for (const id of ids) dropHold(id);
     const all = await readAllCommands();
     const next = all.filter((command) => !ids.has(command.clientCommandId));
     const removedCount = all.length - next.length;
@@ -493,7 +534,7 @@ export function __resetTimeEntryOutboxForTests() {
   mutationTail = Promise.resolve();
   syncInFlightByOwner.clear();
   listeners.clear();
-  heldCommandIds.clear();
+  heldCommands.clear();
   dispatchedCommandIds.clear();
 }
 
@@ -557,6 +598,7 @@ async function runTimeEntryCommandDrain(input: {
     if (isHeld(original, now)) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
+    lapseOverdueHold(original.clientCommandId, now.getTime());
     const targetEntryId = original.targetEntryId ?? (
       original.optimisticEntryId
         ? input.control.correlations.get(original.optimisticEntryId)
@@ -590,7 +632,7 @@ async function runTimeEntryCommandDrain(input: {
     }
 
     // Re-checked after the session reads: an Undo window may have opened meanwhile.
-    if (heldCommandIds.has(original.clientCommandId)) {
+    if (heldCommands.has(original.clientCommandId)) {
       return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
     }
     markDispatched(original.clientCommandId);
@@ -665,7 +707,7 @@ async function enqueueTimeEntryCommand(input: {
   operation: "update" | "delete";
   patch?: TimeEntryUpdatePatch;
   deliverAfter?: string;
-  holdUntilReleased?: boolean;
+  holdLease?: TimeEntryCommandHoldLease;
   requestImmediateDelivery?: boolean;
 }) {
   const activeOwner = await readActiveMobileAccount();
@@ -692,13 +734,21 @@ async function enqueueTimeEntryCommand(input: {
       // Its block's Start was refused: a sync issue from the start (Discard only), never waiting.
       ...(fenced ? { failureKind: "permanent" as const, refusedStart: true, lastError: fenced.message } : {})
     };
-    // Held before it is written, so no drain can see it unheld.
-    if (input.holdUntilReleased && !fenced) heldCommandIds.add(command.clientCommandId);
+    // Held before it is written, so no drain can see it unheld; never for a lease that has ended.
+    const lease = input.holdLease ? leaseStates.get(input.holdLease) : undefined;
+    if (lease && !lease.ended && !fenced) {
+      const deliverAfterMs = Date.parse(command.deliverAfter ?? "");
+      lease.ids.add(command.clientCommandId);
+      heldCommands.set(command.clientCommandId, {
+        deadlineMs: Number.isFinite(deliverAfterMs) ? deliverAfterMs : Date.now(),
+        lease
+      });
+    }
     const all = await readAllCommands();
     try {
       await writeAllCommands([...all, command]);
     } catch (error) {
-      heldCommandIds.delete(command.clientCommandId);
+      dropHold(command.clientCommandId);
       throw error;
     }
     if (
@@ -733,8 +783,29 @@ export function isTimeEntryCommandTransportReady(
 }
 
 function isHeld(command: PendingTimeEntryCommand, now: Date) {
-  return heldCommandIds.has(command.clientCommandId) ||
+  const held = heldCommands.get(command.clientCommandId);
+  return Boolean(held && now.getTime() <= held.deadlineMs + HOLD_LAPSE_MARGIN_MS) ||
     Boolean(command.deliverAfter && Date.parse(command.deliverAfter) > now.getTime());
+}
+
+function dropHold(clientCommandId: string) {
+  const held = heldCommands.get(clientCommandId);
+  if (!held) return false;
+  heldCommands.delete(clientCommandId);
+  held.lease.ids.delete(clientCommandId);
+  return true;
+}
+
+/** A hold past its bound is dropped, and its lease told (retiring that Undo), before any delivery. */
+function lapseOverdueHold(clientCommandId: string, nowMs: number) {
+  const held = heldCommands.get(clientCommandId);
+  if (!held || nowMs <= held.deadlineMs + HOLD_LAPSE_MARGIN_MS) return;
+  dropHold(clientCommandId);
+  try {
+    held.lease.onLapse?.(clientCommandId);
+  } catch {
+    // The owner's bookkeeping must never keep a durable command from its delivery.
+  }
 }
 
 function markDispatched(clientCommandId: string) {
