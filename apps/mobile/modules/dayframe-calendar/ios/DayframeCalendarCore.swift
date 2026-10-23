@@ -865,6 +865,13 @@ public enum DayframeCalendarLabelFit {
     DayframeCalendarConstants.twoLineMinimumHeight * max(1, textScale)
   }
 
+  /// The widest the length may be drawn in a column: the line inside the 6-point side padding, half
+  /// of it in a column under 72 points (the title keeps the rest). It scales down to fit, never wider.
+  public static func lengthMaximumWidth(columnWidth: Double) -> Double {
+    let line = max(0, columnWidth - 12)
+    return columnWidth < DayframeCalendarConstants.compactLengthMaximumWidth ? line / 2 : line
+  }
+
   /// The place and tag lines (0, 1 or 2) that fit under the title and detail lines.
   public static func extraLines(height: Double, textScale: Double) -> Int {
     guard height >= DayframeCalendarConstants.extraLinesMinimumHeight * max(1, textScale) else { return 0 }

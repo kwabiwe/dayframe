@@ -370,6 +370,9 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(swiftConstant("legStripMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.legStripMinimumHeight);
     expect(swiftConstant("iconOnlyMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.iconOnlyMaximumWidth);
     expect(swiftConstant("compactLengthMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.compactLengthMaximumWidth);
+    // The length is bounded by its share of the column and scales down; it never forces its width.
+    expect(rootView).toContain(".frame(maxWidth: CGFloat(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: horizontal.width)), alignment: .leading)");
+    expect(rootView).not.toMatch(/Text\(length\)[\s\S]{0,200}\.fixedSize\(\)/);
     expect(swiftConstant("compactTextMaximumHeight")).toBe(CALENDAR_BLOCK_LABEL.compactTextMaximumHeight);
     expect(swiftConstant("columnTouchTolerance")).toBe(CALENDAR_BLOCK_LABEL.touchTolerance);
     // The old 4-point minimum and "no title under 24 points" rules are gone.

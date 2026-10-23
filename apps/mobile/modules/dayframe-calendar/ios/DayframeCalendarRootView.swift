@@ -711,27 +711,21 @@ private extension DayframeCalendarBlockView {
   func titleLine(scale: CGFloat) -> some View {
     let textColor = Color(dayframeCSS: entry.textColor)
     let size: CGFloat = (metrics.tiny ? 11 : 12.5) * scale
-    let compact = horizontal.width < DayframeCalendarConstants.compactLengthMaximumWidth
     return HStack(spacing: 4) {
       Text(entry.isReview ? "\(entry.title) · review" : entry.title)
         .font(.system(size: size, weight: .bold))
         .lineLimit(1)
         .truncationMode(.tail)
-      if let length = entry.lengthLabel, !length.isEmpty, compact {
+      if let length = entry.lengthLabel, !length.isEmpty {
+        // Never wider than its share of the column: it scales down to fit whole (Codex r6 on #548).
         Text(length)
           .font(.system(size: size, weight: .semibold))
           .monospacedDigit()
           .lineLimit(1)
           .minimumScaleFactor(0.3)
-          .frame(maxWidth: CGFloat(max(0, (horizontal.width - 12) / 2)), alignment: .leading)
+          .frame(maxWidth: CGFloat(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: horizontal.width)), alignment: .leading)
+          .fixedSize(horizontal: false, vertical: true)
           .layoutPriority(1)
-      } else if let length = entry.lengthLabel, !length.isEmpty {
-        // Measured on-block text stays opaque; the length differs by weight only.
-        Text(length)
-          .font(.system(size: size, weight: .semibold))
-          .monospacedDigit()
-          .lineLimit(1)
-          .fixedSize()
       }
     }
     .foregroundStyle(textColor)

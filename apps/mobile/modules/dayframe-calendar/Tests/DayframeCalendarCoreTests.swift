@@ -1475,4 +1475,15 @@ final class DayframeCalendarCoreTests: XCTestCase {
       }
     }
   }
+
+  func testTheLengthNeverClaimsMoreThanItsShareOfTheColumn() {
+    // A 74-point column (the ×1.3 "23h 59m" case): the length gets at most the 62-point line.
+    XCTAssertEqual(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: 74), 62)
+    // Under 72 points, half the line, so the title keeps the rest.
+    XCTAssertEqual(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: 56), 22)
+    XCTAssertEqual(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: 8), 0)
+    for width in stride(from: 0.0, through: 400, by: 0.5) {
+      XCTAssertLessThanOrEqual(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: width), max(0, width - 12))
+    }
+  }
 }
