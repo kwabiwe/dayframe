@@ -1,4 +1,4 @@
-import { analyzeTimeIntervals } from "@dayframe/shared";
+import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaceSeconds, type GettingAroundSummary, type MotionTravelMode, type TripLeg } from "@dayframe/shared";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { query } from "@/lib/db";
 import { formatSourceLabel } from "@/lib/format";
@@ -83,6 +83,10 @@ export type ReportResult = {
   dailySeries: ReportSeriesPoint[];
   /** Each day's logged seconds per activity (ids as in byCategory), for the blocks card. */
   dailyByActivity: ReportDayActivities[];
+  /** Getting around: time by leg mode inside the range's Getting around and Commute blocks (location v4 step 18). */
+  gettingAround: GettingAroundSummary | null;
+  /** Time at places you haven't named, not in a block; not counted in the totals or goals (location v4 step 18). */
+  notLoggedSeconds: number;
   entries: ReportEntryRow[];
   overlapCandidates: Array<{
     id: string;
@@ -146,9 +150,10 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const filterOptions = await getReportFilterOptions(session);
   const appliedFilters = sanitizeReportFilters(input.filters, filterOptions);
   const statement = buildReportDataQuery(session, input, appliedFilters, capturedNow);
-  const [result, sourcesInRange] = await Promise.all([
+  const [result, sourcesInRange, notLoggedSeconds] = await Promise.all([
     query<ReportDataRow>(statement.text, statement.values),
-    getReportSourcesInRange(session, input.range, capturedNow)
+    getReportSourcesInRange(session, input.range, capturedNow),
+    getNotLoggedSeconds(session, input.range, capturedNow)
   ]);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
@@ -243,6 +248,8 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     bySource: normalizeBreakdown(row.bySource),
     dailySeries,
     dailyByActivity: dailyActivitySeconds(analysisEntries, input.dayBoundaries, capturedNow),
+    gettingAround: await getGettingAround(session, analysisEntries, input.range, capturedNow),
+    notLoggedSeconds,
     entries: arrayValue(row.entries).map((entry) => {
       const entryAnalysis = analysisById.get(entry.id);
       return {
@@ -271,6 +278,74 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     },
     capturedNow
   };
+}
+
+/** Getting around: the range's (filtered) blocks in the Getting around and Commute activities, with their trips' legs. */
+async function getGettingAround(
+  session: RequestSession, entries: ReadonlyArray<{ id: string; categoryId?: string }>, range: { start: string; end: string }, capturedNow: string
+) {
+  const ids = entries.filter((entry) => entry.categoryId && entry.categoryId !== "uncategorized").map((entry) => entry.id);
+  if (!ids.length) return null;
+  const result = await query<{ id: string; startedAt: Date; stoppedAt: Date | null; legs: unknown; travelMode: string | null }>(
+    `select te.id, te.started_at as "startedAt", te.stopped_at as "stoppedAt", cs.metadata -> 'legs' as legs,
+            cs.metadata ->> 'travelMode' as "travelMode"
+       from time_entries te
+       join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id and c.starter_key in ('travel', 'commute')
+       left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
+       left join commute_segments cs on cs.workspace_id = te.workspace_id and cs.user_id = te.user_id and cs.status <> 'superseded'
+        and ae.raw_payload ? 'clientSegmentId' and cs.client_segment_id = ae.raw_payload ->> 'clientSegmentId'
+      where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])`,
+    [session.workspaceId, session.userId, ids]);
+  // One block per entry, however many trips might share its client segment id across devices.
+  const blocks = new Map<string, Parameters<typeof gettingAroundSummary>[0][number]>();
+  for (const row of result.rows) {
+    if (blocks.has(row.id)) continue;
+    blocks.set(row.id, {
+      id: row.id,
+      startedAt: new Date(row.startedAt).toISOString(),
+      stoppedAt: row.stoppedAt ? new Date(row.stoppedAt).toISOString() : null,
+      legs: reportLegs(row.legs),
+      travelMode: (["walking", "running", "cycling", "automotive"] as const).find((mode) => mode === row.travelMode) ?? null
+    });
+  }
+  return gettingAroundSummary([...blocks.values()], range, Date.parse(capturedNow));
+}
+
+// Every mode a stored leg can have (legs part 2 adds rail, Underground, tram and bus).
+const REPORT_LEG_MODES: readonly string[] = ["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram"];
+
+/** A trip's stored legs, field by field: times and mode only. */
+function reportLegs(value: unknown): TripLeg[] | null {
+  if (!Array.isArray(value)) return null;
+  const legs = value.flatMap((raw): TripLeg[] => {
+    const leg = raw as Record<string, unknown> | null;
+    if (!leg || typeof leg.startedAt !== "string" || typeof leg.stoppedAt !== "string" ||
+      typeof leg.mode !== "string" || !REPORT_LEG_MODES.includes(leg.mode)) return [];
+    return [{ startedAt: leg.startedAt, stoppedAt: leg.stoppedAt, mode: leg.mode as TripLeg["mode"], confidence: "likely", distanceMeters: null }];
+  });
+  return legs.length ? legs : null;
+}
+
+/** Time at places you haven't named and haven't logged in the range (never filtered: it is outside the blocks). */
+async function getNotLoggedSeconds(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
+  const lookback = new Date(Date.parse(range.start) - 31 * 24 * 60 * 60_000).toISOString();
+  const [places, entries] = await Promise.all([
+    query<{ startedAt: Date; stoppedAt: Date | null }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt" from stay_segments
+        where workspace_id = $1 and user_id = $2 and status <> 'superseded' and status <> 'ignored'
+          and place_id is null and learned_place_id is null and client_segment_id is not null
+          and started_at >= $5::timestamptz and started_at < $4::timestamptz and coalesce(stopped_at, $6::timestamptz) > $3::timestamptz`,
+      [session.workspaceId, session.userId, range.start, range.end, lookback, capturedNow]),
+    query<{ startedAt: Date; stoppedAt: Date | null }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries
+        where workspace_id = $1 and user_id = $2 and started_at < $4::timestamptz and coalesce(stopped_at, $5::timestamptz) > $3::timestamptz`,
+      [session.workspaceId, session.userId, range.start, range.end, capturedNow])
+  ]);
+  const iso = (value: Date | null) => value ? new Date(value).toISOString() : null;
+  return notLoggedPlaceSeconds(
+    places.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
+    entries.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
+    range, Date.parse(capturedNow));
 }
 
 export async function getReportExportRows(session: RequestSession, input: ReportQueryInput) {
