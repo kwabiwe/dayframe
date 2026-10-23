@@ -337,6 +337,21 @@ describe("HealthKit mapping", () => {
     expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledTimes(5);
   });
 
+  it("runs due maintenance for a foreground capture that joins a background wake's capture",async()=>{
+    const key=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
+    const at=new Date(Date.now()-30*86_400_000).toISOString();
+    captureDb.prepare("insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)").run(key,"sleep","synthetic-joined","fixture",at,at,"{}",at);
+    let release:(value:unknown)=>void=()=>undefined;
+    healthkitMocks.queryCategorySamplesWithAnchor.mockImplementation(()=>new Promise((resolve)=>{release=resolve;}));
+    const background=importHealthKitSleep({background:true,fresh:true,maxPages:1});
+    await vi.waitFor(()=>expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledOnce());
+    const foreground=importHealthKitSleep();
+    release({newAnchor:"joined",samples:[],deletedSamples:[]});
+    await Promise.all([background,foreground]);
+    expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledOnce();
+    expect(captureDb.prepare("select sample_json from health_samples where sample_id='synthetic-joined'").get()?.sample_json).toBeNull();
+  });
+
   it("exports a bounded Health debug snapshot without advancing anchors or leaking routes", async () => {
     asyncStore.set("dayframe.healthkit.sleepAnchor.v1", "sleep-anchor-before");
     asyncStore.set("dayframe.healthkit.workoutAnchor.v1", "workout-anchor-before");

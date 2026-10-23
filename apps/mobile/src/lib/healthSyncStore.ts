@@ -104,6 +104,7 @@ async function database() {
         create index if not exists health_sample_window on health_samples(owner_key,kind,stopped_at);
         create index if not exists health_delivery_pending on health_deliveries(owner_key,state,created_at);
         create table if not exists health_prune_runs (owner_key text primary key, pruned_at text not null);
+        create index if not exists health_query_run_finished on health_query_runs(owner_key,finished_at);
         `);
         if ((version?.user_version ?? 0) < 2) {
           // Re-handoff pre-identity queue records with their original journal
@@ -405,6 +406,7 @@ export async function commitHealthCapturePage(input: {
         input.previousAnchor !== input.newAnchor ? 1 : 0,
         input.complete ? "query_completed" : "partial",
       );
+      await expireHealthQueryRuns(transaction, key);
     });
     return {
       generatedCount: generated,
@@ -599,18 +601,42 @@ export async function recordHealthQueryFailure(input: {
   reason: "query_failed" | "invalid_anchor" | "storage_full";
 }) {
   const db = await database();
+  const key = healthOwnerKey(input.owner);
   await serial(() =>
-    db.runAsync(
-      `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
+    db.withExclusiveTransactionAsync(async (transaction) => {
+      await transaction.runAsync(
+        `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
     additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome) values(?,?,?,?,?,?,0,0,0,0,0,0,?)`,
-      healthOwnerKey(input.owner),
-      input.runId,
-      input.contract.kind,
-      canonicalHealthJson(input.contract),
-      input.startedAt,
-      new Date().toISOString(),
-      input.reason,
-    ),
+        key,
+        input.runId,
+        input.contract.kind,
+        canonicalHealthJson(input.contract),
+        input.startedAt,
+        new Date().toISOString(),
+        input.reason,
+      );
+      await expireHealthQueryRuns(transaction, key);
+    }),
+  );
+}
+
+/**
+ * Query-run diagnostics are written by every capture, background wakes included, which skip the
+ * daily prune. Each write therefore also expires that owner's runs past provenance retention:
+ * one indexed range delete (`health_query_run_finished`), so the history stays bounded however
+ * rarely the app is opened.
+ */
+export const HEALTH_QUERY_RUN_EXPIRY_SQL =
+  "delete from health_query_runs where owner_key=? and finished_at<?";
+async function expireHealthQueryRuns(
+  transaction: Pick<SQLite.SQLiteDatabase, "runAsync">,
+  key: string,
+  now = Date.now(),
+) {
+  await transaction.runAsync(
+    HEALTH_QUERY_RUN_EXPIRY_SQL,
+    key,
+    new Date(now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000).toISOString(),
   );
 }
 

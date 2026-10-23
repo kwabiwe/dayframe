@@ -594,6 +594,46 @@ describe("Health journal prune budget (stability audit health-1)", () => {
     ).toMatchObject({ sample_json: "{}" });
   });
 
+  it("bounds query-run history on every capture write, without the daily prune", async () => {
+    const key = store.healthOwnerKey(owner);
+    const otherKey = store.healthOwnerKey({ ...owner, userId: "other" });
+    const now = Date.now();
+    const insert = db.prepare(
+      "insert into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome) values(?,?,'sleep','{}',?,?,0,0,0,0,0,0,'query_completed')",
+    );
+    // 101 daily background captures, none followed by a foreground prune.
+    for (let day = 0; day <= 100; day++) {
+      const at = new Date(now - day * 86_400_000 - 60_000).toISOString();
+      insert.run(key, `synthetic-run-${day}`, at, at);
+      insert.run(otherKey, `synthetic-other-${day}`, at, at);
+    }
+    const runs = (owner_key: string) =>
+      Number(db.prepare("select count(*) n from health_query_runs where owner_key=?").get(owner_key)!.n);
+    const { contract } = await store.getHealthCheckpoint(owner, "sleep");
+    await store.recordHealthQueryFailure({
+      owner,
+      contract,
+      runId: "synthetic-full",
+      startedAt: new Date(now).toISOString(),
+      reason: "storage_full",
+    });
+    // Days 0-89 survive (day 90 is exactly past retention), plus the new failure row.
+    expect(runs(key)).toBe(91);
+    expect(runs(otherKey)).toBe(101);
+    insert.run(key, "synthetic-stale", new Date(now - 95 * 86_400_000).toISOString(), new Date(now - 95 * 86_400_000).toISOString());
+    await page([]);
+    expect(runs(key)).toBe(92);
+    expect(
+      db.prepare("select count(*) n from health_query_runs where owner_key=? and finished_at<?")
+        .get(key, new Date(now - 90 * 86_400_000).toISOString())!.n,
+    ).toBe(0);
+    expect(
+      JSON.stringify(
+        db.prepare(`explain query plan ${store.HEALTH_QUERY_RUN_EXPIRY_SQL}`).all(key, new Date(now).toISOString()),
+      ),
+    ).toContain("health_query_run_finished");
+  });
+
   it("runs the foreground maintenance prune at most once a day per owner", async () => {
     const now = Date.now();
     expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now)).toBe(true);

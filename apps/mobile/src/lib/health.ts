@@ -356,9 +356,17 @@ async function captureHealthKind(
   if (!owner) throw new Error("Sign in before capturing Apple Health data.");
   const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
   const capture = () => captureHealthKindUnsafe(owner, kind, options);
-  return options.fresh
+  const shared = options.fresh
     ? activeHealthCaptures.runFresh(key, capture, options.signal)
     : activeHealthCaptures.run(key, capture, options.observerChange);
+  if (options.background) return shared;
+  try {
+    return await shared;
+  } finally {
+    // A foreground caller may have joined a background wake's capture, which skips maintenance:
+    // ask for the due prune once the shared capture settles (a no-op read when it already ran).
+    await pruneAcknowledgedHealthCaptureIfDue(owner).catch(() => undefined);
+  }
 }
 
 async function captureHealthKindUnsafe(
