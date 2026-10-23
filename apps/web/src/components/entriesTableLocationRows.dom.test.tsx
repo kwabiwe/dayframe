@@ -159,4 +159,15 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     expect(result.current).toBeNull();
     expect(clientFetch.mock.calls[0][1].signal.aborted).toBe(true);
   });
+  it("opens a correction for a place not in a block and for a leg (location v4 step 13)", async () => {
+    HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
+    HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
+    renderList(timeline);
+    fireEvent.click(await screen.findByRole("button", { name: "Correct Unknown place" }));
+    expect(screen.getByRole("radiogroup", { name: "Where were you?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show the legs of Getting around" }));
+    fireEvent.click(screen.getByRole("button", { name: /Change how you travelled: Underground or train\?/ }));
+    expect(screen.getByRole("group", { name: "How did you travel?" })).toBeTruthy();
+  });
 });
