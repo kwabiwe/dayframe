@@ -2081,10 +2081,24 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   white-space: nowrap;
 }
 
+/* The title truncates; the length always shows. Two lines (3 + 16 + 13 px) fit a 34 px block's
+   32 px inside its border. */
 .calendar-entry-title-line {
+  display: flex;
+  gap: 4px;
   font-size: 12.5px;
   font-weight: 700;
-  line-height: 17px;
+  line-height: 16px;
+}
+
+.calendar-entry-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-entry-length {
+  flex: none;
 }
 
 .calendar-entry-length,
@@ -2095,7 +2109,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
 .calendar-entry-detail-line {
   font-size: 11px;
-  line-height: 14px;
+  line-height: 13px;
 }
 
 .calendar-entry-glyph {
@@ -2164,6 +2178,11 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
     padding: 0;
   }
 
+  /* The icon-only column is the block's own tap target: no hover Play over it. */
+  .calendar-start-again {
+    display: none;
+  }
+
   .calendar-entry-title-line,
   .calendar-entry-detail-line {
     display: none;
@@ -2212,6 +2231,8 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
 .swiss-resize-handle.top {
   top: 0;
+  /* Narrower than the bottom handle so the title (6 px down) stays the block's own target. */
+  height: 6px;
 }
 
 .swiss-resize-handle.top::after {
@@ -2240,6 +2261,11 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 .calendar-time-block.is-tiny .calendar-entry-title-line {
   font-size: 11px;
   line-height: 15px;
+}
+
+/* A block tall enough for direct resize keeps its title clear of the top handle. */
+.calendar-time-block.can-direct-resize .calendar-entry-primary {
+  padding-top: 6px;
 }
 
 /* Room for the hover-only Play only where a pointer can hover and the column is wide; a narrower

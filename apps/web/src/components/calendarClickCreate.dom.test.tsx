@@ -301,8 +301,9 @@ describe("Calendar click-to-create DOM interactions", () => {
     const tiny = document.querySelector<HTMLElement>('[data-entry-id="tiny-entry"]') as HTMLElement;
     const medium = document.querySelector<HTMLElement>('[data-entry-id="medium-entry"]') as HTMLElement;
     const full = document.querySelector<HTMLElement>('[data-entry-id="full-entry"]') as HTMLElement;
-    // A 4-minute block is drawn one 16 px label line tall at 64 px an hour.
-    expect(tiny.dataset.calendarSemanticHeight).toBe("16");
+    // A 4-minute block is drawn one 16 px label line tall at 64 px an hour (17 px with its gap).
+    expect(tiny.dataset.calendarSemanticHeight).toBe("17");
+    expect(tiny.style.height).toBe("16px");
     expect(medium.dataset.calendarSemanticHeight).toBe("32");
     expect(full.dataset.calendarSemanticHeight).toBe("64");
     expect(tiny.className).toContain("is-tiny");

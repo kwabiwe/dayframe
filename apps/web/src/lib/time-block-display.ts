@@ -114,9 +114,12 @@ export function canShowTimeBlockInlineAction({
   );
 }
 
-/** Every block is drawn at least one label line tall (location v4 C6), whatever the zoom. */
+/**
+ * Every block is drawn at least one 16 px label line tall (location v4 C6), whatever the zoom: the
+ * semantic minimum adds the 1 px visual gap the drawn shape gives up.
+ */
 export function minimumTimeBlockHeight() {
-  return CALENDAR_BLOCK_LABEL.webMinimumHeight;
+  return CALENDAR_BLOCK_LABEL.webMinimumHeight + calendarBlockVisualGapPx;
 }
 
 /** What a block shows at its drawn height: always its title line, a detail line from 34 px. */

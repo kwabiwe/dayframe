@@ -112,6 +112,17 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).toMatch(/\.calendar-time-block\.is-tiny \.calendar-entry-title-line \{[^}]*font-size:\s*11px;/s);
     expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*font-size:\s*11px;/s);
     expect(styles).toMatch(/@container calendar-time-block \(max-width: 33\.98px\)[\s\S]*?\.calendar-entry-detail-line \{[^}]*display:\s*none;[\s\S]*?\.calendar-entry-glyph \{[^}]*display:\s*grid;/s);
+    // The title truncates while the length always shows (Codex r1 on #545).
+    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*display:\s*flex;/s);
+    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/s);
+    expect(styles).toMatch(/\.calendar-entry-length \{[^}]*flex:\s*none;/s);
+    // Two lines fit at 34 px: 3 px padding + 16 + 13 inside a 1 px border.
+    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*line-height:\s*16px;/s);
+    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*line-height:\s*13px;/s);
+    // The title sits below the 6 px top resize handle, and Play never covers an icon-only column.
+    expect(styles).toMatch(/\.swiss-resize-handle\.top \{[^}]*height:\s*6px;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.can-direct-resize \.calendar-entry-primary \{[^}]*padding-top:\s*6px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 33\.98px\)[\s\S]*?\.calendar-start-again \{[^}]*display:\s*none;/s);
     // The retired structured metadata line and its 111 px fallback are gone.
     expect(styles).not.toContain("calendar-entry-primary-metadata");
     expect(styles).not.toContain("calendar-entry-tag-count");

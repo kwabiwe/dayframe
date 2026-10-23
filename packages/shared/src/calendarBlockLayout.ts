@@ -58,7 +58,7 @@ export function calendarDrawnExtent(top: number, timeHeight: number, minimumHeig
  * grows while the next block starts above its lowest bottom; inside a cluster each block takes the
  * leftmost column whose last block has ended by its top (greedy interval partitioning). Every block
  * in a cluster is 1 / columns wide; a block that collides with nothing keeps the full width.
- * O(n log n) for the sort plus O(n · columns).
+ * O(n log n): one sort, then two heaps (columns in use by bottom, freed columns by index).
  */
 export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBlock>): CalendarBlockColumn[] {
   const tolerance = CALENDAR_BLOCK_LABEL.touchTolerance;
@@ -75,11 +75,13 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
   const out: CalendarBlockColumn[] = [];
   let cluster: Array<{ id: string; columnIndex: number }> = [];
   let clusterBottom = -Infinity;
-  let columnBottoms: number[] = [];
+  let columnCount = 0;
+  // Columns in use, lowest bottom first, and freed columns, leftmost first.
+  const busy = new MinHeap<{ bottom: number; column: number }>((left, right) => left.bottom - right.bottom || left.column - right.column);
+  const free = new MinHeap<number>((left, right) => left - right);
   const flush = () => {
     if (cluster.length === 0) return;
     const clusterId = cluster.map((member) => member.id).join(":");
-    const columnCount = columnBottoms.length;
     for (const member of cluster) {
       out.push({
         id: member.id,
@@ -92,7 +94,9 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
       });
     }
     cluster = [];
-    columnBottoms = [];
+    columnCount = 0;
+    busy.clear();
+    free.clear();
   };
 
   for (const item of items) {
@@ -100,18 +104,61 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
       flush();
       clusterBottom = item.bottom;
     }
-    let columnIndex = columnBottoms.findIndex((bottom) => bottom <= item.top + tolerance);
-    if (columnIndex < 0) {
-      columnIndex = columnBottoms.length;
-      columnBottoms.push(item.bottom);
-    } else {
-      columnBottoms[columnIndex] = item.bottom;
-    }
+    while (busy.size > 0 && busy.peek()!.bottom <= item.top + tolerance) free.push(busy.pop()!.column);
+    const columnIndex = free.size > 0 ? free.pop()! : columnCount++;
+    busy.push({ bottom: item.bottom, column: columnIndex });
     cluster.push({ id: item.id, columnIndex });
     clusterBottom = Math.max(clusterBottom, item.bottom);
   }
   flush();
   return out;
+}
+
+/** A small binary min-heap for the column sweep. */
+class MinHeap<T> {
+  private readonly items: T[] = [];
+  constructor(private readonly compare: (left: T, right: T) => number) {}
+  get size() {
+    return this.items.length;
+  }
+  peek(): T | undefined {
+    return this.items[0];
+  }
+  clear() {
+    this.items.length = 0;
+  }
+  push(item: T) {
+    const items = this.items;
+    items.push(item);
+    let index = items.length - 1;
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (this.compare(items[index], items[parent]) >= 0) break;
+      [items[index], items[parent]] = [items[parent], items[index]];
+      index = parent;
+    }
+  }
+  pop(): T | undefined {
+    const items = this.items;
+    if (items.length === 0) return undefined;
+    const top = items[0];
+    const last = items.pop()!;
+    if (items.length > 0) {
+      items[0] = last;
+      let index = 0;
+      for (;;) {
+        const left = index * 2 + 1;
+        const right = left + 1;
+        let smallest = index;
+        if (left < items.length && this.compare(items[left], items[smallest]) < 0) smallest = left;
+        if (right < items.length && this.compare(items[right], items[smallest]) < 0) smallest = right;
+        if (smallest === index) break;
+        [items[index], items[smallest]] = [items[smallest], items[index]];
+        index = smallest;
+      }
+    }
+    return top;
+  }
 }
 
 export type CalendarBlockLabelTier = {

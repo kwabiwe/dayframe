@@ -18,7 +18,9 @@ import {
 
 describe("time block display helpers", () => {
   it("draws every block one 16 px label line tall and adds the detail line from 34 px (location v4 C6)", () => {
-    expect(minimumTimeBlockHeight()).toBe(16);
+    // 16 px drawn: the semantic minimum adds the 1 px visual gap.
+    expect(minimumTimeBlockHeight()).toBe(17);
+    expect(calendarBlockVisualGeometry({ top: 0, height: minimumTimeBlockHeight() }).height).toBe(16);
 
     const minimum = getTimeBlockDensity({ durationSeconds: 4 * 60, height: 15 });
     expect(minimum).toMatchObject({ isTiny: true, isShort: true, showSecondary: false, canShowInlineAction: false });

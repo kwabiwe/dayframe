@@ -87,6 +87,14 @@ describe("calendar block columns over drawn extents", () => {
     expect(byId(forward)).toEqual(byId(backward));
   });
 
+  it("stays O(n log n) when every block collides at once", () => {
+    const coincident = Array.from({ length: 4000 }, (_, index) => ({ id: `c${index}`, top: 0, bottom: 20 }));
+    const started = performance.now();
+    const layout = layoutCalendarBlockColumns(coincident);
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(new Set(layout.map((item) => item.columnIndex)).size).toBe(4000);
+  });
+
   it("lays out 60 blocks well inside the layout budget", () => {
     const blocks = Array.from({ length: 60 }, (_, index) => ({ id: `b${index}`, top: index * 13, bottom: index * 13 + 15 + (index % 7) * 9 }));
     const started = performance.now();
