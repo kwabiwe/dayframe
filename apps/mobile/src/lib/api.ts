@@ -1440,8 +1440,8 @@ async function syncQueueItems(
       }
       const message = error instanceof Error ? error.message : "Network request failed";
       const failureKind = isMobileTransportFailure(error) ? "network" : "server";
-      const failedItem = markQueueFailure(item, message, attemptedAt, failureKind);
-      firstError ??= queueFailureReport(failedItem, message, failureKind);
+      const failedItem = keepParked(item, markQueueFailure(item, message, attemptedAt, failureKind));
+      firstError ??= queueFailureReport(failedItem, message, failedItem.failureKind ?? failureKind);
       if (isolated && failureKind === "server") {
         remaining.push(failedItem);
         continue;
@@ -2531,11 +2531,26 @@ const PARKED_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** Parked by the server-error cap (not refused as invalid), and its slow retry is due. */
 function isParkedRetryDue(item: QueuedEvent, now: Date) {
-  if (isQueuedTimerMutationEvent(item) || item.failureKind !== "permanent") return false;
-  if (item.lastStatusCode !== undefined && permanentStatusCodes.has(item.lastStatusCode)) return false;
-  if ((item.serverFailureCount ?? 0) < NON_TIMER_SERVER_FAILURE_CAP) return false;
+  if (!isParkedNonTimerEvent(item)) return false;
   const lastAttempt = new Date(item.lastAttemptedAt ?? "").getTime();
   return Number.isNaN(lastAttempt) || now.getTime() - lastAttempt >= PARKED_RETRY_INTERVAL_MS;
+}
+
+/** Parked by the server-error cap, as opposed to refused as invalid (400/413/422). */
+function isParkedNonTimerEvent(item: QueuedEvent) {
+  return !isQueuedTimerMutationEvent(item) &&
+    item.failureKind === "permanent" &&
+    !(item.lastStatusCode !== undefined && permanentStatusCodes.has(item.lastStatusCode)) &&
+    (item.serverFailureCount ?? 0) >= NON_TIMER_SERVER_FAILURE_CAP;
+}
+
+/**
+ * A parked event's unsuccessful retry (offline, timeout, invalid acknowledgement) keeps it parked: its
+ * Sync help issue stays and its next automatic retry is again six hours on (Codex r1 on #547).
+ */
+function keepParked(item: QueuedEvent, failed: QueuedEvent): QueuedEvent {
+  if (!isParkedNonTimerEvent(item)) return failed;
+  return { ...failed, failureKind: "permanent", nextRetryAt: undefined, lastStatusCode: item.lastStatusCode };
 }
 
 function markNonTimerServerFailure(
@@ -2573,7 +2588,15 @@ function isPermanentlyFailedEvent(item: QueuedEvent) {
   );
 }
 
+/**
+ * A parked Health event stays journal-owned: its `health_deliveries` row settles only on the server's
+ * acknowledgement, so Clear would strand it as queued. The server never refused it as invalid, so it
+ * is offered Try again (and keeps its slow retry) but not Clear (Codex r1 on #547).
+ */
 function isClearableFailedEvent(item: QueuedEvent) {
+  if (isParkedNonTimerEvent(item) && (item.source === "health_sleep" || item.source === "health_workout")) {
+    return false;
+  }
   return isPermanentlyFailedEvent(item);
 }
 

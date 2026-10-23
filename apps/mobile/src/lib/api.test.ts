@@ -2076,6 +2076,81 @@ describe("mobile API client", () => {
     expect(parked).toMatchObject({ failureKind: "permanent", serverFailureCount: 10, lastAttemptedAt: "2026-07-06T20:00:00.000Z" });
   });
 
+  it.each([
+    ["an offline failure", () => Promise.reject(new TypeError("Network request failed"))],
+    ["an invalid acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
+    ["a timeout", () => new Promise<Response>(() => undefined)]
+  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, failure) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([storedQueuedEvent({
+      localId: "parked-slow-retry",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 20 },
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    })]));
+    const fetchMock = vi.fn(failure);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pass = syncQueue({ eventScope: "non_timer" });
+    await vi.advanceTimersByTimeAsync(16_000);
+    await pass;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [parked] = await readQueue();
+    expect(parked).toMatchObject({ failureKind: "permanent", lastStatusCode: 500, serverFailureCount: 9 });
+    expect(getQueueDiagnostics([parked])).toMatchObject({ permanentFailedCount: 1, clearableFailedCount: 1, retryableFailedCount: 0 });
+
+    // Still on the six-hour cadence, not ordinary backoff.
+    vi.setSystemTime(new Date(Date.now() + 61 * 60_000));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ eventId: "event-parked" }, 201)));
+    vi.setSystemTime(new Date(Date.now() + 5 * 60 * 60_000));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(readQueue()).resolves.toEqual([]);
+  });
+
+  it("offers Try again but not Clear for a parked Health event (Codex r1 on #547)", async () => {
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({
+        localId: "healthkit:parked",
+        source: "health_sleep",
+        type: "health_sleep_import",
+        rawPayload: { provider: "healthkit", externalSampleId: "sleep-parked" },
+        failedAt: "2026-07-06T08:00:00.000Z",
+        failureKind: "permanent",
+        failureCount: 9,
+        serverFailureCount: 9,
+        firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+        lastStatusCode: 500,
+        lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+      }),
+      storedQueuedEvent({
+        localId: "health-refused-invalid",
+        source: "health_sleep",
+        type: "health_sleep_import",
+        rawPayload: { provider: "healthkit", externalSampleId: "sleep-invalid" },
+        failedAt: "2026-07-06T08:00:00.000Z",
+        failureKind: "permanent",
+        failureCount: 1,
+        lastStatusCode: 422
+      })
+    ]));
+    expect(getQueueDiagnostics(await readQueue())).toMatchObject({ permanentFailedCount: 2, clearableFailedCount: 1 });
+    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1 });
+    expect((await readQueue()).map((item) => item.localId)).toEqual(["healthkit:parked"]);
+  });
+
   it("keeps timer events strictly ordered and never parks them on server errors", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));
