@@ -116,13 +116,15 @@ describe("Sync help: couldn't be sent", () => {
       "1 item from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes it from this iPhone."
     );
     expect(couldntBeSentDetail({ permanentFailedCount: 2, parkedFailedCount: 2 })).toBe(
-      "2 items from this iPhone kept getting server errors. Dayframe still tries them every few hours, or you can try again now; clearing removes them from this iPhone."
+      "2 items from this iPhone kept getting server errors. Dayframe tries them again now and then while it syncs, or you can try again now; clearing removes them from this iPhone."
     );
     // Mixed: no item is described as one that can't be cleared (Codex nit on #547).
     const mixed = couldntBeSentDetail({ permanentFailedCount: 3, parkedFailedCount: 1 });
     expect(mixed).toBe(
-      "3 items from this iPhone couldn't be sent: 2 items couldn't be saved, and 1 item kept getting server errors (Dayframe still tries it every few hours). Trying again may help; clearing removes all 3 from this iPhone."
+      "3 items from this iPhone couldn't be sent: 2 items couldn't be saved, and 1 item kept getting server errors (Dayframe tries it again now and then while it syncs). Trying again may help; clearing removes all 3 from this iPhone."
     );
     expect(mixed).not.toMatch(/can't be cleared/);
+    // Parked items get no scheduled wake, so the copy promises no cadence.
+    expect(mixed).not.toMatch(/every|hours/);
   });
 });

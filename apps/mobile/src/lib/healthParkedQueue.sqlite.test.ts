@@ -242,6 +242,39 @@ describe("parked Health event and its source journal (real SQLite)", () => {
     expect(deliveryState(handedOff.localId)).toBe("discarded");
   });
 
+  it("never sends a cleared event again after the server committed it but its reply was lost", async () => {
+    const api = await import("./api");
+    await signIn();
+    const sample = sleepSample("sleep-sample", sleepStartedAt(), 1);
+    await capture("anchor-1", [sample]);
+    const [handedOff] = await api.readQueue();
+
+    // The server commits the event, but the reply never reaches the phone.
+    const committed: string[] = [];
+    const lostReply = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      committed.push((JSON.parse(String(init?.body)) as { clientEventId: string }).clientEventId);
+      return Promise.reject(new TypeError("Network request failed"));
+    });
+    vi.stubGlobal("fetch", lostReply);
+    await api.syncQueue({ eventScope: "health" });
+    expect(committed).toEqual([handedOff.localId]);
+    expect((await api.readQueue()).map((item) => item.localId)).toEqual([handedOff.localId]);
+    expect(deliveryState(handedOff.localId)).toBe("queued");
+
+    // Later server errors park it, and the person clears it.
+    parkQueue();
+    await expect(api.clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1 });
+    expect(deliveryState(handedOff.localId)).toBe("discarded");
+
+    // Health reports the same night again, unchanged: nothing is handed off or sent a second time.
+    const fetchMock = acknowledgingFetch();
+    await capture("anchor-2", [sample]);
+    await api.syncQueue({ eventScope: "health" });
+    await expect(api.readQueue()).resolves.toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(deliveryRows().map((row) => row.client_event_id)).toEqual([handedOff.localId]);
+  });
+
   it("sends a new revision when the cleared episode's source facts later change", async () => {
     const api = await import("./api");
     await signIn();

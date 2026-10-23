@@ -118,7 +118,7 @@ export function syncHelpStatus(input: {
  * Sync help › "Couldn't be sent": what is wrong with these items and what each action does. Items the
  * server refused as they are and items parked after repeated server errors are both cleared by Clear
  * (a parked Apple Health event settles its journal delivery first), and Try again sends them all now;
- * parked items are also still retried every few hours on their own.
+ * parked items are also retried now and then on passes that run anyway (no wake is scheduled).
  */
 export function couldntBeSentDetail(input: { permanentFailedCount: number; parkedFailedCount: number }) {
   const total = nonNegativeCount(input.permanentFailedCount);
@@ -129,9 +129,9 @@ export function couldntBeSentDetail(input: { permanentFailedCount: number; parke
     return `${items(total)} from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes ${total === 1 ? "it" : "them"} from this iPhone.`;
   }
   if (refused === 0) {
-    return `${items(total)} from this iPhone kept getting server errors. Dayframe still tries ${total === 1 ? "it" : "them"} every few hours, or you can try again now; clearing removes ${total === 1 ? "it" : "them"} from this iPhone.`;
+    return `${items(total)} from this iPhone kept getting server errors. Dayframe tries ${total === 1 ? "it" : "them"} again now and then while it syncs, or you can try again now; clearing removes ${total === 1 ? "it" : "them"} from this iPhone.`;
   }
-  return `${items(total)} from this iPhone couldn't be sent: ${items(refused)} couldn't be saved, and ${items(parked)} kept getting server errors (Dayframe still tries ${parked === 1 ? "it" : "those"} every few hours). Trying again may help; clearing removes all ${total} from this iPhone.`;
+  return `${items(total)} from this iPhone couldn't be sent: ${items(refused)} couldn't be saved, and ${items(parked)} kept getting server errors (Dayframe tries ${parked === 1 ? "it" : "those"} again now and then while it syncs). Trying again may help; clearing removes all ${total} from this iPhone.`;
 }
 
 /**
