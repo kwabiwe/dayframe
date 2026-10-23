@@ -24,7 +24,9 @@ const server = vi.hoisted(() => ({
   held: [] as Array<() => void>,
   /** A bootstrap for this date is read on arrival and answered only when released. */
   holdBootstrapDate: null as string | null,
-  releaseBootstrap: null as (() => void) | null
+  releaseBootstrap: null as (() => void) | null,
+  /** How the held bootstrap answers once released: normally, with a 500, or by rejecting. */
+  heldBootstrapOutcome: "ok" as "ok" | "500" | "reject"
 }));
 
 vi.mock("@/lib/client-auth-fetch", () => ({
@@ -42,6 +44,8 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       if (server.holdBootstrapDate === date) {
         server.holdBootstrapDate = null;
         await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
+        if (server.heldBootstrapOutcome === "reject") throw new TypeError("Failed to fetch");
+        if (server.heldBootstrapOutcome === "500") return { ok: false, status: 500, json: async () => ({}) };
       }
       return { ok: true, status: 200, json: async () => body };
     }
@@ -66,6 +70,7 @@ beforeEach(() => {
   server.held = [];
   server.holdBootstrapDate = null;
   server.releaseBootstrap = null;
+  server.heldBootstrapOutcome = "ok";
   page = "shell";
   probe.runtime = null;
   probe.shown = [];
@@ -252,6 +257,58 @@ describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
     // Nothing is left loading: the next navigation loads B's period.
     await navigate(view, "2026-08-10");
     expect(shown()).toBe("workspace-B@2026-08-10#r1");
+  });
+
+  it("the page's old-workspace props never undo a switch on a return to their period (P → Q → switch → P)", async () => {
+    page = "page";
+    const view = render(tree());
+    await settle();
+    expect(shown()).toBe("workspace-A@2026-08-17#r1"); // P, from workspace A's page props
+    await navigate(view, "2026-08-10"); // Q
+    expect(shown()).toBe("workspace-A@2026-08-10#r1");
+
+    // The switch is accepted; router.refresh has not delivered B's page props yet.
+    server.workspace = "workspace-B";
+    await act(async () => { await probe.runtime!.refresh({ force: true }); });
+    expect(shown()).toBe("workspace-B@2026-08-10#r1");
+    const switchedAt = probe.shown.length - 1;
+    const before = bootstrapRequests().length;
+
+    await navigate(view, "2026-08-17"); // back to P: the page hydrates its old props (workspace A)
+    await settle();
+    expect(bootstrapRequests().slice(before)).toContain("GET /api/bootstrap?date=2026-08-17");
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
+    expect(probe.runtime!.data?.workspace.id).toBe("workspace-B");
+    expect(probe.shown.slice(switchedAt).filter((value) => value.startsWith("workspace-A"))).toEqual([]);
+
+    // The cache still serves B: another period and back stays in B.
+    await navigate(view, "2026-08-10");
+    await navigate(view, "2026-08-17");
+    await settle();
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
+    expect(probe.shown.slice(switchedAt).filter((value) => value.startsWith("workspace-A"))).toEqual([]);
+  });
+
+  it.each(["500", "reject"] as const)("a period load from the workspace left that fails (%s) after the switch shows no error", async (outcome) => {
+    render(tree());
+    await settle();
+    server.holdBootstrapDate = "2026-08-10";
+    server.heldBootstrapOutcome = outcome;
+    let result: Awaited<ReturnType<NonNullable<typeof probe.runtime>["loadDate"]>> | null = null;
+    const pending = probe.runtime!.loadDate("2026-08-10").then((value) => { result = value; });
+    await settle();
+    expect(server.releaseBootstrap).not.toBeNull();
+
+    server.workspace = "workspace-B";
+    await act(async () => { await probe.runtime!.refresh({ force: true }); });
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
+
+    await act(async () => { server.releaseBootstrap?.(); await pending; });
+    await settle();
+    expect(result).toMatchObject({ ok: false });
+    expect(probe.runtime!.dateLoadError).toBeNull();
+    expect(probe.runtime!.isDateLoading).toBe(false);
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
   });
 
   it("after a workspace switch, the old workspace's cached days are never shown (WEB-UI-6)", async () => {
