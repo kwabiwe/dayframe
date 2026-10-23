@@ -32,7 +32,11 @@ const server = {
   holdNext: null as "patch" | "start" | "bootstrap" | null,
   /** Tags the workspace knows besides the running block's. */
   tags: [] as string[],
-  release: null as (() => void) | null
+  release: null as (() => void) | null,
+  /** The page that sent the requests is gone: new requests fail and held responses are lost. */
+  dead: false,
+  /** A held PATCH, once released, never reaches the server (its request was cancelled). */
+  dropHeld: false
 };
 
 /** Whether a field the PATCH's edit was based on (`expectedDetails`) has changed since. */
@@ -56,6 +60,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/client-auth-fetch", () => ({
   clientFetch: vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
+    if (server.dead) throw new TypeError("Failed to fetch");
+    // As browsers do: a keepalive request over the 64 KiB budget is refused outright.
+    if (init?.keepalive && new TextEncoder().encode(String(init.body ?? "")).length > 65_536) {
+      throw new TypeError("Failed to fetch: keepalive body too large");
+    }
     const reply = (ok: boolean, body: unknown) => ({ ok, status: ok ? 200 : 500, json: async () => body });
     if (url === "/api/timer-state") {
       return reply(true, { activeEntryId: server.entry?.id ?? null, updatedAt: server.entry?.updatedAt ?? null });
@@ -79,7 +88,10 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       server.patchInits.push(init ?? {});
       // Only the running block can be patched (an optimistic id is unknown to the server).
       if (url !== `/api/time-entries/${server.entry?.id}`) return reply(false, { error: "Not found" });
+      const held = server.holdNext === "patch";
       await maybeHold("patch");
+      if (held && server.dropHeld) throw new TypeError("Failed to fetch");
+      if (!server.entry) return reply(false, { error: "Not found" });
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
       if (expectedDetails && detailsChanged(server.entry!, expectedDetails)) {
         return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: server.entry }) };
@@ -107,6 +119,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(true, { timeEntryId: server.entry.id });
     }
     if (method === "POST" && url === "/api/events") {
+      if (server.dead) throw new TypeError("Failed to fetch");
       const body = JSON.parse(String(init?.body)) as { type?: string; rawPayload?: { targetEntryId?: string } };
       const target = body.rawPayload?.targetEntryId ?? "";
       server.stops.push(target);
@@ -139,6 +152,9 @@ beforeEach(() => {
   server.rejectStart = false;
   server.tags = [];
   server.rejectPatches = false;
+  server.dead = false;
+  server.dropHeld = false;
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -784,6 +800,8 @@ describe("Stop never starts a new block (production incident, 13 Oct 2026)", () 
 
 describe("Stop and leaving the page never lose a typed description (stability audit WEB-UI-10, WEB-UI-2)", () => {
   const keepalive = () => server.patchInits.map((init) => init.keepalive === true);
+  const stored = () => window.localStorage.getItem("dayframe:pending-timer-details");
+  const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
 
   it("Stop clicked while the autosave PATCH is in flight stops the block with every typed word", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
@@ -794,9 +812,12 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
     // Typed after the autosave left, and then Stop at once (inside the next debounce).
     await user.keyboard(" later");
-    const stop = screen.getByRole("button", { name: "Stop recording" }) as HTMLButtonElement;
-    expect(stop.disabled).toBe(false);
-    await user.click(stop);
+    expect(stopButton().disabled).toBe(false);
+    await user.click(stopButton());
+    // The press is acknowledged while it waits: same slot, busy and named so.
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    expect(stopButton().getAttribute("aria-label")).toBe("Stopping…");
+    expect(stopButton().className).toContain("is-pending");
     await act(async () => { server.release?.(); });
     await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
     expect(descriptions()).toEqual(["Fix bug more", "Fix bug more later"]);
@@ -828,6 +849,61 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.patches).toHaveLength(1);
   });
 
+  it("behind an autosave that never returns, Stop goes ahead after its deadline and carries the text itself", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    // Pressing again while it waits joins the same Stop.
+    await user.click(stopButton());
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // Sent against the copy the hung save started from, with every edit since.
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug" } });
+    expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
+    await screen.findByRole("button", { name: "Start a block" });
+    // The hung save finally fails: the stopped block does not come back and nothing is shown for it.
+    await act(async () => { server.release?.(); });
+    await wait(800);
+    expect(screen.queryByRole("button", { name: /^(Stop recording|Stopping…)$/ })).toBeNull();
+    expect(screen.queryByText(/were not saved/)).toBeNull();
+    expect(server.stops).toEqual(["active"]);
+    expect(server.posts).toEqual([]);
+  });
+
+  it("a Stop queued behind an autosave that was refused (409) says the block kept the other change", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    await user.click(stopButton());
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(server.completed).toMatchObject({ description: "Changed elsewhere" });
+    await screen.findByText("Stopped. This block was changed in another window or device, so it kept those details.");
+  });
+
+  it("a Stop queued behind an autosave that failed says its latest details were not saved", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.rejectPatches = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.click(stopButton());
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    await screen.findByText("Stopped. Its latest details could not be saved, so it kept its previous details.");
+  });
+
   it("pagehide inside the autosave debounce sends the edit at once with keepalive", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
@@ -838,10 +914,12 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" } }]);
     expect(keepalive()).toEqual([true]);
     await wait(1_000);
-    // The debounce does not send it a second time (that copy would be refused as stale).
+    // The debounce does not send it a second time (that copy would be refused as stale), and the
+    // kept copy is cleared once the save is acknowledged.
     expect(server.patches).toHaveLength(1);
     expect(server.entry?.description).toBe("Fix bug more");
     expect(input.value).toBe("Fix bug more");
+    expect(stored()).toBeNull();
   });
 
   it("the tab going hidden inside the debounce sends the edit with keepalive", async () => {
@@ -861,8 +939,18 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.patches).toHaveLength(1);
   });
 
-  it("pagehide while an autosave is in flight also sends the newer edit, based on the one in flight", async () => {
-    const { input } = await renderShell(entry({ description: "Fix bug" }));
+  /** The tab closes: nothing more leaves it; the next load is a fresh shell on the server's copy. */
+  async function reopen(unmount: () => void) {
+    server.dead = true;
+    act(() => unmount());
+    await wait(800);
+    server.dead = false;
+    cleanup();
+    return renderShell(server.entry);
+  }
+
+  it("pagehide while an autosave is in flight sends no successor; the next load restores and saves the newer text", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
     await user.click(input);
     server.holdNext = "patch";
@@ -870,8 +958,70 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
     await user.keyboard(" later");
     act(() => { window.dispatchEvent(new Event("pagehide")); });
-    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
-    expect(keepalive()).toEqual([true, true]);
+    // No PATCH checked against the save still in flight (it could be refused before that one lands).
+    expect(server.sent).toHaveLength(1);
+    expect(stored()).not.toBeNull();
+    // The earlier save lands after the page has gone.
+    await act(async () => { server.release?.(); });
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more later"));
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(server.sent.at(-1)).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
+    expect(stored()).toBeNull();
+  });
+
+  it("the restored text is also saved when the save in flight never reached the server", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await act(async () => { server.release?.(); });
+    expect(server.entry?.description).toBe("Fix bug");
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more later"));
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(stored()).toBeNull();
+  });
+
+  it("kept text overtaken by a change made elsewhere is dropped, never written over it", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await act(async () => { server.release?.(); });
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Changed elsewhere"));
+    await wait(1_000);
+    expect(server.entry?.description).toBe("Changed elsewhere");
+    expect(stored()).toBeNull();
+  });
+
+  it("a description over the keepalive budget autosaves as an ordinary request", async () => {
+    const long = "x".repeat(33_000);
+    const { input } = await renderShell(entry({ description: long }));
+    fireEvent.change(input, { target: { value: `${long}y` } });
+    await waitFor(() => expect(server.entry?.description).toBe(`${long}y`), { timeout: 2_000 });
+    expect(keepalive()).toEqual([false]);
+    expect(input.value).toBe(`${long}y`);
+  });
+
+  it("a close-time flush over the keepalive budget is sent without keepalive and the text is kept for the next load", async () => {
+    const long = "x".repeat(33_000);
+    const { input } = await renderShell(entry({ description: long }));
+    fireEvent.change(input, { target: { value: `${long}y` } });
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(keepalive()).toEqual([false]);
+    expect(JSON.parse(stored()!)).toMatchObject({ entryId: "active", draft: { description: `${long}y` } });
   });
 });
 

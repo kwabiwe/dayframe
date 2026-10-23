@@ -71,6 +71,7 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
     createManualEntry,
     deleteActiveTimer,
     isManualEntryOpen,
+    isStopPending,
     isTimerBusy,
     openManualEntry,
     readShellData,
@@ -837,11 +838,15 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
             default click action runs, so a submit type would start a new block straight after
             every Stop (production since 1 Sep, fixed 13 Oct). Start submits the form explicitly.
             Never disabled: a Stop during an autosave or a Start waits for it in the runtime's
-            gate and then stops the block with every typed edit (stability audit WEB-UI-10). */}
+            gate (a few seconds at most behind a save) and then stops the block with every typed
+            edit (stability audit WEB-UI-10). While it waits the button says so: "Stopping…",
+            aria-busy and a dimmed square, in the same slot (Codex r1 on #539). */}
         <button
-          className={`df-cmd-go${active ? " is-stop" : ""}`}
+          className={`df-cmd-go${active ? " is-stop" : ""}${active && isStopPending ? " is-pending" : ""}`}
           type="button"
-          aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
+          aria-busy={(Boolean(active) && isStopPending) || undefined}
+          aria-label={active ? (isStopPending ? "Stopping…" : "Stop recording") : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
+          title={active && isStopPending ? "Stopping…" : undefined}
           onClick={(event) => {
             if (active) {
               void stopTimer();

@@ -7609,6 +7609,22 @@ button.df-cmd-clock:hover {
   padding: 0;
 }
 
+/* A Stop waiting for a save in flight (Codex r1 on #539): the square dims in place, opacity only,
+   so the fixed Play/Stop slot never moves; at once under Reduce Motion. */
+.df-cmd-go.is-stop svg {
+  transition: opacity 120ms ease-out;
+}
+
+.df-cmd-go.is-stop.is-pending svg {
+  opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-cmd-go.is-stop svg {
+    transition: none;
+  }
+}
+
 .df-cmd-secondary {
   position: relative;
   grid-area: secondary;
