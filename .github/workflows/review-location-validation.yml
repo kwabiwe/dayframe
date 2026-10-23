@@ -156,6 +156,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
+          DAYFRAME_VALIDATION_SCHEMA: ${{ matrix.schema }}
         run: npm run test -w @dayframe/web -- src/app/api/events/offline-replay.postgres.integration.test.ts
       - name: Home and Work place roles
         if: ${{ !cancelled() }}
