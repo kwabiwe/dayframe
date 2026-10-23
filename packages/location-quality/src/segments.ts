@@ -8,6 +8,7 @@ import type {
   StaySegment
 } from "@dayframe/shared";
 import { isIsoInstant } from "./answerKey";
+import { HarnessError } from "./errors";
 
 /**
  * The scored view of an engine segment: kinds, times, anonymous place labels ("P4") and journey
@@ -94,9 +95,9 @@ const SEGMENT_NULLABLE_NUMBER_FIELDS = ["routeM", "lineM", "routeSamples", "maxG
  * the file.
  */
 export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
-  if (!Array.isArray(value)) throw new Error("A saved run must be a JSON array of segments.");
+  if (!Array.isArray(value)) throw new HarnessError("A saved run must be a JSON array of segments.");
   return value.map((raw, index) => {
-    const fail = (field: string) => new Error(`Saved run segment ${index} has an invalid ${field}.`);
+    const fail = (field: string) => new HarnessError(`Saved run segment ${index} has an invalid ${field}.`);
     if (!raw || typeof raw !== "object") throw fail("shape");
     const item = raw as Record<string, unknown>;
     if (item.kind !== "stay" && item.kind !== "commute") throw fail("kind");

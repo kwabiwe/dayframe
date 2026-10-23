@@ -4,6 +4,7 @@
  * activity is a leg (consecutive legs of one mode merge). Visit coordinates and place IDs are never read
  * beyond telling Home from other places.
  */
+import { HarnessError } from "./errors";
 
 export type FineMode = "walk" | "cycle" | "car" | "bus" | "rail" | "underground" | "flight" | "unknown";
 
@@ -88,7 +89,7 @@ export function isIsoInstant(value: unknown): value is string {
 /** Epoch seconds of a strict ISO instant; a bad value is reported without quoting it. */
 export const toSeconds = (iso: unknown, what = "the answer key"): number => {
   const ms = isIsoInstant(iso) ? Date.parse(iso) : Number.NaN;
-  if (!Number.isFinite(ms)) throw new Error(`Invalid timestamp in ${what}.`);
+  if (!Number.isFinite(ms)) throw new HarnessError(`Invalid timestamp in ${what}.`);
   return ms / 1000;
 };
 

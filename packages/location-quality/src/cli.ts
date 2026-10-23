@@ -8,6 +8,7 @@ import { renderReport, summary } from "./report";
 import { loadEngine, replay, sharedEngine } from "./replay";
 import { scoreRun } from "./score";
 import { sanitizeQualitySegments, type QualitySegment } from "./segments";
+import { HarnessError } from "./errors";
 
 const USAGE = `Location quality harness (location v4 §13). Private inputs and outputs must live outside the repository.
 
@@ -34,7 +35,7 @@ export const callerPath = (file: string) => path.resolve(process.env.INIT_CWD ??
  * link), so an output not written yet resolves through its nearest existing parent.
  */
 export function realPathOf(absolute: string, depth = 0): string {
-  if (depth > 40) throw new Error("Too many symbolic links in a private path.");
+  if (depth > 40) throw new HarnessError("Too many symbolic links in a private path.");
   const parts = absolute.split(path.sep).filter((part) => part !== "" && part !== ".");
   let current = path.parse(absolute).root || path.sep;
   for (let index = 0; index < parts.length; index += 1) {
@@ -51,14 +52,16 @@ export function realPathOf(absolute: string, depth = 0): string {
       // Nothing below a missing folder can be a link, but a ".." after it would climb back to
       // where one could be: refuse rather than guess.
       const rest = parts.slice(index);
-      if (rest.includes("..")) throw new Error("A private path may not use \"..\" after a folder that does not exist.");
+      if (rest.includes("..")) throw new HarnessError("A private path may not use \"..\" after a folder that does not exist.");
       return path.join(current, ...rest);
     }
     if (stat.isSymbolicLink()) {
       const target = fs.readlinkSync(next);
       current = realPathOf(path.isAbsolute(target) ? target : `${current}${path.sep}${target}`, depth + 1);
     } else {
-      current = next;
+      // The name as the file system stores it, so a differently cased path to the same folder on a
+      // case-insensitive volume compares equal.
+      current = fs.realpathSync.native(next);
     }
   }
   return current;
@@ -69,24 +72,56 @@ export function realPathOf(absolute: string, depth = 0): string {
  * accident. The check is by path component on where the path really leads, and the caller reads or
  * writes that resolved path, so what is checked is what is used.
  */
-export function assertOutsideRepository(file: string, root = REPOSITORY_ROOT): string {
+export function assertOutsideRepository(file: string, role = "private file", root = REPOSITORY_ROOT): string {
   const absolute = path.isAbsolute(file) ? file : `${process.env.INIT_CWD ?? process.cwd()}${path.sep}${file}`;
   const real = realPathOf(absolute);
-  const relative = path.relative(realPathOf(path.resolve(root)), real);
+  const repository = realPathOf(path.resolve(root));
+  // Case-insensitive volumes (macOS, Windows) compare without case as well.
+  const fold = (value: string) => (process.platform === "darwin" || process.platform === "win32" ? value.toLowerCase() : value);
+  const relative = path.relative(fold(repository), fold(real));
   const inside = relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-  if (inside) throw new Error(`Refusing ${callerPath(file)}: private location inputs and outputs must live outside the repository.`);
+  // Messages name the role, never the path: a private file's name can itself be private.
+  if (inside) throw new HarnessError(`Refusing the ${role}: private location inputs and outputs must live outside the repository.`);
   return real;
 }
 
+/** Reads a private file; a failure names its role, never its path or contents. */
+export function readPrivateText(file: string, role: string): string {
+  const real = assertOutsideRepository(file, role);
+  try {
+    return fs.readFileSync(real, "utf8");
+  } catch {
+    throw new HarnessError(`Could not read the ${role}.`);
+  }
+}
+
+function writePrivateText(file: string, role: string, text: string) {
+  const real = assertOutsideRepository(file, role);
+  try {
+    fs.writeFileSync(real, text);
+  } catch {
+    throw new HarnessError(`Could not write the ${role}.`);
+  }
+}
+
 /** Reads private JSON; a parse failure never quotes the file. */
-export function readPrivateJson(file: string, what: string): unknown {
-  const text = fs.readFileSync(assertOutsideRepository(file), "utf8");
+export function readPrivateJson(file: string, role: string): unknown {
+  const text = readPrivateText(file, role);
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Could not read ${what}: it is not valid JSON.`);
+    throw new HarnessError(`Could not read the ${role}: it is not valid JSON.`);
   }
 }
+
+const ROLES = {
+  "answer-key": "answer key",
+  rows: "evidence rows",
+  places: "place rows",
+  segments: "saved run",
+  "save-segments": "saved run output",
+  "summary-json": "summary output"
+} as const;
 
 async function main() {
   const { values } = parseArgs({
@@ -122,26 +157,26 @@ async function main() {
   const timeZone = values["time-zone"]!;
   const from = toSeconds(values.from, "--from");
   const to = toSeconds(values.to, "--to");
-  if (!(to > from)) throw new Error("--to must be after --from.");
+  if (!(to > from)) throw new HarnessError("--to must be after --from.");
   // Check every private path before reading or writing any of them.
-  for (const name of ["answer-key", "rows", "places", "segments", "save-segments", "summary-json"] as const) {
-    if (values[name]) assertOutsideRepository(values[name]);
+  for (const name of Object.keys(ROLES) as Array<keyof typeof ROLES>) {
+    if (values[name]) assertOutsideRepository(values[name], `${ROLES[name]} (--${name})`);
   }
 
   let segments: QualitySegment[];
   let homePlace = values["home-place"] ?? null;
   if (values.segments) {
-    segments = sanitizeQualitySegments(readPrivateJson(values.segments, "the saved run"));
+    segments = sanitizeQualitySegments(readPrivateJson(values.segments, ROLES.segments));
   } else {
     const engine = values.engine ? await loadEngine(callerPath(values.engine)) : sharedEngine;
     const originLatitude = Number(values["origin-latitude"]);
-    if (!Number.isFinite(originLatitude) || Math.abs(originLatitude) >= 90) throw new Error("--origin-latitude must be a latitude in degrees.");
+    if (!Number.isFinite(originLatitude) || Math.abs(originLatitude) >= 90) throw new HarnessError("--origin-latitude must be a latitude in degrees.");
     const projection = projectionAround(originLatitude);
     const dropped = new Set((values["drop-places"] ?? "").split(",").filter(Boolean));
-    const places = parsePlaceRows(fs.readFileSync(assertOutsideRepository(values.places!), "utf8"), projection)
+    const places = parsePlaceRows(readPrivateText(values.places!, ROLES.places), projection)
       .filter((place) => !dropped.has(place.label));
     homePlace ??= places.find((place) => place.role === "home")?.label ?? null;
-    const evidence = parseEvidenceRows(fs.readFileSync(assertOutsideRepository(values.rows!), "utf8"), projection, {
+    const evidence = parseEvidenceRows(readPrivateText(values.rows!, ROLES.rows), projection, {
       algorithmVersion: engine.config.algorithmVersion,
       dropMotion: values["drop-motion"],
       receivedUntil: values["received-until"] ? Date.parse(values["received-until"]) : undefined
@@ -150,21 +185,23 @@ async function main() {
     segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to));
   }
   if (values["save-segments"]) {
-    fs.writeFileSync(assertOutsideRepository(values["save-segments"]), `${JSON.stringify(segments, null, 1)}\n`);
+    writePrivateText(values["save-segments"], ROLES["save-segments"], `${JSON.stringify(segments, null, 1)}\n`);
   }
 
-  const entries = readPrivateJson(values["answer-key"], "the answer key");
-  if (!Array.isArray(entries)) throw new Error("The answer key must be a Timeline.json array.");
+  const entries = readPrivateJson(values["answer-key"], ROLES["answer-key"]);
+  if (!Array.isArray(entries)) throw new HarnessError("The answer key must be a Timeline.json array.");
   const report = scoreRun(readAnswerKey(entries as TimelineEntry[], from, to), segments, { from, to, homePlace, timeZone });
   process.stdout.write(renderReport(report, timeZone, { detail: values.detail }));
   if (values["summary-json"]) {
-    fs.writeFileSync(assertOutsideRepository(values["summary-json"]), `${JSON.stringify(summary(report), null, 2)}\n`);
+    writePrivateText(values["summary-json"], ROLES["summary-json"], `${JSON.stringify(summary(report), null, 2)}\n`);
   }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
+    // Only the harness's own messages are printed; anything else (a file system or engine error
+    // could name a private path or quote input) is reported by its kind.
+    console.error(error instanceof HarnessError ? error.message : `The harness stopped on an unexpected ${error instanceof Error ? error.name : "error"}.`);
     process.exit(1);
   });
 }

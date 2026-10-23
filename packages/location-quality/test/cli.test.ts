@@ -21,6 +21,11 @@ describe("privacy guard", () => {
     expect(assertOutsideRepository(path.join(path.dirname(REPOSITORY_ROOT), "private", "Timeline.json"))).toContain("private");
   });
 
+  it.runIf(process.platform === "darwin")("refuses a differently cased path into the repository on a case-insensitive volume", () => {
+    expect(() => assertOutsideRepository(path.join(REPOSITORY_ROOT.toUpperCase(), "private.json"))).toThrow(/outside the repository/);
+    expect(() => assertOutsideRepository(path.join(REPOSITORY_ROOT, "x.json"), "answer key")).toThrow(/^Refusing the answer key: /);
+  });
+
   it("follows symlinks, for inputs and for outputs not written yet", () => {
     const link = path.join(scratch, "into-repo");
     fs.symlinkSync(REPOSITORY_ROOT, link);
@@ -64,7 +69,9 @@ describe("saved runs", () => {
   it("report a file that is not JSON, or a bad timestamp, without quoting it", () => {
     const file = path.join(scratch, "broken.json");
     fs.writeFileSync(file, '[{"kind": "stay", "near": "Somewhere Street 12", 51.12345');
-    expect(() => readPrivateJson(file, "the saved run")).toThrow(/^Could not read the saved run: it is not valid JSON\.$/);
+    expect(() => readPrivateJson(file, "saved run")).toThrow(/^Could not read the saved run: it is not valid JSON\.$/);
+    // A missing file is named by its role, never its path.
+    expect(() => readPrivateJson(path.join(scratch, "Somewhere Street 12.json"), "answer key")).toThrow(/^Could not read the answer key\.$/);
     const stamped = [{ ...exampletonSegments[0], startedAt: "Mon, 02 Mar 2026 06:00:00 GMT (Somewhere Street)" }];
     expect(() => sanitizeQualitySegments(stamped)).toThrow(/^Saved run segment 0 has an invalid startedAt\.$/);
     expect(() => readAnswerKey([{ startTime: "Somewhere Street 12", endTime: "2026-03-02T07:00:00Z" }], 0, Infinity))
