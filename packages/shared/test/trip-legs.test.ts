@@ -129,6 +129,14 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
     expect(run(broad)).not.toContain("underground");
   });
 
+  it("lets even one or two readings too broad to accept break a silence, from replay's stored times (Codex r4 on #563)", () => {
+    const fixes = [reading(101, 0, 12), reading(101.5, 400, 13), reading(107.5, 5_900, 13), reading(108, 6_300, 12)];
+    const derive = (broadReadingTimes: number[]) => deriveTripLegs({ startMs: ms(101), endMs: ms(108), timeline: null, readings: fixes,
+      speedOf: credibleSpeedResolver(fixes, config), config: { ...config, tripStationsEnabled: false }, broadReadingTimes }).map((leg) => leg.mode);
+    expect(derive([])).toContain("underground");
+    expect(derive([ms(103), ms(106)])).not.toContain("underground");
+  });
+
   it("never takes a speed from a simulated copy of a reading", () => {
     const genuine = [reading(1, 0, null), reading(3, 150, null), reading(5, 300, null)];
     const simulated = genuine.map((item) => ({ ...item, evidence: { ...item.evidence, clientEvidenceId: `${item.evidence.clientEvidenceId}-sim`,

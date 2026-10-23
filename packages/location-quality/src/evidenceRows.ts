@@ -61,6 +61,24 @@ export type EvidenceRowOptions = {
   receivedUntil?: number;
 };
 
+/**
+ * When genuine readings were taken that the server kept as rejected for being too broad but better than
+ * cell-only (`minimumAccuracyMeters` < accuracy < `maximumAccuracyMeters`), in epoch ms: times only, as
+ * replay reads them (location v4 step 7). The export drops their positions, as ingest does.
+ */
+export function parseBroadReadingTimes(text: string, options: EvidenceRowOptions & { minimumAccuracyMeters: number; maximumAccuracyMeters: number }) {
+  const out: number[] = [];
+  for (const line of lines(text)) {
+    const [, kind, occurredAt, , receivedAt, , , accuracy, , , , simulated, , , , , , , , accepted] = line.split("|");
+    if (accepted === "true" || simulated === "true" || (kind !== "standard_location" && kind !== "significant_change")) continue;
+    if (!isIsoInstant(occurredAt) || !isIsoInstant(receivedAt)) continue;
+    if (options.receivedUntil !== undefined && Date.parse(receivedAt) > options.receivedUntil) continue;
+    const meters = numberOrNull(accuracy);
+    if (meters != null && meters > options.minimumAccuracyMeters && meters < options.maximumAccuracyMeters) out.push(Date.parse(occurredAt));
+  }
+  return out.sort((a, b) => a - b);
+}
+
 export function parseEvidenceRows(text: string, projection: Projection, options: EvidenceRowOptions): LocationEvidence[] {
   const out: LocationEvidence[] = [];
   for (const [index, line] of lines(text).entries()) {
