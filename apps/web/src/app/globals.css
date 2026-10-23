@@ -13926,6 +13926,58 @@ dialog.ui-dialog.df-palette {
   cursor: pointer;
 }
 
+/* Things to check (location v4 step 14): the day's "N to check" chip, and a "?" question under its row. */
+.timeline-checks-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+}
+
+.timeline-checks-chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  color: var(--warning-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timeline-check-row > td {
+  padding: 0 12px 12px 60px;
+}
+
+.timeline-check-question {
+  display: grid;
+  gap: 6px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--warning) 10%, var(--surface));
+}
+
+.timeline-check-question small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.timeline-check-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.timeline-check-toggle[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  color: var(--warning-text);
+}
+
 /* Correcting the location timeline (location v4 step 13): the dialog's sections. */
 .location-correction {
   display: grid;

@@ -570,6 +570,7 @@ export function TimeReviewViews({
             groupByDay
             locationTimeline={locationTimeline}
             places={correctionPlaces}
+            reviewItems={data.reviewItems}
             onChanged={refreshData}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
