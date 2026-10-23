@@ -1,5 +1,5 @@
 import * as SQLite from "expo-sqlite";
-import type { enqueueEvent } from "./api";
+import type { enqueueEvent, enqueueEvents } from "./api";
 import { healthFingerprint, canonicalHealthJson } from "./healthFingerprint";
 
 export type HealthCaptureOwner = {
@@ -501,7 +501,7 @@ async function healthSourceRevision(
 
 export async function handoffHealthEvents(
   owner: HealthCaptureOwner,
-  enqueue: typeof enqueueEvent,
+  enqueue: typeof enqueueEvents,
   isCurrent: () => boolean | Promise<boolean>,
 ) {
   const key = healthOwnerKey(owner);
@@ -514,25 +514,36 @@ export async function handoffHealthEvents(
         "select * from health_deliveries where owner_key=? and state='pending_handoff' order by created_at,client_event_id limit 250",
         key,
       );
-      let queuedCount = 0;
+      if (rows.length === 0 || !(await isCurrent())) return { queuedCount: 0 };
+      // One queue write for the whole page (stability audit 22 Oct 2026, iphone-timer-sync-8). A row
+      // without its payload stops the page there, as the per-row loop did; the rows before it go.
+      let payloadError: Error | null = null;
+      const events: Parameters<typeof enqueueEvent>[0][] = [];
       for (const row of rows) {
-        if (!(await isCurrent())) break;
-        if (!row.payload_json)
-          throw new Error(
+        if (!row.payload_json) {
+          payloadError = new Error(
             "Unacknowledged Health payload is unavailable; source repair is required.",
           );
+          break;
+        }
         const payload = JSON.parse(row.payload_json) as Parameters<
           typeof enqueueEvent
         >[0];
         // Explicit owner + deterministic ID make the separate outbox boundary restartable.
-        await enqueue({
+        events.push({
           ...payload,
           localId: row.client_event_id,
           occurredAt: new Date(String(payload.occurredAt)),
           owner: { workspaceId: owner.workspaceId, userId: owner.userId },
           healthOwner: owner,
         });
-        if (!(await isCurrent())) break;
+      }
+      const { acceptedCount, error } = events.length
+        ? await enqueue(events)
+        : { acceptedCount: 0, error: undefined };
+      let queuedCount = 0;
+      if (acceptedCount > 0 && !(await isCurrent())) return { queuedCount };
+      for (const row of rows.slice(0, acceptedCount)) {
         await serial(() =>
           db.runAsync(
             "update health_deliveries set state='queued',handed_off_at=? where owner_key=? and client_event_id=? and state='pending_handoff'",
@@ -543,6 +554,8 @@ export async function handoffHealthEvents(
         );
         queuedCount++;
       }
+      if (error !== undefined) throw error;
+      if (payloadError) throw payloadError;
       return { queuedCount };
     });
   handoffTails.set(key, result);

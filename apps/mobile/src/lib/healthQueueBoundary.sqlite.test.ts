@@ -134,7 +134,7 @@ describe("Health journal and activity queue boundary (real SQLite)", () => {
     const { store, api } = await signedInWithCapture();
     // Interrupted handoff: the event reaches the queue, the journal still reads pending_handoff.
     let checks = 0;
-    await store.handoffHealthEvents(owner, api.enqueueEvent, () => ++checks < 2);
+    await store.handoffHealthEvents(owner, api.enqueueEvents, () => ++checks < 2);
     const [queued] = await api.readQueue();
     expect(deliveryState()).toBe("pending_handoff");
     // The server permanently refuses it.
@@ -148,11 +148,11 @@ describe("Health journal and activity queue boundary (real SQLite)", () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let reading!: () => void;
     const read = new Promise<void>((resolve) => { reading = resolve; });
-    const handoff = store.handoffHealthEvents(owner, (async (input: Parameters<typeof api.enqueueEvent>[0]) => {
+    const handoff = store.handoffHealthEvents(owner, (async (inputs: Parameters<typeof api.enqueueEvents>[0]) => {
       reading();
       await gate;
-      return api.enqueueEvent(input);
-    }) as typeof api.enqueueEvent, () => true);
+      return api.enqueueEvents(inputs);
+    }) as typeof api.enqueueEvents, () => true);
     await read;
     await expect(api.clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1 });
     expect(deliveryState()).toBe("discarded");
@@ -167,7 +167,7 @@ describe("Health journal and activity queue boundary (real SQLite)", () => {
 
   it("drops a queued Health event whose journal delivery is settled or gone, without sending it", async () => {
     const { store, api } = await signedInWithCapture();
-    await store.handoffHealthEvents(owner, api.enqueueEvent, () => true);
+    await store.handoffHealthEvents(owner, api.enqueueEvents, () => true);
     const [queued] = await api.readQueue();
     // Its journal row is gone (an older build's Clear, then that account's expiry).
     db.exec("delete from health_deliveries");

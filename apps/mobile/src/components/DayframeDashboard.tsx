@@ -118,6 +118,7 @@ import {
   isQueuedTimerMutationEvent,
   login,
   readQueue,
+  pruneTimerEntryIdCorrelations,
   readTimerEntryIdCorrelations,
   resolveTimerEntryIdAfterQueueBarrier,
   requestPasswordReset,
@@ -321,6 +322,8 @@ function DashboardBrandLockup({
   );
 }
 const RECENT_LAST_STOP_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Correlation pruning reads every durable store, so a refresh does it at most this often. */
+const TIMER_ID_CORRELATION_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 /**
  * The tab that shows a running block's live seconds from the Dashboard's clock: Reports' running totals.
  * Today's live block keeps its own clock (`useLiveBlockElapsed`), so Today in front needs none.
@@ -444,6 +447,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const liveActivityReconciliationDeferred = useRef(false);
   const optimisticTimerIds = useRef(new Map<string, string>());
   const timerIdCorrelationsLoaded = useRef(false);
+  const lastTimerIdCorrelationPruneAt = useRef(0);
   const optimisticTimerSequence = useRef(0);
   const optimisticTimerStartReconciler = useRef(createOptimisticTimerStartReconciler());
   const supersededStopRollbackTracker = useRef(createSupersededStopRollbackTracker());
@@ -729,6 +733,42 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     timerIdCorrelationsLoaded.current = true;
   }
 
+  /**
+   * Bounds the correlation store and this screen's copy of it (stability audit 22 Oct 2026,
+   * iphone-timer-sync-7). Optimistic IDs still on screen, in an open editor or in a pending deletion
+   * are kept.
+   */
+  async function pruneTimerIdCorrelationsAfterLoad(bootstrap: MobileBootstrap) {
+    const nowMs = Date.now();
+    if (nowMs - lastTimerIdCorrelationPruneAt.current < TIMER_ID_CORRELATION_PRUNE_INTERVAL_MS) return;
+    lastTimerIdCorrelationPruneAt.current = nowMs;
+    const owner = timerStopOwner(bootstrap);
+    const onScreen = new Set<string>();
+    for (const data of [bootstrap, latestData.current]) {
+      if (!data) continue;
+      for (const entry of [
+        data.activeEntry,
+        ...data.entries,
+        ...(data.historyEntries ?? []),
+        ...(data.dayEntries ?? []),
+        ...(data.weekEntries ?? [])
+      ]) {
+        if (entry?.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) onScreen.add(entry.id);
+      }
+    }
+    for (const entryId of deletionCoordinator.current?.current()?.entryIds ?? []) onScreen.add(entryId);
+    // Open editors keep the entry they opened with, which may still carry its optimistic ID (Codex r1
+    // on #552).
+    for (const entryId of [calendarEditEntryRef.current?.id, activeEditorEntryId.current]) {
+      if (entryId?.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) onScreen.add(entryId);
+    }
+    const removed = await pruneTimerEntryIdCorrelations({ owner, retainLocalIds: onScreen })
+      .catch(() => [] as string[]);
+    const current = latestData.current;
+    if (!current || !sameTimerStopOwner(timerStopOwner(current), owner)) return;
+    for (const localId of removed) optimisticTimerIds.current.delete(localId);
+  }
+
   function timerStopOwner(bootstrap: MobileBootstrap): TimerStopOwner {
     return {
       userId: bootstrap.user.id,
@@ -986,6 +1026,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       loadedBootstrap.current = bootstrap;
       publishDashboardData(bootstrap);
       setPendingTimerStops([...ownedPendingStops]);
+      void pruneTimerIdCorrelationsAfterLoad(bootstrap);
       syncShortcutCatalog(bootstrap);
       setAuthState("authenticated");
       void refreshLocationServices(bootstrap);

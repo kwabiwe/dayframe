@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
-import { enqueueEvent, type MobileBootstrap } from "./api";
+import { enqueueEvents, type MobileBootstrap } from "./api";
 import {
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -108,24 +108,20 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
     .filter((event) => nativeEventCanTransferToOwner(event, owner));
   if (!events.length) return { transferredCount: 0, transferredLocalIds: [] as string[] };
 
-  let transferredCount = 0;
-  const transferredLocalIds: string[] = [];
-  try {
-    for (const event of events) {
-      await enqueueEvent({
-        owner,
-        localId: event.localId,
-        source: "shortcut",
-        type: event.type,
-        occurredAt: event.occurredAt,
-        categoryId: event.categoryId,
-        description: event.description,
-        rawPayload: event.rawPayload
-      });
-      transferredCount += 1;
-      transferredLocalIds.push(event.localId);
-    }
-  } catch (error) {
+  // One queue write for the whole native backlog (stability audit 22 Oct 2026, iphone-timer-sync-8).
+  const { acceptedCount, error } = await enqueueEvents(events.map((event) => ({
+    owner,
+    localId: event.localId,
+    source: "shortcut" as const,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    categoryId: event.categoryId,
+    description: event.description,
+    rawPayload: event.rawPayload
+  })));
+  const transferredLocalIds = events.slice(0, acceptedCount).map((event) => event.localId);
+  const transferredCount = transferredLocalIds.length;
+  if (error !== undefined) {
     if (transferredLocalIds.length) {
       await nativeShortcutQueue.removeShortcutEvents(transferredLocalIds).catch(() => 0);
     }

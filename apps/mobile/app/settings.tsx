@@ -95,6 +95,7 @@ import {
   ensureAutomaticLoggingCategories,
   fetchBootstrap,
   getQueueDiagnostics,
+  getStorageQuarantineDiagnostics,
   logout,
   readQueue,
   retryFailedQueuedEvents,
@@ -1651,14 +1652,16 @@ export default function SettingsScreen() {
       if (!owner) return;
       const [
         latestQueue, review, location, native, health, manual,
-        timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues, freezes
+        timeEntryDiagnostics, timeEntryIssues, timerStopDiagnostics, timerStopIssues, freezes,
+        storageQuarantine
       ] = await Promise.all([
         readQueue(owner), readReviewSupportExportForOwner(owner),
         getLocationStoreDiagnostics(owner), getNativeLocationIntelligenceStatus().catch(() => null),
         getHealthImportStatus(), getLastManualSyncResult(owner),
         getTimeEntryOutboxDiagnostics(owner), listTimeEntrySyncIssues(owner),
         getTimerStopOutboxDiagnostics(owner), listTimerStopSyncIssues(owner),
-        readFreezeDiagnostics()
+        readFreezeDiagnostics(),
+        getStorageQuarantineDiagnostics().catch(() => null)
       ]);
       if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
       if (freezes) setFreezeSnapshot(freezes);
@@ -1668,6 +1671,8 @@ export default function SettingsScreen() {
         lastObservedServerBuild: data?.serverBuild ?? null,
         owner: { workspace: owner.workspaceId.slice(0, 8), user: owner.userId.slice(0, 8) },
         activity: supportQueueDiagnostics(latestQueue),
+        // Unreadable queue/correlation containers kept on this iPhone: reason, time and size only.
+        storageQuarantine,
         health,
         // Null while the Review store still holds another account.
         reviewSync: review ? { diagnostics: review.diagnostics, mutations: review.mutations } : null,

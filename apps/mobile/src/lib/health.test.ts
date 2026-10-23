@@ -71,7 +71,17 @@ vi.mock("./mobileAccount", async (importOriginal) => {
 vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
 
 vi.mock("./api", () => ({
-  enqueueEvent: apiMocks.enqueueEvent,
+  // The handoff batches its page; each event still reaches the per-event mock in order.
+  enqueueEvents: async (events: unknown[]) => {
+    for (let index = 0; index < events.length; index++) {
+      try {
+        await apiMocks.enqueueEvent(events[index]);
+      } catch (error) {
+        return { acceptedCount: index, error };
+      }
+    }
+    return { acceptedCount: events.length };
+  },
   reprocessHealthReviewItems: apiMocks.reprocessHealthReviewItems
 }));
 

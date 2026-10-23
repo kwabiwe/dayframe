@@ -30,7 +30,17 @@ vi.mock("react-native", () => ({
 }));
 
 vi.mock("./api", () => ({
-  enqueueEvent: mocks.enqueueEvent
+  // The drain batches the backlog; each event still reaches the per-event mock in order.
+  enqueueEvents: async (events: unknown[]) => {
+    for (let index = 0; index < events.length; index++) {
+      try {
+        await mocks.enqueueEvent(events[index]);
+      } catch (error) {
+        return { acceptedCount: index, error };
+      }
+    }
+    return { acceptedCount: events.length };
+  }
 }));
 
 vi.mock("./mobileAccount", () => ({

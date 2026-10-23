@@ -311,6 +311,13 @@ export async function refuseTimeEntryCommandsForOptimisticEntry(
   });
 }
 
+/** The owner's fenced optimistic block IDs, so correlation pruning keeps what the fence names. */
+export async function readRefusedStartFenceEntryIds(owner: MobileAccountOwner) {
+  return (await readRefusedStartFence())
+    .filter((record) => mobileAccountOwnersEqual(record, owner))
+    .map((record) => record.optimisticEntryId);
+}
+
 export async function removeTimeEntryCommands(clientCommandIds: readonly string[]) {
   const ids = new Set(clientCommandIds);
   if (ids.size === 0) return 0;

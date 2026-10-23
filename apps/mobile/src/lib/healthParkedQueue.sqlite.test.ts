@@ -136,7 +136,7 @@ describe("parked Health event and its source journal (real SQLite)", () => {
       isCurrent: () => true,
       derive
     });
-    await store.handoffHealthEvents(owner, api.enqueueEvent, () => true);
+    await store.handoffHealthEvents(owner, api.enqueueEvents, () => true);
     const [handedOff] = await api.readQueue();
     expect(handedOff.localId).toMatch(/^healthkit:/);
     expect(deliveryState()).toBe("queued");
