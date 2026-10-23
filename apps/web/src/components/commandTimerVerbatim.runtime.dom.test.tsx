@@ -198,10 +198,12 @@ async function renderShell(entry: TimeEntryRow | null) {
   server.entry = entry;
   let refresh: () => Promise<unknown> = async () => undefined;
   let stop: () => Promise<unknown> = async () => undefined;
+  let start: (input: { categoryId: string }) => Promise<unknown> = async () => undefined;
   function Loader() {
     const runtime = useAppShellRuntime();
     refresh = () => runtime.refresh({ force: true });
     stop = () => runtime.stopTimer();
+    start = (input) => runtime.startTimer(input);
     const { hydrate: load } = runtime;
     useEffect(() => {
       const page = bootstrap(server.entry);
@@ -212,7 +214,7 @@ async function renderShell(entry: TimeEntryRow | null) {
   const { unmount } = render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
   const input = await screen.findByLabelText("Description") as HTMLInputElement;
   // A server copy arriving later (another device started a block, a poll noticed it).
-  return { input, unmount, refresh: () => act(async () => { await refresh(); }), stop: () => stop() };
+  return { input, unmount, refresh: () => act(async () => { await refresh(); }), stop: () => stop(), start: (input: { categoryId: string }) => start(input) };
 }
 
 function descriptions() {
@@ -1366,6 +1368,25 @@ describe("a workspace switch saves the typed description first (stability audit 
     await act(async () => { server.release?.(); });
     await wait(1_500);
     expect(descriptions()).toEqual(["Fix bug more"]);
+  });
+
+  it("Codex r2: a Start queued before the switch still saves the block it replaces with its final text", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const shell = await renderShell(entry({ description: "Plan" }));
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    let started: Promise<unknown> = Promise.resolve();
+    act(() => { started = shell.start({ categoryId: "write" }); });
+    let switching: Promise<void> = Promise.resolve();
+    act(() => { switching = beforeSessionChange(); });
+    await act(async () => { server.release?.(); });
+    await act(async () => { await started; await switching; });
+    await waitFor(() => expect(server.posts).toHaveLength(1));
+    expect(server.completed).toMatchObject({ id: "active", description: "Plan x later" });
   });
 });
 

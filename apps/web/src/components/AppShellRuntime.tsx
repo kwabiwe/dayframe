@@ -205,7 +205,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const startHandoffsRef = useRef(new Map<string, string>());
   // The running block's draft at the moment a Start that replaces it was asked for, by block id:
   // its pending edits, saved to its real id before the switch runs (Codex r10).
-  const outgoingDraftsRef = useRef(new Map<string, { draft: TimerDraft; base: TimerDraft }>());
+  const outgoingDraftsRef = useRef(new Map<string, { draft: TimerDraft; base: TimerDraft; generation: number }>());
   const refreshRequestRef = useRef(0);
   const dateLoadRequestRef = useRef(0);
   const isDateLoadingRef = useRef(false);
@@ -571,12 +571,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return { owner, generation: pendingStoreSessionRef.current.generation };
   }, []);
-  // After the session-change cutoff (sign-out, workspace switch) the old session sends no more
-  // description writes: autosave, page exits, Stop's details. Only the cutoff's own save may
-  // (stability audit WEB-UI-8; Codex r1 #3 on #557). The fence is #539's store generation.
+  // After the session-change cutoff (sign-out, workspace switch) the old session sends no
+  // description write captured since: autosave, page exits, Stop's details. A write captured
+  // before it (a queued Start's save of the block it replaces) still goes, and so does the
+  // cutoff's own save (stability audit WEB-UI-8; Codex r1 #3, r2 on #557). Each write carries
+  // #539's store generation from when its text was captured.
   const sessionChangeSaveRef = useRef(false);
-  const sessionEnded = useCallback((snapshot: BootstrapData | null) => (
-    !sessionChangeSaveRef.current && pendingOwner(snapshot).generation !== pendingTimerDetailsGeneration()
+  const sessionEnded = useCallback((snapshot: BootstrapData | null, captured: number) => (
+    !sessionChangeSaveRef.current && pendingOwner(snapshot).generation !== captured
   ), [pendingOwner]);
 
   // Sends one description PATCH. It is keepalive (it outlives the page if the tab closes or
@@ -617,7 +619,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     snapshot: BootstrapData,
     draft: TimerDraft,
     explicitBase?: TimerDraft,
-    options: { closing?: boolean } = {}
+    options: { closing?: boolean; generation?: number } = {}
   ): Promise<MutationOutcome> => {
     const activeEntry = snapshot.activeEntry!;
     const base = explicitBase ?? baseFor(activeEntry);
@@ -625,7 +627,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!targetId) return { ok: false, error: "The block is still starting." };
     const patch = timerDetailsPatch(draft, base);
     if (!patch) return { ok: true };
-    if (sessionEnded(snapshot)) return { ok: false, error: SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE };
+    if (sessionEnded(snapshot, options.generation ?? pendingTimerDetailsGeneration())) return { ok: false, error: SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE };
     setIsTimerBusy(true);
     setTimerError(null);
     refreshRequestRef.current += 1;
@@ -709,7 +711,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const entry = dataRef.current?.activeEntry;
     const targetId = entry ? serverEntryId(entry.id) : null;
     const patch = entry ? timerDetailsPatch(draftRef.current, baseFor(entry)) : null;
-    if (!entry || !targetId || !patch || sessionEnded(dataRef.current)) return;
+    if (!entry || !targetId || !patch || sessionEnded(dataRef.current, pendingTimerDetailsGeneration())) return;
     void sendDetailsPatch(targetId, patch.body).catch(() => undefined);
   }, [baseFor, sendDetailsPatch, serverEntryId, sessionEnded]);
 
@@ -721,8 +723,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!snapshot) return { ok: false, error: "Block data is still loading." };
     const outgoing = snapshot.activeEntry;
     if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) {
-      outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing) });
+      outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing), generation: pendingTimerDetailsGeneration() });
     }
+    const startGeneration = pendingTimerDetailsGeneration();
     return runTimerStartMutation({
       beforeStart: async () => {
         // The block this Start replaces gets its pending edits first, at its real id.
@@ -731,7 +734,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         const pending = entry ? outgoingDraftsRef.current.get(entry.id) : undefined;
         outgoingDraftsRef.current.clear();
         if (current && entry && pending && serverEntryId(entry.id)) {
-          const outcome = await saveActiveDetails(current, pending.draft, pending.base);
+          const outcome = await saveActiveDetails(current, pending.draft, pending.base, { generation: pending.generation });
           // Refused because the block changed elsewhere: the switch goes ahead, and the notice
           // that the edit was not kept stays on screen (Codex r1 on #387).
           if (!outcome.ok && outcome.error === DETAILS_CONFLICT_MESSAGE) return { notice: DETAILS_CONFLICT_SWITCH_MESSAGE };
@@ -778,9 +781,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         // is what is saved.
         // The real block was created with the optimistic block's details: that is the base.
         const pending = outgoingDraftsRef.current.get(optimisticId)
-          ?? { draft: draftRef.current, base: timerDraftForEntry(snapshot.activeEntry) };
+          ?? { draft: draftRef.current, base: timerDraftForEntry(snapshot.activeEntry), generation: startGeneration };
         outgoingDraftsRef.current.delete(optimisticId);
-        await saveActiveDetails(snapshot, pending.draft, pending.base);
+        await saveActiveDetails(snapshot, pending.draft, pending.base, { generation: pending.generation });
         return serverId;
       },
       refresh: async () => {
@@ -800,6 +803,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!requested) return { ok: false, error: "There is no running block to stop." };
     const gate = mutationGateRef.current;
     const outcomeSeq = detailsOutcomeRef.current.seq;
+    const stopGeneration = pendingTimerDetailsGeneration();
     // Stop is never turned away by a mutation already in the gate (stability audit WEB-UI-10): it
     // waits for it and then stops the block still on screen, with the edits made since (the patch
     // below is computed after the wait, against the base that save left). A block whose Start is
@@ -865,7 +869,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // tab's own text.
     const savedBase = baseFor(activeEntry);
     const base = bypassed?.base ?? savedBase;
-    const fields = sessionEnded(snapshot) ? [] : [...new Set([
+    const fields = sessionEnded(snapshot, stopGeneration) ? [] : [...new Set([
       ...timerDraftEditedFields(draft, base),
       ...(bypassed ? timerDraftEditedFields(draft, savedBase) : [])
     ])];
