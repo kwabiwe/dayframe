@@ -51,6 +51,7 @@ export {
   DAYFRAME_ACTIVITY_ICON_GROUPS,
   DAYFRAME_APP_ICONS,
   DAYFRAME_GLYPHS,
+  DAYFRAME_LEG_MODE_ICONS,
   activityGroupFor,
   activityIconKeyForName,
   isActivityIconKey,

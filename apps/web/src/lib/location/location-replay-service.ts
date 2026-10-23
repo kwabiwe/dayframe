@@ -152,6 +152,20 @@ export async function replayLocationEvidence(
       options.processingAt
     ]
   );
+  // Readings ingest stored as rejected for being too broad (positions dropped) still show the phone was
+  // seen: their times, never their positions, keep a trip's silence from reading as Underground (location
+  // v4 step 7, Codex r3 on #563).
+  const broadResult = await client.query<{ occurredAt: Date | string }>(
+    `select occurred_at as "occurredAt"
+     from location_evidence
+     where workspace_id = $1 and user_id = $2 and device_id = $3
+       and algorithm_version = $4 and accepted = false and rejection_reason = 'accuracy_too_broad'
+       and evidence_type in ('standard_location', 'significant_change') and is_simulated is not true
+       and horizontal_accuracy_m < $6 and expires_at > $5::timestamptz
+     order by occurred_at`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
+      LOCATION_ENGINE_V2_CONFIG.tripUnseenObservedAccuracyMeters]
+  );
   observeLocationTiming(options, "evidence_read", "completed");
   observeLocationCount(options, "evidenceRows", evidenceResult.rows.length);
   observeLocationStage(options, "catalogue_read");
@@ -216,7 +230,8 @@ export async function replayLocationEvidence(
     savedPlaces: places.savedPlaces,
     acceptedLearnedPlaces: places.learnedPlaces,
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
-    processingAt: options.processingAt
+    processingAt: options.processingAt,
+    broadReadingTimes: (broadResult.rows ?? []).map((row) => new Date(row.occurredAt).getTime())
   });
   observeLocationTiming(options, "engine_computation", "completed");
 
@@ -228,7 +243,8 @@ export async function replayLocationEvidence(
     ? await lockAutoLoggedBlocks(client, session, { ...options, reconciliation: options.autoLogReconciliation })
     : new Set<string>();
   observeLocationTiming(options, "protected_replacement_checks", "started");
-  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places);
+  const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places,
+    output.broadReadingTimes);
   const segments = protectedReplacement.segments;
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
@@ -319,7 +335,8 @@ async function excludeProtectedReplacements(
   options: Pick<LocationReplayOptions, "deviceId" | "algorithmVersion" | "processingAt" | "persistenceProfile" | "onLocationCount" | "autoLogReconciliation">,
   segments: LocationSegment[],
   acceptedEvidence: ClassifiedEvidence[] = [],
-  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {},
+  broadReadingTimes: readonly number[] = []
 ) {
   // A trip's legs are fallback candidates: if protected history holds the trip,
   // its unaffected legs remain instead of their open Reviews being retired.
@@ -451,11 +468,11 @@ async function excludeProtectedReplacements(
       !(segment.stops?.length && movesEndpoint(segment))));
   const kept = segments.flatMap((segment) => replaceable(segment)
     ? segment.kind === "commute" && !segment.stops?.length && movesEndpoint(segment)
-      ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places)
+      ? rebuildLegWithinDecidedStops(segment, decidedStays, segments, acceptedEvidence, options, places, broadReadingTimes)
       : [segment]
     : segment.kind === "commute"
       ? (segment.legs ?? []).filter(replaceable).flatMap((leg) =>
-          rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options, places))
+          rebuildLegWithinDecidedStops(leg, decidedStays, segments, acceptedEvidence, options, places, broadReadingTimes))
       : []).filter((segment) => !overlapsDecidedMotionJourney(segment));
   // Time away is offered only when no journey qualifies: a rebuilt endpoint
   // must never stretch it over a journey that replay keeps, nor over evidence
@@ -561,7 +578,8 @@ function rebuildLegWithinDecidedStops(
   segments: LocationSegment[],
   acceptedEvidence: ClassifiedEvidence[],
   options: Pick<LocationReplayOptions, "algorithmVersion" | "processingAt">,
-  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {}
+  places: Pick<CommuteDerivationOptions, "savedPlaces" | "learnedPlaces"> = {},
+  broadReadingTimes: readonly number[] = []
 ): CommuteSegment[] {
   const config = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
   // A leg that stood only because its outing qualified keeps that support only while the outing,
@@ -576,7 +594,7 @@ function rebuildLegWithinDecidedStops(
   // A rebuilt journey gets legs over its new times (location v4 step 6).
   return withTripLegs(deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
-    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt)
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt, undefined, broadReadingTimes)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
 }
 
@@ -896,7 +914,7 @@ export async function shownOpenTrip(client: pg.PoolClient, session: RequestSessi
  * when it no longer qualifies or would start from another stay.
  */
 export function openTripAgainstDecidedOrigin(
-  output: Pick<LocationEngineOutput, "segmentUpserts" | "acceptedEvidence" | "openTrip">,
+  output: Pick<LocationEngineOutput, "segmentUpserts" | "acceptedEvidence" | "openTrip" | "broadReadingTimes">,
   persistedStoppedAt: string,
   config: typeof LOCATION_ENGINE_V2_CONFIG,
   processingAt: string
@@ -910,7 +928,7 @@ export function openTripAgainstDecidedOrigin(
     .flatMap((journey) => [journey, ...(journey.legs ?? [])]);
   // With its legs so far (location v4 step 6).
   const rebuilt = openTripWithLegs(deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys),
-    output.acceptedEvidence, config, processingAt);
+    output.acceptedEvidence, config, processingAt, undefined, output.broadReadingTimes);
   return rebuilt?.fromStaySegmentId === origin.clientSegmentId ? rebuilt : null;
 }
 

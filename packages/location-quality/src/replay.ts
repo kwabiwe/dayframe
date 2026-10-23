@@ -30,13 +30,20 @@ export async function loadEngine(locationDir: string): Promise<LocationEngine> {
   return { run: segmenter.runLocationEngine, config: config.LOCATION_ENGINE_V2_CONFIG };
 }
 
-/** One full replay from an empty state, as if every row arrived before `processingAt`. */
-export function replay(engine: LocationEngine, evidence: LocationEvidence[], savedPlaces: SavedPlaceForMatching[], processingAt: string): QualitySegment[] {
+/**
+ * One full replay from an empty state, as if every row arrived before `processingAt`. Exported rows
+ * hold positions as metres from a hidden origin, so they are nowhere near real stations: the bundled
+ * station list is switched off (an older engine without the switch ignores it).
+ */
+export function replay(engine: LocationEngine, evidence: LocationEvidence[], savedPlaces: SavedPlaceForMatching[], processingAt: string,
+  broadReadingTimes: readonly number[] = []): QualitySegment[] {
   const output = engine.run({
     evidence,
+    // Times of readings the server kept as too broad, as replay passes them (an older engine ignores it).
+    broadReadingTimes,
     savedPlaces,
     acceptedLearnedPlaces: [],
-    config: engine.config,
+    config: { ...engine.config, tripStationsEnabled: false },
     processingAt,
     priorState: { algorithmVersion: engine.config.algorithmVersion, mode: "idle", activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null }
   });

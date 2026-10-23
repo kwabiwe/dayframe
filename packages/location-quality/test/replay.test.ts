@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "@dayframe/shared";
-import { parseEvidenceRows, parsePlaceRows, placeIdFromLabel, placeLabelFromId, projectionAround } from "../src/evidenceRows";
+import { parseBroadReadingTimes, parseEvidenceRows, parsePlaceRows, placeIdFromLabel, placeLabelFromId, projectionAround } from "../src/evidenceRows";
 import { replay, sharedEngine } from "../src/replay";
 import { exampletonPlaces } from "./exampleton";
 
@@ -77,5 +77,29 @@ describe("replay", () => {
     expect(moves).toHaveLength(1);
     expect([moves[0].from, moves[0].to]).toEqual(["P4", "P1"]);
     expect(JSON.stringify(segments)).not.toMatch(/latitude|longitude/);
+  });
+  it("passes the times of readings the server kept as too broad, as replay does (Codex r4 on #563)", () => {
+    // A stay, a drive whose accurate fixes are six minutes and 5.5 km apart, and a stay; two rejected 300 m readings between.
+    const rows: string[] = [];
+    const time = (minutes: number) => new Date(Date.parse("2026-03-02T06:00:00Z") + minutes * 60_000).toISOString();
+    const add = (fields: Parameters<typeof evidenceRow>[0]) => rows.push(evidenceRow({ n: rows.length + 1, ...fields }));
+    for (let index = 0; index < 8; index += 1) add({ occurredAt: time(index * 30 / 7), x: 0, y: 0, accuracy: 8, speed: 0 });
+    for (const [minute, x, speed] of [[31, 0, 12], [31.5, 400, 13], [37.5, 5_900, 13], [38, 6_300, 12]]) add({ occurredAt: time(minute), x, y: 0, accuracy: 8, speed });
+    for (let index = 0; index < 8; index += 1) add({ occurredAt: time(39 + index * 31 / 7), x: 6_300, y: 0, accuracy: 8, speed: 0 });
+    for (const [minute, activity] of [[0, "stationary"], [31, "automotive"], [38, "stationary"]] as const) {
+      add({ kind: "motion_activity", occurredAt: time(minute), activity, confidence: "high" });
+    }
+    const quiet = rows.join("\n");
+    for (const minute of [33, 36]) add({ occurredAt: time(minute), accuracy: 300, accepted: "false" });
+    const seen = rows.join("\n");
+    const modes = (text: string) => {
+      const options = { algorithmVersion: sharedEngine.config.algorithmVersion };
+      const broad = parseBroadReadingTimes(text, { ...options, minimumAccuracyMeters: 200, maximumAccuracyMeters: 500 });
+      return replay(sharedEngine, parseEvidenceRows(text, projection, options), [], time(120), broad)
+        .flatMap((segment) => segment.kind === "commute" ? (segment.legs ?? []).map((leg) => leg.mode) : []);
+    };
+    expect(parseBroadReadingTimes(seen, { algorithmVersion: "v", minimumAccuracyMeters: 200, maximumAccuracyMeters: 500 })).toEqual([Date.parse(time(33)), Date.parse(time(36))]);
+    expect(modes(quiet)).toContain("underground");
+    expect(modes(seen)).not.toContain("underground");
   });
 });

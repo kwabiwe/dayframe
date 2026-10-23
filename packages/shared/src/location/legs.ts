@@ -2,7 +2,8 @@ import type { LocationEngineConfig } from "./config";
 import { distanceMeters } from "./geo";
 import { credibleSpeedResolver } from "./commute";
 import { buildMotionTimeline, isMotionEvidence, motionLegLabels, type MotionTimeline } from "./motionActivity";
-import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, TripLeg } from "./types";
+import { nearestStation, type StationKind } from "./stations";
+import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, TripLeg, TripLegMode } from "./types";
 
 /**
  * Legs of a trip, part 1 (location v4 §8, build step 6): walk, run, cycle and drive. Change points are
@@ -12,10 +13,20 @@ import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, Tr
  * counts towards a hold. Legs shorter than `tripLegMinimumMs` merge into the longer moving neighbour
  * (across stops; the earlier on a tie), shortest first, unless they are walks of
  * `tripChangeWalkMinimumMs` or more between two vehicle legs. A stop between two legs of one mode joins
- * that leg. Deterministic and replayable; genuine location fixes and Core Motion only.
+ * that leg.
+ *
+ * Part 2 (build step 7): a silence of `tripUnseenLegMinimumMs` or more between genuine fixes
+ * `tripUnseenLegMinimumMeters` apart at 5–25 m/s, with readings better than cell-only accuracy no more
+ * often than one per `tripUnseenSparseReadingIntervalMs` in between, is a leg of its own, Underground
+ * (sure when both ends are at Underground stations, otherwise unsure with train as runner-up). A vehicle
+ * leg with a sustained train speed and few stops is a train: sure between rail stations, and without
+ * them, at a median above UK motorway limits, unsure with car as runner-up (a fast drive matches it).
+ * A vehicle leg between Underground stations is the Underground, and a slower one between metro or
+ * tram stops a tram; each end is witnessed by its own fix inside the leg. Deterministic and replayable;
+ * genuine location fixes (and the times of broad ones), Core Motion and the bundled stations only.
  */
 
-type Label = MotionTravelMode | "still";
+type Label = MotionTravelMode | "still" | "unseen";
 type SpeedClass = "still" | "foot" | "mid" | "vehicle";
 type Slice = {
   fromMs: number;
@@ -30,9 +41,13 @@ type Slice = {
 /** A run of slices [first, last] with one label; `observedMs` leaves indeterminate slices out. */
 type Run = { label: Label; first: number; last: number; observedMs: number; prev: Run | null; next: Run | null; alive: boolean };
 
-const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling"]);
+const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling", "unseen"]);
 /** How long one reading's speed speaks for the time after it. */
 const SPEED_HOLD_MS = 120_000;
+/** A leg's end is witnessed by a fix this close to it, inside the leg. */
+const ENDPOINT_WINDOW_MS = 120_000;
+/** A credible speed under this is stillness, for counting a train's stops. */
+const STOP_SPEED_MPS = 1.5;
 
 function speedClass(speed: number, config: LocationEngineConfig): SpeedClass {
   if (speed < config.tripStillSpeedMps) return "still";
@@ -55,6 +70,7 @@ function sliceLabel(motion: Label | null, speed: SpeedClass | null): Label | nul
 
 /** Whether a speed regime supports a label: a moving mode's own range, or stillness for a stop. */
 function speedSupports(label: Label, speed: SpeedClass): boolean {
+  if (label === "unseen") return false;
   return label === "still" ? speed === "still" : speedFits(label, speed);
 }
 
@@ -120,7 +136,8 @@ export function deriveTripLegs({
   timeline,
   readings,
   speedOf,
-  config
+  config,
+  broadReadingTimes = []
 }: {
   startMs: number;
   endMs: number;
@@ -130,6 +147,8 @@ export function deriveTripLegs({
   /** A reading's speed when it is credible (native from any copy, else an accurate fix's implied speed), or null. */
   speedOf: (item: ClassifiedEvidence) => number | null;
   config: LocationEngineConfig;
+  /** When genuine readings too broad to accept but better than cell-only were taken (epoch ms): each one breaks a silence. */
+  broadReadingTimes?: readonly number[];
 }): TripLeg[] {
   if (!(endMs > startMs)) return [];
   const labels = timeline ? motionLegLabels(timeline).filter((item) => item.toMs > startMs && item.fromMs < endMs) : [];
@@ -139,9 +158,40 @@ export function deriveTripLegs({
     const speed = speedOf(item);
     return speed != null && Number.isFinite(speed) && speed >= 0 ? [{ atMs, speed: speedClass(speed, config) }] : [];
   });
-  // Elementary slices between every change of either input.
+  const fixes = timed.filter(({ item }) => genuineLegFix(item, config))
+    .map(({ item, atMs }) => ({ atMs, point: { latitude: item.evidence.latitude!, longitude: item.evidence.longitude! } }));
+  // Genuine accepted readings better than cell-only accuracy (design §8). A run between distant fixes
+  // stays a silence while they are sparse: underground, station Wi-Fi gives a reading of 70–130 m now and
+  // then (one to three in 5–24 minutes in the owner's week), where a drive gives one every minute. A
+  // reading too broad to accept but better than cell-only (200–500 m) breaks it outright (Codex r4 on #563).
+  const observedTimes = timed.filter(({ item }) => {
+    const { kind, isSimulated, latitude, longitude, horizontalAccuracyMeters } = item.evidence;
+    return (kind === "standard_location" || kind === "significant_change") && isSimulated !== true &&
+      latitude != null && longitude != null && horizontalAccuracyMeters != null &&
+      horizontalAccuracyMeters < config.tripUnseenObservedAccuracyMeters;
+  }).map(({ atMs }) => atMs).sort((a, b) => a - b);
+  const broadTimes = broadReadingTimes.filter((atMs) => atMs >= startMs && atMs <= endMs).sort((a, b) => a - b);
+  let observedFrom = 0;
+  let broadFrom = 0;
+  // Unseen stretches: nothing much observed between two distant genuine fixes, at train or Underground speed.
+  const unseen = fixes.slice(1).flatMap((next, index) => {
+    const before = fixes[index];
+    while (observedFrom < observedTimes.length && observedTimes[observedFrom] <= before.atMs) observedFrom += 1;
+    let inside = 0;
+    while (observedFrom + inside < observedTimes.length && observedTimes[observedFrom + inside] < next.atMs) inside += 1;
+    if (inside * config.tripUnseenSparseReadingIntervalMs > next.atMs - before.atMs) return [];
+    while (broadFrom < broadTimes.length && broadTimes[broadFrom] <= before.atMs) broadFrom += 1;
+    if (broadFrom < broadTimes.length && broadTimes[broadFrom] < next.atMs) return [];
+    const gapMs = next.atMs - before.atMs;
+    const meters = distanceMeters(before.point, next.point);
+    const mps = meters / (gapMs / 1_000);
+    return gapMs >= config.tripUnseenLegMinimumMs && meters >= config.tripUnseenLegMinimumMeters &&
+      mps >= config.tripUnseenLegMinimumSpeedMps && mps <= config.tripUnseenLegMaximumSpeedMps
+      ? [{ fromMs: before.atMs, toMs: next.atMs }] : [];
+  });
+  // Elementary slices between every change of any input.
   const cuts = [...new Set([startMs, endMs, ...labels.flatMap((item) => [item.fromMs, item.toMs]),
-    ...speeds.flatMap(({ atMs }) => [atMs, atMs + SPEED_HOLD_MS])])]
+    ...speeds.flatMap(({ atMs }) => [atMs, atMs + SPEED_HOLD_MS]), ...unseen.flatMap((item) => [item.fromMs, item.toMs])])]
     .filter((at) => at >= startMs && at <= endMs).sort((a, b) => a - b);
   const slices: Slice[] = [];
   let labelIndex = 0;
@@ -155,9 +205,12 @@ export function deriveTripLegs({
     while (speedIndex + 1 < speeds.length && speeds[speedIndex + 1].atMs <= midMs) speedIndex += 1;
     const speed = speedIndex >= 0 && midMs - speeds[speedIndex].atMs <= SPEED_HOLD_MS ? speeds[speedIndex].speed : null;
     const reported = motion && !motion.carried ? motion.label : null;
-    const label = sliceLabel(motion?.label ?? null, speed);
+    // A silence between distant fixes is its own leg; the gap itself is what was seen.
+    const silent = unseen.some((item) => item.fromMs <= midMs && midMs < item.toMs);
+    const label = silent ? "unseen" : sliceLabel(motion?.label ?? null, speed);
     // Seen: Core Motion reported it, or a speed whose regime fits it (a speed that contradicts a carried label never holds it).
-    slices.push({ fromMs, toMs, label, reported, seen: reported != null || label != null && speed != null && speedSupports(label, speed) });
+    slices.push({ fromMs, toMs, label, reported,
+      seen: silent || reported != null || label != null && speed != null && speedSupports(label, speed) });
   }
   const sliceMs = (slice: Slice) => slice.toMs - slice.fromMs;
 
@@ -278,13 +331,50 @@ export function deriveTripLegs({
   const moving: Run[] = [];
   for (let run: Run | null = head; run; run = run.next) if (run.label !== "still") moving.push(run);
   if (!moving.length) return [];
-  const fixes = timed.filter(({ item }) => genuineLegFix(item, config))
-    .map(({ item, atMs }) => ({ atMs, point: { latitude: item.evidence.latitude!, longitude: item.evidence.longitude! } }));
-  return moving.map((run, index) => {
-    const mode = run.label as MotionTravelMode;
+  const rawSpeeds = timed.flatMap(({ item, atMs }) => {
+    const speed = speedOf(item);
+    return speed != null && Number.isFinite(speed) && speed >= 0 ? [{ atMs, speed }] : [];
+  });
+  /**
+   * A leg's two end witnesses: a genuine fix inside the leg within `ENDPOINT_WINDOW_MS` (at most a quarter
+   * of the leg) of its start, and another within that of its end. Fixes outside the leg (an adjacent walk's)
+   * or in its middle never prove where it began or ended.
+   */
+  const endPoints = (fromMs: number, toMs: number) => {
+    const window = Math.min(ENDPOINT_WINDOW_MS, (toMs - fromMs) / 4);
+    let start: (typeof fixes)[number] | null = null;
+    let end: (typeof fixes)[number] | null = null;
+    for (const fix of fixes) {
+      if (fix.atMs >= fromMs && fix.atMs <= fromMs + window && (!start || fix.atMs < start.atMs)) start = fix;
+      if (fix.atMs <= toMs && fix.atMs >= toMs - window && (!end || fix.atMs > end.atMs)) end = fix;
+    }
+    return start && end && start !== end ? { from: start.point, to: end.point } : null;
+  };
+  const bothAt = (fromMs: number, toMs: number, kinds: readonly StationKind[]) => {
+    if (!config.tripStationsEnabled) return false;
+    const ends = endPoints(fromMs, toMs);
+    return Boolean(ends && nearestStation(ends.from, kinds, config.tripStationRadiusMeters) &&
+      nearestStation(ends.to, kinds, config.tripStationRadiusMeters));
+  };
+  /** Distance along the genuine accurate fixes in [fromMs, toMs], through every gap's two anchors; null with fewer than two. */
+  const pathMeters = (fromMs: number, toMs: number) => {
+    const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
+    return points.length >= 2 ? Math.round(points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0)) : null;
+  };
+  return moving.map((run, index): TripLeg => {
     // Stillness at the trip's ends belongs to the first or last leg, whose times are the trip's own.
     const fromMs = index === 0 ? startMs : slices[run.first].fromMs;
     const toMs = index === moving.length - 1 ? endMs : slices[run.last].toMs;
+    const startedAt = new Date(fromMs).toISOString();
+    const stoppedAt = new Date(toMs).toISOString();
+    if (run.label === "unseen") {
+      const sure = bothAt(slices[run.first].fromMs, slices[run.last].toMs, ["underground"]);
+      // Unseen runs merged across a stop keep every gap's anchors in their distance.
+      return { startedAt, stoppedAt, mode: "underground", confidence: sure ? "sure" : "unsure",
+        ...(sure ? {} : { runnerUp: "train" as const }), unobserved: true,
+        distanceMeters: pathMeters(slices[run.first].fromMs, slices[run.last].toMs) };
+    }
+    const mode = run.label as MotionTravelMode;
     let covered = 0;
     let agreeing = 0;
     for (let at = run.first; at <= run.last; at += 1) {
@@ -294,16 +384,38 @@ export function deriveTripLegs({
     const motionAgrees = agreeing > 0 && agreeing * 2 >= covered;
     const inLeg = speeds.filter(({ atMs }) => atMs >= fromMs && atMs < toMs);
     const speedAgrees = inLeg.length > 0 && inLeg.filter(({ speed }) => speedFits(mode, speed)).length * 2 >= inLeg.length;
-    const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
-    const distance = points.length >= 2
-      ? points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0) : null;
-    return {
-      startedAt: new Date(fromMs).toISOString(),
-      stoppedAt: new Date(toMs).toISOString(),
-      mode,
-      confidence: motionAgrees && speedAgrees ? "sure" : motionAgrees || speedAgrees ? "likely" : "unsure",
-      distanceMeters: distance == null ? null : Math.round(distance)
-    } satisfies TripLeg;
+    const confidence: TripLeg["confidence"] = motionAgrees && speedAgrees ? "sure" : motionAgrees || speedAgrees ? "likely" : "unsure";
+    const meters = pathMeters(fromMs, toMs);
+    if (mode === "automotive") {
+      // Every credible reading of the leg, its arrival included, in time order.
+      const legSpeeds = rawSpeeds.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs);
+      const sorted = legSpeeds.map(({ speed }) => speed).sort((a, b) => a - b);
+      const median = sorted.length ? sorted[sorted.length >> 1] : null;
+      const fastTimes = legSpeeds.filter(({ speed }) => speed >= config.tripTrainMinimumSpeedMps).map(({ atMs }) => atMs);
+      // Sustained: enough readings, half of them at train speed, spread over at least half the leg.
+      const sustained = legSpeeds.length >= config.tripTrainSustainedMinimumReadings && fastTimes.length >= 2 &&
+        fastTimes.length * 2 >= legSpeeds.length && (fastTimes.at(-1)! - fastTimes[0]) * 2 >= toMs - fromMs &&
+        sorted.at(-1)! <= config.tripTrainMaximumSpeedMps;
+      // Few stops: the stretches of stillness inside the leg are on average far apart (not a bus's).
+      let stops = 0;
+      for (let at = 1; at < legSpeeds.length - 1; at += 1) {
+        if (legSpeeds[at].speed < STOP_SPEED_MPS && legSpeeds[at - 1].speed >= STOP_SPEED_MPS) stops += 1;
+      }
+      const spanMeters = meters ?? (median == null ? 0 : median * (toMs - fromMs) / 1_000);
+      const trainLike = sustained && (stops === 0 || spanMeters / stops >= config.tripTrainMinimumStopSpacingMeters);
+      const atRail = trainLike && bothAt(fromMs, toMs, ["rail"]);
+      // Without stations at both ends, a sustained speed above UK motorway limits is a train, but one a
+      // fast drive can match: unsure, with car as the runner-up, for the person to settle.
+      const speedOnlyTrain = !atRail && trainLike && median != null && legSpeeds.length >= config.tripTrainSpeedOnlyMinimumReadings &&
+        median >= config.tripTrainSpeedOnlyMinimumMps;
+      const atUnderground = !atRail && !speedOnlyTrain && bothAt(fromMs, toMs, ["underground"]);
+      const transit: TripLegMode | null = atRail || speedOnlyTrain ? "train"
+        : atUnderground ? "underground"
+          : median != null && median <= config.tripTramMaximumSpeedMps && bothAt(fromMs, toMs, ["metro"]) ? "tram" : null;
+      if (speedOnlyTrain) return { startedAt, stoppedAt, mode: "train", confidence: "unsure", runnerUp: "automotive", distanceMeters: meters };
+      if (transit) return { startedAt, stoppedAt, mode: transit, confidence: atRail || atUnderground ? "sure" : "likely", distanceMeters: meters };
+    }
+    return { startedAt, stoppedAt, mode, confidence, distanceMeters: meters };
   });
 }
 
@@ -317,7 +429,8 @@ export function withTripLegs(
   evidenceWithMotion: readonly ClassifiedEvidence[],
   config: LocationEngineConfig,
   processingAt: string,
-  timeline?: MotionTimeline | null
+  timeline?: MotionTimeline | null,
+  broadReadingTimes: readonly number[] = []
 ): CommuteSegment[] {
   if (!commutes.length) return [];
   const accepted = evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence));
@@ -327,7 +440,7 @@ export function withTripLegs(
   const byId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
   const annotate = (commute: CommuteSegment): CommuteSegment => {
     const tripLegs = deriveTripLegs({
-      startMs: Date.parse(commute.startedAt), endMs: Date.parse(commute.stoppedAt), timeline: motion, speedOf, config,
+      startMs: Date.parse(commute.startedAt), endMs: Date.parse(commute.stoppedAt), timeline: motion, speedOf, config, broadReadingTimes,
       readings: commute.evidenceIds.flatMap((id) => byId.get(id) ?? [])
         .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
     });
@@ -347,7 +460,8 @@ export function openTripWithLegs(
   evidenceWithMotion: readonly ClassifiedEvidence[],
   config: LocationEngineConfig,
   processingAt: string,
-  timeline?: MotionTimeline | null
+  timeline?: MotionTimeline | null,
+  broadReadingTimes: readonly number[] = []
 ): OpenTrip | null {
   if (!trip) return null;
   const accepted = evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence));
@@ -356,7 +470,7 @@ export function openTripWithLegs(
   const byId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
   const tripLegs = deriveTripLegs({
     startMs: Date.parse(trip.startedAt), endMs: Date.parse(trip.lastObservedAt), timeline: motion,
-    speedOf: credibleSpeedResolver(accepted, config), config,
+    speedOf: credibleSpeedResolver(accepted, config), config, broadReadingTimes,
     readings: trip.evidenceIds.flatMap((id) => byId.get(id) ?? [])
       .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
   });

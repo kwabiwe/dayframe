@@ -4,7 +4,7 @@ import type {
   ContinuityStatus,
   LocationSegment,
   LocationSegmentStatus,
-  MotionTravelMode,
+  TripLegMode,
   StaySegment
 } from "@dayframe/shared";
 import { isIsoInstant } from "./answerKey";
@@ -87,7 +87,7 @@ const ENGINE_CODES: Record<string, readonly string[]> = {
     "same_place_meaningful_round_trip",
     "same_place_outing"
   ] satisfies CommuteQualificationReason[],
-  mode: ["walking", "running", "cycling", "automotive"] satisfies MotionTravelMode[]
+  mode: ["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram"] satisfies TripLegMode[]
 };
 
 const SEGMENT_STRING_FIELDS = ["status", "confidence", "continuity"] as const;

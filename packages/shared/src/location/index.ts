@@ -4,6 +4,7 @@ export * from "./config";
 export * from "./evidenceDto";
 export * from "./geo";
 export * from "./legs";
+export * from "./stations";
 export * from "./journeyIdentityFixture";
 export * from "./largeBuildingVisitFixture";
 export * from "./motionActivity";

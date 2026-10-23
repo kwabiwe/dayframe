@@ -23,6 +23,40 @@ export type LocationEngineConfig = {
   tripLegMinimumMs: number;
   /** Trip legs: a walk between two vehicle legs stays its own leg (a change) from this long. */
   tripChangeWalkMinimumMs: number;
+  /** Trip legs: a silence this long between distant accurate readings is a leg of its own (underground). */
+  tripUnseenLegMinimumMs: number;
+  /** Trip legs: an unseen leg spans at least this far... */
+  tripUnseenLegMinimumMeters: number;
+  /** ...at an average speed in this range. */
+  tripUnseenLegMinimumSpeedMps: number;
+  tripUnseenLegMaximumSpeedMps: number;
+  /**
+   * ...and genuine accepted readings better than this (design §8: cell-only fixes are worse) came in
+   * between no more often than one per `tripUnseenSparseReadingIntervalMs` on average; a reading too
+   * broad to accept but better than this came in between not at all.
+   */
+  tripUnseenObservedAccuracyMeters: number;
+  tripUnseenSparseReadingIntervalMs: number;
+  /**
+   * Trip legs: whether leg ends are matched against the bundled stations. Off only for replays of
+   * exported evidence whose positions are relative to a hidden origin (the scoring harness).
+   */
+  tripStationsEnabled: boolean;
+  /** Trip legs: without stations, a vehicle leg sustaining this median speed (above UK motorway limits) is an unsure train, car the runner-up. */
+  tripTrainSpeedOnlyMinimumMps: number;
+  /** Trip legs: how many credible readings a speed-only train needs. */
+  tripTrainSpeedOnlyMinimumReadings: number;
+  /** Trip legs: a leg's end is at a station within this distance of it. */
+  tripStationRadiusMeters: number;
+  /** Trip legs: a train sustains at least this speed for half its credible readings, and never exceeds the maximum. */
+  tripTrainMinimumSpeedMps: number;
+  tripTrainMaximumSpeedMps: number;
+  /** Trip legs: a train's speed is sustained over at least this many credible readings... */
+  tripTrainSustainedMinimumReadings: number;
+  /** ...with few stops: on average at least this far apart (a bus stops every 200–600 m, design §8). */
+  tripTrainMinimumStopSpacingMeters: number;
+  /** Trip legs: a tram's median speed stays under this. */
+  tripTramMaximumSpeedMps: number;
   savedPlaceMinimumDwellMs: number;
   savedPlaceExitReentryGraceMs: number;
   savedPlaceQuietGapMaxMs: number;
@@ -115,6 +149,21 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   tripStopMinimumMs: 60_000,
   tripLegMinimumMs: 120_000,
   tripChangeWalkMinimumMs: 90_000,
+  tripUnseenLegMinimumMs: 300_000,
+  tripUnseenLegMinimumMeters: 1_000,
+  tripUnseenLegMinimumSpeedMps: 5,
+  tripUnseenLegMaximumSpeedMps: 25,
+  tripUnseenObservedAccuracyMeters: 500,
+  tripUnseenSparseReadingIntervalMs: 180_000,
+  tripStationsEnabled: true,
+  tripTrainSpeedOnlyMinimumMps: 33,
+  tripTrainSpeedOnlyMinimumReadings: 5,
+  tripStationRadiusMeters: 500,
+  tripTrainMinimumSpeedMps: 15,
+  tripTrainMaximumSpeedMps: 55,
+  tripTrainSustainedMinimumReadings: 3,
+  tripTrainMinimumStopSpacingMeters: 1_000,
+  tripTramMaximumSpeedMps: 20,
   savedPlaceMinimumDwellMs: 300_000,
   savedPlaceExitReentryGraceMs: 300_000,
   savedPlaceQuietGapMaxMs: 1_800_000,
