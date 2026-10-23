@@ -31,9 +31,13 @@ const healthAcknowledgement = vi.hoisted(() => vi.fn());
 const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
 vi.mock("expo-crypto",()=>({}));
-vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
+const healthDiscard = vi.hoisted(() => vi.fn(async (_items: unknown[]) => 0));
+const healthDeliveryOpen = vi.hoisted(() => vi.fn(async (_owner: unknown, _id: string) => true));
+vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard,isHealthDeliveryOpen:healthDeliveryOpen}));
 const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
 vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
+const healthSignOut = vi.hoisted(() => ({ end: vi.fn((_markerId: string) => Promise.resolve()), mark: vi.fn(() => Promise.resolve("synthetic-marker")) }));
+vi.mock("./healthSignOut",()=>({endHealthCaptureAfterLogout:healthSignOut.end,markSignedOutHealthExpiryPending:healthSignOut.mark}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -228,6 +232,59 @@ describe("mobile API client", () => {
     expect(locationLifecycle.end).toHaveBeenCalledWith("logout", TIMER_STOP_OWNER, expect.any(Function));
     expect(await getSessionToken()).toBeNull();
     expect(await readOwnedAuthenticatedSessionSnapshot(TIMER_STOP_OWNER)).toMatchObject({status:"signed_out"});
+  });
+
+  it("settles a refused Health event in its journal before Clear removes it from the queue (Codex r1 on #549)", async () => {
+    storeBoundSession("session-token");
+    const captured={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+    await enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:refused:one",healthOwner:captured});
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({error:"Synthetic refusal"},422)));
+    await syncQueue({eventScope:"non_timer",forceRetry:true});
+    expect((await readQueue())[0]).toMatchObject({localId:"healthkit:sleep:refused:one",failureKind:"permanent"});
+    healthDiscard.mockClear();
+    healthDiscard.mockRejectedValueOnce(new Error("Synthetic SQLite failure"));
+    await expect(clearFailedQueuedEvents()).rejects.toThrow("Synthetic");
+    // The journal could not record it: the event stays queued, and Clear can be tried again.
+    expect((await readQueue()).map(item=>item.localId)).toEqual(["healthkit:sleep:refused:one"]);
+    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({removedCount:1});
+    expect(healthDiscard).toHaveBeenLastCalledWith([{owner:captured,clientEventId:"healthkit:sleep:refused:one"}]);
+    expect(await readQueue()).toEqual([]);
+  });
+
+  it("records the Health journal expiry before logout completes; failing to record it fails logout (Codex r1 on #549)", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn(async () => jsonResponse({ok:true}));
+    vi.stubGlobal("fetch", fetchMock);
+    healthSignOut.mark.mockClear();
+    healthSignOut.mark.mockRejectedValueOnce(new Error("Synthetic storage failure"));
+    await expect(logout()).rejects.toThrow("Synthetic storage failure");
+    // Failed before the server session was revoked: still consistently signed in (Codex r2 on #549).
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await getSessionToken()).toBe("session-token");
+    healthSignOut.end.mockClear();
+    await logout();
+    expect(healthSignOut.mark).toHaveBeenCalledTimes(2);
+    expect(await getSessionToken()).toBeNull();
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledWith("synthetic-marker"));
+  });
+
+  it("ends Apple Health capture for the account after logout completes, never for a fenced one (health-3, health-4)", async () => {
+    storeBoundSession("session-token");
+    healthSignOut.end.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ok:true})));
+    await logout();
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledOnce());
+    expect(await getSessionToken()).toBeNull();
+    healthSignOut.end.mockClear();
+    await setSessionToken("old-session",TIMER_STOP_OWNER);await activateMobileAccount(TIMER_STOP_OWNER);
+    let release!: (response:Response)=>void;
+    vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{release=resolve;})));
+    const pending=logout();
+    const rejected=expect(pending).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await vi.waitFor(()=>expect(release).toBeDefined());
+    await setSessionToken("replacement-session",ACCOUNT_B_OWNER);await activateMobileAccount(ACCOUNT_B_OWNER);
+    release(jsonResponse({ok:true}));await rejected;
+    expect(healthSignOut.end).not.toHaveBeenCalled();
   });
 
   it.each([ACCOUNT_B_OWNER,TIMER_STOP_OWNER])("fences delayed explicit logout against a replacement login (%j)",async(nextOwner)=>{

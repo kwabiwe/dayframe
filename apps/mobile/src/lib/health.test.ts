@@ -16,7 +16,9 @@ vi.mock("expo-sqlite",()=>({openDatabaseAsync:async()=>{
   };return adapter;
 }}));
 vi.mock("./backendIdentity",()=>({requireBackendIdentity:()=>"staging-fixture"}));
-vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true}));
+vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true,
+  currentSessionGeneration:()=>1,subscribeAuthenticatedSession:()=>()=>undefined,
+  readAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{generation:1,owner:{userId:"health-user",workspaceId:"health-workspace"},token:"synthetic"}})}));
 afterAll(()=>captureDb.close());
 afterEach(()=>vi.useRealTimers());
 
@@ -63,6 +65,7 @@ vi.mock("./mobileAccount", async (importOriginal) => {
   return {
     ...actual,
     readActiveMobileAccount: async () => ({ userId: "health-user", workspaceId: "health-workspace" }),
+    getActiveMobileAccountSnapshot: () => ({ userId: "health-user", workspaceId: "health-workspace" }),
   };
 });
 vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
@@ -345,6 +348,29 @@ describe("HealthKit mapping", () => {
     await importHealthKitSleep();
     expect(raw("synthetic-a")).toBeNull();
     expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledTimes(5);
+  });
+
+  it("expires a signed-out account's journal at a launch's first foreground capture, never in a background wake (health-3)",async()=>{
+    const {__resetHealthSignOutForTests}=await import("./healthSignOut");
+    __resetHealthSignOutForTests();
+    // Opens the journal (and its schema) here, so the test does not depend on an earlier one.
+    await (await import("./healthSyncStore")).getHealthCheckpoint({backendId:"staging-fixture",workspaceId:"health-workspace",userId:"health-user"},"sleep");
+    const departed=JSON.stringify(["staging-fixture","health-workspace","departed-user"]);
+    const active=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
+    const insert=(key:string,id:string)=>{const at=new Date().toISOString();
+      captureDb.prepare("insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)").run(key,"sleep",id,"fixture",at,at,"{}",at);};
+    const samples=(key:string)=>Number(captureDb.prepare("select count(*) n from health_samples where owner_key=?").get(key)!.n);
+    healthkitMocks.queryCategorySamplesWithAnchor.mockImplementation(async()=>({newAnchor:"empty",samples:[],deletedSamples:[]}));
+    insert(departed,"synthetic-departed");insert(active,"synthetic-active");
+    await importHealthKitSleep({background:true,fresh:true,maxPages:1});
+    expect(samples(departed)).toBe(1);
+    await importHealthKitSleep();
+    expect(samples(departed)).toBe(0);
+    expect(samples(active)).toBe(1);
+    // Once per launch: later foreground captures spend nothing on it.
+    insert(departed,"synthetic-departed-again");
+    await importHealthKitSleep();
+    expect(samples(departed)).toBe(1);
   });
 
   it("runs due maintenance for a foreground capture that joins a background wake's capture",async()=>{
