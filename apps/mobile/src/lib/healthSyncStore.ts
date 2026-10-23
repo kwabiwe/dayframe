@@ -792,13 +792,15 @@ export async function keepRecordedHealthTime(
 
 /**
  * Settles queued Health events the person removed from the activity queue (Clear on events the server
- * permanently refused) as `discarded`: the payload is dropped at once and the row is no longer
+ * permanently refused, or parked after repeated server errors) as `discarded`: the payload is dropped at once and the row is no longer
  * unsettled work, so prune and signed-out expiry stop protecting it and its episode (Codex r1 on #549).
  * Every unsettled row the queue removes is settled, including one still `pending_handoff` after a
  * handoff interrupted between the queue write and its bookkeeping, which the next handoff would
  * otherwise enqueue again (Codex r2 on #549); an acknowledged row is left as it is. Only events Clear
- * actually removes reach here (parked Health work it refuses keeps its row). Runs before the queue write, so a crash in between leaves the event queued and its
- * later acknowledgement still lands (acknowledgement overwrites `discarded`).
+ * actually removes reach here. Runs before the queue write, so a crash in between leaves the event queued
+ * and its later acknowledgement still lands (acknowledgement overwrites `discarded`), and a failure fails
+ * Clear with nothing removed. The episode keeps its source revision, so the same facts are not sent
+ * again, while a genuine source change is a new revision with its own delivery.
  */
 export async function discardQueuedHealthDeliveries(
   items: Array<{ owner: HealthCaptureOwner; clientEventId: string }>,

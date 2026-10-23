@@ -115,6 +115,26 @@ export function syncHelpStatus(input: {
 }
 
 /**
+ * Sync help › "Couldn't be sent": what is wrong with these items and what each action does. Items the
+ * server refused as they are and items parked after repeated server errors are both cleared by Clear
+ * (a parked Apple Health event settles its journal delivery first), and Try again sends them all now;
+ * parked items are also still retried every few hours on their own.
+ */
+export function couldntBeSentDetail(input: { permanentFailedCount: number; parkedFailedCount: number }) {
+  const total = nonNegativeCount(input.permanentFailedCount);
+  const parked = Math.min(total, nonNegativeCount(input.parkedFailedCount));
+  const refused = total - parked;
+  const items = (n: number) => `${n} ${n === 1 ? "item" : "items"}`;
+  if (parked === 0) {
+    return `${items(total)} from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes ${total === 1 ? "it" : "them"} from this iPhone.`;
+  }
+  if (refused === 0) {
+    return `${items(total)} from this iPhone kept getting server errors. Dayframe still tries ${total === 1 ? "it" : "them"} every few hours, or you can try again now; clearing removes ${total === 1 ? "it" : "them"} from this iPhone.`;
+  }
+  return `${items(total)} from this iPhone couldn't be sent: ${items(refused)} couldn't be saved, and ${items(parked)} kept getting server errors (Dayframe still tries ${parked === 1 ? "it" : "those"} every few hours). Trying again may help; clearing removes all ${total} from this iPhone.`;
+}
+
+/**
  * Sync help › Places watched: how many saved places iOS is watching and how they were chosen
  * (geofenceSelection.ts, location v3 PR 16b). Counts only, never where the phone is; null while
  * no place is being watched.

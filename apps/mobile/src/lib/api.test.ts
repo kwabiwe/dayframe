@@ -2176,7 +2176,7 @@ describe("mobile API client", () => {
     await expect(readQueue()).resolves.toEqual([]);
   });
 
-  it("offers Try again but not Clear for a parked Health event (Codex r1 on #547)", async () => {
+  it("offers Try again and Clear for a parked Health event beside a refused one", async () => {
     storeBoundSession("session-token");
     asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
       storedQueuedEvent({
@@ -2203,9 +2203,9 @@ describe("mobile API client", () => {
         lastStatusCode: 422
       })
     ]));
-    expect(getQueueDiagnostics(await readQueue())).toMatchObject({ permanentFailedCount: 2, clearableFailedCount: 1 });
-    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1 });
-    expect((await readQueue()).map((item) => item.localId)).toEqual(["healthkit:parked"]);
+    expect(getQueueDiagnostics(await readQueue())).toMatchObject({ permanentFailedCount: 2, parkedFailedCount: 1, clearableFailedCount: 2 });
+    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 2 });
+    await expect(readQueue()).resolves.toEqual([]);
   });
 
   it("keeps timer events strictly ordered and never parks them on server errors", async () => {
