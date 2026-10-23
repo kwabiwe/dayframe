@@ -175,7 +175,8 @@ export async function withCorrectedStayPlaces(
       `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind,
               metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId",
               (metadata ->> 'correctedCategoryChosen')::boolean as chosen
-       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+         and (continuity_status = 'manual' or metadata ? 'setByYou')`,
       [session.workspaceId, session.userId, batch]);
     for (const row of result.rows) {
       const placeMatchKind = row.kind === "saved" && row.placeId ? "saved" : row.kind === "learned" && row.learnedPlaceId ? "learned"

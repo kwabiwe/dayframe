@@ -186,12 +186,21 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const event = await db.query(`select e.suggested_place_id as "placeId" from activity_events e join review_items ri on ri.event_id = e.id
         where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
     expect(event.rows[0].placeId).toBe(homeId);
-    const trip = await db.query(`select from_place_id as "fromPlaceId" from commute_segments where workspace_id = $1 and client_segment_id = 'trip-1'`, [workspaceId]);
-    expect(trip.rows[0].fromPlaceId).toBe(homeId);
-    // A person's correction, as Review's own: replay keeps it, Review names trips and learns names from it.
-    const manual = await db.query(`select client_segment_id as id, continuity_status as status from stay_segments
-        where workspace_id = $1 and client_segment_id in ('seg-a', 'seg-b') order by 1`, [workspaceId]);
-    expect(manual.rows).toEqual([{ id: "seg-a", status: "manual" }, { id: "seg-b", status: "manual" }]);
+    // The person's place, never `manual` (a place you are still at closes when you leave), and the trips either
+    // side are named from it at emission, as for Review's own corrections (Codex r3/r4 on #566).
+    const kept = await db.query(`select client_segment_id as id, continuity_status as status, metadata ->> 'setByYou' as "setByYou"
+        from stay_segments where workspace_id = $1 and client_segment_id in ('seg-a', 'seg-b') order by 1`, [workspaceId]);
+    expect(kept.rows.map((row) => [row.id, row.status === "manual", row.setByYou])).toEqual([["seg-a", false, "true"], ["seg-b", false, "true"]]);
+    const { withCorrectedStayPlaces } = await import("./location-review-semantic-batch");
+    const ids = new Map((await db.query<{ client: string; id: string }>(
+      `select client_segment_id as client, id from stay_segments where workspace_id = $1 and client_segment_id in ('seg-a', 'seg-b')`, [workspaceId])).rows
+      .map((row) => [row.client, row.id] as const));
+    const emitted = await withCorrectedStayPlaces(db, session, [
+      { kind: "commute", clientSegmentId: "trip-1", fromStaySegmentId: "seg-a", toStaySegmentId: "seg-b", fromPlaceId: null, toPlaceId: null,
+        startedAt: at(480), stoppedAt: at(520) }
+    ] as Parameters<typeof withCorrectedStayPlaces>[2], ids);
+    expect(emitted.correctedMoves.has("trip-1")).toBe(true);
+    expect(emitted.segments[0]).toMatchObject({ fromPlaceId: homeId, toPlaceId: homeId });
 
     // A place the person picked, then deleted: replay skips that correction instead of writing a missing place back.
     const { correctLocationTimeline, withTimelineCorrections } = await import("./location-timeline-corrections");

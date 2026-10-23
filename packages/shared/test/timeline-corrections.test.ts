@@ -64,12 +64,6 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(result.find((segment) => segment.clientSegmentId === "t")).toMatchObject({ startedAt: at(58), stoppedAt: at(92), setByYou: true });
   });
 
-  it("starts and ends the trips either side at a place the person set (Codex r2 on #566)", () => {
-    const result = applyTimelineCorrections(segments, [correction({ subject: "place", kind: "place", target: { placeId: SAVED, learnedPlaceId: null } }, 0, 60)], NOW);
-    expect(result.find((segment) => segment.clientSegmentId === "t")).toMatchObject({ fromPlaceId: SAVED });
-    expect(result.find((segment) => segment.clientSegmentId === "t")).not.toHaveProperty("toPlaceId");
-  });
-
   it("leaves out a trip that wasn't one", () => {
     const result = applyTimelineCorrections(segments, [correction({ subject: "trip", kind: "delete" }, 60, 90)], NOW);
     expect(result.map((segment) => segment.clientSegmentId)).toEqual(["a", "b"]);
