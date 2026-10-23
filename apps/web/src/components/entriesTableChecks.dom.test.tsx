@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
@@ -116,5 +116,47 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     const first = screen.getAllByRole("group")[0].getAttribute("aria-label");
     fireEvent.click(screen.getByRole("button", { name: "3 to check" }));
     expect(screen.getAllByRole("group")[0].getAttribute("aria-label")).not.toBe(first);
+  });
+  it("folds an outing onto its stay, says what the answer covers, and decides them together (Codex r1 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const outing = [
+      suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
+        rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } }),
+      suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
+        suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } })
+    ];
+    render(
+      <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={timeline} reviewItems={outing}
+        entries={[]} onChanged={vi.fn(async () => undefined)} onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    expect(screen.getByText(/With its trips: .*Your answer covers them too\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
+  });
+
+  it("brings an answered card back with Undo even after a refresh dropped it, and moves focus on (Codex r1 on #568)", async () => {
+    const props = { capturedNow: new Date(at(12)), categories: [], groupByDay: true, locationTimeline: timeline, entries: [],
+      onChanged: vi.fn(async () => undefined), onDeleteEntries: vi.fn(), onScroll: vi.fn(), scrollContainerRef: vi.fn(), tags: [] };
+    const { rerender } = render(<EntriesTable {...props} reviewItems={reviewItems} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await waitFor(() => expect((document.activeElement as HTMLElement | null)?.dataset.checkKey).toBeTruthy());
+    // A refresh no longer lists it (capped, or decided elsewhere meanwhile); Undo still brings it back.
+    rerender(<EntriesTable {...props} reviewItems={reviewItems.filter((item) => item.id !== PLACE)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("button", { name: "Check Office" })).toBeTruthy();
+  });
+
+  it("keeps Apple Health's check when the location read failed (Codex r1 on #568)", async () => {
+    render(
+      <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={null} reviewItems={reviewItems}
+        checksDay={{ start: new Date(at(0)), end: new Date(at(24)) }}
+        entries={[entry("planning", "Planning", at(11), at(11, 45))]} onChanged={vi.fn(async () => undefined)} onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    expect(await screen.findByRole("button", { name: "Check Sleep" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "3 to check" })).toBeTruthy();
   });
 });

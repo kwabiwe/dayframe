@@ -86,7 +86,7 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
   const correct = (onCorrect && !place.blockIds.length) || (check && row.checkIds.length) ? (
     <div className="timeline-list-actions">
-      {check && row.checkIds.length ? <CheckToggle expanded={check.expanded} label={label} onToggle={check.onToggle} /> : null}
+      {check && row.checkIds.length ? <CheckToggle checkKey={row.key} expanded={check.expanded} label={label} onToggle={check.onToggle} /> : null}
       {onCorrect && !place.blockIds.length ? (
         <button aria-label={`Correct ${label}`} className="df-icon-action" data-tip="Correct" onClick={() => onCorrect(place, label)} type="button">
           <DayframeIcon glyph="pencil" size={16} />
@@ -137,9 +137,10 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
 }
 
 /** A row's "?": opens its question under the row. */
-export function CheckToggle({ expanded, label, onToggle }: { expanded: boolean; label: string; onToggle: () => void }) {
+export function CheckToggle({ checkKey, expanded, label, onToggle }: { checkKey: string; expanded: boolean; label: string; onToggle: () => void }) {
   return (
-    <button aria-expanded={expanded} aria-label={`Check ${label}`} className="df-icon-action timeline-check-toggle" data-tip="Check"
+    <button aria-expanded={expanded} aria-label={`Check ${label}`} className="df-icon-action timeline-check-toggle" data-check-key={checkKey}
+      data-tip="Check"
       onClick={onToggle} type="button">
       <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
     </button>

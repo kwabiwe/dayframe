@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { DAYFRAME_APP_ICONS, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -9,6 +9,8 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
   outingMutationFor,
+  outingSummary,
+  type ReviewOuting,
   reviewCardCategory,
   reviewDefaultName,
   reviewMutationFor,
@@ -44,19 +46,41 @@ export function useListChecks({
 }) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
   const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, () => undefined);
+  // As on the deck (Codex r1 on #568): what was answered here, so Undo or a refused save brings it back
+  // even when a refresh no longer lists it; and an answered outing's trips, kept folded while its answer is held.
+  const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
+  const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
+  const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
+  const [seenRestore, setSeenRestore] = useState(0);
+  const loadedIds = useMemo(() => new Set(openItems.map((item) => item.id)), [openItems]);
+  // Adjusting state while rendering: a restore brings back its snapshot; the data listing it again takes over.
+  if (state.restored && state.restored.sequence !== seenRestore) {
+    setSeenRestore(state.restored.sequence);
+    // The answered card, and an outing's trips with it, as the deck brings a whole outing back.
+    const back = [snapshots.get(state.restored.itemId), ...(heldOutings.get(state.restored.itemId) ?? [])]
+      .filter((item): item is ReviewItemRow => Boolean(item) && !loadedIds.has(item!.id));
+    if (back.length) setRevived(new Map([...revived, ...back.map((item) => [item.id, item] as const)]));
+  }
+  if ([...revived.keys()].some((id) => loadedIds.has(id))) setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
+  const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id))], [loadedIds, openItems, revived]);
   // An outing (an unknown stay with its trips there and back) is one "?" on its stay, as on the deck.
-  const outings = useMemo(() => reviewOutings(openItems), [openItems]);
-  const memberIds = useMemo(() => new Set([...outings.values()].flatMap((outing) => outing.members.map((member) => member.id))), [outings]);
-  const itemsById = useMemo(() => new Map(openItems.map((item) => [item.id, item])), [openItems]);
-  const checks = useMemo<ListCheck[]>(() => openItems
+  const outings = useMemo(() => reviewOutings(items), [items]);
+  const memberIds = useMemo(() => new Set([
+    ...[...outings.values()].flatMap((outing) => outing.members.map((member) => member.id)),
+    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, members]) => members.map((member) => member.id))
+  ]), [heldOutings, outings, state.hiddenIds]);
+  const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const checks = useMemo<ListCheck[]>(() => items
     .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id))
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
-  [memberIds, openItems, state.hiddenIds]);
+  [items, memberIds, state.hiddenIds]);
 
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);
     if (!item || (kind === "log" && !reviewWindow(item))) return;
     const outing = outings.get(item.id);
+    setSnapshots((current) => new Map([...current, [item.id, item], ...(outing?.members ?? []).map((member) => [member.id, member] as const)]));
+    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members));
     const span = reviewWindow(item);
     const category = reviewCardCategory(item, undefined, categories);
     const outingMs = outing ? outing.members.reduce((sum, member) => {
@@ -75,7 +99,7 @@ export function useListChecks({
     });
   }, [categories, decide, itemsById, outings]);
 
-  return { answer, checks, clearError, itemsById, state, undo };
+  return { answer, checks, clearError, itemsById, outings, state, undo };
 }
 
 /** "3 to check" at the top of the day's List: each press moves to the next "?" and opens its question. */
@@ -96,10 +120,13 @@ export function CheckQuestionRow({
   clock,
   item,
   onAnswer,
-  onPickPlace
+  onPickPlace,
+  outing
 }: {
   clock: ClockFormat;
   item: ReviewItemRow;
+  /** The trips there and back this answer decides too, as the deck shows them. */
+  outing?: ReviewOuting;
   onAnswer: (kind: ReviewDecisionKind) => void;
   /** Correct the place first (step 13): the suggestion then offers the place you picked. */
   onPickPlace?: () => void;
@@ -117,6 +144,7 @@ export function CheckQuestionRow({
         <div className="timeline-check-question" role="group" aria-label={question}>
           <b>{question}</b>
           <small>{detail}</small>
+          {outing ? <small>With its trips: {outingSummary(outing)}. Your answer covers them too.</small> : null}
           <div className="timeline-check-answers">
             <button className="ui-button ui-button-primary is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
               Log {reviewDefaultName(item)}
@@ -160,7 +188,7 @@ export function CheckRowView({ check, clock, item, row }: {
         <div className="timeline-list-duration-content">{span ? formatDuration(Math.round((span.stopMs - span.startMs) / 1000)) : null}</div>
       </td>
       <td className="px-3 py-3">
-        <div className="timeline-list-actions"><CheckToggle expanded={check.expanded} label={title} onToggle={check.onToggle} /></div>
+        <div className="timeline-list-actions"><CheckToggle checkKey={row.key} expanded={check.expanded} label={title} onToggle={check.onToggle} /></div>
       </td>
     </tr>
   );

@@ -110,7 +110,8 @@ async function saveGroupedTimeEntryDescription(entryIds: string[], description: 
 
 function applyTimelineRegroup(update: () => void) {
   const documentWithTransitions = document as ViewTransitionDocument;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !documentWithTransitions.startViewTransition) {
+  if (typeof window.matchMedia !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+    !documentWithTransitions.startViewTransition) {
     update();
     return;
   }
@@ -219,6 +220,11 @@ function TimelineInlineTimeControl({
 const NO_CORRECTION_PLACES: readonly CorrectionPlace[] = [];
 const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
 
+/** A day with nothing from location: its checks are then rows of their own. */
+function emptyDayTimeline(day: DateRange): LocationTimeline {
+  return { date: "", timeZone: "", dayStart: day.start.toISOString(), dayEnd: day.end.toISOString(), items: [], openTrip: null, gaps: [] };
+}
+
 export function EntriesTable({
   entries,
   categories,
@@ -232,7 +238,8 @@ export function EntriesTable({
   capturedNow = new Date(),
   locationTimeline = null,
   places = NO_CORRECTION_PLACES,
-  reviewItems = NO_REVIEW_ITEMS
+  reviewItems = NO_REVIEW_ITEMS,
+  checksDay = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -250,6 +257,8 @@ export function EntriesTable({
   places?: readonly CorrectionPlace[];
   /** Open suggestions, each a "?" on the day's row it is about (location v4 step 14). */
   reviewItems?: readonly ReviewItemRow[];
+  /** The shown day in day scope, so its checks show without the location read; null otherwise. */
+  checksDay?: DateRange | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -291,8 +300,10 @@ export function EntriesTable({
   const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   const locationRows = useMemo(
-    () => (localTimeReady ? locationListRows(locationTimeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks }) : []),
-    [entries, listChecks.checks, localTimeReady, locationTimeline, nowMs, showEveryPlace]
+    // Without the location read (it failed, or hasn't arrived), the day's checks still show on rows of their own (Codex r1 on #568).
+    () => (localTimeReady ? locationListRows(locationTimeline ?? (checksDay ? emptyDayTimeline(checksDay) : null), entries,
+      { nowMs, showAll: showEveryPlace, checks: listChecks.checks }) : []),
+    [checksDay, entries, listChecks.checks, localTimeReady, locationTimeline, nowMs, showEveryPlace]
   );
   const tripByBlock = useMemo(() => tripsByBlockId(locationTimeline), [locationTimeline]);
   /** The open suggestion a location row's "?" is about, if any. */
@@ -306,7 +317,7 @@ export function EntriesTable({
     if (!checkRows.length) return;
     const at = checkRows.findIndex((row) => row.key === focusedCheck);
     const next = checkRows[(at + 1) % checkRows.length];
-    setFocusedCheck(next.key);
+    applyTimelineRegroup(() => setFocusedCheck(next.key));
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
       .find((element) => element.dataset.locationRow === anchor)
@@ -316,7 +327,9 @@ export function EntriesTable({
   const renderLocationRow = (row: LocationListRow) => {
     const item = checkOf(row);
     const expanded = Boolean(item) && focusedCheck === row.key;
-    const check = item ? { expanded, onToggle: () => setFocusedCheck((current) => current === row.key ? null : row.key) } : undefined;
+    // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
+    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === row.key ? null : row.key)) }
+      : undefined;
     const label = row.kind === "place" ? row.place.name ?? "Unknown place" : "";
     return (
       <Fragment key={row.key}>
@@ -324,16 +337,36 @@ export function EntriesTable({
           ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
           : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
         {item && expanded ? (
-          <CheckQuestionRow clock={clock} item={item}
+          <CheckQuestionRow clock={clock} item={item} outing={listChecks.outings.get(item.id)}
             onAnswer={(kind) => {
-              listChecks.answer(item.id, kind);
-              setFocusedCheck(null);
+              // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
+              const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
+              applyTimelineRegroup(() => {
+                listChecks.answer(item.id, kind);
+                setFocusedCheck(null);
+              });
+              setTimeout(() => focusCheck(following?.key ?? null), 0);
             }}
             onPickPlace={row.kind === "place" && !row.place.blockIds.length ? () => correctPlace(row.place, label) : undefined} />
         ) : null}
       </Fragment>
     );
   };
+  /** Focus a row's "?" by its key, else the chip, else the List. */
+  const focusCheck = (key: string | null) => {
+    const target = (key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null) ??
+      document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current;
+    target?.focus();
+  };
+  // Undo or a refused save brings a "?" back: its toggle takes focus.
+  const restoredKey = listChecks.state.restored
+    ? locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === listChecks.state.restored!.itemId)?.key ?? null
+    : null;
+  const restoredSequence = listChecks.state.restored?.sequence ?? 0;
+  useEffect(() => {
+    if (restoredSequence && restoredKey) setTimeout(() => focusCheck(restoredKey), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per restore
+  }, [restoredSequence]);
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -1146,7 +1179,7 @@ export function EntriesTable({
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
-            message={listChecks.state.notice.label} onAction={listChecks.undo}
+            message={listChecks.state.notice.label} onAction={() => applyTimelineRegroup(() => listChecks.undo())}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>

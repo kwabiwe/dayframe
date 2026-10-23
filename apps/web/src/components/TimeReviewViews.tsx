@@ -571,6 +571,7 @@ export function TimeReviewViews({
             locationTimeline={locationTimeline}
             places={correctionPlaces}
             reviewItems={data.reviewItems}
+            checksDay={state.view === "list" && state.scope === "day" ? ranges.active : null}
             onChanged={refreshData}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
