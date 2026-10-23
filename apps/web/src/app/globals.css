@@ -13961,6 +13961,16 @@ dialog.ui-dialog.df-palette {
   background: color-mix(in oklab, var(--warning) 10%, var(--surface));
 }
 
+/* On a phone the List's table scrolls sideways: the question stays in view, as wide as the screen. */
+@media (max-width: 760px) {
+  .timeline-check-question {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    max-width: calc(100vw - 48px);
+  }
+}
+
 .timeline-check-question small {
   color: var(--text-secondary);
   font-size: 12px;
