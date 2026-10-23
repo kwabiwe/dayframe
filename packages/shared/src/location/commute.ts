@@ -834,7 +834,7 @@ export function deriveCommutes(
     // completed Visit covers, and one that would span a silence over the
     // continuity limit starts where movement was seen.
     startedAtMs = ownVisitCoverEndMs(from, acceptedEvidence, occurredAtMs, ownedByDestination, snapshots, startedAtMs, stoppedAtMs, config);
-    startedAtMs = movementSupportedStartMs(to, acceptedEvidence, occurredAtMs, speedOf, ownedByDestination, snapshots,
+    startedAtMs = movementSupportedStartMs(acceptedEvidence, occurredAtMs, speedOf, ownedByDestination, snapshots,
       options.interiorStops ?? [], startedAtMs, stoppedAtMs, config);
     // Time away from a saved or learned place is measured from the place
     // itself (a stay's observed centre can sit well inside its circle), and
@@ -1274,9 +1274,11 @@ function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], o
  * was last seen there before it moved, so the journey starts at the latest of
  * them; time before that is unobserved, not travel. A journey with no
  * movement seen, no observation before its first movement, or a recorded stop
- * before it keeps its start.
+ * before it keeps its start. Readings at the destination's place count (in a
+ * round trip they are the origin's own departure); only readings the
+ * destination stay owns are left out.
  */
-function movementSupportedStartMs(to: StaySegment, evidence: ClassifiedEvidence[],
+function movementSupportedStartMs(evidence: ClassifiedEvidence[],
   occurredAtMs: readonly number[], nativeSpeed: (item: ClassifiedEvidence) => number | null, ownedByDestination: ReadonlySet<string>,
   snapshots: ReadonlySet<ClassifiedEvidence>, interiorStops: readonly StaySegment[], startedAtMs: number, stoppedAtMs: number, config: LocationEngineConfig) {
   const moving = (item: ClassifiedEvidence) => {
@@ -1293,7 +1295,7 @@ function movementSupportedStartMs(to: StaySegment, evidence: ClassifiedEvidence[
   for (const [index, item] of evidence.entries()) {
     const at = occurredAtMs[index];
     if (at < startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null || snapshots.has(item) ||
-      ownedByDestination.has(item.evidence.clientEvidenceId) || evidenceMatchesStay(item, to)) continue;
+      ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
     // Movement at the start itself (the departure reading) shows the journey began there.
     if (moving(item)) {
       movedMs = at;

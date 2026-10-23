@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { deriveCommutes } from "../src/location/commute";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
-import type { ClassifiedEvidence, LocationEvidence, StaySegment } from "../src/location/types";
+import { runLocationEngine } from "../src/location/segmenter";
+import type { ClassifiedEvidence, CommuteSegment, LocationEvidence, StaySegment } from "../src/location/types";
 
 // Location v4 Fix B, without Fix A's stay-keeping in front of it: synthetic equatorial geometry in
 // metres around a made-up origin (an unknown stay's own completed Visit centre), synthetic identities.
@@ -134,5 +135,55 @@ describe("journey start guard (location v4 Fix B)", () => {
     const [move] = journey({ visitEndsAt: null, continuous: true });
     expect(move.startedAt).toBe(at(60));
     expect(move.continuityStatus).toBe("continuous");
+  });
+});
+
+describe("journey start guard in a same-place round trip (full engine)", () => {
+  // Saved home at the origin; a drive out east and back. Synthetic geometry and identities.
+  const HOME_ID = "10000000-0000-4000-8000-0000000000b2";
+  const home = (id: string, minutes: number, patch: Partial<LocationEvidence> = {}) =>
+    reading(id, minutes, 0, 0, { savedPlaceId: HOME_ID, ...patch }).evidence;
+  const away = (id: string, minutes: number, east: number, speed: number) =>
+    reading(id, minutes, 0, east, { speedMetersPerSecond: speed }).evidence;
+  function run(stillAt80: boolean) {
+    const evidence: LocationEvidence[] = [
+      home("home-a", 0), home("home-b", 30), home("home-c", 59),
+      // The departure: an accurate moving fix still inside home's circle.
+      home("departure", 60.1, { speedMetersPerSecond: 8, horizontalAccuracyMeters: 8 }),
+      ...(stillAt80 ? [away("still", 80, 2_400, 0)] : []),
+      away("out-1", 81, 2_600, 8), away("out-2", 82, 1_800, 9), away("out-3", 83, 900, 9),
+      home("home-d", 84), home("home-e", 100), home("home-f", 130), home("home-g", 160)
+    ];
+    const output = runLocationEngine({ priorState: { algorithmVersion: config.algorithmVersion, mode: "idle", activeSegmentId: null,
+      processedEvidenceIds: [], lastProcessedAt: null }, config, processingAt: at(200), acceptedLearnedPlaces: [], evidence,
+      savedPlaces: [{ id: HOME_ID, name: "Home", latitude: 0, longitude: 0, radiusMeters: 100, loggingEnabled: false }] });
+    return output.segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  }
+
+  it("counts the origin's own moving departure, so a still reading after a silence never trims the trip", () => {
+    const [trip] = run(true);
+    expect(trip).toBeDefined();
+    expect(trip.startedAt).toBe(at(60.1));
+  });
+});
+
+describe("journey start guard thresholds", () => {
+  const limit = config.maxContinuityGapMs / 60_000;
+  // Unknown origin ends at 60; still readings `limit` minutes apart, then movement, then the destination.
+  function startWith(movingAt: number) {
+    const from = stay("origin", 0, 60, 0, ["origin-a"]);
+    const to = stay("destination", movingAt + 10, null, 1_500, ["destination-a"]);
+    const evidence = [reading("origin-a", 30, 0, 0), reading("still-1", 60 + limit, 50, 0), reading("still-2", 60 + 2 * limit, 50, 0),
+      reading("moving-1", movingAt, 0, 600, { speedMetersPerSecond: 9 }), reading("moving-2", movingAt + 4, 0, 1_200, { speedMetersPerSecond: 9 }),
+      reading("destination-a", movingAt + 10, 0, 1_500)];
+    return deriveCommutes([from, to], evidence, config, at(400))[0]?.startedAt;
+  }
+
+  it("keeps the start when no silence exceeds the continuity limit", () => {
+    expect(startWith(60 + 3 * limit)).toBe(at(60));
+  });
+
+  it("starts at the last reading before movement once a silence exceeds it", () => {
+    expect(startWith(60 + 3 * limit + 0.5)).toBe(at(60 + 2 * limit));
   });
 });
