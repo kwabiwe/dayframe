@@ -197,10 +197,10 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
-  enqueueTimeEntryDelete,
   enqueueTimeEntryUpdate,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
+  type TimeEntryCommandHoldLease,
   synchroniseTimeEntryCommands
 } from "@/lib/timeEntryOutbox";
 import {
@@ -209,9 +209,14 @@ import {
 } from "@/lib/timeEntrySheetPresentation";
 import {
   createDeletionCoordinator,
-  DELETION_UNDO_MS,
   type PendingDeletion
 } from "@/lib/historyDeletion";
+import {
+  canUndoDeletes,
+  createUndoHoldLease,
+  holdDeletesForOpenedUndoWindow,
+  persistUndoableTimeEntryDeletes
+} from "@/lib/deletionUndoHold";
 import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
@@ -468,6 +473,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     MobileBootstrap | null
   >> | null>(null);
   const deletionCommandIds = useRef(new Map<number, string[]>());
+  // The deletion coordinator's lifetime: ending it drops every Undo hold, even mid-write (Codex r1 on #540).
+  const deletionHoldLease = useRef<TimeEntryCommandHoldLease | null>(null);
   const deletionPreparationInFlight = useRef(false);
   const activeSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
   const calendarSheetDeletionToken = useRef<{ presentationId: number; token: number } | null>(null);
@@ -544,6 +551,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (blankStart) blankTimerStartGate.current.release(blankStart.token);
     deletionCoordinator.current?.dispose();
     deletionCoordinator.current = null;
+    deletionHoldLease.current?.end();
+    deletionHoldLease.current = null;
     deletionCommandIds.current.clear();
     deletionPreparationInFlight.current = false;
     activeSheetDeletionToken.current = null;
@@ -1254,6 +1263,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // A provider teardown cannot safely finish an account-scoped mutation. Treat
     // outstanding Undo work as cancelled so the server copy remains recoverable.
     deletionCoordinator.current?.dispose();
+    deletionHoldLease.current?.end();
   }, []);
 
   useEffect(() => {
@@ -2634,25 +2644,26 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     const bootstrap = snapshot ?? latestData.current;
     if (!bootstrap) return false;
     const owner = timerStopOwner(bootstrap);
-    const commandIds: string[] = [];
+    // Captured now: a sign-out or teardown during the writes ends this lease, not a later one.
+    getDeletionCoordinator();
+    const lease = deletionHoldLease.current as TimeEntryCommandHoldLease;
     try {
-      for (const entry of entries) {
-        const persistedId = persistedTimerEntryId(entry.id);
-        const command = await enqueueTimeEntryDelete({
-          owner,
-          target: persistedId
-            ? { targetEntryId: persistedId }
-            : { optimisticEntryId: entry.id },
-          // A force-quit during Undo keeps the deletion durable. The normal
-          // coordinator releases this hold as soon as the Undo window commits.
-          deliverAfter: new Date(Date.now() + DELETION_UNDO_MS + 1_000).toISOString()
-        });
-        commandIds.push(command.clientCommandId);
-      }
+      // Held until the Undo window, which may open only after the sheet has left, closes
+      // (stability audit timer-1). A force-quit keeps the deletion durable.
+      const commandIds = await persistUndoableTimeEntryDeletes({
+        lease,
+        owner,
+        targets: entries.map((entry) => {
+          const persistedId = persistedTimerEntryId(entry.id);
+          return persistedId ? { targetEntryId: persistedId } : { optimisticEntryId: entry.id };
+        })
+      });
+      // Its owner went away during the writes: the deletes stand, unheld, and nothing is shown.
+      if (lease.ended) return false;
       deletionCommandIds.current.set(token, commandIds);
       return true;
     } catch {
-      await removeTimeEntryCommands(commandIds).catch(() => undefined);
+      if (lease.ended) return false;
       getDeletionCoordinator().invalidate(token);
       Alert.alert(
         entries.length > 1 ? "Blocks not deleted" : "Block not deleted",
@@ -2721,10 +2732,25 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   function getDeletionCoordinator() {
     if (!deletionCoordinator.current) {
+      deletionHoldLease.current?.end();
+      // A hold ran out its bound (an Undo that never opened or closed): that Undo closes as if it
+      // expired, before the delete is delivered.
+      deletionHoldLease.current = createUndoHoldLease((clientCommandId) => {
+        for (const [token, ids] of deletionCommandIds.current) {
+          if (ids.includes(clientCommandId)) deletionCoordinator.current?.commit(token);
+        }
+      });
       deletionCoordinator.current = createDeletionCoordinator<
         TimeEntry,
         MobileBootstrap | null
       >({
+        canRestore: ({ token }) => canUndoDeletes(deletionCommandIds.current.get(token) ?? []),
+        onActivate: ({ activatedAt, token }) => {
+          void holdDeletesForOpenedUndoWindow(
+            deletionCommandIds.current.get(token) ?? [],
+            activatedAt
+          ).catch(() => undefined);
+        },
         onCommit: ({ entries, snapshot, token }) => {
           clearSheetDeletionToken(token);
           commitDeletion(entries, snapshot, token);
@@ -2740,6 +2766,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             entries.map((entry) => entry.id),
             optimisticTimerIds.current
           ));
+        },
+        // The delete already reached the server (it can't while held; belt and braces): no ghost.
+        onRestoreRefused: ({ entries }) => {
+          AccessibilityInfo.announceForAccessibility(
+            entries.length > 1 ? "Blocks already deleted." : "Block already deleted."
+          );
         }
       });
     }

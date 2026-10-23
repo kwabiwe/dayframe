@@ -156,6 +156,28 @@ describe("durable dashboard projection", () => {
     expect(projected.activeEntry?.stoppedAt).toBeNull();
   });
 
+  it("shows a block's own waiting Stop over a snapshot where the next Start ended it later (iphone-timer-sync-2)", () => {
+    // Offline Start A 10:00, Stop A 10:25, Start B 12:00: the queue delivered both Starts, so the server
+    // ended A at 12:00 until A's own Stop arrives and pulls it back (#531).
+    const a = { ...entry("canonical-a"), stoppedAt: "2026-08-22T12:00:00.000Z", durationSeconds: 7200 };
+    const b = { ...entry("canonical-b"), startedAt: "2026-08-22T12:00:00.000Z" };
+    const waiting = projectDurableLocalWork(bootstrap({ activeEntry: b, entries: [b, a] }), work({
+      timerStops: [{ ...pendingStop(), targetEntryId: a.id }],
+      correlations: new Map([[LOCAL_ID, a.id]])
+    }));
+    expect(waiting.activeEntry?.id).toBe(b.id);
+    expect(waiting.entries.find((item) => item.id === a.id)).toMatchObject({
+      stoppedAt: "2026-08-22T10:25:00.000Z",
+      durationSeconds: 1500
+    });
+
+    // Once the Stop is delivered it leaves the outbox and the server's own end shows unchanged.
+    const settledA = { ...a, stoppedAt: "2026-08-22T10:25:00.000Z", durationSeconds: 1500 };
+    const settledServer = bootstrap({ activeEntry: b, entries: [b, settledA] });
+    expect(projectDurableLocalWork(settledServer, work({ correlations: new Map([[LOCAL_ID, a.id]]) })))
+      .toEqual(settledServer);
+  });
+
   it("is deterministic and idempotent for cached relaunch restoration", () => {
     const durable = work({
       activityEvents: [queuedStart()],

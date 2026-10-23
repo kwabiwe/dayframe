@@ -48,7 +48,7 @@ import {
   completeSkippedHealthRepairKind,
   commitHealthCapturePage,
   handoffHealthEvents,
-  pruneAcknowledgedHealthCapture,
+  pruneAcknowledgedHealthCaptureIfDue,
   recordHealthQueryFailure,
   type HealthCaptureOwner,
   type HealthCaptureKind,
@@ -326,6 +326,8 @@ export type HealthCaptureOptions = {
   maxPages?: number;
   /** A background wake's capture: starts after the call instead of joining one already running. */
   fresh?: boolean;
+  /** Runs inside a background wake: skips journal maintenance (the at-most-daily prune). */
+  background?: boolean;
   repairWindow?: { startedAt: string; stoppedAt: string };
 };
 const HEALTH_QUERY_PAGE_SIZE = 250;
@@ -354,9 +356,17 @@ async function captureHealthKind(
   if (!owner) throw new Error("Sign in before capturing Apple Health data.");
   const key = JSON.stringify([owner, kind, options.repairWindow ?? "delta"]);
   const capture = () => captureHealthKindUnsafe(owner, kind, options);
-  return options.fresh
+  const shared = options.fresh
     ? activeHealthCaptures.runFresh(key, capture, options.signal)
     : activeHealthCaptures.run(key, capture, options.observerChange);
+  if (options.background) return shared;
+  try {
+    return await shared;
+  } finally {
+    // A foreground caller may have joined a background wake's capture, which skips maintenance:
+    // ask for the due prune once the shared capture settles (a no-op read when it already ran).
+    await pruneAcknowledgedHealthCaptureIfDue(owner).catch(() => undefined);
+  }
 }
 
 async function captureHealthKindUnsafe(
@@ -398,7 +408,9 @@ async function captureHealthKindUnsafe(
   }
   const healthkit = await loadHealthKit();
   const mappings = await getHealthAutoLogMappings();
-  await pruneAcknowledgedHealthCapture(owner);
+  // Journal maintenance is foreground-owned and at most daily: a background wake's bounded
+  // budget goes to capture and handoff only.
+  if (!options.background) await pruneAcknowledgedHealthCaptureIfDue(owner);
   let importedCount = 0,
     capturedCount = 0,
     deletionCount = 0,
