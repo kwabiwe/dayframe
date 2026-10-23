@@ -471,7 +471,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // The details save in flight (its block, the base it was sent against, and whether it travels
   // keepalive), and the outcome of the last one: a Stop that waited for it, or gave up waiting,
   // uses both (Codex r1 on #539).
-  const detailsInFlightRef = useRef<{ entryId: string; base: TimerDraft; keepalive: boolean } | null>(null);
+  const detailsInFlightRef = useRef<{ entryId: string; base: TimerDraft; keepalive: boolean; version: string | undefined } | null>(null);
   const detailsOutcomeRef = useRef<{ seq: number; entryId: string; conflict: boolean; error: string | null }>(
     { seq: 0, entryId: "", conflict: false, error: null }
   );
@@ -481,6 +481,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // only its version caused; an older one (a hung save a Stop went past) is dropped (Codex r3).
   const detailsWriteSeqRef = useRef(0);
   const keepaliveBytesRef = useRef(0);
+  // An accepted Start's block, still shown optimistically: its server version, once a details
+  // PATCH has returned one (the Start's POST does not). Unknown until then (Codex r4 on #539).
+  const handoffVersionsRef = useRef(new Map<string, string>());
+  /** The version of the block on screen this tab last had from the server, as ISO; none if unknown. */
+  const versionOf = useCallback((entry: TimeEntryRow | null | undefined) => (
+    entry && isOptimisticTimerId(entry.id) ? handoffVersionsRef.current.get(entry.id) : entryVersion(entry)
+  ), []);
   // The pending-details store's owner and session token (lib/timer-draft-store.ts).
   const pendingStoreSessionRef = useRef<{ owner: string; generation: number } | null>(null);
   const pendingOwner = useCallback((snapshot: BootstrapData | null) => {
@@ -523,10 +530,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // that landed since, whatever it changed, makes this one 409. A 409 its version alone caused (the
   // fields still hold the base) is retried once at the new version, if this is still the newest
   // write for a block still on screen; otherwise it is dropped.
+  // A close-time save (`closing`) sends no version, only the field-level `expectedDetails`: the
+  // page cannot retry it, so an unrelated change elsewhere (an activity, a start) must not refuse
+  // it, while a real conflict on the edited fields still does (Codex r4 on #539).
   const saveActiveDetails = useCallback(async (
     snapshot: BootstrapData,
     draft: TimerDraft,
-    explicitBase?: TimerDraft
+    explicitBase?: TimerDraft,
+    options: { closing?: boolean } = {}
   ): Promise<MutationOutcome> => {
     const activeEntry = snapshot.activeEntry!;
     const base = explicitBase ?? baseFor(activeEntry);
@@ -545,7 +556,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // What is being saved is now the base, so an edit made while the save is pending (even one
     // back to the previous text) is newer and survives its acknowledgement (Codex r7).
     setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), activeEntry.id);
-    const inFlight = { entryId: activeEntry.id, base, keepalive: false };
+    const version = options.closing ? undefined : versionOf(activeEntry);
+    const inFlight = { entryId: activeEntry.id, base, keepalive: false, version };
     detailsInFlightRef.current = inFlight;
     // A save that settles after a Stop went ahead without it (`stopTimer`'s deadline) leaves the
     // stopped block alone: no rollback brings it back and its notice is the Stop's.
@@ -554,7 +566,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       detailsOutcomeRef.current = { seq: detailsOutcomeRef.current.seq + 1, entryId: activeEntry.id, conflict, error };
     };
     try {
-      const version = entryVersion(activeEntry);
       let response = await sendDetailsPatch(targetId, withVersion(patch.body, version), (keepalive) => {
         inFlight.keepalive = keepalive;
       });
@@ -583,6 +594,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
       if (!response.ok) throw new Error(await responseError(response, `Unable to save the block details: ${response.status}`));
       const result = (await response.json()) as { updatedAt?: string };
+      const savedVersion = serverVersion(result.updatedAt);
+      if (savedVersion && isOptimisticTimerId(activeEntry.id)) handoffVersionsRef.current.set(activeEntry.id, savedVersion);
       if (result.updatedAt && dataRef.current) {
         commitData(
           applyAuthoritativeActiveEntryVersion(dataRef.current, activeEntry.id, result.updatedAt),
@@ -606,7 +619,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       detailsSavesInFlightRef.current -= 1;
       setIsTimerBusy(false);
     }
-  }, [adoptServerDetails, baseFor, commitData, pendingOwner, sendDetailsPatch, serverEntryId, setTimerDraft, setTimerDraftBase]);
+  }, [adoptServerDetails, baseFor, commitData, pendingOwner, sendDetailsPatch, serverEntryId, setTimerDraft, setTimerDraftBase, versionOf]);
 
   // Leaving the shell: details the running block's real id would still get from autosave are sent
   // now (keepalive when it fits, so the request outlives the page). A block whose Start's POST has
@@ -616,7 +629,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const targetId = entry ? serverEntryId(entry.id) : null;
     const patch = entry ? timerDetailsPatch(draftRef.current, baseFor(entry)) : null;
     if (!entry || !targetId || !patch) return;
-    void sendDetailsPatch(targetId, withVersion(patch.body, entryVersion(entry))).catch(() => undefined);
+    void sendDetailsPatch(targetId, patch.body).catch(() => undefined);
   }, [baseFor, sendDetailsPatch, serverEntryId]);
 
   const startTimer = useCallback(async (
@@ -723,7 +736,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       while (gate.isActive()) {
         const left = deadlineAt - Date.now();
         const inFlight = detailsInFlightRef.current;
-        if (left <= 0 && inFlight && inFlight.entryId === requested.id && serverEntryId(requested.id)) {
+        // Only past a save that carries a version: its late landing is then refused. A save without
+        // one (an accepted Start's first details save) is waited for (Codex r4 on #539).
+        if (left <= 0 && inFlight && inFlight.entryId === requested.id && serverEntryId(requested.id) && inFlight.version) {
           bypassed = { base: inFlight.base };
           break;
         }
@@ -787,7 +802,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       try {
         if (fields.length) {
           ++detailsWriteSeqRef.current;
-          let updateResponse = await sendDetailsPatch(targetId, withVersion(detailsBody(base), entryVersion(activeEntry)));
+          let updateResponse = await sendDetailsPatch(targetId, withVersion(detailsBody(base), versionOf(activeEntry)));
           if (updateResponse.status === 409) {
             const current = (await updateResponse.json().catch(() => null) as { entry?: TimeEntryRow } | null)?.entry;
             // Only this tab's own text is there (the hung save landed first, or only the version
@@ -840,7 +855,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, pendingOwner, refresh, sendDetailsPatch, serverEntryId, setTimerDraft]);
+  }, [baseFor, commitData, pendingOwner, refresh, sendDetailsPatch, serverEntryId, setTimerDraft, versionOf]);
 
   // One Stop at a time: pressing again while one waits or runs joins it (no stacked waiters).
   const stopTimer = useCallback((input: TimerDraftInput = {}): Promise<MutationOutcome> => {
@@ -898,13 +913,16 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
 
-  const updateActiveDetails = useCallback(async (draft: TimerDraft): Promise<MutationOutcome> => {
+  const updateActiveDetails = useCallback(async (
+    draft: TimerDraft,
+    options: { closing?: boolean } = {}
+  ): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     // A block whose Start is still in flight keeps its edits in the draft; the Start saves them to
     // the real block as soon as the server accepts it.
     if (!serverEntryId(snapshot.activeEntry.id)) return { ok: false, error: "The block is still starting." };
-    const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft));
+    const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft, undefined, options));
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
@@ -930,7 +948,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const draft = draftRef.current;
       const patch = timerDetailsPatch(draft, base);
       const inFlight = detailsInFlightRef.current?.entryId === entry.id ? detailsInFlightRef.current : null;
-      const keep = (patch && (inFlight || !fitsKeepalive(JSON.stringify(withVersion(patch.body, entryVersion(entry))))))
+      const keep = (patch && (inFlight || !fitsKeepalive(JSON.stringify(patch.body))))
         || (inFlight && !inFlight.keepalive);
       if (keep) {
         const { owner, generation } = pendingOwner(snapshot);
@@ -941,7 +959,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           savedAt: Date.now()
         }, generation);
       }
-      if (patch && !mutationGateRef.current.isActive()) void updateActiveDetails(draft);
+      if (patch && !mutationGateRef.current.isActive()) void updateActiveDetails(draft, { closing: true });
     }
     const onPageHide = () => flush();
     const onVisibilityChange = () => {
@@ -1264,9 +1282,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
 const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-timer:";
 
-/** The version of a block this tab last had from the server; none for a block still shown optimistically. */
+/**
+ * A server timestamp as ISO. The first page's data arrives from the server component with `Date`
+ * values, later bootstraps as JSON strings; both become the same ISO string (Codex r4 on #539).
+ */
+function serverVersion(value: unknown) {
+  const time = value instanceof Date ? value.getTime() : typeof value === "string" ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
+
+/** The version of a block as the server gave it; none for a block still shown optimistically. */
 function entryVersion(entry: TimeEntryRow | null | undefined) {
-  return entry && !entry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) && entry.updatedAt ? String(entry.updatedAt) : undefined;
+  return entry && !entry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) ? serverVersion(entry.updatedAt) : undefined;
 }
 
 function withVersion(body: Record<string, unknown>, version: string | undefined) {

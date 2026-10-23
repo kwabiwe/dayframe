@@ -78,6 +78,13 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
       const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch>; expectedUpdatedAt?: string };
       const { expectedDetails, expectedUpdatedAt, ...sent } = body;
+      // As the route: a version must be an ISO date-time with an offset.
+      if (expectedUpdatedAt != null && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt)) {
+        server.sent.push(body);
+        server.patchUrls.push(url);
+        server.patchInits.push(init ?? {});
+        return { ok: false, status: 400, json: async () => ({ error: "Invalid expectedUpdatedAt" }) };
+      }
       // Recorded as the details the PATCH asks the block to have: only the fields it sends change
       // (as on the server); the raw request is kept in `sent`.
       const before = server.entry;
@@ -150,7 +157,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
 // These tests wait on the real 650 ms autosave debounce and deferred requests, several times each.
 vi.setConfig({ testTimeout: 20_000 });
 
-const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
+const { AppShellRuntimeProvider, STOP_WAIT_DEADLINE_MS, useAppShellRuntime } = await import("./AppShellRuntime");
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 beforeEach(() => {
@@ -170,6 +177,7 @@ beforeEach(() => {
   server.dead = false;
   server.dropHeld = false;
   server.landsAfterClose = false;
+  initialPageData = null;
   window.localStorage.clear();
   window.sessionStorage.clear();
 });
@@ -182,6 +190,9 @@ afterEach(() => {
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 const activitiesOpen = () => screen.queryByRole("listbox", { name: "Activities" }) !== null;
 
+/** The first page's data as the server component hands it over (null: as a later bootstrap). */
+let initialPageData: ((data: BootstrapData) => BootstrapData) | null = null;
+
 /** Loads `entry` as the shell does on a page load, then renders the bar. */
 async function renderShell(entry: TimeEntryRow | null) {
   server.entry = entry;
@@ -192,7 +203,10 @@ async function renderShell(entry: TimeEntryRow | null) {
     refresh = () => runtime.refresh({ force: true });
     stop = () => runtime.stopTimer();
     const { hydrate: load } = runtime;
-    useEffect(() => load(bootstrap(server.entry)), [load]);
+    useEffect(() => {
+      const page = bootstrap(server.entry);
+      load(initialPageData ? initialPageData(page) : page);
+    }, [load]);
     return runtime.shellData ? <PersistentTimerBar /> : null;
   }
   const { unmount } = render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
@@ -920,6 +934,87 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.stops).toEqual(["active"]);
   });
 
+  it("Codex r4 #1: the first page's Date versions are sent as ISO, before any bootstrap replaces them", async () => {
+    initialPageData = (page) => {
+      const asDate = (row: TimeEntryRow) => ({ ...row, updatedAt: new Date(row.updatedAt) as unknown as string });
+      return {
+        ...page,
+        activeEntry: page.activeEntry ? asDate(page.activeEntry) : null,
+        entries: page.entries.map(asDate),
+        dayEntries: page.dayEntries.map(asDate),
+        weekEntries: page.weekEntries.map(asDate),
+        historyEntries: page.historyEntries.map(asDate)
+      };
+    };
+    server.holdNext = "bootstrap";
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"), { timeout: 2_000 });
+    expect(server.sent[0]).toMatchObject({ expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(input.value).toBe("Fix bug more");
+    // A dirty Stop at that version also goes through.
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(server.completed?.description).toBe("Fix bug more later");
+    server.release?.();
+  });
+
+  it("Codex r4 #2: behind an accepted Start's first details save (no version yet) Stop waits, and its text stays final", async () => {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.release).not.toBeNull());
+    const releaseStart = server.release!;
+    server.release = null;
+    await user.keyboard(" x");
+    // The POST is accepted; the edits made meanwhile go to the real block and that save is held.
+    server.holdNext = "patch";
+    await act(async () => { releaseStart(); });
+    await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.click(stopButton());
+    // No deadline bypass past a save without a version.
+    await wait(STOP_WAIT_DEADLINE_MS + 800);
+    expect(server.stops).toEqual([]);
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 3_000 });
+    expect(server.completed?.description).toBe("Plan");
+    // Stop's own write carried the version that first save returned.
+    expect(server.sent.at(-1)).toMatchObject({ description: "Plan", expectedUpdatedAt: expect.any(String) });
+    await wait(500);
+    expect(server.completed?.description).toBe("Plan");
+  });
+
+  it("Codex r4 #3: a close-time save survives an unrelated change elsewhere (no version, field-level check only)", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    // Another device switches the activity; this tab has not refreshed.
+    server.entry = { ...server.entry!, categoryId: "write", categoryName: "Writing", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent[0]).not.toHaveProperty("expectedUpdatedAt");
+    await waitFor(() => expect(server.entry).toMatchObject({ description: "Fix bug more", categoryId: "write" }));
+  });
+
+  it("Codex r4 #3: a close-time save still refuses a description changed elsewhere", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await wait(300);
+    expect(server.entry?.description).toBe("Changed elsewhere");
+  });
+
   it("Codex r3 #1: a revert plus an activity change before Stop stays final when the hung save lands after Stop", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
@@ -993,7 +1088,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await user.keyboard("{End} more");
     expect(server.patches).toEqual([]);
     act(() => { window.dispatchEvent(new Event("pagehide")); });
-    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) }]);
+    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" } }]);
     expect(keepalive()).toEqual([true]);
     await wait(1_000);
     // The debounce does not send it a second time (that copy would be refused as stale), and the

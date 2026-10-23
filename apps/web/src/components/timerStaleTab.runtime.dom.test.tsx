@@ -170,7 +170,8 @@ async function openTab() {
 
 /** Each PATCH body without its version (asserted on its own where it matters). */
 const bodies = () => server.patches.map((patch) => {
-  const { expectedUpdatedAt: _version, ...body } = patch.body as Record<string, unknown>;
+  const body = { ...(patch.body as Record<string, unknown>) };
+  delete body.expectedUpdatedAt;
   return body;
 });
 
