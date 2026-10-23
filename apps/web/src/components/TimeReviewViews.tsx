@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, resolveActivityIcon, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -32,6 +32,8 @@ import {
 import {
   calendarBlockLaneInsets,
   calendarBracketRailPx,
+  calendarBlockDetailLine,
+  calendarBlockDurationLabel,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
@@ -774,6 +776,11 @@ export function CalendarReview({
   // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
   // one shown day (none across midnight), and each part's place in it for its block's name. Drawn
   // from the stored blocks, so a resize draft moves its block but not the bracket until it is saved.
+  // Narrow columns show the activity's icon instead of words (location v4 C6).
+  const categoryGlyphs = useMemo(
+    () => new Map(categories.map((category) => [category.id, resolveActivityIcon(category).glyph])),
+    [categories]
+  );
   const calendarBrackets = useMemo(() => {
     const byDay = new Map<string, NamedPatternBracket[]>();
     const parts = new Map<string, string>();
@@ -1692,7 +1699,7 @@ export function CalendarReview({
                     const durationSeconds = calendarDurationSeconds(entry, activeDraft, day, capturedNow);
                     const density = getTimeBlockDensity({
                       durationSeconds,
-                      height: semanticBlockPositionStyle.height
+                      height: visualBlockGeometry.height
                     });
                     const blockKey = calendarBlockKey(entry.id, day);
                     return {
@@ -1732,8 +1739,7 @@ export function CalendarReview({
                     mode: "full",
                     offsetFraction: 0,
                     widthFraction: 1,
-                    zIndex: 0,
-                    textDensity: "full"
+                    zIndex: 0
                   } satisfies TimeBlockLane;
                   const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
                   const isResizing = resizingId === entry.id;
@@ -1764,7 +1770,6 @@ export function CalendarReview({
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
                         entry.categoryId ? "df-block" : "is-uncategorized",
-                        lane.textDensity === "none" ? "has-no-text is-compact-overlap" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
@@ -1817,14 +1822,15 @@ export function CalendarReview({
                         }}
                         onMouseDown={(event) => event.preventDefault()}
                       >
-                        {density.showCombinedPrimary && lane.textDensity !== "none" ? (
-                          <CalendarBlockPrimaryLine entry={displayEntry} />
-                        ) : null}
-                        {density.showSecondary && lane.textDensity !== "none" ? (
-                          <span className="calendar-entry-secondary-line tabular">
-                            {calendarBlockSecondaryLine(displayEntry, capturedNow, clock)}
+                        <CalendarBlockTitleLine capturedNow={capturedNow} entry={displayEntry} />
+                        {density.showSecondary ? (
+                          <span className="calendar-entry-detail-line tabular">
+                            {calendarBlockDetailLine(displayEntry, capturedNow, clock)}
                           </span>
                         ) : null}
+                        <span className="calendar-entry-glyph" aria-hidden="true">
+                          <DayframeIcon glyph={categoryGlyphs.get(entry.categoryId ?? "") ?? resolveActivityIcon({ name: entry.categoryName }).glyph} size={12} />
+                        </span>
                       </button>
                       {showInlineAction ? (
                         <button
@@ -1982,32 +1988,22 @@ export function CalendarReview({
   );
 }
 
-function CalendarBlockPrimaryLine({
+/**
+ * Every block's one label line (location v4 C6): its title and its real length, "Coffee 4m",
+ * whatever its drawn height. The full description, activity, tags and times are in its name.
+ */
+function CalendarBlockTitleLine({
+  capturedNow,
   entry
 }: {
+  capturedNow: Date;
   entry: Parameters<typeof calendarBlockPrimaryParts>[0];
 }) {
-  const { category, description, firstTag, hiddenTagCount } = calendarBlockPrimaryParts(entry);
+  const { description } = calendarBlockPrimaryParts(entry);
   return (
-    <span className="calendar-entry-primary-line">
-      <span className="calendar-entry-description">{description}</span>
-      {category || firstTag ? (
-        <span className="calendar-entry-primary-metadata">
-          {category ? (
-            <>
-              <span className="calendar-entry-separator"> · </span>
-              <span className="calendar-entry-category">{category}</span>
-            </>
-          ) : null}
-          {firstTag ? (
-            <>
-              <span className="calendar-entry-separator"> · </span>
-              <span className="calendar-entry-tag">#{firstTag}</span>
-              {hiddenTagCount ? <span className="calendar-entry-tag-count"> +{hiddenTagCount}</span> : null}
-            </>
-          ) : null}
-        </span>
-      ) : null}
+    <span className="calendar-entry-title-line">
+      <span className="calendar-entry-title">{description}</span>{" "}
+      <span className="calendar-entry-length tabular">{calendarBlockDurationLabel(entry, capturedNow)}</span>
     </span>
   );
 }
@@ -2055,7 +2051,7 @@ function calendarBlockStyle(
     );
   }
   const durationMinutes = Math.max(1, endMinutes - startMinutes);
-  const minimumHeight = minimumTimeBlockHeight(rowHeight);
+  const minimumHeight = minimumTimeBlockHeight();
   const top = Math.min(calendarHeight - minimumHeight, Math.max(0, (startMinutes / 60) * rowHeight));
   const height = Math.min(calendarHeight - top, Math.max(minimumHeight, (durationMinutes / 60) * rowHeight));
   const continuation = calendarBlockContinuationEdges({

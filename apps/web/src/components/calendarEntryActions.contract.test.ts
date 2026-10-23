@@ -107,12 +107,14 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).not.toContain("dayframe-date-time");
   });
 
-  it("keeps the CSS-only Calendar text hierarchy and narrow-container fallback", () => {
-    expect(styles).toMatch(/\.calendar-entry-description \{[^}]*font-weight:\s*650;/s);
-    expect(styles).toMatch(/\.calendar-entry-category \{[^}]*font-weight:\s*400;/s);
-    expect(styles).toMatch(/\.calendar-entry-tag \{[^}]*font-weight:\s*700;/s);
-    expect(styles).toMatch(/\.calendar-entry-primary-metadata,[\s\S]*\.calendar-entry-tag-count \{[^}]*color:\s*color-mix\(in srgb, var\(--foreground\) 68%, var\(--surface\)\);/s);
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 111px\)[\s\S]*\.calendar-entry-primary-metadata \{[^}]*display:\s*none;/s);
+  it("keeps the Calendar title hierarchy and the icon-only narrow column (location v4 C6)", () => {
+    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*font-size:\s*12\.5px;[^}]*font-weight:\s*700;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.is-tiny \.calendar-entry-title-line \{[^}]*font-size:\s*11px;/s);
+    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*font-size:\s*11px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 33\.98px\)[\s\S]*?\.calendar-entry-detail-line \{[^}]*display:\s*none;[\s\S]*?\.calendar-entry-glyph \{[^}]*display:\s*grid;/s);
+    // The retired structured metadata line and its 111 px fallback are gone.
+    expect(styles).not.toContain("calendar-entry-primary-metadata");
+    expect(styles).not.toContain("calendar-entry-tag-count");
   });
 
   it("routes active edits through the shell mutation and keeps List ownership", () => {

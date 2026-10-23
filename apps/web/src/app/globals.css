@@ -2045,12 +2045,12 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 2px;
+  gap: 0;
   overflow: hidden;
   border: 0;
   border-radius: inherit;
   background: transparent;
-  padding: 8px 10px;
+  padding: 3px 6px 0;
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -2067,8 +2067,12 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   outline-offset: 1px;
 }
 
-.calendar-entry-primary-line,
-.calendar-entry-secondary-line {
+/* Calendar titles at every zoom (location v4 C6, mock-ups #web-grid): every block is at least one
+   16 px label line tall and prints its title and real length ("Coffee 4m"); from 34 px a detail line
+   ("Deep work · 10:45–12:30"); a column under 34 px wide shows the activity icon only. Text takes
+   the block's own colour (on-block on activity fills). */
+.calendar-entry-title-line,
+.calendar-entry-detail-line {
   display: block;
   width: 100%;
   min-width: 0;
@@ -2077,39 +2081,25 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   white-space: nowrap;
 }
 
-.calendar-entry-primary-line {
-  color: var(--foreground);
-  font-weight: 400;
-}
-
-.calendar-entry-description {
-  font-weight: 650;
-}
-
-.calendar-entry-primary-metadata,
-.calendar-entry-separator,
-.calendar-entry-category,
-.calendar-entry-tag,
-.calendar-entry-tag-count {
-  color: color-mix(in srgb, var(--foreground) 68%, var(--surface));
-}
-
-.calendar-entry-category {
-  font-weight: 400;
-}
-
-.calendar-entry-tag {
+.calendar-entry-title-line {
+  font-size: 12.5px;
   font-weight: 700;
+  line-height: 17px;
 }
 
-.calendar-entry-tag-count {
-  font-weight: 500;
+.calendar-entry-length,
+.calendar-entry-detail-line {
+  font-weight: 600;
+  opacity: 0.85;
 }
 
-.calendar-entry-secondary-line {
-  color: color-mix(in srgb, var(--foreground) 72%, var(--surface));
+.calendar-entry-detail-line {
   font-size: 11px;
-  font-weight: 550;
+  line-height: 14px;
+}
+
+.calendar-entry-glyph {
+  display: none;
 }
 
 .calendar-start-again {
@@ -2169,9 +2159,21 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   }
 }
 
-@container calendar-time-block (max-width: 111px) {
-  .calendar-entry-primary-metadata {
+@container calendar-time-block (max-width: 33.98px) {
+  .calendar-entry-primary {
+    padding: 0;
+  }
+
+  .calendar-entry-title-line,
+  .calendar-entry-detail-line {
     display: none;
+  }
+
+  .calendar-entry-glyph {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
   }
 }
 
@@ -2230,36 +2232,24 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   opacity: 1;
 }
 
-.calendar-time-block.is-short .calendar-entry-primary-line {
-  font-size: 11px;
-  line-height: 1.15;
-}
-
-.calendar-time-block.is-short .calendar-entry-primary {
-  align-content: center;
-  gap: 0;
-  padding: 2px 7px;
-}
-
 .calendar-time-block.is-tiny .calendar-entry-primary {
-  padding: 1px 7px;
+  align-content: center;
+  padding-top: 0;
 }
 
-.calendar-time-block.is-tiny .calendar-entry-primary-line {
-  font-size: 10.5px;
+.calendar-time-block.is-tiny .calendar-entry-title-line {
+  font-size: 11px;
+  line-height: 15px;
 }
 
-.calendar-time-block.can-direct-resize .calendar-entry-primary {
-  padding-block: 10px;
-  line-height: 1.15;
-}
-
-.calendar-time-block.has-inline-action-slot .calendar-entry-primary {
-  padding-right: 31px;
-}
-
-.calendar-time-block.is-short.has-inline-action-slot .calendar-entry-primary {
-  padding-right: 29px;
+/* Room for the hover-only Play only where a pointer can hover and the column is wide; a narrower
+   title runs to the edge and Play sits over its end while hovered (location v4 C6). */
+@media (hover: hover) and (pointer: fine) {
+  @container calendar-time-block (min-width: 112px) {
+    .calendar-time-block.has-inline-action-slot .calendar-entry-primary {
+      padding-right: 31px;
+    }
+  }
 }
 
 @media (max-width: 640px) {
@@ -5947,16 +5937,6 @@ dialog.ui-dialog.df-range-custom {
   }
 }
 
-.calendar-entry-primary-line,
-.calendar-entry-secondary-line {
-  font-size: 11px;
-  line-height: 1.2;
-}
-
-.calendar-time-block.is-short .calendar-entry-primary-line,
-.calendar-time-block.is-tiny .calendar-entry-primary-line {
-  font-size: 11px;
-}
 .calendar-compact-editor,
 .time-entry-quick-editor-modal {
   --web-control-height: 44px;
@@ -9209,19 +9189,8 @@ dialog.ui-dialog.df-palette {
 
 /* Everything drawn on a solid block uses its measured on-block colour; metadata at 80 %. */
 .calendar-time-block.df-block .calendar-entry-primary,
-.calendar-time-block.df-block .calendar-entry-primary-line,
-.calendar-time-block.df-block .calendar-entry-description,
 .calendar-time-block.df-block .calendar-start-again {
   color: var(--on-block);
-}
-
-.calendar-time-block.df-block .calendar-entry-primary-metadata,
-.calendar-time-block.df-block .calendar-entry-separator,
-.calendar-time-block.df-block .calendar-entry-category,
-.calendar-time-block.df-block .calendar-entry-tag,
-.calendar-time-block.df-block .calendar-entry-tag-count,
-.calendar-time-block.df-block .calendar-entry-secondary-line {
-  color: color-mix(in srgb, var(--on-block) 80%, transparent);
 }
 
 .calendar-time-block.df-block:hover:not(.is-selected):not(.is-resizing) {

@@ -8,7 +8,10 @@ const timeline = readFileSync(fileURLToPath(new URL("./TimeReviewViews.tsx", imp
 describe("Calendar in Blocks contract", () => {
   it("draws every line and control on a solid block in its on-block colour", () => {
     expect(styles).toMatch(/\.calendar-time-block\.df-block \.calendar-entry-primary,[\s\S]*?\.calendar-time-block\.df-block \.calendar-start-again \{[^}]*color: var\(--on-block\);/);
-    expect(styles).toMatch(/\.calendar-time-block\.df-block \.calendar-entry-category,[\s\S]*?\{[^}]*color: color-mix\(in srgb, var\(--on-block\) 80%, transparent\);/);
+    // Location v4 C6: the title, length and detail lines inherit the on-block colour (no separate
+    // metadata colours); the length and detail line are at 85 % opacity.
+    expect(styles).toMatch(/\.calendar-entry-length,\s*\.calendar-entry-detail-line \{[^}]*opacity: 0\.85;/);
+    expect(styles).not.toMatch(/\.calendar-entry-title-line \{[^}]*color:/);
   });
 
   it("layers Review suggestions above entries' lanes but below a hovered, selected or resizing entry; the now line runs behind every block", () => {

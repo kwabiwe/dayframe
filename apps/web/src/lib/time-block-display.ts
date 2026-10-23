@@ -1,14 +1,12 @@
 import {
-  layoutTimeIntervals,
-  type TimeIntervalLayoutMode,
-  type TimeIntervalTextDensity,
+  CALENDAR_BLOCK_LABEL,
+  calendarBlockLabelTier,
+  layoutCalendarBlockColumns,
   type ClockFormat
 } from "@dayframe/shared";
 import { timeEntryCategoryLabel } from "@/lib/display";
 import { dateTimeLocal, formatDuration, formatTime } from "@/lib/format";
 
-const shortBlockMinutes = 15;
-const minimumClickableBlockHeight = 18;
 const calendarBlockVisualGapPx = 1;
 const calendarBlockLaneGapPx = 1;
 const calendarBlockOuterInsetPx = 8;
@@ -18,10 +16,11 @@ export const resizeDragThresholdPx = 6;
 export type TimeBlockDensity = {
   canDirectResize: boolean;
   canShowInlineAction: boolean;
+  /** Under 22 px: the title line uses the smaller label size. */
   isTiny: boolean;
+  /** Under 34 px: one line, "Title 11m". */
   isShort: boolean;
-  showAnyText: boolean;
-  showCombinedPrimary: boolean;
+  /** From 34 px: a detail line ("Activity · 10:45–12:30") under the title. */
   showSecondary: boolean;
 };
 
@@ -43,11 +42,10 @@ export type CalendarBlockPrimaryParts = {
 export type TimeBlockLane = {
   laneCount: number;
   laneIndex: number;
-  mode: TimeIntervalLayoutMode;
+  mode: "full" | "lane";
   offsetFraction: number;
   widthFraction: number;
   zIndex: number;
-  textDensity: TimeIntervalTextDensity;
 };
 
 export function calendarBlockVisualGeometry({
@@ -116,10 +114,12 @@ export function canShowTimeBlockInlineAction({
   );
 }
 
-export function minimumTimeBlockHeight(pixelsPerHour: number) {
-  return Math.max(minimumClickableBlockHeight, (shortBlockMinutes / 60) * pixelsPerHour);
+/** Every block is drawn at least one label line tall (location v4 C6), whatever the zoom. */
+export function minimumTimeBlockHeight() {
+  return CALENDAR_BLOCK_LABEL.webMinimumHeight;
 }
 
+/** What a block shows at its drawn height: always its title line, a detail line from 34 px. */
 export function getTimeBlockDensity({
   durationSeconds,
   height
@@ -127,17 +127,14 @@ export function getTimeBlockDensity({
   durationSeconds: number;
   height: number;
 }): TimeBlockDensity {
-  const isTiny = height < 24;
-  const isShort = height < 40;
+  const tier = calendarBlockLabelTier({ height, width: Number.POSITIVE_INFINITY });
 
   return {
     canDirectResize: height >= 48,
     canShowInlineAction: height >= 24,
-    isTiny,
-    isShort,
-    showAnyText: height >= 18,
-    showCombinedPrimary: height >= 18,
-    showSecondary: durationSeconds > 0 && height >= 48
+    isTiny: tier.compactText,
+    isShort: tier.lines === 1,
+    showSecondary: durationSeconds > 0 && tier.lines === 2
   };
 }
 
@@ -146,8 +143,7 @@ export function timeBlockDensityClassNames(density: TimeBlockDensity) {
     density.isTiny ? "is-tiny" : "",
     density.isShort ? "is-short" : "",
     density.canDirectResize ? "can-direct-resize" : "",
-    density.canShowInlineAction ? "can-show-inline-action" : "",
-    density.showAnyText ? "" : "has-no-text"
+    density.canShowInlineAction ? "can-show-inline-action" : ""
   ];
 }
 
@@ -184,6 +180,34 @@ export function calendarBlockSecondaryLine(
   return `${formatDuration(durationSeconds)} (${formatTime(entry.startedAt, clock)} – ${finish})`;
 }
 
+/** The whole entry's length (a running one up to now), as its label prints it: "11m", "1h 45m". */
+export function calendarBlockDurationLabel(
+  entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">,
+  capturedNow: Date
+) {
+  const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
+  return formatDuration(Math.max(0, Math.floor(
+    (new Date(stoppedAt).getTime() - new Date(entry.startedAt).getTime()) / 1_000
+  )));
+}
+
+/**
+ * The detail line from 34 px (location v4 C6): "Deep work · 10:45–12:30". A block titled by its
+ * activity (no description) shows the times alone; a running one ends "now".
+ */
+export function calendarBlockDetailLine(
+  entry: CalendarBlockDisplayEntry,
+  capturedNow: Date,
+  clock: ClockFormat
+) {
+  const { category } = calendarBlockPrimaryParts(entry);
+  const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
+  const dayOffset = localDayOffset(entry.startedAt, stoppedAt);
+  const finish = entry.stoppedAt ? `${formatTime(stoppedAt, clock)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
+  const times = `${formatTime(entry.startedAt, clock)}–${finish}`;
+  return category ? `${category} · ${times}` : times;
+}
+
 function localDayOffset(startedAt: string, stoppedAt: string) {
   const start = dateTimeLocal(startedAt).slice(0, 10);
   const finish = dateTimeLocal(stoppedAt).slice(0, 10);
@@ -192,29 +216,25 @@ function localDayOffset(startedAt: string, stoppedAt: string) {
   return Math.max(0, Math.round((finishDate - startDate) / 86_400_000));
 }
 
+/**
+ * Side-by-side columns over the blocks' drawn extents (location v4 C6): a short block's one-line
+ * minimum that reaches into the next block puts the two side by side, as in Apple Calendar. No
+ * inset overlay and no text-less lanes: every column keeps its title.
+ */
 export function layoutTimeBlockLanes(
   blocks: ReadonlyArray<{ key: string; top: number; height: number }>
 ) {
   const lanes = new Map<string, TimeBlockLane>();
-  for (const layout of layoutTimeIntervals(
-    blocks.map((block) => ({
-      id: block.key,
-      startedAt: block.top,
-      stoppedAt: block.top + block.height
-    })),
-    0,
-    // Rendered minimum heights still need collision lanes even when the
-    // underlying entries are sequential. These values are pixels, not time.
-    { minimumOverlapMs: 0 }
+  for (const column of layoutCalendarBlockColumns(
+    blocks.map((block) => ({ id: block.key, top: block.top, bottom: block.top + block.height }))
   )) {
-    lanes.set(layout.id, {
-      laneCount: layout.laneCount,
-      laneIndex: layout.laneIndex,
-      mode: layout.mode,
-      offsetFraction: layout.offsetFraction,
-      widthFraction: layout.widthFraction,
-      zIndex: layout.zIndex,
-      textDensity: layout.textDensity
+    lanes.set(column.id, {
+      laneCount: column.columnCount,
+      laneIndex: column.columnIndex,
+      mode: column.columnCount > 1 ? "lane" : "full",
+      offsetFraction: column.offsetFraction,
+      widthFraction: column.widthFraction,
+      zIndex: column.zIndex
     });
   }
   return lanes;

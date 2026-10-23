@@ -52,8 +52,9 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain("<CalendarEntryCompactEditor");
     expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
-    expect(timeline).toContain('className="calendar-entry-primary-line"');
-    expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
+    expect(timeline).toContain('className="calendar-entry-title-line"');
+    expect(timeline).toContain('className="calendar-entry-detail-line tabular"');
+    expect(timeline).toContain('className="calendar-entry-glyph" aria-hidden="true"');
   });
 
   it("preserves a distinct running state and compact hover action", () => {
