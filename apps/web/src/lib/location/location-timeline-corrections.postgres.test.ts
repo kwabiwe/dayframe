@@ -188,6 +188,10 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(event.rows[0].placeId).toBe(homeId);
     const trip = await db.query(`select from_place_id as "fromPlaceId" from commute_segments where workspace_id = $1 and client_segment_id = 'trip-1'`, [workspaceId]);
     expect(trip.rows[0].fromPlaceId).toBe(homeId);
+    // A person's correction, as Review's own: replay keeps it, Review names trips and learns names from it.
+    const manual = await db.query(`select client_segment_id as id, continuity_status as status from stay_segments
+        where workspace_id = $1 and client_segment_id in ('seg-a', 'seg-b') order by 1`, [workspaceId]);
+    expect(manual.rows).toEqual([{ id: "seg-a", status: "manual" }, { id: "seg-b", status: "manual" }]);
 
     // A place the person picked, then deleted: replay skips that correction instead of writing a missing place back.
     const { correctLocationTimeline, withTimelineCorrections } = await import("./location-timeline-corrections");

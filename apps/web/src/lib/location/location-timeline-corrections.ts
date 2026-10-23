@@ -233,8 +233,10 @@ async function applyToSegment(
   switch (request.kind) {
     case "place":
       await client.query(
+        // A person's correction, as Review's own change of place: `manual`, so replay keeps it, Review names the
+        // trips either side from it and learns names against it (Codex r3 on #566).
         `update stay_segments
-            set place_id = $4, learned_place_id = $5,
+            set place_id = $4, learned_place_id = $5, continuity_status = 'manual',
                 metadata = metadata || jsonb_build_object('placeMatchKind', $6::text, 'setByYou', true, 'correctionSpan', $7::jsonb),
                 updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
@@ -262,7 +264,7 @@ async function applyToSegment(
     case "times":
       // Trusted table name from the subject.
       await client.query(
-        `update ${table} set started_at = $4, stopped_at = $5,
+        `update ${table} set started_at = $4, stopped_at = $5, continuity_status = 'manual',
                 metadata = metadata || jsonb_build_object('setByYou', true, 'correctionSpan', $6::jsonb), updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
         [...scope, iso(request.startedAt), iso(request.stoppedAt), spanJson]);
