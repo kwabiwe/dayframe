@@ -627,12 +627,12 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 
 ## Native Location status and signal journal (iPhone)
 
-Automated: `nativeMainThreadBlocking.contract.test.ts` (banned synchronous calls on main-thread native paths: throwaway `CLLocationManager`s, `locationServicesEnabled()` off a background queue, authorisation reads outside the delegate callback, journal reads or `sync` in `status()`, journal rewrites on append), `bash scripts/validate-ios-location-signals.sh` (compiles and runs `DayframeLocationSignalStore` on macOS: append-only writes, duplicates, a cut-short record, a journal unreadable until unlock, retention, remove, a busy store), and a clean native iOS build (adding the store file needs `pod install`). The Simulator cannot prove locationd contention.
+Automated: `nativeMainThreadBlocking.contract.test.ts` (banned synchronous calls on main-thread native paths: throwaway `CLLocationManager`s, `locationServicesEnabled()` off a background queue, authorisation reads outside the delegate callback, journal reads or `sync` in `status()`, journal rewrites on append), `bash scripts/validate-ios-location-signals.sh` (compiles and runs `DayframeLocationSignalStore` on macOS: append-only writes, duplicates, a cut-short record, a multibyte torn tail, out-of-order expiry, a journal unreadable until unlock, retention, remove, a busy store), and a clean native iOS build (adding the store file needs `pod install`). The Simulator cannot prove locationd contention.
 
 Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN`:
 
 1. The "Dayframe location diagnostics" export from Settings shows the right accuracy and `locationServicesEnabled: true` a few seconds after a fresh launch, and again after changing the permission in iOS Settings and returning.
-2. Turn Location Services off system-wide, return to Dayframe: a new export shows `locationServicesEnabled: false`; turn it back on and a new export shows `true`.
+2. Turn Location Services off system-wide, return to Dayframe: a new export shows `locationServicesEnabled: false` (allow up to a minute when location monitoring is off); turn it back on and a new export shows `true`.
 3. A normal day with location on: native signals still drain (pending count returns to 0 after the app runs), and arrivals and departures appear as before.
 4. No new hang or freeze report naming `DayframeLocationVisitService` in Sync help's "Pauses and crashes" or App Store Connect over several days.
 

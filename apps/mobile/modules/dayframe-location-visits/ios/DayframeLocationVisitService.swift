@@ -20,6 +20,10 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
   private var accuracyAuthorization: CLAccuracyAuthorization?
   private var locationServicesEnabled: Bool?
   private var locationServicesGeneration = 0
+  /// Uptime of the last background ask. With no manager yet, no callback reports a system-wide
+  /// Location Services switch, so `status()` asks again at most once a minute.
+  private var locationServicesAskedAt: TimeInterval?
+  private static let locationServicesRefreshSeconds: TimeInterval = 60
   private lazy var significantChangesAvailable = CLLocationManager.significantLocationChangeMonitoringAvailable()
 
   public func startMonitoring(restoredForRelaunch: Bool = false) {
@@ -51,7 +55,10 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
   /// added by the module off the main thread (`DayframeLocationVisitsModule.status()`).
   public func status() -> [String: Any] {
     let enabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
-    if locationServicesEnabled == nil && locationServicesGeneration == 0 { refreshLocationServicesEnabled() }
+    let uptime = ProcessInfo.processInfo.systemUptime
+    if locationServicesAskedAt.map({ uptime - $0 >= Self.locationServicesRefreshSeconds }) ?? true {
+      refreshLocationServicesEnabled()
+    }
     return [
       "enabled": enabled,
       "authorizationStatus": authorizationStatus.map { authorizationName($0) } ?? "unknown",
@@ -72,6 +79,7 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
   /// Asks off the main thread; only the newest answer is kept.
   private func refreshLocationServicesEnabled() {
     locationServicesGeneration += 1
+    locationServicesAskedAt = ProcessInfo.processInfo.systemUptime
     let generation = locationServicesGeneration
     Self.locationStateQueue.async {
       let enabled = CLLocationManager.locationServicesEnabled()

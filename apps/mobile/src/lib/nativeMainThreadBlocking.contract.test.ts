@@ -37,12 +37,33 @@ function functionBody(source: string, name: string) {
   return body;
 }
 
-/** Bodies of closures handed to a non-main queue's `async`. */
-function backgroundQueueClosures(source: string) {
-  return closuresAfter(source, /\b[\w.]+\.async\s*\{/).filter((_, index) => {
-    const receivers = [...codeOnly(source).matchAll(/\b([\w.]+)\.async\s*\{/g)].map((match) => match[1]!);
-    return !/(^|\.)main$/.test(receivers[index]!);
-  });
+const mainActorHop = /\bTask\s*(\(\s*priority:[^)]*\))?\s*\{(?=\s*@MainActor)|MainActor\.run\s*(\([^)]*\))?\s*\{|DispatchQueue\.main\.(async|sync)\w*\s*(\([^)]*\))?\s*\{/;
+
+/** `code` with every nested main-actor hop's closure blanked, so work queued back to main never counts. */
+function withoutMainActorHops(code: string) {
+  let result = code;
+  for (const body of closuresAfter(code, mainActorHop)) result = result.replace(body, body.replace(/[^\n]/g, " "));
+  return result;
+}
+
+/**
+ * Bodies of closures handed to a serial queue this file creates (`let name = DispatchQueue(label: …)`)
+ * or to a global queue, minus any nested main-actor hop. Any other receiver, such as an alias of the
+ * main queue, never counts as background work.
+ */
+export function backgroundQueueClosures(source: string) {
+  const code = codeOnly(source);
+  const ownQueues = new Set(
+    [...code.matchAll(/\blet\s+(\w+)\s*(?::\s*DispatchQueue\s*)?=\s*DispatchQueue\(\s*label:/g)].map((match) => match[1]!)
+  );
+  const marker = /\b([\w.]+)\.async\s*\{|\bDispatchQueue\.global\([^)]*\)\.async\s*\{/g;
+  const receivers = [...code.matchAll(marker)].map((match) => match[1]);
+  return closuresAfter(source, marker)
+    .filter((_, index) => {
+      const receiver = receivers[index];
+      return receiver === undefined || ownQueues.has(receiver.split(".").pop()!);
+    })
+    .map(withoutMainActorHops);
 }
 
 function occurrences(code: string, pattern: RegExp) {
@@ -50,10 +71,12 @@ function occurrences(code: string, pattern: RegExp) {
 }
 
 // Throwaway managers make a synchronous locationd round trip on whichever thread builds them. Only
-// the listed, once-per-process paths may build one; each needs a reason.
-const throwawayManagerAllowlist: Record<string, string> = {
-  "modules/dayframe-tracking-notice/ios/DayframeTrackingNoticeService.swift":
-    "applicationWillTerminate: once, as the process exits; never a refresh path"
+// the listed once-per-process function may build one, exactly once; each entry needs a reason.
+const throwawayManagerAllowlist: Record<string, { function: string; reason: string }> = {
+  "modules/dayframe-tracking-notice/ios/DayframeTrackingNoticeService.swift": {
+    function: "applicationWillTerminate",
+    reason: "once, as the process exits; never a refresh path"
+  }
 };
 
 describe("native main-thread blocking guard", () => {
@@ -64,6 +87,25 @@ describe("native main-thread blocking guard", () => {
     expect(functionBody(read(visitServicePath), "configuredManager")).toMatch(/\bCLLocationManager\(\)/);
     expect(builders.map(({ path }) => path).filter((path) => path !== visitServicePath && !throwawayManagerAllowlist[path]))
       .toEqual([]);
+    for (const [path, allowed] of Object.entries(throwawayManagerAllowlist)) {
+      const source = read(path);
+      expect(occurrences(codeOnly(source), /\bCLLocationManager\(\)/), path).toBe(1);
+      expect(occurrences(functionBody(source, allowed.function), /\bCLLocationManager\(\)/), path).toBe(1);
+    }
+  });
+
+  it("counts only work on this file's own or a global queue, never main-actor hops or main aliases", () => {
+    const own = "let stateQueue = DispatchQueue(label: \"q\")\n";
+    const call = "CLLocationManager.locationServicesEnabled()";
+    const counted = (body: string) =>
+      backgroundQueueClosures(own + body).reduce((total, closure) => total + occurrences(closure, /\.locationServicesEnabled\(\)/), 0);
+    expect(counted(`stateQueue.async { let x = ${call} }`)).toBe(1);
+    expect(counted(`DispatchQueue.global(qos: .utility).async { let x = ${call} }`)).toBe(1);
+    expect(counted(`let alias = DispatchQueue.main\nalias.async { let x = ${call} }`)).toBe(0);
+    expect(counted(`DispatchQueue.main.async { let x = ${call} }`)).toBe(0);
+    expect(counted(`stateQueue.async { Task { @MainActor in let x = ${call} } }`)).toBe(0);
+    expect(counted(`stateQueue.async { DispatchQueue.main.async { let x = ${call} } }`)).toBe(0);
+    expect(counted(`stateQueue.async { MainActor.run { let x = ${call} } }`)).toBe(0);
   });
 
   it("asks CLLocationManager.locationServicesEnabled() only on a background queue", () => {
@@ -112,6 +154,6 @@ describe("native main-thread blocking guard", () => {
     expect(appendUnlocked).toMatch(/seekToEnd\(\)/);
     // A full rewrite on append happens only to compact an expired journal or a passed cap.
     expect(occurrences(appendUnlocked, /persistUnlocked\(/)).toBe(2);
-    expect(appendUnlocked).toMatch(/if expiredOldestRecordUnlocked\(\) \{\s*persistUnlocked/);
+    expect(appendUnlocked).toMatch(/if hasExpiredRecordUnlocked\(\) \{\s*persistUnlocked/);
   });
 });

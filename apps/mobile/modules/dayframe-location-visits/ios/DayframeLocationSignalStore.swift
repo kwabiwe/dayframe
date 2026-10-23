@@ -48,6 +48,9 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
   private var storageErrorCode: String?
   private var cached: [DayframeLocationSignal]?
   private var cachedIds: Set<String> = []
+  /// The earliest `occurredAt` in `cached`: file order is not time order (a deferred Visit can
+  /// arrive after newer fixes), so expiry is checked against this, not the first record.
+  private var earliestOccurredAt: Date?
 
   init(
     fileURL: URL? = nil,
@@ -126,10 +129,11 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
   }
 
   private func appendUnlocked(_ signal: DayframeLocationSignal) {
-    if expiredOldestRecordUnlocked() {
+    if hasExpiredRecordUnlocked() {
       persistUnlocked(prune(loadedUnlocked()))
     }
-    guard !cachedIds.contains(signal.id), let fileURL else { return }
+    // A record already past retention (a late, deferred callback) would be pruned on the next read.
+    guard isRetained(signal), !cachedIds.contains(signal.id), let fileURL else { return }
     guard let record = try? encoder.encode(signal) else { return }
     // Each record starts a new line, so a record cut short by an earlier interrupted write stays
     // on its own line and is skipped when read, never joined to this one.
@@ -145,8 +149,11 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
         try line.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         try (fileURL as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
       }
-      cached?.append(signal)
-      cachedIds.insert(signal.id)
+      if cached != nil {
+        cached?.append(signal)
+        cachedIds.insert(signal.id)
+        earliestOccurredAt = [earliestOccurredAt, DayframeSignalTime.parse(signal.occurredAt)].compactMap { $0 }.min()
+      }
       storageErrorCode = nil
     } catch {
       storageErrorCode = "storage_write_failed"
@@ -157,10 +164,11 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
     }
   }
 
-  /// Compaction on append is rare: only when the oldest record has expired.
-  private func expiredOldestRecordUnlocked() -> Bool {
-    guard let first = loadedUnlocked().first else { return false }
-    return !isRetained(first)
+  /// Compaction on append is rare: only once the earliest record has expired.
+  private func hasExpiredRecordUnlocked() -> Bool {
+    guard !loadedUnlocked().isEmpty else { return false }
+    guard let earliestOccurredAt else { return true }
+    return earliestOccurredAt < now().addingTimeInterval(-retentionSeconds)
   }
 
   private func loadedUnlocked() -> [DayframeLocationSignal] {
@@ -170,15 +178,23 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
     if FileManager.default.fileExists(atPath: fileURL.path) {
       // A journal that exists but cannot be read yet (protected data before the first unlock after a
       // restart) is not cached as empty: the next call reads it again, so its records are never hidden.
-      guard let data = try? Data(contentsOf: fileURL),
-            let text = String(data: data, encoding: .utf8) else { return [] }
-      loaded = text.split(separator: "\n").compactMap { line in
-        try? decoder.decode(DayframeLocationSignal.self, from: Data(line.utf8))
+      guard let data = try? Data(contentsOf: fileURL) else { return [] }
+      // Records are split on raw newline bytes and decoded one by one, so a record torn by an
+      // interrupted write (even inside a multibyte character) loses only itself.
+      loaded = data.split(separator: UInt8(ascii: "\n")).compactMap { line in
+        try? decoder.decode(DayframeLocationSignal.self, from: Data(line))
       }
     }
-    cached = loaded
-    cachedIds = Set(loaded.map(\.id))
+    setCacheUnlocked(loaded)
     return loaded
+  }
+
+  private func setCacheUnlocked(_ signals: [DayframeLocationSignal]) {
+    cached = signals
+    cachedIds = Set(signals.map(\.id))
+    // A record whose time cannot be parsed counts as expired, as `prune` treats it.
+    let dates = signals.map { DayframeSignalTime.parse($0.occurredAt) ?? .distantPast }
+    earliestOccurredAt = dates.min()
   }
 
   private func persistUnlocked(_ signals: [DayframeLocationSignal]) {
@@ -190,8 +206,7 @@ final class DayframeLocationSignalStore: @unchecked Sendable {
     do {
       try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
       try (fileURL as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
-      cached = signals
-      cachedIds = Set(signals.map(\.id))
+      setCacheUnlocked(signals)
       storageErrorCode = nil
     } catch {
       storageErrorCode = "storage_write_failed"

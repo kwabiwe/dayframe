@@ -66,6 +66,46 @@ do {
   check(restored.read(limit: 100).map(\.id) == ["complete", "after-recovery"], "journal survives recreation")
 }
 
+// A record torn inside a multibyte character loses only itself (Codex r1 on #543): records are split
+// on raw newline bytes, never decoded as one string.
+do {
+  let url = journalURL()
+  let named = DayframeLocationSignal(
+    id: "multibyte", kind: "visit", occurredAt: DayframeSignalTime.seconds(base), endedAt: nil,
+    latitude: nil, longitude: nil, horizontalAccuracyMeters: nil, metadata: ["label": "caf\u{e9} \u{2014} \u{1F3E0}"]
+  )
+  var contents = try JSONEncoder().encode(named)
+  var torn = Data("\n".utf8)
+  torn.append(try JSONEncoder().encode(signal("torn")))
+  torn.append(contentsOf: [0x22, 0xE2, 0x80]) // a quote, then two of an em dash's three bytes
+  contents.append(torn)
+  try contents.write(to: url)
+  let store = DayframeLocationSignalStore(fileURL: url, now: { base })
+  check(store.count() == 1, "a torn multibyte tail keeps the complete record")
+  store.append(signal("after-torn"))
+  check(store.read(limit: 100).map(\.id) == ["multibyte", "after-torn"], "appends after a torn tail are read")
+  check(store.read(limit: 1).first?.metadata["label"] == "caf\u{e9} \u{2014} \u{1F3E0}", "multibyte text round-trips")
+}
+
+// File order is not time order: a late, already-expired callback is never written, and an earlier
+// record that expires behind a newer first record is compacted away on append (Codex r1 on #543).
+do {
+  let url = journalURL()
+  var clock = base
+  let store = DayframeLocationSignalStore(fileURL: url, retentionSeconds: 60, now: { clock })
+  store.append(signal("fresh-first"))
+  store.append(signal("expired-late", at: base.addingTimeInterval(-61)))
+  check(store.count() == 1, "an expired incoming record is not queued")
+  check(!String(decoding: bytes(url), as: UTF8.self).contains("expired-late"), "an expired incoming record is not written")
+  store.append(signal("older-second", at: base.addingTimeInterval(-30)))
+  clock = base.addingTimeInterval(45)
+  store.append(signal("third", at: clock))
+  _ = store.lastErrorCode() // flush the queue without pruning
+  let onDisk = String(decoding: bytes(url), as: UTF8.self)
+  check(!onDisk.contains("older-second") && onDisk.contains("fresh-first") && onDisk.contains("third"),
+        "the earliest record is compacted on append even when it is not first")
+}
+
 // A journal that cannot be read yet (protected data before the first unlock) is read again later,
 // never cached as empty, so its records are not hidden or compacted away.
 do {
