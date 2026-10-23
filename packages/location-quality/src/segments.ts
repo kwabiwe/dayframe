@@ -7,7 +7,7 @@ import type {
   MotionTravelMode,
   StaySegment
 } from "@dayframe/shared";
-import { ISO_INSTANT } from "./answerKey";
+import { isIsoInstant } from "./answerKey";
 
 /**
  * The scored view of an engine segment: kinds, times, anonymous place labels ("P4") and journey
@@ -100,7 +100,7 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
     if (!raw || typeof raw !== "object") throw fail("shape");
     const item = raw as Record<string, unknown>;
     if (item.kind !== "stay" && item.kind !== "commute") throw fail("kind");
-    const instant = (value: unknown) => typeof value === "string" && ISO_INSTANT.test(value) && Number.isFinite(Date.parse(value));
+    const instant = isIsoInstant;
     if (!instant(item.startedAt)) throw fail("startedAt");
     const out: Record<string, unknown> = { kind: item.kind, startedAt: item.startedAt };
     for (const field of SEGMENT_STRING_FIELDS) {

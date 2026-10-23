@@ -48,7 +48,11 @@ export function realPathOf(absolute: string, depth = 0): string {
     try {
       stat = fs.lstatSync(next);
     } catch {
-      return path.join(current, ...parts.slice(index));
+      // Nothing below a missing folder can be a link, but a ".." after it would climb back to
+      // where one could be: refuse rather than guess.
+      const rest = parts.slice(index);
+      if (rest.includes("..")) throw new Error("A private path may not use \"..\" after a folder that does not exist.");
+      return path.join(current, ...rest);
     }
     if (stat.isSymbolicLink()) {
       const target = fs.readlinkSync(next);
@@ -142,7 +146,8 @@ async function main() {
       dropMotion: values["drop-motion"],
       receivedUntil: values["received-until"] ? Date.parse(values["received-until"]) : undefined
     });
-    segments = replay(engine, evidence, places, values.at ?? values.to);
+    // The same allowlist as a saved run, so a replay can never carry more than one would.
+    segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to));
   }
   if (values["save-segments"]) {
     fs.writeFileSync(assertOutsideRepository(values["save-segments"]), `${JSON.stringify(segments, null, 1)}\n`);

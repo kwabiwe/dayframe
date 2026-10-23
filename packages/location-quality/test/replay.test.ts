@@ -57,6 +57,8 @@ describe("evidence rows", () => {
     expect(all[0].savedPlaceId).toBe(placeIdFromLabel("P4"));
     expect(all[1].metadata).toEqual({ motionActivity: "automotive", motionConfidence: "high", motionContinuation: true });
     expect(all[1].latitude).toBeNull();
+    expect(() => parseEvidenceRows(evidenceRow({ n: 9, occurredAt: "Mon, 02 Mar 2026 06:00:00 GMT (Somewhere Street)" }), projection, { algorithmVersion: "v" }))
+      .toThrow(/^Evidence row 9 has an invalid timestamp\.$/);
     const trimmed = parseEvidenceRows(text, projection, { algorithmVersion: "v", dropMotion: true, receivedUntil: Date.parse("2026-03-02T06:30:00Z") });
     expect(trimmed.map((e) => e.clientEvidenceId)).toEqual(["e00001"]);
   });

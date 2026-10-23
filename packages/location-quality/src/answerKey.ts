@@ -71,11 +71,23 @@ export type AnswerKey = {
 };
 
 /** An ISO 8601 instant with a zone ("2026-10-15T13:00:00.000+01:00", "…Z"), nothing else. */
-export const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+export const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+/** A strict ISO instant that names a real calendar time (no 30 February rolled into March). */
+export function isIsoInstant(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = ISO_INSTANT.exec(value);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  const [, year, month, day, hour, minute, second = "0", offsetHour = "0", offsetMinute = "0"] = match;
+  const daysInMonth = new Date(Date.UTC(Number(year), Number(month), 0)).getUTCDate();
+  return Number(month) >= 1 && Number(month) <= 12 && Number(day) >= 1 && Number(day) <= daysInMonth
+    && Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59
+    && Number(offsetHour) <= 23 && Number(offsetMinute) <= 59;
+}
 
 /** Epoch seconds of a strict ISO instant; a bad value is reported without quoting it. */
 export const toSeconds = (iso: unknown, what = "the answer key"): number => {
-  const ms = typeof iso === "string" && ISO_INSTANT.test(iso) ? Date.parse(iso) : Number.NaN;
+  const ms = isIsoInstant(iso) ? Date.parse(iso) : Number.NaN;
   if (!Number.isFinite(ms)) throw new Error(`Invalid timestamp in ${what}.`);
   return ms / 1000;
 };

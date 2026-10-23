@@ -1,4 +1,5 @@
 import type { LocationEvidence, SavedPlaceForMatching } from "@dayframe/shared";
+import { isIsoInstant } from "./answerKey";
 
 /**
  * Pipe-separated evidence and place rows in relative metres. A private export (see README) keeps
@@ -65,6 +66,10 @@ export function parseEvidenceRows(text: string, projection: Projection, options:
     const [n, kind, occurredAt, endedAt, receivedAt, x, y, accuracy, speed, course, place, simulated, activity, confidence,
       continuation, open, callbackAt, authorization, accuracyAuthorization, accepted, timeZone, geofence, altitude] = line.split("|");
     if (accepted !== "true") continue;
+    // Times go into the engine's segments verbatim: only strict ISO instants, never free text.
+    for (const time of [occurredAt, receivedAt, ...(endedAt ? [endedAt] : []), ...(callbackAt ? [callbackAt] : [])]) {
+      if (!isIsoInstant(time)) throw new Error(`Evidence row ${n} has an invalid timestamp.`);
+    }
     if (options.dropMotion && kind === "motion_activity") continue;
     if (options.receivedUntil !== undefined && Date.parse(receivedAt) > options.receivedUntil) continue;
     const metadata: Record<string, unknown> = {};

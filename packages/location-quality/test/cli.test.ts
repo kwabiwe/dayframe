@@ -37,6 +37,8 @@ describe("privacy guard", () => {
     fs.symlinkSync(path.join(link, "packages", "..", "not-yet-written-private.json"), hop);
     expect(() => assertOutsideRepository(hop)).toThrow(/outside the repository/);
     expect(() => assertOutsideRepository(path.join(link, "packages", "..", "x.json"))).toThrow(/outside the repository/);
+    // A missing folder followed by "..": refused, since the walk cannot see past it.
+    expect(() => assertOutsideRepository(`${scratch}${path.sep}missing${path.sep}..${path.sep}into-repo${path.sep}private.json`)).toThrow(/does not exist/);
   });
 });
 
@@ -54,6 +56,7 @@ describe("saved runs", () => {
     const coded = sanitizeQualitySegments([{ ...exampletonSegments[1], reason: "somewhere_street_12", mode: "automotive", status: "somewhere" }]);
     expect(coded[0]).toMatchObject({ reason: null, mode: "automotive", status: "other" });
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stoppedAt: "2026-99-99T99:99:99Z" }])).toThrow(/invalid stoppedAt/);
+    expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stoppedAt: "2026-02-30T06:00:00Z" }])).toThrow(/invalid stoppedAt/);
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stops: -1 }])).toThrow(/invalid stops/);
     expect(() => sanitizeQualitySegments({})).toThrow(/JSON array/);
   });
