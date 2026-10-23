@@ -10,6 +10,7 @@ import {
 } from "./location-replay-batching";
 import {
   deriveCommutes,
+  deriveOpenTrip,
   outingQualifies,
   isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
@@ -256,7 +257,22 @@ export async function replayLocationEvidence(
     });
   const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "commute_persistence", "completed");
-  await persistOpenTrip(client, session, options.deviceId, output.openTrip ?? null, stayIds, options.processingAt);
+  // The journey in progress, re-derived when a decided origin keeps a different end than the engine's.
+  const engineStays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+  const engineOrigin = output.openTrip ? engineStays.find((stay) => stay.clientSegmentId === output.openTrip!.fromStaySegmentId) : undefined;
+  const engineConfig = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
+  const openTripChanged = await persistOpenTrip(client, session, options.deviceId, output.openTrip ?? null, stayIds, options.processingAt,
+    engineOrigin ? {
+      engineStoppedAt: engineOrigin.stoppedAt ?? null,
+      rederive: (persistedStoppedAt) => {
+        const decided = engineStays.map((stay) => stay === engineOrigin
+          ? { ...stay, stoppedAt: persistedStoppedAt, locationOnlyStoppedAt: undefined, stopLowerBoundAt: null, stopUpperBoundAt: null } : stay);
+        const rebuilt = deriveOpenTrip(decided, output.acceptedEvidence, engineConfig, options.processingAt);
+        return rebuilt?.fromStaySegmentId === engineOrigin.clientSegmentId ? rebuilt : null;
+      }
+    } : null);
+  // Today's "Travelling since…" line is something the app shows: its change asks the phone to refresh.
+  if (openTripChanged && options.semanticChanges) options.semanticChanges.count += 1;
   observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
   await replaceEvidenceLinks(
@@ -864,52 +880,69 @@ async function persistStays(
 /**
  * The journey in progress (location v4 step 5) lives only under its origin stay's `openTrip` metadata
  * key: never a commute row, so nothing logs, reviews or reports it. Times, counts, metres and the mode
- * only; never coordinates. Each replay stamps it with its own time (`asOf`): a replay older than the
- * stored journey changes nothing. Otherwise it clears every other recent stay's key and writes this
- * one's, whether or not the origin is a decided stay (only that key changes); the journey never starts
- * before the origin's persisted end (a corrected stay keeps its boundary), and a persisted origin that
- * is still open holds no journey.
+ * only; never coordinates. Each replay stamps the key with its own time (`asOf`), and a replay with no
+ * journey leaves a stamp alone (a tombstone on the device's latest stay), so a replay older than the
+ * stored stamp changes nothing. Only stays begun within `OPEN_TRIP_ORIGIN_LOOKBACK_MS` are read.
+ *
+ * When the origin's persisted end differs from the engine's (a decided stay keeps its boundary), the
+ * journey is derived again against the persisted end (`rederive`); a persisted origin still open holds
+ * none. Returns whether what the app shows changed (a journey appeared, went, or moved its start), for
+ * the reply's refresh signal.
  */
 export async function persistOpenTrip(client: pg.PoolClient, session: RequestSession, deviceId: string,
-  openTrip: OpenTrip | null, stayIds: Map<string, string>, replayedAt: string) {
+  openTrip: OpenTrip | null, stayIds: Map<string, string>, replayedAt: string,
+  origin: { engineStoppedAt: string | null; rederive: (persistedStoppedAt: string) => OpenTrip | null } | null = null) {
   const since = new Date(Date.parse(replayedAt) - OPEN_TRIP_ORIGIN_LOOKBACK_MS).toISOString();
-  const newer = await client.query(
-    `select 1 from stay_segments
-      where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $4::timestamptz
-        and metadata ? 'openTrip' and (metadata -> 'openTrip' ->> 'asOf')::timestamptz > $5::timestamptz
+  const current = (await client.query<{ id: string; trip: Record<string, unknown> }>(
+    `select id, metadata -> 'openTrip' as "trip" from stay_segments
+      where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $4::timestamptz and metadata ? 'openTrip'
+      order by (metadata -> 'openTrip' ->> 'asOf')::timestamptz desc nulls last
       limit 1`,
-    [session.workspaceId, session.userId, deviceId, since, replayedAt]);
-  if (newer.rows.length) return;
-  const originId = openTrip ? stayIds.get(openTrip.fromStaySegmentId) ?? null : null;
-  const origin = originId ? (await client.query<{ stoppedAt: Date | null }>(
-    `select stopped_at as "stoppedAt" from stay_segments where workspace_id = $1 and user_id = $2 and id = $3::uuid`,
-    [session.workspaceId, session.userId, originId])).rows[0] : undefined;
-  const persistedEndMs = origin?.stoppedAt ? new Date(origin.stoppedAt).getTime() : null;
-  const keep = openTrip && originId && persistedEndMs != null ? originId : null;
+    [session.workspaceId, session.userId, deviceId, since])).rows[0];
+  const currentAsOf = typeof current?.trip?.asOf === "string" ? Date.parse(current.trip.asOf) : NaN;
+  if (Number.isFinite(currentAsOf) && currentAsOf > Date.parse(replayedAt)) return false;
+  const shownBefore = current && typeof current.trip?.startedAt === "string" ? `${current.id}:${current.trip.startedAt}` : null;
+
+  let trip = openTrip;
+  const originId = trip ? stayIds.get(trip.fromStaySegmentId) ?? null : null;
+  if (trip && !originId) trip = null;
+  if (trip && originId) {
+    const persisted = (await client.query<{ stoppedAt: Date | null }>(
+      `select stopped_at as "stoppedAt" from stay_segments where workspace_id = $1 and user_id = $2 and id = $3::uuid`,
+      [session.workspaceId, session.userId, originId])).rows[0];
+    const persistedStoppedAt = persisted?.stoppedAt ? new Date(persisted.stoppedAt).toISOString() : null;
+    if (!persistedStoppedAt) trip = null;
+    else if (origin && persistedStoppedAt !== (origin.engineStoppedAt ? new Date(origin.engineStoppedAt).toISOString() : null)) {
+      trip = origin.rederive(persistedStoppedAt);
+    }
+  }
   await client.query(
     `update stay_segments set metadata = metadata - 'openTrip', updated_at = now()
-      where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $5::timestamptz and metadata ? 'openTrip'
-        and ($4::uuid is null or id <> $4::uuid)`,
-    [session.workspaceId, session.userId, deviceId, keep, since]);
-  if (!openTrip || !keep || persistedEndMs == null) return;
-  const startedAt = new Date(Math.max(Date.parse(openTrip.startedAt), persistedEndMs)).toISOString();
-  if (!(Date.parse(openTrip.lastObservedAt) > Date.parse(startedAt))) {
-    await client.query(`update stay_segments set metadata = metadata - 'openTrip', updated_at = now()
-      where workspace_id = $1 and user_id = $2 and id = $3::uuid`, [session.workspaceId, session.userId, keep]);
-    return;
+      where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $4::timestamptz and metadata ? 'openTrip'`,
+    [session.workspaceId, session.userId, deviceId, since]);
+  if (trip && originId) {
+    const stored = {
+      asOf: replayedAt,
+      startedAt: trip.startedAt,
+      lastObservedAt: trip.lastObservedAt,
+      routeSampleCount: trip.routeSampleCount,
+      routeDistanceMeters: trip.routeDistanceMeters,
+      ...(trip.travelMode ? { travelMode: trip.travelMode } : {})
+    };
+    await client.query(
+      `update stay_segments set metadata = jsonb_set(metadata, '{openTrip}', $4::jsonb), updated_at = now()
+        where workspace_id = $1 and user_id = $2 and id = $3::uuid`,
+      [session.workspaceId, session.userId, originId, JSON.stringify(stored)]);
+    return shownBefore !== `${originId}:${trip.startedAt}`;
   }
-  const stored = {
-    asOf: replayedAt,
-    startedAt,
-    lastObservedAt: openTrip.lastObservedAt,
-    routeSampleCount: openTrip.routeSampleCount,
-    routeDistanceMeters: openTrip.routeDistanceMeters,
-    ...(openTrip.travelMode ? { travelMode: openTrip.travelMode } : {})
-  };
+  // No journey: the stamp stays on the device's latest stay, so an older replay cannot bring one back.
   await client.query(
     `update stay_segments set metadata = jsonb_set(metadata, '{openTrip}', $4::jsonb), updated_at = now()
-      where workspace_id = $1 and user_id = $2 and id = $3::uuid`,
-    [session.workspaceId, session.userId, keep, JSON.stringify(stored)]);
+      where id = (select id from stay_segments
+                   where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $5::timestamptz
+                   order by started_at desc, id desc limit 1)`,
+    [session.workspaceId, session.userId, deviceId, JSON.stringify({ asOf: replayedAt }), since]);
+  return shownBefore !== null;
 }
 
 async function persistCommutes(

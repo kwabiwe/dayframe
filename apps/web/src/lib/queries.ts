@@ -306,9 +306,10 @@ export type OpenTripRow = {
 const OPEN_TRIP_FRESH_MS = LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs;
 
 /**
- * The journey replay last saw in progress, from its origin stay's `openTrip` metadata. A journey
- * never runs past `commuteMaximumDurationMs`, so only stays that ended within it, and began within
- * `OPEN_TRIP_ORIGIN_LOOKBACK_MS`, are read (a bounded range of idx_stay_segments_user_time). Stale entries (no replay since the phone went quiet) are not shown.
+ * The journey replay last saw in progress, from its origin stay's `openTrip` metadata (a stamp with no
+ * journey is skipped). Only stays begun within `OPEN_TRIP_ORIGIN_LOOKBACK_MS` are read (a bounded range of
+ * idx_stay_segments_user_time), and the origin's own fields never decide it, so an older replay's rewrite of
+ * the stay cannot hide a newer journey. Stale entries (no replay since the phone went quiet) are not shown.
  */
 export async function getOpenTrip(session: RequestSession, capturedNow: string): Promise<OpenTripRow | null> {
   const result = await query<{ startedAt: string; lastObservedAt: string; fromPlaceId: string | null; travelMode: string | null }>(
@@ -319,11 +320,11 @@ export async function getOpenTrip(session: RequestSession, capturedNow: string):
        from stay_segments sg
       where sg.workspace_id = $1 and sg.user_id = $2 and sg.status <> 'superseded'
         and sg.started_at >= $3::timestamptz - make_interval(secs => $5::double precision / 1000)
-        and sg.stopped_at >= $3::timestamptz - make_interval(secs => $4::double precision / 1000)
-        and sg.metadata ? 'openTrip'
+        and sg.metadata -> 'openTrip' ? 'startedAt'
+        and (sg.metadata -> 'openTrip' ->> 'lastObservedAt')::timestamptz >= $3::timestamptz - make_interval(secs => $4::double precision / 1000)
       order by sg.metadata->'openTrip'->>'lastObservedAt' desc
       limit 1`,
-    [session.workspaceId, session.userId, capturedNow, LOCATION_ENGINE_V2_CONFIG.commuteMaximumDurationMs, OPEN_TRIP_ORIGIN_LOOKBACK_MS]);
+    [session.workspaceId, session.userId, capturedNow, OPEN_TRIP_FRESH_MS, OPEN_TRIP_ORIGIN_LOOKBACK_MS]);
   const row = result.rows[0];
   if (!row || !row.startedAt || !row.lastObservedAt) return null;
   if (Date.parse(capturedNow) - Date.parse(row.lastObservedAt) > OPEN_TRIP_FRESH_MS) return null;

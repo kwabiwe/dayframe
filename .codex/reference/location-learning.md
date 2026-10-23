@@ -230,13 +230,17 @@ Temporal invariants:
   reviewed or reported; `commute_segments` cannot hold it (its destination
   and end are NOT NULL), hence no migration. Bootstrap returns it while its
   latest observation is within the same limit, and the iPhone checks again
-  on the minute. Replay stamps it with its own time (`asOf`): an older replay
-  never overwrites or clears a newer journey (replay's stay rewrite keeps a
-  newer key too); it never starts before the origin's persisted end (a
-  corrected stay keeps its boundary), a persisted origin that is still open
-  holds none, and a short unknown stop a journey reached is inside it (the
-  journey runs from the place before). Reads and cleanup look only at stays
-  begun within 14 days. Replaying the 15–22 Oct week as received every 5
+  on the minute. Replay stamps it with its own time (`asOf`), and a replay
+  with no journey leaves the stamp on the device's latest stay, so an older
+  replay never overwrites, clears or brings back a journey (replay's stay
+  rewrite keeps a newer key too). When a decided origin keeps a different end
+  from the engine's, the journey is derived again against the persisted end
+  (none if it no longer qualifies); a persisted origin that is still open
+  holds none; a short unknown stop a journey reached is inside it (the
+  journey runs from the place before). The bootstrap read never depends on
+  the origin's own fields, and reads and cleanup look only at stays begun
+  within 14 days. A change in what Today shows counts in the reply's
+  `semanticChangeCount`, so the phone refreshes at once. Replaying the 15–22 Oct week as received every 5
   minutes against the Google answer key: of the moments it shows, 80 % are
   travel by Google (precision); of the travel moments with no finished trip
   yet, it shows at 73 % (recall); its start is within 0.3 min of Google's
