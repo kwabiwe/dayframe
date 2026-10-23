@@ -158,14 +158,58 @@ describeWithDatabase("location timeline on disposable PostgreSQL (location v4 st
          from generate_series(1, 3000) as n`, [workspaceId, userId, at(-1_440)]);
     await db.query("analyze stay_segments");
     const client = await db.connect();
+    // Whether each bounded read can use its index (the planner's choice on a small test table is a cost call).
+    const explain = async (sql: string, values: unknown[]) => {
+      await client.query("begin");
+      try {
+        await client.query("set local enable_seqscan = off");
+        return (await client.query<{ "QUERY PLAN": string }>(`explain ${sql}`, values)).rows.map((row) => row["QUERY PLAN"]).join("\n");
+      } finally {
+        await client.query("rollback");
+      }
+    };
     try {
-      const plan = (await client.query<{ "QUERY PLAN": string }>(
-        `explain select s.id from stay_segments s
+      const plan = await explain(
+        `select s.id from stay_segments s
           where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded' and s.client_segment_id is not null
             and s.started_at >= $3::timestamptz and s.started_at < $4::timestamptz and coalesce(s.stopped_at, $5::timestamptz) > $6::timestamptz`,
-        [workspaceId, userId, at(-31 * 1_440), at(1_440), at(6 * 1_440), at(0)])).rows.map((row) => row["QUERY PLAN"]).join("\n");
+        [workspaceId, userId, at(-31 * 1_440), at(1_440), at(6 * 1_440), at(0)]);
       expect(plan).toContain("idx_stay_segments_user_time");
       expect(plan).toMatch(/started_at >= /);
+      // A stay still open 40 days on, and the trip and block-link reads, each through its own index (migration 021).
+      await db.query(
+        `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+         values ($1, $2, 'seg-long-open', 'device-2', 'open', $3, null, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb)`,
+        [workspaceId, userId, at(-40 * 1_440)]);
+      await db.query(
+        `insert into commute_segments (workspace_id, user_id, device_id, client_segment_id, algorithm_version, status, started_at, stopped_at,
+           from_stay_segment_id, to_stay_segment_id, confidence)
+         select $1, $2, 'device-1', 'trip-history-' || n, 'location-v2.0', 'finalised', s.started_at - interval '20 minutes', s.started_at,
+                s.id, s.id, 'medium'
+           from stay_segments s, lateral (select substring(s.client_segment_id from 13)::int as n) k
+          where s.workspace_id = $1 and s.client_segment_id like 'seg-history-%'`, [workspaceId, userId]);
+      await db.query(
+        `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+         select $1, $2, 'location_learning', 'commute_detected', started_at, 'medium', jsonb_build_object('clientSegmentId', client_segment_id)
+           from commute_segments where workspace_id = $1 and client_segment_id like 'trip-history-%'`, [workspaceId, userId]);
+      await db.query("analyze stay_segments; analyze commute_segments; analyze activity_events");
+      const open = await getLocationTimeline(session, { date: "2026-10-23", timeZone: "UTC", now: new Date(at(3 * 1_440 + 600)) });
+      expect(open.items.map((item) => item.id)).toContain("seg-long-open");
+      const tripPlan = await explain(
+        `select c.id from commute_segments c
+          where c.workspace_id = $1 and c.user_id = $2 and c.status <> 'superseded'
+            and c.started_at >= $3::timestamptz and c.started_at < $4::timestamptz and c.stopped_at > $5::timestamptz`,
+        [workspaceId, userId, at(-360), at(1_440), at(0)]);
+      expect(tripPlan).toContain("idx_commute_segments_user_time");
+      expect(tripPlan).toMatch(/started_at >= /);
+      const eventPlan = await explain(
+        `select ae.id from activity_events ae
+          where ae.workspace_id = $1 and ae.user_id = $2
+            and ((ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = any($3::text[]))
+              or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'segmentId' = any($4::text[])))`,
+        [workspaceId, userId, ["trip-history-7", "seg-home"], ["00000000-0000-4000-8000-000000000000"]]);
+      expect(eventPlan).toContain("idx_activity_events_client_segment");
+      expect(eventPlan).toContain("idx_activity_events_segment");
     } finally {
       client.release();
     }

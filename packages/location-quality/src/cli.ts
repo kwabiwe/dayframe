@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { readAnswerKey, toSeconds, type TimelineEntry } from "./answerKey";
-import { parseEvidenceRows, parsePlaceRows, projectionAround } from "./evidenceRows";
+import { parseBroadReadingTimes, parseEvidenceRows, parsePlaceRows, projectionAround } from "./evidenceRows";
 import { renderReport, summary } from "./report";
 import { loadEngine, replay, sharedEngine } from "./replay";
 import { scoreRun } from "./score";
@@ -176,13 +176,17 @@ async function main() {
     const places = parsePlaceRows(readPrivateText(values.places!, ROLES.places), projection)
       .filter((place) => !dropped.has(place.label));
     homePlace ??= places.find((place) => place.role === "home")?.label ?? null;
-    const evidence = parseEvidenceRows(readPrivateText(values.rows!, ROLES.rows), projection, {
+    const rowText = readPrivateText(values.rows!, ROLES.rows);
+    const rowOptions = {
       algorithmVersion: engine.config.algorithmVersion,
       dropMotion: values["drop-motion"],
       receivedUntil: values["received-until"] ? Date.parse(values["received-until"]) : undefined
-    });
+    };
+    const evidence = parseEvidenceRows(rowText, projection, rowOptions);
+    const broadReadingTimes = parseBroadReadingTimes(rowText, { ...rowOptions, minimumAccuracyMeters: engine.config.maxAcceptedHorizontalAccuracyMeters,
+      maximumAccuracyMeters: (engine.config as { tripUnseenObservedAccuracyMeters?: number }).tripUnseenObservedAccuracyMeters ?? 500 });
     // The same allowlist as a saved run, so a replay can never carry more than one would.
-    segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to));
+    segments = sanitizeQualitySegments(replay(engine, evidence, places, values.at ?? values.to, broadReadingTimes));
   }
   if (values["save-segments"]) {
     writePrivateText(values["save-segments"], ROLES["save-segments"], `${JSON.stringify(segments, null, 1)}\n`);

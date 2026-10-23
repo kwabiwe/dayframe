@@ -43,7 +43,7 @@ The primary services are:
 - `apps/web/src/lib/review-mutation-service.ts` for ordinary Review terminal actions;
 - `apps/web/src/lib/location/location-ingest-service.ts` and `location-review-service.ts` for Location V2 evidence, retained-evidence replay, and corrections;
 - `apps/web/src/app/api/time-entries/**` and `apps/web/src/app/api/events/route.ts` for app-facing writes.
-- `apps/web/src/lib/location/location-timeline-service.ts` behind `GET /api/timeline?date=YYYY-MM-DD[&tz=]` for the read-only location timeline (location v4): a day's places, trips with legs and stops, the journey in progress and the gaps, cut in the requested zone. It never returns coordinates, and the bootstrap, time-entries and events contracts are unchanged.
+- `apps/web/src/lib/location/location-timeline-service.ts` behind `GET /api/timeline?date=YYYY-MM-DD[&tz=]` for the read-only location timeline (location v4): a day's places, trips with legs and stops, the journey in progress and the gaps, cut in the requested zone. Its reads are index-backed (migration 021): stays by start time over the 31 days before the day plus open and longer stays, trips by start time, and a block's source event by the segment it names. It never returns coordinates, and the bootstrap, time-entries and events contracts are unchanged.
 
 ## Bounded sync operations
 

@@ -31,8 +31,9 @@ export type LocationEngineConfig = {
   tripUnseenLegMinimumSpeedMps: number;
   tripUnseenLegMaximumSpeedMps: number;
   /**
-   * ...and genuine readings better than this (design §8: cell-only fixes are worse) came in between no
-   * more often than one per `tripUnseenSparseReadingIntervalMs` on average.
+   * ...and genuine accepted readings better than this (design §8: cell-only fixes are worse) came in
+   * between no more often than one per `tripUnseenSparseReadingIntervalMs` on average; a reading too
+   * broad to accept but better than this came in between not at all.
    */
   tripUnseenObservedAccuracyMeters: number;
   tripUnseenSparseReadingIntervalMs: number;
