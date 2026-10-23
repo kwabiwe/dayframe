@@ -727,6 +727,79 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
       await expect(shortcutStop(20)).resolves.toMatchObject({ stopOutcome: "stopped" });
       expect(await timeline()).toEqual([["W", 0, 20], ["X", 30, null]]);
     });
+
+    it("still ends a finished block whose Start came without an origin (Codex r1 on #538)", async () => {
+      // `/api/events` accepts a web Start with no `origin`; the server's own mark makes it a timer block.
+      await processActivityEvent({ occurredAt: at(0), rawPayload: {}, description: "W", source: "manual_app", type: "timer_start" }, session);
+      await webStart(30, "X");
+      await expect(shortcutStop(20)).resolves.toMatchObject({ stopOutcome: "stopped" });
+      expect(await timeline()).toEqual([["W", 0, 20], ["X", 30, null]]);
+    });
+
+    it("never takes the timer mark from client input", async () => {
+      const stop = await processActivityEvent({
+        occurredAt: at(10), rawPayload: { serverTimerStart: true }, source: "manual_app", type: "timer_stop"
+      }, session);
+      const stored = await pool.query<{ rawPayload: Record<string, unknown> }>(
+        `select raw_payload as "rawPayload" from activity_events where id = $1`, [stop.eventId]
+      );
+      expect(stored.rows[0]?.rawPayload).not.toHaveProperty("serverTimerStart");
+    });
+
+    // Codex r1 on #538: grouped edits and batch deletes lock blocks in entry-id order. A Stop or late Start
+    // must lock the blocks covering its moment in that order too, or the two can deadlock. A batch here holds
+    // the lower id; the Stop or Start waits on it holding nothing, so the batch can then take the higher id.
+    async function lockOrderHeldByBatch(arrive: () => Promise<unknown>) {
+      const ids = [randomUUID(), randomUUID()].sort();
+      const [low, high] = ids as [string, string];
+      // The higher id starts first, so start order is the reverse of id order.
+      for (const [id, start, description] of [[high, 0, "H"], [low, 10, "L"]] as const) {
+        const event = await pool.query<{ id: string }>(
+          `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+           values ($1, $2, 'mobile_app', 'timer_start', $3, 'high', '{"serverTimerStart":true}'::jsonb) returning id`,
+          [workspaceId, userId, at(start)]
+        );
+        await pool.query(
+          `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at, created_from_event_id)
+           values ($1, $2, $3, 'mobile_app', 'high', 'confirmed', $4, $5, $6, $7)`,
+          [id, workspaceId, userId, description, at(start), at(60), event.rows[0]!.id]
+        );
+      }
+      const batch = await pool.connect();
+      try {
+        await batch.query("begin");
+        await batch.query("select id from time_entries where id = $1 for update", [low]);
+        const batchPid = (await batch.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+        const arrival = arrive();
+        let waited = false;
+        for (let tries = 0; tries < 200 && !waited; tries += 1) {
+          const waiting = await pool.query(
+            "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+            [batchPid]
+          );
+          waited = waiting.rows.length > 0;
+          if (!waited) await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(waited).toBe(true);
+        // The batch's next lock, in id order. It fails at once if the Stop or Start already holds it.
+        await expect(batch.query("select id from time_entries where id = $1 for update nowait", [high])).resolves.toBeTruthy();
+        await batch.query("commit");
+        await arrival;
+      } finally {
+        await batch.query("rollback").catch(() => undefined);
+        batch.release();
+      }
+    }
+
+    it("a Shortcut Stop locks the blocks covering its moment in entry-id order", async () => {
+      await lockOrderHeldByBatch(() => shortcutStop(20));
+      expect(await timeline()).toEqual([["H", 0, 20], ["L", 10, 20]]);
+    });
+
+    it("a late Shortcut Start locks the blocks covering its moment in entry-id order", async () => {
+      await lockOrderHeldByBatch(() => shortcutStart(20, "S"));
+      expect(await timeline()).toEqual([["H", 0, 20], ["L", 10, 20], ["S", 20, 60]]);
+    });
   });
 });
 

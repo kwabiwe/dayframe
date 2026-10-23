@@ -766,7 +766,11 @@ async function processActivityEventWithClient(
         parsed.occurredAt,
         candidate.confidence,
         // Review decision keys are written only by the server's Review actions (E1).
-        JSON.stringify(withoutServerStopOutcome(withoutServerReviewDecision(parsed.rawPayload))),
+        // Server-owned keys are stripped from client input; a Start the server runs is marked (server-1).
+        JSON.stringify(withServerTimerStart(
+          withoutServerStopOutcome(withoutServerReviewDecision(parsed.rawPayload)),
+          candidate.action === "start_timer"
+        )),
         candidate.projectId ?? null,
         candidate.categoryId ?? null,
         candidate.placeId ?? null,
@@ -1092,12 +1096,24 @@ async function processActivityEventWithClient(
 }
 
 const SERVER_STOP_OUTCOME_KEY = "serverStopOutcome";
+/**
+ * Server-owned: written on every explicit Start event the server runs as a timer (`start_timer`), and on
+ * a split's `timer_switch`, never taken from client input. It marks the blocks those events create as
+ * blocks a timer started (TIMER_STARTED_SQL, stability audit server-1; Codex r1 on #538).
+ */
+const SERVER_TIMER_START_KEY = "serverTimerStart";
 
 function withoutServerStopOutcome<T extends Record<string, unknown>>(payload: T): T {
-  if (!payload || typeof payload !== "object" || !(SERVER_STOP_OUTCOME_KEY in payload)) return payload;
+  if (!payload || typeof payload !== "object") return payload;
+  if (!(SERVER_STOP_OUTCOME_KEY in payload) && !(SERVER_TIMER_START_KEY in payload)) return payload;
   const rest: Record<string, unknown> = { ...payload };
   delete rest[SERVER_STOP_OUTCOME_KEY];
+  delete rest[SERVER_TIMER_START_KEY];
   return rest as T;
+}
+
+function withServerTimerStart<T extends Record<string, unknown>>(payload: T, timerStart: boolean) {
+  return timerStart ? { ...payload, [SERVER_TIMER_START_KEY]: true } : payload;
 }
 
 /**
@@ -1253,7 +1269,8 @@ async function lateShortcutStartWindow(
     `select id, stopped_at as "stoppedAt" from time_entries
      where workspace_id = $1 and user_id = $2 and started_at < $3
        and (stopped_at is null or stopped_at > $3)${TIMELINE_BLOCK_FILTER}
-     order by started_at
+     -- Entry-id order, as every multi-entry lock (grouped edits, batch deletes; Codex r1 on #538).
+     order by id
      for update`,
     [session.workspaceId, session.userId, at]
   );
@@ -1330,16 +1347,18 @@ const PERSON_SET_END_SQL = `(exists (
 /**
  * A block a timer started: one inserted when an explicit Start (app, web, Shortcut, NFC, quick action,
  * split) was processed, so it ran and its end came from the timer lifecycle unless a person set it.
- * A manual entry also gets a `manual_app` `timer_start` event, but `createManualEntry` writes it with no
- * `origin` key, while every web timer Start has sent `origin` since the first commit; Review, Location and
- * Health blocks come from other event types. A block with no creating event left is not one (stability
- * audit server-1). No migration or backfill: the facts are on every existing row.
+ * Since #538 the server marks each such event (`serverTimerStart`, stripped from client input). An older
+ * event has no mark: it counts unless it has the manual-entry shape, a `manual_app` `timer_start` with no
+ * `origin` (`createManualEntry` never writes one, every built-in web timer Start does), which stays
+ * ambiguous and so is kept, like a block with no creating event left. Review, Location and Health blocks
+ * come from other event types (stability audit server-1). No migration or backfill.
  */
 const TIMER_STARTED_SQL = `(exists (
   select 1 from activity_events ae
   where ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
     and ae.event_type in ('timer_start', 'timer_switch', 'quick_action', 'nfc_action', 'shortcut_action')
-    and not (ae.source = 'manual_app' and ae.event_type = 'timer_start' and not (ae.raw_payload ? 'origin'))
+    and (ae.raw_payload->>'${SERVER_TIMER_START_KEY}' = 'true'
+      or not (ae.source = 'manual_app' and ae.event_type = 'timer_start' and not (ae.raw_payload ? 'origin')))
 ))`;
 
 /**
@@ -1427,7 +1446,8 @@ async function stopBlocksRunningAt(
     `select id, stopped_at as "stoppedAt" from time_entries
      where workspace_id = $2 and user_id = $3
        and started_at < $1 and (stopped_at is null or stopped_at > $1)${TIMELINE_BLOCK_FILTER}
-     order by started_at
+     -- Entry-id order, as every multi-entry lock (grouped edits, batch deletes; Codex r1 on #538).
+     order by id
      for update`,
     [event.occurredAt, event.workspaceId, event.userId]
   );
@@ -2828,7 +2848,7 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
       [
         session.workspaceId,
         session.userId,
-        JSON.stringify({ origin: "web_timer_split", previousEntryId: row.id }),
+        JSON.stringify({ origin: "web_timer_split", previousEntryId: row.id, [SERVER_TIMER_START_KEY]: true }),
         row.projectId,
         row.categoryId,
         row.placeId
