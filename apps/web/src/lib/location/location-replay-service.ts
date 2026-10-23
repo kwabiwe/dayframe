@@ -852,6 +852,7 @@ async function persistStays(
         ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {}),
         // The person corrected its place or times, and the engine span those corrections are tied to (location v4 step 11).
         ...(segment.setByYou ? { setByYou: true } : {}),
+        ...(segment.placeSetByYou ? { placeSetByYou: true } : {}),
         ...(segment.correctionSpan ? { correctionSpan: segment.correctionSpan } : {})
       })
     ]);

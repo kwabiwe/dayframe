@@ -68,7 +68,7 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     // An open Review suggestion for the first place: its event, no block (Codex r1 on #566).
     const suggestion = (await db.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
-       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', '{"clientSegmentId":"seg-a"}'::jsonb, 'needs_review') returning id`,
+       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', '{"clientSegmentId":"seg-a","nameSource":"learned"}'::jsonb, 'needs_review') returning id`,
       [workspaceId, userId, at(0)])).rows[0].id;
     await db.query(`update stay_segments set created_from_event_id = $1 where id = $2`, [suggestion, first]);
     await db.query(
@@ -186,6 +186,10 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const event = await db.query(`select e.suggested_place_id as "placeId" from activity_events e join review_items ri on ri.event_id = e.id
         where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
     expect(event.rows[0].placeId).toBe(homeId);
+    // Its title is now the place's, never a learned name Review could teach back (Codex r5 on #566).
+    const source = await db.query(`select e.raw_payload ? 'nameSource' as "hasSource" from activity_events e join review_items ri on ri.event_id = e.id
+        where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
+    expect(source.rows[0].hasSource).toBe(false);
     // The person's place, never `manual` (a place you are still at closes when you leave), and the trips either
     // side are named from it at emission, as for Review's own corrections (Codex r3/r4 on #566).
     const kept = await db.query(`select client_segment_id as id, continuity_status as status, metadata ->> 'setByYou' as "setByYou"
@@ -200,6 +204,15 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
         startedAt: at(480), stoppedAt: at(520) }
     ] as Parameters<typeof withCorrectedStayPlaces>[2], ids);
     expect(emitted.correctedMoves.has("trip-1")).toBe(true);
+    // A place set to one with no saved id (here unknown; a learned place likewise) still names the trip (Codex r5 on #566).
+    const { correctLocationTimeline: correct } = await import("./location-timeline-corrections");
+    await correct({ kind: "place", subject: "place", itemId: "seg-c", placeId: null, learnedPlaceId: null }, session);
+    const seg = (await db.query<{ id: string }>(`select id from stay_segments where workspace_id = $1 and client_segment_id = 'seg-c'`, [workspaceId])).rows[0].id;
+    const learned = await withCorrectedStayPlaces(db, session, [
+      { kind: "commute", clientSegmentId: "trip-c", fromStaySegmentId: "seg-c", toStaySegmentId: "seg-c", fromPlaceId: null, toPlaceId: null,
+        startedAt: at(800), stoppedAt: at(820) }
+    ] as Parameters<typeof withCorrectedStayPlaces>[2], new Map([["seg-c", seg]]));
+    expect(learned.correctedMoves.has("trip-c")).toBe(true);
     expect(emitted.segments[0]).toMatchObject({ fromPlaceId: homeId, toPlaceId: homeId });
 
     // A place the person picked, then deleted: replay skips that correction instead of writing a missing place back.

@@ -238,7 +238,8 @@ async function applyToSegment(
         // when you leave (Codex r3/r4 on #566).
         `update stay_segments
             set place_id = $4, learned_place_id = $5,
-                metadata = metadata || jsonb_build_object('placeMatchKind', $6::text, 'setByYou', true, 'correctionSpan', $7::jsonb),
+                metadata = metadata || jsonb_build_object('placeMatchKind', $6::text, 'setByYou', true, 'placeSetByYou', true,
+                  'correctionSpan', $7::jsonb),
                 updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
         [...scope, request.placeId, request.learnedPlaceId, request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown", spanJson]);
@@ -252,7 +253,9 @@ async function applyToSegment(
                     (select lp.name from learned_places lp where lp.id = $5 and lp.workspace_id = $2 and lp.user_id = $3), ri.title)
             where ri.workspace_id = $2 and ri.user_id = $3 and ri.location_segment_id = $1 and ri.status = 'open'
             returning ri.event_id)
-         update activity_events ae set suggested_place_id = $4
+         -- The suggestion's title is now the place's, never a learned name the person could be taught back
+         -- (Codex r5 on #566), as Review's own save-place does.
+         update activity_events ae set suggested_place_id = $4, raw_payload = ae.raw_payload - 'semanticReason' - 'nameSource'
            from suggestion
           where ae.id = suggestion.event_id and ae.workspace_id = $2 and ae.user_id = $3`,
         [...scope, request.placeId, request.learnedPlaceId]);

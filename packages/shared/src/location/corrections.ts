@@ -127,6 +127,7 @@ export function applyTimelineCorrections(segments: readonly LocationSegment[], c
           learnedPlaceId: correction.target.learnedPlaceId ?? null,
           placeMatchKind: placeMatchKindFor(correction.target),
           setByYou: true,
+          placeSetByYou: true,
           correctionSpan: spanOf(correction)
         });
       } else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {

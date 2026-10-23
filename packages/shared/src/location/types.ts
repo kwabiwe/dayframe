@@ -151,6 +151,8 @@ export type StaySegment = {
   supersedesSegmentId?: string | null;
   /** The person corrected this place's place or times (a timeline correction, location v4 step 11). */
   setByYou?: true;
+  /** The person set this place's place (not only its times): trips from and to it are named from it. */
+  placeSetByYou?: true;
   /** The engine's span the person's corrections of this item are tied to (its times before any correction). */
   correctionSpan?: { startedAt: string; stoppedAt: string };
 };
