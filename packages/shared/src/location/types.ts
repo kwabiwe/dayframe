@@ -151,6 +151,8 @@ export type StaySegment = {
   supersedesSegmentId?: string | null;
   /** The person corrected this place's place or times (a timeline correction, location v4 step 11). */
   setByYou?: true;
+  /** The engine's span the person's corrections of this item are tied to (its times before any correction). */
+  correctionSpan?: { startedAt: string; stoppedAt: string };
 };
 
 /**
@@ -209,6 +211,8 @@ export type CommuteSegment = {
   tripLegs?: TripLeg[];
   /** The person corrected this trip's times (a timeline correction, location v4 step 11). */
   setByYou?: true;
+  /** The engine's span the person's corrections of this trip are tied to (its times before any correction). */
+  correctionSpan?: { startedAt: string; stoppedAt: string };
   /**
    * Set when Motion & Fitness activity, not GPS, showed the movement that qualified
    * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.

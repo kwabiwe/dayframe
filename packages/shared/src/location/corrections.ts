@@ -88,61 +88,67 @@ function placeMatchKindFor(target: TimelineCorrection["target"]): StaySegment["p
   return target.placeId ? "saved" : target.learnedPlaceId ? "learned" : "unknown";
 }
 
-/** A trip's leg with the person's mode: the leg overlapping the corrected span most. */
+/** A trip's leg with the person's mode: the leg overlapping the corrected span most, its other fields kept. */
 function legsWithMode(legs: readonly TripLeg[] | undefined, correction: TimelineCorrection): TripLeg[] | undefined {
   if (!legs?.length || !correction.target.mode) return legs ? [...legs] : undefined;
   const leg = bestOverlap(legs, correction, Number.POSITIVE_INFINITY);
   if (!leg) return [...legs];
-  return legs.map((other) => other === leg ? {
-    startedAt: other.startedAt,
-    stoppedAt: other.stoppedAt,
-    mode: correction.target.mode!,
-    confidence: "sure",
-    distanceMeters: other.distanceMeters,
-    setByYou: true
-  } : other);
+  return legs.map((other) => {
+    if (other !== leg) return other;
+    const { runnerUp: _runnerUp, ...rest } = other;
+    return { ...rest, mode: correction.target.mode!, confidence: "sure", setByYou: true };
+  });
 }
 
 /**
  * The engine's segments with the person's corrections applied, oldest first, so a later correction of
- * the same item wins. A corrected item carries `setByYou`. A trip that wasn't one is left out. Pure and
- * deterministic: replay calls it before it persists anything.
+ * the same item wins. Each correction finds its item among the engine's own segments, before any
+ * correction changed their times, so a shortened item is still found by a later correction tied to its
+ * original span (Codex r1 on #566). A corrected item carries `setByYou` and the span its corrections
+ * are tied to (`correctionSpan`). A trip that wasn't one is left out. Pure and deterministic: replay
+ * calls it before it persists anything.
  */
 export function applyTimelineCorrections(segments: readonly LocationSegment[], corrections: readonly TimelineCorrection[], nowMs: number) {
-  let stays = segments.filter((segment): segment is StaySegment => segment.kind === "stay").map((stay) => ({ ...stay }));
-  let commutes = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute").map((commute) => ({ ...commute }));
+  const engineStays = segments.filter((segment): segment is StaySegment => segment.kind === "stay");
+  const engineTrips = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+  const stays = new Map<StaySegment, StaySegment>(engineStays.map((stay) => [stay, { ...stay }]));
+  const trips = new Map<CommuteSegment, CommuteSegment | null>(engineTrips.map((trip) => [trip, { ...trip }]));
   const ordered = [...corrections].sort((a, b) => ms(a.createdAt) - ms(b.createdAt) || a.id.localeCompare(b.id));
+  const spanOf = (correction: TimelineCorrection) => ({ startedAt: correction.spanStartedAt, stoppedAt: correction.spanStoppedAt });
   for (const correction of ordered) {
     if (correction.subject === "place") {
-      const stay = bestOverlap(stays, correction, nowMs);
-      if (!stay) continue;
+      const engine = bestOverlap(engineStays, correction, nowMs);
+      const stay = engine ? stays.get(engine)! : null;
+      if (!engine || !stay) continue;
       if (correction.kind === "place") {
-        stays = stays.map((other) => other === stay ? {
-          ...other,
+        stays.set(engine, {
+          ...stay,
           placeId: correction.target.placeId ?? null,
           learnedPlaceId: correction.target.learnedPlaceId ?? null,
           placeMatchKind: placeMatchKindFor(correction.target),
-          setByYou: true as const
-        } : other);
+          setByYou: true,
+          correctionSpan: spanOf(correction)
+        });
       } else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {
-        stays = stays.map((other) => other === stay ? {
-          ...other, startedAt: correction.target.startedAt!, stoppedAt: correction.target.stoppedAt!, setByYou: true as const
-        } : other);
+        stays.set(engine, { ...stay, startedAt: correction.target.startedAt, stoppedAt: correction.target.stoppedAt, setByYou: true,
+          correctionSpan: spanOf(correction) });
       }
     } else if (correction.subject === "trip") {
-      const trip = bestOverlap(commutes, correction, nowMs);
-      if (!trip) continue;
-      if (correction.kind === "delete") commutes = commutes.filter((other) => other !== trip);
+      const engine = bestOverlap(engineTrips, correction, nowMs);
+      const trip = engine ? trips.get(engine) : null;
+      if (!engine || !trip) continue;
+      if (correction.kind === "delete") trips.set(engine, null);
       else if (correction.kind === "times" && correction.target.startedAt && correction.target.stoppedAt) {
-        commutes = commutes.map((other) => other === trip ? {
-          ...other, startedAt: correction.target.startedAt!, stoppedAt: correction.target.stoppedAt!, setByYou: true as const
-        } : other);
+        trips.set(engine, { ...trip, startedAt: correction.target.startedAt, stoppedAt: correction.target.stoppedAt, setByYou: true,
+          correctionSpan: spanOf(correction) });
       }
     } else if (correction.subject === "leg" && correction.kind === "leg_mode") {
-      const trip = bestOverlap(commutes, correction, nowMs);
-      if (!trip?.tripLegs?.length) continue;
-      commutes = commutes.map((other) => other === trip ? { ...other, tripLegs: legsWithMode(other.tripLegs, correction) } : other);
+      const engine = bestOverlap(engineTrips, correction, nowMs);
+      const trip = engine ? trips.get(engine) : null;
+      if (!engine || !trip?.tripLegs?.length) continue;
+      trips.set(engine, { ...trip, tripLegs: legsWithMode(trip.tripLegs, correction) });
     }
   }
-  return [...stays, ...commutes].sort((a, b) => ms(a.startedAt) - ms(b.startedAt) || a.kind.localeCompare(b.kind));
+  const out: LocationSegment[] = [...stays.values(), ...[...trips.values()].filter((trip): trip is CommuteSegment => trip != null)];
+  return out.sort((a, b) => ms(a.startedAt) - ms(b.startedAt) || a.kind.localeCompare(b.kind));
 }

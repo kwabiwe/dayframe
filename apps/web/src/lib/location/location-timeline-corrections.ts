@@ -88,18 +88,23 @@ async function lockSegment(client: pg.PoolClient, session: RequestSession, table
   return row;
 }
 
-/** Whether a block was made from this segment (its event names the segment), so its block is what the person edits. */
+/**
+ * Whether a block was made from this segment, so its block is what the person edits: a time entry made
+ * from the segment's own event, or from an event naming it (`clientSegmentId`, or a Review correction's
+ * `segmentId`, the row id). An open Review suggestion has an event but no time entry, so it is no block
+ * (Codex r1 on #566).
+ */
 async function hasBlock(client: pg.PoolClient, session: RequestSession, itemId: string, row: SegmentRow) {
-  if (row.createdFromEventId) return true;
   const result = await client.query(
     `select 1 from time_entries te
        join activity_events ae on ae.id = te.created_from_event_id
         and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
       where te.workspace_id = $1 and te.user_id = $2
-        and (ae.raw_payload ->> 'clientSegmentId' = $3
-          or (ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $3))
+        and (te.created_from_event_id = $5::uuid
+          or (ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = $3)
+          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'correction' = 'true' and ae.raw_payload ->> 'segmentId' = $4))
       limit 1`,
-    [session.workspaceId, session.userId, itemId]);
+    [session.workspaceId, session.userId, itemId, row.id, row.createdFromEventId]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -109,22 +114,14 @@ function overlaps(aFrom: number, aTo: number, bFrom: number, bTo: number) {
 
 /**
  * The span a correction is tied to: the engine's span for the item. An item the person already corrected
- * keeps the span of that correction (its times may differ from what replay derives), so every later
- * correction of it still finds the engine's item.
+ * carries that span (`correctionSpan` in its metadata, kept by replay), since its times may differ from
+ * what the engine derives; never a neighbour's span (Codex r1 on #566).
  */
-async function correctionSpan(
-  client: pg.PoolClient, session: RequestSession, subject: TimelineCorrection["subject"], startedAt: string, stoppedAt: string
-) {
-  const earlier = await client.query<{ spanStartedAt: Date; spanStoppedAt: Date }>(
-    `select span_started_at as "spanStartedAt", span_stopped_at as "spanStoppedAt"
-       from location_timeline_corrections
-      where workspace_id = $1 and user_id = $2 and subject = $3 and replaced_at is null
-        and span_started_at < $5::timestamptz and span_stopped_at > $4::timestamptz
-      order by created_at desc, id desc
-      limit 1`,
-    [session.workspaceId, session.userId, subject, startedAt, stoppedAt]);
-  const row = earlier.rows[0];
-  return row ? { startedAt: iso(row.spanStartedAt), stoppedAt: iso(row.spanStoppedAt) } : { startedAt, stoppedAt };
+function correctionSpan(row: SegmentRow, startedAt: string, stoppedAt: string) {
+  const kept = row.metadata?.correctionSpan as { startedAt?: unknown; stoppedAt?: unknown } | undefined;
+  return typeof kept?.startedAt === "string" && typeof kept.stoppedAt === "string" &&
+    Number.isFinite(Date.parse(kept.startedAt)) && Date.parse(kept.stoppedAt) > Date.parse(kept.startedAt)
+    ? { startedAt: iso(kept.startedAt), stoppedAt: iso(kept.stoppedAt) } : { startedAt, stoppedAt };
 }
 
 function targetFor(request: TimelineCorrectionRequest): TimelineCorrection["target"] {
@@ -181,7 +178,7 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     }
     const span = request.kind === "leg_mode"
       ? { startedAt: iso(request.legStartedAt), stoppedAt: iso(request.legStoppedAt) }
-      : await correctionSpan(client, session, request.subject, itemStartedAt, itemStoppedAt);
+      : correctionSpan(row, itemStartedAt, itemStoppedAt);
     const target = targetFor(request);
     const event = await client.query<{ id: string }>(
       `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
@@ -203,31 +200,34 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
         where workspace_id = $2 and user_id = $3 and id <> $1 and replaced_at is null
           and subject = $4 and kind = $5 and span_started_at = $6::timestamptz and span_stopped_at = $7::timestamptz`,
       [correction.id, session.workspaceId, session.userId, request.subject, request.kind, span.startedAt, span.stoppedAt]);
-    await applyToSegment(client, session, table, row, request, legIndex);
+    await applyToSegment(client, session, table, row, request, legIndex, span);
     return { ok: true as const, correction };
   });
 }
 
 async function applyToSegment(
   client: pg.PoolClient, session: RequestSession, table: "stay_segments" | "commute_segments", row: SegmentRow,
-  request: TimelineCorrectionRequest, legIndex: number
+  request: TimelineCorrectionRequest, legIndex: number, span: { startedAt: string; stoppedAt: string }
 ) {
   const scope = [row.id, session.workspaceId, session.userId];
+  const spanJson = JSON.stringify(span);
   switch (request.kind) {
     case "place":
       await client.query(
         `update stay_segments
             set place_id = $4, learned_place_id = $5,
-                metadata = metadata || jsonb_build_object('placeMatchKind', $6::text, 'setByYou', true), updated_at = now()
+                metadata = metadata || jsonb_build_object('placeMatchKind', $6::text, 'setByYou', true, 'correctionSpan', $7::jsonb),
+                updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
-        [...scope, request.placeId, request.learnedPlaceId, request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown"]);
+        [...scope, request.placeId, request.learnedPlaceId, request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown", spanJson]);
       return;
     case "times":
       // Trusted table name from the subject.
       await client.query(
-        `update ${table} set started_at = $4, stopped_at = $5, metadata = metadata || '{"setByYou": true}'::jsonb, updated_at = now()
+        `update ${table} set started_at = $4, stopped_at = $5,
+                metadata = metadata || jsonb_build_object('setByYou', true, 'correctionSpan', $6::jsonb), updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
-        [...scope, iso(request.startedAt), iso(request.stoppedAt)]);
+        [...scope, iso(request.startedAt), iso(request.stoppedAt), spanJson]);
       return;
     case "leg_mode":
       await client.query(

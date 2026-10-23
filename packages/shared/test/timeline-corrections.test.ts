@@ -76,6 +76,26 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(legs[1]).toEqual({ startedAt: at(70), stoppedAt: at(90), mode: "bus", confidence: "sure", distanceMeters: 9_000, setByYou: true });
   });
 
+  it("keeps a leg's other details when its mode is set (Codex r1 on #566)", () => {
+    const unseen = [trip("u", 60, 90, [{ startedAt: at(60), stoppedAt: at(90), mode: "underground", confidence: "unsure", runnerUp: "train",
+      unobserved: true, distanceMeters: 9_000 }])];
+    const [corrected] = applyTimelineCorrections(unseen, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "train" } }, 60, 90)], NOW);
+    expect((corrected as CommuteSegment).tripLegs).toEqual([{ startedAt: at(60), stoppedAt: at(90), mode: "train", confidence: "sure",
+      unobserved: true, distanceMeters: 9_000, setByYou: true }]);
+  });
+
+  it("finds each correction's item among the engine's own spans, so a shortened item is still found (Codex r1 on #566)", () => {
+    const result = applyTimelineCorrections(segments, [
+      correction({ subject: "place", kind: "times", target: { startedAt: at(0), stoppedAt: at(10) } }, 0, 60, 1),
+      correction({ subject: "place", kind: "place", target: { placeId: SAVED, learnedPlaceId: null } }, 0, 60, 2),
+      correction({ subject: "trip", kind: "times", target: { startedAt: at(85), stoppedAt: at(88) } }, 60, 90, 3),
+      correction({ subject: "trip", kind: "delete" }, 60, 90, 4)
+    ], NOW);
+    expect(result.find((segment) => segment.clientSegmentId === "a")).toMatchObject({ startedAt: at(0), stoppedAt: at(10), placeId: SAVED,
+      setByYou: true, correctionSpan: { startedAt: at(0), stoppedAt: at(60) } });
+    expect(result.map((segment) => segment.clientSegmentId)).toEqual(["a", "b"]);
+  });
+
   it("matches an open place up to now", () => {
     const result = applyTimelineCorrections(segments, [correction({ subject: "place", kind: "place", target: { placeId: SAVED } }, 90, 600)], NOW);
     expect(result.find((segment) => segment.clientSegmentId === "b")).toMatchObject({ placeId: SAVED, setByYou: true });

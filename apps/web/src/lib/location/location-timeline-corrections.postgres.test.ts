@@ -65,6 +65,15 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     await db.query(
       `insert into time_entries (workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
        values ($1, $2, 'location_learning', $3, $4, $5)`, [workspaceId, userId, at(480), at(520), blockEvent]);
+    // An open Review suggestion for the first place: its event, no block (Codex r1 on #566).
+    const suggestion = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', '{"clientSegmentId":"seg-a"}'::jsonb, 'needs_review') returning id`,
+      [workspaceId, userId, at(0)])).rows[0].id;
+    await db.query(`update stay_segments set created_from_event_id = $1 where id = $2`, [suggestion, first]);
+    await db.query(
+      `insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status)
+       values ($1, $2, $3, $4, 'unknown_stay', 'Unknown place', 'open')`, [workspaceId, userId, suggestion, first]);
     expect(firstTrip).toBeTruthy();
   });
 
@@ -134,9 +143,10 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const trip = await database!.query(`select status from commute_segments where client_segment_id = 'trip-2' and workspace_id = $1`, [workspaceId]);
     expect(trip.rows[0].status).toBe("superseded");
     const review = await database!.query(
-      `select ri.status, ri.ignored_scope as "scope", e.review_status as "eventStatus" from review_items ri join activity_events e on e.id = ri.event_id
-        where ri.workspace_id = $1`, [workspaceId]);
-    expect(review.rows).toEqual([{ status: "ignored", scope: "superseded", eventStatus: "ignored" }]);
+      `select ri.type, ri.status, ri.ignored_scope as "scope", e.review_status as "eventStatus" from review_items ri join activity_events e on e.id = ri.event_id
+        where ri.workspace_id = $1 order by ri.type`, [workspaceId]);
+    expect(review.rows).toEqual([{ type: "commute", status: "ignored", scope: "superseded", eventStatus: "ignored" },
+      { type: "unknown_stay", status: "open", scope: null, eventStatus: "needs_review" }]);
   });
 
   it("applies the active corrections to replay's segments, and never stores coordinates", async () => {
@@ -156,5 +166,15 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     } finally {
       client.release();
     }
+  });
+  it("ties a correction to its own item's engine span, never a neighbour's (Codex r1 on #566)", async () => {
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    // The first place (engine span 0–480, corrected earlier) now stretches into the second (520–700).
+    await correctLocationTimeline({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(10), stoppedAt: at(560) }, session);
+    const neighbour = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-b", placeId: homeId, learnedPlaceId: null }, session);
+    const own = await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-a", placeId: homeId, learnedPlaceId: null }, session);
+    expect(own.correction).toMatchObject({ spanStartedAt: at(0), spanStoppedAt: at(480) });
+    const kept = await database!.query(`select replaced_at from location_timeline_corrections where id = $1`, [neighbour.correction.id]);
+    expect(kept.rows[0].replaced_at).toBeNull();
   });
 });

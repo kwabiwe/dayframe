@@ -850,8 +850,9 @@ async function persistStays(
         ...(segment.formation ? { formation: segment.formation } : {}),
         // Motion & Fitness moved the end: keep the location-only end for rebuilds.
         ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {}),
-        // The person corrected its place or times (location v4 step 11).
-        ...(segment.setByYou ? { setByYou: true } : {})
+        // The person corrected its place or times, and the engine span those corrections are tied to (location v4 step 11).
+        ...(segment.setByYou ? { setByYou: true } : {}),
+        ...(segment.correctionSpan ? { correctionSpan: segment.correctionSpan } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
@@ -1048,7 +1049,8 @@ async function persistCommutes(
         ...(segment.tripLegs?.length ? { legs: segment.tripLegs } : {}),
         ...(segment.motionSupported ? { motionSupported: true } : {}),
         ...(segment.motionTimed ? { motionTimed: true } : {}),
-        ...(segment.setByYou ? { setByYou: true } : {})
+        ...(segment.setByYou ? { setByYou: true } : {}),
+        ...(segment.correctionSpan ? { correctionSpan: segment.correctionSpan } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
