@@ -276,6 +276,43 @@ Temporal invariants:
   58 % → 66 %, walking minutes right 19 % → 77 %, car 87 % → 88 %; leg count
   right 29/32, multi-leg trips split into the right number of legs 1/4 (rail,
   Underground and bus come with step 7's bundled stations).
+  leg, so legs always span the trip's own times. Legs under `tripLegMinimumMs`
+  (2 min) merge into the longer moving neighbour, except a walk of
+  `tripChangeWalkMinimumMs` (90 s) or more between two vehicle legs (a
+  change). Confidence: sure when Core Motion and speed agree over the leg,
+  likely with one of them, unsure with neither. Distance is along the leg's
+  accurate readings. Stored in the trip's metadata (`legs`, design §14; times, mode,
+  confidence, metres). Scored against the Google answer key (the harness now
+  takes each minute's mode from its leg): week 89 → 90, no day worse; fine
+  mode 58 % → 66 %, walking minutes right 19 % → 77 %, car 87 % → 88 %;
+  leg count right 28/32, multi-leg trips split into the right number of legs
+  1/4 (rail, Underground and bus come with step 7's bundled stations).
+- Trip legs, part 2 (location v4 step 7; `legs.ts`, `stations.ts`). Bundled
+  stations: `stations.generated.ts`, built by `scripts/build-station-list.ts`
+  from the DfT NaPTAN access-nodes CSV (Open Government Licence v3.0,
+  attribution in the file header): 3,615 active stations (2,661 rail, 296
+  Underground in London and Glasgow, 658 metro, light rail and tram), kind and
+  position only, about 60 KB, decoded once and searched by latitude band. Leg
+  modes: a silence of `tripUnseenLegMinimumMs` (5 min) or more between two
+  accurate readings at least 1 km apart at 5–25 m/s is a leg of its own,
+  Underground and `unobserved` (sure when both ends are within
+  `tripStationRadiusMeters` of Underground stations, otherwise unsure with
+  `runnerUp: "train"`); a vehicle leg holding `tripTrainMinimumSpeedMps` for
+  half its credible readings between stations is a train (sure), and without
+  stations one whose median is at least `tripTrainSpeedOnlyMinimumMps` (33
+  m/s, above UK motorway limits) over 5+ readings is a likely train; a vehicle
+  leg between Underground stations is the Underground, and a slower one
+  between metro or tram stops a tram. Bus is not inferred: with about one
+  reading a minute the stop pattern cannot be seen (Google's bus legs showed
+  0–0.7 stops per km, cars 0–1.6), so bus comes from corrections (steps
+  11–12) or a later timetable match. Leg glyphs: `DAYFRAME_LEG_MODE_ICONS`
+  (Lucide `train-front-tunnel` and `tram-front` added). The exported evidence
+  the scoring harness replays holds positions relative to a hidden origin, so
+  the harness replays with `tripStationsEnabled: false`; station rules are
+  covered by synthetic tests over the bundle's own positions and need real
+  device evidence. Score (station-free): week 90 → 92, no day worse (22 Oct
+  77 → 82); fine mode 66 % → 75 %; rail minutes right 0 % → 41 %, Underground
+  0 % → 55 %, car 88 % unchanged.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

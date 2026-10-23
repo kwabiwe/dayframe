@@ -8,7 +8,11 @@ import type { QualitySegment } from "./segments";
  */
 
 /** Engine travel modes → answer-key modes. An engine Move without a mode scores as "none". */
-export const ENGINE_FINE_MODE: Record<string, FineMode> = { walking: "walk", running: "walk", cycling: "cycle", automotive: "car" };
+export const ENGINE_FINE_MODE: Record<string, FineMode> = {
+  walking: "walk", running: "walk", cycling: "cycle", automotive: "car",
+  // Leg modes (location v4 step 7); the answer key counts trams as rail.
+  bus: "bus", train: "rail", tram: "rail", underground: "underground"
+};
 export const DAY_SCORE_WEIGHTS = { kind: 30, stays: 20, bounds: 15, trips: 15, mode: 20 } as const;
 /** Stays and trips are scored from ten minutes; a boundary is right within five. */
 export const MIN_SCORED_STAY_MINUTES = 10;

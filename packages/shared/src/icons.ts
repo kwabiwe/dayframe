@@ -128,6 +128,18 @@ export const DAYFRAME_APP_ICONS = {
   openTrip: "route"
 } as const satisfies Record<string, DayframeGlyph>;
 
+/** A trip leg's mode (location v4 §4, §8): the glyph Calendar, Reports and the leg editor show. */
+export const DAYFRAME_LEG_MODE_ICONS = {
+  walking: "footprints",
+  running: "footprints",
+  cycling: "bike",
+  automotive: "car",
+  bus: "bus",
+  train: "train-front",
+  underground: "train-front-tunnel",
+  tram: "tram-front"
+} as const satisfies Record<string, DayframeGlyph>;
+
 const ACTIVITY_ICON_BY_KEY = new Map<string, (typeof DAYFRAME_ACTIVITY_ICONS)[number]>(
   DAYFRAME_ACTIVITY_ICONS.map((icon) => [icon.key, icon])
 );

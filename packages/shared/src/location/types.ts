@@ -153,15 +153,24 @@ export type StaySegment = {
 
 /**
  * One mode inside a trip (location v4 §4, §8): its own times, mode, confidence and distance along its
- * accurate readings. Waits and changes between legs are not legs. Part 1 knows walk, run, cycle and
- * drive; rail, Underground and bus come with the bundled stations (build step 7).
+ * accurate readings. Waits and changes between legs are not legs. Walk, run, cycle and drive come from
+ * Core Motion and speed (build step 6); train, Underground and tram from the bundled stations (step 7).
  */
+export type TripLegMode = MotionTravelMode | "bus" | "train" | "underground" | "tram";
+
 export type TripLeg = {
   startedAt: string;
   stoppedAt: string;
-  mode: MotionTravelMode;
-  /** Sure: Core Motion and speed agree; likely: one of them; unsure: neither (a carried or inferred guess). */
+  mode: TripLegMode;
+  /**
+   * Sure: Core Motion and speed agree, or for rail and Underground both ends are at stations of the kind;
+   * likely: one input; unsure: a guess, such as an Underground leg read from a silence.
+   */
   confidence: "sure" | "likely" | "unsure";
+  /** The next most likely mode of an unsure leg ("Underground or train?"). */
+  runnerUp?: TripLegMode;
+  /** No position was observed during the leg (underground, or no signal): its route is unknown. */
+  unobserved?: true;
   distanceMeters: number | null;
 };
 
