@@ -87,6 +87,20 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
       .toEqual(["automotive"]);
   });
 
+  it("never lets a carried label hold a change of mode", () => {
+    // Walk, 30 s driving, 4½ min unknown (carried as driving), 30 s driving, walk: one minute of reported driving.
+    expect(legs(0, 20, [[0, "walking"], [6, "automotive"], [6.5, "unknown"], [11, "automotive"], [11.5, "walking"]]).map(({ mode }) => mode))
+      .toEqual(["walking"]);
+  });
+
+  it("never takes a speed from a simulated copy of a reading", () => {
+    const genuine = [reading(1, 0, null), reading(3, 150, null), reading(5, 300, null)];
+    const simulated = genuine.map((item) => ({ ...item, evidence: { ...item.evidence, clientEvidenceId: `${item.evidence.clientEvidenceId}-sim`,
+      kind: "significant_change" as const, isSimulated: true, speedMetersPerSecond: 25 } }));
+    const speedOf = credibleSpeedResolver([...genuine, ...simulated], config);
+    expect(genuine.map(speedOf)).toEqual([null, null, null]);
+  });
+
   it("merges a short leg into its moving neighbour across stops", () => {
     expect(legs(0, 20, [[0, "automotive"], [8, "stationary"], [9, "cycling"], [9.5, "stationary"], [11, "automotive"]])
       .map(({ mode, from, to }) => ({ mode, from, to }))).toEqual([{ mode: "automotive", from: 0, to: 20 }]);

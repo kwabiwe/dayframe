@@ -350,7 +350,8 @@ export function credibleSpeedResolver(evidence: ClassifiedEvidence[], config: Lo
     const { kind, horizontalAccuracyMeters } = item.evidence;
     if (kind !== "standard_location" && kind !== "significant_change" || item.evidence.isSimulated === true ||
       horizontalAccuracyMeters == null || horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) return null;
-    const native = (nativeSpeed ??= nativeSpeedResolver(evidence))(item);
+    // A simulated copy never lends its speed to a genuine reading.
+    const native = (nativeSpeed ??= nativeSpeedResolver(evidence.filter((other) => other.evidence.isSimulated !== true)))(item);
     if (native != null) return native;
     const implied = item.impliedSpeedMetersPerSecond;
     return accurateFix(item, config) && implied != null && Number.isFinite(implied) ? implied : null;

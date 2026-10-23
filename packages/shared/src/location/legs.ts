@@ -24,6 +24,8 @@ type Slice = {
   label: Label | null;
   /** Core Motion's own report for the slice, never a carried label. */
   reported: Label | null;
+  /** Whether the label was seen (reported by Core Motion, or from speed), not only carried across a spell: only seen time holds a change. */
+  seen: boolean;
 };
 /** A run of slices [first, last] with one label; `observedMs` leaves indeterminate slices out. */
 type Run = { label: Label; first: number; last: number; observedMs: number; prev: Run | null; next: Run | null; alive: boolean };
@@ -147,20 +149,22 @@ export function deriveTripLegs({
     const motion = labelIndex < labels.length && labels[labelIndex].fromMs <= midMs ? labels[labelIndex] : null;
     while (speedIndex + 1 < speeds.length && speeds[speedIndex + 1].atMs <= midMs) speedIndex += 1;
     const speed = speedIndex >= 0 && midMs - speeds[speedIndex].atMs <= SPEED_HOLD_MS ? speeds[speedIndex].speed : null;
-    slices.push({ fromMs, toMs, label: sliceLabel(motion?.label ?? null, speed), reported: motion && !motion.carried ? motion.label : null });
+    const reported = motion && !motion.carried ? motion.label : null;
+    slices.push({ fromMs, toMs, label: sliceLabel(motion?.label ?? null, speed), reported, seen: reported != null || speed != null });
   }
   const sliceMs = (slice: Slice) => slice.toMs - slice.fromMs;
 
   // Runs of one label, linked in time order. Indeterminate slices join the run before them (the first
-  // run takes any at the start) without adding to its observed time.
+  // run takes any at the start); only seen time (not a carried label) adds to a run's observed time.
   let head: Run | null = null;
   let tail: Run | null = null;
   for (const [index, slice] of slices.entries()) {
+    const seenMs = slice.label && slice.seen ? sliceMs(slice) : 0;
     if (tail && (!slice.label || slice.label === tail.label)) {
       tail.last = index;
-      if (slice.label) tail.observedMs += sliceMs(slice);
+      tail.observedMs += seenMs;
     } else if (slice.label) {
-      const run: Run = { label: slice.label, first: tail ? index : 0, last: index, observedMs: sliceMs(slice), prev: tail, next: null, alive: true };
+      const run: Run = { label: slice.label, first: tail ? index : 0, last: index, observedMs: seenMs, prev: tail, next: null, alive: true };
       if (tail) tail.next = run;
       else head = run;
       tail = run;
@@ -201,7 +205,10 @@ export function deriveTripLegs({
   for (let run: Run | null = head; run; run = run.next) {
     if (run.label !== "still" || run.observedMs >= config.tripStopMinimumMs) continue;
     const neighbour = run.prev && run.prev.label !== "still" ? run.prev : run.next && run.next.label !== "still" ? run.next : null;
-    if (neighbour) run = relabel(run, neighbour.label);
+    if (!neighbour) continue;
+    // The pause is part of the leg's time, but never part of the moving time that holds its mode.
+    run.observedMs = 0;
+    run = relabel(run, neighbour.label);
   }
 
   // Short moving runs join their longer moving neighbour, across stops, shortest first. A walk that
