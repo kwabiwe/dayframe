@@ -122,8 +122,10 @@ describe("shared web time-entry quick editor", () => {
     // The title sits below the 6 px top resize handle, and Play never covers an icon-only column.
     expect(styles).toMatch(/\.swiss-resize-handle\.top \{[^}]*height:\s*6px;/s);
     expect(styles).toMatch(/\.calendar-time-block\.can-direct-resize \.calendar-entry-primary \{[^}]*padding-top:\s*6px;/s);
-    // Under 72 px the length alone, scaled so it always fits whole (Codex r3 on #545).
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 71\.98px\) \{\s*\.calendar-entry-title \{[^}]*display:\s*none;[\s\S]*?\.calendar-entry-length \{[^}]*var\(--calendar-length-chars/s);
+    // Under 72 px the title stays and the length takes at most half the line, scaled to fit whole.
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 71\.98px\) \{\s*\.calendar-entry-length \{[^}]*50cqw[^}]*var\(--calendar-length-chars/s);
+    // Play's whole 44 px target (36 px in from the edge) sits inside the reserved 38 px.
+    expect(styles).toMatch(/@container calendar-time-block \(min-width: 112px\) \{\s*\.calendar-time-block\.has-inline-action-slot \.calendar-entry-primary \{\s*padding-right: 38px;/s);
     expect(timeline).toContain('"--calendar-length-chars": length.length');
     // The retired structured metadata line and its 111 px fallback are gone.
     expect(styles).not.toContain("calendar-entry-primary-metadata");

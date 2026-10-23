@@ -1205,8 +1205,9 @@ textarea.ui-control {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-/* The ?entry= deep link: the row's cells carry the highlight (they paint over the row), with a
-   neutral edge on the first cell; hovering keeps it. */
+/* Room for the hover-only Play only where a pointer can hover and the column is 112 px or wider
+   (narrower columns hide Play): 38 px holds Play's whole 44 px pointer target, which reaches 36 px in
+   from the edge, so it never lies over the label (location v4 C6, Codex r4 on #545). */
 .timeline-list-row.timeline-entry-highlight > td,
 .timeline-list-row.timeline-entry-highlight:hover > td {
   background: color-mix(in srgb, var(--foreground) 12%, var(--surface-inset));
@@ -2175,15 +2176,11 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   }
 }
 
-/* Under 72 px the label is the length alone, scaled down so the whole length always fits (the title
-   stays in the name and tooltip); under 34 px the activity icon alone (below). */
+/* Under 72 px the length takes at most half the line, scaled down so it always fits whole, and the
+   title truncates in the rest (Codex r3/r4 on #545); under 34 px the activity icon alone (below). */
 @container calendar-time-block (max-width: 71.98px) {
-  .calendar-entry-title {
-    display: none;
-  }
-
   .calendar-entry-length {
-    font-size: min(1em, calc((100cqw - 12px) / (var(--calendar-length-chars, 3) * 0.82)));
+    font-size: min(1em, calc((50cqw - 8px) / (var(--calendar-length-chars, 3) * 0.82)));
   }
 }
 
@@ -2282,7 +2279,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 @media (hover: hover) and (pointer: fine) {
   @container calendar-time-block (min-width: 112px) {
     .calendar-time-block.has-inline-action-slot .calendar-entry-primary {
-      padding-right: 31px;
+      padding-right: 38px;
     }
   }
 }
