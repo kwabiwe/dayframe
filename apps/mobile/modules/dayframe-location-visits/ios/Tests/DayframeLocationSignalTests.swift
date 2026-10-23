@@ -99,7 +99,10 @@ final class DayframeLocationSignalTests: XCTestCase {
   }
 
   func testOpenVisitQueueSurvivesStoreRecreation() {
-    DayframeLocationSignalStore(fileURL: signalFile).append(signal(id: "open-visit"))
+    let original = DayframeLocationSignalStore(fileURL: signalFile)
+    original.append(signal(id: "open-visit"))
+    // Appends are asynchronous on the store's own queue: flush it before a second store reads the file.
+    XCTAssertEqual(original.count(), 1)
     let restored = DayframeLocationSignalStore(fileURL: signalFile).read(limit: 100)
     XCTAssertEqual(restored.first?.id, "open-visit")
     XCTAssertNil(restored.first?.endedAt)

@@ -79,6 +79,17 @@ const sample = (id: string, offset = 0): HealthJournalSample => ({
   value: { externalSampleId: id, stage: "asleep_core" },
 });
 function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
+  return deriveWith({})(samples);
+}
+/** The same episodes under a different Dayframe mapping or build-specific event shape. */
+function deriveWith(mapping: { categoryId?: string; description?: string; shape?: string }) {
+  return (samples: HealthJournalSample[]): HealthEpisodeDraft[] =>
+    deriveMapped(samples, mapping);
+}
+function deriveMapped(
+  samples: HealthJournalSample[],
+  mapping: { categoryId?: string; description?: string; shape?: string },
+): HealthEpisodeDraft[] {
   if (!samples.length) return [];
   const startedAt = samples[0].startedAt,
     stoppedAt = samples.at(-1)!.stoppedAt;
@@ -92,11 +103,13 @@ function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
         source: "health_sleep",
         type: "health_sleep_import",
         occurredAt: new Date(startedAt),
-        description: "Sleep",
+        categoryId: mapping.categoryId,
+        description: mapping.description ?? "Sleep",
         rawPayload: {
           startedAt,
           stoppedAt,
           samples: samples.map((sample) => sample.value),
+          ...(mapping.shape ? { buildShape: mapping.shape } : {}),
         },
       },
     },
@@ -109,6 +122,7 @@ async function page(
     deletedIds?: string[];
     isCurrent?: () => boolean;
     repair?: { startedAt: string; stoppedAt: string };
+    derive?: (samples: HealthJournalSample[]) => HealthEpisodeDraft[];
   } = {},
 ) {
   const active = options.owner ?? owner;
@@ -129,7 +143,7 @@ async function page(
     returnedCount: additions.length,
     complete: true,
     isCurrent: options.isCurrent ?? (() => true),
-    derive,
+    derive: options.derive ?? derive,
   });
 }
 
@@ -276,7 +290,7 @@ describe("Health journal real SQLite boundaries", () => {
     ]) {
       await expect(store.recordHealthAcknowledgement(wrongOwner, clientEventId, {
         eventId: "server-event", clientEventId, processingDisposition: "processed",
-      })).rejects.toThrow("no matching captured owner");
+      })).resolves.toBe(false);
     }
     expect(db.prepare("select state from health_deliveries").get()!.state).toBe("pending_handoff");
   });
@@ -524,6 +538,136 @@ function seedJournal(
   db.exec("commit");
 }
 
+describe("Health journal of signed-out accounts (stability audit health-3)", () => {
+  const ownerKeys = () =>
+    db
+      .prepare(
+        `select owner_key from health_checkpoints union select owner_key from health_samples
+         union select owner_key from health_episodes union select owner_key from health_deliveries
+         union select owner_key from health_query_runs order by 1`,
+      )
+      .all()
+      .map((row) => String(row.owner_key));
+  const rowsOf = (who: HealthCaptureOwner, table: string) =>
+    Number(
+      db
+        .prepare(`select count(*) n from ${table} where owner_key=?`)
+        .get(store.healthOwnerKey(who))!.n,
+    );
+  async function acknowledgeAll(who: HealthCaptureOwner) {
+    const rows = db
+      .prepare("select client_event_id id from health_deliveries where owner_key=? and state!='acknowledged'")
+      .all(store.healthOwnerKey(who));
+    for (const row of rows) {
+      const id = String(row.id);
+      await store.recordHealthAcknowledgement(who, id, { clientEventId: id, eventId: `event-${id}`, processingDisposition: "open" });
+    }
+  }
+  const keeper = (keep: HealthCaptureOwner | null) => async () => ({ keep, isCurrent: () => true });
+  const departed = { ...owner, userId: "departed" };
+  const unsettled = { ...owner, userId: "unsettled" };
+  const signedIn = { ...owner, userId: "signed-in" };
+
+  it("deletes departed accounts' journals, keeps the signed-in account's and every unacknowledged delivery", async () => {
+    await page([sample("departed-1")], { owner: departed });
+    await acknowledgeAll(departed);
+    await page([sample("unsettled-1")], { owner: unsettled });
+    await page([sample("signed-in-1")], { owner: signedIn });
+    await acknowledgeAll(signedIn);
+    const signedInRows = ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
+      .map((table) => rowsOf(signedIn, table));
+    const unsettledPayload = db
+      .prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
+      .get(store.healthOwnerKey(unsettled))!;
+    expect(String(unsettledPayload.payload_json)).toContain("unsettled-1");
+
+    expect(await store.expireInactiveHealthOwners(keeper(signedIn))).toBeGreaterThan(0);
+
+    // The departed account leaves nothing behind: no raw sample, payload, episode or checkpoint.
+    for (const table of ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"])
+      expect(rowsOf(departed, table), table).toBe(0);
+    // The signed-in account is untouched.
+    expect(["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
+      .map((table) => rowsOf(signedIn, table))).toEqual(signedInRows);
+    // Unacknowledged work stays with its episode, so the queued event's acknowledgement still lands.
+    expect(db.prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
+      .get(store.healthOwnerKey(unsettled))).toEqual(unsettledPayload);
+    expect(rowsOf(unsettled, "health_episodes")).toBe(1);
+    expect(rowsOf(unsettled, "health_samples")).toBe(0);
+    expect(rowsOf(unsettled, "health_checkpoints")).toBe(0);
+    const id = String(unsettledPayload.client_event_id);
+    await store.recordHealthAcknowledgement(unsettled, id, { clientEventId: id, eventId: "event", processingDisposition: "open" });
+
+    // Signed out entirely: every account's settled journal goes.
+    await page([sample("unsettled-2", 60_000)], { owner: unsettled });
+    expect(await store.expireInactiveHealthOwners(keeper(null))).toBeGreaterThan(0);
+    expect(rowsOf(signedIn, "health_samples") + rowsOf(signedIn, "health_deliveries") + rowsOf(signedIn, "health_checkpoints")).toBe(0);
+    expect(ownerKeys()).toEqual([store.healthOwnerKey(unsettled)]);
+    expect(db.prepare("select state from health_deliveries").all().map((row) => row.state)).toEqual(["pending_handoff"]);
+  });
+
+  it("defers while the keeper cannot be settled, and rolls back when it changes before commit (Codex r1 on #549)", async () => {
+    await page([sample("departed-1")], { owner: departed });
+    await acknowledgeAll(departed);
+    expect(await store.expireInactiveHealthOwners(async () => null)).toBeNull();
+    let current = true;
+    expect(await store.expireInactiveHealthOwners(async () => ({
+      keep: signedIn,
+      isCurrent: () => { const was = current; current = false; return was; },
+    }))).toBeNull();
+    expect(rowsOf(departed, "health_samples")).toBe(1);
+    expect(rowsOf(departed, "health_deliveries")).toBe(1);
+  });
+
+  it("settles a queued event removed from the activity queue as discarded, keeping work still owed (Codex r1 on #549)", async () => {
+    await page([sample("refused-1")], { owner: departed });
+    await store.handoffHealthEvents(departed, (async () => undefined) as never, () => true);
+    await page([sample("waiting-1", 60_000)], { owner: unsettled });
+    const refused = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(departed))!.id);
+    const waiting = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(unsettled))!.id);
+    expect(await store.discardQueuedHealthDeliveries([{ owner: departed, clientEventId: refused }])).toBe(1);
+    expect(db.prepare("select state,payload_json from health_deliveries where client_event_id=?").get(refused))
+      .toEqual({ state: "discarded", payload_json: null });
+    // Prune no longer protects its samples; signed-out expiry deletes it and its episode.
+    await store.pruneAcknowledgedHealthCapture(departed, Date.now() + 20 * 86_400_000);
+    expect(db.prepare("select sample_json from health_samples where sample_id='refused-1'").get()!.sample_json).toBeNull();
+    expect(await store.expireInactiveHealthOwners(keeper(null))).toBeGreaterThan(0);
+    expect(rowsOf(departed, "health_deliveries") + rowsOf(departed, "health_episodes")).toBe(0);
+    expect(db.prepare("select state from health_deliveries where client_event_id=?").get(waiting)!.state).toBe("pending_handoff");
+    expect(rowsOf(unsettled, "health_episodes")).toBe(1);
+  });
+
+  it("settles a removed event whose handoff was interrupted, so the next handoff cannot bring it back (Codex r2 on #549)", async () => {
+    await page([sample("interrupted-1")], { owner: departed });
+    const id = String(db.prepare("select client_event_id id from health_deliveries").get()!.id);
+    // The event reached the durable queue, but the process stopped before the journal recorded it.
+    mocks.failHandoff = true;
+    await expect(store.handoffHealthEvents(departed, (async () => undefined) as never, () => true)).rejects.toThrow();
+    mocks.failHandoff = false;
+    expect(db.prepare("select state from health_deliveries").get()!.state).toBe("pending_handoff");
+    expect(await store.discardQueuedHealthDeliveries([{ owner: departed, clientEventId: id }])).toBe(1);
+    const enqueue = vi.fn(async () => undefined);
+    expect(await store.handoffHealthEvents(departed, enqueue as never, () => true)).toEqual({ queuedCount: 0 });
+    expect(enqueue).not.toHaveBeenCalled();
+    // An acknowledged row is not changed by a discard.
+    await page([sample("acknowledged-1")], { owner: signedIn });
+    await acknowledgeAll(signedIn);
+    const acknowledged = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(signedIn))!.id);
+    expect(await store.discardQueuedHealthDeliveries([{ owner: signedIn, clientEventId: acknowledged }])).toBe(0);
+  });
+
+  it("reads the account to keep when its turn in the journal's lane comes, not when it was asked", async () => {
+    await page([sample("new-account")], { owner: signedIn });
+    let active: HealthCaptureOwner | null = null;
+    // Asked while signed out; a sign-in lands before the expiry's turn and keeps its journal.
+    const expiry = store.expireInactiveHealthOwners(async () => ({ keep: active, isCurrent: () => true }));
+    active = signedIn;
+    await expiry;
+    expect(rowsOf(signedIn, "health_samples")).toBe(1);
+    expect(rowsOf(signedIn, "health_checkpoints")).toBe(1);
+  });
+});
+
 describe("Health journal prune budget (stability audit health-1)", () => {
   it("prunes 90 days of three-source journal with no per-row correlated subquery", async () => {
     const now = Date.now();
@@ -656,5 +800,65 @@ describe("Health journal prune budget (stability audit health-1)", () => {
     expect(raw()).toBe(26);
     // A clock set back before the last run does not postpone maintenance.
     expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now - 86_400_000)).toBe(true);
+  });
+});
+
+describe("Health revision identity comes from source facts only (stability audit health-2)", () => {
+  const deliveries = () =>
+    db
+      .prepare("select client_event_id,revision,payload_json from health_deliveries order by created_at,rowid")
+      .all();
+  it("does not re-send an unchanged episode after a mapping or event-shape change", async () => {
+    await page([sample("early"), sample("late", 3_600_000)]);
+    const [original] = deliveries();
+    expect(deliveries()).toHaveLength(1);
+    // Settings > Apple Health "Logs as" / Name change, then a capture with no new samples.
+    await page([], { derive: deriveWith({ categoryId: "category-rest", description: "Rest" }) });
+    // A newer build that changes a label or payload field of the derived event.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    expect(deliveries()).toEqual([original]);
+    expect(db.prepare("select revision from health_episodes").get()!.revision).toBe(original.revision);
+  });
+  it("re-sends a genuine source change with the current mapping", async () => {
+    const early = sample("early");
+    await page([early]);
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toHaveLength(1);
+    // An added member and an edited member (different times) are both source changes.
+    await page([sample("late", 3_600_000)], { derive: deriveWith({ description: "Rest" }) });
+    await page([{ ...early, stoppedAt: new Date(Date.parse(early.stoppedAt) + 600_000).toISOString() }], {
+      derive: deriveWith({ description: "Rest" }),
+    });
+    const sent = deliveries();
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((row) => row.client_event_id)).size).toBe(3);
+    expect(JSON.parse(String(sent[2].payload_json)).description).toBe("Rest");
+  });
+  it("adopts episodes journaled by an older build without re-sending them on upgrade", async () => {
+    // Journal written by a build whose revision fingerprinted the event (mapping and shape).
+    await page([sample("early"), sample("late", 3_600_000)], {
+      derive: deriveWith({ description: "Legacy", shape: "build-1" }),
+    });
+    await page([sample("other", 30 * 3_600_000)], { derive: deriveWith({ description: "Legacy", shape: "build-1" }) });
+    const legacyColumns = "owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at";
+    db.exec(`create table legacy_episodes as select ${legacyColumns} from health_episodes;
+      drop table health_episodes;
+      create table health_episodes (
+        owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
+        sample_ids_json text not null, started_at text not null, stopped_at text not null,
+        revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+      insert into health_episodes select * from legacy_episodes; drop table legacy_episodes;`);
+    const before = deliveries();
+    expect(before).toHaveLength(2);
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    // The upgraded build derives the same episodes with its own mapping and event shape.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toEqual(before);
+    // A genuine change to an adopted episode still re-sends, once.
+    await page([sample("later", 30 * 3_600_000 + 3_600_000)], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ shape: "build-3" }) });
+    expect(deliveries()).toHaveLength(3);
   });
 });

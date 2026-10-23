@@ -12,7 +12,10 @@ vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => <a href={href} {...props}>{children}</a>
 }));
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.fetch }));
-vi.mock("@/lib/session-change", () => ({ beforeSessionChange: mocks.beforeSessionChange }));
+vi.mock("@/lib/session-change", () => ({
+  beforeSessionChange: mocks.beforeSessionChange,
+  onBeforeSessionChange: () => () => undefined
+}));
 
 const { AppShellRuntimeProvider } = await import("@/components/AppShellRuntime");
 const { AccountSettings, HelpSettings } = await import("./SettingsForms");

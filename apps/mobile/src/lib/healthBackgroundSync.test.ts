@@ -11,6 +11,9 @@ import {
 import type { HealthCaptureOptions, HealthImportStatus } from "./health";
 import { createHealthCaptureCoalescer } from "./healthCaptureLifecycle";
 
+const healthSignOut = vi.hoisted(() => ({ watch: vi.fn() }));
+vi.mock("./healthSignOut", () => ({ watchSignedOutHealthBackground: healthSignOut.watch }));
+
 const queued: HealthImportStatus = { provider: "healthkit", status: "queued", notes: "", importedCount: 1 };
 
 function dependencies(overrides: Partial<HealthWakeDependencies> = {}) {
@@ -307,5 +310,8 @@ describe("Apple Health wake runner", () => {
     expect(native.addWakeListener).toHaveBeenCalledOnce();
     expect(native.startListening).toHaveBeenCalledOnce();
     expect(onWake).toBeTypeOf("function");
+    // A signed-out launch, and every later sign-out, turns HealthKit's wakes off (health-4).
+    await vi.waitFor(() => expect(healthSignOut.watch).toHaveBeenCalledWith(native));
+    expect(healthSignOut.watch).toHaveBeenCalledOnce();
   });
 });

@@ -31,9 +31,13 @@ const healthAcknowledgement = vi.hoisted(() => vi.fn());
 const healthBackend = vi.hoisted(() => ({id:"staging-fixture"}));
 vi.mock("./backendIdentity",()=>({get DAYFRAME_BACKEND_ID(){return healthBackend.id;}}));
 vi.mock("expo-crypto",()=>({}));
-vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
+const healthDiscard = vi.hoisted(() => vi.fn(async (_items: unknown[]) => 0));
+const healthDeliveryOpen = vi.hoisted(() => vi.fn(async (_owner: unknown, _id: string) => true));
+vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard,isHealthDeliveryOpen:healthDeliveryOpen}));
 const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
 vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
+const healthSignOut = vi.hoisted(() => ({ end: vi.fn((_markerId: string) => Promise.resolve()), mark: vi.fn(() => Promise.resolve("synthetic-marker")) }));
+vi.mock("./healthSignOut",()=>({endHealthCaptureAfterLogout:healthSignOut.end,markSignedOutHealthExpiryPending:healthSignOut.mark}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -228,6 +232,59 @@ describe("mobile API client", () => {
     expect(locationLifecycle.end).toHaveBeenCalledWith("logout", TIMER_STOP_OWNER, expect.any(Function));
     expect(await getSessionToken()).toBeNull();
     expect(await readOwnedAuthenticatedSessionSnapshot(TIMER_STOP_OWNER)).toMatchObject({status:"signed_out"});
+  });
+
+  it("settles a refused Health event in its journal before Clear removes it from the queue (Codex r1 on #549)", async () => {
+    storeBoundSession("session-token");
+    const captured={...TIMER_STOP_OWNER,backendId:"staging-fixture"};
+    await enqueueEvent({source:"health_sleep",type:"health_sleep_import",localId:"healthkit:sleep:refused:one",healthOwner:captured});
+    vi.stubGlobal("fetch",vi.fn(async()=>jsonResponse({error:"Synthetic refusal"},422)));
+    await syncQueue({eventScope:"non_timer",forceRetry:true});
+    expect((await readQueue())[0]).toMatchObject({localId:"healthkit:sleep:refused:one",failureKind:"permanent"});
+    healthDiscard.mockClear();
+    healthDiscard.mockRejectedValueOnce(new Error("Synthetic SQLite failure"));
+    await expect(clearFailedQueuedEvents()).rejects.toThrow("Synthetic");
+    // The journal could not record it: the event stays queued, and Clear can be tried again.
+    expect((await readQueue()).map(item=>item.localId)).toEqual(["healthkit:sleep:refused:one"]);
+    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({removedCount:1});
+    expect(healthDiscard).toHaveBeenLastCalledWith([{owner:captured,clientEventId:"healthkit:sleep:refused:one"}]);
+    expect(await readQueue()).toEqual([]);
+  });
+
+  it("records the Health journal expiry before logout completes; failing to record it fails logout (Codex r1 on #549)", async () => {
+    storeBoundSession("session-token");
+    const fetchMock = vi.fn(async () => jsonResponse({ok:true}));
+    vi.stubGlobal("fetch", fetchMock);
+    healthSignOut.mark.mockClear();
+    healthSignOut.mark.mockRejectedValueOnce(new Error("Synthetic storage failure"));
+    await expect(logout()).rejects.toThrow("Synthetic storage failure");
+    // Failed before the server session was revoked: still consistently signed in (Codex r2 on #549).
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await getSessionToken()).toBe("session-token");
+    healthSignOut.end.mockClear();
+    await logout();
+    expect(healthSignOut.mark).toHaveBeenCalledTimes(2);
+    expect(await getSessionToken()).toBeNull();
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledWith("synthetic-marker"));
+  });
+
+  it("ends Apple Health capture for the account after logout completes, never for a fenced one (health-3, health-4)", async () => {
+    storeBoundSession("session-token");
+    healthSignOut.end.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ok:true})));
+    await logout();
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledOnce());
+    expect(await getSessionToken()).toBeNull();
+    healthSignOut.end.mockClear();
+    await setSessionToken("old-session",TIMER_STOP_OWNER);await activateMobileAccount(TIMER_STOP_OWNER);
+    let release!: (response:Response)=>void;
+    vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{release=resolve;})));
+    const pending=logout();
+    const rejected=expect(pending).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await vi.waitFor(()=>expect(release).toBeDefined());
+    await setSessionToken("replacement-session",ACCOUNT_B_OWNER);await activateMobileAccount(ACCOUNT_B_OWNER);
+    release(jsonResponse({ok:true}));await rejected;
+    expect(healthSignOut.end).not.toHaveBeenCalled();
   });
 
   it.each([ACCOUNT_B_OWNER,TIMER_STOP_OWNER])("fences delayed explicit logout against a replacement login (%j)",async(nextOwner)=>{
@@ -1837,6 +1894,336 @@ describe("mobile API client", () => {
       { activeLeaseCount: 0, localId: "health-already-transmitting" },
       { activeLeaseCount: 1, localId: "timer-arrived-during-health" }
     ]);
+  });
+
+  it("keeps delivering later location events while one Health event keeps failing (iphone-timer-sync-4)", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "health-poison",
+      source: "health_sleep",
+      type: "health_sleep_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "sleep-poison" }
+    });
+    await enqueueEvent({
+      localId: "location-after-health",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 40 }
+    });
+    const posted: string[] = [];
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const { clientEventId } = JSON.parse(String(init?.body)) as { clientEventId: string };
+      posted.push(clientEventId);
+      return Promise.resolve(clientEventId === "health-poison"
+        ? jsonResponse({ error: "Unable to sync this event." }, 500)
+        : jsonResponse({ eventId: `event-${clientEventId}` }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["health-poison", "location-after-health"]);
+    expect(first.synced).toEqual(["location-after-health"]);
+    expect(first.remaining).toEqual([
+      expect.objectContaining({ localId: "health-poison", failureKind: "server", lastStatusCode: 500 })
+    ]);
+
+    // Before the Health item's backoff is due, a later location event is still sent and the
+    // failing item is not retried early.
+    await enqueueEvent({
+      localId: "location-while-health-backs-off",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 15 }
+    });
+    const second = await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["health-poison", "location-after-health", "location-while-health-backs-off"]);
+    expect(second.synced).toEqual(["location-while-health-backs-off"]);
+    const queue = await readQueue();
+    expect(queue.map((item) => item.localId)).toEqual(["health-poison"]);
+    // The Health event is handed over unchanged: same ID and payload.
+    expect(queue[0].rawPayload).toEqual({ provider: "healthkit", externalSampleId: "sleep-poison" });
+  });
+
+  it("delivers a timer event and its correlation while a slow Health upload is in flight (iphone-timer-sync-5)", async () => {
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "health-slow-upload",
+      source: "health_sleep",
+      type: "health_sleep_import",
+      rawPayload: { provider: "healthkit", externalSampleId: "sleep-slow" }
+    });
+    const healthResponse = deferred<Response>();
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { clientEventId: string; type: string };
+      if (body.clientEventId === "health-slow-upload") return healthResponse.promise;
+      return Promise.resolve(jsonResponse({
+        eventId: `event-${body.clientEventId}`,
+        ...(body.type === "timer_start" ? { timeEntryId: TIMER_TARGET_A } : {})
+      }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const healthDrain = syncQueue({ eventScope: "non_timer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await enqueueEvent({
+      localId: "optimistic-active-timer:during-health",
+      source: "mobile_app",
+      type: "timer_start",
+      requestImmediateDelivery: true
+    });
+    const notYet = Symbol("still waiting");
+    const within = <T,>(promise: Promise<T>) => Promise.race([
+      promise,
+      new Promise<typeof notYet>((resolve) => setTimeout(() => resolve(notYet), 500))
+    ]);
+
+    // The Dashboard's default sync: its timer half finishes while Health is still uploading.
+    const allDrain = syncQueue();
+    await expect(within(resolveTimerEntryIdAfterQueueBarrier("optimistic-active-timer:during-health")))
+      .resolves.toBe(TIMER_TARGET_A);
+
+    // A Shortcut Stop queued now is delivered at once too, ahead of the Health upload.
+    await enqueueEvent({
+      localId: "shortcut-stop-during-health",
+      source: "shortcut",
+      type: "timer_stop",
+      rawPayload: { stopScope: "running_at" }
+    });
+    await expect(within(syncQueue({ eventScope: "timer_mutations" }))).resolves.toMatchObject({
+      synced: ["shortcut-stop-during-health"]
+    });
+
+    healthResponse.resolve(jsonResponse({ eventId: "event-health-slow" }, 201));
+    await expect(healthDrain).resolves.toMatchObject({ synced: ["health-slow-upload"] });
+    await expect(allDrain).resolves.toMatchObject({
+      synced: ["optimistic-active-timer:during-health"],
+      remainingCount: 0
+    });
+    await expect(readQueue()).resolves.toEqual([]);
+  });
+
+  it("parks a non-timer event that keeps getting server errors as a Sync help issue (iphone-timer-sync-4)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));
+    storeBoundSession("session-token");
+    await enqueueEvent({
+      localId: "location-poison",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 30 }
+    });
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Unable to sync this event." }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Offline attempts never count towards the cap.
+    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new TypeError("Network request failed"))));
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await syncQueue({ eventScope: "non_timer", forceRetry: true });
+    }
+    vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
+    expect((await readQueue())[0].failureKind).toBe("network");
+    vi.stubGlobal("fetch", fetchMock);
+
+    // A burst of forced retries during a short outage does not park it either.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      await syncQueue({ eventScope: "non_timer", forceRetry: true });
+    }
+    expect((await readQueue())[0].failureKind).toBe("server");
+
+    let passes = 0;
+    while ((await readQueue())[0].failureKind !== "permanent" && passes < 40) {
+      vi.setSystemTime(new Date(Date.now() + 61 * 60_000));
+      await syncQueue({ eventScope: "non_timer" });
+      passes += 1;
+    }
+    const [parked] = await readQueue();
+    expect(parked).toEqual(expect.objectContaining({
+      localId: "location-poison",
+      failureKind: "permanent",
+      lastStatusCode: 500,
+      rawPayload: { durationMinutes: 30 }
+    }));
+    const diagnostics = getQueueDiagnostics(await readQueue());
+    expect(diagnostics).toMatchObject({ permanentFailedCount: 1, clearableFailedCount: 1, retryableFailedCount: 0 });
+
+    // Parked: automatic passes stop resending it, but Sync help's Try again still can.
+    const callsWhenParked = fetchMock.mock.calls.length;
+    vi.setSystemTime(new Date(Date.now() + 3 * 60 * 60_000));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock.mock.calls.length).toBe(callsWhenParked);
+    fetchMock.mockImplementationOnce(() => Promise.resolve(jsonResponse({ eventId: "event-location-poison" }, 201)));
+    await expect(retryFailedQueuedEvents()).resolves.toMatchObject({ synced: ["location-poison"] });
+    await expect(readQueue()).resolves.toEqual([]);
+  });
+
+  it("retries a parked event slowly, one per pass, and clears its issue when a retry succeeds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));
+    storeBoundSession("session-token");
+    const parkedFields = {
+      source: "location_learning",
+      type: "unknown_stay",
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastError: "Unable to sync this event. Dayframe stopped retrying it after repeated server errors.",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    };
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({ ...parkedFields, localId: "parked-1", rawPayload: { durationMinutes: 20 } }),
+      storedQueuedEvent({ ...parkedFields, localId: "parked-2", rawPayload: { durationMinutes: 25 } }),
+      // Refused as invalid: never retried automatically.
+      storedQueuedEvent({ ...parkedFields, localId: "refused-invalid", lastStatusCode: 422, rawPayload: { durationMinutes: 5 } })
+    ]));
+    const posted: string[] = [];
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const { clientEventId } = JSON.parse(String(init?.body)) as { clientEventId: string };
+      posted.push(clientEventId);
+      return Promise.resolve(jsonResponse({ eventId: `event-${clientEventId}` }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Within 6 h of the last attempt nothing is resent.
+    vi.setSystemTime(new Date("2026-07-06T13:00:00.000Z"));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual([]);
+    expect(getQueueDiagnostics(await readQueue()).permanentFailedCount).toBe(3);
+
+    // Once due, one parked event per pass; a success clears its issue.
+    vi.setSystemTime(new Date("2026-07-06T14:30:00.000Z"));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1"]);
+    expect((await readQueue()).map((item) => item.localId)).toEqual(["parked-2", "refused-invalid"]);
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1", "parked-2"]);
+    const left = await readQueue();
+    expect(left.map((item) => item.localId)).toEqual(["refused-invalid"]);
+    expect(getQueueDiagnostics(left).permanentFailedCount).toBe(1);
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1", "parked-2"]);
+  });
+
+  it("keeps a parked event's issue when its slow retry fails again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([storedQueuedEvent({
+      localId: "parked-again",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 20 },
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    })]));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Unable to sync this event." }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncQueue({ eventScope: "non_timer" });
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [parked] = await readQueue();
+    expect(parked).toMatchObject({ failureKind: "permanent", serverFailureCount: 10, lastAttemptedAt: "2026-07-06T20:00:00.000Z" });
+  });
+
+  it.each([
+    ["an offline failure", () => Promise.reject(new TypeError("Network request failed"))],
+    ["an invalid acknowledgement", () => Promise.resolve(jsonResponse({ ok: true }, 201))],
+    ["a timeout", () => new Promise<Response>(() => undefined)]
+  ] as const)("keeps a parked event parked when its slow retry ends in %s (Codex r1 on #547)", async (_name, failure) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([storedQueuedEvent({
+      localId: "parked-slow-retry",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 20 },
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    })]));
+    const fetchMock = vi.fn(failure);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pass = syncQueue({ eventScope: "non_timer" });
+    await vi.advanceTimersByTimeAsync(16_000);
+    await pass;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [parked] = await readQueue();
+    expect(parked).toMatchObject({ failureKind: "permanent", lastStatusCode: 500, serverFailureCount: 9 });
+    expect(getQueueDiagnostics([parked])).toMatchObject({ permanentFailedCount: 1, clearableFailedCount: 1, retryableFailedCount: 0 });
+
+    // Still on the six-hour cadence, not ordinary backoff.
+    vi.setSystemTime(new Date(Date.now() + 61 * 60_000));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ eventId: "event-parked" }, 201)));
+    vi.setSystemTime(new Date(Date.now() + 5 * 60 * 60_000));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(readQueue()).resolves.toEqual([]);
+  });
+
+  it("offers Try again but not Clear for a parked Health event (Codex r1 on #547)", async () => {
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({
+        localId: "healthkit:parked",
+        source: "health_sleep",
+        type: "health_sleep_import",
+        rawPayload: { provider: "healthkit", externalSampleId: "sleep-parked" },
+        failedAt: "2026-07-06T08:00:00.000Z",
+        failureKind: "permanent",
+        failureCount: 9,
+        serverFailureCount: 9,
+        firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+        lastStatusCode: 500,
+        lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+      }),
+      storedQueuedEvent({
+        localId: "health-refused-invalid",
+        source: "health_sleep",
+        type: "health_sleep_import",
+        rawPayload: { provider: "healthkit", externalSampleId: "sleep-invalid" },
+        failedAt: "2026-07-06T08:00:00.000Z",
+        failureKind: "permanent",
+        failureCount: 1,
+        lastStatusCode: 422
+      })
+    ]));
+    expect(getQueueDiagnostics(await readQueue())).toMatchObject({ permanentFailedCount: 2, clearableFailedCount: 1 });
+    await expect(clearFailedQueuedEvents()).resolves.toMatchObject({ removedCount: 1 });
+    expect((await readQueue()).map((item) => item.localId)).toEqual(["healthkit:parked"]);
+  });
+
+  it("keeps timer events strictly ordered and never parks them on server errors", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));
+    storeBoundSession("session-token");
+    await enqueueEvent({ localId: "stop-1", source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 1 }) });
+    await enqueueEvent({ localId: "stop-2", source: "mobile_app", type: "timer_stop", rawPayload: scopedStopPayload({ order: 2 }) });
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Server error" }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let pass = 0; pass < 20; pass += 1) {
+      vi.setSystemTime(new Date(Date.now() + 61 * 60_000));
+      await syncQueue({ eventScope: "timer_mutations" });
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+    const queue = await readQueue();
+    expect(queue.map((item) => [item.localId, item.failureKind])).toEqual([["stop-1", "server"], ["stop-2", undefined]]);
   });
 
   it("preserves queue order when the first event fails to sync", async () => {

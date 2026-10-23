@@ -15,6 +15,7 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     DayframeSharedFileLock.install(DayframeSharedFileLockBackgroundTask.begin)
     DayframeDiagnosticsService.shared.start()
+    DayframeLocalDatabaseBackup.exclude()
     let delegate = ReactNativeDelegate()
     let factory = ExpoReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -50,6 +51,26 @@ class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+}
+
+/// expo-sqlite keeps every Dayframe database (the Location, Health and Review journals and outboxes)
+/// in `Documents/SQLite`, which iCloud and computer backups include. They hold precise location and
+/// Health data that logout and Delete recent evidence must be able to remove, so the folder is kept out
+/// of backups (stability audit 22 Oct 2026, location-5), before JavaScript can open a database. iOS
+/// applies a folder's exclusion to everything inside it; this runs at every launch, background ones too.
+private enum DayframeLocalDatabaseBackup {
+  static func exclude() {
+    guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    var directory = documents.appendingPathComponent("SQLite", isDirectory: true)
+    do {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      try directory.setResourceValues(values)
+    } catch {
+      // Best effort: the next launch tries again.
+    }
   }
 }
 

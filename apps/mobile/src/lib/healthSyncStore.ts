@@ -35,6 +35,8 @@ type EpisodeRow = {
   sample_ids_json: string;
   started_at: string;
   stopped_at: string;
+  revision: string;
+  source_revision: string | null;
 };
 type DeliveryRow = {
   client_event_id: string;
@@ -86,7 +88,7 @@ async function database() {
         create table if not exists health_episodes (
           owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
           sample_ids_json text not null, started_at text not null, stopped_at text not null,
-          revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+          revision text not null, updated_at text not null, source_revision text, primary key(owner_key,episode_id));
         create table if not exists health_deliveries (
           owner_key text not null, client_event_id text not null, episode_id text not null, revision text not null,
           payload_json text, state text not null default 'pending_handoff', created_at text not null,
@@ -106,6 +108,15 @@ async function database() {
         create table if not exists health_prune_runs (owner_key text primary key, pruned_at text not null);
         create index if not exists health_query_run_finished on health_query_runs(owner_key,finished_at);
         `);
+        // Journals from builds before source-fact revisions have no source_revision column; their
+        // episodes are adopted on the next commit without a re-send (see sourceRevisionFor).
+        const episodeColumns = await transaction.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(health_episodes)",
+        );
+        if (!episodeColumns.some((column) => column.name === "source_revision"))
+          await transaction.execAsync(
+            "alter table health_episodes add column source_revision text",
+          );
         if ((version?.user_version ?? 0) < 2) {
           // Re-handoff pre-identity queue records with their original journal
           // owner and immutable payload. Acknowledged deliveries stay settled.
@@ -195,7 +206,7 @@ export async function commitHealthCapturePage(input: {
       }>(
         `select
         (select count(*) from health_samples where owner_key=?) as samples,
-        (select count(*) from health_deliveries where owner_key=? and state!='acknowledged') as pending`,
+        (select count(*) from health_deliveries where owner_key=? and state in ('pending_handoff','queued')) as pending`,
         key,
         key,
       );
@@ -274,15 +285,17 @@ export async function commitHealthCapturePage(input: {
         key,
         input.contract.kind,
       );
-      const drafts = input.derive(
-        sampleRows.map((row) => ({
-          id: row.sample_id,
-          sourceKey: row.source_key,
-          startedAt: row.started_at,
-          stoppedAt: row.stopped_at,
-          value: JSON.parse(row.sample_json),
-        })),
+      const journalSamples = sampleRows.map((row) => ({
+        id: row.sample_id,
+        sourceKey: row.source_key,
+        startedAt: row.started_at,
+        stoppedAt: row.stopped_at,
+        value: JSON.parse(row.sample_json) as Record<string, unknown>,
+      }));
+      const samplesById = new Map(
+        journalSamples.map((sample) => [sample.id, sample]),
       );
+      const drafts = input.derive(journalSamples);
       for (const draft of drafts) {
         const members = [...new Set(draft.sampleIds)].sort();
         const matches = oldEpisodes
@@ -308,6 +321,36 @@ export async function commitHealthCapturePage(input: {
           episodeId,
         );
         if (unresolved?.n) continue; // Explicit correction preserves the existing union and user-visible time.
+        const sourceRevision = await healthSourceRevision(
+          input.contract.kind,
+          draft.sourceKey,
+          members,
+          samplesById,
+        );
+        const existing = oldEpisodes.find(
+          (episode) => episode.episode_id === episodeId,
+        );
+        // Unchanged source facts: nothing to send, whatever the current mapping or event shape.
+        // An episode journaled before source revisions is adopted when its members and window
+        // are unchanged, so an upgrade never re-sends the retained journal.
+        const unchanged =
+          !!existing &&
+          (existing.source_revision === sourceRevision ||
+            (existing.source_revision == null &&
+              existing.source_key === draft.sourceKey &&
+              existing.sample_ids_json === JSON.stringify(members) &&
+              existing.started_at === draft.startedAt &&
+              existing.stopped_at === draft.stoppedAt));
+        if (unchanged) {
+          await transaction.runAsync(
+            "update health_episodes set source_revision=?,updated_at=? where owner_key=? and episode_id=?",
+            sourceRevision,
+            now,
+            key,
+            episodeId,
+          );
+          continue;
+        }
         const {
           localId: _legacyId,
           owner: _owner,
@@ -322,7 +365,7 @@ export async function commitHealthCapturePage(input: {
             logicalEpisodeId: episodeId,
           },
         };
-        const revision = await healthFingerprint(payload);
+        const revision = sourceRevision;
         const clientEventId = `healthkit:${input.contract.kind}:${episodeId}:${revision}`;
         const event = {
           ...payload,
@@ -348,9 +391,10 @@ export async function commitHealthCapturePage(input: {
         );
         generated += inserted.changes;
         await transaction.runAsync(
-          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at)
-          values(?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
-          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,updated_at=excluded.updated_at`,
+          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,source_revision,updated_at)
+          values(?,?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
+          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,
+          source_revision=excluded.source_revision,updated_at=excluded.updated_at`,
           key,
           input.contract.kind,
           episodeId,
@@ -359,6 +403,7 @@ export async function commitHealthCapturePage(input: {
           draft.startedAt,
           draft.stoppedAt,
           revision,
+          sourceRevision,
           now,
         );
       }
@@ -414,6 +459,44 @@ export async function commitHealthCapturePage(input: {
       usableSampleCount: input.additions.length,
     };
   });
+}
+
+/**
+ * An episode revision identifies its HealthKit source facts only: the member sample identities,
+ * their times and source, and the native sleep stage or workout activity type. Dayframe's
+ * activity mapping and the derived event's shape are deliberately excluded, so a mapping change
+ * or a new build never re-sends an unchanged episode (mapping changes reach the server through
+ * the explicit Health reprocess instead). A changed or added member is a new revision.
+ */
+async function healthSourceRevision(
+  kind: HealthCaptureKind,
+  sourceKey: string,
+  members: string[],
+  samplesById: Map<string, HealthJournalSample>,
+) {
+  return healthFingerprint([
+    "health-source-v1",
+    kind,
+    sourceKey,
+    members.map((id) => {
+      const sample = samplesById.get(id);
+      const value = sample?.value ?? {};
+      const raw = (value.rawPayload ?? {}) as Record<string, unknown>;
+      const source = (
+        (raw.sourceRevision ?? {}) as { source?: Record<string, unknown> }
+      ).source;
+      return [
+        id,
+        sample?.sourceKey ?? null,
+        sample?.startedAt ?? null,
+        sample?.stoppedAt ?? null,
+        kind === "sleep"
+          ? (value.stage ?? null)
+          : (raw.workoutActivityType ?? value.workoutType ?? null),
+        source?.bundleIdentifier ?? null,
+      ];
+    }),
+  ]);
 }
 
 export async function handoffHealthEvents(
@@ -497,8 +580,25 @@ export async function recordHealthAcknowledgement(
       clientEventId,
     ),
   );
-  if (!result.changes && clientEventId.startsWith("healthkit:"))
-    throw new Error("The Health acknowledgement has no matching captured owner and event.");
+  // No journal row (discarded and then expired, or never this owner's): there is nothing left to
+  // settle, so the queued event is done rather than retried forever (Codex r3 on #549).
+  return result.changes > 0;
+}
+
+/**
+ * Whether a journal delivery is still owed to the server (`pending_handoff` or `queued`). The activity
+ * queue admits a journal-owned Health event only while this holds, checked under the queue's own lock,
+ * and drops one it holds once it no longer does, so Clear's discard and a handoff holding an earlier
+ * snapshot can never leave a Health body in the queue without its journal row (Codex r3 on #549).
+ */
+export async function isHealthDeliveryOpen(owner: HealthCaptureOwner, clientEventId: string) {
+  const db = await database();
+  const row = await db.getFirstAsync<{ state: string }>(
+    "select state from health_deliveries where owner_key=? and client_event_id=?",
+    healthOwnerKey(owner),
+    clientEventId,
+  );
+  return row?.state === "pending_handoff" || row?.state === "queued";
 }
 
 export async function beginOrResumeHealthRepair(
@@ -677,6 +777,40 @@ export async function keepRecordedHealthTime(
   });
 }
 
+/**
+ * Settles queued Health events the person removed from the activity queue (Clear on events the server
+ * permanently refused) as `discarded`: the payload is dropped at once and the row is no longer
+ * unsettled work, so prune and signed-out expiry stop protecting it and its episode (Codex r1 on #549).
+ * Every unsettled row the queue removes is settled, including one still `pending_handoff` after a
+ * handoff interrupted between the queue write and its bookkeeping, which the next handoff would
+ * otherwise enqueue again (Codex r2 on #549); an acknowledged row is left as it is. Only events Clear
+ * actually removes reach here (parked Health work it refuses keeps its row). Runs before the queue write, so a crash in between leaves the event queued and its
+ * later acknowledgement still lands (acknowledgement overwrites `discarded`).
+ */
+export async function discardQueuedHealthDeliveries(
+  items: Array<{ owner: HealthCaptureOwner; clientEventId: string }>,
+) {
+  if (!items.length) return 0;
+  const db = await database();
+  return serial(async () => {
+    let changed = 0;
+    const now = new Date().toISOString();
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      for (const item of items)
+        changed += (
+          await transaction.runAsync(
+            `update health_deliveries set state='discarded',payload_json=null,acknowledged_at=?
+            where owner_key=? and client_event_id=? and state in ('pending_handoff','queued')`,
+            now,
+            healthOwnerKey(item.owner),
+            item.clientEventId,
+          )
+        ).changes;
+    });
+    return changed;
+  });
+}
+
 /** Journal maintenance runs at most this often per owner (see `pruneAcknowledgedHealthCaptureIfDue`). */
 export const HEALTH_PRUNE_INTERVAL_MS = 86_400_000;
 
@@ -752,7 +886,7 @@ async function pruneOwnerJournal(
   ).toISOString();
   // Episodes with an unresolved correction, and episodes with any unacknowledged delivery.
   const corrected = `select c.episode_id from health_source_corrections c where c.owner_key=? and c.state='needs_attention'`;
-  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state!='acknowledged'`;
+  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state in ('pending_handoff','queued')`;
   // Their source members, gathered once: one json_each pass over the protecting episodes only.
   const protectedSamples = `select member.value from health_episodes e,json_each(e.sample_ids_json) member
       where e.owner_key=? and member.value is not null
@@ -782,7 +916,7 @@ async function pruneOwnerJournal(
     key,
   );
   await transaction.runAsync(
-    `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
+    `delete from health_deliveries where owner_key=? and state in ('acknowledged','discarded') and acknowledged_at<?
       and episode_id not in (${corrected})`,
     key,
     provenanceBefore,
@@ -808,3 +942,75 @@ async function pruneOwnerJournal(
     key,
   );
 }
+
+/** Who keeps their journal, from the session authority; `isCurrent` must hold until the deletion commits. */
+export type HealthJournalKeeper = {
+  keep: HealthCaptureOwner | null;
+  isCurrent: () => boolean;
+};
+
+/**
+ * Removes the Health journal of every account except `resolveKeep()`'s (stability audit 22 Oct 2026,
+ * health-3): a signed-out or replaced account's raw samples, payloads, episodes and checkpoints are
+ * otherwise never pruned, because maintenance runs only for the account capturing. The keeper is read
+ * inside the journal's serial lane and rechecked before commit, so a sign-in that lands first is never
+ * touched; with no signed-in account (`keep: null`) every owner is expired, and a `null` keeper (an
+ * account hand-over in progress, or a session that cannot be read) defers it. Unacknowledged deliveries
+ * are durable work the outbox still holds (an acknowledgement must find its row), so they, their
+ * episodes and those episodes' unresolved corrections stay until that account settles them; discarded
+ * and acknowledged ones go. Returns the rows deleted, or null when deferred.
+ */
+export async function expireInactiveHealthOwners(
+  resolveKeep: () => Promise<HealthJournalKeeper | null>,
+): Promise<number | null> {
+  const db = await database();
+  return serial(async () => {
+    const keeper = await resolveKeep();
+    if (!keeper || !keeper.isCurrent()) return null;
+    const keepKey = keeper.keep ? healthOwnerKey(keeper.keep) : null;
+    let deleted = 0;
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      for (const table of [
+        "health_checkpoints",
+        "health_repairs",
+        "health_samples",
+        "health_query_runs",
+        "health_prune_runs",
+      ])
+        deleted += (
+          await transaction.runAsync(
+            `delete from ${table} where owner_key is not ?`,
+            keepKey,
+          )
+        ).changes;
+      deleted += (
+        await transaction.runAsync(
+          "delete from health_deliveries where owner_key is not ? and state in ('acknowledged','discarded')",
+          keepKey,
+        )
+      ).changes;
+      // Every delivery left for these owners is unsettled; keep the episodes they belong to.
+      deleted += (
+        await transaction.runAsync(
+          `delete from health_episodes where owner_key is not ?
+          and (owner_key,episode_id) not in (select owner_key,episode_id from health_deliveries)`,
+          keepKey,
+        )
+      ).changes;
+      deleted += (
+        await transaction.runAsync(
+          `delete from health_source_corrections where owner_key is not ?
+          and (state!='needs_attention' or (owner_key,episode_id) not in (select owner_key,episode_id from health_episodes))`,
+          keepKey,
+        )
+      ).changes;
+      if (!keeper.isCurrent()) throw new HealthJournalKeeperChanged();
+    });
+    return deleted;
+  }).catch((error) => {
+    if (error instanceof HealthJournalKeeperChanged) return null;
+    throw error;
+  });
+}
+
+class HealthJournalKeeperChanged extends Error {}

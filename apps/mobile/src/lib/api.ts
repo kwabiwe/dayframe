@@ -85,7 +85,13 @@ let timerEntryIdCorrelationMutationTail: Promise<void> = Promise.resolve();
 type ActiveActivityQueueSync = {
   promise: Promise<SyncQueueResult>;
 };
-const activityQueueSyncInFlightByOwner = new Map<string, ActiveActivityQueueSync>();
+/**
+ * Timer events and the rest of the queue (Health, location) drain on separate per-owner lanes, so a
+ * Start, Stop or Switch and its correlation never wait behind a slow non-timer upload (stability audit
+ * 22 Oct 2026, iphone-timer-sync-5). Each lane stays serialised per owner; the two touch disjoint items.
+ */
+type ActivityQueueLane = "timer" | "non_timer";
+const activityQueueSyncInFlightByLane = new Map<string, ActiveActivityQueueSync>();
 const activityQueueListeners = new Set<() => void>();
 
 // Request cancellation follows the existing captured session predicate. It is
@@ -424,6 +430,9 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   failureKind?: QueueFailureKind;
   /** When the server first refused this queued Start; kept across Retries so it is announced once. */
   refusedStartAt?: string;
+  /** Server error replies to a non-timer event, and when the first came; they bound its automatic retries. */
+  serverFailureCount?: number;
+  firstServerFailureAt?: string;
 };
 
 export type QueueFailureKind = "network" | "server" | "permanent";
@@ -510,6 +519,8 @@ type QueueableEvent = Omit<
   | "lastAttemptedAt"
   | "nextRetryAt"
   | "failureKind"
+  | "serverFailureCount"
+  | "firstServerFailureAt"
   | "userId"
   | "workspaceId"
 >;
@@ -774,6 +785,12 @@ export async function logout() {
       return endLocationCaptureOwnership("logout", logoutOwner ?? undefined, isCurrent);
     });
     requireCurrent();
+    // Recorded before the server session is revoked, so the Health journal expiry started below is
+    // retried at a later launch, signed out or not; a failed write fails logout while still signed in
+    // (Codex r1 and r2 on #549).
+    const healthExpiryMarker = await import("./healthSignOut")
+      .then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending(logoutOwner ?? null));
+    requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
       method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -798,6 +815,10 @@ export async function logout() {
     logoutSucceeded = true;
     // The evening Review reminder belongs to the account that just left.
     void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
+    // So do its Health journal and HealthKit's background wakes (health-3, health-4). Unsettled
+    // Health deliveries stay with the durable queue that still holds them; the recorded expiry
+    // survives a failure here.
+    void import("./healthSignOut").then(({ endHealthCaptureAfterLogout }) => endHealthCaptureAfterLogout(healthExpiryMarker)).catch(() => undefined);
   } finally {
     unsubscribe();
     finishBootstrapLogoutRequest?.();
@@ -835,6 +856,14 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     const all = await readAllQueue(owner);
     const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
+    // A journal handoff is admitted only while its delivery is still owed, under this queue lock that
+    // Clear's discard also holds: a handoff working from an earlier snapshot cannot re-add a cleared
+    // event (Codex r3 on #549).
+    if (input.healthOwner && queuedLocalId.startsWith("healthkit:") &&
+        !queue.some((item) => item.localId === queuedLocalId)) {
+      const { isHealthDeliveryOpen } = await import("./healthSyncStore");
+      if (!await isHealthDeliveryOpen(input.healthOwner, queuedLocalId)) return queue;
+    }
     if (queue.some((item) => item.localId === queuedLocalId)) {
       if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
         await reserveTimerBackgroundExecution(
@@ -952,8 +981,9 @@ export async function resolveTimerEntryIdAfterQueueBarrier(localId: string) {
   const { pendingSync } = await withQueueMutation(async () => {
     const owner = await readActiveMobileAccount();
     return {
+      // Only the timer lane can record a correlation; a slow Health or location upload is not waited for.
       pendingSync: owner
-        ? activityQueueSyncInFlightByOwner.get(mobileAccountKey(owner))?.promise ?? null
+        ? activityQueueSyncInFlightByLane.get(activityQueueLaneKey(owner, "timer"))?.promise ?? null
         : null
     };
   });
@@ -1014,9 +1044,23 @@ export async function removeQueuedEvent(localId: string) {
     if (isRefusedTimerStart(target) && !await settleRefusedTimerStart(refusedTimerStartOf(target, owner))) {
       return false;
     }
+    await settleDiscardedHealthEvents([target]);
     await writeAllQueue(all.filter((item) => item !== target));
     return true;
   });
+}
+
+/**
+ * A Health event the person removes from the queue is settled in its Health journal first
+ * (`discarded`), so its payload and episode stop being protected as unsettled work (Codex r1 on #549).
+ * A failure leaves the queue unchanged; Clear can be tried again.
+ */
+async function settleDiscardedHealthEvents(items: QueuedEvent[]) {
+  const health = items.filter((item) =>
+    item.healthOwner && (item.source === "health_sleep" || item.source === "health_workout"));
+  if (!health.length) return;
+  const { discardQueuedHealthDeliveries } = await import("./healthSyncStore");
+  await discardQueuedHealthDeliveries(health.map((item) => ({ owner: item.healthOwner!, clientEventId: item.localId })));
 }
 
 export function subscribeActivityQueue(listener: () => void) {
@@ -1086,6 +1130,7 @@ export async function clearFailedQueuedEvents() {
     }
     const remaining = queue.filter((item) => !isClearableFailedEvent(item) || held.has(item));
     const removed = queue.filter((item) => isClearableFailedEvent(item) && !held.has(item));
+    await settleDiscardedHealthEvents(removed);
     await writeAllQueue([
       ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining
@@ -1105,37 +1150,68 @@ export function syncQueue(options: SyncQueueOptions = {}): Promise<SyncQueueResu
 }
 
 async function syncQueueNow(options: SyncQueueOptions): Promise<SyncQueueResult> {
-  const { sync } = await withQueueMutation(async () => {
+  const scope = options.eventScope ?? "all";
+  const first = await withQueueMutation(async () => {
     const owner = await readActiveMobileAccount();
-    if (!owner) {
-      return { sync: Promise.resolve(queueSyncResult([], [], undefined, false)) };
-    }
-    const ownerKey = mobileAccountKey(owner);
-    const previous = activityQueueSyncInFlightByOwner.get(ownerKey)?.promise;
-    const active: ActiveActivityQueueSync = { promise: Promise.resolve(
-      queueSyncResult([], [], undefined, false)
-    ) };
-    const nextSync = (previous?.catch(() => undefined) ?? Promise.resolve())
-      .then(() => runActivityQueueSyncRequest(options, owner))
-      .finally(() => {
-        if (activityQueueSyncInFlightByOwner.get(ownerKey) === active) {
-          activityQueueSyncInFlightByOwner.delete(ownerKey);
-        }
-      });
-    active.promise = nextSync;
-    activityQueueSyncInFlightByOwner.set(ownerKey, active);
-    return { sync: nextSync };
+    if (!owner) return null;
+    const lane: ActivityQueueLane = scope === "non_timer" || scope === "health" ? "non_timer" : "timer";
+    const phase = scope === "all" ? { ...options, eventScope: "timer_mutations" as const } : options;
+    return { owner, sync: chainActivityQueueLaneSync(owner, lane, phase) };
   });
-  return sync;
+  if (!first) return queueSyncResult([], [], undefined, false);
+  if (scope !== "all") return first.sync;
+
+  // Timer events first, then the rest on its own lane: a later timer sync never waits for this half.
+  const { owner } = first;
+  const timerResult = await first.sync;
+  if (options.signal?.aborted || timerResult.stopped) {
+    return combineQueueSyncResults(
+      [timerResult],
+      await ownedQueueForScope(owner, "all"),
+      options.signal?.aborted === true
+    );
+  }
+  const foreground = await withQueueMutation(async () =>
+    ({ sync: chainActivityQueueLaneSync(owner, "non_timer", { ...options, eventScope: "non_timer" }) })
+  );
+  const foregroundResult = await foreground.sync;
+  return combineQueueSyncResults(
+    [timerResult, foregroundResult],
+    await ownedQueueForScope(owner, "all")
+  );
+}
+
+/** Chains one pass behind the owner's earlier pass on the same lane. Call inside `withQueueMutation`. */
+function chainActivityQueueLaneSync(
+  owner: MobileAccountOwner,
+  lane: ActivityQueueLane,
+  options: SyncQueueOptions
+) {
+  const laneKey = activityQueueLaneKey(owner, lane);
+  const previous = activityQueueSyncInFlightByLane.get(laneKey)?.promise;
+  const active: ActiveActivityQueueSync = { promise: Promise.resolve(
+    queueSyncResult([], [], undefined, false)
+  ) };
+  const nextSync = (previous?.catch(() => undefined) ?? Promise.resolve())
+    .then(() => runActivityQueueSyncRequest(options, owner))
+    .finally(() => {
+      if (activityQueueSyncInFlightByLane.get(laneKey) === active) {
+        activityQueueSyncInFlightByLane.delete(laneKey);
+      }
+    });
+  active.promise = nextSync;
+  activityQueueSyncInFlightByLane.set(laneKey, active);
+  return nextSync;
+}
+
+function activityQueueLaneKey(owner: MobileAccountOwner, lane: ActivityQueueLane) {
+  return `${lane}:${mobileAccountKey(owner)}`;
 }
 
 async function runActivityQueueSyncRequest(
   options: SyncQueueOptions,
   owner: MobileAccountOwner
 ) {
-  if (options.eventScope === "timer_mutations") {
-    return syncQueueUnlocked(options, owner);
-  }
   if (options.eventScope === "health") {
     // Never alongside timer delivery's background assertion; the next wake or foreground sends it.
     if (getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0) {
@@ -1152,40 +1228,7 @@ async function runActivityQueueSyncRequest(
     }
     return syncQueueUnlocked(options, owner);
   }
-
-  const timerResult = await syncQueueUnlocked({
-    ...options,
-    eventScope: "timer_mutations"
-  }, owner);
-  if (
-    options.signal?.aborted ||
-    timerResult.stopped
-  ) {
-    return combineQueueSyncResults(
-      [timerResult],
-      await ownedQueueForScope(owner, "all"),
-      options.signal?.aborted === true
-    );
-  }
-  if (
-    getTimerBackgroundExecutionSnapshot().activeLeaseCount > 0 ||
-    !foregroundActivitySyncAllowed()
-  ) {
-    return combineQueueSyncResults(
-      [timerResult],
-      await ownedQueueForScope(owner, "all"),
-      true
-    );
-  }
-  const foregroundResult = await syncQueueUnlocked({
-    ...options,
-    eventScope: "non_timer",
-    signal: options.signal
-  }, owner);
-  return combineQueueSyncResults(
-    [timerResult, foregroundResult],
-    await ownedQueueForScope(owner, "all")
-  );
+  return syncQueueUnlocked({ ...options, eventScope: "timer_mutations" }, owner);
 }
 
 async function deferredQueueSyncResult(
@@ -1274,9 +1317,12 @@ async function syncQueueItems(
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
   const refusedStarts: RefusedTimerStart[] = [];
+  const dropped: string[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
+  // At most one slow retry of a parked Health or location event per pass (see isParkedRetryDue).
+  let parkedRetryBudget = 1;
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
@@ -1285,11 +1331,23 @@ async function syncQueueItems(
       stopped = true;
       break;
     }
+    // A journal-owned Health event whose delivery is no longer owed (discarded, acknowledged or gone
+    // with its account's journal) leaves the queue unsent (Codex r3 on #549).
+    if (item.healthOwner && item.localId.startsWith("healthkit:") && queuedEventMatchesOwner(item, owner)) {
+      const { isHealthDeliveryOpen } = await import("./healthSyncStore");
+      // A journal that cannot be read now keeps the event: only a settled or missing row drops it.
+      if (!await isHealthDeliveryOpen(item.healthOwner, item.localId).catch(() => true)) {
+        dropped.push(item.localId);
+        continue;
+      }
+    }
     if (options.onlyFailed && !hasQueueFailure(item)) {
       remaining.push(item);
       continue;
     }
-    if (!options.retryFailed && isPermanentlyFailedEvent(item)) {
+    const parkedRetry = !options.retryFailed && parkedRetryBudget > 0 && isParkedRetryDue(item, now);
+    if (parkedRetry) parkedRetryBudget -= 1;
+    if (!options.retryFailed && !parkedRetry && isPermanentlyFailedEvent(item)) {
       remaining.push(item);
       firstError ??= queueFailureReport(
         item,
@@ -1299,14 +1357,22 @@ async function syncQueueItems(
       );
       continue;
     }
+    // Timer events keep strict order (a Stop waits for its Start). Health and location events are
+    // independent, idempotent summaries, so one that is failing never holds back the next (stability
+    // audit 22 Oct 2026, iphone-timer-sync-4).
+    const isolated = !isQueuedTimerMutationEvent(item);
     if (hasQueueFailure(item) && !options.retryFailed && !options.forceRetry && !isQueueRetryDue(item, now)) {
-      remaining.push(item, ...queue.slice(index + 1));
       firstError ??= queueFailureReport(
         item,
         `Next retry ${formatRetryIso(item.nextRetryAt)}.`,
         item.failureKind ?? "network",
         item.lastStatusCode
       );
+      if (isolated) {
+        remaining.push(item);
+        continue;
+      }
+      remaining.push(item, ...queue.slice(index + 1));
       stopped = true;
       break;
     }
@@ -1352,8 +1418,14 @@ async function syncQueueItems(
         break;
       }
       if (!response.ok) {
-        const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
         const message = formatApiError((payload ?? {}) as ApiErrorPayload) ?? "Unable to sync queued event";
+        if (isolated && !permanentStatusCodes.has(response.status)) {
+          const failedItem = markNonTimerServerFailure(item, message, attemptedAt, response.status);
+          remaining.push(failedItem);
+          firstError ??= queueFailureReport(failedItem, failedItem.lastError ?? message, failedItem.failureKind ?? "server", response.status);
+          continue;
+        }
+        const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
         // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
         // is refused again, and the person was already told (Codex r2 on #532). The refusal is kept on
         // the item, so a transient failure between Retries (422, 500, 422) can't announce it twice
@@ -1412,9 +1484,13 @@ async function syncQueueItems(
       }
       const message = error instanceof Error ? error.message : "Network request failed";
       const failureKind = isMobileTransportFailure(error) ? "network" : "server";
-      const failedItem = markQueueFailure(item, message, attemptedAt, failureKind);
+      const failedItem = keepParked(item, markQueueFailure(item, message, attemptedAt, failureKind));
+      firstError ??= queueFailureReport(failedItem, message, failedItem.failureKind ?? failureKind);
+      if (isolated && failureKind === "server") {
+        remaining.push(failedItem);
+        continue;
+      }
       remaining.push(failedItem, ...queue.slice(index + 1));
-      firstError ??= queueFailureReport(failedItem, message, failureKind);
       stopped = true;
       break;
     }
@@ -1424,7 +1500,7 @@ async function syncQueueItems(
     owner,
     processed: queue,
     remaining,
-    synced
+    synced: [...synced, ...dropped]
   });
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).
@@ -2412,7 +2488,11 @@ function migrateQueuedEvent(
     lastStatusCode,
     lastAttemptedAt: validIsoString(item.lastAttemptedAt),
     nextRetryAt: validIsoString(item.nextRetryAt),
-    failureKind
+    failureKind,
+    serverFailureCount: typeof item.serverFailureCount === "number" && Number.isFinite(item.serverFailureCount)
+      ? Math.max(0, Math.trunc(item.serverFailureCount))
+      : undefined,
+    firstServerFailureAt: validIsoString(item.firstServerFailureAt)
   };
 }
 
@@ -2479,6 +2559,68 @@ function markQueueFailure(
   };
 }
 
+/**
+ * A Health or location event the server keeps answering with an error is retried with backoff, then
+ * parked as a Sync help issue ("Couldn't be sent": Try again or Clear) once it has had
+ * NON_TIMER_SERVER_FAILURE_CAP error replies over at least NON_TIMER_SERVER_FAILURE_WINDOW_MS. It is
+ * never dropped. Offline attempts and timeouts don't count: only replies from the server do. A parked
+ * event keeps its Sync help issue but is still retried slowly (PARKED_RETRY_INTERVAL_MS, one per pass,
+ * only on passes that run anyway: parked work never schedules a wake), and leaves once one succeeds.
+ */
+const NON_TIMER_SERVER_FAILURE_CAP = 8;
+const NON_TIMER_SERVER_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** A parked event is still retried on passes that run anyway, at most once per this interval. */
+const PARKED_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** Parked by the server-error cap (not refused as invalid), and its slow retry is due. */
+function isParkedRetryDue(item: QueuedEvent, now: Date) {
+  if (!isParkedNonTimerEvent(item)) return false;
+  const lastAttempt = new Date(item.lastAttemptedAt ?? "").getTime();
+  return Number.isNaN(lastAttempt) || now.getTime() - lastAttempt >= PARKED_RETRY_INTERVAL_MS;
+}
+
+/** Parked by the server-error cap, as opposed to refused as invalid (400/413/422). */
+function isParkedNonTimerEvent(item: QueuedEvent) {
+  return !isQueuedTimerMutationEvent(item) &&
+    item.failureKind === "permanent" &&
+    !(item.lastStatusCode !== undefined && permanentStatusCodes.has(item.lastStatusCode)) &&
+    (item.serverFailureCount ?? 0) >= NON_TIMER_SERVER_FAILURE_CAP;
+}
+
+/**
+ * A parked event's unsuccessful retry (offline, timeout, invalid acknowledgement) keeps it parked: its
+ * Sync help issue stays and its next automatic retry is again six hours on (Codex r1 on #547).
+ */
+function keepParked(item: QueuedEvent, failed: QueuedEvent): QueuedEvent {
+  if (!isParkedNonTimerEvent(item)) return failed;
+  return { ...failed, failureKind: "permanent", nextRetryAt: undefined, lastStatusCode: item.lastStatusCode };
+}
+
+function markNonTimerServerFailure(
+  item: QueuedEvent,
+  message: string,
+  attemptedAt: string,
+  statusCode: number
+): QueuedEvent {
+  const serverFailureCount = (item.serverFailureCount ?? 0) + 1;
+  const firstServerFailureAt = validIsoString(item.firstServerFailureAt) ?? attemptedAt;
+  const elapsedMs = new Date(attemptedAt).getTime() - new Date(firstServerFailureAt).getTime();
+  const parked = serverFailureCount >= NON_TIMER_SERVER_FAILURE_CAP &&
+    elapsedMs >= NON_TIMER_SERVER_FAILURE_WINDOW_MS;
+  return {
+    ...markQueueFailure(
+      item,
+      parked ? `${message} Dayframe stopped retrying it after repeated server errors.` : message,
+      attemptedAt,
+      parked ? "permanent" : "server",
+      statusCode
+    ),
+    serverFailureCount,
+    firstServerFailureAt
+  };
+}
+
 function hasQueueFailure(item: QueuedEvent) {
   return Boolean(item.failedAt || item.lastError || (item.failureCount ?? 0) > 0);
 }
@@ -2490,7 +2632,15 @@ function isPermanentlyFailedEvent(item: QueuedEvent) {
   );
 }
 
+/**
+ * A parked Health event stays journal-owned: its `health_deliveries` row settles only on the server's
+ * acknowledgement, so Clear would strand it as queued. The server never refused it as invalid, so it
+ * is offered Try again (and keeps its slow retry) but not Clear (Codex r1 on #547).
+ */
 function isClearableFailedEvent(item: QueuedEvent) {
+  if (isParkedNonTimerEvent(item) && (item.source === "health_sleep" || item.source === "health_workout")) {
+    return false;
+  }
   return isPermanentlyFailedEvent(item);
 }
 
@@ -2572,7 +2722,11 @@ function reconcileActivityQueueDrain(input: {
         ...(processed.lastAttemptedAt ? { lastAttemptedAt: processed.lastAttemptedAt } : {}),
         ...(processed.nextRetryAt ? { nextRetryAt: processed.nextRetryAt } : {}),
         ...(processed.failureKind ? { failureKind: processed.failureKind } : {}),
-        ...(processed.refusedStartAt ? { refusedStartAt: processed.refusedStartAt } : {})
+        ...(processed.refusedStartAt ? { refusedStartAt: processed.refusedStartAt } : {}),
+        ...(processed.serverFailureCount === undefined
+          ? {}
+          : { serverFailureCount: processed.serverFailureCount }),
+        ...(processed.firstServerFailureAt ? { firstServerFailureAt: processed.firstServerFailureAt } : {})
       }];
     });
     await writeAllQueue(next);

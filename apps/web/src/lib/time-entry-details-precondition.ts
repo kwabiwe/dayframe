@@ -44,3 +44,17 @@ export function detailsChangedSince(stored: StoredDetails, expected: ExpectedDet
 function uniqueSorted(names: string[]) {
   return [...new Set(names)].sort();
 }
+
+/**
+ * Optional version precondition (web timer, Codex r3 on #539): the block's `updatedAt` as the
+ * client last had it from the server. Any write since (whatever it changed) makes the PATCH 409
+ * with the current block, so a late save can never land over a newer one from the same tab.
+ * Compared at millisecond precision, the precision the API returns. Absent: as before (iPhone,
+ * older web clients).
+ */
+export const ExpectedUpdatedAtSchema = z.string().datetime({ offset: true });
+
+export function versionChangedSince(storedUpdatedAt: string | Date, expectedUpdatedAt: string) {
+  const stored = storedUpdatedAt instanceof Date ? storedUpdatedAt.getTime() : Date.parse(storedUpdatedAt);
+  return Math.floor(stored) !== Math.floor(Date.parse(expectedUpdatedAt));
+}

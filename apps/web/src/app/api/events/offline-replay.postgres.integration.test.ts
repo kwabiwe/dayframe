@@ -87,22 +87,55 @@ describe.runIf(runDatabaseIntegration)("an offline iPhone timer queue replayed t
     });
   }
 
-  async function bootstrapTimeline() {
+  type Timeline = { active: [string | null, number] | null; day: Array<[string | null, number, number | null]> };
+  const minutes = (value: string | Date | null) =>
+    value === null ? null : (new Date(value).getTime() - base) / 60_000;
+
+  /** What the server recorded. */
+  async function recordedTimeline(): Promise<Timeline> {
+    const result = await pool.query<{ description: string | null; startedAt: Date; stoppedAt: Date | null }>(
+      `select description, started_at as "startedAt", stopped_at as "stoppedAt"
+       from time_entries where workspace_id = $1 and user_id = $2 order by started_at`,
+      [workspaceId, userId]
+    );
+    const running = result.rows.filter((row) => row.stoppedAt === null);
+    return {
+      active: running.length ? [running[running.length - 1].description, minutes(running[running.length - 1].startedAt)!] : null,
+      day: result.rows.map((row) => [row.description, minutes(row.startedAt)!, minutes(row.stoppedAt)])
+    };
+  }
+
+  /** What the phone shows once its outbox is empty: the next bootstrap as it is. */
+  async function bootstrapTimeline(): Promise<Timeline> {
     const response = await getBootstrap(new Request(`http://localhost/api/bootstrap?date=${day}`, {
       headers: { Authorization: "Bearer test" }
     }));
-    expect(response.status).toBe(200);
     const data = await response.json() as {
+      error?: string;
       activeEntry: { description: string | null; startedAt: string } | null;
       dayEntries: Array<{ description: string | null; startedAt: string; stoppedAt: string | null }>;
     };
-    const minutes = (value: string | null) => value === null ? null : (Date.parse(value) - base) / 60_000;
+    expect(response.status, data.error).toBe(200);
     return {
-      active: data.activeEntry ? [data.activeEntry.description, minutes(data.activeEntry.startedAt)] : null,
+      active: data.activeEntry ? [data.activeEntry.description, minutes(data.activeEntry.startedAt)!] : null,
       day: data.dayEntries
-        .map((entry) => [entry.description, minutes(entry.startedAt), minutes(entry.stoppedAt)] as const)
-        .sort((left, right) => (left[1] ?? 0) - (right[1] ?? 0))
+        .map((entry): [string | null, number, number | null] =>
+          [entry.description, minutes(entry.startedAt)!, minutes(entry.stoppedAt)])
+        .sort((left, right) => left[1] - right[1])
     };
+  }
+
+  /**
+   * The CI "base" profile has only 001_init.sql, which the event service supports but the bootstrap
+   * does not (it answers 500 for a missing column such as users.goals_revision, by design), so there the
+   * phone's view is not read. Every other database, including the "ordered" profile and `db:setup`,
+   * checks both.
+   */
+  const bootstrapReadable = process.env.DAYFRAME_VALIDATION_SCHEMA !== "base";
+
+  async function expectSettled(expected: Timeline) {
+    expect(await recordedTimeline()).toEqual(expected);
+    if (bootstrapReadable) expect(await bootstrapTimeline()).toEqual(expected);
   }
 
   it("keeps a block's own Stop when the next Start reaches the server first (Start A 09:00, Stop A 10:00, Start B 11:00)", async () => {
@@ -119,10 +152,7 @@ describe.runIf(runDatabaseIntegration)("an offline iPhone timer queue replayed t
     expect(stopA.body).toMatchObject({ stopOutcome: "stopped", timeEntryId: entryA });
 
     // The phone drops a delivered Stop and shows the next bootstrap as it is.
-    expect(await bootstrapTimeline()).toEqual({
-      active: ["B", 120],
-      day: [["A", 0, 60], ["B", 120, null]]
-    });
+    await expectSettled({ active: ["B", 120], day: [["A", 0, 60], ["B", 120, null]] });
   });
 
   it("keeps every block's own Stop across several offline blocks", async () => {
@@ -133,10 +163,7 @@ describe.runIf(runDatabaseIntegration)("an offline iPhone timer queue replayed t
     expect((await outboxStop(60, startA.body.timeEntryId as string)).body).toMatchObject({ stopOutcome: "stopped" });
     expect((await outboxStop(180, startB.body.timeEntryId as string)).body).toMatchObject({ stopOutcome: "stopped" });
 
-    expect(await bootstrapTimeline()).toEqual({
-      active: ["C", 240],
-      day: [["A", 0, 60], ["B", 120, 180], ["C", 240, null]]
-    });
+    await expectSettled({ active: ["C", 240], day: [["A", 0, 60], ["B", 120, 180], ["C", 240, null]] });
   });
 
   it("delivering the same Stop again changes nothing", async () => {
@@ -151,6 +178,6 @@ describe.runIf(runDatabaseIntegration)("an offline iPhone timer queue replayed t
     };
     expect((await post(stop)).status).toBe(201);
     expect((await post(stop)).status).toBe(200);
-    expect((await bootstrapTimeline()).day).toEqual([["A", 0, 60], ["B", 120, null]]);
+    await expectSettled({ active: ["B", 120], day: [["A", 0, 60], ["B", 120, null]] });
   });
 });

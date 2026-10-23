@@ -44,7 +44,7 @@ describe("Location real SQLite drain results",()=>{
   expect(await store.getLocationRolloutMode()).toBe("v2_review");
   expect(db.prepare("select value from location_store_metadata where key='semantic_mode_acknowledged_at'").get()!.value).toBe(fresh);
  });
- it.each(["pending", "acknowledged"])("journal expiry does not expire %s upload bodies or retained context (P3/P3b)",async state=>{
+ it.each(["pending", "acknowledged"])("journal expiry keeps retained context, and a %s upload body only while it is queued work (P3/P3b, location-5)",async state=>{
   await seed();
   // Storing evidence no longer replays the local journal (13 Oct); replay once so engine state exists.
   await store.processPendingLocationEvidence();
@@ -55,9 +55,33 @@ describe("Location real SQLite drain results",()=>{
   vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(Date.now()+40*86_400_000);
   await store.applyLocationRetention();
   expect(db.prepare("select count(*) n from location_evidence_journal").get()!.n).toBe(0);
-  expect(db.prepare("select body_json from location_upload_outbox limit 1").get()!.body_json).toBe(body);
+  // A pending body is the durable upload queue; an acknowledged one only kept its coordinates (location-5).
+  if(state==="pending")expect(db.prepare("select body_json from location_upload_outbox limit 1").get()!.body_json).toBe(body);
+  else expect(db.prepare("select count(*) n from location_upload_outbox").get()!.n).toBe(0);
   expect(db.prepare("select count(*) n from location_account_context").get()!.n).toBe(1);
   expect(db.prepare("select count(*) n from location_engine_state").get()!.n).toBe(1);
+ });
+ it("expires settled upload bodies a day after they settled, never pending ones, a bounded number per pass (location-5)",async()=>{
+  const key=`${owner.workspaceId}:${owner.userId}`;
+  const insert=db.prepare("insert into location_upload_outbox (client_batch_id, account_key, body_json, state, created_at, updated_at) values (?, ?, ?, ?, ?, ?)");
+  const now=Date.now(),at=(ms:number)=>new Date(now-ms).toISOString();
+  const body=JSON.stringify({evidence:[{latitude:51.5,longitude:-0.1}]});
+  for(const state of ["acknowledged","partial","rejected","pending"]){
+   insert.run(`recent-${state}`,key,body,state,at(3_600_000),at(3_600_000));
+   insert.run(`old-${state}`,key,body,state,at(2*86_400_000),at(2*86_400_000));
+  }
+  await store.applyLocationRetention();
+  const ids=()=>db.prepare("select client_batch_id id from location_upload_outbox order by client_batch_id").all().map(row=>row.id);
+  expect(ids()).toEqual(["old-pending","recent-acknowledged","recent-partial","recent-pending","recent-rejected"]);
+  // An older build's backlog drains over several passes instead of one large write.
+  for(let i=0;i<store.SETTLED_UPLOAD_EXPIRY_BATCH+20;i+=1)insert.run(`backlog-${String(i).padStart(3,"0")}`,key,body,"acknowledged",at(30*86_400_000),at(30*86_400_000));
+  await store.applyLocationRetention();
+  expect(ids().filter(id=>String(id).startsWith("backlog-"))).toHaveLength(20);
+  await store.applyLocationRetention();
+  expect(ids()).toEqual(["old-pending","recent-acknowledged","recent-partial","recent-pending","recent-rejected"]);
+  vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(now+2*86_400_000);
+  await store.applyLocationRetention();
+  expect(ids()).toEqual(["old-pending","recent-pending"]);
  });
  it("reads the support export's location numbers only for the requested owner (Codex r6 on #355)",async()=>{
   await seed(2);
@@ -383,6 +407,11 @@ describe("location journal query plans (performance.md: no unbounded journal rea
   expect(plain.length).toBeGreaterThan(15);
   const offenders=plain.flatMap(sql=>{const found=scans(plan(sql));return found.length?[`${sql.replace(/\s+/g," ").slice(0,90)} → ${found.join("; ")}`]:[];});
   expect(offenders).toEqual([]);
+ });
+ it("the settled upload-body expiry searches its partial index (location-5)",()=>{
+  const detail=plan(store.SETTLED_UPLOAD_EXPIRY_SQL.replace("updated_at < ?","updated_at < '2026-01-01T00:00:00Z'").replace("limit ?","limit 50"));
+  expect(scans(detail)).toEqual([]);
+  expect(detail.join(" ")).toContain("location_upload_outbox_settled_idx");
  });
  it("the templated upload and retention statements search indexes too",()=>{
   const templated=[

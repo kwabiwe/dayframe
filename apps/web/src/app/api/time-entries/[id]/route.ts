@@ -12,7 +12,7 @@ import { resolveRequestSession } from "@/lib/ingest-auth";
 import { TagNameSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { getTimeEntryById } from "@/lib/queries";
-import { ExpectedDetailsSchema } from "@/lib/time-entry-details-precondition";
+import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   let session: Awaited<ReturnType<typeof resolveRequestSession>> | null = null;
@@ -35,6 +35,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     // if a detail this edit was based on has changed since. Absent: as before (mobile, older web).
     if (Object.prototype.hasOwnProperty.call(body, "expectedDetails") && body.expectedDetails != null) {
       update.expectedDetails = ExpectedDetailsSchema.parse(body.expectedDetails);
+    }
+    // Optional version precondition (web timer): 409 if the block was written since that version.
+    if (Object.prototype.hasOwnProperty.call(body, "expectedUpdatedAt") && body.expectedUpdatedAt != null) {
+      update.expectedUpdatedAt = ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
     }
     validateTimeWindow(update);
     const result = await updateTimeEntry(id, update, session);
