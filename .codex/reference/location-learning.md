@@ -190,6 +190,30 @@ Temporal invariants:
   global 120 m radius stays: 150 m and 180 m changed three other days in the
   owner's 15–22 Oct trace with no agreement gain against an independent
   timeline, and the sweep and corpora were neutral.
+- Journey start guard (Fix B, location v4 step 4; `ownVisitCoverEndMs` and
+  `movementSupportedStartMs` in `commute.ts`). Defence in depth behind the
+  rule above, for journeys built from stays that were split anyway. (1) A
+  journey never claims time its origin's own completed Visit covers: the
+  covering Visit is chosen as above from the Visits attached to the origin
+  stay (or sharing an attached Visit's arrival time); when the device was seen
+  inside its circle after the stay ended and every accurate genuine reading
+  from the stay's end to its departure lies inside, the journey starts at
+  that departure. A reading beyond the circle, or the origin's own geofence
+  exit, keeps the start; with no reading inside after the stay ended the
+  Visit alone never delays a departure (on the staging week, iOS dated three
+  saved-place departures 4 s to 3 min after the exit and the first moving
+  fix). (2) A journey that would span a silence over `maxContinuityGapMs`
+  (12 min) before any movement starts at the last reading before the first
+  movement: a reading with credible accuracy whose native (or, for an
+  accurate fix, implied) speed reaches `movementSpeedThresholdMps`. The time
+  before it is unobserved, not travel. A journey whose first reading after the
+  silence is already moving, with no movement seen at all, or with a recorded
+  stop before its first movement keeps its start. Location evidence only; Core
+  Motion still only times the journey afterwards. Without Fix A, the 22 Oct
+  phantom 2.5-hour Move would have become a gap and the short walk out.
+  Scored with the location v4 harness: the 15–22 Oct week is identical (89),
+  the capture sweep is 0 worse, and the staging-week and near-radius corpora
+  are identical.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity
