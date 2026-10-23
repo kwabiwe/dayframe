@@ -10,7 +10,6 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { RequestDeadlineError, withRequestDeadline } from "@/lib/request-deadline";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import {
   applyPendingTimerDetails,
@@ -572,6 +571,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return { owner, generation: pendingStoreSessionRef.current.generation };
   }, []);
+  // After the session-change cutoff (sign-out, workspace switch) the old session sends no more
+  // description writes: autosave, page exits, Stop's details. Only the cutoff's own save may
+  // (stability audit WEB-UI-8; Codex r1 #3 on #557). The fence is #539's store generation.
+  const sessionChangeSaveRef = useRef(false);
+  const sessionEnded = useCallback((snapshot: BootstrapData | null) => (
+    !sessionChangeSaveRef.current && pendingOwner(snapshot).generation !== pendingTimerDetailsGeneration()
+  ), [pendingOwner]);
 
   // Sends one description PATCH. It is keepalive (it outlives the page if the tab closes or
   // reloads) whenever it fits the browser's keepalive budget beside any other keepalive request
@@ -587,14 +593,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (keepalive) keepaliveBytesRef.current += bytes;
     onSent?.(keepalive);
     try {
-      // Bounded (stability audit WEB-UI-11): no answer by the deadline fails like any other error.
-      return await withRequestDeadline((signal) => clientFetch(`/api/time-entries/${targetId}`, {
+      return await clientFetch(`/api/time-entries/${targetId}`, {
         method: "PATCH",
         ...(keepalive ? { keepalive: true } : {}),
         headers: { "Content-Type": "application/json" },
-        body: text,
-        signal
-      }));
+        body: text
+      });
     } finally {
       if (keepalive) keepaliveBytesRef.current -= bytes;
     }
@@ -621,6 +625,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!targetId) return { ok: false, error: "The block is still starting." };
     const patch = timerDetailsPatch(draft, base);
     if (!patch) return { ok: true };
+    if (sessionEnded(snapshot)) return { ok: false, error: SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE };
     setIsTimerBusy(true);
     setTimerError(null);
     refreshRequestRef.current += 1;
@@ -695,7 +700,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       detailsSavesInFlightRef.current -= 1;
       setIsTimerBusy(false);
     }
-  }, [adoptServerDetails, baseFor, commitData, pendingOwner, sendDetailsPatch, serverEntryId, setTimerDraft, setTimerDraftBase, versionOf]);
+  }, [adoptServerDetails, baseFor, commitData, pendingOwner, sendDetailsPatch, serverEntryId, sessionEnded, setTimerDraft, setTimerDraftBase, versionOf]);
 
   // Leaving the shell: details the running block's real id would still get from autosave are sent
   // now (keepalive when it fits, so the request outlives the page). A block whose Start's POST has
@@ -704,9 +709,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     const entry = dataRef.current?.activeEntry;
     const targetId = entry ? serverEntryId(entry.id) : null;
     const patch = entry ? timerDetailsPatch(draftRef.current, baseFor(entry)) : null;
-    if (!entry || !targetId || !patch) return;
+    if (!entry || !targetId || !patch || sessionEnded(dataRef.current)) return;
     void sendDetailsPatch(targetId, patch.body).catch(() => undefined);
-  }, [baseFor, sendDetailsPatch, serverEntryId]);
+  }, [baseFor, sendDetailsPatch, serverEntryId, sessionEnded]);
 
   const startTimer = useCallback(async (
     input: TimerDraftInput = {},
@@ -718,11 +723,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) {
       outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing) });
     }
-    // A Start with no answer by the deadline (stability audit WEB-UI-11) is rolled back like a
-    // rejected one, so a Stop waiting behind it goes ahead; the server may still have committed
-    // it, so its copy is fetched at once (never a second Start).
-    let timedOut = false;
-    const outcome = await runTimerStartMutation({
+    return runTimerStartMutation({
       beforeStart: async () => {
         // The block this Start replaces gets its pending edits first, at its real id.
         const current = dataRef.current;
@@ -758,24 +759,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setBusy: setIsTimerBusy,
       setError: setTimerError,
       send: async (payload) => {
-        let result: { timeEntryId?: unknown } | null;
-        try {
-          result = await withRequestDeadline(async (signal) => {
-            const response = await clientFetch("/api/time-entries", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-              signal
-            });
-            if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
-            // Accepted: record which real block the optimistic one on screen is, from the POST itself.
-            return await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
-          });
-        } catch (error) {
-          if (!(error instanceof RequestDeadlineError)) throw error;
-          timedOut = true;
-          throw new Error(START_TIMED_OUT_MESSAGE);
-        }
+        const response = await clientFetch("/api/time-entries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
+        // Accepted: record which real block the optimistic one on screen is, from the POST itself.
+        const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
         const serverId = typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined;
         const snapshot = dataRef.current;
         const optimisticId = snapshot?.activeEntry?.id ?? null;
@@ -796,8 +787,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
       }
     });
-    if (timedOut && !mutationGateRef.current.isActive()) await refresh({ force: true });
-    return outcome;
   }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
@@ -876,7 +865,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // tab's own text.
     const savedBase = baseFor(activeEntry);
     const base = bypassed?.base ?? savedBase;
-    const fields = [...new Set([
+    const fields = sessionEnded(snapshot) ? [] : [...new Set([
       ...timerDraftEditedFields(draft, base),
       ...(bypassed ? timerDraftEditedFields(draft, savedBase) : [])
     ])];
@@ -952,7 +941,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, pendingOwner, refresh, sendDetailsPatch, serverEntryId, setTimerDraft, versionOf]);
+  }, [baseFor, commitData, pendingOwner, refresh, sendDetailsPatch, serverEntryId, sessionEnded, setTimerDraft, versionOf]);
 
   // One Stop at a time: pressing again while one waits or runs joins it (no stacked waiters).
   const stopTimer = useCallback((input: TimerDraftInput = {}): Promise<MutationOutcome> => {
@@ -1113,7 +1102,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const snapshot = dataRef.current;
       if (late || !snapshot?.activeEntry || !serverEntryId(snapshot.activeEntry.id) || !unsaved()) return;
       started = true;
-      await gate.run(() => saveActiveDetails(snapshot, draftRef.current));
+      await gate.run(async () => {
+        sessionChangeSaveRef.current = true;
+        try {
+          return await saveActiveDetails(snapshot, draftRef.current);
+        } finally {
+          sessionChangeSaveRef.current = false;
+        }
+      });
     })();
     const done = await Promise.race([
       save.then(() => true),
@@ -1441,7 +1437,6 @@ const DETAILS_CONFLICT_MESSAGE = "This block was changed in another window or de
 const DETAILS_CONFLICT_SWITCH_MESSAGE = "Switched. The block you left was changed in another window or device, so your edit to it was not saved.";
 const DETAILS_CONFLICT_STOP_MESSAGE = "Stopped. This block was changed in another window or device, so it kept those details.";
 const DETAILS_FAILED_MESSAGE = "Block details were not saved. Your previous values were restored.";
-const START_TIMED_OUT_MESSAGE = "The block took too long to start. If it did start, it shows here.";
 const SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE = "Your last edit to the running block was not saved before the change.";
 const DETAILS_FAILED_STOP_MESSAGE = "Stopped. Its latest details could not be saved, so it kept its previous details.";
 /** How long a Stop waits for a save already in flight before it goes ahead and carries the edits itself. */

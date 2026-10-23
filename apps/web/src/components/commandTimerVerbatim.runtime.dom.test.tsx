@@ -1361,79 +1361,11 @@ describe("a workspace switch saves the typed description first (stability audit 
     await act(async () => { await beforeSessionChange(); });
     expect(Date.now() - startedAt).toBeLessThan(STOP_WAIT_DEADLINE_MS + 1_000);
     await screen.findByText(/not saved before/);
-    // Nothing is sent for it after the switch went ahead.
+    // Nothing is sent for it after the switch went ahead, not even by autosave re-arming once the
+    // earlier save settles (Codex r1 #3 on #557).
     await act(async () => { server.release?.(); });
-    await wait(300);
+    await wait(1_500);
     expect(descriptions()).toEqual(["Fix bug more"]);
-  });
-});
-
-describe("a hung Start or details save has a client deadline, so a Stop behind it goes ahead (stability audit WEB-UI-11)", () => {
-  const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
-  beforeEach(async () => {
-    const { setTimerRequestDeadlineForTests } = await import("@/lib/request-deadline");
-    setTimerRequestDeadlineForTests(400);
-  });
-  afterEach(async () => {
-    const { setTimerRequestDeadlineForTests } = await import("@/lib/request-deadline");
-    setTimerRequestDeadlineForTests();
-  });
-
-  it("a Start that never answers settles as failed and the Stop waiting behind it finishes", async () => {
-    const shell = await renderShell(null);
-    const user = userEvent.setup();
-    await user.click(shell.input);
-    await user.keyboard("Plan");
-    server.holdNext = "start";
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(server.release).not.toBeNull());
-    await user.click(stopButton());
-    await screen.findByRole("button", { name: "Start a block" }, { timeout: 2_000 });
-    await screen.findByText(/took too long to start/);
-    expect(server.posts).toHaveLength(1);
-    expect(server.stops).toEqual([]);
-  });
-
-  it("a timed-out Start the server did commit is shown from the server, and nothing starts twice", async () => {
-    const shell = await renderShell(null);
-    const user = userEvent.setup();
-    await user.click(shell.input);
-    await user.keyboard("Plan");
-    server.holdNext = "start";
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(server.release).not.toBeNull());
-    // The server commits the block; its answer never arrives.
-    server.entry = entry({ id: "started-1", description: "Plan", startedAt: new Date().toISOString() });
-    await screen.findByText(/took too long to start/, undefined, { timeout: 2_000 });
-    await waitFor(() => expect(shell.input.value).toBe("Plan"));
-    await screen.findByRole("button", { name: "Stop recording" }, { timeout: 2_000 });
-    expect(server.posts).toHaveLength(1);
-    // Stop now stops that real block.
-    await user.click(stopButton());
-    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 2_000 });
-  });
-
-  it("behind an accepted Start's first details save that never answers, Stop stops the started block", async () => {
-    const shell = await renderShell(null);
-    const user = userEvent.setup();
-    await user.click(shell.input);
-    await user.keyboard("Plan");
-    server.holdNext = "start";
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(server.release).not.toBeNull());
-    const releaseStart = server.release!;
-    server.release = null;
-    await user.keyboard(" x");
-    server.holdNext = "patch";
-    await act(async () => { releaseStart(); });
-    await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]), { timeout: 2_000 });
-    // A revert to that save's base: Stop may not go past a save without a version (Codex r4 #2 on
-    // #539), so before the deadline it waited for this one forever.
-    await user.keyboard("{Backspace}{Backspace}");
-    await user.click(stopButton());
-    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 2_000 });
-    expect(server.completed?.description).toBe("Plan");
-    expect(server.posts).toHaveLength(1);
   });
 });
 
