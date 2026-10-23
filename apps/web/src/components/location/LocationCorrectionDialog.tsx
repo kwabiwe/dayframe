@@ -36,12 +36,24 @@ function timeValue(iso: string) {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** The instant of a time field's "HH:MM" on the same local day as `dayOf`. */
-function instantOn(dayOf: string, value: string) {
+/**
+ * The instant a time field's "HH:MM" means for the time it replaces: on that time's local day or the day
+ * either side, whichever is nearest on the clock (a stay across midnight), in the viewer's zone. Null
+ * when that time doesn't exist that day (the hour the clocks go forward).
+ */
+export function editedInstant(original: string, value: string) {
   const [hours, minutes] = value.split(":").map(Number);
-  const date = new Date(dayOf);
-  date.setHours(hours, minutes, 0, 0);
-  return date.toISOString();
+  const from = new Date(original);
+  // The day by wall-clock distance (so a skipped hour never moves it to another day), then the instant.
+  const wall = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate(), from.getHours(), from.getMinutes());
+  const shift = [-1, 0, 1].reduce((best, candidate) => {
+    const at = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate() + candidate, hours, minutes);
+    const bestAt = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate() + best, hours, minutes);
+    return Math.abs(at - wall) < Math.abs(bestAt - wall) ? candidate : best;
+  }, 0);
+  const date = new Date(from.getFullYear(), from.getMonth(), from.getDate() + shift, hours, minutes, 0, 0);
+  // A time the clocks skip normalises to another hour: it isn't a time that day.
+  return date.getHours() === hours && date.getMinutes() === minutes ? date.toISOString() : null;
 }
 
 async function sendCorrection(correction: TimelineCorrectionRequest) {
@@ -71,32 +83,46 @@ export function LocationCorrectionDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The place chosen: a saved place, the learned place it already is, or unknown.
-  const current = target.kind === "place" ? target.place.placeId ? `saved:${target.place.placeId}`
+  const original = target.kind === "place" ? target.place.placeId ? `saved:${target.place.placeId}`
     : target.place.learnedPlaceId ? `learned:${target.place.learnedPlaceId}` : "unknown" : "unknown";
-  const [picked, setPicked] = useState(current);
+  const [picked, setPicked] = useState(original);
   const [start, setStart] = useState(target.kind === "place" ? timeValue(target.place.startedAt) : "");
   const [end, setEnd] = useState(target.kind === "place" && target.place.stoppedAt ? timeValue(target.place.stoppedAt) : "");
   const [mode, setMode] = useState<TripLegMode>(target.kind === "leg" ? target.leg.mode : "walking");
+  // What the server has now: corrections saved before a later one was refused are the new starting point.
+  const [saved, setSaved] = useState(() => ({
+    picked: original,
+    startedAt: target.kind === "place" ? target.place.startedAt : "",
+    stoppedAt: target.kind === "place" ? target.place.stoppedAt : null,
+    mode: target.kind === "leg" ? target.leg.mode : "walking" as TripLegMode
+  }));
 
   function corrections(): TimelineCorrectionRequest[] | string {
+    // Only what changed is sent: an untouched leg, place or time is left as it is.
     if (target.kind === "leg") {
-      return mode === target.leg.mode && target.leg.confidence === "sure" ? [] : [{
+      return mode === saved.mode ? [] : [{
         kind: "leg_mode", subject: "leg", itemId: target.tripId, legStartedAt: target.leg.startedAt, legStoppedAt: target.leg.stoppedAt, mode
       }];
     }
     const { place } = target;
     const out: TimelineCorrectionRequest[] = [];
-    if (picked !== current) {
+    if (picked !== saved.picked) {
       out.push({ kind: "place", subject: "place", itemId: place.id,
         placeId: picked.startsWith("saved:") ? picked.slice(6) : null,
         learnedPlaceId: picked.startsWith("learned:") ? picked.slice(8) : null });
     }
-    if (place.stoppedAt && (start !== timeValue(place.startedAt) || end !== timeValue(place.stoppedAt))) {
-      if (!start || !end) return "Enter a start and an end.";
-      const startedAt = instantOn(place.startedAt, start);
-      const stoppedAt = instantOn(place.stoppedAt, end);
-      if (Date.parse(stoppedAt) <= Date.parse(startedAt)) return "The end must be after the start.";
-      out.push({ kind: "times", subject: "place", itemId: place.id, startedAt, stoppedAt });
+    if (saved.stoppedAt) {
+      const startChanged = start !== timeValue(saved.startedAt);
+      const endChanged = end !== timeValue(saved.stoppedAt);
+      if (startChanged || endChanged) {
+        if (!start || !end) return "Enter a start and an end.";
+        // An untouched field keeps its exact instant; an edited one is the nearest instant with that time.
+        const startedAt = startChanged ? editedInstant(saved.startedAt, start) : saved.startedAt;
+        const stoppedAt = endChanged ? editedInstant(saved.stoppedAt, end) : saved.stoppedAt;
+        if (!startedAt || !stoppedAt) return "That time doesn't exist on that day: the clocks changed.";
+        if (Date.parse(stoppedAt) <= Date.parse(startedAt)) return "The end must be after the start.";
+        out.push({ kind: "times", subject: "place", itemId: place.id, startedAt, stoppedAt });
+      }
     }
     return out;
   }
@@ -113,13 +139,20 @@ export function LocationCorrectionDialog({
     }
     setBusy(true);
     setError(null);
+    let savedAny = false;
     for (const correction of pending) {
       const failure = await sendCorrection(correction).catch(() => "Couldn't save that. Check your connection and try again.");
       if (failure) {
+        // What did save is the new starting point, and the List shows it.
+        if (savedAny) await onCorrected();
         setBusy(false);
         setError(failure);
         return;
       }
+      savedAny = true;
+      setSaved((current) => correction.kind === "place" ? { ...current, picked }
+        : correction.kind === "times" ? { ...current, startedAt: correction.startedAt, stoppedAt: correction.stoppedAt }
+          : correction.kind === "leg_mode" ? { ...current, mode: correction.mode } : current);
     }
     await onCorrected();
     setBusy(false);
@@ -143,7 +176,7 @@ export function LocationCorrectionDialog({
           <span className="location-correction-label" id="location-correction-mode">How did you travel?</span>
           <div aria-labelledby="location-correction-mode" className="location-correction-modes" role="group">
             {LEG_MODES.map((option) => (
-              <button aria-pressed={mode === option} className="location-correction-mode" key={option} onClick={() => setMode(option)} type="button">
+              <button aria-pressed={mode === option} className="location-correction-mode" disabled={busy} key={option} onClick={() => setMode(option)} type="button">
                 <DayframeIcon glyph={DAYFRAME_LEG_MODE_ICONS[option]} size={18} />
                 {LEG_MODE_LABEL[option]}
               </button>
@@ -164,24 +197,21 @@ export function LocationCorrectionDialog({
       <div className="location-correction">
         <span className="location-correction-label" id="location-correction-place">Where were you?</span>
         <div aria-labelledby="location-correction-place" className="location-correction-options" role="radiogroup">
-          {place.learnedPlaceId && !place.placeId ? (
-            <button aria-checked={picked === current} className="location-correction-option" onClick={() => setPicked(current)} role="radio" type="button">
-              <DayframeIcon glyph={DAYFRAME_APP_ICONS.places} size={18} />
-              <span><b>{place.name ?? "Learned place"}</b><small>Learned place</small></span>
-            </button>
-          ) : null}
-          {places.map((option) => (
-            <button aria-checked={picked === `saved:${option.id}`} className="location-correction-option" key={option.id}
-              onClick={() => setPicked(`saved:${option.id}`)} role="radio" type="button">
-              <DayframeIcon glyph={option.role === "home" ? DAYFRAME_APP_ICONS.placeHome : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork
-                : DAYFRAME_APP_ICONS.places} size={18} />
-              <span><b>{option.name}</b><small>Saved place</small></span>
-            </button>
+          {[
+            ...(place.learnedPlaceId && !place.placeId
+              ? [{ key: original, glyph: DAYFRAME_APP_ICONS.places, name: place.name ?? "Learned place", note: "Learned place" }] : []),
+            ...places.map((option) => ({ key: `saved:${option.id}`, name: option.name, note: "Saved place",
+              glyph: option.role === "home" ? DAYFRAME_APP_ICONS.placeHome : option.role === "work" ? DAYFRAME_APP_ICONS.placeWork : DAYFRAME_APP_ICONS.places })),
+            { key: "unknown", glyph: DAYFRAME_APP_ICONS.placeUnknown, name: "Leave as unknown", note: "Keeps it as an unknown place until you name it" }
+          ].map((option) => (
+            // Native radios: one tab stop, arrow keys move the choice.
+            <label className="location-correction-option" data-checked={picked === option.key} key={option.key}>
+              <input checked={picked === option.key} className="location-correction-radio" disabled={busy} name={`location-correction-place-${place.id}`}
+                onChange={() => setPicked(option.key)} type="radio" value={option.key} />
+              <DayframeIcon glyph={option.glyph} size={18} />
+              <span><b>{option.name}</b><small>{option.note}</small></span>
+            </label>
           ))}
-          <button aria-checked={picked === "unknown"} className="location-correction-option" onClick={() => setPicked("unknown")} role="radio" type="button">
-            <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={18} />
-            <span><b>Leave as unknown</b><small>Keeps it as an unknown place until you name it</small></span>
-          </button>
         </div>
         <p className="location-correction-hint">Nearby suggestions come from Apple Maps, so they show on your iPhone. The web shows places you saved.</p>
         {open ? null : (
@@ -189,10 +219,10 @@ export function LocationCorrectionDialog({
             <span className="location-correction-label" id="location-correction-times">Times</span>
             <div aria-labelledby="location-correction-times" className="location-correction-times" role="group">
               <label className="location-correction-time"><span>Start</span>
-                <input onChange={(event) => setStart(event.target.value)} type="time" value={start} />
+                <input disabled={busy} onChange={(event) => setStart(event.target.value)} type="time" value={start} />
               </label>
               <label className="location-correction-time"><span>End</span>
-                <input onChange={(event) => setEnd(event.target.value)} type="time" value={end} />
+                <input disabled={busy} onChange={(event) => setEnd(event.target.value)} type="time" value={end} />
               </label>
             </div>
           </>

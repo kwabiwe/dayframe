@@ -13949,6 +13949,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .location-correction-option {
+  position: relative;
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr);
   gap: 12px;
@@ -13979,12 +13980,28 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
 }
 
-.location-correction-option[aria-checked="true"] {
+.location-correction-option[data-checked="true"] {
   background: var(--foreground);
   color: var(--surface);
 }
 
-.location-correction-option[aria-checked="true"] small {
+/* The radio itself is visually hidden: the whole row shows the choice, and keeps the radio's keyboard. */
+.location-correction-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.location-correction-option:has(.location-correction-radio:focus-visible) {
+  /* The shared neutral focus ring, inside the row. */
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.location-correction-option[data-checked="true"] small {
   color: inherit;
   opacity: 0.8;
 }
