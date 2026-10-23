@@ -149,6 +149,10 @@ export type LocationStoreDiagnostics = {
   /** Reading the journal and running the engine; the snapshot rewrite after it is not included. */
   lastLocalReplayComputeMs?: number | null;
   lastLocalReplayInputCount?: number | null;
+  /** A failed local replay (an error name only, never its message or data); it never gates sync or geofences. */
+  lastLocalReplayFailedAt?: string | null;
+  lastLocalReplayError?: string | null;
+  localReplayFailureCount?: number;
   activeProvisionalSegmentKind: string | null;
   lastGapDurationSeconds: number | null;
   rejectedEvidenceCounts: Record<string, number>;
@@ -723,8 +727,10 @@ async function persistLocationEvidenceUnsafe(items: LocationEvidence[], snapshot
 
 /**
  * The local journal replay is a diagnostic projection (Settings › Sync help › Share location details reads
- * it); the server's replay is what logs and suggests time. Foreground and account configuration refresh it
- * at most this often; the export shares the last run's numbers with their time.
+ * it); the server's replay is what logs and suggests time. It runs the whole shared engine over the
+ * seven-day journal on the JS thread (about 1 s for 14,000 rows on a Mac, more on Hermes), so only that
+ * export asks for it, at most this often (stability audit 22 Oct 2026, location-3): never a bootstrap
+ * publish, foreground pass, account configuration or stored sample.
  */
 export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS = 10 * 60_000;
 
@@ -733,15 +739,38 @@ export async function processPendingLocationEvidence(processingAt = new Date().t
   return serialiseLocationMutation(() => processPendingLocationEvidenceUnsafe(processingAt));
 }
 
-/** Re-runs the local journal unless this account's last run is under ten minutes old. */
+/**
+ * Re-runs the local journal unless this account's last run, or last failed run, is under ten minutes old.
+ * It never rejects: a failure (a stored row a newer schema no longer parses, an engine throw) is recorded
+ * as an error name and a count and rolls back to the previous snapshot (stability audit location-4).
+ */
 export async function refreshLocalJournalReplayIfDue(now = Date.now()) {
-  return serialiseLocationMutation(async () => {
-    const current = await currentContext();
-    if (!current) return [];
-    const owned = parseOwnedDiagnosticMetadata(await metadata(`sync_diagnostics:${current.key}`));
-    const lastRun = diagnosticsBelongTo(owned, current.key) ? Date.parse(owned.lastLocalReplayAt ?? "") : Number.NaN;
-    if (Number.isFinite(lastRun) && now >= lastRun && now - lastRun < LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS) return [];
-    return processPendingLocationEvidenceUnsafe(new Date(now).toISOString());
+  return serialiseLocationMutation(async (): Promise<LocationSegment[]> => {
+    let failure: { key: string; previousCount: number } | null = null;
+    const processingAt = new Date(now).toISOString();
+    try {
+      const current = await currentContext();
+      if (!current) return [];
+      const owned = parseOwnedDiagnosticMetadata(await metadata(`sync_diagnostics:${current.key}`));
+      const belongs = diagnosticsBelongTo(owned, current.key);
+      const lastRuns = belongs ? [owned.lastLocalReplayAt, owned.lastLocalReplayFailedAt]
+        .map((value) => Date.parse(value ?? "")).filter(Number.isFinite) : [];
+      const lastRun = lastRuns.length ? Math.max(...lastRuns) : Number.NaN;
+      if (Number.isFinite(lastRun) && now >= lastRun && now - lastRun < LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS) return [];
+      failure = { key: current.key, previousCount: belongs ? owned.localReplayFailureCount ?? 0 : 0 };
+      return await processPendingLocationEvidenceUnsafe(processingAt);
+    } catch (error) {
+      if (failure) {
+        try {
+          await updateOwnedDiagnostics(failure.key, {
+            lastLocalReplayFailedAt: processingAt,
+            lastLocalReplayError: error instanceof Error ? error.name.slice(0, 60) : "unknown",
+            localReplayFailureCount: failure.previousCount + 1
+          }, await database());
+        } catch { /* A diagnostic about a diagnostic cannot fail its caller. */ }
+      }
+      return [];
+    }
   });
 }
 
@@ -1581,6 +1610,9 @@ export async function getLocationStoreDiagnostics(owner?: MobileAccountOwner): P
     lastLocalReplayAt: owned.lastLocalReplayAt ?? null,
     lastLocalReplayComputeMs: owned.lastLocalReplayComputeMs ?? null,
     lastLocalReplayInputCount: owned.lastLocalReplayInputCount ?? null,
+    lastLocalReplayFailedAt: owned.lastLocalReplayFailedAt ?? null,
+    lastLocalReplayError: owned.lastLocalReplayError ?? null,
+    localReplayFailureCount: owned.localReplayFailureCount ?? 0,
     activeProvisionalSegmentKind: owned.activeProvisionalSegmentKind ?? null,
     lastGapDurationSeconds: owned.lastGapDurationSeconds ?? null,
     rejectedEvidenceCounts: owned.rejectedEvidenceCounts ?? {},

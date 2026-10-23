@@ -211,6 +211,7 @@ binary are not physical acceptance.
 Required checks:
 
 - Late and refused queued Starts (PRD D20, stability PR A): in airplane mode start a block on the iPhone, start a different block on the web, then reconnect the iPhone. The iPhone block lands completed, ending where the web block starts, and the web block keeps running. Nothing waits in Sync help, and later iPhone Starts and Stops reach the server. A refused Start (rare: same-second collision) shows "Block not started", disappears from Today after a refresh, and its typed edits appear in Sync help to discard. Delete a group with a refused block in it (start a block offline, delete it with a saved one, and let the refusal arrive within the 5 s window): the Undo toast changes from "Deleted 2 blocks" to the saved block's name with a short fade and no jump in height (instant under Reduce Motion), keeps its 5 s deadline, and Undo brings back only the saved block; at the largest text size, with the refusal landing while the toast is still rising (so the new name wraps), it still leaves cleanly both on its timeout and on Undo, with motion and with Reduce Motion (no blank, stuck-transparent or flickering toast); Sync help shows the refused block's Delete as never saved (Discard only), and later Edits for other blocks still reach the server.
+- Queue lane isolation (stability audit 22 Oct 2026, iphone-timer-sync-4/5): in airplane mode let Health and location work queue (a Health import, a short trip), then start and stop a block on the iPhone; reconnect. The Stop lands on the web immediately, without waiting for the Health/location upload, and the queued Health/location work follows.
 - Web start timer.
 - Web stop timer.
 - Mobile start timer.
@@ -278,6 +279,7 @@ Required checks:
 
 Required checks when changing background location sampling, learned places, or detected-stay Review behavior:
 
+- Shared engine changes (segmentation, matching, commutes, modes, legs): score before and after with `npm --silent run score:location` (silent, so npm never echoes the private file names) (`packages/location-quality/README.md`) on the owner's Mac against the private Google Timeline export, and put only the week and day scores and counts in the PR (PRD D21). Not a CI check: the answer key never leaves the Mac.
 - Shared classification tests for weak/noise, one-off activity, and repeated place evidence.
 - Mobile geofence and offline queue tests.
 - Web event-service and learned-place route tests.
@@ -624,6 +626,17 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 2. Same with Dayframe in front, and Stop from the Live Activity on the Lock Screen.
 3. Airplane mode: run a Start Shortcut, reopen Dayframe after reconnecting; the queued Start is delivered once.
 4. Leave Dayframe backgrounded with location on for several days of normal use: no new `0xdead10cc` report in Settings › Privacy & Security › Analytics Data or in App Store Connect.
+
+## Native Location status and signal journal (iPhone)
+
+Automated: `nativeMainThreadBlocking.contract.test.ts` (banned synchronous calls on main-thread native paths: throwaway `CLLocationManager`s, `locationServicesEnabled()` off a background queue, authorisation reads outside the delegate callback, journal reads or `sync` in `status()`, journal rewrites on append), `bash scripts/validate-ios-location-signals.sh` (compiles and runs `DayframeLocationSignalStore` on macOS: append-only writes, duplicates, a cut-short record, a multibyte torn tail, out-of-order expiry, a journal unreadable until unlock, retention, remove, a busy store), and a clean native iOS build (adding the store file needs `pod install`). The Simulator cannot prove locationd contention.
+
+Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN`:
+
+1. The "Dayframe location diagnostics" export from Settings shows the right accuracy and `locationServicesEnabled: true` a few seconds after a fresh launch, and again after changing the permission in iOS Settings and returning.
+2. Turn Location Services off system-wide, return to Dayframe: a new export shows `locationServicesEnabled: false` (allow up to a minute when location monitoring is off); turn it back on and a new export shows `true`.
+3. A normal day with location on: native signals still drain (pending count returns to 0 after the app runs), and arrivals and departures appear as before.
+4. No new hang or freeze report naming `DayframeLocationVisitService` in Sync help's "Pauses and crashes" or App Store Connect over several days.
 
 ## Freeze and crash diagnostics (iPhone)
 

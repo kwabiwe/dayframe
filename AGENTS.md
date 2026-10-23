@@ -62,6 +62,7 @@ npm run export:workspace -- ./dayframe-backup.json
 - `apps/mobile/src/lib`: API client, offline queue, geofence, HealthKit, deep links.
 - `packages/shared`: Zod schemas, shared types, palette, event normalization.
 - `packages/db`: local Postgres/PostGIS migration, seed/setup/import/export scripts.
+- `packages/location-quality`: local location scoring harness against a private Google Timeline answer key (inputs and outputs stay outside Git).
 - `supabase/migrations`: hosted Supabase-only RLS/security migrations.
 - `docs`: PRD, hosting, production readiness, regression checklist.
 
