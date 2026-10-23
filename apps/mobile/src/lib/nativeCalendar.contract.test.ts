@@ -124,7 +124,9 @@ describe("native Calendar production contract", () => {
 
     expect(records).toContain("var tagText: String?");
     expect(model).toContain("tagText = record.tagText");
-    expect(rootView).toContain("DayframeCalendarGlyph(name: \"tag\"");
+    expect(rootView).toContain('[("place", entry.placeText), ("tag", entry.tagText)]');
+    // Location v4 C6: place and tag lines stay, under the detail line, on blocks with room for them.
+    expect(rootView).toContain("DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))");
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });
@@ -350,5 +352,50 @@ describe("native Calendar production contract", () => {
     expect(dashboard).toContain("await load({ silent: true })");
     expect(dashboard).toContain("const startedAt = new Date(nowMs - 30 * 60 * 1000)");
     expect(dashboard).toContain("durationSeconds: 30 * 60");
+  });
+});
+
+describe("native Calendar titles at every zoom (location v4 C6)", () => {
+  const core = readFileSync(`${moduleRoot}ios/DayframeCalendarCore.swift`, "utf8");
+  const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+  const coordinator = readFileSync(`${moduleRoot}ios/DayframeCalendarScrollCoordinator.swift`, "utf8");
+  const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
+  const swiftConstant = (name: string) => Number(core.match(new RegExp(`public static let ${name} = ([0-9.]+)`))?.[1]);
+
+  it("mirrors the shared label rule's numbers", async () => {
+    const { CALENDAR_BLOCK_LABEL } = await import("@dayframe/shared");
+    expect(swiftConstant("labelLineMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.iosMinimumHeight);
+    expect(swiftConstant("maximumLabelTextScale")).toBe(CALENDAR_BLOCK_LABEL.iosMaximumTextScale);
+    expect(swiftConstant("twoLineMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.twoLineMinimumHeight);
+    expect(swiftConstant("legStripMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.legStripMinimumHeight);
+    expect(swiftConstant("iconOnlyMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.iconOnlyMaximumWidth);
+    expect(swiftConstant("compactLengthMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.compactLengthMaximumWidth);
+    // The length is bounded by its share of the column and scales down; it never forces its width.
+    expect(rootView).toContain(".frame(maxWidth: CGFloat(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: horizontal.width)), alignment: .leading)");
+    expect(rootView).not.toMatch(/Text\(length\)[\s\S]{0,200}\.fixedSize\(\)/);
+    expect(swiftConstant("compactTextMaximumHeight")).toBe(CALENDAR_BLOCK_LABEL.compactTextMaximumHeight);
+    expect(swiftConstant("columnTouchTolerance")).toBe(CALENDAR_BLOCK_LABEL.touchTolerance);
+    // The old 4-point minimum and "no title under 24 points" rules are gone.
+    expect(core).not.toContain("minimumVisibleBlockHeight");
+    expect(core).not.toContain("titleMinimumHeight");
+  });
+
+  it("lays out columns natively at every zoom, with drawing and hit testing sharing one layout", () => {
+    expect(core).toContain("public enum DayframeCalendarColumnMath");
+    expect(core).toContain("public enum DayframeCalendarDayLayout");
+    expect(rootView).toContain("let dayLayout = DayframeCalendarDayLayout.layout(");
+    expect(coordinator).toContain("let dayLayout = DayframeCalendarDayLayout.layout(");
+    expect(rootView).toContain("textScale: labelTextScale");
+    expect(coordinator).toContain("textScale: model.labelTextScale");
+    // Zoom is direct manipulation: no easing of column changes while the fingers move.
+    expect(model).toMatch(/func updateHourHeight[\s\S]*?transaction\.disablesAnimations = true/);
+  });
+
+  it("ships a glyph for every activity icon, for columns too narrow for words", () => {
+    const manifest = JSON.parse(readFileSync(`${moduleRoot}ios/Glyphs/manifest.json`, "utf8")) as Record<string, unknown>;
+    const icons = readFileSync(fileURLToPath(new URL("../../../../packages/shared/src/icons.ts", import.meta.url)), "utf8");
+    for (const [, glyph] of icons.matchAll(/glyph: "([a-z0-9-]+)"/g)) expect(manifest).toHaveProperty(`activity-${glyph}`);
+    expect(manifest).toHaveProperty("activity-circle-dot");
+    expect(rootView).toContain('DayframeCalendarGlyph(name: "activity-\\(glyph)", size: 12)');
   });
 });

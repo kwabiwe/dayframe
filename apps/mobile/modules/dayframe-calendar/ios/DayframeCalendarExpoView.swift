@@ -37,6 +37,25 @@ final class DayframeCalendarExpoView: ExpoView {
     controller.view.backgroundColor = .clear
     controller.view.translatesAutoresizingMaskIntoConstraints = true
     hostingController = controller
+    updateLabelTextScale()
+    if #available(iOS 17.0, *) {
+      registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: DayframeCalendarExpoView, _: UITraitCollection) in
+        view.updateLabelTextScale()
+      }
+    }
+  }
+
+  // iOS 16 has no trait registration: the older callback carries Text Size changes there.
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if #unavailable(iOS 17.0), previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      updateLabelTextScale()
+    }
+  }
+
+  /// Block labels follow Dynamic Type (location v4 C6); the one-line minimum height grows with them.
+  private func updateLabelTextScale() {
+    model.updateLabelTextScale(Double(UIFontMetrics(forTextStyle: .footnote).scaledValue(for: 1, compatibleWith: traitCollection)))
   }
 
   override func didMoveToSuperview() {
@@ -51,6 +70,7 @@ final class DayframeCalendarExpoView: ExpoView {
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
+    updateLabelTextScale()
     guard let hostingController else { return }
 
     if window == nil {

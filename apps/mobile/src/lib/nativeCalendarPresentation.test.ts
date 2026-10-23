@@ -74,7 +74,10 @@ describe("native Calendar presentation boundary", () => {
       isActive: true,
       stoppedAtMs: null
     });
-    expect(serialized.meta).toContain("running");
+    // Location v4 C6: a running block's detail line ends "now"; its label prints the length so far.
+    expect(serialized.meta).toMatch(/–now$/);
+    expect(serialized.lengthLabel).toMatch(/^\d+(h|m)/);
+    expect(serialized.accessibilityLabel).toMatch(/ to now, /);
     expect(state.model.totalSeconds).toBe(2 * 60 * 60);
   });
 
@@ -276,23 +279,25 @@ describe("native Calendar presentation boundary", () => {
       expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
     });
 
-    it("reserves the target around iOS's 4-point minimum block, not the raw time (Codex r9)", () => {
-      // 09:00–09:01 draws 4 points tall, so its target centres at 09:02:30 and reaches 09:30; the
-      // 09:53–09:58 target starts at 09:28. They overlap, so they need their own lanes.
+    it("reserves the target around iOS's minimum block on old and new builds, not the raw time (Codex r9; location v4 C6)", () => {
+      // 09:00–09:01 draws 4 points on an older build and one label line (up to 19.5 points: 24.375
+      // minutes) on a current one, so its 55-minute target centres between 09:02:30 and 09:12:11.25:
+      // the envelope is 08:35–09:39:41.25. The 09:53–09:58 envelope starts at 09:28. They overlap.
+      const seconds = (value: number) => value * 1000;
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 9, 1), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 30) });
+        .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 39) + seconds(41.25) });
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 53), localTime(2026, 7, 10, 9, 58), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 23) });
+        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 32) + seconds(41.25) });
       const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 53, 5)] }));
       const lane = state.model.entries;
       expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
       expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
     });
 
-    it("targets that do not overlap share a lane (09:00–09:01 and 09:58–10:03)", () => {
-      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 58, 5)] }));
+    it("targets that do not overlap share a lane (09:00–09:01 and 10:05–10:10)", () => {
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 10, 5, 5)] }));
       const lane = state.model.entries;
-      // a reaches 09:30; b (09:58–10:03) starts its target at 09:33.
+      // a's envelope reaches 09:39:41; b (10:05–10:10) starts its envelope at 09:40 (location v4 C6).
       expect(lane[0].offsetFraction).toBeCloseTo(lane[1].offsetFraction);
       expect(lane[0].widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     });
@@ -1056,10 +1061,11 @@ describe("native Calendar Blocks presentation", () => {
     };
     const twentyFour = buildNativeCalendarBridgeState(base).model;
     expect(twentyFour.clockFormat).toBe("24h");
-    expect(twentyFour.entries[0].meta).toContain("21:05-22:00");
+    expect(twentyFour.entries[0].meta).toContain("21:05–22:00");
+    expect(twentyFour.entries[0].accessibilityLabel).toContain("21:05 to 22:00, 55 minutes");
     const twelve = buildNativeCalendarBridgeState({ ...base, clockFormat: "12h" }).model;
     expect(twelve.clockFormat).toBe("12h");
-    expect(twelve.entries[0].meta).toContain("9:05 PM-10:00 PM");
+    expect(twelve.entries[0].meta).toContain("9:05 PM–10:00 PM");
   });
 
   describe("named patterns (location v3 PR 14b)", () => {
@@ -1095,7 +1101,7 @@ describe("native Calendar Blocks presentation", () => {
 
     it("says each part's place in the trip once, in that part's own label", () => {
       const state = build(at(12, 0), bootstrap([...trip(), entry({ id: "work", startedAt: iso(at(9, 0)), stoppedAt: iso(at(11, 0)) })]));
-      expect(label(state, "there")).toBe("Open time block: there. Part 1 of 3 of School run");
+      expect(label(state, "there")).toBe("Open time block: there, 08:00 to 08:10, 10 minutes. Part 1 of 3 of School run");
       expect(label(state, "stay")).toContain(". Part 2 of 3 of School run");
       expect(label(state, "back")).toContain(". Part 3 of 3 of School run");
       expect(label(state, "work")).not.toContain("School run");
@@ -1155,6 +1161,11 @@ const CALENDAR_ZOOMS = [48, 72, 128];
 /**
  * Where iOS draws each block and its tap target at one zoom, mirroring DayframeCalendarBlockMath,
  * DayframeCalendarHorizontalMath and DayframeCalendarVerticalMath (horizontal in column fractions).
+ */
+/**
+ * The hit geometry an older native build (before location v4 C6) gives this model: React's column
+ * fractions and its 4-point minimum. Such builds still read the model, so React's own layout must
+ * stay tap-safe. A current build lays out columns natively; DayframeCalendarCoreTests checks its taps.
  */
 function nativeFrames(state: ReturnType<typeof build>, hourHeight: number) {
   const { dayEndMs, dayStartMs, nowMs } = state.model;

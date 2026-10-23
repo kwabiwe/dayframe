@@ -397,6 +397,8 @@ Native Calendar evidence:
 
 Native Calendar block styling additionally requires:
 
+- Calendar titles at every zoom (location v4 C6): `swift test` in `apps/mobile/modules/dayframe-calendar` (columns on the mock-ups' Thursday, zoom freeing a column, regions, Dynamic Type minimum, and the layout budget: 60 blocks at 48 pt/h in under 4 ms), the contract tests tying the Swift constants to `CALENDAR_BLOCK_LABEL`, and the `calendar-qa` dev route on a Simulator build against `#ios-grid` (48 pt/h) and `#ios-grid-default` (72 pt/h) at 375 points in Daylight and Midnight. On a physical iPhone: pinch across 48–128 pt/h and watch short blocks move into and out of columns with the fingers (no easing, no snap on release), the largest Dynamic Type sizes (taller one-line minimum, no clipped label), VoiceOver reading each block's time range and length, and taps on narrow icon-only columns opening the right block.
+
 - Swift behaviour tests proving one nominal compact radius, a one-point visual-only gap, zero gap for next-day continuation, positive tiny geometry, unchanged semantic text thresholds, and semantic hit height.
 - Source/bridge contracts proving the old half-height capsule rule is absent; solid fills with measured text, the live ring and the hatched Review lane remain; styling adds no Play, networking, mutation, model-version bump, hosting controller, or additional gesture owner beyond the one documented Calendar creation recognizer.
 - Rendered tall, short, tiny, exact sequential, active, Review, Uncategorized, tagged, long-title, contained/partial/dense overlap, and both continuation directions at minimum/default/maximum zoom.
