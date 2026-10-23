@@ -27,11 +27,13 @@ struct DayframeCalendarGlyph: View {
   let name: String
   // Points; 24-point registry art scales with the 2-point stroke.
   let size: CGFloat
+  /// False: exactly `size` points, for a caller that already applies (and caps) the text scale.
+  var followsTextSize = true
 
   @ScaledMetric(relativeTo: .caption2) private var scale: CGFloat = 1
 
   var body: some View {
-    let side = size * scale
+    let side = followsTextSize ? size * scale : size
     if let image = DayframeCalendarGlyphs.image(named: name) {
       Image(uiImage: image)
         .renderingMode(.template)

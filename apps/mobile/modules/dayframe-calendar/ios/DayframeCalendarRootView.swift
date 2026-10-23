@@ -629,7 +629,14 @@ private struct DayframeCalendarBlockView: View {
       let showsMeta = legacy ? metrics.height >= 58 && horizontal.width >= 150 : metrics.showMeta
       if showsTitle {
         VStack(alignment: .leading, spacing: 0) {
+          // A compact (under 22 × scale) block centres its one line in what it has.
           titleLine(scale: scale)
+            .frame(
+              height: CGFloat(metrics.tiny
+                ? max(1, metrics.height - DayframeCalendarLabelFit.visualGap)
+                : DayframeCalendarLabelFit.titleLineHeight(textScale: Double(scale))),
+              alignment: .leading
+            )
 
           if showsMeta && !entry.meta.isEmpty {
             Text(entry.meta)
@@ -637,29 +644,28 @@ private struct DayframeCalendarBlockView: View {
               .monospacedDigit()
               .foregroundStyle(textColor)
               .lineLimit(1)
+              .frame(height: CGFloat(DayframeCalendarLabelFit.detailLineHeight(textScale: Double(scale))), alignment: .leading)
           }
 
-          // Room for more: the place and tags, as before, from the same height as before.
-          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight * Double(scale), let placeText = entry.placeText, !placeText.isEmpty {
+          // Room for more: the place, then the tags, only as many lines as fit the block.
+          // (An older bundle's blocks keep their old rule: both lines whenever the detail line shows.)
+          let extraLines = !showsMeta ? 0 : legacy ? 2 : DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))
+          let extras = [("place", entry.placeText), ("tag", entry.tagText)]
+            .compactMap { (pair: (String, String?)) -> (String, String)? in
+              guard let text = pair.1, !text.isEmpty else { return nil }
+              return (pair.0, text)
+            }
+            .prefix(extraLines)
+          ForEach(Array(extras), id: \.0) { glyph, text in
             HStack(spacing: 4) {
-              DayframeCalendarGlyph(name: "place", size: 11)
+              DayframeCalendarGlyph(name: glyph, size: 11 * scale, followsTextSize: false)
                 .accessibilityHidden(true)
-              Text(placeText)
+              Text(text)
                 .font(.system(size: 11 * scale))
                 .lineLimit(1)
             }
             .foregroundStyle(textColor)
-          }
-
-          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight * Double(scale), let tagText = entry.tagText, !tagText.isEmpty {
-            HStack(spacing: 4) {
-              DayframeCalendarGlyph(name: "tag", size: 11)
-                .accessibilityHidden(true)
-              Text(tagText)
-                .font(.system(size: 11 * scale))
-                .lineLimit(1)
-            }
-            .foregroundStyle(textColor)
+            .frame(height: CGFloat(DayframeCalendarLabelFit.detailLineHeight(textScale: Double(scale))), alignment: .leading)
           }
         }
         // Review text sits on an opaque surface plate: theme text on the theme surface is the

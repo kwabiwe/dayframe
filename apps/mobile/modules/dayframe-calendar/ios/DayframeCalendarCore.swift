@@ -852,6 +852,28 @@ public struct DayframeCalendarBlockMetrics: Equatable {
   }
 }
 
+/// How many label lines fit a block (location v4 C6). Each line has a fixed height at the label's
+/// text scale, so what is drawn never outgrows the block it was laid out for.
+public enum DayframeCalendarLabelFit {
+  public static let topPadding = 3.0
+  public static let visualGap = DayframeCalendarConstants.blockVisualGap
+  public static func titleLineHeight(textScale: Double) -> Double { 16 * textScale }
+  public static func detailLineHeight(textScale: Double) -> Double { 14 * textScale }
+
+  /// Two lines from 34 points at the default size and below, growing with larger text.
+  public static func twoLineMinimumHeight(textScale: Double) -> Double {
+    DayframeCalendarConstants.twoLineMinimumHeight * max(1, textScale)
+  }
+
+  /// The place and tag lines (0, 1 or 2) that fit under the title and detail lines.
+  public static func extraLines(height: Double, textScale: Double) -> Int {
+    guard height >= DayframeCalendarConstants.extraLinesMinimumHeight * max(1, textScale) else { return 0 }
+    let used = topPadding + visualGap + titleLineHeight(textScale: textScale) + detailLineHeight(textScale: textScale)
+    let room = height - used
+    return max(0, min(2, Int(floor(room / detailLineHeight(textScale: textScale)))))
+  }
+}
+
 public enum DayframeCalendarBlockMath {
   public static func metrics(
     startedAtMs: Double,
@@ -903,10 +925,10 @@ public enum DayframeCalendarBlockMath {
     // The tiers grow with the label's text size, so the lines they add always fit.
     let scale = DayframeCalendarDayLayout.clampedTextScale(textScale)
     return DayframeCalendarBlockMetrics(
-      compact: height < DayframeCalendarConstants.twoLineMinimumHeight * scale,
+      compact: height < DayframeCalendarLabelFit.twoLineMinimumHeight(textScale: scale),
       continuesIntoNextDay: effectiveStopMs > dayEndMs,
       height: height,
-      showMeta: height >= DayframeCalendarConstants.twoLineMinimumHeight * scale,
+      showMeta: height >= DayframeCalendarLabelFit.twoLineMinimumHeight(textScale: scale),
       showTitle: true,
       startsBeforeDay: startedAtMs < dayStartMs,
       tiny: height < DayframeCalendarConstants.compactTextMaximumHeight * scale,

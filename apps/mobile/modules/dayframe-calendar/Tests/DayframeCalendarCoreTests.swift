@@ -1453,4 +1453,26 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertTrue(try metrics(minutes: 25, scale: 1.3).tiny)
     XCTAssertFalse(try metrics(minutes: 25, scale: 1).tiny)
   }
+
+  func testExtraLinesOnlyWhenTheyFit() {
+    // 3 + 1 + 16 + 14 = 34 at the default size: the first extra line needs 48, the second 62.
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 57, textScale: 1), 0)
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 58, textScale: 1), 1)
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 62, textScale: 1), 2)
+    // ×1.3: 4 + 39 = 43 used, 18.2 a line, from 75.4: the 74.4-point block Codex measured gets none,
+    // a 76-point block one, and two from 79.4.
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 74.4, textScale: 1.3), 0)
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 76, textScale: 1.3), 1)
+    XCTAssertEqual(DayframeCalendarLabelFit.extraLines(height: 79.4, textScale: 1.3), 2)
+    for scale in [0.8, 1.0, 1.3] {
+      // Compact blocks (under 22 × scale) centre one line in their own height instead.
+      for height in stride(from: 22 * scale, through: 120, by: 0.5) {
+        let lines = DayframeCalendarLabelFit.extraLines(height: height, textScale: scale)
+        var used = 3 + 1 + 16 * scale
+        if height >= DayframeCalendarLabelFit.twoLineMinimumHeight(textScale: scale) { used += 14 * scale }
+        used += Double(lines) * 14 * scale
+        XCTAssertLessThanOrEqual(used, height + 0.001, "lines overflow a \(height)-point block at ×\(scale)")
+      }
+    }
+  }
 }
