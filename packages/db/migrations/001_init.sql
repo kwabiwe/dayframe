@@ -959,7 +959,7 @@ create index if not exists idx_stay_segments_venue_history
   on stay_segments using gist(centre)
   where venue_place_id is not null;
 
--- Keep the clean base fixture aligned with 021_location_timeline_corrections.sql (timeline corrections).
+-- Keep the clean base fixture aligned with 022_location_timeline_corrections.sql (timeline corrections).
 create table if not exists location_timeline_corrections (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references workspaces(id) on delete cascade,

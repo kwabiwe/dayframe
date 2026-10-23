@@ -1,4 +1,4 @@
--- Timeline corrections (Location v4 §4, §14; build step 11, the one v4 migration). A correction is what
+-- Timeline corrections (Location v4 §4, §14; build step 11, the v4 design's table). A correction is what
 -- the person set on their location timeline: a place's place or times, a trip that wasn't one, a leg's
 -- mode. It is tied to the time it covers, written event-first (an activity_events row, then this row,
 -- then the segments it changes, in one transaction) and applied again by every replay. Never

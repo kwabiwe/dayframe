@@ -1,4 +1,4 @@
--- Timeline corrections (Location v4 §4, §14; build step 11). See packages/db/migrations/021. Owner-only
+-- Timeline corrections (Location v4 §4, §14; build step 11). See packages/db/migrations/022. Owner-only
 -- like the other location tables. Additive; apply to staging before the server Preview that writes it,
 -- and to production before that server deploys (migration → server → phone).
 create table if not exists public.location_timeline_corrections (
