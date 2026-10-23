@@ -87,17 +87,22 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       server.patchUrls.push(url);
       server.patchInits.push(init ?? {});
       // Only the running block can be patched (an optimistic id is unknown to the server).
-      if (url !== `/api/time-entries/${server.entry?.id}`) return reply(false, { error: "Not found" });
+      // The running block, or (as the server allows) the block a Stop just completed.
+      const target = () => url === `/api/time-entries/${server.entry?.id}` ? "entry" as const
+        : url === `/api/time-entries/${server.completed?.id}` ? "completed" as const : null;
+      if (!target()) return reply(false, { error: "Not found" });
       const held = server.holdNext === "patch";
       await maybeHold("patch");
       if (held && server.dropHeld) throw new TypeError("Failed to fetch");
-      if (!server.entry) return reply(false, { error: "Not found" });
+      const which = target();
+      if (!which) return reply(false, { error: "Not found" });
+      const current = server[which]!;
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
-      if (expectedDetails && detailsChanged(server.entry!, expectedDetails)) {
-        return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: server.entry }) };
+      if (expectedDetails && detailsChanged(current, expectedDetails)) {
+        return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: current }) };
       }
-      const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
-      server.entry = { ...server.entry!, ...sent, updatedAt } as TimeEntryRow;
+      const updatedAt = new Date(Date.parse(current.updatedAt) + 60_000).toISOString();
+      server[which] = { ...current, ...sent, updatedAt } as TimeEntryRow;
       return reply(true, { updatedAt });
     }
     if (method === "POST" && url === "/api/time-entries") {
@@ -155,6 +160,7 @@ beforeEach(() => {
   server.dead = false;
   server.dropHeld = false;
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -800,7 +806,13 @@ describe("Stop never starts a new block (production incident, 13 Oct 2026)", () 
 
 describe("Stop and leaving the page never lose a typed description (stability audit WEB-UI-10, WEB-UI-2)", () => {
   const keepalive = () => server.patchInits.map((init) => init.keepalive === true);
-  const stored = () => window.localStorage.getItem("dayframe:pending-timer-details");
+  // Any kept record, in either storage (the first version of this fix used localStorage).
+  const storedKeys = () => [window.sessionStorage, window.localStorage].flatMap((store) =>
+    Object.keys(store).filter((key) => key.startsWith("dayframe:pending-timer-details")).map((key) => ({ store, key })));
+  const stored = () => {
+    const [first] = storedKeys();
+    return first ? first.store.getItem(first.key) : null;
+  };
   const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
 
   it("Stop clicked while the autosave PATCH is in flight stops the block with every typed word", async () => {
@@ -866,13 +878,35 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug" } });
     expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
     await screen.findByRole("button", { name: "Start a block" });
-    // The hung save finally fails: the stopped block does not come back and nothing is shown for it.
+    // The hung save finally lands: it is refused (the block moved on), the stopped block does not
+    // come back and nothing is shown for it.
     await act(async () => { server.release?.(); });
     await wait(800);
     expect(screen.queryByRole("button", { name: /^(Stop recording|Stopping…)$/ })).toBeNull();
     expect(screen.queryByText(/were not saved/)).toBeNull();
     expect(server.stops).toEqual(["active"]);
     expect(server.posts).toEqual([]);
+  });
+
+  it("a revert typed during a hung autosave is the stopped block's final text, even when that save lands after Stop", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    expect(input.value).toBe("Fix bug");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // The hung "Fix bug x" now commits on the stopped block…
+    await act(async () => { server.release?.(); });
+    // …and the revert is sent again over it.
+    await waitFor(() => expect(server.completed?.description).toBe("Fix bug"), { timeout: 2_000 });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug");
+    expect(screen.queryByText(/changed in another window/)).toBeNull();
+    expect(server.stops).toEqual(["active"]);
   });
 
   it("a Stop queued behind an autosave that was refused (409) says the block kept the other change", async () => {
@@ -970,6 +1004,60 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(stored()).toBeNull();
   });
 
+  it("closing during the only pending autosave keeps its text, and a reload saves it when that save was lost", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    // Nothing typed since the save left.
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(stored()).not.toBeNull();
+    await act(async () => { server.release?.(); });
+    expect(server.entry?.description).toBe("Fix bug");
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more"));
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"), { timeout: 2_000 });
+    expect(stored()).toBeNull();
+  });
+
+  it("after sign-out or a workspace switch begins, a page exit keeps nothing", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(stored()).not.toBeNull();
+    await act(async () => { await beforeSessionChange(100); });
+    expect(storedKeys()).toEqual([]);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(storedKeys()).toEqual([]);
+    await act(async () => { server.release?.(); });
+  });
+
+  it("a tab showing one block never clears the text kept for another", async () => {
+    const kept = {
+      entryId: "other",
+      draft: { categoryId: "focus", description: "Kept text", tagNames: [] },
+      bases: [{ categoryId: "focus", description: "Before", tagNames: [] }],
+      savedAt: Date.now()
+    };
+    // Kept for user "user", workspace "workspace", block "other".
+    window.sessionStorage.setItem("dayframe:pending-timer-details:user:workspace:other", JSON.stringify(kept));
+    // The same record where the first version of this fix kept it.
+    window.localStorage.setItem("dayframe:pending-timer-details", JSON.stringify(kept));
+    await renderShell(entry({ description: "Fix bug" }));
+    await wait(800);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(storedKeys()).toHaveLength(2);
+  });
+
   it("the restored text is also saved when the save in flight never reached the server", async () => {
     const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
@@ -1052,6 +1140,7 @@ function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
       weekStart: "2026-08-17T00:00:00.000Z",
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace" }
   } as unknown as BootstrapData;
 }

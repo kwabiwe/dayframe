@@ -8,11 +8,13 @@ import {
 
 /**
  * The running block's details a close-time flush could not be sure of delivering (stability
- * audit WEB-UI-2; Codex r1 on #539). The page writes them here before it sends them, a successful
- * save of that exact text clears them, and the next load (or the tab coming back) puts them back
- * in the draft when the server still holds one of the copies they were based on, so autosave sends
- * them again. Kept in this browser only, for one block, for at most a day; cleared on sign-out and
- * workspace switch.
+ * audit WEB-UI-2; Codex r1/r2 on #539). The page writes them here before it sends them (and the
+ * text of a save still in flight, which closing can cancel), a save of that exact text that the
+ * server acknowledges clears them, and a reload or restore of the same tab puts them back in the
+ * draft when the server still holds one of the copies they were based on, so autosave sends them
+ * again. Per tab (sessionStorage), one record per user, workspace and block, at most a day old.
+ * When the session ends (sign-out, workspace switch) every record is removed and writes made for
+ * the session that ended are refused (`generation`), so a later page exit cannot write them back.
  */
 export type PendingTimerDetails = {
   /** The block's server id. */
@@ -23,20 +25,34 @@ export type PendingTimerDetails = {
   savedAt: number;
 };
 
+/** Whose records these are: the signed-in user and workspace. */
+export type PendingTimerDetailsOwner = { userId: string; workspaceId: string };
+
 export type PendingTimerDetailsDecision =
   | { kind: "saved" }
   | { kind: "stale" }
   | { kind: "apply"; fields: TimerDetailField[] };
 
-const STORAGE_KEY = "dayframe:pending-timer-details";
+const STORAGE_PREFIX = "dayframe:pending-timer-details:";
 export const PENDING_TIMER_DETAILS_MAX_AGE_MS = 24 * 60 * 60_000;
+
+let generation = 0;
+
+/** The current session's write token; a token from before the last `endPendingTimerDetailsSession` is refused. */
+export function pendingTimerDetailsGeneration() {
+  return generation;
+}
 
 function storage(): Storage | null {
   try {
-    return typeof window === "undefined" ? null : window.localStorage;
+    return typeof window === "undefined" ? null : window.sessionStorage;
   } catch {
     return null;
   }
+}
+
+function keyFor(owner: PendingTimerDetailsOwner, entryId: string) {
+  return `${STORAGE_PREFIX}${encodeURIComponent(owner.userId)}:${encodeURIComponent(owner.workspaceId)}:${encodeURIComponent(entryId)}`;
 }
 
 function isDraft(value: unknown): value is TimerDraft {
@@ -47,18 +63,22 @@ function isDraft(value: unknown): value is TimerDraft {
     && Array.isArray(draft!.tagNames) && draft!.tagNames.every((tag) => typeof tag === "string");
 }
 
-export function writePendingTimerDetails(record: PendingTimerDetails) {
+/** Writes the record for its block; refused (false) for a session that has ended. */
+export function writePendingTimerDetails(owner: PendingTimerDetailsOwner, record: PendingTimerDetails, writeGeneration: number) {
+  if (writeGeneration !== generation) return false;
   try {
-    storage()?.setItem(STORAGE_KEY, JSON.stringify(record));
+    storage()?.setItem(keyFor(owner, record.entryId), JSON.stringify(record));
+    return true;
   } catch {
     // Full or blocked storage: the flush itself still runs.
+    return false;
   }
 }
 
-export function readPendingTimerDetails(now = Date.now()): PendingTimerDetails | null {
+export function readPendingTimerDetails(owner: PendingTimerDetailsOwner, entryId: string, now = Date.now()): PendingTimerDetails | null {
   let raw: string | null = null;
   try {
-    raw = storage()?.getItem(STORAGE_KEY) ?? null;
+    raw = storage()?.getItem(keyFor(owner, entryId)) ?? null;
   } catch {
     return null;
   }
@@ -66,7 +86,7 @@ export function readPendingTimerDetails(now = Date.now()): PendingTimerDetails |
   try {
     const record = JSON.parse(raw) as PendingTimerDetails;
     if (
-      typeof record?.entryId === "string"
+      record?.entryId === entryId
       && isDraft(record.draft)
       && Array.isArray(record.bases) && record.bases.length > 0 && record.bases.every(isDraft)
       && typeof record.savedAt === "number"
@@ -75,19 +95,35 @@ export function readPendingTimerDetails(now = Date.now()): PendingTimerDetails |
   } catch {
     // Unreadable: dropped below.
   }
-  clearPendingTimerDetails();
+  clearPendingTimerDetails(owner, entryId);
   return null;
 }
 
-/** Clears the record; with `entryId`, only that block's; with `saved`, only when that text is all it holds. */
-export function clearPendingTimerDetails(entryId?: string, saved?: TimerDraft) {
-  if (entryId !== undefined) {
-    const record = readPendingTimerDetails();
-    if (!record || record.entryId !== entryId) return;
-    if (saved && timerDraftEditedFields(record.draft, saved).length) return;
+/** Clears that block's record; with `saved`, only when that text is all it holds. */
+export function clearPendingTimerDetails(owner: PendingTimerDetailsOwner, entryId: string, saved?: TimerDraft) {
+  if (saved) {
+    const record = readPendingTimerDetails(owner, entryId);
+    if (!record || timerDraftEditedFields(record.draft, saved).length) return;
   }
   try {
-    storage()?.removeItem(STORAGE_KEY);
+    storage()?.removeItem(keyFor(owner, entryId));
+  } catch {
+    // Nothing more to do.
+  }
+}
+
+/** The session ends: every record goes, and writes for it are refused from now on. */
+export function endPendingTimerDetailsSession() {
+  generation += 1;
+  const store = storage();
+  if (!store) return;
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < store.length; index += 1) {
+      const key = store.key(index);
+      if (key?.startsWith(STORAGE_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) store.removeItem(key);
   } catch {
     // Nothing more to do.
   }

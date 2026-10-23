@@ -4,12 +4,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   PENDING_TIMER_DETAILS_MAX_AGE_MS,
   clearPendingTimerDetails,
+  endPendingTimerDetailsSession,
   fitsKeepalive,
   pendingTimerDetailsDecision,
+  pendingTimerDetailsGeneration,
   readPendingTimerDetails,
   writePendingTimerDetails,
   type PendingTimerDetails
 } from "./timer-draft-store";
+
+const owner = { userId: "user-1", workspaceId: "workspace-1" };
 
 const draft = (description: string, categoryId = "focus") => ({ categoryId, description, tagNames: [] });
 const record = (overrides: Partial<PendingTimerDetails> = {}): PendingTimerDetails => ({
@@ -20,7 +24,7 @@ const record = (overrides: Partial<PendingTimerDetails> = {}): PendingTimerDetai
   ...overrides
 });
 
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => window.sessionStorage.clear());
 
 describe("pending timer details (Codex r1 on #539)", () => {
   it("applies over either copy it was based on, and only for the fields it edits", () => {
@@ -35,23 +39,46 @@ describe("pending timer details (Codex r1 on #539)", () => {
     expect(pendingTimerDetailsDecision(record(), draft("Changed elsewhere"))).toEqual({ kind: "stale" });
   });
 
-  it("round-trips, expires after a day and drops unreadable records", () => {
-    writePendingTimerDetails(record());
-    expect(readPendingTimerDetails()?.draft.description).toBe("Fix bug more later");
-    expect(readPendingTimerDetails(Date.now() + PENDING_TIMER_DETAILS_MAX_AGE_MS + 1)).toBeNull();
-    expect(window.localStorage.length).toBe(0);
-    window.localStorage.setItem("dayframe:pending-timer-details", "{not json");
-    expect(readPendingTimerDetails()).toBeNull();
-    expect(window.localStorage.length).toBe(0);
+  it("round-trips per tab, expires after a day and drops unreadable records", () => {
+    writePendingTimerDetails(owner, record(), pendingTimerDetailsGeneration());
+    expect(Object.keys(window.localStorage).filter((key) => key.startsWith("dayframe:pending-timer-details"))).toEqual([]);
+    expect(readPendingTimerDetails(owner, "entry-1")?.draft.description).toBe("Fix bug more later");
+    expect(readPendingTimerDetails(owner, "entry-1", Date.now() + PENDING_TIMER_DETAILS_MAX_AGE_MS + 1)).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
+    writePendingTimerDetails(owner, record(), pendingTimerDetailsGeneration());
+    window.sessionStorage.setItem(window.sessionStorage.key(0)!, "{not json");
+    expect(readPendingTimerDetails(owner, "entry-1")).toBeNull();
+    expect(window.sessionStorage.length).toBe(0);
   });
 
-  it("a save clears only its own block's record, and only when it saved that exact text", () => {
-    writePendingTimerDetails(record());
-    clearPendingTimerDetails("entry-2");
-    clearPendingTimerDetails("entry-1", draft("Fix bug more"));
-    expect(readPendingTimerDetails()).not.toBeNull();
-    clearPendingTimerDetails("entry-1", draft("Fix bug more later"));
-    expect(readPendingTimerDetails()).toBeNull();
+  it("is scoped by user, workspace and block: another owner or block never reads or clears it", () => {
+    writePendingTimerDetails(owner, record(), pendingTimerDetailsGeneration());
+    expect(readPendingTimerDetails({ ...owner, workspaceId: "workspace-2" }, "entry-1")).toBeNull();
+    expect(readPendingTimerDetails({ ...owner, userId: "user-2" }, "entry-1")).toBeNull();
+    expect(readPendingTimerDetails(owner, "entry-2")).toBeNull();
+    clearPendingTimerDetails(owner, "entry-2");
+    clearPendingTimerDetails({ ...owner, workspaceId: "workspace-2" }, "entry-1");
+    expect(readPendingTimerDetails(owner, "entry-1")).not.toBeNull();
+  });
+
+  it("a save clears its block's record only when it saved that exact text", () => {
+    writePendingTimerDetails(owner, record(), pendingTimerDetailsGeneration());
+    clearPendingTimerDetails(owner, "entry-1", draft("Fix bug more"));
+    expect(readPendingTimerDetails(owner, "entry-1")).not.toBeNull();
+    clearPendingTimerDetails(owner, "entry-1", draft("Fix bug more later"));
+    expect(readPendingTimerDetails(owner, "entry-1")).toBeNull();
+  });
+
+  it("ending the session removes every record and refuses writes made with the old token", () => {
+    const token = pendingTimerDetailsGeneration();
+    writePendingTimerDetails(owner, record(), token);
+    writePendingTimerDetails(owner, record({ entryId: "entry-2" }), token);
+    window.sessionStorage.setItem("unrelated", "kept");
+    endPendingTimerDetailsSession();
+    expect(window.sessionStorage.length).toBe(1);
+    expect(writePendingTimerDetails(owner, record(), token)).toBe(false);
+    expect(readPendingTimerDetails(owner, "entry-1")).toBeNull();
+    expect(writePendingTimerDetails(owner, record(), pendingTimerDetailsGeneration())).toBe(true);
   });
 
   it("keeps keepalive bodies under the browser budget, counting encoded bytes", () => {
