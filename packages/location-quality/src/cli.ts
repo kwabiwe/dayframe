@@ -28,44 +28,50 @@ export const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.me
 export const callerPath = (file: string) => path.resolve(process.env.INIT_CWD ?? process.cwd(), file);
 
 /**
- * The real path of a file, or of its nearest existing parent with the rest appended (an output not
- * written yet). A dangling symlink is followed to where it points, since writing through it would
- * create its target.
+ * Where a path really leads, resolved one component at a time in filesystem order, as the system
+ * does when it opens or creates the file: a symlink is followed before any `..` after it, and a
+ * dangling link leads to its target. A missing component ends the walk (nothing below it can be a
+ * link), so an output not written yet resolves through its nearest existing parent.
  */
-function realPathOf(file: string, depth = 0): string {
+export function realPathOf(absolute: string, depth = 0): string {
   if (depth > 40) throw new Error("Too many symbolic links in a private path.");
-  const missing: string[] = [];
-  let current = file;
-  for (;;) {
+  const parts = absolute.split(path.sep).filter((part) => part !== "" && part !== ".");
+  let current = path.parse(absolute).root || path.sep;
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    if (part === "..") {
+      current = path.dirname(current);
+      continue;
+    }
+    const next = path.join(current, part);
+    let stat: fs.Stats;
     try {
-      return path.join(fs.realpathSync.native(current), ...missing.reverse());
+      stat = fs.lstatSync(next);
     } catch {
-      let link: string | null = null;
-      try {
-        if (fs.lstatSync(current).isSymbolicLink()) link = fs.readlinkSync(current);
-      } catch {
-        // Missing: look at its parent.
-      }
-      if (link !== null) return realPathOf(path.join(path.resolve(path.dirname(current), link), ...missing.reverse()), depth + 1);
-      const parent = path.dirname(current);
-      if (parent === current) return file;
-      missing.push(path.basename(current));
-      current = parent;
+      return path.join(current, ...parts.slice(index));
+    }
+    if (stat.isSymbolicLink()) {
+      const target = fs.readlinkSync(next);
+      current = realPathOf(path.isAbsolute(target) ? target : `${current}${path.sep}${target}`, depth + 1);
+    } else {
+      current = next;
     }
   }
+  return current;
 }
 
 /**
  * Private inputs and outputs never live inside the repository, so they cannot be committed by
- * accident. Containment is by path component after resolving symlinks, so neither `<repo>/..x` nor a
- * link out of (or into) the repository fools it.
+ * accident. The check is by path component on where the path really leads, and the caller reads or
+ * writes that resolved path, so what is checked is what is used.
  */
 export function assertOutsideRepository(file: string, root = REPOSITORY_ROOT): string {
-  const resolved = callerPath(file);
-  const relative = path.relative(realPathOf(path.resolve(root)), realPathOf(resolved));
+  const absolute = path.isAbsolute(file) ? file : `${process.env.INIT_CWD ?? process.cwd()}${path.sep}${file}`;
+  const real = realPathOf(absolute);
+  const relative = path.relative(realPathOf(path.resolve(root)), real);
   const inside = relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-  if (inside) throw new Error(`Refusing ${resolved}: private location inputs and outputs must live outside the repository.`);
-  return resolved;
+  if (inside) throw new Error(`Refusing ${callerPath(file)}: private location inputs and outputs must live outside the repository.`);
+  return real;
 }
 
 /** Reads private JSON; a parse failure never quotes the file. */

@@ -1,4 +1,12 @@
-import type { LocationSegment } from "@dayframe/shared";
+import type {
+  CommuteQualificationReason,
+  CommuteSegment,
+  ContinuityStatus,
+  LocationSegment,
+  LocationSegmentStatus,
+  MotionTravelMode,
+  StaySegment
+} from "@dayframe/shared";
 import { ISO_INSTANT } from "./answerKey";
 
 /**
@@ -58,6 +66,24 @@ export function toQualitySegments(segments: LocationSegment[], placeLabel: (id: 
   });
 }
 
+// The engine's own code values, tied to its types so a new code is a compile error here. A saved run
+// keeps only these; anything else becomes "other" (or null), so no free text survives.
+const ENGINE_CODES: Record<string, readonly string[]> = {
+  status: ["candidate", "open", "closed", "finalised", "superseded", "ignored"] satisfies LocationSegmentStatus[],
+  confidence: ["low", "medium", "medium_high", "high"] satisfies CommuteSegment["confidence"][],
+  continuity: ["continuous", "supported_by_visit", "uncertain_gap", "broken_by_other_place", "manual"] satisfies ContinuityStatus[],
+  match: ["saved", "learned", "unknown", "ambiguous"] satisfies StaySegment["placeMatchKind"][],
+  formation: ["physical_stop"] satisfies NonNullable<StaySegment["formation"]>[],
+  reason: [
+    "significant_endpoint_displacement",
+    "significant_route_distance",
+    "endpoint_only_significant_distance",
+    "same_place_meaningful_round_trip",
+    "same_place_outing"
+  ] satisfies CommuteQualificationReason[],
+  mode: ["walking", "running", "cycling", "automotive"] satisfies MotionTravelMode[]
+};
+
 const SEGMENT_STRING_FIELDS = ["status", "confidence", "continuity"] as const;
 const SEGMENT_NULLABLE_STRING_FIELDS = ["stoppedAt", "place", "match", "formation", "from", "to", "reason", "mode"] as const;
 const SEGMENT_NULLABLE_NUMBER_FIELDS = ["routeM", "lineM", "routeSamples", "maxGapS"] as const;
@@ -74,7 +100,8 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
     if (!raw || typeof raw !== "object") throw fail("shape");
     const item = raw as Record<string, unknown>;
     if (item.kind !== "stay" && item.kind !== "commute") throw fail("kind");
-    if (typeof item.startedAt !== "string" || !ISO_INSTANT.test(item.startedAt)) throw fail("startedAt");
+    const instant = (value: unknown) => typeof value === "string" && ISO_INSTANT.test(value) && Number.isFinite(Date.parse(value));
+    if (!instant(item.startedAt)) throw fail("startedAt");
     const out: Record<string, unknown> = { kind: item.kind, startedAt: item.startedAt };
     for (const field of SEGMENT_STRING_FIELDS) {
       if (typeof item[field] !== "string") throw fail(field);
@@ -85,13 +112,15 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
       if (fieldValue !== null && typeof fieldValue !== "string") throw fail(field);
       out[field] = fieldValue;
     }
-    if (out.stoppedAt !== null && !ISO_INSTANT.test(out.stoppedAt as string)) throw fail("stoppedAt");
+    if (out.stoppedAt !== null && !instant(out.stoppedAt)) throw fail("stoppedAt");
     // Place labels are anonymous ("P4", "-"), never names; the rest are engine codes.
     for (const field of ["place", "from", "to"] as const) {
       if (out[field] !== null && !/^(P\d+|-)$/.test(out[field] as string)) throw fail(field);
     }
-    for (const field of ["status", "confidence", "continuity", "match", "formation", "reason", "mode"] as const) {
-      if (out[field] !== null && !/^[a-z][a-z0-9_]*$/.test(out[field] as string)) throw fail(field);
+    for (const [field, codes] of Object.entries(ENGINE_CODES)) {
+      if (out[field] !== null && !codes.includes(out[field] as string)) {
+        out[field] = (SEGMENT_STRING_FIELDS as readonly string[]).includes(field) ? "other" : null;
+      }
     }
     for (const field of SEGMENT_NULLABLE_NUMBER_FIELDS) {
       const fieldValue = item[field] ?? null;

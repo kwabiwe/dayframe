@@ -26,11 +26,17 @@ describe("privacy guard", () => {
     fs.symlinkSync(REPOSITORY_ROOT, link);
     expect(() => assertOutsideRepository(path.join(link, "packages", "Timeline.json"))).toThrow(/outside the repository/);
     expect(() => assertOutsideRepository(path.join(link, "new-folder", "summary.json"))).toThrow(/outside the repository/);
-    expect(assertOutsideRepository(path.join(scratch, "summary.json"))).toBe(path.join(scratch, "summary.json"));
+    // The path returned is where the file really is, so the caller writes exactly what was checked.
+    expect(assertOutsideRepository(path.join(scratch, "summary.json"))).toBe(path.join(fs.realpathSync(scratch), "summary.json"));
     // A dangling link outside the repository pointing at a file not yet written inside it.
     const dangling = path.join(scratch, "run.json");
     fs.symlinkSync(path.join(REPOSITORY_ROOT, "not-yet-written-private.json"), dangling);
     expect(() => assertOutsideRepository(dangling)).toThrow(/outside the repository/);
+    // A link into the repository followed by "..": the system resolves the link first.
+    const hop = path.join(scratch, "hop.json");
+    fs.symlinkSync(path.join(link, "packages", "..", "not-yet-written-private.json"), hop);
+    expect(() => assertOutsideRepository(hop)).toThrow(/outside the repository/);
+    expect(() => assertOutsideRepository(path.join(link, "packages", "..", "x.json"))).toThrow(/outside the repository/);
   });
 });
 
@@ -42,10 +48,12 @@ describe("saved runs", () => {
     expect(JSON.stringify(clean)).not.toMatch(/latitude|longitude|Somewhere/);
   });
 
-  it("refuse names in place labels, free text in codes and malformed segments, without quoting them", () => {
+  it("refuse names in place labels and malformed segments, and keep only engine codes, without quoting them", () => {
     const named = [{ ...exampletonSegments[0], place: "Somewhere Street" }];
     expect(() => sanitizeQualitySegments(named)).toThrow("Saved run segment 0 has an invalid place.");
-    expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], reason: "Somewhere Street" }])).toThrow(/invalid reason/);
+    const coded = sanitizeQualitySegments([{ ...exampletonSegments[1], reason: "somewhere_street_12", mode: "automotive", status: "somewhere" }]);
+    expect(coded[0]).toMatchObject({ reason: null, mode: "automotive", status: "other" });
+    expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stoppedAt: "2026-99-99T99:99:99Z" }])).toThrow(/invalid stoppedAt/);
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stops: -1 }])).toThrow(/invalid stops/);
     expect(() => sanitizeQualitySegments({})).toThrow(/JSON array/);
   });
