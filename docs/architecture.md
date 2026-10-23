@@ -17,6 +17,7 @@ Web and iOS bootstrap/read models <──── workspace/user-scoped Postgres q
 - `apps/web` owns the Next.js UI, authenticated API routes, event processing, reports, export, and hosted auth adapter.
 - `apps/mobile` owns the Expo iOS UI, SecureStore app session, local capture queues, HealthKit and location adapters, and targeted native iOS surfaces.
 - `packages/shared` owns cross-platform schemas, event normalization, palette/theme contracts, timer state logic, tags, time intervals, and the deterministic Location V2 engine.
+- `packages/location-quality` is a local-only scoring harness (PRD D21): it replays the shared engine over private relative-metre evidence and scores it against a Google Timeline export. It is never imported by the apps, and its private inputs and outputs must stay outside the repository.
 - `packages/db/migrations` is the ordered local Postgres/PostGIS schema history. `packages/db/scripts/setup.ts` applies every SQL migration in filename order, then seed data.
 - `supabase/migrations` is the ordered hosted Supabase migration history, including RLS, hosted indexes/functions, tags, location, Review receipts, Health reconciliation, and Live Activity delivery.
 
