@@ -1388,4 +1388,49 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertNotEqual(layout["r1"]?.offsetFraction, layout["r2"]?.offsetFraction)
     try tapsResolve(entries)
   }
+
+  // MARK: Codex r2 on #548
+
+  func testAnOlderBundlesModelKeepsItsOwnGeometryAndTaps() throws {
+    func legacy(_ id: String, _ start: String, _ stop: String) throws -> DayframeCalendarLayoutInput {
+      DayframeCalendarLayoutInput(
+        id: id, startedAtMs: try milliseconds("2026-07-10T\(start):00Z"), stoppedAtMs: try milliseconds("2026-07-10T\(stop):00Z"),
+        columnGroup: nil, regionOffsetFraction: 0, regionWidthFraction: 1,
+        fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0
+      )
+    }
+    try tapsResolve([try legacy("a", "09:00", "09:01"), try legacy("b", "09:08", "09:09")])
+  }
+
+  func testReviewTargetsThatWouldMeetByAFractionGetTheirOwnColumns() throws {
+    let lane = (0.56, 0.44)
+    let first = try input("r1", "09:00", "09:01", group: "review", region: lane)
+    let second = DayframeCalendarLayoutInput(
+      id: "r2", startedAtMs: try milliseconds("2026-07-10T09:54:30Z"), stoppedAtMs: try milliseconds("2026-07-10T09:55:30Z"),
+      columnGroup: "review", regionOffsetFraction: 0.56, regionWidthFraction: 0.44,
+      fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0
+    )
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let layout = DayframeCalendarDayLayout.layout(entries: [first, second], nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, calendar: calendar)
+    // Their 44-point targets would overlap by 0.4 points: strictly apart means side by side.
+    XCTAssertEqual(layout["r1"]?.columnCount, 2)
+  }
+
+  func testFiveHundredCoincidentBlocksLayOutQuickly() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let entries = (0..<500).map { (index: Int) -> DayframeCalendarLayoutInput in
+      DayframeCalendarLayoutInput(
+        id: "c\(index)", startedAtMs: dayStart + 9 * 3_600_000, stoppedAtMs: dayStart + 9 * 3_600_000 + 60_000,
+        columnGroup: "logged", regionOffsetFraction: 0, regionWidthFraction: 1,
+        fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0
+      )
+    }
+    let started = Date()
+    _ = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, calendar: calendar)
+    XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)
+  }
 }

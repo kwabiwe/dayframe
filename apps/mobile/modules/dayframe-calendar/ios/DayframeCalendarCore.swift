@@ -28,6 +28,9 @@ public enum DayframeCalendarConstants {
   public static let compactTextMaximumHeight = 22.0
   /// Drawn edges this close count as touching, not colliding.
   public static let columnTouchTolerance = 0.5
+  /// The minimum an older JS bundle's model was laid out for (no `columnGroup`): such blocks keep it,
+  /// so React's fractions still separate what is drawn.
+  public static let legacyMinimumBlockHeight = 4.0
   public static let longPressMinimumDuration = 0.50
   public static let longPressAllowableMovement = 11.0
   public static let longPressSnapMinutes = 15
@@ -953,8 +956,11 @@ public struct DayframeCalendarColumn: Equatable {
 /// whose last block has ended by its top. Every block in a cluster is 1 / columns wide.
 /// O(n log n): one sort, then two heaps (columns in use by bottom, freed columns by index).
 public enum DayframeCalendarColumnMath {
-  public static func layout(_ blocks: [DayframeCalendarDrawnBlock]) -> [DayframeCalendarColumn] {
-    let tolerance = DayframeCalendarConstants.columnTouchTolerance
+  /// `tolerance`: drawn edges this close count as touching. Review targets use 0 (strictly apart).
+  public static func layout(
+    _ blocks: [DayframeCalendarDrawnBlock],
+    tolerance: Double = DayframeCalendarConstants.columnTouchTolerance
+  ) -> [DayframeCalendarColumn] {
     var seen = Set<String>()
     let items = blocks
       .filter { block in
@@ -1148,7 +1154,7 @@ public enum DayframeCalendarDayLayout {
         dayStartMs: dayStartMs,
         dayEndMs: dayEndMs,
         hourHeight: hourHeight,
-        minimumHeight: minimumHeight,
+        minimumHeight: entry.columnGroup == nil ? DayframeCalendarConstants.legacyMinimumBlockHeight : minimumHeight,
         calendar: calendar
       ) else { continue }
       blocks[entry.id] = block
@@ -1162,8 +1168,11 @@ public enum DayframeCalendarDayLayout {
       }
     }
     var columns: [String: DayframeCalendarColumn] = [:]
-    for (_, members) in groups {
-      for column in DayframeCalendarColumnMath.layout(members) { columns[column.id] = column }
+    for (group, members) in groups {
+      // Review targets must not meet at all: no touching tolerance.
+      for column in DayframeCalendarColumnMath.layout(members, tolerance: group == "review" ? 0 : DayframeCalendarConstants.columnTouchTolerance) {
+        columns[column.id] = column
+      }
     }
 
     var placed: [(id: String, block: DayframeCalendarBlockMetrics, offset: Double, width: Double, count: Int, z: Int)] = []
@@ -1185,17 +1194,48 @@ public enum DayframeCalendarDayLayout {
       }
     }
 
-    // A short block's 44-point target may grow only where no other block is drawn in its space.
+    // A short block's 44-point target may grow only where no other block is drawn in its space. Only
+    // blocks whose top or bottom falls inside the target can be drawn there (a block covering the
+    // whole target would collide with this one, so it is in another column or region), found with two
+    // sorted arrays: O(n log n) plus the matches.
     let epsilon = 1e-9
+    let timelineHeight = 24 * hourHeight
+    let byTop = placed.indices.sorted { placed[$0].block.top < placed[$1].block.top }
+    let byBottom = placed.indices.sorted { placed[$0].block.top + placed[$0].block.height < placed[$1].block.top + placed[$1].block.height }
+    let tops = byTop.map { placed[$0].block.top }
+    let bottoms = byBottom.map { placed[$0].block.top + placed[$0].block.height }
+    func firstIndex(_ values: [Double], atLeast value: Double, strictly: Bool) -> Int {
+      var low = 0, high = values.count
+      while low < high {
+        let mid = (low + high) / 2
+        if strictly ? values[mid] <= value : values[mid] < value { low = mid + 1 } else { high = mid }
+      }
+      return low
+    }
     var out: [String: DayframeCalendarLaidOutEntry] = [:]
-    for item in placed {
-      let target = targetExtent(top: item.block.top, height: item.block.height, timelineHeight: 24 * hourHeight)
-      let sharesTarget = placed.contains { other in
-        other.id != item.id
-          && other.offset < item.offset + item.width - epsilon
-          && item.offset < other.offset + other.width - epsilon
-          && other.block.top < target.bottom
-          && target.top < other.block.top + other.block.height
+    for (index, item) in placed.enumerated() {
+      var sharesTarget = false
+      if item.block.height < 44 {
+        let target = targetExtent(top: item.block.top, height: item.block.height, timelineHeight: timelineHeight)
+        let sharesSpace = { (other: Int) -> Bool in
+          let candidate = placed[other]
+          return other != index
+            && candidate.offset < item.offset + item.width - epsilon
+            && item.offset < candidate.offset + candidate.width - epsilon
+            && candidate.block.top < target.bottom
+            && target.top < candidate.block.top + candidate.block.height
+        }
+        // Tops in [target.top, target.bottom), then bottoms in (target.top, target.bottom].
+        var cursor = firstIndex(tops, atLeast: target.top, strictly: false)
+        while !sharesTarget, cursor < tops.count, tops[cursor] < target.bottom {
+          sharesTarget = sharesSpace(byTop[cursor])
+          cursor += 1
+        }
+        cursor = firstIndex(bottoms, atLeast: target.top, strictly: true)
+        while !sharesTarget, cursor < bottoms.count, bottoms[cursor] <= target.bottom {
+          sharesTarget = sharesSpace(byBottom[cursor])
+          cursor += 1
+        }
       }
       out[item.id] = DayframeCalendarLaidOutEntry(
         block: item.block,
