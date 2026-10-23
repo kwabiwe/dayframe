@@ -3,8 +3,8 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, View, type StyleProp, t
 import Reanimated, { useSharedValue } from "react-native-reanimated";
 import { DAYFRAME_BLOCKS } from "@dayframe/shared";
 import { colorWithAlpha } from "../today/todayBlocksLayout";
-import { blocksToastEntering, blocksToastExiting, type ToastPhase } from "../../lib/blocksMotion";
-import { localLayoutTransition, localPresenceEntering } from "../../lib/motion";
+import { blocksToastEntering, blocksToastExiting, blocksToastLayout, type ToastPhase } from "../../lib/blocksMotion";
+import { localPresenceEntering } from "../../lib/motion";
 import { toastAccessibilityText, type BlocksToastCopy } from "../../lib/blocksToastCopy";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { MOBILE_TEXT_CAP, mobileTextProps } from "../../lib/mobileTypography";
@@ -83,8 +83,10 @@ export type BlocksToastProps = {
  * member whose Start was refused goes from "Deleted 2 blocks" to "Deleted Deep work" with the same
  * deadline and Undo (Codex r3 on #532). The new swatch and lines fade in over 140 ms (no exit fade:
  * the old words go at once, so two sentences never overlap) while the pill's layout transition
- * carries any height change from its anchored edge; Reduce Motion swaps the content and settles the
- * size at once. The first content never fades, so the entrance stays the only motion on mount.
+ * (`blocksToastLayout`, the frame only) carries any height change from its anchored edge; Reduce
+ * Motion swaps the content and settles the size at once. The first content never fades, so the
+ * entrance stays the only motion on mount. A size change during the entrance merges into it, and
+ * the layout transition's completion settles the phase in the entrance's place (Codex r4 on #532).
  */
 export function BlocksToast({
   appearSettled = false,
@@ -172,7 +174,7 @@ export function BlocksToast({
       accessibilityLiveRegion="polite"
       entering={appearSettled ? undefined : blocksToastEntering(reduceMotion, phase)}
       exiting={blocksToastExiting(reduceMotion, phase)}
-      layout={localLayoutTransition(reduceMotion)}
+      layout={blocksToastLayout(reduceMotion, phase)}
       style={[
         toastStyles.toast,
         hasAction ? toastStyles.toastWithAction : toastStyles.toastWithoutAction,

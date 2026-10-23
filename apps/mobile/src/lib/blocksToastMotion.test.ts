@@ -20,7 +20,7 @@ vi.mock("./motion", () => ({ MOBILE_MOTION: { control: 160, layout: 220 } }));
 vi.mock("react-native", () => ({ Animated: {}, Easing: {} }));
 vi.mock("react", () => ({ useEffect: () => undefined, useRef: (value: unknown) => ({ current: value }) }));
 
-const { BLOCKS_SPRING, TOAST_MOTION, blocksToastEntering, blocksToastExiting } = await import("./blocksMotion");
+const { BLOCKS_SPRING, TOAST_MOTION, blocksToastEntering, blocksToastExiting, blocksToastLayout } = await import("./blocksMotion");
 
 type Config = { initialValues: Record<string, unknown>; animations: Record<string, unknown>; callback?: (finished: boolean) => void };
 const settledValue = () => ({ value: "entering" as "entering" | "fading" | "settled" });
@@ -99,6 +99,27 @@ describe("the Undo toast's motion (X4)", () => {
     expect(settled.value).toBe("entering");
     (blocksToastEntering(true, settled) as unknown as () => Config)();
     expect(settled.value).toBe("fading");
+  });
+
+  it("moves only its frame on a content update, and settles the phase when that finishes (Codex r4 on #532)", () => {
+    const phase = settledValue();
+    const layout = blocksToastLayout(false, phase)!;
+    const config = layout({
+      currentHeight: 52, currentOriginX: 20, currentOriginY: 648, currentWidth: 335,
+      targetHeight: 69, targetOriginX: 20, targetOriginY: 631, targetWidth: 335
+    } as never) as unknown as Config;
+    // Opacity and the transform stay the entrance's and the exit's.
+    expect(Object.keys(config.animations).sort()).toEqual(["height", "originX", "originY", "width"]);
+    expect(config.initialValues).toEqual({ height: 52, originX: 20, originY: 648, width: 335 });
+    expect(config.animations.height).toEqual({ timing: 69, config: { duration: 220, reduceMotion: "never" } });
+    // An exit taking over (not finished) leaves the phase for the exit to carry the live values.
+    config.callback?.(false);
+    expect(phase.value).toBe("entering");
+    // Finished, Reanimated has forgotten the values, merged entrance and all: the phase settles.
+    config.callback?.(true);
+    expect(phase.value).toBe("settled");
+    // Reduce Motion has no layout transition: the size settles at once.
+    expect(blocksToastLayout(true, settledValue())).toBeUndefined();
   });
 
   it("drops away in 160 ms", () => {

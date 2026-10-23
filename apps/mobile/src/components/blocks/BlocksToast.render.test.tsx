@@ -20,10 +20,10 @@ vi.mock("react-native", () => ({
 vi.mock("react-native-reanimated", () => ({ default: { View: "ReanimatedView" }, useSharedValue: (value: unknown) => ({ value }) }));
 vi.mock("../../lib/blocksMotion", () => ({
   blocksToastEntering: (reduceMotion: boolean) => ({ kind: "entering", spring: reduceMotion ? null : "pop", reduceMotion }),
-  blocksToastExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion })
+  blocksToastExiting: (reduceMotion: boolean) => ({ kind: "exiting", reduceMotion }),
+  blocksToastLayout: (reduceMotion: boolean) => (reduceMotion ? undefined : { kind: "layout" })
 }));
 vi.mock("../../lib/motion", () => ({
-  localLayoutTransition: (reduceMotion: boolean) => ({ kind: "layout", reduceMotion }),
   localPresenceEntering: (reduceMotion: boolean) => ({ kind: "contentFade", reduceMotion })
 }));
 vi.mock("../../lib/mobileTypography", () => ({ MOBILE_TEXT_CAP: { control: 1.3 }, mobileTextProps: () => ({}) }));
@@ -190,7 +190,8 @@ describe("BlocksToast (UIA-003)", () => {
     );
     act(() => { tree = create(render("Deleted 2 blocks", null)); });
     const pill = host();
-    expect(pill.props.layout).toEqual({ kind: "layout", reduceMotion: false });
+    // The toast's own frame-only transition (BlocksToast.lifecycle.test.tsx plays it through an entrance).
+    expect(pill.props.layout).toEqual({ kind: "layout" });
     // The first words never fade: the entrance is the only motion on mount.
     expect(byTestId("toast-content").props.entering).toBeUndefined();
 
@@ -211,7 +212,8 @@ describe("BlocksToast (UIA-003)", () => {
       <BlocksToast actionLabel="Undo" message={message} onAction={vi.fn()} reduceMotion testID="toast" theme={theme} />
     );
     act(() => { tree = create(render("Deleted 2 blocks")); });
-    expect(host().props.layout).toEqual({ kind: "layout", reduceMotion: true });
+    // No layout transition at all: the size settles at once.
+    expect(host().props.layout).toBeUndefined();
     act(() => tree!.update(render("Deleted Deep work")));
     expect(byTestId("toast-content").props.entering).toBeUndefined();
     expect(texts()).toEqual(["Deleted Deep work", "Undo"]);
