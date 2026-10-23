@@ -5,11 +5,25 @@ const holder = vi.hoisted(() => ({ session: null as unknown }));
 vi.mock("@/lib/ingest-auth", () => ({ resolveRequestSession: vi.fn(async () => holder.session) }));
 vi.mock("@/lib/live-activity-post-response", () => ({ scheduleLiveActivityNotification: vi.fn() }));
 
+import type pg from "pg";
 import { pool } from "@/lib/db";
 import { DELETE, PATCH } from "./route";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 const T = (hhmm: string) => `2026-10-20T${hhmm}:00.000Z`;
+
+/** Waits until a backend of this database is blocked behind another's lock (the resend on the row lock). */
+async function waitUntilBlocked() {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const blocked = await pool.query<{ count: number }>(
+      `select count(*)::int as count from pg_stat_activity
+       where datname = current_database() and cardinality(pg_blocking_pids(pid)) > 0`
+    );
+    if ((blocked.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("The resend never waited on the row lock.");
+}
 
 // Stability audit 22 Oct 2026, item 17: an iPhone Edit whose response was lost is resent unchanged.
 // With its outbox command id the resend is answered as delivered and never reverts a newer edit.
@@ -41,6 +55,7 @@ describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of a
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await pool.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
     await pool.query("delete from users where id = $1", [userId]).catch(() => undefined);
   });
@@ -155,11 +170,59 @@ describe.runIf(runDatabaseIntegration)("PATCH /api/time-entries/[id] resend of a
     expect(await row()).toMatchObject({ description: "phone C" });
   });
 
-  it("two concurrent deliveries of the same command apply it once", async () => {
-    const [a, b] = await Promise.all([patch(phoneA(), COMMAND), patch(phoneA(), COMMAND)]);
-    expect([a.status, b.status]).toEqual([200, 200]);
-    expect([a.json.replayed, b.json.replayed].filter(Boolean)).toHaveLength(1);
+  it("a resend that waits on the first delivery's row lock is answered as delivered once it commits", async () => {
+    // Hold the first delivery's transaction open at its commit: row locked, edit and receipt written.
+    let releaseCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => { releaseCommit = resolve; });
+    let reachedCommit!: () => void;
+    const atCommit = new Promise<void>((resolve) => { reachedCommit = resolve; });
+    const connect = pool.connect.bind(pool) as () => Promise<pg.PoolClient>;
+    vi.spyOn(pool, "connect").mockImplementationOnce((async () => {
+      const client = await connect();
+      const query = client.query;
+      client.query = (async (...args: Parameters<typeof query>) => {
+        if (args[0] === "commit") {
+          reachedCommit();
+          await commitGate;
+          client.query = query;
+        }
+        return (query as (...input: unknown[]) => unknown).apply(client, args);
+      }) as typeof query;
+      return client;
+    }) as never);
+
+    const first = patch(phoneA(), COMMAND);
+    await atCommit;
+    const resend = patch(phoneA(), COMMAND);
+    await waitUntilBlocked();
+    releaseCommit();
+    const [a, b] = await Promise.all([first, resend]);
+
+    expect(a.status).toBe(200);
+    expect(a.json).not.toHaveProperty("replayed");
+    expect(b.status).toBe(200);
+    expect(b.json).toMatchObject({ replayed: true, entry: { id: entryId, description: "phone A" } });
     expect((await audit()).filter((entry) => entry.metadata.clientCommandId === COMMAND)).toHaveLength(1);
+  });
+
+  it("a resend that waits while the block is being deleted is answered as delivered once the delete commits", async () => {
+    expect((await patch(phoneA(), COMMAND)).status).toBe(200); // applied; the response is lost
+    const deleting = await pool.connect();
+    try {
+      await deleting.query("begin");
+      await deleting.query("delete from time_entries where id = $1", [entryId]);
+      const resend = patch(phoneA(), COMMAND);
+      await waitUntilBlocked();
+      await deleting.query("commit");
+
+      const result = await resend;
+      expect(result.status).toBe(200);
+      expect(result.json).toMatchObject({ ok: true, replayed: true, entry: null });
+      expect(await row()).toBeNull();
+    } finally {
+      await deleting.query("rollback").catch(() => undefined);
+      deleting.release();
+    }
   });
 
   it("an older iPhone's resend (no command id) still applies as before", async () => {
