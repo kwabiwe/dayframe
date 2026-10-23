@@ -778,7 +778,7 @@ export async function logout() {
     // retried at a later launch, signed out or not; a failed write fails logout while still signed in
     // (Codex r1 and r2 on #549).
     const healthExpiryMarker = await import("./healthSignOut")
-      .then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending());
+      .then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending(logoutOwner ?? null));
     requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
@@ -845,6 +845,14 @@ export async function enqueueEvent(input: ActivityEventDraft) {
     const all = await readAllQueue(owner);
     const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
     const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
+    // A journal handoff is admitted only while its delivery is still owed, under this queue lock that
+    // Clear's discard also holds: a handoff working from an earlier snapshot cannot re-add a cleared
+    // event (Codex r3 on #549).
+    if (input.healthOwner && queuedLocalId.startsWith("healthkit:") &&
+        !queue.some((item) => item.localId === queuedLocalId)) {
+      const { isHealthDeliveryOpen } = await import("./healthSyncStore");
+      if (!await isHealthDeliveryOpen(input.healthOwner, queuedLocalId)) return queue;
+    }
     if (queue.some((item) => item.localId === queuedLocalId)) {
       if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
         await reserveTimerBackgroundExecution(
@@ -1299,6 +1307,7 @@ async function syncQueueItems(
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
   const refusedStarts: RefusedTimerStart[] = [];
+  const dropped: string[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
@@ -1309,6 +1318,16 @@ async function syncQueueItems(
       remaining.push(item, ...queue.slice(index + 1));
       stopped = true;
       break;
+    }
+    // A journal-owned Health event whose delivery is no longer owed (discarded, acknowledged or gone
+    // with its account's journal) leaves the queue unsent (Codex r3 on #549).
+    if (item.healthOwner && item.localId.startsWith("healthkit:") && queuedEventMatchesOwner(item, owner)) {
+      const { isHealthDeliveryOpen } = await import("./healthSyncStore");
+      // A journal that cannot be read now keeps the event: only a settled or missing row drops it.
+      if (!await isHealthDeliveryOpen(item.healthOwner, item.localId).catch(() => true)) {
+        dropped.push(item.localId);
+        continue;
+      }
     }
     if (options.onlyFailed && !hasQueueFailure(item)) {
       remaining.push(item);
@@ -1449,7 +1468,7 @@ async function syncQueueItems(
     owner,
     processed: queue,
     remaining,
-    synced
+    synced: [...synced, ...dropped]
   });
   // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
   // is retried; only the newly refused are announced (Codex r1 on #532).

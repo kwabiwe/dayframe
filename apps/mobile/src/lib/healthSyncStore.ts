@@ -497,8 +497,25 @@ export async function recordHealthAcknowledgement(
       clientEventId,
     ),
   );
-  if (!result.changes && clientEventId.startsWith("healthkit:"))
-    throw new Error("The Health acknowledgement has no matching captured owner and event.");
+  // No journal row (discarded and then expired, or never this owner's): there is nothing left to
+  // settle, so the queued event is done rather than retried forever (Codex r3 on #549).
+  return result.changes > 0;
+}
+
+/**
+ * Whether a journal delivery is still owed to the server (`pending_handoff` or `queued`). The activity
+ * queue admits a journal-owned Health event only while this holds, checked under the queue's own lock,
+ * and drops one it holds once it no longer does, so Clear's discard and a handoff holding an earlier
+ * snapshot can never leave a Health body in the queue without its journal row (Codex r3 on #549).
+ */
+export async function isHealthDeliveryOpen(owner: HealthCaptureOwner, clientEventId: string) {
+  const db = await database();
+  const row = await db.getFirstAsync<{ state: string }>(
+    "select state from health_deliveries where owner_key=? and client_event_id=?",
+    healthOwnerKey(owner),
+    clientEventId,
+  );
+  return row?.state === "pending_handoff" || row?.state === "queued";
 }
 
 export async function beginOrResumeHealthRepair(

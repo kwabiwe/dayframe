@@ -133,8 +133,8 @@ describe("Health journal after logout (health-3)", () => {
   });
 
   const marker = () => h.asyncStore.get(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY);
-  const earlierLaunchMarker = (id: string, done = false) =>
-    h.asyncStore.set(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY, JSON.stringify({ id, launch: "earlier-launch", done }));
+  const earlierLaunchMarker = (id: string, done = false, owner: Owner | null = null) =>
+    h.asyncStore.set(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY, JSON.stringify({ id, launch: "earlier-launch", done, owner }));
 
   it("a recorded logout expiry survives deferral and failure, and clears only after it ran", async () => {
     // An earlier launch's logout stopped after recording it.
@@ -159,7 +159,7 @@ describe("Health journal after logout (health-3)", () => {
     signIn(B);
     await account.activateMobileAccount(B);
     // B's logout has recorded its expiry but not yet signed out: a cleanup running now leaves it.
-    const id = await signOut.markSignedOutHealthExpiryPending();
+    const id = await signOut.markSignedOutHealthExpiryPending(B);
     expect(await signOut.runPendingSignedOutHealthExpiry()).toBe(false);
     expect(h.keepers).toEqual([]);
     expect(JSON.parse(marker()!)).toMatchObject({ id, done: false });
@@ -170,6 +170,23 @@ describe("Health journal after logout (health-3)", () => {
     expect(marker()).toBeUndefined();
   });
 
+  it("an interrupted logout's marker waits while its owner is still signed in, then runs at the 401 sign-out (Codex r3 on #549)", async () => {
+    // The app stopped after the server revoked A, before A's token was removed.
+    earlierLaunchMarker("interrupted", false, A);
+    signIn(A);
+    await account.activateMobileAccount(A);
+    signOut.watchSignedOutHealthBackground(h.native);
+    await flush();
+    expect(await signOut.runPendingSignedOutHealthExpiry()).toBe(false);
+    expect(h.keepers.every((keeper) => keeper === null)).toBe(true);
+    expect(JSON.parse(marker()!)).toMatchObject({ id: "interrupted" });
+    // The next request's 401 signs A out: the recorded expiry now runs and is consumed.
+    signOutSession();
+    await account.deactivateMobileAccount(A);
+    await vi.waitFor(() => expect(marker()).toBeUndefined());
+    expect(h.keepers.at(-1)).toEqual({ keep: null });
+  });
+
   it("an older cleanup never removes a newer logout's marker (Codex r2 on #549)", async () => {
     earlierLaunchMarker("older", true);
     let release!: () => void;
@@ -178,14 +195,14 @@ describe("Health journal after logout (health-3)", () => {
     const cleanup = signOut.runPendingSignedOutHealthExpiry();
     await started;
     // While the older expiry runs, a newer logout records its own marker.
-    const newer = await signOut.markSignedOutHealthExpiryPending();
+    const newer = await signOut.markSignedOutHealthExpiryPending(A);
     release();
     expect(await cleanup).toBe(true);
     expect(JSON.parse(marker()!)).toMatchObject({ id: newer, done: false });
   });
 
   it("logout stops delivery and runs its recorded expiry", async () => {
-    const id = await signOut.markSignedOutHealthExpiryPending();
+    const id = await signOut.markSignedOutHealthExpiryPending(null);
     await signOut.endHealthCaptureAfterLogout(id);
     expect(h.calls).toEqual([false]);
     expect(h.keepers).toEqual([{ keep: null }]);

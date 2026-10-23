@@ -276,7 +276,7 @@ describe("Health journal real SQLite boundaries", () => {
     ]) {
       await expect(store.recordHealthAcknowledgement(wrongOwner, clientEventId, {
         eventId: "server-event", clientEventId, processingDisposition: "processed",
-      })).rejects.toThrow("no matching captured owner");
+      })).resolves.toBe(false);
     }
     expect(db.prepare("select state from health_deliveries").get()!.state).toBe("pending_handoff");
   });

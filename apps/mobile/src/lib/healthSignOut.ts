@@ -17,6 +17,7 @@ import { requireBackendIdentity } from "./backendIdentity";
 import { expireInactiveHealthOwners, type HealthJournalKeeper } from "./healthSyncStore";
 import {
   getActiveMobileAccountSnapshot,
+  type MobileAccountOwner,
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
   subscribeActiveMobileAccount,
@@ -95,12 +96,15 @@ export function expireSignedOutHealthJournalsOncePerLaunch() {
   return expiredThisLaunch;
 }
 
-// The pending-expiry marker: `{ id, launch, done }`. Logout writes it before it revokes the session and
-// marks it done once it has signed out; every read and write runs on one serial chain. A cleanup consumes
-// only a marker whose logout has finished: done, or written by an earlier launch (that logout can no
-// longer finish here). It reads the id, runs the expiry, then removes the marker only if it still holds
-// that id, so a newer logout's marker is never consumed by an older cleanup (Codex r2 on #549).
-type ExpiryMarker = { id: string; launch: string; done: boolean };
+// The pending-expiry marker: `{ id, launch, done, owner }`. Logout writes it before it revokes the
+// session and marks it done once it has signed out; every read and write runs on one serial chain. A
+// cleanup consumes only a marker whose logout has finished: done, or written by an earlier launch (that
+// logout can no longer finish here). It is bound to the departing owner and is consumed only by an
+// expiry that removed that owner's journal: while the session still reads that owner (a logout
+// interrupted after the server revoked it, before the token went), it stays pending until a sign-out
+// lets it run (Codex r3 on #549). It reads the id, runs the expiry, then removes the marker only if it
+// still holds that id, so a newer logout's marker is never consumed by an older cleanup (Codex r2).
+type ExpiryMarker = { id: string; launch: string; done: boolean; owner: MobileAccountOwner | null };
 const LAUNCH_ID = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
 let markerTail: Promise<unknown> = Promise.resolve();
 function onMarker<Result>(work: () => Promise<Result>) {
@@ -114,20 +118,21 @@ async function readMarker(): Promise<ExpiryMarker | null> {
   try {
     const value = JSON.parse(raw) as Partial<ExpiryMarker>;
     if (typeof value.id === "string" && typeof value.launch === "string")
-      return { id: value.id, launch: value.launch, done: value.done === true };
+      return { id: value.id, launch: value.launch, done: value.done === true, owner: value.owner ?? null };
   } catch {
     // An unreadable marker still asks for an expiry.
   }
-  return { id: raw, launch: "", done: true };
+  return { id: raw, launch: "", done: true, owner: null };
 }
 
 /** Logout records this before it revokes the session; the returned id is passed to `endHealthCaptureAfterLogout`. */
-export function markSignedOutHealthExpiryPending() {
+export function markSignedOutHealthExpiryPending(owner: MobileAccountOwner | null) {
   return onMarker(async () => {
     const id = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    const departing = owner ? { userId: owner.userId, workspaceId: owner.workspaceId } : null;
     await AsyncStorage.setItem(
       HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY,
-      JSON.stringify({ id, launch: LAUNCH_ID, done: false } satisfies ExpiryMarker),
+      JSON.stringify({ id, launch: LAUNCH_ID, done: false, owner: departing } satisfies ExpiryMarker),
     );
     return id;
   });
@@ -145,7 +150,13 @@ function finishSignedOutHealthExpiryLogout(id: string) {
 export async function runPendingSignedOutHealthExpiry() {
   const marker = await onMarker(readMarker);
   if (!marker || (!marker.done && marker.launch === LAUNCH_ID)) return false;
-  if ((await expireSignedOutHealthJournals()) === null) return false;
+  const expired = await expireInactiveHealthOwners(async () => {
+    const keeper = await healthJournalKeeper();
+    // The departing owner is still the session's: its journal would be kept, so the marker waits.
+    if (keeper?.keep && marker.owner && mobileAccountOwnersEqual(keeper.keep, marker.owner)) return null;
+    return keeper;
+  });
+  if (expired === null) return false;
   await onMarker(async () => {
     if ((await readMarker())?.id === marker.id)
       await AsyncStorage.removeItem(HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY);
@@ -202,11 +213,14 @@ export function stopHealthBackgroundDeliveryWhileSignedOut(native?: HealthBackgr
  * delivery, and a logout's unfinished journal expiry is retried.
  */
 export function watchSignedOutHealthBackground(native: HealthBackgroundSwitch) {
-  const stop = () => void stopHealthBackgroundDeliveryWhileSignedOut(native).catch(() => undefined);
-  const unsubscribeAccount = subscribeActiveMobileAccount(stop);
-  const unsubscribeSession = subscribeAuthenticatedSession(stop);
-  stop();
-  void runPendingSignedOutHealthExpiry().catch(() => undefined);
+  // Every session or account change (a 401 sign-out included) also retries a pending expiry.
+  const changed = () => {
+    void stopHealthBackgroundDeliveryWhileSignedOut(native).catch(() => undefined);
+    void runPendingSignedOutHealthExpiry().catch(() => undefined);
+  };
+  const unsubscribeAccount = subscribeActiveMobileAccount(changed);
+  const unsubscribeSession = subscribeAuthenticatedSession(changed);
+  changed();
   return () => {
     unsubscribeAccount();
     unsubscribeSession();
