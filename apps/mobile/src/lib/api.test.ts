@@ -1999,6 +1999,83 @@ describe("mobile API client", () => {
     await expect(readQueue()).resolves.toEqual([]);
   });
 
+  it("retries a parked event slowly, one per pass, and clears its issue when a retry succeeds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));
+    storeBoundSession("session-token");
+    const parkedFields = {
+      source: "location_learning",
+      type: "unknown_stay",
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastError: "Unable to sync this event. Dayframe stopped retrying it after repeated server errors.",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    };
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([
+      storedQueuedEvent({ ...parkedFields, localId: "parked-1", rawPayload: { durationMinutes: 20 } }),
+      storedQueuedEvent({ ...parkedFields, localId: "parked-2", rawPayload: { durationMinutes: 25 } }),
+      // Refused as invalid: never retried automatically.
+      storedQueuedEvent({ ...parkedFields, localId: "refused-invalid", lastStatusCode: 422, rawPayload: { durationMinutes: 5 } })
+    ]));
+    const posted: string[] = [];
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const { clientEventId } = JSON.parse(String(init?.body)) as { clientEventId: string };
+      posted.push(clientEventId);
+      return Promise.resolve(jsonResponse({ eventId: `event-${clientEventId}` }, 201));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Within 6 h of the last attempt nothing is resent.
+    vi.setSystemTime(new Date("2026-07-06T13:00:00.000Z"));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual([]);
+    expect(getQueueDiagnostics(await readQueue()).permanentFailedCount).toBe(3);
+
+    // Once due, one parked event per pass; a success clears its issue.
+    vi.setSystemTime(new Date("2026-07-06T14:30:00.000Z"));
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1"]);
+    expect((await readQueue()).map((item) => item.localId)).toEqual(["parked-2", "refused-invalid"]);
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1", "parked-2"]);
+    const left = await readQueue();
+    expect(left.map((item) => item.localId)).toEqual(["refused-invalid"]);
+    expect(getQueueDiagnostics(left).permanentFailedCount).toBe(1);
+    await syncQueue({ eventScope: "non_timer" });
+    expect(posted).toEqual(["parked-1", "parked-2"]);
+  });
+
+  it("keeps a parked event's issue when its slow retry fails again", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T20:00:00.000Z"));
+    storeBoundSession("session-token");
+    asyncStore.set("dayframe.offlineQueue.v1", JSON.stringify([storedQueuedEvent({
+      localId: "parked-again",
+      source: "location_learning",
+      type: "unknown_stay",
+      rawPayload: { durationMinutes: 20 },
+      failedAt: "2026-07-06T08:00:00.000Z",
+      failureKind: "permanent",
+      failureCount: 9,
+      serverFailureCount: 9,
+      firstServerFailureAt: "2026-07-05T06:00:00.000Z",
+      lastStatusCode: 500,
+      lastAttemptedAt: "2026-07-06T08:00:00.000Z"
+    })]));
+    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse({ error: "Unable to sync this event." }, 500)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncQueue({ eventScope: "non_timer" });
+    await syncQueue({ eventScope: "non_timer" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [parked] = await readQueue();
+    expect(parked).toMatchObject({ failureKind: "permanent", serverFailureCount: 10, lastAttemptedAt: "2026-07-06T20:00:00.000Z" });
+  });
+
   it("keeps timer events strictly ordered and never parks them on server errors", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T08:00:00.000Z"));

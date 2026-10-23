@@ -1287,6 +1287,8 @@ async function syncQueueItems(
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
+  // At most one slow retry of a parked Health or location event per pass (see isParkedRetryDue).
+  let parkedRetryBudget = 1;
 
   for (let index = 0; index < queue.length; index += 1) {
     const item = queue[index];
@@ -1299,7 +1301,9 @@ async function syncQueueItems(
       remaining.push(item);
       continue;
     }
-    if (!options.retryFailed && isPermanentlyFailedEvent(item)) {
+    const parkedRetry = !options.retryFailed && parkedRetryBudget > 0 && isParkedRetryDue(item, now);
+    if (parkedRetry) parkedRetryBudget -= 1;
+    if (!options.retryFailed && !parkedRetry && isPermanentlyFailedEvent(item)) {
       remaining.push(item);
       firstError ??= queueFailureReport(
         item,
@@ -2515,10 +2519,24 @@ function markQueueFailure(
  * A Health or location event the server keeps answering with an error is retried with backoff, then
  * parked as a Sync help issue ("Couldn't be sent": Try again or Clear) once it has had
  * NON_TIMER_SERVER_FAILURE_CAP error replies over at least NON_TIMER_SERVER_FAILURE_WINDOW_MS. It is
- * never dropped. Offline attempts and timeouts don't count: only replies from the server do.
+ * never dropped. Offline attempts and timeouts don't count: only replies from the server do. A parked
+ * event keeps its Sync help issue but is still retried slowly (PARKED_RETRY_INTERVAL_MS, one per pass,
+ * only on passes that run anyway: parked work never schedules a wake), and leaves once one succeeds.
  */
 const NON_TIMER_SERVER_FAILURE_CAP = 8;
 const NON_TIMER_SERVER_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** A parked event is still retried on passes that run anyway, at most once per this interval. */
+const PARKED_RETRY_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** Parked by the server-error cap (not refused as invalid), and its slow retry is due. */
+function isParkedRetryDue(item: QueuedEvent, now: Date) {
+  if (isQueuedTimerMutationEvent(item) || item.failureKind !== "permanent") return false;
+  if (item.lastStatusCode !== undefined && permanentStatusCodes.has(item.lastStatusCode)) return false;
+  if ((item.serverFailureCount ?? 0) < NON_TIMER_SERVER_FAILURE_CAP) return false;
+  const lastAttempt = new Date(item.lastAttemptedAt ?? "").getTime();
+  return Number.isNaN(lastAttempt) || now.getTime() - lastAttempt >= PARKED_RETRY_INTERVAL_MS;
+}
 
 function markNonTimerServerFailure(
   item: QueuedEvent,
