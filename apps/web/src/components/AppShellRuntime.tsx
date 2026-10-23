@@ -374,12 +374,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
       // The workspace changed while this loaded: the period it asked for belongs to the workspace
       // left, so it is dropped quietly (the caller does not navigate).
-      if (generation !== workspaceGenerationRef.current) {
-        return { ok: false, error: "The workspace changed while that period loaded." };
-      }
+      if (generation !== workspaceGenerationRef.current) return workspaceChangedOutcome;
       commitData(payload, "canonical");
       return { ok: true };
     } catch {
+      // A request from the workspace left that fails after the switch is obsolete too: no error
+      // banner for a period the user no longer asked for.
+      if (generation !== workspaceGenerationRef.current) return workspaceChangedOutcome;
       const error = "Couldn’t load that period. Your current view is unchanged.";
       setDateLoadError(error);
       return { ok: false, error };
@@ -503,6 +504,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;
     if (nextData.dateRange.selectedDate !== selectedDate) return;
+    // Page props belong to the workspace they were drawn for. Once the runtime has accepted
+    // another workspace (a switch, before router.refresh delivers new props), they never replace
+    // its data or undo the switch: a fresh load decides which workspace is current.
+    const acceptedWorkspace = dateDataCacheWorkspaceRef.current;
+    if (acceptedWorkspace !== null && nextData.workspace.id !== acceptedWorkspace) {
+      selectedDateRef.current = selectedDate;
+      void refresh();
+      return;
+    }
     // Page props drawn before the zone cookie existed (or for another zone) never replace a copy
     // built for the zone the browser sends now; shown only when nothing better is there, and then
     // fetched again (Codex r2 on #484).
@@ -1468,6 +1478,9 @@ export function useRuntimePageData(initialData: BootstrapData) {
     hydrate(initialData);
   }, [hydrate, initialData]);
 
+  // Page props drawn for another workspace than the runtime's are never shown (see `hydrate`).
+  const shell = runtime.shellData;
+  if (shell && shell.workspace.id !== initialData.workspace.id) return runtime.data ?? shell;
   if (
     runtime.data?.workspace.id === initialData.workspace.id &&
     runtime.data.dateRange.selectedDate === runtime.selectedDate
@@ -1477,6 +1490,8 @@ export function useRuntimePageData(initialData: BootstrapData) {
   if (initialData.dateRange.selectedDate === runtime.selectedDate) return initialData;
   return runtime.data ?? initialData;
 }
+
+const workspaceChangedOutcome: DateLoadOutcome = { ok: false, error: "The workspace changed while that period loaded." };
 
 function dateDataCacheKey(workspaceId: string, date: string) {
   return `${workspaceId}|${date}`;

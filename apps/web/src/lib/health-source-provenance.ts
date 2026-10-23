@@ -1,4 +1,5 @@
 import type pg from "pg";
+import { SUPERSEDED_REVIEW_SCOPE } from "./location/location-review-supersession";
 import type { RequestSession } from "./session";
 
 export type PriorHealthSource = {
@@ -126,4 +127,65 @@ export async function inspectHealthSourceRevision(
     })),
     result.rows.length > 500,
   );
+}
+
+/**
+ * Retires the still-open Review cards of earlier revisions of the episode a Health event just
+ * accepted (stability audit health-6). Called in the ingest transaction, under the owner lock, only
+ * once the new revision is visible as a block or its own card. An earlier revision is one with the
+ * same journal episode identity (`logicalEpisodeId`), or one whose source samples the new revision
+ * now carries in full (a nap regrouped into the night keeps the night's identity). A card for a
+ * different episode, even one sharing a sample, and a card the person already acted on are never
+ * touched. The card is marked `ignored`/`superseded` (the system's retirement, never a user's
+ * Dismiss), and its event keeps its undecided status so a later revision never reads it as an
+ * ignore decision. Returns the number of cards retired.
+ */
+export async function supersedeEarlierHealthRevisionReviews(
+  client: pg.PoolClient,
+  session: RequestSession,
+  kind: string,
+  eventId: string,
+  payload: Record<string, unknown>,
+) {
+  const episodeId =
+    typeof payload.logicalEpisodeId === "string" && payload.logicalEpisodeId
+      ? payload.logicalEpisodeId
+      : null;
+  const ids = healthSourceSampleIds(payload);
+  if (!episodeId && !ids.length) return 0;
+  const candidates = await client.query<{
+    reviewId: string;
+    rawPayload: Record<string, unknown>;
+  }>(
+    `select ri.id as "reviewId",ae.raw_payload as "rawPayload"
+     from review_items ri
+     join activity_events ae on ae.id=ri.event_id and ae.workspace_id=ri.workspace_id and ae.user_id=ri.user_id
+     where ri.workspace_id=$1 and ri.user_id=$2 and ri.status='open' and ri.location_segment_id is null
+       and ae.id<>$3 and ae.event_type=$4
+       and coalesce(ae.raw_payload->>'provider','healthkit')='healthkit'
+       and (ae.raw_payload->>'logicalEpisodeId'=$5
+         or (ae.raw_payload->'sourceSampleIds') ?| $6::text[]
+         or (ae.raw_payload->>'externalSampleId'=any($6::text[]) and ae.event_type='health_workout_import')
+         or exists(select 1 from jsonb_array_elements(case when jsonb_typeof(ae.raw_payload->'samples')='array' then ae.raw_payload->'samples' else '[]'::jsonb end) sample
+           where sample->>'externalSampleId'=any($6::text[])))
+     order by ri.id limit 500`,
+    [session.workspaceId, session.userId, eventId, kind, episodeId, ids],
+  );
+  const accepted = new Set(ids);
+  const reviewIds = candidates.rows
+    .filter((row) => {
+      if (episodeId && row.rawPayload?.logicalEpisodeId === episodeId) return true;
+      const earlier = healthSourceSampleIds(row.rawPayload);
+      return earlier.length > 0 && earlier.every((id) => accepted.has(id));
+    })
+    .map((row) => row.reviewId);
+  if (!reviewIds.length) return 0;
+  const retired = await client.query(
+    `update review_items
+     set status='ignored',resolved_at=now(),ignored_scope='${SUPERSEDED_REVIEW_SCOPE}',
+         notes=concat_ws(' ',nullif(notes,''),'Superseded by a later Apple Health revision of the same episode.')
+     where workspace_id=$1 and user_id=$2 and id=any($3::uuid[]) and status='open'`,
+    [session.workspaceId, session.userId, reviewIds],
+  );
+  return retired.rowCount ?? 0;
 }
