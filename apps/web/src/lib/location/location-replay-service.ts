@@ -12,6 +12,7 @@ import {
   deriveCommutes,
   deriveOpenTrip,
   outingQualifies,
+  withTripLegs,
   isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -571,9 +572,10 @@ function rebuildLegWithinDecidedStops(
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
-  return deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
+  // A rebuilt journey gets legs over its new times (location v4 step 6).
+  return withTripLegs(deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
-    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
 }
 

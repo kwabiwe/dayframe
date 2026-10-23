@@ -141,7 +141,8 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
     if (item.legs !== undefined && !Array.isArray(item.legs)) throw fail("legs");
     if (Array.isArray(item.legs)) out.legs = item.legs.map((leg: unknown) => {
       const value = leg as Record<string, unknown> | null;
-      if (!value || !instant(value.startedAt) || !instant(value.stoppedAt)) throw fail("legs");
+      if (!value || !instant(value.startedAt) || !instant(value.stoppedAt) ||
+        !(Date.parse(value.stoppedAt as string) > Date.parse(value.startedAt as string))) throw fail("legs");
       return { startedAt: value.startedAt, stoppedAt: value.stoppedAt,
         mode: typeof value.mode === "string" && ENGINE_CODES.mode.includes(value.mode) ? value.mode : null };
     });

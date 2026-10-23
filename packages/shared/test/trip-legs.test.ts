@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { credibleSpeedResolver } from "../src/location/commute";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { largeBuildingAt, largeBuildingVisitFixture } from "../src/location/largeBuildingVisitFixture";
-import { deriveTripLegs } from "../src/location/legs";
+import { deriveTripLegs, withTripLegs } from "../src/location/legs";
 import { buildMotionTimeline } from "../src/location/motionActivity";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { ClassifiedEvidence, CommuteSegment, LocationEvidence, MotionActivity } from "../src/location/types";
@@ -79,6 +79,50 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
 
   it("ignores broad readings' speed", () => {
     expect(legs(0, 8, [], [reading(1, 0, 25, 1_500), reading(4, 3_000, 25, 1_500)])).toEqual([]);
+  });
+
+  it("never lets indeterminate time hold a change of mode", () => {
+    // Drive, 30 s cycling, 4½ min of nothing Core Motion could tell, drive again: one drive.
+    expect(legs(0, 20, [[0, "automotive"], [8, "cycling"], [8.5, "unknown"], [13, "automotive"]]).map(({ mode }) => mode))
+      .toEqual(["automotive"]);
+  });
+
+  it("merges a short leg into its moving neighbour across stops", () => {
+    expect(legs(0, 20, [[0, "automotive"], [8, "stationary"], [9, "cycling"], [9.5, "stationary"], [11, "automotive"]])
+      .map(({ mode, from, to }) => ({ mode, from, to }))).toEqual([{ mode: "automotive", from: 0, to: 20 }]);
+  });
+
+  it("never counts a carried Core Motion label as agreement", () => {
+    // The whole trip sits in an unknown spell between two drives: the label is carried, so only speed agrees.
+    const readings = [reading(31, 0, 12), reading(34, 2_000, 13), reading(38, 5_000, 12)];
+    expect(legs(30, 40, [[0, "automotive"], [20, "unknown"], [50, "automotive"]], readings).map(({ mode, confidence }) => ({ mode, confidence })))
+      .toEqual([{ mode: "automotive", confidence: "likely" }]);
+  });
+
+  it("measures distance along genuine fixes only", () => {
+    const genuine = [reading(1, 0, 12), reading(4, 2_000, 13), reading(8, 5_000, 12)];
+    const simulated = { ...reading(6, 40_000, 12), evidence: { ...reading(6, 40_000, 12).evidence, isSimulated: true } } as ClassifiedEvidence;
+    const steps: Array<[number, MotionActivity]> = [[0, "automotive"]];
+    expect(legs(0, 10, steps, [...genuine, simulated].sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt)))[0].distanceMeters)
+      .toBe(legs(0, 10, steps, genuine)[0].distanceMeters);
+  });
+
+  it("stays fast on a long trip of alternating readings", () => {
+    const readings = Array.from({ length: 20_000 }, (_, index) => reading(index * 0.018, index * 2.5, index % 2 ? 2.4 : 2.6));
+    const started = performance.now();
+    const result = legs(0, 361, [], readings);
+    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("gives legs to the journeys a trip replaced, so a restored one has them too", () => {
+    const readings = [reading(1, 0, 12), reading(4, 2_000, 13), reading(8, 5_000, 12)];
+    const commute = (id: string, from: number, to: number, ids: string[]) => ({ kind: "commute", clientSegmentId: id, startedAt: at(from),
+      stoppedAt: at(to), evidenceIds: ids }) as unknown as CommuteSegment;
+    const [trip] = withTripLegs([{ ...commute("trip", 0, 10, ["r-1", "r-4", "r-8"]), legs: [commute("leg-a", 0, 5, ["r-1", "r-4"]),
+      commute("leg-b", 5, 10, ["r-8"])] }], [...readings, ...motion([[0, "automotive"]])], config, at(60));
+    expect(trip.tripLegs?.map((leg) => leg.mode)).toEqual(["automotive"]);
+    expect(trip.legs?.map((leg) => leg.tripLegs?.map((tripLeg) => tripLeg.mode))).toEqual([["automotive"], ["automotive"]]);
   });
 
   it("comes out of the engine on each trip", () => {

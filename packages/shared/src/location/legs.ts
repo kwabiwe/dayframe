@@ -1,22 +1,32 @@
 import type { LocationEngineConfig } from "./config";
 import { distanceMeters } from "./geo";
-import { motionLegLabels, type MotionTimeline } from "./motionActivity";
-import type { ClassifiedEvidence, MotionTravelMode, TripLeg } from "./types";
+import { credibleSpeedResolver } from "./commute";
+import { buildMotionTimeline, isMotionEvidence, motionLegLabels, type MotionTimeline } from "./motionActivity";
+import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, TripLeg } from "./types";
 
 /**
  * Legs of a trip, part 1 (location v4 §8, build step 6): walk, run, cycle and drive. Change points are
- * a Core Motion class change held for `tripLegMinimumMs`, a speed regime change in credible readings,
- * and stillness of `tripStopMinimumMs` or more (a change or a wait, which separates legs and is never
- * a leg). Indeterminate time joins the leg beside it; legs shorter than `tripLegMinimumMs` merge into a
- * neighbour, unless they are walks of `tripChangeWalkMinimumMs` or more between two vehicle legs. A stop
- * between two legs of one mode joins that leg. Deterministic and replayable; location
- * evidence and Core Motion only.
+ * a Core Motion class change held for `tripLegMinimumMs` of observed time, a speed regime change in
+ * credible readings, and stillness of `tripStopMinimumMs` or more (a change or a wait, which separates
+ * legs of different modes and is never a leg). Indeterminate time joins the leg beside it but never
+ * counts towards a hold. Legs shorter than `tripLegMinimumMs` merge into the longer moving neighbour
+ * (across stops; the earlier on a tie), shortest first, unless they are walks of
+ * `tripChangeWalkMinimumMs` or more between two vehicle legs. A stop between two legs of one mode joins
+ * that leg. Deterministic and replayable; genuine location fixes and Core Motion only.
  */
 
 type Label = MotionTravelMode | "still";
 type SpeedClass = "still" | "foot" | "mid" | "vehicle";
-type Slice = { fromMs: number; toMs: number; label: Label | null; motion: Label | null; speed: SpeedClass | null };
-type Run = { fromMs: number; toMs: number; label: Label; slices: Slice[] };
+type Slice = {
+  fromMs: number;
+  toMs: number;
+  /** Null when nothing labels the slice (indeterminate). */
+  label: Label | null;
+  /** Core Motion's own report for the slice, never a carried label. */
+  reported: Label | null;
+};
+/** A run of slices [first, last] with one label; `observedMs` leaves indeterminate slices out. */
+type Run = { label: Label; first: number; last: number; observedMs: number; prev: Run | null; next: Run | null; alive: boolean };
 
 const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling"]);
 /** How long one reading's speed speaks for the time after it. */
@@ -42,11 +52,58 @@ function sliceLabel(motion: Label | null, speed: SpeedClass | null): Label | nul
 }
 
 /** Whether a reading's speed fits a leg's mode, for its confidence. */
-function speedFits(mode: MotionTravelMode, speed: SpeedClass) {
+function speedFits(mode: MotionTravelMode, speed: SpeedClass): boolean {
   switch (mode) {
     case "walking": case "running": return speed === "foot";
     case "cycling": return speed === "mid" || speed === "foot";
     case "automotive": return speed === "mid" || speed === "vehicle";
+  }
+}
+
+/** A genuine location fix with an accurate position: the only readings a leg's distance uses. */
+export function genuineLegFix(item: ClassifiedEvidence, config: LocationEngineConfig) {
+  const { kind, isSimulated, latitude, longitude, horizontalAccuracyMeters } = item.evidence;
+  return (kind === "standard_location" || kind === "significant_change") && isSimulated !== true &&
+    latitude != null && longitude != null && horizontalAccuracyMeters != null &&
+    horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters;
+}
+
+/** A binary min-heap of runs by observed time, then by position; entries made stale by a merge are skipped on pop. */
+class RunHeap {
+  private items: Array<{ run: Run; key: number; order: number }> = [];
+  get size() {
+    return this.items.length;
+  }
+  push(run: Run) {
+    this.items.push({ run, key: run.observedMs, order: run.first });
+    for (let index = this.items.length - 1; index > 0;) {
+      const parent = (index - 1) >> 1;
+      if (this.less(parent, index)) break;
+      [this.items[parent], this.items[index]] = [this.items[index], this.items[parent]];
+      index = parent;
+    }
+  }
+  pop() {
+    const top = this.items[0];
+    const last = this.items.pop()!;
+    if (this.items.length) {
+      this.items[0] = last;
+      for (let index = 0; ;) {
+        const left = index * 2 + 1;
+        let smallest = index;
+        if (left < this.items.length && this.less(left, smallest)) smallest = left;
+        if (left + 1 < this.items.length && this.less(left + 1, smallest)) smallest = left + 1;
+        if (smallest === index) break;
+        [this.items[smallest], this.items[index]] = [this.items[index], this.items[smallest]];
+        index = smallest;
+      }
+    }
+    return top;
+  }
+  private less(a: number, b: number) {
+    const x = this.items[a];
+    const y = this.items[b];
+    return x.key < y.key || x.key === y.key && x.order < y.order;
   }
 }
 
@@ -87,91 +144,160 @@ export function deriveTripLegs({
     const toMs = cuts[index];
     const midMs = (fromMs + toMs) / 2;
     while (labelIndex < labels.length && labels[labelIndex].toMs <= midMs) labelIndex += 1;
-    const motion = labelIndex < labels.length && labels[labelIndex].fromMs <= midMs ? labels[labelIndex].label : null;
+    const motion = labelIndex < labels.length && labels[labelIndex].fromMs <= midMs ? labels[labelIndex] : null;
     while (speedIndex + 1 < speeds.length && speeds[speedIndex + 1].atMs <= midMs) speedIndex += 1;
     const speed = speedIndex >= 0 && midMs - speeds[speedIndex].atMs <= SPEED_HOLD_MS ? speeds[speedIndex].speed : null;
-    slices.push({ fromMs, toMs, label: sliceLabel(motion, speed), motion, speed });
+    slices.push({ fromMs, toMs, label: sliceLabel(motion?.label ?? null, speed), reported: motion && !motion.carried ? motion.label : null });
   }
-  // Indeterminate time joins the labelled time before it (or, at the start, the first after it).
-  const firstLabel = slices.find((slice) => slice.label)?.label;
-  if (!firstLabel) return [];
-  let previous: Label = firstLabel;
-  let runs: Run[] = slices.map((slice) => {
-    previous = slice.label ?? previous;
-    return { fromMs: slice.fromMs, toMs: slice.toMs, label: previous, slices: [slice] };
-  });
-  const merge = (list: Run[]) => list.reduce<Run[]>((out, run) => {
-    const last = out.at(-1);
-    if (last && last.label === run.label) {
-      last.toMs = run.toMs;
-      last.slices.push(...run.slices);
-    } else {
-      out.push({ ...run, slices: [...run.slices] });
-    }
-    return out;
-  }, []);
-  const duration = (run: Run) => run.toMs - run.fromMs;
-  // Brief stillness (waiting to cross, a light) is part of the leg around it.
-  for (let changed = true; changed;) {
-    changed = false;
-    runs = merge(runs);
-    const index = runs.findIndex((run) => run.label === "still" && duration(run) < config.tripStopMinimumMs &&
-      runs.some((other) => other.label !== "still"));
-    if (index >= 0) {
-      runs[index].label = (runs[index - 1] ?? runs[index + 1]).label;
-      changed = true;
+  const sliceMs = (slice: Slice) => slice.toMs - slice.fromMs;
+
+  // Runs of one label, linked in time order. Indeterminate slices join the run before them (the first
+  // run takes any at the start) without adding to its observed time.
+  let head: Run | null = null;
+  let tail: Run | null = null;
+  for (const [index, slice] of slices.entries()) {
+    if (tail && (!slice.label || slice.label === tail.label)) {
+      tail.last = index;
+      if (slice.label) tail.observedMs += sliceMs(slice);
+    } else if (slice.label) {
+      const run: Run = { label: slice.label, first: tail ? index : 0, last: index, observedMs: sliceMs(slice), prev: tail, next: null, alive: true };
+      if (tail) tail.next = run;
+      else head = run;
+      tail = run;
     }
   }
-  // Short moving runs join a neighbour: the longer moving one beside them. A walk between two vehicle
-  // legs (a change of train, a walk to the bus) stays a leg.
-  for (let changed = true; changed;) {
-    changed = false;
-    runs = merge(runs);
-    const index = runs.findIndex((run, at) => {
-      if (run.label === "still" || duration(run) >= config.tripLegMinimumMs) return false;
-      const before = runs.slice(0, at).reverse().find((other) => other.label !== "still");
-      const after = runs.slice(at + 1).find((other) => other.label !== "still");
-      const isWalk = run.label === "walking" || run.label === "running";
-      if (isWalk && duration(run) >= config.tripChangeWalkMinimumMs && before && after &&
-        VEHICLE.has(before.label) && VEHICLE.has(after.label)) return false;
-      return Boolean(runs[at - 1] && runs[at - 1].label !== "still" || runs[at + 1] && runs[at + 1].label !== "still");
-    });
-    if (index >= 0) {
-      const before = runs[index - 1]?.label !== "still" ? runs[index - 1] : undefined;
-      const after = runs[index + 1]?.label !== "still" ? runs[index + 1] : undefined;
-      const into = before && after ? (duration(before) >= duration(after) ? before : after) : before ?? after!;
-      runs[index].label = into.label;
-      changed = true;
-    }
+  if (!head) return [];
+
+  /** Joins a run's next neighbour into it when they share a label; returns the run. */
+  const joinNext = (run: Run) => {
+    const next = run.next;
+    if (!next || next.label !== run.label) return run;
+    run.last = next.last;
+    run.observedMs += next.observedMs;
+    run.next = next.next;
+    if (next.next) next.next.prev = run;
+    else tail = run;
+    next.alive = false;
+    return run;
+  };
+  /** Gives a run a new label and joins it with same-label neighbours; returns the survivor. */
+  const relabel = (run: Run, label: Label) => {
+    run.label = label;
+    const survivor = run.prev && run.prev.label === label ? joinNext(run.prev) : run;
+    return joinNext(survivor);
+  };
+  const movingBefore = (run: Run) => {
+    let other = run.prev;
+    while (other && other.label === "still") other = other.prev;
+    return other;
+  };
+  const movingAfter = (run: Run) => {
+    let other = run.next;
+    while (other && other.label === "still") other = other.next;
+    return other;
+  };
+
+  // Brief stillness (waiting to cross, a light) is part of the moving time beside it.
+  for (let run: Run | null = head; run; run = run.next) {
+    if (run.label !== "still" || run.observedMs >= config.tripStopMinimumMs) continue;
+    const neighbour = run.prev && run.prev.label !== "still" ? run.prev : run.next && run.next.label !== "still" ? run.next : null;
+    if (neighbour) run = relabel(run, neighbour.label);
   }
-  runs = merge(runs);
-  // A stop between two legs of one mode (a car at lights, a walk past a wait) does not change the leg:
-  // the stillness joins it. Stillness only separates legs of different modes; at the trip's ends it
-  // belongs to the first or last leg, whose times are the trip's own.
-  runs = merge(runs.map((run, index) => run.label === "still" && runs[index - 1] && runs[index + 1] &&
-    runs[index - 1].label === runs[index + 1].label ? { ...run, label: runs[index - 1].label } : run));
-  const moving = runs.filter((run) => run.label !== "still");
+
+  // Short moving runs join their longer moving neighbour, across stops, shortest first. A walk that
+  // lasts `tripChangeWalkMinimumMs` between two vehicle legs (a change of train, a walk to the bus) stays.
+  const heap = new RunHeap();
+  const shortMoving = (run: Run) => run.alive && run.label !== "still" && run.observedMs < config.tripLegMinimumMs;
+  let runCount = 0;
+  for (let run: Run | null = head; run; run = run.next) {
+    runCount += 1;
+    if (shortMoving(run)) heap.push(run);
+  }
+  // Every merge relabels a run to a different label, so this ends; the cap only guards against a mistake.
+  for (let guard = runCount * 8; heap.size && guard > 0; guard -= 1) {
+    const { run, key } = heap.pop();
+    if (!shortMoving(run) || key !== run.observedMs) continue;
+    const before = movingBefore(run);
+    const after = movingAfter(run);
+    const isWalk = run.label === "walking" || run.label === "running";
+    if (isWalk && run.observedMs >= config.tripChangeWalkMinimumMs && before && after &&
+      VEHICLE.has(before.label) && VEHICLE.has(after.label)) continue;
+    const into = before && after ? (after.observedMs > before.observedMs ? after : before) : before ?? after;
+    // Already its neighbour's mode across a stop: the stop pass below joins them.
+    if (!into || into.label === run.label) continue;
+    const survivor = relabel(run, into.label);
+    if (shortMoving(survivor)) heap.push(survivor);
+    // A neighbour's change can end another short run's change-walk exemption.
+    for (const other of [movingBefore(survivor), movingAfter(survivor)]) if (other && shortMoving(other)) heap.push(other);
+  }
+
+  // A stop between two legs of one mode does not change the leg (a car at lights, a walk past a wait).
+  for (let run: Run | null = head; run; run = run.next) {
+    if (run.label === "still" && run.prev && run.next && run.prev.label === run.next.label) run = relabel(run, run.prev.label);
+  }
+
+  const moving: Run[] = [];
+  for (let run: Run | null = head; run; run = run.next) if (run.label !== "still") moving.push(run);
   if (!moving.length) return [];
-  moving[0].fromMs = startMs;
-  moving.at(-1)!.toMs = endMs;
-  return moving.map((run) => {
+  const fixes = timed.filter(({ item }) => genuineLegFix(item, config))
+    .map(({ item, atMs }) => ({ atMs, point: { latitude: item.evidence.latitude!, longitude: item.evidence.longitude! } }));
+  return moving.map((run, index) => {
     const mode = run.label as MotionTravelMode;
-    const covered = run.slices.reduce((sum, slice) => sum + (slice.toMs - slice.fromMs), 0);
-    const motionAgrees = run.slices.reduce((sum, slice) => sum + (slice.motion === mode ? slice.toMs - slice.fromMs : 0), 0) >= covered / 2;
-    const inLeg = speeds.filter(({ atMs }) => atMs >= run.fromMs && atMs < run.toMs);
+    // Stillness at the trip's ends belongs to the first or last leg, whose times are the trip's own.
+    const fromMs = index === 0 ? startMs : slices[run.first].fromMs;
+    const toMs = index === moving.length - 1 ? endMs : slices[run.last].toMs;
+    let covered = 0;
+    let agreeing = 0;
+    for (let at = run.first; at <= run.last; at += 1) {
+      covered += sliceMs(slices[at]);
+      if (slices[at].reported === mode) agreeing += sliceMs(slices[at]);
+    }
+    const motionAgrees = agreeing > 0 && agreeing * 2 >= covered;
+    const inLeg = speeds.filter(({ atMs }) => atMs >= fromMs && atMs < toMs);
     const speedAgrees = inLeg.length > 0 && inLeg.filter(({ speed }) => speedFits(mode, speed)).length * 2 >= inLeg.length;
-    const points = timed.filter(({ atMs, item }) => atMs >= run.fromMs && atMs <= run.toMs && item.evidence.latitude != null &&
-      item.evidence.longitude != null && item.evidence.horizontalAccuracyMeters != null &&
-      item.evidence.horizontalAccuracyMeters <= config.highQualityHorizontalAccuracyMeters)
-      .map(({ item }) => ({ latitude: item.evidence.latitude!, longitude: item.evidence.longitude! }));
+    const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
     const distance = points.length >= 2
-      ? points.slice(1).reduce((sum, point, index) => sum + distanceMeters(points[index], point), 0) : null;
+      ? points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0) : null;
     return {
-      startedAt: new Date(run.fromMs).toISOString(),
-      stoppedAt: new Date(run.toMs).toISOString(),
+      startedAt: new Date(fromMs).toISOString(),
+      stoppedAt: new Date(toMs).toISOString(),
       mode,
       confidence: motionAgrees && speedAgrees ? "sure" : motionAgrees || speedAgrees ? "likely" : "unsure",
       distanceMeters: distance == null ? null : Math.round(distance)
     } satisfies TripLeg;
   });
+}
+
+/**
+ * Every journey with its legs, from its own readings and Core Motion over its final times: the trip
+ * itself and the legs it replaced (`legs`, restored when protected history blocks the trip), so each
+ * one replay can persist carries legs. Pass the run's motion timeline when it is already built.
+ */
+export function withTripLegs(
+  commutes: readonly CommuteSegment[],
+  evidenceWithMotion: readonly ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  processingAt: string,
+  timeline?: MotionTimeline | null
+): CommuteSegment[] {
+  if (!commutes.length) return [];
+  const accepted = evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence));
+  const motion = timeline !== undefined ? timeline
+    : accepted.length === evidenceWithMotion.length ? null : buildMotionTimeline([...evidenceWithMotion], config, Date.parse(processingAt));
+  const speedOf = credibleSpeedResolver(accepted, config);
+  const byId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
+  const annotate = (commute: CommuteSegment): CommuteSegment => {
+    const tripLegs = deriveTripLegs({
+      startMs: Date.parse(commute.startedAt), endMs: Date.parse(commute.stoppedAt), timeline: motion, speedOf, config,
+      readings: commute.evidenceIds.flatMap((id) => byId.get(id) ?? [])
+        .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
+    });
+    const { tripLegs: _previous, ...rest } = commute;
+    return {
+      ...rest,
+      ...(tripLegs.length ? { tripLegs } : {}),
+      ...(commute.legs ? { legs: commute.legs.map(annotate) } : {})
+    };
+  };
+  return commutes.map(annotate);
 }

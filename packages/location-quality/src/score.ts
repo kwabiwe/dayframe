@@ -176,7 +176,9 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
     // A trip with legs (location v4 step 6) takes each minute's mode from its leg; the trip's own mode
     // stays for minutes between legs (a wait or a change).
     for (const leg of move.legs ?? []) {
-      const interval = { a: Date.parse(leg.startedAt) / 1000, b: Date.parse(leg.stoppedAt) / 1000 };
+      // A leg only ever speaks for its own trip's minutes.
+      const interval = { a: Math.max(move.a, Date.parse(leg.startedAt) / 1000), b: Math.min(move.b, Date.parse(leg.stoppedAt) / 1000) };
+      if (!(interval.b > interval.a)) continue;
       for (const m of minutesOf(interval)) if (engineModeAt.has(m)) engineModeAt.set(m, ENGINE_FINE_MODE[leg.mode ?? ""] ?? "none");
     }
   }

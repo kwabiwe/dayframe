@@ -1,6 +1,6 @@
 import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
 import { assembleTripsThroughStops, credibleSpeedResolver, deriveCommutes, deriveOpenTrip } from "./commute";
-import { deriveTripLegs } from "./legs";
+import { deriveTripLegs, withTripLegs } from "./legs";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { indexPlacesByLatitude, matchLocationToPlaces, placesNearLatitude } from "./placeMatcher";
@@ -1980,13 +1980,15 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     savedPlaces: input.savedPlaces,
     learnedPlaces: input.acceptedLearnedPlaces
   });
-  const commutes = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
+  const assembled = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
     savedPlaces: input.savedPlaces,
     learnedPlaces: input.acceptedLearnedPlaces
   });
-  // Legs (location v4 step 6) from each trip's own readings and Core Motion over its window.
+  // Every journey replay can persist carries its legs (location v4 step 6).
+  const commutes = withTripLegs(assembled, acceptedWithMotion, input.config, input.processingAt, motionTimeline);
+  // The open trip's legs so far, from its readings and Core Motion over its window.
   const speedOf = credibleSpeedResolver(accepted, input.config);
   const byEvidenceId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
   const legsFor = (startedAt: string, stoppedAt: string, evidenceIds: readonly string[]) => deriveTripLegs({
@@ -1994,10 +1996,6 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     readings: evidenceIds.flatMap((id) => byEvidenceId.get(id) ?? [])
       .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
   });
-  for (const commute of commutes) {
-    const tripLegs = legsFor(commute.startedAt, commute.stoppedAt, commute.evidenceIds);
-    if (tripLegs.length) commute.tripLegs = tripLegs;
-  }
   const withLegsSoFar = (trip: OpenTrip | null) => {
     if (!trip) return null;
     const tripLegs = legsFor(trip.startedAt, trip.lastObservedAt, trip.evidenceIds);
