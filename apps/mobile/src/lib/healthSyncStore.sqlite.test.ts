@@ -79,6 +79,17 @@ const sample = (id: string, offset = 0): HealthJournalSample => ({
   value: { externalSampleId: id, stage: "asleep_core" },
 });
 function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
+  return deriveWith({})(samples);
+}
+/** The same episodes under a different Dayframe mapping or build-specific event shape. */
+function deriveWith(mapping: { categoryId?: string; description?: string; shape?: string }) {
+  return (samples: HealthJournalSample[]): HealthEpisodeDraft[] =>
+    deriveMapped(samples, mapping);
+}
+function deriveMapped(
+  samples: HealthJournalSample[],
+  mapping: { categoryId?: string; description?: string; shape?: string },
+): HealthEpisodeDraft[] {
   if (!samples.length) return [];
   const startedAt = samples[0].startedAt,
     stoppedAt = samples.at(-1)!.stoppedAt;
@@ -92,11 +103,13 @@ function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
         source: "health_sleep",
         type: "health_sleep_import",
         occurredAt: new Date(startedAt),
-        description: "Sleep",
+        categoryId: mapping.categoryId,
+        description: mapping.description ?? "Sleep",
         rawPayload: {
           startedAt,
           stoppedAt,
           samples: samples.map((sample) => sample.value),
+          ...(mapping.shape ? { buildShape: mapping.shape } : {}),
         },
       },
     },
@@ -109,6 +122,7 @@ async function page(
     deletedIds?: string[];
     isCurrent?: () => boolean;
     repair?: { startedAt: string; stoppedAt: string };
+    derive?: (samples: HealthJournalSample[]) => HealthEpisodeDraft[];
   } = {},
 ) {
   const active = options.owner ?? owner;
@@ -129,7 +143,7 @@ async function page(
     returnedCount: additions.length,
     complete: true,
     isCurrent: options.isCurrent ?? (() => true),
-    derive,
+    derive: options.derive ?? derive,
   });
 }
 
@@ -656,5 +670,65 @@ describe("Health journal prune budget (stability audit health-1)", () => {
     expect(raw()).toBe(26);
     // A clock set back before the last run does not postpone maintenance.
     expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now - 86_400_000)).toBe(true);
+  });
+});
+
+describe("Health revision identity comes from source facts only (stability audit health-2)", () => {
+  const deliveries = () =>
+    db
+      .prepare("select client_event_id,revision,payload_json from health_deliveries order by created_at,rowid")
+      .all();
+  it("does not re-send an unchanged episode after a mapping or event-shape change", async () => {
+    await page([sample("early"), sample("late", 3_600_000)]);
+    const [original] = deliveries();
+    expect(deliveries()).toHaveLength(1);
+    // Settings > Apple Health "Logs as" / Name change, then a capture with no new samples.
+    await page([], { derive: deriveWith({ categoryId: "category-rest", description: "Rest" }) });
+    // A newer build that changes a label or payload field of the derived event.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    expect(deliveries()).toEqual([original]);
+    expect(db.prepare("select revision from health_episodes").get()!.revision).toBe(original.revision);
+  });
+  it("re-sends a genuine source change with the current mapping", async () => {
+    const early = sample("early");
+    await page([early]);
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toHaveLength(1);
+    // An added member and an edited member (different times) are both source changes.
+    await page([sample("late", 3_600_000)], { derive: deriveWith({ description: "Rest" }) });
+    await page([{ ...early, stoppedAt: new Date(Date.parse(early.stoppedAt) + 600_000).toISOString() }], {
+      derive: deriveWith({ description: "Rest" }),
+    });
+    const sent = deliveries();
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((row) => row.client_event_id)).size).toBe(3);
+    expect(JSON.parse(String(sent[2].payload_json)).description).toBe("Rest");
+  });
+  it("adopts episodes journaled by an older build without re-sending them on upgrade", async () => {
+    // Journal written by a build whose revision fingerprinted the event (mapping and shape).
+    await page([sample("early"), sample("late", 3_600_000)], {
+      derive: deriveWith({ description: "Legacy", shape: "build-1" }),
+    });
+    await page([sample("other", 30 * 3_600_000)], { derive: deriveWith({ description: "Legacy", shape: "build-1" }) });
+    const legacyColumns = "owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at";
+    db.exec(`create table legacy_episodes as select ${legacyColumns} from health_episodes;
+      drop table health_episodes;
+      create table health_episodes (
+        owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
+        sample_ids_json text not null, started_at text not null, stopped_at text not null,
+        revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+      insert into health_episodes select * from legacy_episodes; drop table legacy_episodes;`);
+    const before = deliveries();
+    expect(before).toHaveLength(2);
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    // The upgraded build derives the same episodes with its own mapping and event shape.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toEqual(before);
+    // A genuine change to an adopted episode still re-sends, once.
+    await page([sample("later", 30 * 3_600_000 + 3_600_000)], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ shape: "build-3" }) });
+    expect(deliveries()).toHaveLength(3);
   });
 });

@@ -35,6 +35,8 @@ type EpisodeRow = {
   sample_ids_json: string;
   started_at: string;
   stopped_at: string;
+  revision: string;
+  source_revision: string | null;
 };
 type DeliveryRow = {
   client_event_id: string;
@@ -86,7 +88,7 @@ async function database() {
         create table if not exists health_episodes (
           owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
           sample_ids_json text not null, started_at text not null, stopped_at text not null,
-          revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+          revision text not null, updated_at text not null, source_revision text, primary key(owner_key,episode_id));
         create table if not exists health_deliveries (
           owner_key text not null, client_event_id text not null, episode_id text not null, revision text not null,
           payload_json text, state text not null default 'pending_handoff', created_at text not null,
@@ -106,6 +108,15 @@ async function database() {
         create table if not exists health_prune_runs (owner_key text primary key, pruned_at text not null);
         create index if not exists health_query_run_finished on health_query_runs(owner_key,finished_at);
         `);
+        // Journals from builds before source-fact revisions have no source_revision column; their
+        // episodes are adopted on the next commit without a re-send (see sourceRevisionFor).
+        const episodeColumns = await transaction.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(health_episodes)",
+        );
+        if (!episodeColumns.some((column) => column.name === "source_revision"))
+          await transaction.execAsync(
+            "alter table health_episodes add column source_revision text",
+          );
         if ((version?.user_version ?? 0) < 2) {
           // Re-handoff pre-identity queue records with their original journal
           // owner and immutable payload. Acknowledged deliveries stay settled.
@@ -274,15 +285,17 @@ export async function commitHealthCapturePage(input: {
         key,
         input.contract.kind,
       );
-      const drafts = input.derive(
-        sampleRows.map((row) => ({
-          id: row.sample_id,
-          sourceKey: row.source_key,
-          startedAt: row.started_at,
-          stoppedAt: row.stopped_at,
-          value: JSON.parse(row.sample_json),
-        })),
+      const journalSamples = sampleRows.map((row) => ({
+        id: row.sample_id,
+        sourceKey: row.source_key,
+        startedAt: row.started_at,
+        stoppedAt: row.stopped_at,
+        value: JSON.parse(row.sample_json) as Record<string, unknown>,
+      }));
+      const samplesById = new Map(
+        journalSamples.map((sample) => [sample.id, sample]),
       );
+      const drafts = input.derive(journalSamples);
       for (const draft of drafts) {
         const members = [...new Set(draft.sampleIds)].sort();
         const matches = oldEpisodes
@@ -308,6 +321,36 @@ export async function commitHealthCapturePage(input: {
           episodeId,
         );
         if (unresolved?.n) continue; // Explicit correction preserves the existing union and user-visible time.
+        const sourceRevision = await healthSourceRevision(
+          input.contract.kind,
+          draft.sourceKey,
+          members,
+          samplesById,
+        );
+        const existing = oldEpisodes.find(
+          (episode) => episode.episode_id === episodeId,
+        );
+        // Unchanged source facts: nothing to send, whatever the current mapping or event shape.
+        // An episode journaled before source revisions is adopted when its members and window
+        // are unchanged, so an upgrade never re-sends the retained journal.
+        const unchanged =
+          !!existing &&
+          (existing.source_revision === sourceRevision ||
+            (existing.source_revision == null &&
+              existing.source_key === draft.sourceKey &&
+              existing.sample_ids_json === JSON.stringify(members) &&
+              existing.started_at === draft.startedAt &&
+              existing.stopped_at === draft.stoppedAt));
+        if (unchanged) {
+          await transaction.runAsync(
+            "update health_episodes set source_revision=?,updated_at=? where owner_key=? and episode_id=?",
+            sourceRevision,
+            now,
+            key,
+            episodeId,
+          );
+          continue;
+        }
         const {
           localId: _legacyId,
           owner: _owner,
@@ -322,7 +365,7 @@ export async function commitHealthCapturePage(input: {
             logicalEpisodeId: episodeId,
           },
         };
-        const revision = await healthFingerprint(payload);
+        const revision = sourceRevision;
         const clientEventId = `healthkit:${input.contract.kind}:${episodeId}:${revision}`;
         const event = {
           ...payload,
@@ -348,9 +391,10 @@ export async function commitHealthCapturePage(input: {
         );
         generated += inserted.changes;
         await transaction.runAsync(
-          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at)
-          values(?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
-          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,updated_at=excluded.updated_at`,
+          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,source_revision,updated_at)
+          values(?,?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
+          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,
+          source_revision=excluded.source_revision,updated_at=excluded.updated_at`,
           key,
           input.contract.kind,
           episodeId,
@@ -359,6 +403,7 @@ export async function commitHealthCapturePage(input: {
           draft.startedAt,
           draft.stoppedAt,
           revision,
+          sourceRevision,
           now,
         );
       }
@@ -414,6 +459,44 @@ export async function commitHealthCapturePage(input: {
       usableSampleCount: input.additions.length,
     };
   });
+}
+
+/**
+ * An episode revision identifies its HealthKit source facts only: the member sample identities,
+ * their times and source, and the native sleep stage or workout activity type. Dayframe's
+ * activity mapping and the derived event's shape are deliberately excluded, so a mapping change
+ * or a new build never re-sends an unchanged episode (mapping changes reach the server through
+ * the explicit Health reprocess instead). A changed or added member is a new revision.
+ */
+async function healthSourceRevision(
+  kind: HealthCaptureKind,
+  sourceKey: string,
+  members: string[],
+  samplesById: Map<string, HealthJournalSample>,
+) {
+  return healthFingerprint([
+    "health-source-v1",
+    kind,
+    sourceKey,
+    members.map((id) => {
+      const sample = samplesById.get(id);
+      const value = sample?.value ?? {};
+      const raw = (value.rawPayload ?? {}) as Record<string, unknown>;
+      const source = (
+        (raw.sourceRevision ?? {}) as { source?: Record<string, unknown> }
+      ).source;
+      return [
+        id,
+        sample?.sourceKey ?? null,
+        sample?.startedAt ?? null,
+        sample?.stoppedAt ?? null,
+        kind === "sleep"
+          ? (value.stage ?? null)
+          : (raw.workoutActivityType ?? value.workoutType ?? null),
+        source?.bundleIdentifier ?? null,
+      ];
+    }),
+  ]);
 }
 
 export async function handoffHealthEvents(

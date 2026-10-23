@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pool } from "./db";
 import {
+  createManualEntry,
   processActivityEvent,
   TimerReplacementWindowError,
   TimerStopBeforeStartError,
@@ -44,12 +45,21 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     await pool.end();
   });
 
+  // A timer block, created from its Start event as the server creates one (only a block a timer started
+  // can be ended by a later Stop or Start, stability audit server-1); a Health block has no Start.
   async function block(startMinute: number, stopMinute: number | null, source = "mobile_app", description = "Block") {
     const id = randomUUID();
+    const health = source === "health_sleep" || source === "health_workout";
+    const startEvent = health ? null : await pool.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, $3, 'timer_start', $4, 'high', '{"origin":"test_timer"}'::jsonb) returning id`,
+      [workspaceId, userId, source, at(startMinute)]
+    );
     await pool.query(
-      `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at)
-       values ($1, $2, $3, $4, 'high', 'confirmed', $5, $6, $7)`,
-      [id, workspaceId, userId, source, description, at(startMinute), stopMinute === null ? null : at(stopMinute)]
+      `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at, created_from_event_id)
+       values ($1, $2, $3, $4, 'high', 'confirmed', $5, $6, $7, $8)`,
+      [id, workspaceId, userId, source, description, at(startMinute), stopMinute === null ? null : at(stopMinute),
+        startEvent?.rows[0].id ?? null]
     );
     return id;
   }
@@ -635,6 +645,161 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
     await shortcutStop(20);
     await shortcutStart(10, "A");
     expect(await timeline()).toEqual([["Sleep", -60, 60], ["P", 0, 10], ["A", 10, 20]]);
+  });
+
+  // Stability audit server-1: a Stop or Start that waited offline ends only blocks a timer ran, at an end
+  // no person set. Manual entries, Review blocks and person-set ends keep their time.
+  describe("blocks a timer did not end", () => {
+    const manual = (start: number, stop: number, description: string) =>
+      createManualEntry({ description, startedAt: at(start).toISOString(), stoppedAt: at(stop).toISOString() }, session);
+
+    async function reviewBlock(start: number, stop: number, description: string) {
+      const event = await pool.query<{ id: string }>(
+        `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, review_status)
+         values ($1, $2, 'geofence_specific', 'geofence_enter', $3, 'medium', 'confirmed') returning id`,
+        [workspaceId, userId, at(start)]
+      );
+      await pool.query(
+        `insert into time_entries (workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at, created_from_event_id)
+         values ($1, $2, 'geofence_specific', 'medium', 'confirmed', $3, $4, $5, $6)`,
+        [workspaceId, userId, description, at(start), at(stop), event.rows[0].id]
+      );
+    }
+
+    function webStart(minute: number, description: string) {
+      return processActivityEvent({
+        occurredAt: at(minute),
+        rawPayload: { origin: "web_timer", startedAt: at(minute).toISOString() },
+        description,
+        source: "manual_app",
+        type: "timer_start"
+      }, session);
+    }
+
+    it("a late Shortcut Stop leaves a manual entry whole", async () => {
+      await manual(0, 120, "M");
+      await expect(shortcutStop(60)).resolves.toMatchObject({ stopOutcome: "superseded" });
+      expect(await timeline()).toEqual([["M", 0, 120]]);
+    });
+
+    it("a late Shortcut Stop leaves a Review-confirmed block whole", async () => {
+      await reviewBlock(0, 120, "R");
+      await expect(shortcutStop(60)).resolves.toMatchObject({ stopOutcome: "superseded" });
+      expect(await timeline()).toEqual([["R", 0, 120]]);
+    });
+
+    it("a late Shortcut Stop keeps an end a person extended", async () => {
+      const extended = await block(0, 30, "mobile_app", "P");
+      await updateTimeEntry(extended, { stoppedAt: at(90).toISOString() }, session);
+      await expect(shortcutStop(60)).resolves.toMatchObject({ stopOutcome: "superseded" });
+      expect(await timeline()).toEqual([["P", 0, 90]]);
+    });
+
+    it("a late Shortcut Stop keeps a manual entry whose title and end a person edited", async () => {
+      const entry = await manual(0, 100, "M");
+      await updateTimeEntry(entry.id, { description: "M2", stoppedAt: at(120).toISOString() }, session);
+      await shortcutStop(60);
+      expect(await timeline()).toEqual([["M2", 0, 120]]);
+    });
+
+    it("a Shortcut Stop ends the running timer but not a manual entry overlapping it", async () => {
+      await block(0, null, "mobile_app", "P");
+      await manual(30, 50, "M");
+      await expect(shortcutStop(40)).resolves.toMatchObject({ stopOutcome: "stopped" });
+      expect(await timeline()).toEqual([["P", 0, 40], ["M", 30, 50]]);
+    });
+
+    it("a late Shortcut Start inside a manual entry is recorded beside it without cutting it", async () => {
+      await manual(0, 120, "M");
+      await expect(shortcutStart(60, "S")).resolves.toMatchObject({ startOutcome: "recorded_completed" });
+      expect(await timeline()).toEqual([["M", 0, 120], ["S", 60, 120]]);
+    });
+
+    it("an entry-scoped Stop never pulls back a manual entry", async () => {
+      const entry = await manual(0, 120, "M");
+      await appStop(60, entry.id);
+      expect(await timeline()).toEqual([["M", 0, 120]]);
+    });
+
+    it("still ends a finished web timer block at an earlier Shortcut Stop (PRD D20)", async () => {
+      await webStart(0, "W");
+      await webStart(30, "X");
+      await expect(shortcutStop(20)).resolves.toMatchObject({ stopOutcome: "stopped" });
+      expect(await timeline()).toEqual([["W", 0, 20], ["X", 30, null]]);
+    });
+
+    it("still ends a finished block whose Start came without an origin (Codex r1 on #538)", async () => {
+      // `/api/events` accepts a web Start with no `origin`; the server's own mark makes it a timer block.
+      await processActivityEvent({ occurredAt: at(0), rawPayload: {}, description: "W", source: "manual_app", type: "timer_start" }, session);
+      await webStart(30, "X");
+      await expect(shortcutStop(20)).resolves.toMatchObject({ stopOutcome: "stopped" });
+      expect(await timeline()).toEqual([["W", 0, 20], ["X", 30, null]]);
+    });
+
+    it("never takes the timer mark from client input", async () => {
+      const stop = await processActivityEvent({
+        occurredAt: at(10), rawPayload: { serverTimerStart: true }, source: "manual_app", type: "timer_stop"
+      }, session);
+      const stored = await pool.query<{ rawPayload: Record<string, unknown> }>(
+        `select raw_payload as "rawPayload" from activity_events where id = $1`, [stop.eventId]
+      );
+      expect(stored.rows[0]?.rawPayload).not.toHaveProperty("serverTimerStart");
+    });
+
+    // Codex r1 on #538: grouped edits and batch deletes lock blocks in entry-id order. A Stop or late Start
+    // must lock the blocks covering its moment in that order too, or the two can deadlock. A batch here holds
+    // the lower id; the Stop or Start waits on it holding nothing, so the batch can then take the higher id.
+    async function lockOrderHeldByBatch(arrive: () => Promise<unknown>) {
+      const ids = [randomUUID(), randomUUID()].sort();
+      const [low, high] = ids as [string, string];
+      // The higher id starts first, so start order is the reverse of id order.
+      for (const [id, start, description] of [[high, 0, "H"], [low, 10, "L"]] as const) {
+        const event = await pool.query<{ id: string }>(
+          `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+           values ($1, $2, 'mobile_app', 'timer_start', $3, 'high', '{"serverTimerStart":true}'::jsonb) returning id`,
+          [workspaceId, userId, at(start)]
+        );
+        await pool.query(
+          `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, stopped_at, created_from_event_id)
+           values ($1, $2, $3, 'mobile_app', 'high', 'confirmed', $4, $5, $6, $7)`,
+          [id, workspaceId, userId, description, at(start), at(60), event.rows[0]!.id]
+        );
+      }
+      const batch = await pool.connect();
+      try {
+        await batch.query("begin");
+        await batch.query("select id from time_entries where id = $1 for update", [low]);
+        const batchPid = (await batch.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+        const arrival = arrive();
+        let waited = false;
+        for (let tries = 0; tries < 200 && !waited; tries += 1) {
+          const waiting = await pool.query(
+            "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+            [batchPid]
+          );
+          waited = waiting.rows.length > 0;
+          if (!waited) await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        expect(waited).toBe(true);
+        // The batch's next lock, in id order. It fails at once if the Stop or Start already holds it.
+        await expect(batch.query("select id from time_entries where id = $1 for update nowait", [high])).resolves.toBeTruthy();
+        await batch.query("commit");
+        await arrival;
+      } finally {
+        await batch.query("rollback").catch(() => undefined);
+        batch.release();
+      }
+    }
+
+    it("a Shortcut Stop locks the blocks covering its moment in entry-id order", async () => {
+      await lockOrderHeldByBatch(() => shortcutStop(20));
+      expect(await timeline()).toEqual([["H", 0, 20], ["L", 10, 20]]);
+    });
+
+    it("a late Shortcut Start locks the blocks covering its moment in entry-id order", async () => {
+      await lockOrderHeldByBatch(() => shortcutStart(20, "S"));
+      expect(await timeline()).toEqual([["H", 0, 20], ["L", 10, 20], ["S", 20, 60]]);
+    });
   });
 });
 

@@ -1412,7 +1412,21 @@ describe("place persistence", () => {
     );
   });
 
-  const deleteClient = (overrides: (statement: string) => unknown = () => undefined) => ({
+  it("treats a place field present as undefined as not sent, so it is never written as null", async () => {
+    mocks.query.mockResolvedValueOnce({ rows: [{ id: placeId(), name: "Office" }] });
+
+    await updatePlace(
+      placeId(),
+      { name: "Office", defaultCategoryId: undefined, defaultActivityDescription: undefined, radiusMeters: undefined, autoLog: undefined },
+      session
+    );
+
+    const values = mocks.query.mock.calls[0]?.[1] as unknown[];
+    // $9 radius, $13 default category, $15 default activity description, $21 auto-log: all "not sent".
+    expect([values[8], values[12], values[14], values[20]]).toEqual([false, false, false, false]);
+  });
+
+  const deleteClient =(overrides: (statement: string) => unknown = () => undefined) => ({
     query: vi.fn<(statement: string, values?: unknown[]) => Promise<{ rows: unknown[] }>>(async (statement) => {
       const override = overrides(statement);
       if (override instanceof Error) throw override;

@@ -35,7 +35,7 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain("const outcome = await loadDate(nextState.date)");
     expect(timeline).toContain('window.history.pushState(null, "", href)');
     expect(runtime).toContain('clientFetch(`/api/bootstrap?date=${date}`');
-    expect(runtime).toContain("dateDataCacheRef.current.get(date)");
+    expect(runtime).toContain("dateDataCacheRef.current.get(dateDataCacheKey(workspaceId, date))");
     expect(runtime).toContain("DATE_DATA_CACHE_LIMIT = 8");
     expect(runtime).toContain("withCurrentSharedBootstrap(cached, dataRef.current)");
     expect(runtime).toContain("shellData: data");
