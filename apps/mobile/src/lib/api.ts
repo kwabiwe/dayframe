@@ -493,6 +493,8 @@ export type QueueDiagnostics = {
   failedCount: number;
   retryableFailedCount: number;
   permanentFailedCount: number;
+  /** Of the permanent failures, those parked after repeated server errors (still slowly retried). */
+  parkedFailedCount: number;
   clearableFailedCount: number;
   oldestQueuedAt?: string;
   nextRetryAt?: string;
@@ -1284,6 +1286,7 @@ export function getQueueDiagnostics(queue: QueuedEvent[]): QueueDiagnostics {
     failedCount: failed.length,
     retryableFailedCount: retryableFailed.length,
     permanentFailedCount: permanentFailed.length,
+    parkedFailedCount: permanentFailed.filter(isParkedNonTimerEvent).length,
     clearableFailedCount: queue.filter(isClearableFailedEvent).length,
     oldestQueuedAt: earliestIso(queue.map((item) => item.queuedAt)),
     nextRetryAt: earliestIso(retryableFailed.map((item) => item.nextRetryAt)),
@@ -2770,8 +2773,8 @@ function markQueueFailure(
  * A Health or location event the server keeps answering with an error is retried with backoff, then
  * parked as a Sync help issue ("Couldn't be sent": Try again or Clear) once it has had
  * NON_TIMER_SERVER_FAILURE_CAP error replies over at least NON_TIMER_SERVER_FAILURE_WINDOW_MS. It is
- * never dropped. Offline attempts and timeouts don't count: only replies from the server do. A parked
- * event keeps its Sync help issue but is still retried slowly (PARKED_RETRY_INTERVAL_MS, one per pass,
+ * never dropped on its own (only the person's Clear removes it). Offline attempts and timeouts don't
+ * count: only replies from the server do. A parked event keeps its Sync help issue but is still retried slowly (PARKED_RETRY_INTERVAL_MS, one per pass,
  * only on passes that run anyway: parked work never schedules a wake), and leaves once one succeeds.
  */
 const NON_TIMER_SERVER_FAILURE_CAP = 8;
@@ -2840,14 +2843,12 @@ function isPermanentlyFailedEvent(item: QueuedEvent) {
 }
 
 /**
- * A parked Health event stays journal-owned: its `health_deliveries` row settles only on the server's
- * acknowledgement, so Clear would strand it as queued. The server never refused it as invalid, so it
- * is offered Try again (and keeps its slow retry) but not Clear (Codex r1 on #547).
+ * Every item Sync help shows as "Couldn't be sent" can be cleared, a parked Apple Health event too: Clear
+ * settles its source-journal delivery as `discarded` before the queue write (`settleDiscardedHealthEvents`),
+ * so it no longer counts as unsettled work, and if that settlement fails Clear fails with nothing removed.
+ * A later source change of that episode is a new revision and is sent as usual.
  */
 function isClearableFailedEvent(item: QueuedEvent) {
-  if (isParkedNonTimerEvent(item) && (item.source === "health_sleep" || item.source === "health_workout")) {
-    return false;
-  }
   return isPermanentlyFailedEvent(item);
 }
 
