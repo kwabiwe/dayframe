@@ -1,4 +1,5 @@
 import type { LocationSegment } from "@dayframe/shared";
+import { ISO_INSTANT } from "./answerKey";
 
 /**
  * The scored view of an engine segment: kinds, times, anonymous place labels ("P4") and journey
@@ -73,7 +74,7 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
     if (!raw || typeof raw !== "object") throw fail("shape");
     const item = raw as Record<string, unknown>;
     if (item.kind !== "stay" && item.kind !== "commute") throw fail("kind");
-    if (typeof item.startedAt !== "string" || !Number.isFinite(Date.parse(item.startedAt))) throw fail("startedAt");
+    if (typeof item.startedAt !== "string" || !ISO_INSTANT.test(item.startedAt)) throw fail("startedAt");
     const out: Record<string, unknown> = { kind: item.kind, startedAt: item.startedAt };
     for (const field of SEGMENT_STRING_FIELDS) {
       if (typeof item[field] !== "string") throw fail(field);
@@ -84,7 +85,7 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
       if (fieldValue !== null && typeof fieldValue !== "string") throw fail(field);
       out[field] = fieldValue;
     }
-    if (out.stoppedAt !== null && !Number.isFinite(Date.parse(out.stoppedAt as string))) throw fail("stoppedAt");
+    if (out.stoppedAt !== null && !ISO_INSTANT.test(out.stoppedAt as string)) throw fail("stoppedAt");
     // Place labels are anonymous ("P4", "-"), never names; the rest are engine codes.
     for (const field of ["place", "from", "to"] as const) {
       if (out[field] !== null && !/^(P\d+|-)$/.test(out[field] as string)) throw fail(field);

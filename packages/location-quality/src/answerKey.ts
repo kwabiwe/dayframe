@@ -70,9 +70,13 @@ export type AnswerKey = {
   allTrips: KeyTrip[];
 };
 
-export const toSeconds = (iso: string): number => {
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) throw new Error(`Invalid timestamp in answer key: ${iso}`);
+/** An ISO 8601 instant with a zone ("2026-10-15T13:00:00.000+01:00", "…Z"), nothing else. */
+export const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** Epoch seconds of a strict ISO instant; a bad value is reported without quoting it. */
+export const toSeconds = (iso: unknown, what = "the answer key"): number => {
+  const ms = typeof iso === "string" && ISO_INSTANT.test(iso) ? Date.parse(iso) : Number.NaN;
+  if (!Number.isFinite(ms)) throw new Error(`Invalid timestamp in ${what}.`);
   return ms / 1000;
 };
 

@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { readAnswerKey } from "../src/answerKey";
-import { assertOutsideRepository, REPOSITORY_ROOT } from "../src/cli";
+import { assertOutsideRepository, readPrivateJson, REPOSITORY_ROOT } from "../src/cli";
 import { fixed } from "../src/report";
 import { scoreRun } from "../src/score";
 import { sanitizeQualitySegments } from "../src/segments";
@@ -28,6 +27,10 @@ describe("privacy guard", () => {
     expect(() => assertOutsideRepository(path.join(link, "packages", "Timeline.json"))).toThrow(/outside the repository/);
     expect(() => assertOutsideRepository(path.join(link, "new-folder", "summary.json"))).toThrow(/outside the repository/);
     expect(assertOutsideRepository(path.join(scratch, "summary.json"))).toBe(path.join(scratch, "summary.json"));
+    // A dangling link outside the repository pointing at a file not yet written inside it.
+    const dangling = path.join(scratch, "run.json");
+    fs.symlinkSync(path.join(REPOSITORY_ROOT, "not-yet-written-private.json"), dangling);
+    expect(() => assertOutsideRepository(dangling)).toThrow(/outside the repository/);
   });
 });
 
@@ -47,21 +50,15 @@ describe("saved runs", () => {
     expect(() => sanitizeQualitySegments({})).toThrow(/JSON array/);
   });
 
-  it("report a file that is not JSON without quoting it", () => {
+  it("report a file that is not JSON, or a bad timestamp, without quoting it", () => {
     const file = path.join(scratch, "broken.json");
     fs.writeFileSync(file, '[{"kind": "stay", "near": "Somewhere Street 12", 51.12345');
-    let stderr = "";
-    try {
-      execFileSync(path.join(REPOSITORY_ROOT, "node_modules", ".bin", "tsx"), [
-        path.join(REPOSITORY_ROOT, "packages", "location-quality", "src", "cli.ts"),
-        "--answer-key", file, "--segments", file, "--from", "2026-03-02T06:00:00Z", "--to", "2026-03-02T18:00:00Z"
-      ], { stdio: "pipe" });
-    } catch (error) {
-      stderr = String((error as { stderr?: Buffer }).stderr ?? "");
-    }
-    expect(stderr).toContain("Could not read the saved run: it is not valid JSON.");
-    expect(stderr).not.toMatch(/Somewhere|51\.12345/);
-  }, 60_000);
+    expect(() => readPrivateJson(file, "the saved run")).toThrow(/^Could not read the saved run: it is not valid JSON\.$/);
+    const stamped = [{ ...exampletonSegments[0], startedAt: "Mon, 02 Mar 2026 06:00:00 GMT (Somewhere Street)" }];
+    expect(() => sanitizeQualitySegments(stamped)).toThrow(/^Saved run segment 0 has an invalid startedAt\.$/);
+    expect(() => readAnswerKey([{ startTime: "Somewhere Street 12", endTime: "2026-03-02T07:00:00Z" }], 0, Infinity))
+      .toThrow(/^Invalid timestamp in the answer key\.$/);
+  });
 });
 
 describe("long windows and rounding", () => {

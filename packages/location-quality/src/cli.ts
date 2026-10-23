@@ -27,14 +27,26 @@ export const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.me
 /** npm runs workspace scripts in the package folder; relative paths mean the folder the command was typed in. */
 export const callerPath = (file: string) => path.resolve(process.env.INIT_CWD ?? process.cwd(), file);
 
-/** The real path of a file, or of its nearest existing parent with the rest appended (an output not written yet). */
-function realPathOf(file: string): string {
+/**
+ * The real path of a file, or of its nearest existing parent with the rest appended (an output not
+ * written yet). A dangling symlink is followed to where it points, since writing through it would
+ * create its target.
+ */
+function realPathOf(file: string, depth = 0): string {
+  if (depth > 40) throw new Error("Too many symbolic links in a private path.");
   const missing: string[] = [];
   let current = file;
   for (;;) {
     try {
       return path.join(fs.realpathSync.native(current), ...missing.reverse());
     } catch {
+      let link: string | null = null;
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) link = fs.readlinkSync(current);
+      } catch {
+        // Missing: look at its parent.
+      }
+      if (link !== null) return realPathOf(path.join(path.resolve(path.dirname(current), link), ...missing.reverse()), depth + 1);
       const parent = path.dirname(current);
       if (parent === current) return file;
       missing.push(path.basename(current));
@@ -57,7 +69,7 @@ export function assertOutsideRepository(file: string, root = REPOSITORY_ROOT): s
 }
 
 /** Reads private JSON; a parse failure never quotes the file. */
-function readPrivateJson(file: string, what: string): unknown {
+export function readPrivateJson(file: string, what: string): unknown {
   const text = fs.readFileSync(assertOutsideRepository(file), "utf8");
   try {
     return JSON.parse(text);
@@ -98,8 +110,8 @@ async function main() {
     process.exit(values.help ? 0 : 2);
   }
   const timeZone = values["time-zone"]!;
-  const from = toSeconds(values.from);
-  const to = toSeconds(values.to);
+  const from = toSeconds(values.from, "--from");
+  const to = toSeconds(values.to, "--to");
   if (!(to > from)) throw new Error("--to must be after --from.");
   // Check every private path before reading or writing any of them.
   for (const name of ["answer-key", "rows", "places", "segments", "save-segments", "summary-json"] as const) {

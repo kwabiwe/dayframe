@@ -1,4 +1,5 @@
 import { COARSE_MODE, type AnswerKey, type FineMode, type KeyStay, type KeyTrip } from "./answerKey";
+import { fixed } from "./format";
 import type { QualitySegment } from "./segments";
 
 /**
@@ -362,7 +363,7 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
   const detail: string[] = [];
   for (const y of moves.filter((move) => !real.has(move))) {
     const tripOverlap = key.trips.reduce((sum, x) => sum + overlap(y, x), 0) / 60;
-    detail.push(`phantom Move ${span(y)} ${y.from}>${y.to} ${y.reason} ${y.confidence} mode=${y.mode} gt-overlap=${tripOverlap.toFixed(1)} min`);
+    detail.push(`phantom Move ${span(y)} ${y.from}>${y.to} ${y.reason} ${y.confidence} mode=${y.mode} gt-overlap=${fixed(tripOverlap, 1)} min`);
   }
   const sureStays = engineStays.filter((y) => minutesOf(y).length >= MIN_SCORED_STAY_MINUTES && mostlySure(y));
   const matched = new Set(week.pairs.map(([, y]) => y));
