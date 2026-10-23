@@ -278,6 +278,7 @@ Required checks:
 
 Required checks when changing background location sampling, learned places, or detected-stay Review behavior:
 
+- Shared engine changes (segmentation, matching, commutes, modes, legs): score before and after with `npm --silent run score:location` (silent, so npm never echoes the private file names) (`packages/location-quality/README.md`) on the owner's Mac against the private Google Timeline export, and put only the week and day scores and counts in the PR (PRD D21). Not a CI check: the answer key never leaves the Mac.
 - Shared classification tests for weak/noise, one-off activity, and repeated place evidence.
 - Mobile geofence and offline queue tests.
 - Web event-service and learned-place route tests.
