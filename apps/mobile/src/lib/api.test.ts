@@ -34,6 +34,8 @@ vi.mock("expo-crypto",()=>({}));
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement}));
 const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
 vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
+const healthSignOut = vi.hoisted(() => ({ end: vi.fn(() => Promise.resolve()) }));
+vi.mock("./healthSignOut",()=>({endHealthCaptureAfterLogout:healthSignOut.end}));
 
 vi.mock("expo-secure-store", () => ({
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
@@ -228,6 +230,25 @@ describe("mobile API client", () => {
     expect(locationLifecycle.end).toHaveBeenCalledWith("logout", TIMER_STOP_OWNER, expect.any(Function));
     expect(await getSessionToken()).toBeNull();
     expect(await readOwnedAuthenticatedSessionSnapshot(TIMER_STOP_OWNER)).toMatchObject({status:"signed_out"});
+  });
+
+  it("ends Apple Health capture for the account after logout completes, never for a fenced one (health-3, health-4)", async () => {
+    storeBoundSession("session-token");
+    healthSignOut.end.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ok:true})));
+    await logout();
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledOnce());
+    expect(await getSessionToken()).toBeNull();
+    healthSignOut.end.mockClear();
+    await setSessionToken("old-session",TIMER_STOP_OWNER);await activateMobileAccount(TIMER_STOP_OWNER);
+    let release!: (response:Response)=>void;
+    vi.stubGlobal("fetch",vi.fn(()=>new Promise<Response>(resolve=>{release=resolve;})));
+    const pending=logout();
+    const rejected=expect(pending).rejects.toBeInstanceOf(StaleMobileSessionResponseError);
+    await vi.waitFor(()=>expect(release).toBeDefined());
+    await setSessionToken("replacement-session",ACCOUNT_B_OWNER);await activateMobileAccount(ACCOUNT_B_OWNER);
+    release(jsonResponse({ok:true}));await rejected;
+    expect(healthSignOut.end).not.toHaveBeenCalled();
   });
 
   it.each([ACCOUNT_B_OWNER,TIMER_STOP_OWNER])("fences delayed explicit logout against a replacement login (%j)",async(nextOwner)=>{

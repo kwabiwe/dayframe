@@ -798,6 +798,9 @@ export async function logout() {
     logoutSucceeded = true;
     // The evening Review reminder belongs to the account that just left.
     void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
+    // So do its Health journal and HealthKit's background wakes (health-3, health-4). Unsettled
+    // Health deliveries stay with the durable queue that still holds them.
+    void import("./healthSignOut").then(({ endHealthCaptureAfterLogout }) => endHealthCaptureAfterLogout()).catch(() => undefined);
   } finally {
     unsubscribe();
     finishBootstrapLogoutRequest?.();

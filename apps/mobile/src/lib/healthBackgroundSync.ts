@@ -249,6 +249,10 @@ export function installHealthBackgroundSync(native: NativeHealthBackground | nul
     complete: (id, success) => native.complete(id, success)
   });
   native.addWakeListener((wake) => runner.receive(wake));
+  // No wakes while no account is signed in (stability audit 22 Oct 2026, health-4).
+  void import("./healthSignOut")
+    .then(({ watchSignedOutHealthBackground }) => watchSignedOutHealthBackground(native))
+    .catch(() => undefined);
   void native.startListening()
     .then((wakes) => {
       for (const wake of wakes) runner.receive(wake);

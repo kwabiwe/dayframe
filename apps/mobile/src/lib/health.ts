@@ -55,6 +55,7 @@ import {
   type HealthJournalSample,
   type HealthEpisodeDraft,
 } from "./healthSyncStore";
+import { expireSignedOutHealthJournalsOncePerLaunch } from "./healthSignOut";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -366,6 +367,8 @@ async function captureHealthKind(
     // A foreground caller may have joined a background wake's capture, which skips maintenance:
     // ask for the due prune once the shared capture settles (a no-op read when it already ran).
     await pruneAcknowledgedHealthCaptureIfDue(owner).catch(() => undefined);
+    // A replaced or signed-out account's journal is never pruned by its own captures (health-3).
+    await expireSignedOutHealthJournalsOncePerLaunch().catch(() => undefined);
   }
 }
 

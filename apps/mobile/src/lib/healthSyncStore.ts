@@ -808,3 +808,60 @@ async function pruneOwnerJournal(
     key,
   );
 }
+
+/**
+ * Removes the Health journal of every account except `resolveKeep()`'s (stability audit 22 Oct 2026,
+ * health-3): a signed-out or replaced account's raw samples, payloads, episodes and checkpoints are
+ * otherwise never pruned, because maintenance runs only for the account capturing. The kept owner is
+ * read inside the journal's serial lane, so a sign-in that lands first is never touched; with no
+ * signed-in account (`null`) every owner is expired. Unacknowledged deliveries are durable work the
+ * outbox still holds (an acknowledgement must find its row), so they, their episodes and those
+ * episodes' unresolved corrections stay until that account settles them. Returns the rows deleted.
+ */
+export async function expireInactiveHealthOwners(
+  resolveKeep: () => Promise<HealthCaptureOwner | null>,
+) {
+  const db = await database();
+  return serial(async () => {
+    const keep = await resolveKeep();
+    const keepKey = keep ? healthOwnerKey(keep) : null;
+    let deleted = 0;
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      for (const table of [
+        "health_checkpoints",
+        "health_repairs",
+        "health_samples",
+        "health_query_runs",
+        "health_prune_runs",
+      ])
+        deleted += (
+          await transaction.runAsync(
+            `delete from ${table} where owner_key is not ?`,
+            keepKey,
+          )
+        ).changes;
+      deleted += (
+        await transaction.runAsync(
+          "delete from health_deliveries where owner_key is not ? and state='acknowledged'",
+          keepKey,
+        )
+      ).changes;
+      // Every delivery left for these owners is unsettled; keep the episodes they belong to.
+      deleted += (
+        await transaction.runAsync(
+          `delete from health_episodes where owner_key is not ?
+          and (owner_key,episode_id) not in (select owner_key,episode_id from health_deliveries)`,
+          keepKey,
+        )
+      ).changes;
+      deleted += (
+        await transaction.runAsync(
+          `delete from health_source_corrections where owner_key is not ?
+          and (state!='needs_attention' or (owner_key,episode_id) not in (select owner_key,episode_id from health_episodes))`,
+          keepKey,
+        )
+      ).changes;
+    });
+    return deleted;
+  });
+}

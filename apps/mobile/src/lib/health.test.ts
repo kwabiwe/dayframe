@@ -337,6 +337,27 @@ describe("HealthKit mapping", () => {
     expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledTimes(5);
   });
 
+  it("expires a signed-out account's journal at a launch's first foreground capture, never in a background wake (health-3)",async()=>{
+    const {__resetHealthSignOutForTests}=await import("./healthSignOut");
+    __resetHealthSignOutForTests();
+    const departed=JSON.stringify(["staging-fixture","health-workspace","departed-user"]);
+    const active=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
+    const insert=(key:string,id:string)=>{const at=new Date().toISOString();
+      captureDb.prepare("insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)").run(key,"sleep",id,"fixture",at,at,"{}",at);};
+    const samples=(key:string)=>Number(captureDb.prepare("select count(*) n from health_samples where owner_key=?").get(key)!.n);
+    healthkitMocks.queryCategorySamplesWithAnchor.mockImplementation(async()=>({newAnchor:"empty",samples:[],deletedSamples:[]}));
+    insert(departed,"synthetic-departed");insert(active,"synthetic-active");
+    await importHealthKitSleep({background:true,fresh:true,maxPages:1});
+    expect(samples(departed)).toBe(1);
+    await importHealthKitSleep();
+    expect(samples(departed)).toBe(0);
+    expect(samples(active)).toBe(1);
+    // Once per launch: later foreground captures spend nothing on it.
+    insert(departed,"synthetic-departed-again");
+    await importHealthKitSleep();
+    expect(samples(departed)).toBe(1);
+  });
+
   it("runs due maintenance for a foreground capture that joins a background wake's capture",async()=>{
     const key=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
     const at=new Date(Date.now()-30*86_400_000).toISOString();
