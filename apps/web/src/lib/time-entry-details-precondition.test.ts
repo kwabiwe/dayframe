@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detailsChangedSince, ExpectedDetailsSchema } from "./time-entry-details-precondition";
+import { detailsChangedSince, ExpectedDetailsSchema, ExpectedUpdatedAtSchema, versionChangedSince } from "./time-entry-details-precondition";
 
 const stored = { categoryId: "coding", description: "app testing", tagNormalizedNames: [] as string[] };
 
@@ -33,5 +33,18 @@ describe("details precondition (409 safety net)", () => {
   it("accepts only the three detail fields", () => {
     expect(ExpectedDetailsSchema.safeParse({ description: "BAU", categoryId: null, tagNames: ["x"] }).success).toBe(true);
     expect(ExpectedDetailsSchema.safeParse({ startedAt: "2026-10-13T07:00:00.000Z" }).success).toBe(false);
+  });
+});
+
+describe("version precondition (Codex r3 on #539)", () => {
+  it("refuses a version written since, at millisecond precision", () => {
+    expect(versionChangedSince(new Date("2026-07-31T15:00:00.123Z"), "2026-07-31T15:00:00.123Z")).toBe(false);
+    expect(versionChangedSince("2026-07-31T15:00:00.123Z", "2026-07-31T16:00:00.123+01:00")).toBe(false);
+    expect(versionChangedSince(new Date("2026-07-31T15:00:00.124Z"), "2026-07-31T15:00:00.123Z")).toBe(true);
+  });
+
+  it("accepts only an ISO date-time with an offset", () => {
+    expect(ExpectedUpdatedAtSchema.safeParse("2026-07-31T15:00:00.123Z").success).toBe(true);
+    expect(ExpectedUpdatedAtSchema.safeParse("yesterday").success).toBe(false);
   });
 });
