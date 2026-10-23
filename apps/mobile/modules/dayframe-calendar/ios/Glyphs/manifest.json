@@ -38,5 +38,555 @@
       "zoom-out@2x.png": "ee4b08005b092a21e2a7b4085dd481693ce32de0070c0b8da4201d64e457886e",
       "zoom-out@3x.png": "364318b8252ea4d1456afa084106f8a2f2bb110351e358651882ab6643110bbf"
     }
+  },
+  "activity-baby": {
+    "glyph": "baby",
+    "points": 24,
+    "svgSha256": "c37fd9f223c72b49d0af666277cc6649c43e7795766b7422e1627f916e41ace1",
+    "images": {
+      "activity-baby.png": "ea77fb3070e63eb6aeaac0fc8b232754478d72644fbbe80f23c00e4bd2a55b74",
+      "activity-baby@2x.png": "85189028570f95f81c2a44caec03a229f81bd87b2e6b07f081990ea33cfb440f",
+      "activity-baby@3x.png": "929e6feca4bf239d22b862e54cebd048832bd18bdce7ac7e4d9c09088ac78c40"
+    }
+  },
+  "activity-bike": {
+    "glyph": "bike",
+    "points": 24,
+    "svgSha256": "f7cf6bca876b5719d046b6ec686b3d63cf6b4d89e97bdf834094b21768ef9b34",
+    "images": {
+      "activity-bike.png": "15f607bf8895e0ebe48df6b2ee193872c9b4e5e1334f573dfbc0537231f06e1a",
+      "activity-bike@2x.png": "2b0d0a5127ea22e97b5723c79c985dee0a123f3c9a50c314a2eca9070331155a",
+      "activity-bike@3x.png": "ca37d0bbf8365512fdd03a8e83838355965a55222f83e6ddc67cdfda6e54e476"
+    }
+  },
+  "activity-book-open": {
+    "glyph": "book-open",
+    "points": 24,
+    "svgSha256": "e0559a596b407fc507f0664292c780c7c78dd4acb0506d12d537d0d9cdddba95",
+    "images": {
+      "activity-book-open.png": "ef994328f44f172ce4321712b817bb926e5c577b501f3d3612d6150415ec7644",
+      "activity-book-open@2x.png": "d8610ceac173b1c45c79bedca060d1adbf7202d26c434a3d2985e390ae582c97",
+      "activity-book-open@3x.png": "f1bf2c209ae6fcab4e447ccdc9a7a5dfa7360084420fe97546b187fbbef7416f"
+    }
+  },
+  "activity-brain": {
+    "glyph": "brain",
+    "points": 24,
+    "svgSha256": "db805232b22d083e5bee6133637580f0f148e188c064a1123b8de640633bcc12",
+    "images": {
+      "activity-brain.png": "393249f8912e2f8da2e6869c55090a2655eda2c984ba133365eacc168a08f234",
+      "activity-brain@2x.png": "39a23fb3666c92d210c3f2772e6373b5f83770b3d361be386d3c45a33827e97b",
+      "activity-brain@3x.png": "82d26e05b9e6ee3e1624accc46575088fddcd0b669e00948fb76a99d5b7e0f16"
+    }
+  },
+  "activity-briefcase": {
+    "glyph": "briefcase",
+    "points": 24,
+    "svgSha256": "1f340186652153472d601e01f7624cdbcf8a15ce4bd5ce4bd3d5072ca8afe8a2",
+    "images": {
+      "activity-briefcase.png": "bec12f7f81e9261a8a0209c0ecda1fe75e4f5fbc28376bd723fb4a3fd53d96ed",
+      "activity-briefcase@2x.png": "08c530b468d2d14e19091eec00e3a23a8932a2d3ea7c71786508592a7f0f1db3",
+      "activity-briefcase@3x.png": "358c5a834dd1124b24b7469bc5ed4586e3f0561aea1c0172219f32c9d8457143"
+    }
+  },
+  "activity-building-2": {
+    "glyph": "building-2",
+    "points": 24,
+    "svgSha256": "dad04cd331f40559722c2016b2089aeb75e8941ade5c059499269cd791168fc5",
+    "images": {
+      "activity-building-2.png": "989eabe77daf47250f115c2cab18982f8e652d1c67e926f549d3cad442220405",
+      "activity-building-2@2x.png": "c50a2c36f4be871e6ab8e579ceb6e5f966cb82e5fab6205d05bbfed9c4d4383d",
+      "activity-building-2@3x.png": "9da0144fe631e213ee93568a84bb81eae05608ba50fc581845455ba68ccd7092"
+    }
+  },
+  "activity-bus": {
+    "glyph": "bus",
+    "points": 24,
+    "svgSha256": "e9ea554ee67553e6de1334c1b3b9818c38cea8b93e0c2747bc3c355497edaf43",
+    "images": {
+      "activity-bus.png": "3c0bd019c9088ac6e2662f1c7672940750e5416d840b5317fa1a8e48b924b68d",
+      "activity-bus@2x.png": "5443ecda07ce29567da2f12dbc91c020c9a1b6e873b84afec068d751660e6525",
+      "activity-bus@3x.png": "7cf273a433c86a0d6e1cb19b38513d70a071eda366582bad99c319282d316985"
+    }
+  },
+  "activity-camera": {
+    "glyph": "camera",
+    "points": 24,
+    "svgSha256": "41aa28a581e279e535b9fea627b654aa568154ae2497ee25165568161f21c338",
+    "images": {
+      "activity-camera.png": "dd9d4383c094b41a620c4a8490117f702c396dc2a4671bb407dfb8b66d5e0233",
+      "activity-camera@2x.png": "ce18bc9232327036c6bd6373acb0ec308c473ed80e35def1f847e31f27556d0e",
+      "activity-camera@3x.png": "054368120145e6f461293ba6c57e57119db3ef3be9ab8b546cc3c33fb4a5f9d5"
+    }
+  },
+  "activity-car": {
+    "glyph": "car",
+    "points": 24,
+    "svgSha256": "178cd4a730bbbcbd2f2bced192e553e98e55057f0dea7b71721a580b8ec9699a",
+    "images": {
+      "activity-car.png": "54ecd8c4e9fdd68395ffd6865cdca568c40fc43840f0258ce3d523b3e3798f9f",
+      "activity-car@2x.png": "84167e5d9773f3bb7ce3228461c8008c46497e7ce0819b0573ef8bcd8854735e",
+      "activity-car@3x.png": "d6cd187b2b11a724ac78a786d0a706d73c94424c918cf641617839cd786b584c"
+    }
+  },
+  "activity-chef-hat": {
+    "glyph": "chef-hat",
+    "points": 24,
+    "svgSha256": "b44ae9a718e3f2d97c728fea81c54114ee44ffe90e7db6e08acc42b869adbea8",
+    "images": {
+      "activity-chef-hat.png": "ec899cbf61b949b1a15702079507391797d616c611c1510ead0095344736aa81",
+      "activity-chef-hat@2x.png": "0565f8ac43eac2acf64507bca4c7bc64b18954d7b0bc8dc81cfdf5557dc1230e",
+      "activity-chef-hat@3x.png": "d649ace351b0644c4ac3c9d3352d1bdc617d433cf7ce67e17dee4d18d91a7d8e"
+    }
+  },
+  "activity-circle-dot": {
+    "glyph": "circle-dot",
+    "points": 24,
+    "svgSha256": "ae52a8eb47fc9672c1499705592bfe9a968b13dac7028d09d68784d16bf73e0b",
+    "images": {
+      "activity-circle-dot.png": "e53636efe27310d78a8318e62a51f4b82dcbe1c6977e8a6c0873855b8ea6781d",
+      "activity-circle-dot@2x.png": "d4ce10da1397a6a15ba16942ce65bbd88727178fe9edf24025cc1d5ef3cb660c",
+      "activity-circle-dot@3x.png": "85631ea9065f532f7ff851fa126396962923370d9a6ac7e2902e6b3a914b18c1"
+    }
+  },
+  "activity-code-xml": {
+    "glyph": "code-xml",
+    "points": 24,
+    "svgSha256": "d6e85ee369e08dc6b4826276da93f3af50b0b33251f5e0899d38ea26253d3d12",
+    "images": {
+      "activity-code-xml.png": "0b06903c909b91e91a43df275b70f55550e858969c539ea2c14e47df706c1a78",
+      "activity-code-xml@2x.png": "0481dd7a985a3233e3fbc289e15b7c8698331386bbe8bfbe4bd5f0a2ace6a100",
+      "activity-code-xml@3x.png": "d4c4c5fe45909f7a4bb7c6db9f4fcc4a1a6c7bf8b09889400f2725a589f835c1"
+    }
+  },
+  "activity-coffee": {
+    "glyph": "coffee",
+    "points": 24,
+    "svgSha256": "6d35e2ac733327ba9f6e2c3544e4eec1c198b0d6e5cd66c4a2ca9ae1f56bddce",
+    "images": {
+      "activity-coffee.png": "3423891101da642f403997c06d349cf59eebde9c5cbbb236e86dc7743ba97559",
+      "activity-coffee@2x.png": "94414193f204ec1f984e28544e8315b2bfd19aa29fdda1ec46a6621db6e70a3a",
+      "activity-coffee@3x.png": "2aab8a674ef41c5af16688dc17c44b6cc0d8053821e536d8bd4aaf6bfe5bef23"
+    }
+  },
+  "activity-dumbbell": {
+    "glyph": "dumbbell",
+    "points": 24,
+    "svgSha256": "c9188833734656566c17c9fa605420dd5d5dd81c22bb873ac901916756ff1c0d",
+    "images": {
+      "activity-dumbbell.png": "aac8890af9fe55538bd76b49dc60c17241c702100d9fb59650af962f340b15e5",
+      "activity-dumbbell@2x.png": "0ad0a92b689941edf9605d37999c900dfbc682ec38edc901e388a3987eb35f55",
+      "activity-dumbbell@3x.png": "babd7440c5fb9db1e84e0d6e8ed06e7559655279d753e2141af598f407f8dfa3"
+    }
+  },
+  "activity-flower-2": {
+    "glyph": "flower-2",
+    "points": 24,
+    "svgSha256": "85f0025462e6e2cd688f8ffb5be7747ac0f8af6994e7f572074f6ad60b59e67c",
+    "images": {
+      "activity-flower-2.png": "a4b32dda052a3b8059746545c59d590a0bf710086b6c66ceda102360c46d704e",
+      "activity-flower-2@2x.png": "4abd9785f763acc51ddc1dea86d68f771b48b4166b39121f672a9997718cd494",
+      "activity-flower-2@3x.png": "c6f5d1dcb64f3009064f234d6df0de9d8e54069f61119d4d05deff0e10359c80"
+    }
+  },
+  "activity-footprints": {
+    "glyph": "footprints",
+    "points": 24,
+    "svgSha256": "61822a601ff8ec4953e7aade9853d3322ca8609f2a9e71c7afd5ee62175eeb81",
+    "images": {
+      "activity-footprints.png": "afc4d6147cb6ba7445500a56266595e873a63931a28c94d933d76a5cffb4cbe7",
+      "activity-footprints@2x.png": "241fc1b80a3c9e907307baee1c0cb5d2fb8c9334bb909873eaefdd291bc45bf4",
+      "activity-footprints@3x.png": "f818ecf66b03e9ba2dc8c3d2a1ff26c456d211efba8e3fe2b7aa988dad4d03e8"
+    }
+  },
+  "activity-gamepad-2": {
+    "glyph": "gamepad-2",
+    "points": 24,
+    "svgSha256": "3057cfb5af9f6d97c1ea77f82ed70dc674fa334645a78f99f42cf1f81b88de36",
+    "images": {
+      "activity-gamepad-2.png": "892dd1dbea74d4a75467b62fa7c688eb41bb56045b95621614a009ecb2a9aaa4",
+      "activity-gamepad-2@2x.png": "b13b59d3384b5714ff8cc076c25eb2b60b940d19f987f86aa37a7ecfd8d497ad",
+      "activity-gamepad-2@3x.png": "bfd75e4ff6107e7619ab80902c62a0264e23ce8ba0d7bdedb8a8a70f7a6c4456"
+    }
+  },
+  "activity-graduation-cap": {
+    "glyph": "graduation-cap",
+    "points": 24,
+    "svgSha256": "ca4a5c6685c5cfd4d309f7d7ef7bbf4dbeb20adc41e136a91eb62b78811a5305",
+    "images": {
+      "activity-graduation-cap.png": "d3f267e4d82b8a5f4a0e9a5fab5c8848f348b75a338e1bc1465672450bd285e3",
+      "activity-graduation-cap@2x.png": "da43100ce9b987cb3766d484b390b8304e2d9061c57d6ddce2602ec5c26d73ce",
+      "activity-graduation-cap@3x.png": "d8ee9d81f7017f281a588269db6b0aff220486fc0c8835b85950923d4bd09d4a"
+    }
+  },
+  "activity-guitar": {
+    "glyph": "guitar",
+    "points": 24,
+    "svgSha256": "a9471629c8eb7114098d03f6ef76467d52c2313985133c6ca78d5334fd7835e6",
+    "images": {
+      "activity-guitar.png": "b224c9c17e7ce6f1ee772e4cabbc3f71cfc630cd90094547c375ba11e2dc22f9",
+      "activity-guitar@2x.png": "cda429021d8a60993fdf755e88c270bd63424e8e2c43afba633e91a1e1b0314b",
+      "activity-guitar@3x.png": "7b457b818c5ac8fe3d9eb24bb617adc583b56a938655bb1318b271a2fdfc3e17"
+    }
+  },
+  "activity-hand-heart": {
+    "glyph": "hand-heart",
+    "points": 24,
+    "svgSha256": "d51bf2646a30b26cc137e8735285f4004aab11ae431f0820a245823330022a31",
+    "images": {
+      "activity-hand-heart.png": "ed5ea8a1f20cc7f377117ed61d7329915d545ea0db7ff2a5b2e16e49ce371bc6",
+      "activity-hand-heart@2x.png": "72b3d877424460ce940f79da5c7fba6a380d4e6a1d7afd3d3be60045b701501d",
+      "activity-hand-heart@3x.png": "118eb53b9195e3c3e49d3717290f4616bfe130a2c5afe07607e6c0163bf178c0"
+    }
+  },
+  "activity-heart": {
+    "glyph": "heart",
+    "points": 24,
+    "svgSha256": "24f40db08d08f71d1cb9e9427b325fc1d50984dd62d1c663eb443d646e25f5ae",
+    "images": {
+      "activity-heart.png": "0c1544ecc1c488e81fa46552659b7fd9429c2d4e5b22536228f851bd791562a8",
+      "activity-heart@2x.png": "936d25ef9f4c93b9755bd48b11eb7f38afbdbc77b500ed66a10c10756cd8baac",
+      "activity-heart@3x.png": "e20fb37b103f275c694f54b91555a45f143783510043d58e842496f50a26cf6e"
+    }
+  },
+  "activity-heart-pulse": {
+    "glyph": "heart-pulse",
+    "points": 24,
+    "svgSha256": "b70d781af6c209bbc15f435c687ae3d6887ec045ee52d4bbc75bfb1dae4cbed7",
+    "images": {
+      "activity-heart-pulse.png": "deb495b83d787100720c701d14c189cfe00c54a116faad5e95b9e53ccbf676af",
+      "activity-heart-pulse@2x.png": "0bc333846b178c5619118ceb7a9c37ad0e861742456073c484cbab2405b4725f",
+      "activity-heart-pulse@3x.png": "253e5b842c05d9ad405c635d0d3c3fce61011f5f7f69e593951a6a25a605ebbe"
+    }
+  },
+  "activity-house": {
+    "glyph": "house",
+    "points": 24,
+    "svgSha256": "f4dfa8f71a2cc6f92d65ddfe353898f03323ea4ff7f3472c9cf6a6402a5e8e71",
+    "images": {
+      "activity-house.png": "44f703ce76410a5d13a2fa73e8e97cdbd1b8540c06e56f47ac1428e5ec5f6309",
+      "activity-house@2x.png": "16c3a79fc1b0e3ef9cb50151f56dbb4bd67ac331f11906765f9c4690684ebc8e",
+      "activity-house@3x.png": "b53e7b15dbb4717de65ed729a967aca50db940f01547ce5cae4d5b6f475846bb"
+    }
+  },
+  "activity-inbox": {
+    "glyph": "inbox",
+    "points": 24,
+    "svgSha256": "e7319dd1b0d5ed3f53028202889be2c163546f6509d0d7782526db7dcf74b4a5",
+    "images": {
+      "activity-inbox.png": "ecb18d11ef1acac68906b3560014b2c17370ae59e3a100ab96329b4fdae5b6cd",
+      "activity-inbox@2x.png": "ba3b3af238821fa401f3aed31eeabdec25f6ef66b4c04cff214dc76043198e9d",
+      "activity-inbox@3x.png": "9700e26cbfb77f02a6ced40d98820a56939ad884d07731d3fdfc81dbb899ef66"
+    }
+  },
+  "activity-languages": {
+    "glyph": "languages",
+    "points": 24,
+    "svgSha256": "afa850c9c9b88d2ebc09cbe41c56de5395ee7f0eda52b0dc81e7f395b7d99d06",
+    "images": {
+      "activity-languages.png": "d61c244e5635e27aecf4546cb348ba74166b4a1b87b7363ef96f4867f2e6d3c7",
+      "activity-languages@2x.png": "4b71cede4656f331b88367266c8003e62d8d19bdda3e570e7841a85d37a0d88d",
+      "activity-languages@3x.png": "bf497bbe0d5509438bcd56e38fc61b0fe85dc074e22961cc2e208b2d83397020"
+    }
+  },
+  "activity-laptop": {
+    "glyph": "laptop",
+    "points": 24,
+    "svgSha256": "166881667dab74943017a60cac6a5ef5a44e15df6ab83eb0768081a7304b2a51",
+    "images": {
+      "activity-laptop.png": "66610ff8cdae3c10571a9c9a305a965fd6d722b351b0153bb944ab61a8dd0ed7",
+      "activity-laptop@2x.png": "494d16e91e9294e7efc39821a2f3d6ad267b9c2508819af6cf5cd1ab72fd92f0",
+      "activity-laptop@3x.png": "b209d77f0bda97325abd92aa4a3dec8720b403d13ef342ab3b70d11567f77d97"
+    }
+  },
+  "activity-mail": {
+    "glyph": "mail",
+    "points": 24,
+    "svgSha256": "bcaa30f583ef71b232133102b14b57f460941aafa3649d65e576606a71d1f994",
+    "images": {
+      "activity-mail.png": "737a42bd288332863cc6b08a5bf576331938fdb5932b0d63f9784fc4c491283e",
+      "activity-mail@2x.png": "411a5b5b7647e38be6d819e72a82b01f9ec9f668024cbc876c705839465bbb64",
+      "activity-mail@3x.png": "0753bc62ade3f0d9dd9d30dd7db2204007d09a3d64d4b9cd18f742400379c1ac"
+    }
+  },
+  "activity-message-circle": {
+    "glyph": "message-circle",
+    "points": 24,
+    "svgSha256": "b751cfa708b2e724b885886df2c021a708f8fc6351745cffabddcf03c80a5c7a",
+    "images": {
+      "activity-message-circle.png": "3b7131a701ed8b6babc651b83e1d664aea507bce594caaeaab35ee477e0c1466",
+      "activity-message-circle@2x.png": "16f99eb61c39aeb64c45ff35048c212da8501d859629c1da3c125a45d18ebaf2",
+      "activity-message-circle@3x.png": "4ffdea0488ca1358f8e9c74a7723b591632e599f1e408e61fac084bf22d49210"
+    }
+  },
+  "activity-moon": {
+    "glyph": "moon",
+    "points": 24,
+    "svgSha256": "326fb36f56666eb2c88655ff9e9bd2c3b2ce5a89d0e96ec3d1cc09bb37916b34",
+    "images": {
+      "activity-moon.png": "12f61a442f1f260af855fe60bb8cd85ed667800b5c399490f5a4a576d87cb155",
+      "activity-moon@2x.png": "5f690eb8cf9b346b0485255d98e0699acbe69a885a4c59f96e4beccf9c70166f",
+      "activity-moon@3x.png": "fa3b4827b6dffd69cd0d22e3ee9fccdd09c556b6d1f096e98d79eefbfceaa2cc"
+    }
+  },
+  "activity-mountain": {
+    "glyph": "mountain",
+    "points": 24,
+    "svgSha256": "7c502c216f7a7ea5d47c559ce6c9bcf5d2ba00539ab2cba89bc21c89b0d66022",
+    "images": {
+      "activity-mountain.png": "45943ec898c132e0b041bd23a2dbb2341c39d1611a101deaf534103fb1db7b74",
+      "activity-mountain@2x.png": "2e40f8a8688b067e5463bb1f6769ab7c4b371dfd5cfc89caffaf1c5f02999167",
+      "activity-mountain@3x.png": "dcdc1e5a5e58917bcc742608e85b00e3420153c352895396d5dc2d0d8922f3af"
+    }
+  },
+  "activity-music": {
+    "glyph": "music",
+    "points": 24,
+    "svgSha256": "8791c22e49e00781a966a1e882326cad71b1ba4a07e35a5c14dcdbaeb4fb1022",
+    "images": {
+      "activity-music.png": "ccbcd5859a9829055834eb7549dc64a403aa7fa613043e6c445bec5a7217935f",
+      "activity-music@2x.png": "b2359e6aa7e6772507eb1017057011fde0a5500c0e8842fe835867bd23cb5527",
+      "activity-music@3x.png": "99c368a867172a1a9cf061aa28b7a5428c196fba9aa7135cda0add514afc2e20"
+    }
+  },
+  "activity-palette": {
+    "glyph": "palette",
+    "points": 24,
+    "svgSha256": "f35a1f4c35f6183c1b2294bb3c7a2744dd3a643c5a9008ac1a1c1945049f4a27",
+    "images": {
+      "activity-palette.png": "3082a01a54f904ced7a7e90a4ecbd9e9e14d8697f03b1e84f994026c14325f5a",
+      "activity-palette@2x.png": "3aebb20467d43c99945b75c519f9a68c408b5cd32dc7bca44a212177632e24b3",
+      "activity-palette@3x.png": "9a2d798d61d25eb543d0185374f84e3cff4ebf8337ae704537f9a3f3ae77c96c"
+    }
+  },
+  "activity-party-popper": {
+    "glyph": "party-popper",
+    "points": 24,
+    "svgSha256": "8ee290cd6c07aad8c912fc452a9e156224a4b892eed248ac31658fded0eef4f9",
+    "images": {
+      "activity-party-popper.png": "47b88b4ce239a9a22ff338926c0792115e9d6d1901c881dcc5b673496dcad48b",
+      "activity-party-popper@2x.png": "c5e075f4b2da7deda76b450867f2dbefe805a6bdc785be6374bc2c7896db4030",
+      "activity-party-popper@3x.png": "9ba89bdda6c43924b43d8e3269f21ecc38a486f9186425455d64dc363ceb1bab"
+    }
+  },
+  "activity-paw-print": {
+    "glyph": "paw-print",
+    "points": 24,
+    "svgSha256": "042ad4f8fffb63be29250cee265f069e23c1f2eb9a049925a79e56d780bef10b",
+    "images": {
+      "activity-paw-print.png": "7ee729a78bab490145b6d44a59aaf816d8ba199f33d80e418a6cffa6d877226c",
+      "activity-paw-print@2x.png": "dec99079fcff6f047e9094fe2fa95347cf13c2461bcce9b7007081ba0fa97dfa",
+      "activity-paw-print@3x.png": "2aa3d322c63f6375157e8da930851609c71f80721946f7f2626857d4cadec786"
+    }
+  },
+  "activity-pen-line": {
+    "glyph": "pen-line",
+    "points": 24,
+    "svgSha256": "91ad7f8bfab14dd42242ea2b12809e9aedac5a91f5cabf67d02749205cd18750",
+    "images": {
+      "activity-pen-line.png": "d59f2cecaf59978c0cfcb5d27d9728e14cba7ac9628bf4d8444fe7fcf6cc5c26",
+      "activity-pen-line@2x.png": "8d1fc3882e6154469fc31612a775051ca0d17cb72e7f103a7cb9dd50e31d2888",
+      "activity-pen-line@3x.png": "d817d402e5f098920d9de2147bd1482b9210688e50e41d64780682bf0861a80b"
+    }
+  },
+  "activity-phone": {
+    "glyph": "phone",
+    "points": 24,
+    "svgSha256": "ccfb16993ecc0591b33676823f3737fafdc928d9c7d958c03dd83505ef259527",
+    "images": {
+      "activity-phone.png": "0e9e8eb948cb159939072c253e8b2266a82314320b66d5817b6eb4b56938eb8b",
+      "activity-phone@2x.png": "b4d7ac65cf61c5ec70c7214699e16fc064bf34fe1d0922f3e180081fdd467400",
+      "activity-phone@3x.png": "649ff842fedb8d92c5e556c6d2abd5896a7102d5db855bd2673356c6b71298b7"
+    }
+  },
+  "activity-pill": {
+    "glyph": "pill",
+    "points": 24,
+    "svgSha256": "d5525046b701e8d85a51ae9e4aab9bb6ea9c9a0538d5be61c5ffda446194031c",
+    "images": {
+      "activity-pill.png": "dc733c2de6aa563b8dfbdfd21d4c0cbe627879edbabb44347fb6f22309be22ea",
+      "activity-pill@2x.png": "33ba5d645c86644f0775efe37709caefa4e28597d4c8aa5062ed0d95d7f0de12",
+      "activity-pill@3x.png": "018149fd96fd0a9cf3ca2abd36f9db3064ba9814c956dbe76dddeac5a191ba9e"
+    }
+  },
+  "activity-plane": {
+    "glyph": "plane",
+    "points": 24,
+    "svgSha256": "fbf9f91e818109504f7614120944e21ff64f71a74d867d143db8ccfb4094cf03",
+    "images": {
+      "activity-plane.png": "d5473ac8966f9169a31c7ee8d1c2643082f3b0afbc9d1f373e03dabb6e797458",
+      "activity-plane@2x.png": "38973e2c503e3c6d45354f1918c0389360551e91bd24659a283728968bf8e5df",
+      "activity-plane@3x.png": "b51808afeaed710c9b7e2db169bc8fc307e6975ddf957a1ee0df1ec71fb4f4ec"
+    }
+  },
+  "activity-presentation": {
+    "glyph": "presentation",
+    "points": 24,
+    "svgSha256": "70fbc1ae41c2a9d5ba5603663a35d69c05950ab077f4cbc85e5ff540c3ba7c50",
+    "images": {
+      "activity-presentation.png": "2d47bf123b03ad6767fd7c598fc409d805e6c3658b61cc0a1f3b1de0fc9e5860",
+      "activity-presentation@2x.png": "ea68b70522f89d130687ff0f0f4770b0763c5f492fbc72b2981d8b664474c680",
+      "activity-presentation@3x.png": "833a0edc92e224ee5190beaca028ad954db442b871aef9085d0420e98d9ea3ec"
+    }
+  },
+  "activity-route": {
+    "glyph": "route",
+    "points": 24,
+    "svgSha256": "87a291c8cbaf43ae04132f1568ee13487d2f78d08bf5ddb9c14a68fcf84deca0",
+    "images": {
+      "activity-route.png": "b47edaa407eb6db43d7d80c80eab72c34905c962bace1ae05682301991692b36",
+      "activity-route@2x.png": "4d718e1c05b87fbf6b8507ca6e91ce846d686fba0af8d9e985f2959bc8130d42",
+      "activity-route@3x.png": "73e1401e4feef417a9beeeab469dd7a61f190c1541d942f92f7af5e2862099f5"
+    }
+  },
+  "activity-ship": {
+    "glyph": "ship",
+    "points": 24,
+    "svgSha256": "d36cf9b78bcbe2275009a66843de2b876b2def0088a286ef48f573e9744bbc76",
+    "images": {
+      "activity-ship.png": "52962fa16edf9ee7f8c105d6eee99f413100ded6298dbda1df95d89a002957f5",
+      "activity-ship@2x.png": "23861121fd3df2ca83819c9e13142f66e023614941ef78ba35b8c4b411b43705",
+      "activity-ship@3x.png": "7c6109542026044d975274e994bb78af42d57cd1f69e443d43f923e7ad494b70"
+    }
+  },
+  "activity-shirt": {
+    "glyph": "shirt",
+    "points": 24,
+    "svgSha256": "28564878377867d7fdd5994092220f0a7de646f9f145b6788efa8b34cc8a18c4",
+    "images": {
+      "activity-shirt.png": "c78980f1b0712bbf7a12eecf76974fde200b170ec20a62f27e61acdfe7c2f447",
+      "activity-shirt@2x.png": "486006b9f66b4b9c93f4cfdad601b3649f83cbe30079cccbd33086bf00fb5e60",
+      "activity-shirt@3x.png": "1dc3c824edab36419605bcfc5fd10788a67997e154fbe815f90e57dad8fad215"
+    }
+  },
+  "activity-shopping-bag": {
+    "glyph": "shopping-bag",
+    "points": 24,
+    "svgSha256": "f2fb98c27671140609ade34fe7f11824aed806a552cfe267fc7a1f7ab2166bae",
+    "images": {
+      "activity-shopping-bag.png": "25d2b41ecf3f3ba6f52d5453a1055f3835bc8061332d5a18e1a8e2e34c6776cf",
+      "activity-shopping-bag@2x.png": "11b2eb85b32d225326851bab4d3d833f8777bd810bb3948173bc8d7025297fa1",
+      "activity-shopping-bag@3x.png": "72c11e612b1ed4eb5b0d92899f0939cb99f9eb98ae952bcb47cf004f5dafa435"
+    }
+  },
+  "activity-shopping-cart": {
+    "glyph": "shopping-cart",
+    "points": 24,
+    "svgSha256": "4f384ee704d75318c952bbcacc6c41f6cd52a9a10eeed9cec0b722dd7cc3255b",
+    "images": {
+      "activity-shopping-cart.png": "0bf5ae985a730cffa30ed933c769d78e150875d5d40f3a47f7d68eb23d4568fb",
+      "activity-shopping-cart@2x.png": "d8e23ac9dcaad6bcdf5e6c532c296466ce45cc87478b6d059e1351add10796b8",
+      "activity-shopping-cart@3x.png": "85362267866f24d5374a851ddba9f87d56636f78c27fc6560eb9a99a697c3723"
+    }
+  },
+  "activity-sprout": {
+    "glyph": "sprout",
+    "points": 24,
+    "svgSha256": "b5c913a4247a8e320f47437a89f61dee901eea78279a97df118de24b8d98fd31",
+    "images": {
+      "activity-sprout.png": "b799d34cade880d0766f983805b4f8eb18aa03e657f8ecd38a501c4bb2818477",
+      "activity-sprout@2x.png": "79e83f4bbe2daae6730f6df9cf6b3a5b508b6e7f3ae0e17197baa5970420a8dd",
+      "activity-sprout@3x.png": "d2414e985f95c3d4d1a462a3a896a6a8cbdc4308aa7f6de077017864c21f29a1"
+    }
+  },
+  "activity-stethoscope": {
+    "glyph": "stethoscope",
+    "points": 24,
+    "svgSha256": "4b1301a10368f80cea24b69872dddd7d659bf68b77c30618abf2c8ca282a7435",
+    "images": {
+      "activity-stethoscope.png": "daa4a45751f66fd5d3c02ba2a3e68b4b4c0b67178952a34bd5c73fd4485a6a86",
+      "activity-stethoscope@2x.png": "ac091ad4930db65308cca137b4988582b1c4f9abd61c8ef08d4966f4dfed0b49",
+      "activity-stethoscope@3x.png": "82ee9917599598b46976e51283bdebb0b2eedeb84d6e1f9fcf2bdfe9f3554fc8"
+    }
+  },
+  "activity-swimmer": {
+    "glyph": "swimmer",
+    "points": 24,
+    "svgSha256": "ed8eae54c8439ca979337ebfc45e72ec9e0336b8726b994bced7f411fd6b9bd9",
+    "images": {
+      "activity-swimmer.png": "73786f96a06db51669c2341cd0708f177cb5015bf4235d2fe03caeb74db80d62",
+      "activity-swimmer@2x.png": "b479ff0bcd53df76b888bfbbfabd228decd749dbfb358821665981b902f4fb89",
+      "activity-swimmer@3x.png": "31665e9fd71f033090eb81f2d77935877cd7e148c2c28bafb82c9862ac2756e6"
+    }
+  },
+  "activity-tent": {
+    "glyph": "tent",
+    "points": 24,
+    "svgSha256": "51d9b2601f24639f629b0129a3f6eb565574c54f718d82e78d5b18569361b3b9",
+    "images": {
+      "activity-tent.png": "7a4834dbccfd982c632365b5f271a668d1833fd02befc3560bd729f913ea01dc",
+      "activity-tent@2x.png": "5cecd53c58ba0f2689e956d05586d7568e809baf2ac19942af3127c7223c7a1e",
+      "activity-tent@3x.png": "4812b43333fd6a29141b2495741b37c05ecd07d1b984d476fa5b317822ebdcb0"
+    }
+  },
+  "activity-train-front": {
+    "glyph": "train-front",
+    "points": 24,
+    "svgSha256": "a28d41f22915244c27439e5c4fbf3774bdcbf4721a2776c9cf0d42ff4a09f4bf",
+    "images": {
+      "activity-train-front.png": "4766cbe66af69af08a60aa1c87a5864fe2aca903acb92b061a97c46626b26951",
+      "activity-train-front@2x.png": "ffe6b144a3a425aebf67b481c643de15e2724d70cbdf08eed72c15626b22040d",
+      "activity-train-front@3x.png": "eb5d19c53dc46644a895ef0e64e2ec6e47bd229487a17db43892d5539bcbfb3a"
+    }
+  },
+  "activity-tv": {
+    "glyph": "tv",
+    "points": 24,
+    "svgSha256": "db17b1713893e4a36a03460592f31e701450ac150187201a598eeaa4647f1705",
+    "images": {
+      "activity-tv.png": "59f9f16210e96538c22c09a4cde012e6846e593e6cefa25ad573c4437ef71fdf",
+      "activity-tv@2x.png": "217e228144b8da0f4809c9d58fd3228dffabd781e2238aae3ae2cc105993244d",
+      "activity-tv@3x.png": "3d17de61e3b3368f573c2a8cd028d2bff7d608183c40a92de1f0d6b144ee3f96"
+    }
+  },
+  "activity-user-round": {
+    "glyph": "user-round",
+    "points": 24,
+    "svgSha256": "3a773465c27272a3089dc299c992fc817f78bfef21a48930dc4a626d0718a5ae",
+    "images": {
+      "activity-user-round.png": "33c82979706a28d570ff2512c8d030cd2eb0e1e3407110d2d16fb8d05720ed4c",
+      "activity-user-round@2x.png": "27e324c443fdf8e5f3c19a2b17a4e6a7348fc3f14b41e787463170809991810f",
+      "activity-user-round@3x.png": "de9fb54c0df567faf9b683f7e29eb0ca681f0fd756a89ab149a2a01f1cd2ef1c"
+    }
+  },
+  "activity-users": {
+    "glyph": "users",
+    "points": 24,
+    "svgSha256": "2c77faf887273adc97f21cd2dc4c8c68d617e1e12a2da4c02a48c7d69f13342d",
+    "images": {
+      "activity-users.png": "bb4f14cdab9a267314ff632bbd1fdab17f2ed03d9452e4e3e1f95b780b0d6660",
+      "activity-users@2x.png": "4b9a12ef556834f2f50819dafd615fc237e3c3f597424f0069f27a3fc5b7c8c8",
+      "activity-users@3x.png": "936551d0cd2638ec8f52e366a460dcfa50b37f0c9526139876a40f9f2e9fa90b"
+    }
+  },
+  "activity-utensils": {
+    "glyph": "utensils",
+    "points": 24,
+    "svgSha256": "83b9e32c9c8de6bf8b3723fba74b383874c91596af753902f17d96430644f5f3",
+    "images": {
+      "activity-utensils.png": "5263ec7cb82b9736d8fb1476e9343fc12b230ba4153c2329d7169dd33c9ed021",
+      "activity-utensils@2x.png": "8f55e908a1d6139bebc57559df51b14a8171fcd3f72cfa3cdcab097d227a3940",
+      "activity-utensils@3x.png": "8659be8c0fbedb32c9bc2ca5abbd968a51d509158af0ab8c631414f1e9349219"
+    }
+  },
+  "activity-wallet": {
+    "glyph": "wallet",
+    "points": 24,
+    "svgSha256": "6ff9961c577c422204fcac1808edd64d95e45f5db7c355fa702c4db6b583c24a",
+    "images": {
+      "activity-wallet.png": "e39dbc7498d64f781957275c4aefa9c4ee98d618461930aa19ddfd79548992bd",
+      "activity-wallet@2x.png": "ccc5e5f818056eae8e88d73582a58e79360c0bfe96316a66f202c16d3fb1a5f5",
+      "activity-wallet@3x.png": "4615ce5c563a4ae07f926841d47c543277a2d9364bdb76f2c9570549949f050a"
+    }
+  },
+  "activity-wrench": {
+    "glyph": "wrench",
+    "points": 24,
+    "svgSha256": "36c96c27e9214b7b58ebfa07f07334c9066d2f157b0698ed5737a174adc78924",
+    "images": {
+      "activity-wrench.png": "ea0691abc55bb4779e9cbe919f7ac4e744db5e2a060471e108f13f8192c1217b",
+      "activity-wrench@2x.png": "6536914d7a7ecc678f999a94049caaa83fc03a17b4967de4f77f20fa2c1c89dc",
+      "activity-wrench@3x.png": "d5e3627e9574088ef4abe3705fe97d1b43897c69200fcf445e1c12a0e9086927"
+    }
   }
 }

@@ -123,6 +123,7 @@ export * from "./location";
 export * from "./reviewMutations";
 export * from "./reviewPresentation";
 export * from "./timeIntervals";
+export * from "./calendarBlockLayout";
 export * from "./coveredActivityTotals";
 export * from "./durations";
 export * from "./previousEndStart";

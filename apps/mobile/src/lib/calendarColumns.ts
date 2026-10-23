@@ -37,7 +37,11 @@ export type CalendarColumnLayout = {
   zIndex: number;
 };
 
-/** iOS draws a block at least 4 points tall: 5 minutes at the most zoomed-out 48 points an hour. */
+/**
+ * The time-based fallback: what an older native build (before location v4 C6) draws, at its old
+ * 4-point minimum. A current build lays out its own columns over drawn extents at every zoom, which
+ * collide at least as often, so React's hit analysis built on these columns stays conservative.
+ */
 export const CALENDAR_MINIMUM_DRAWN_MS = 5 * 60_000;
 
 export function layoutCalendarColumns(
