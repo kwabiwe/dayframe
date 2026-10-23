@@ -10,6 +10,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
+import { RequestDeadlineError, withRequestDeadline } from "@/lib/request-deadline";
 import { onBeforeSessionChange } from "@/lib/session-change";
 import {
   applyPendingTimerDetails,
@@ -586,12 +587,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (keepalive) keepaliveBytesRef.current += bytes;
     onSent?.(keepalive);
     try {
-      return await clientFetch(`/api/time-entries/${targetId}`, {
+      // Bounded (stability audit WEB-UI-11): no answer by the deadline fails like any other error.
+      return await withRequestDeadline((signal) => clientFetch(`/api/time-entries/${targetId}`, {
         method: "PATCH",
         ...(keepalive ? { keepalive: true } : {}),
         headers: { "Content-Type": "application/json" },
-        body: text
-      });
+        body: text,
+        signal
+      }));
     } finally {
       if (keepalive) keepaliveBytesRef.current -= bytes;
     }
@@ -715,7 +718,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (outgoing && !outgoingDraftsRef.current.has(outgoing.id)) {
       outgoingDraftsRef.current.set(outgoing.id, { draft: draftRef.current, base: baseFor(outgoing) });
     }
-    return runTimerStartMutation({
+    // A Start with no answer by the deadline (stability audit WEB-UI-11) is rolled back like a
+    // rejected one, so a Stop waiting behind it goes ahead; the server may still have committed
+    // it, so its copy is fetched at once (never a second Start).
+    let timedOut = false;
+    const outcome = await runTimerStartMutation({
       beforeStart: async () => {
         // The block this Start replaces gets its pending edits first, at its real id.
         const current = dataRef.current;
@@ -751,14 +758,24 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       setBusy: setIsTimerBusy,
       setError: setTimerError,
       send: async (payload) => {
-        const response = await clientFetch("/api/time-entries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
-        // Accepted: record which real block the optimistic one on screen is, from the POST itself.
-        const result = await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
+        let result: { timeEntryId?: unknown } | null;
+        try {
+          result = await withRequestDeadline(async (signal) => {
+            const response = await clientFetch("/api/time-entries", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+              signal
+            });
+            if (!response.ok) throw new Error(await responseError(response, `Unable to start the block: ${response.status}`));
+            // Accepted: record which real block the optimistic one on screen is, from the POST itself.
+            return await response.json().catch(() => null) as { timeEntryId?: unknown } | null;
+          });
+        } catch (error) {
+          if (!(error instanceof RequestDeadlineError)) throw error;
+          timedOut = true;
+          throw new Error(START_TIMED_OUT_MESSAGE);
+        }
         const serverId = typeof result?.timeEntryId === "string" ? result.timeEntryId : undefined;
         const snapshot = dataRef.current;
         const optimisticId = snapshot?.activeEntry?.id ?? null;
@@ -779,6 +796,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         await refresh({ force: true });
       }
     });
+    if (timedOut && !mutationGateRef.current.isActive()) await refresh({ force: true });
+    return outcome;
   }, [baseFor, commitData, refresh, saveActiveDetails, serverEntryId, setTimerDraft]);
 
   const startEntryAgain = useCallback(async (entry: TimeEntryRow): Promise<MutationOutcome> => {
@@ -1075,6 +1094,36 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     setTimerDraft(applyPendingTimerDetails(record, draftRef.current, decision.fields));
   }, [baseFor, pendingOwner, setTimerDraft]);
 
+  // Before sign-out or a workspace switch (stability audit WEB-UI-8): the running block's edits
+  // that autosave has not sent yet are saved under the session they were made in, with the
+  // ordinary versioned save, after whatever holds the gate (a save, a Start) and within the Stop
+  // deadline. A refused or failed save shows its usual notice; edits still unsent at the deadline
+  // are not sent after the change, and the person is told.
+  const saveDetailsBeforeSessionChange = useCallback(async () => {
+    const gate = mutationGateRef.current;
+    const unsaved = () => {
+      const entry = dataRef.current?.activeEntry;
+      return Boolean(entry && timerDetailsPatch(draftRef.current, baseFor(entry)));
+    };
+    let late = false;
+    let started = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const save = (async () => {
+      await gate.whenIdle();
+      const snapshot = dataRef.current;
+      if (late || !snapshot?.activeEntry || !serverEntryId(snapshot.activeEntry.id) || !unsaved()) return;
+      started = true;
+      await gate.run(() => saveActiveDetails(snapshot, draftRef.current));
+    })();
+    const done = await Promise.race([
+      save.then(() => true),
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), STOP_WAIT_DEADLINE_MS); })
+    ]);
+    clearTimeout(timer);
+    late = true;
+    if (!done && !started && unsaved()) setTimerError(SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE);
+  }, [baseFor, saveActiveDetails, serverEntryId]);
+
   const activeEntryRestoreKey = timerDraftVersion(data?.activeEntry);
   useEffect(() => {
     restorePendingDetails();
@@ -1087,17 +1136,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     window.addEventListener("pageshow", onShow);
     document.addEventListener("visibilitychange", onShow);
     // Sign-out or a workspace switch: this session's kept text goes, and its later page exits
-    // write nothing (its token is from before the session ended; Codex r2 on #539).
+    // write nothing (its token is from before the session ended; Codex r2 on #539). Edits still
+    // waiting for autosave are saved first (stability audit WEB-UI-8).
     const unregister = onBeforeSessionChange(async () => {
       pendingOwner(dataRef.current);
       endPendingTimerDetailsSession();
+      await saveDetailsBeforeSessionChange();
     });
     return () => {
       window.removeEventListener("pageshow", onShow);
       document.removeEventListener("visibilitychange", onShow);
       unregister();
     };
-  }, [pendingOwner, restorePendingDetails]);
+  }, [pendingOwner, restorePendingDetails, saveDetailsBeforeSessionChange]);
 
   const updateActiveEntryFromCalendar = useCallback(async (
     input: ActiveEntryCompactMutationInput
@@ -1390,6 +1441,8 @@ const DETAILS_CONFLICT_MESSAGE = "This block was changed in another window or de
 const DETAILS_CONFLICT_SWITCH_MESSAGE = "Switched. The block you left was changed in another window or device, so your edit to it was not saved.";
 const DETAILS_CONFLICT_STOP_MESSAGE = "Stopped. This block was changed in another window or device, so it kept those details.";
 const DETAILS_FAILED_MESSAGE = "Block details were not saved. Your previous values were restored.";
+const START_TIMED_OUT_MESSAGE = "The block took too long to start. If it did start, it shows here.";
+const SESSION_CHANGE_DETAILS_UNSAVED_MESSAGE = "Your last edit to the running block was not saved before the change.";
 const DETAILS_FAILED_STOP_MESSAGE = "Stopped. Its latest details could not be saved, so it kept its previous details.";
 /** How long a Stop waits for a save already in flight before it goes ahead and carries the edits itself. */
 export const STOP_WAIT_DEADLINE_MS = 3_000;

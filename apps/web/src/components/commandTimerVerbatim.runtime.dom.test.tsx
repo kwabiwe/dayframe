@@ -1322,6 +1322,121 @@ describe("Stop and leaving the page never lose a typed description (stability au
   });
 });
 
+describe("a workspace switch saves the typed description first (stability audit WEB-UI-8)", () => {
+  it("text typed inside the autosave debounce is saved, versioned, before the switch goes ahead", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    expect(server.patches).toEqual([]);
+    await act(async () => { await beforeSessionChange(); });
+    expect(server.entry?.description).toBe("Fix bug more");
+    expect(server.sent[0]).toMatchObject({ description: "Fix bug more", expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(Object.keys(window.sessionStorage).filter((key) => key.startsWith("dayframe:pending-timer-details"))).toEqual([]);
+  });
+
+  it("a save that fails before the switch is shown, not silent", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    server.rejectPatches = true;
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    await act(async () => { await beforeSessionChange(); });
+    expect(server.patches).toHaveLength(1);
+    await screen.findByText(/were not saved/);
+  });
+
+  it("behind a save that never answers the switch waits at most the Stop deadline and says the edit was not saved", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    const startedAt = Date.now();
+    await act(async () => { await beforeSessionChange(); });
+    expect(Date.now() - startedAt).toBeLessThan(STOP_WAIT_DEADLINE_MS + 1_000);
+    await screen.findByText(/not saved before/);
+    // Nothing is sent for it after the switch went ahead.
+    await act(async () => { server.release?.(); });
+    await wait(300);
+    expect(descriptions()).toEqual(["Fix bug more"]);
+  });
+});
+
+describe("a hung Start or details save has a client deadline, so a Stop behind it goes ahead (stability audit WEB-UI-11)", () => {
+  const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
+  beforeEach(async () => {
+    const { setTimerRequestDeadlineForTests } = await import("@/lib/request-deadline");
+    setTimerRequestDeadlineForTests(400);
+  });
+  afterEach(async () => {
+    const { setTimerRequestDeadlineForTests } = await import("@/lib/request-deadline");
+    setTimerRequestDeadlineForTests();
+  });
+
+  it("a Start that never answers settles as failed and the Stop waiting behind it finishes", async () => {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.release).not.toBeNull());
+    await user.click(stopButton());
+    await screen.findByRole("button", { name: "Start a block" }, { timeout: 2_000 });
+    await screen.findByText(/took too long to start/);
+    expect(server.posts).toHaveLength(1);
+    expect(server.stops).toEqual([]);
+  });
+
+  it("a timed-out Start the server did commit is shown from the server, and nothing starts twice", async () => {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.release).not.toBeNull());
+    // The server commits the block; its answer never arrives.
+    server.entry = entry({ id: "started-1", description: "Plan", startedAt: new Date().toISOString() });
+    await screen.findByText(/took too long to start/, undefined, { timeout: 2_000 });
+    await waitFor(() => expect(shell.input.value).toBe("Plan"));
+    await screen.findByRole("button", { name: "Stop recording" }, { timeout: 2_000 });
+    expect(server.posts).toHaveLength(1);
+    // Stop now stops that real block.
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 2_000 });
+  });
+
+  it("behind an accepted Start's first details save that never answers, Stop stops the started block", async () => {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.release).not.toBeNull());
+    const releaseStart = server.release!;
+    server.release = null;
+    await user.keyboard(" x");
+    server.holdNext = "patch";
+    await act(async () => { releaseStart(); });
+    await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]), { timeout: 2_000 });
+    // A revert to that save's base: Stop may not go past a save without a version (Codex r4 #2 on
+    // #539), so before the deadline it waited for this one forever.
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 2_000 });
+    expect(server.completed?.description).toBe("Plan");
+    expect(server.posts).toHaveLength(1);
+  });
+});
+
 function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
   const entries = activeEntry ? [activeEntry] : [];
   return {
