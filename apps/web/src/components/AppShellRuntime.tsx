@@ -471,7 +471,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // The details save in flight (its block, the base it was sent against, and whether it travels
   // keepalive), and the outcome of the last one: a Stop that waited for it, or gave up waiting,
   // uses both (Codex r1 on #539).
-  const detailsInFlightRef = useRef<{ entryId: string; base: TimerDraft; keepalive: boolean; version: string | undefined } | null>(null);
+  const detailsInFlightRef = useRef<{
+    entryId: string;
+    base: TimerDraft;
+    fields: TimerDetailField[];
+    keepalive: boolean;
+    version: string | undefined;
+  } | null>(null);
   const detailsOutcomeRef = useRef<{ seq: number; entryId: string; conflict: boolean; error: string | null }>(
     { seq: 0, entryId: "", conflict: false, error: null }
   );
@@ -557,7 +563,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // back to the previous text) is newer and survives its acknowledgement (Codex r7).
     setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), activeEntry.id);
     const version = options.closing ? undefined : versionOf(activeEntry);
-    const inFlight = { entryId: activeEntry.id, base, keepalive: false, version };
+    const inFlight = { entryId: activeEntry.id, base, fields: patch.fields, keepalive: false, version };
     detailsInFlightRef.current = inFlight;
     // A save that settles after a Stop went ahead without it (`stopTimer`'s deadline) leaves the
     // stopped block alone: no rollback brings it back and its notice is the Stop's.
@@ -736,9 +742,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       while (gate.isActive()) {
         const left = deadlineAt - Date.now();
         const inFlight = detailsInFlightRef.current;
-        // Only past a save that carries a version: its late landing is then refused. A save without
-        // one (an accepted Start's first details save) is waited for (Codex r4 on #539).
-        if (left <= 0 && inFlight && inFlight.entryId === requested.id && serverEntryId(requested.id) && inFlight.version) {
+        // Only past a save whose late landing will be refused: one that carries a version, or one
+        // without (an accepted Start's first details save, a page-hide save the tab came back
+        // from) whose field-level check Stop's text breaks, because it differs from that save's
+        // base on a field it sent. A revert to that base behind a save without a version is waited
+        // for (Codex r4/r5 on #539).
+        const finalDraft = mergeTimerDraft(draftRef.current, input);
+        if (left <= 0 && inFlight && inFlight.entryId === requested.id && serverEntryId(requested.id)
+          && (inFlight.version || inFlight.fields.some((field) => !timerDetailEquivalent(field, finalDraft, inFlight.base)))) {
           bypassed = { base: inFlight.base };
           break;
         }
@@ -939,7 +950,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // behind a save still in flight, and a save in flight that is not keepalive. Nothing is kept for
   // a session that has ended (Codex r1–r3 on #539).
   useEffect(() => {
-    function flush() {
+    // `leaving`: the page is going away (pagehide), so the save carries no version (see
+    // `saveActiveDetails`). Going hidden the tab usually comes back: an ordinary, versioned save,
+    // so a Stop after its return can still go past it if it hangs (Codex r5 on #539).
+    function flush(leaving: boolean) {
       const snapshot = dataRef.current;
       const entry = snapshot?.activeEntry;
       const targetId = entry ? serverEntryId(entry.id) : null;
@@ -959,11 +973,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
           savedAt: Date.now()
         }, generation);
       }
-      if (patch && !mutationGateRef.current.isActive()) void updateActiveDetails(draft, { closing: true });
+      if (patch && !mutationGateRef.current.isActive()) void updateActiveDetails(draft, { closing: leaving });
     }
-    const onPageHide = () => flush();
+    const onPageHide = () => flush(true);
     const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") flush();
+      if (document.visibilityState === "hidden") flush(false);
     };
     window.addEventListener("pagehide", onPageHide);
     document.addEventListener("visibilitychange", onVisibilityChange);

@@ -1015,6 +1015,54 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.entry?.description).toBe("Changed elsewhere");
   });
 
+  const setVisibility = (state: "hidden" | "visible") => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+    try {
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    } finally {
+      visibility.mockRestore();
+    }
+  };
+
+  it("Codex r5: a save started by hiding the tab carries the version, so after returning Stop goes past it if it hangs", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    setVisibility("hidden");
+    expect(server.sent[0]).toMatchObject({ description: "Fix bug more", expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(keepalive()).toEqual([true]);
+    setVisibility("visible");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: STOP_WAIT_DEADLINE_MS + 1_500 });
+    expect(server.completed?.description).toBe("Fix bug more");
+    // The hung save lands late and is refused by its version.
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug more");
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r5: Stop behind a version-less page-hide save the tab came back from is bounded, and its text stays final", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent[0]).not.toHaveProperty("expectedUpdatedAt");
+    // Restored from the back/forward cache: the save still hangs.
+    act(() => { window.dispatchEvent(new Event("pageshow")); });
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: STOP_WAIT_DEADLINE_MS + 1_500 });
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug more later");
+    expect(server.stops).toEqual(["active"]);
+  });
+
   it("Codex r3 #1: a revert plus an activity change before Stop stays final when the hung save lands after Stop", async () => {
     const { input } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
