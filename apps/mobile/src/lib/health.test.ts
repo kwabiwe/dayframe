@@ -317,6 +317,26 @@ describe("HealthKit mapping", () => {
     expect(result).toMatchObject({partial:true});
   });
 
+  it("keeps journal maintenance out of background wakes and runs it at most daily in the foreground",async()=>{
+    const key=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
+    const aged=(id:string)=>{const at=new Date(Date.now()-30*86_400_000).toISOString();
+      captureDb.prepare("insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)").run(key,"sleep",id,"fixture",at,at,"{}",at);};
+    const raw=(id:string)=>captureDb.prepare("select sample_json from health_samples where sample_id=?").get(id)?.sample_json;
+    healthkitMocks.queryCategorySamplesWithAnchor.mockImplementation(async()=>({newAnchor:"empty",samples:[],deletedSamples:[]}));
+    await importHealthKitSleep();
+    aged("synthetic-a");
+    await importHealthKitSleep({background:true,fresh:true,maxPages:1});
+    expect(raw("synthetic-a")).toBe("{}");
+    await importHealthKitSleep();
+    expect(raw("synthetic-a")).toBe("{}");
+    vi.setSystemTime(new Date(Date.now()+86_400_000));
+    await importHealthKitSleep({background:true,fresh:true,maxPages:1});
+    expect(raw("synthetic-a")).toBe("{}");
+    await importHealthKitSleep();
+    expect(raw("synthetic-a")).toBeNull();
+    expect(healthkitMocks.queryCategorySamplesWithAnchor).toHaveBeenCalledTimes(5);
+  });
+
   it("exports a bounded Health debug snapshot without advancing anchors or leaking routes", async () => {
     asyncStore.set("dayframe.healthkit.sleepAnchor.v1", "sleep-anchor-before");
     asyncStore.set("dayframe.healthkit.workoutAnchor.v1", "workout-anchor-before");

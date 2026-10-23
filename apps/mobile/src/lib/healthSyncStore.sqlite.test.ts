@@ -7,7 +7,12 @@ import type {
   HealthJournalSample,
 } from "./healthSyncStore";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), failHandoff: false, failUpgrade: false }));
+const mocks = vi.hoisted(() => ({
+  open: vi.fn(),
+  failHandoff: false,
+  failUpgrade: false,
+  recorded: null as null | Array<{ sql: string; args: unknown[] }>,
+}));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "sha256" },
@@ -33,6 +38,7 @@ function adapter() {
     getAllAsync: async (sql: string, ...args: never[]) =>
       db.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => {
+      mocks.recorded?.push({ sql, args });
       if (mocks.failHandoff && sql.includes("handed_off_at=?"))
         throw new Error("crash after durable enqueue");
       return db.prepare(sql).run(...args);
@@ -56,6 +62,7 @@ beforeEach(async () => {
   vi.resetModules();
   mocks.failHandoff = false;
   mocks.failUpgrade = false;
+  mocks.recorded = null;
   db = new DatabaseSync(":memory:");
   mocks.open.mockResolvedValue(adapter());
   store = await import("./healthSyncStore");
@@ -465,5 +472,149 @@ describe("Health journal real SQLite boundaries", () => {
         .prepare("select workout_complete,sleep_complete from health_repairs")
         .get(),
     ).toMatchObject({ workout_complete: 0, sleep_complete: 0 });
+  });
+});
+
+// Synthetic journal at steady state: one night per day for 90 days, `perNight` source samples
+// each (40 ≈ one Watch, 120 ≈ three sources). IDs and times are synthetic; no Health values.
+function seedJournal(
+  nights: number,
+  perNight: number,
+  now: number,
+  protect: (night: number) => "acknowledged" | "pending" | "correction",
+) {
+  const key = store.healthOwnerKey(owner);
+  const sampleRow = db.prepare(
+    "insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)",
+  );
+  const episodeRow = db.prepare(
+    "insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at) values(?,?,?,?,?,?,?,?,?)",
+  );
+  const deliveryRow = db.prepare(
+    "insert into health_deliveries(owner_key,client_event_id,episode_id,revision,payload_json,state,created_at,acknowledged_at) values(?,?,?,?,?,?,?,?)",
+  );
+  const correctionRow = db.prepare(
+    "insert into health_source_corrections(owner_key,correction_id,episode_id,deleted_ids_json,created_at) values(?,?,?,?,?)",
+  );
+  db.exec("begin");
+  for (let night = 0; night < nights; night++) {
+    const at = new Date(now - (night + 1) * 86_400_000).toISOString();
+    const ids = Array.from(
+      { length: perNight },
+      (_, index) => `synthetic-${night}-${index}`,
+    );
+    for (const id of ids)
+      sampleRow.run(key, "sleep", id, "fixture", at, at, "{}", at);
+    const episodeId = `episode-${night}`;
+    episodeRow.run(key, "sleep", episodeId, "fixture", JSON.stringify(ids), at, at, "r", at);
+    const state = protect(night);
+    deliveryRow.run(
+      key,
+      `delivery-${night}`,
+      episodeId,
+      "r",
+      "{}",
+      state === "pending" ? "queued" : "acknowledged",
+      at,
+      state === "pending" ? null : at,
+    );
+    if (state === "correction")
+      correctionRow.run(key, `correction-${night}`, episodeId, "[]", at);
+  }
+  db.exec("commit");
+}
+
+describe("Health journal prune budget (stability audit health-1)", () => {
+  it("prunes 90 days of three-source journal with no per-row correlated subquery", async () => {
+    const now = Date.now();
+    seedJournal(90, 120, now, () => "acknowledged");
+    mocks.recorded = [];
+    const startedAt = performance.now();
+    await store.pruneAcknowledgedHealthCapture(owner, now);
+    const elapsed = performance.now() - startedAt;
+    const statements = mocks.recorded;
+    mocks.recorded = null;
+    expect(statements.length).toBeGreaterThanOrEqual(7);
+    // Deterministic bound: a correlated subquery is re-run for every journal row (quadratic in
+    // journal age); each statement may only build its protected set once.
+    const correlated = statements.flatMap(({ sql, args }) =>
+      (
+        db.prepare(`explain query plan ${sql}`).all(...(args as never[])) as Array<{
+          detail: string;
+        }>
+      )
+        .filter((row) => /CORRELATED/.test(row.detail))
+        .map((row) => `${sql.replace(/\s+/g, " ").slice(0, 60)} → ${row.detail}`),
+    );
+    expect(correlated).toEqual([]);
+    // Loose wall-clock backstop only (measured 6.5 s before the fix, a few ms after).
+    expect(elapsed).toBeLessThan(1_000);
+    expect(
+      Number(
+        db.prepare("select count(*) n from health_samples where sample_json is not null").get()!.n,
+      ),
+    ).toBe(14 * 120);
+  }, 30_000);
+
+  it("never prunes members of an unacknowledged delivery or unresolved correction, however old", async () => {
+    const now = Date.now();
+    // Nights 0-119: every 10th still queued, every 10th+5 corrected, the rest acknowledged.
+    seedJournal(120, 4, now, (night) =>
+      night % 10 === 0 ? "pending" : night % 10 === 5 ? "correction" : "acknowledged",
+    );
+    await store.pruneAcknowledgedHealthCapture(owner, now);
+    const protectedNights = Array.from({ length: 120 }, (_, night) => night).filter(
+      (night) => night % 10 === 0 || night % 10 === 5,
+    );
+    for (const night of protectedNights) {
+      const rows = db
+        .prepare("select sample_json from health_samples where sample_id like ?")
+        .all(`synthetic-${night}-%`) as Array<{ sample_json: string | null }>;
+      expect(rows).toHaveLength(4);
+      expect(rows.every((row) => row.sample_json !== null)).toBe(true);
+      expect(
+        db.prepare("select payload_json from health_deliveries where episode_id=?").get(`episode-${night}`),
+      ).toMatchObject({ payload_json: "{}" });
+      expect(
+        db.prepare("select count(*) n from health_episodes where episode_id=?").get(`episode-${night}`)!.n,
+      ).toBe(1);
+    }
+    // Acknowledged nights: raw nulled after 14 days, everything gone after 90.
+    expect(
+      db.prepare("select sample_json from health_samples where sample_id='synthetic-21-0'").get(),
+    ).toMatchObject({ sample_json: null });
+    expect(
+      db.prepare("select count(*) n from health_samples where sample_id like 'synthetic-101-%'").get()!.n,
+    ).toBe(0);
+    expect(
+      db.prepare("select count(*) n from health_episodes where episode_id='episode-101'").get()!.n,
+    ).toBe(0);
+    expect(
+      db.prepare("select sample_json from health_samples where sample_id='synthetic-3-0'").get(),
+    ).toMatchObject({ sample_json: "{}" });
+  });
+
+  it("runs the foreground maintenance prune at most once a day per owner", async () => {
+    const now = Date.now();
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now)).toBe(true);
+    seedJournal(30, 2, now, () => "acknowledged");
+    const raw = () =>
+      Number(db.prepare("select count(*) n from health_samples where sample_json is not null").get()!.n);
+    expect(raw()).toBe(60);
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + 3_600_000)).toBe(false);
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + store.HEALTH_PRUNE_INTERVAL_MS - 1),
+    ).toBe(false);
+    expect(raw()).toBe(60);
+    // Another owner has its own schedule.
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue({ ...owner, userId: "other" }, now + 1),
+    ).toBe(true);
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + store.HEALTH_PRUNE_INTERVAL_MS),
+    ).toBe(true);
+    expect(raw()).toBe(26);
+    // A clock set back before the last run does not postpone maintenance.
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now - 86_400_000)).toBe(true);
   });
 });

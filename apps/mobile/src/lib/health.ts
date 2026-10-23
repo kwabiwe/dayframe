@@ -48,7 +48,7 @@ import {
   completeSkippedHealthRepairKind,
   commitHealthCapturePage,
   handoffHealthEvents,
-  pruneAcknowledgedHealthCapture,
+  pruneAcknowledgedHealthCaptureIfDue,
   recordHealthQueryFailure,
   type HealthCaptureOwner,
   type HealthCaptureKind,
@@ -326,6 +326,8 @@ export type HealthCaptureOptions = {
   maxPages?: number;
   /** A background wake's capture: starts after the call instead of joining one already running. */
   fresh?: boolean;
+  /** Runs inside a background wake: skips journal maintenance (the at-most-daily prune). */
+  background?: boolean;
   repairWindow?: { startedAt: string; stoppedAt: string };
 };
 const HEALTH_QUERY_PAGE_SIZE = 250;
@@ -398,7 +400,9 @@ async function captureHealthKindUnsafe(
   }
   const healthkit = await loadHealthKit();
   const mappings = await getHealthAutoLogMappings();
-  await pruneAcknowledgedHealthCapture(owner);
+  // Journal maintenance is foreground-owned and at most daily: a background wake's bounded
+  // budget goes to capture and handoff only.
+  if (!options.background) await pruneAcknowledgedHealthCaptureIfDue(owner);
   let importedCount = 0,
     capturedCount = 0,
     deletionCount = 0,
