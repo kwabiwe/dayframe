@@ -791,6 +791,10 @@ export async function logout() {
       clearShortcutCatalog();
     }).catch(() => undefined);
     requireCurrent();
+    // Recorded before logout completes, so the Health journal expiry it starts below is retried at
+    // the next launch, signed out or not, if it fails or the app stops first (Codex r1 on #549).
+    await import("./healthSignOut").then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending());
+    requireCurrent();
     if (activeOwner) await deactivateMobileAccount(activeOwner);
     accountDeactivated = true;
     requireCurrent();
@@ -799,7 +803,8 @@ export async function logout() {
     // The evening Review reminder belongs to the account that just left.
     void import("./reviewNudge").then(({ cancelReviewNudgeForLogout }) => cancelReviewNudgeForLogout()).catch(() => undefined);
     // So do its Health journal and HealthKit's background wakes (health-3, health-4). Unsettled
-    // Health deliveries stay with the durable queue that still holds them.
+    // Health deliveries stay with the durable queue that still holds them; the recorded expiry
+    // survives a failure here.
     void import("./healthSignOut").then(({ endHealthCaptureAfterLogout }) => endHealthCaptureAfterLogout()).catch(() => undefined);
   } finally {
     unsubscribe();
@@ -1017,9 +1022,23 @@ export async function removeQueuedEvent(localId: string) {
     if (isRefusedTimerStart(target) && !await settleRefusedTimerStart(refusedTimerStartOf(target, owner))) {
       return false;
     }
+    await settleDiscardedHealthEvents([target]);
     await writeAllQueue(all.filter((item) => item !== target));
     return true;
   });
+}
+
+/**
+ * A Health event the person removes from the queue is settled in its Health journal first
+ * (`discarded`), so its payload and episode stop being protected as unsettled work (Codex r1 on #549).
+ * A failure leaves the queue unchanged; Clear can be tried again.
+ */
+async function settleDiscardedHealthEvents(items: QueuedEvent[]) {
+  const health = items.filter((item) =>
+    item.healthOwner && (item.source === "health_sleep" || item.source === "health_workout"));
+  if (!health.length) return;
+  const { discardQueuedHealthDeliveries } = await import("./healthSyncStore");
+  await discardQueuedHealthDeliveries(health.map((item) => ({ owner: item.healthOwner!, clientEventId: item.localId })));
 }
 
 export function subscribeActivityQueue(listener: () => void) {
@@ -1089,6 +1108,7 @@ export async function clearFailedQueuedEvents() {
     }
     const remaining = queue.filter((item) => !isClearableFailedEvent(item) || held.has(item));
     const removed = queue.filter((item) => isClearableFailedEvent(item) && !held.has(item));
+    await settleDiscardedHealthEvents(removed);
     await writeAllQueue([
       ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining

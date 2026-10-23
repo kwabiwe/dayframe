@@ -39,6 +39,7 @@ import {
 } from "./healthCaptureLifecycle";
 import { requireBackendIdentity } from "./backendIdentity";
 import {
+  currentSessionGeneration,
   readOwnedAuthenticatedSessionSnapshot,
   isAuthenticatedSessionSnapshotCurrent,
 } from "./secure-session";
@@ -55,7 +56,10 @@ import {
   type HealthJournalSample,
   type HealthEpisodeDraft,
 } from "./healthSyncStore";
-import { expireSignedOutHealthJournalsOncePerLaunch } from "./healthSignOut";
+import {
+  enableHealthBackgroundDeliveryForSession,
+  expireSignedOutHealthJournalsOncePerLaunch,
+} from "./healthSignOut";
 
 const HEALTHKIT_SLEEP_TYPE = "HKCategoryTypeIdentifierSleepAnalysis";
 const HEALTHKIT_WORKOUT_TYPE = "HKWorkoutTypeIdentifier";
@@ -300,6 +304,8 @@ let libraryBackgroundManagerRetired = false;
 
 export async function configureHealthKitAutomaticSync() {
   ensureIos();
+  // Enable is bound to the session that asked: a logout while this runs keeps delivery off (Codex r1 on #549).
+  const generation = currentSessionGeneration();
   const healthkit = await loadHealthKit();
   const available = await Promise.resolve(healthkit.isHealthDataAvailable());
   if (!available) return false;
@@ -312,7 +318,7 @@ export async function configureHealthKitAutomaticSync() {
     await Promise.resolve(healthkit.clearBackgroundTypes?.()).catch(() => undefined);
   }
   const native = await import("../../modules/dayframe-health-background");
-  const enabled = await native.setEnabled(true).catch(() => false);
+  const enabled = await enableHealthBackgroundDeliveryForSession(generation, native).catch(() => false);
   await AsyncStorage.setItem(
     HEALTHKIT_BACKGROUND_DELIVERY_KEY,
     enabled ? "true" : "false",

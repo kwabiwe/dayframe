@@ -195,7 +195,7 @@ export async function commitHealthCapturePage(input: {
       }>(
         `select
         (select count(*) from health_samples where owner_key=?) as samples,
-        (select count(*) from health_deliveries where owner_key=? and state!='acknowledged') as pending`,
+        (select count(*) from health_deliveries where owner_key=? and state in ('pending_handoff','queued')) as pending`,
         key,
         key,
       );
@@ -677,6 +677,38 @@ export async function keepRecordedHealthTime(
   });
 }
 
+/**
+ * Settles queued Health events the person removed from the activity queue (Clear on events the server
+ * permanently refused) as `discarded`: the payload is dropped at once and the row is no longer
+ * unsettled work, so prune and signed-out expiry stop protecting it and its episode (Codex r1 on #549).
+ * Only `queued` rows change: an event still waiting for handoff, or already acknowledged, is not one
+ * the queue held. Runs before the queue write, so a crash in between leaves the event queued and its
+ * later acknowledgement still lands (acknowledgement overwrites `discarded`).
+ */
+export async function discardQueuedHealthDeliveries(
+  items: Array<{ owner: HealthCaptureOwner; clientEventId: string }>,
+) {
+  if (!items.length) return 0;
+  const db = await database();
+  return serial(async () => {
+    let changed = 0;
+    const now = new Date().toISOString();
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      for (const item of items)
+        changed += (
+          await transaction.runAsync(
+            `update health_deliveries set state='discarded',payload_json=null,acknowledged_at=?
+            where owner_key=? and client_event_id=? and state='queued'`,
+            now,
+            healthOwnerKey(item.owner),
+            item.clientEventId,
+          )
+        ).changes;
+    });
+    return changed;
+  });
+}
+
 /** Journal maintenance runs at most this often per owner (see `pruneAcknowledgedHealthCaptureIfDue`). */
 export const HEALTH_PRUNE_INTERVAL_MS = 86_400_000;
 
@@ -752,7 +784,7 @@ async function pruneOwnerJournal(
   ).toISOString();
   // Episodes with an unresolved correction, and episodes with any unacknowledged delivery.
   const corrected = `select c.episode_id from health_source_corrections c where c.owner_key=? and c.state='needs_attention'`;
-  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state!='acknowledged'`;
+  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state in ('pending_handoff','queued')`;
   // Their source members, gathered once: one json_each pass over the protecting episodes only.
   const protectedSamples = `select member.value from health_episodes e,json_each(e.sample_ids_json) member
       where e.owner_key=? and member.value is not null
@@ -782,7 +814,7 @@ async function pruneOwnerJournal(
     key,
   );
   await transaction.runAsync(
-    `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
+    `delete from health_deliveries where owner_key=? and state in ('acknowledged','discarded') and acknowledged_at<?
       and episode_id not in (${corrected})`,
     key,
     provenanceBefore,
@@ -809,22 +841,31 @@ async function pruneOwnerJournal(
   );
 }
 
+/** Who keeps their journal, from the session authority; `isCurrent` must hold until the deletion commits. */
+export type HealthJournalKeeper = {
+  keep: HealthCaptureOwner | null;
+  isCurrent: () => boolean;
+};
+
 /**
  * Removes the Health journal of every account except `resolveKeep()`'s (stability audit 22 Oct 2026,
  * health-3): a signed-out or replaced account's raw samples, payloads, episodes and checkpoints are
- * otherwise never pruned, because maintenance runs only for the account capturing. The kept owner is
- * read inside the journal's serial lane, so a sign-in that lands first is never touched; with no
- * signed-in account (`null`) every owner is expired. Unacknowledged deliveries are durable work the
- * outbox still holds (an acknowledgement must find its row), so they, their episodes and those
- * episodes' unresolved corrections stay until that account settles them. Returns the rows deleted.
+ * otherwise never pruned, because maintenance runs only for the account capturing. The keeper is read
+ * inside the journal's serial lane and rechecked before commit, so a sign-in that lands first is never
+ * touched; with no signed-in account (`keep: null`) every owner is expired, and a `null` keeper (an
+ * account hand-over in progress, or a session that cannot be read) defers it. Unacknowledged deliveries
+ * are durable work the outbox still holds (an acknowledgement must find its row), so they, their
+ * episodes and those episodes' unresolved corrections stay until that account settles them; discarded
+ * and acknowledged ones go. Returns the rows deleted, or null when deferred.
  */
 export async function expireInactiveHealthOwners(
-  resolveKeep: () => Promise<HealthCaptureOwner | null>,
-) {
+  resolveKeep: () => Promise<HealthJournalKeeper | null>,
+): Promise<number | null> {
   const db = await database();
   return serial(async () => {
-    const keep = await resolveKeep();
-    const keepKey = keep ? healthOwnerKey(keep) : null;
+    const keeper = await resolveKeep();
+    if (!keeper || !keeper.isCurrent()) return null;
+    const keepKey = keeper.keep ? healthOwnerKey(keeper.keep) : null;
     let deleted = 0;
     await db.withExclusiveTransactionAsync(async (transaction) => {
       for (const table of [
@@ -842,7 +883,7 @@ export async function expireInactiveHealthOwners(
         ).changes;
       deleted += (
         await transaction.runAsync(
-          "delete from health_deliveries where owner_key is not ? and state='acknowledged'",
+          "delete from health_deliveries where owner_key is not ? and state in ('acknowledged','discarded')",
           keepKey,
         )
       ).changes;
@@ -861,7 +902,13 @@ export async function expireInactiveHealthOwners(
           keepKey,
         )
       ).changes;
+      if (!keeper.isCurrent()) throw new HealthJournalKeeperChanged();
     });
     return deleted;
+  }).catch((error) => {
+    if (error instanceof HealthJournalKeeperChanged) return null;
+    throw error;
   });
 }
+
+class HealthJournalKeeperChanged extends Error {}

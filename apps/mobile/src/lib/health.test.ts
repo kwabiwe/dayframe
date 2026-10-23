@@ -16,7 +16,9 @@ vi.mock("expo-sqlite",()=>({openDatabaseAsync:async()=>{
   };return adapter;
 }}));
 vi.mock("./backendIdentity",()=>({requireBackendIdentity:()=>"staging-fixture"}));
-vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true}));
+vi.mock("./secure-session",()=>({readOwnedAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{}}),isAuthenticatedSessionSnapshotCurrent:()=>true,
+  currentSessionGeneration:()=>1,subscribeAuthenticatedSession:()=>()=>undefined,
+  readAuthenticatedSessionSnapshot:async()=>({status:"authenticated",snapshot:{generation:1,owner:{userId:"health-user",workspaceId:"health-workspace"},token:"synthetic"}})}));
 afterAll(()=>captureDb.close());
 afterEach(()=>vi.useRealTimers());
 
@@ -63,6 +65,7 @@ vi.mock("./mobileAccount", async (importOriginal) => {
   return {
     ...actual,
     readActiveMobileAccount: async () => ({ userId: "health-user", workspaceId: "health-workspace" }),
+    getActiveMobileAccountSnapshot: () => ({ userId: "health-user", workspaceId: "health-workspace" }),
   };
 });
 vi.mock("./mobile-network", () => ({StaleMobileSessionResponseError: class extends Error {}}));
@@ -340,6 +343,8 @@ describe("HealthKit mapping", () => {
   it("expires a signed-out account's journal at a launch's first foreground capture, never in a background wake (health-3)",async()=>{
     const {__resetHealthSignOutForTests}=await import("./healthSignOut");
     __resetHealthSignOutForTests();
+    // Opens the journal (and its schema) here, so the test does not depend on an earlier one.
+    await (await import("./healthSyncStore")).getHealthCheckpoint({backendId:"staging-fixture",workspaceId:"health-workspace",userId:"health-user"},"sleep");
     const departed=JSON.stringify(["staging-fixture","health-workspace","departed-user"]);
     const active=JSON.stringify(["staging-fixture","health-workspace","health-user"]);
     const insert=(key:string,id:string)=>{const at=new Date().toISOString();

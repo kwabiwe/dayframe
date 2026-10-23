@@ -524,6 +524,121 @@ function seedJournal(
   db.exec("commit");
 }
 
+describe("Health journal of signed-out accounts (stability audit health-3)", () => {
+  const ownerKeys = () =>
+    db
+      .prepare(
+        `select owner_key from health_checkpoints union select owner_key from health_samples
+         union select owner_key from health_episodes union select owner_key from health_deliveries
+         union select owner_key from health_query_runs order by 1`,
+      )
+      .all()
+      .map((row) => String(row.owner_key));
+  const rowsOf = (who: HealthCaptureOwner, table: string) =>
+    Number(
+      db
+        .prepare(`select count(*) n from ${table} where owner_key=?`)
+        .get(store.healthOwnerKey(who))!.n,
+    );
+  async function acknowledgeAll(who: HealthCaptureOwner) {
+    const rows = db
+      .prepare("select client_event_id id from health_deliveries where owner_key=? and state!='acknowledged'")
+      .all(store.healthOwnerKey(who));
+    for (const row of rows) {
+      const id = String(row.id);
+      await store.recordHealthAcknowledgement(who, id, { clientEventId: id, eventId: `event-${id}`, processingDisposition: "open" });
+    }
+  }
+  const keeper = (keep: HealthCaptureOwner | null) => async () => ({ keep, isCurrent: () => true });
+  const departed = { ...owner, userId: "departed" };
+  const unsettled = { ...owner, userId: "unsettled" };
+  const signedIn = { ...owner, userId: "signed-in" };
+
+  it("deletes departed accounts' journals, keeps the signed-in account's and every unacknowledged delivery", async () => {
+    await page([sample("departed-1")], { owner: departed });
+    await acknowledgeAll(departed);
+    await page([sample("unsettled-1")], { owner: unsettled });
+    await page([sample("signed-in-1")], { owner: signedIn });
+    await acknowledgeAll(signedIn);
+    const signedInRows = ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
+      .map((table) => rowsOf(signedIn, table));
+    const unsettledPayload = db
+      .prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
+      .get(store.healthOwnerKey(unsettled))!;
+    expect(String(unsettledPayload.payload_json)).toContain("unsettled-1");
+
+    expect(await store.expireInactiveHealthOwners(keeper(signedIn))).toBeGreaterThan(0);
+
+    // The departed account leaves nothing behind: no raw sample, payload, episode or checkpoint.
+    for (const table of ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"])
+      expect(rowsOf(departed, table), table).toBe(0);
+    // The signed-in account is untouched.
+    expect(["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
+      .map((table) => rowsOf(signedIn, table))).toEqual(signedInRows);
+    // Unacknowledged work stays with its episode, so the queued event's acknowledgement still lands.
+    expect(db.prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
+      .get(store.healthOwnerKey(unsettled))).toEqual(unsettledPayload);
+    expect(rowsOf(unsettled, "health_episodes")).toBe(1);
+    expect(rowsOf(unsettled, "health_samples")).toBe(0);
+    expect(rowsOf(unsettled, "health_checkpoints")).toBe(0);
+    const id = String(unsettledPayload.client_event_id);
+    await store.recordHealthAcknowledgement(unsettled, id, { clientEventId: id, eventId: "event", processingDisposition: "open" });
+
+    // Signed out entirely: every account's settled journal goes.
+    await page([sample("unsettled-2", 60_000)], { owner: unsettled });
+    expect(await store.expireInactiveHealthOwners(keeper(null))).toBeGreaterThan(0);
+    expect(rowsOf(signedIn, "health_samples") + rowsOf(signedIn, "health_deliveries") + rowsOf(signedIn, "health_checkpoints")).toBe(0);
+    expect(ownerKeys()).toEqual([store.healthOwnerKey(unsettled)]);
+    expect(db.prepare("select state from health_deliveries").all().map((row) => row.state)).toEqual(["pending_handoff"]);
+  });
+
+  it("defers while the keeper cannot be settled, and rolls back when it changes before commit (Codex r1 on #549)", async () => {
+    await page([sample("departed-1")], { owner: departed });
+    await acknowledgeAll(departed);
+    expect(await store.expireInactiveHealthOwners(async () => null)).toBeNull();
+    let current = true;
+    expect(await store.expireInactiveHealthOwners(async () => ({
+      keep: signedIn,
+      isCurrent: () => { const was = current; current = false; return was; },
+    }))).toBeNull();
+    expect(rowsOf(departed, "health_samples")).toBe(1);
+    expect(rowsOf(departed, "health_deliveries")).toBe(1);
+  });
+
+  it("settles a queued event removed from the activity queue as discarded, keeping work still owed (Codex r1 on #549)", async () => {
+    await page([sample("refused-1")], { owner: departed });
+    await store.handoffHealthEvents(departed, (async () => undefined) as never, () => true);
+    await page([sample("waiting-1", 60_000)], { owner: unsettled });
+    const refused = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(departed))!.id);
+    const waiting = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(unsettled))!.id);
+    // Only a queued row is settled: one still waiting for handoff is not what the queue removed.
+    expect(await store.discardQueuedHealthDeliveries([
+      { owner: departed, clientEventId: refused },
+      { owner: unsettled, clientEventId: waiting },
+    ])).toBe(1);
+    expect(db.prepare("select state,payload_json from health_deliveries where client_event_id=?").get(refused))
+      .toEqual({ state: "discarded", payload_json: null });
+    // Prune no longer protects its samples; signed-out expiry deletes it and its episode.
+    await store.pruneAcknowledgedHealthCapture(departed, Date.now() + 20 * 86_400_000);
+    expect(db.prepare("select sample_json from health_samples where sample_id='refused-1'").get()!.sample_json).toBeNull();
+    expect(await store.expireInactiveHealthOwners(keeper(null))).toBeGreaterThan(0);
+    expect(rowsOf(departed, "health_deliveries") + rowsOf(departed, "health_episodes")).toBe(0);
+    expect(db.prepare("select state from health_deliveries where client_event_id=?").get(waiting)!.state).toBe("pending_handoff");
+    expect(rowsOf(unsettled, "health_episodes")).toBe(1);
+  });
+
+  it("reads the account to keep when its turn in the journal's lane comes, not when it was asked", async () => {
+    await page([sample("new-account")], { owner: signedIn });
+    let active: HealthCaptureOwner | null = null;
+    // Asked while signed out; a sign-in lands before the expiry's turn and keeps its journal.
+    const expiry = store.expireInactiveHealthOwners(async () => ({ keep: active, isCurrent: () => true }));
+    active = signedIn;
+    await expiry;
+    expect(rowsOf(signedIn, "health_samples")).toBe(1);
+    expect(rowsOf(signedIn, "health_checkpoints")).toBe(1);
+  });
+});
+
 describe("Health journal prune budget (stability audit health-1)", () => {
   it("prunes 90 days of three-source journal with no per-row correlated subquery", async () => {
     const now = Date.now();
@@ -656,84 +771,5 @@ describe("Health journal prune budget (stability audit health-1)", () => {
     expect(raw()).toBe(26);
     // A clock set back before the last run does not postpone maintenance.
     expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now - 86_400_000)).toBe(true);
-  });
-});
-
-describe("Health journal of signed-out accounts (stability audit health-3)", () => {
-  const ownerKeys = () =>
-    db
-      .prepare(
-        `select owner_key from health_checkpoints union select owner_key from health_samples
-         union select owner_key from health_episodes union select owner_key from health_deliveries
-         union select owner_key from health_query_runs order by 1`,
-      )
-      .all()
-      .map((row) => String(row.owner_key));
-  const rowsOf = (who: HealthCaptureOwner, table: string) =>
-    Number(
-      db
-        .prepare(`select count(*) n from ${table} where owner_key=?`)
-        .get(store.healthOwnerKey(who))!.n,
-    );
-  async function acknowledgeAll(who: HealthCaptureOwner) {
-    const rows = db
-      .prepare("select client_event_id id from health_deliveries where owner_key=? and state!='acknowledged'")
-      .all(store.healthOwnerKey(who));
-    for (const row of rows) {
-      const id = String(row.id);
-      await store.recordHealthAcknowledgement(who, id, { clientEventId: id, eventId: `event-${id}`, processingDisposition: "open" });
-    }
-  }
-  const departed = { ...owner, userId: "departed" };
-  const unsettled = { ...owner, userId: "unsettled" };
-  const signedIn = { ...owner, userId: "signed-in" };
-
-  it("deletes departed accounts' journals, keeps the signed-in account's and every unacknowledged delivery", async () => {
-    await page([sample("departed-1")], { owner: departed });
-    await acknowledgeAll(departed);
-    await page([sample("unsettled-1")], { owner: unsettled });
-    await page([sample("signed-in-1")], { owner: signedIn });
-    await acknowledgeAll(signedIn);
-    const signedInRows = ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
-      .map((table) => rowsOf(signedIn, table));
-    const unsettledPayload = db
-      .prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
-      .get(store.healthOwnerKey(unsettled))!;
-    expect(String(unsettledPayload.payload_json)).toContain("unsettled-1");
-
-    expect(await store.expireInactiveHealthOwners(async () => signedIn)).toBeGreaterThan(0);
-
-    // The departed account leaves nothing behind: no raw sample, payload, episode or checkpoint.
-    for (const table of ["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"])
-      expect(rowsOf(departed, table), table).toBe(0);
-    // The signed-in account is untouched.
-    expect(["health_checkpoints", "health_samples", "health_episodes", "health_deliveries", "health_query_runs"]
-      .map((table) => rowsOf(signedIn, table))).toEqual(signedInRows);
-    // Unacknowledged work stays with its episode, so the queued event's acknowledgement still lands.
-    expect(db.prepare("select client_event_id,payload_json from health_deliveries where owner_key=?")
-      .get(store.healthOwnerKey(unsettled))).toEqual(unsettledPayload);
-    expect(rowsOf(unsettled, "health_episodes")).toBe(1);
-    expect(rowsOf(unsettled, "health_samples")).toBe(0);
-    expect(rowsOf(unsettled, "health_checkpoints")).toBe(0);
-    const id = String(unsettledPayload.client_event_id);
-    await store.recordHealthAcknowledgement(unsettled, id, { clientEventId: id, eventId: "event", processingDisposition: "open" });
-
-    // Signed out entirely: every account's settled journal goes.
-    await page([sample("unsettled-2", 60_000)], { owner: unsettled });
-    expect(await store.expireInactiveHealthOwners(async () => null)).toBeGreaterThan(0);
-    expect(rowsOf(signedIn, "health_samples") + rowsOf(signedIn, "health_deliveries") + rowsOf(signedIn, "health_checkpoints")).toBe(0);
-    expect(ownerKeys()).toEqual([store.healthOwnerKey(unsettled)]);
-    expect(db.prepare("select state from health_deliveries").all().map((row) => row.state)).toEqual(["pending_handoff"]);
-  });
-
-  it("reads the account to keep when its turn in the journal's lane comes, not when it was asked", async () => {
-    await page([sample("new-account")], { owner: signedIn });
-    let active: HealthCaptureOwner | null = null;
-    // Asked while signed out; a sign-in lands before the expiry's turn and keeps its journal.
-    const expiry = store.expireInactiveHealthOwners(async () => active);
-    active = signedIn;
-    await expiry;
-    expect(rowsOf(signedIn, "health_samples")).toBe(1);
-    expect(rowsOf(signedIn, "health_checkpoints")).toBe(1);
   });
 });
