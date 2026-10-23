@@ -317,14 +317,96 @@ enum DayframeMetricKitSummary {
 }
 
 /// Saved in the app's own Application Support (never the App Group, never backed up), bounded.
+/// One day of MetricKit's daily metrics, as counts only (location v4 step 3, design §10): how long
+/// iOS kept location at each accuracy, background and foreground time, and CPU. Never a position.
+struct DayframeEnergyDay: Codable, Equatable {
+  let begin: Date
+  let end: Date
+  let appVersion: String?
+  /// Seconds at best accuracy (best plus best-for-navigation): the budget's "best accuracy" time.
+  let bestAccuracySeconds: Double
+  /// Seconds at 10 m, 100 m, 1 km and 3 km accuracy.
+  let tenMetresSeconds: Double
+  let hundredMetresSeconds: Double
+  let kilometreSeconds: Double
+  let threeKilometresSeconds: Double
+  let foregroundSeconds: Double
+  let backgroundSeconds: Double
+  let backgroundLocationSeconds: Double
+  let cpuSeconds: Double
+}
+
+/// Sync help's line: the averages over the last days reported, and the design's best-accuracy budget.
+struct DayframeEnergySummary: Equatable {
+  /// All of Dayframe's location work under 20 minutes a day at best accuracy (design §10).
+  static let bestAccuracyBudgetSeconds = 20.0 * 60
+  static let window = 7
+
+  let days: Int
+  let bestAccuracySecondsPerDay: Double
+  let backgroundLocationSecondsPerDay: Double
+  let backgroundSecondsPerDay: Double
+  let cpuSecondsPerDay: Double
+  let daysOverBudget: Int
+
+  /// Over the newest `window` days; nil with none.
+  init?(_ allDays: [DayframeEnergyDay]) {
+    let days = Array(allDays.sorted { $0.begin < $1.begin }.suffix(Self.window))
+    guard !days.isEmpty else { return nil }
+    let count = Double(days.count)
+    self.days = days.count
+    bestAccuracySecondsPerDay = days.reduce(0) { $0 + $1.bestAccuracySeconds } / count
+    backgroundLocationSecondsPerDay = days.reduce(0) { $0 + $1.backgroundLocationSeconds } / count
+    backgroundSecondsPerDay = days.reduce(0) { $0 + $1.backgroundSeconds } / count
+    cpuSecondsPerDay = days.reduce(0) { $0 + $1.cpuSeconds } / count
+    daysOverBudget = days.filter { $0.bestAccuracySeconds > Self.bestAccuracyBudgetSeconds }.count
+  }
+
+  var dictionary: [String: Any] {
+    [
+      "days": days,
+      "bestAccuracySecondsPerDay": bestAccuracySecondsPerDay,
+      "backgroundLocationSecondsPerDay": backgroundLocationSecondsPerDay,
+      "backgroundSecondsPerDay": backgroundSecondsPerDay,
+      "cpuSecondsPerDay": cpuSecondsPerDay,
+      "daysOverBudget": daysOverBudget,
+      "bestAccuracyBudgetSeconds": Self.bestAccuracyBudgetSeconds
+    ]
+  }
+}
+
 struct DayframeDiagnosticsStore {
   static let maxStalls = 40
   static let maxReports = 12
   static let maxReportBytes = 400_000
+  /// Daily energy metrics kept on the iPhone: four weeks, enough to compare a week before and after.
+  static let maxEnergyDays = 30
 
   let directory: URL
 
   private var stallsURL: URL { directory.appendingPathComponent("stalls-v1.json", isDirectory: false) }
+  private var energyURL: URL { directory.appendingPathComponent("energy-v1.json", isDirectory: false) }
+
+  /// Oldest first.
+  func energyDays() -> [DayframeEnergyDay] {
+    guard
+      let data = try? Data(contentsOf: energyURL),
+      let days = try? Self.decoder.decode([DayframeEnergyDay].self, from: data)
+    else {
+      return []
+    }
+    return days
+  }
+
+  /// Saves a day once (a re-delivered payload for the same day replaces it), keeping the newest 30.
+  @discardableResult
+  func saveEnergyDay(_ day: DayframeEnergyDay) -> Bool {
+    var days = energyDays().filter { $0.begin != day.begin }
+    days.append(day)
+    days.sort { $0.begin < $1.begin }
+    guard prepareDirectory(), let data = try? Self.encoder.encode(Array(days.suffix(Self.maxEnergyDays))) else { return false }
+    return (try? data.write(to: energyURL, options: .atomic)) != nil
+  }
 
   func stalls() -> [DayframeStallRecord] {
     guard
@@ -398,6 +480,7 @@ struct DayframeDiagnosticsStore {
 
   func clear() {
     try? FileManager.default.removeItem(at: stallsURL)
+    try? FileManager.default.removeItem(at: energyURL)
     for url in reportURLs() { try? FileManager.default.removeItem(at: url) }
   }
 

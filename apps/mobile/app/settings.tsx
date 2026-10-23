@@ -2,6 +2,7 @@ import { readOwnedAuthenticatedSessionSnapshot, isAuthenticatedSessionSnapshotCu
 import { mobileBuildDiagnostics } from "@/lib/mobileBuildDiagnostics";
 import { supportQueueDiagnostics } from "@/lib/supportSyncDiagnostics";
 import { freezeDiagnosticsSummary, supportFreezeDiagnostics, type NativeDiagnostics, type NativeDiagnosticsSnapshot } from "@/lib/stallWatchdog";
+import { energySummaryLine, supportEnergyDiagnostics } from "@/lib/energyMetrics";
 import { getActiveMobileAccountSnapshot, readActiveMobileAccount, mobileAccountOwnersEqual, subscribeActiveMobileAccount, type MobileAccountOwner } from "@/lib/mobileAccount";
 import { afterSettingsTransition, createFocusedTransitionReady, type TransitionGate } from "@/lib/settingsTransition";
 import {
@@ -1712,6 +1713,7 @@ export default function SettingsScreen() {
         quickStart: readQuickStartDiagnostics(),
         // Pauses of 3 s or more (thread, times, fixed task labels) and MetricKit hang/crash reports.
         freezes: supportFreezeDiagnostics(freezes),
+        locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays),
         manualSync: manual,
         selectedDate: data?.dateRange?.selectedDate ?? null,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2901,6 +2903,14 @@ export default function SettingsScreen() {
                   testID="sync-help-freezes"
                   theme={theme}
                   title="Pauses and crashes"
+                />
+                <SettingsBlockRow
+                  // MetricKit's daily counts (location v4 step 3): kept on this iPhone, included in
+                  // the support details; check against Settings › Battery over the same week.
+                  subtitle={freezeSnapshot ? energySummaryLine(freezeSnapshot.energy) : "Not reported yet: iOS sends these about once a day"}
+                  testID="sync-help-location-energy"
+                  theme={theme}
+                  title="Location energy"
                 />
               </SettingsBlockGroup>
             </View>
