@@ -735,7 +735,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
 
   /**
    * Bounds the correlation store and this screen's copy of it (stability audit 22 Oct 2026,
-   * iphone-timer-sync-7). Optimistic IDs still on screen or in a pending deletion are kept.
+   * iphone-timer-sync-7). Optimistic IDs still on screen, in an open editor or in a pending deletion
+   * are kept.
    */
   async function pruneTimerIdCorrelationsAfterLoad(bootstrap: MobileBootstrap) {
     const nowMs = Date.now();
@@ -756,6 +757,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       }
     }
     for (const entryId of deletionCoordinator.current?.current()?.entryIds ?? []) onScreen.add(entryId);
+    // Open editors keep the entry they opened with, which may still carry its optimistic ID (Codex r1
+    // on #552); a Save from one restores a pruned mapping anyway (`timerEntryIdReferences.ts`).
+    for (const entryId of [calendarEditEntryRef.current?.id, activeEditorEntryId.current]) {
+      if (entryId?.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) onScreen.add(entryId);
+    }
     const removed = await pruneTimerEntryIdCorrelations({ owner, retainLocalIds: onScreen })
       .catch(() => [] as string[]);
     const current = latestData.current;

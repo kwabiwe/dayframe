@@ -49,6 +49,7 @@ import {
   activateMobileAccount,
   deactivateMobileAccount,
   getActiveMobileAccountSnapshot,
+  subscribeActiveMobileAccount,
   mobileAccountKey,
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -70,6 +71,12 @@ import {
 } from "./timerBackgroundExecution";
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
+import {
+  forgetStaleTimerEntryIdNotes,
+  noteTimerEntryIdReference,
+  setTimerEntryIdNoteListener,
+  wasTimerEntryIdNotedRecently
+} from "./timerEntryIdReferences";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -81,6 +88,10 @@ const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
  */
 const STORAGE_QUARANTINE_KEY = "dayframe.offlineQueue.quarantine.v1";
 const STORAGE_QUARANTINE_MAX_PER_CONTAINER = 2;
+/** A copy's contents are deleted after 7 days or when the account changes; a metadata note stays. */
+const STORAGE_QUARANTINE_RAW_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
+const STORAGE_QUARANTINE_MAX_NOTES = 5;
+let storageQuarantineMutationTail: Promise<void> = Promise.resolve();
 /**
  * Correlation bounds (stability audit 22 Oct 2026, iphone-timer-sync-7). A correlation that queued
  * work, an Edit/Delete, a Stop or the refusal fence still names is always kept, so no durable work is
@@ -956,7 +967,17 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
         break;
       }
     }
-    if (changed && all) await writeAllQueue(all);
+    if (changed && all) {
+      // Noted before the write, so correlation pruning keeps what these events name (Codex r1 on #552).
+      for (const input of inputs.slice(0, acceptedCount)) {
+        for (const value of Object.values(input.rawPayload ?? {})) {
+          if (typeof value === "string" && value.startsWith(OPTIMISTIC_TIMER_ENTRY_ID_PREFIX)) {
+            noteTimerEntryIdReference(value);
+          }
+        }
+      }
+      await writeAllQueue(all);
+    }
     for (const owner of reservationOwners.values()) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
@@ -1032,8 +1053,11 @@ export async function removeTimerEntryIdCorrelation(
 /**
  * Drops the owner's correlations nothing needs any more (stability audit 22 Oct 2026,
  * iphone-timer-sync-7): not named by queued activity, an Edit/Delete, a Stop or the refusal fence,
- * older than a day, and not on screen (`retainLocalIds`, kept for at most 30 days). Durable work is
- * only read when some correlation is old enough to go. Returns the local IDs it removed.
+ * not noted by an admission in the last day, older than a day, and not held on screen
+ * (`retainLocalIds`, kept for at most 30 days). A record from before `recordedAt` existed is stamped
+ * now on first sight and then follows the same rules. Durable work is only read when some correlation
+ * is old enough to go. A removed record that an admission names afterwards is restored
+ * (`timerEntryIdReferences.ts`). Returns the local IDs it removed.
  */
 export async function pruneTimerEntryIdCorrelations(input: {
   owner: MobileAccountOwner;
@@ -1041,36 +1065,76 @@ export async function pruneTimerEntryIdCorrelations(input: {
   now?: Date;
 }): Promise<string[]> {
   const nowMs = (input.now ?? new Date()).getTime();
+  void sweepStorageQuarantine().catch(() => undefined);
   return withTimerEntryIdCorrelationMutation(async () => {
-    const records = await readAllTimerEntryIdCorrelations(input.owner, { forWrite: true });
+    forgetStaleTimerEntryIdNotes();
+    forgetStalePrunedCorrelations();
+    const stored = await readAllTimerEntryIdCorrelations(input.owner, { forWrite: true });
+    let stamped = false;
+    const records = stored.map((record) => {
+      if (record.recordedAt || !mobileAccountOwnersEqual(record, input.owner)) return record;
+      stamped = true;
+      return { ...record, recordedAt: new Date(nowMs).toISOString() };
+    });
     const candidates = records.filter((record) =>
       mobileAccountOwnersEqual(record, input.owner) &&
       timerEntryIdCorrelationAgeMs(record, nowMs) > TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS
     );
-    if (candidates.length === 0) return [];
-    const referenced = await timerEntryIdsReferencedByDurableWork(input.owner);
+    const referenced = candidates.length > 0
+      ? await timerEntryIdsReferencedByDurableWork(input.owner)
+      : new Set<string>();
     const retained = new Set(input.retainLocalIds ?? []);
-    const removed = new Set<string>();
+    const removed = new Map<string, TimerEntryIdCorrelationRecord>();
+    // From here to the write nothing awaits: an admission noted after this check finds its record in
+    // `prunedTimerEntryIdCorrelations` and restores it behind this lock.
     for (const record of candidates) {
-      if (referenced.has(record.localId)) continue;
+      if (referenced.has(record.localId) || wasTimerEntryIdNotedRecently(record.localId)) continue;
       if (
         retained.has(record.localId) &&
         timerEntryIdCorrelationAgeMs(record, nowMs) <= TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS
       ) continue;
-      removed.add(record.localId);
+      removed.set(record.localId, record);
     }
-    if (removed.size === 0) return [];
+    if (removed.size === 0 && !stamped) return [];
+    for (const [localId, record] of removed) {
+      prunedTimerEntryIdCorrelations.set(localId, { record, prunedAtMs: Date.now() });
+    }
     await writeAllTimerEntryIdCorrelations(records.filter((record) =>
       !mobileAccountOwnersEqual(record, input.owner) || !removed.has(record.localId)
     ));
-    return [...removed];
+    return [...removed.keys()];
   });
 }
 
-/** A record from before `recordedAt` was kept belongs to an earlier process, so it counts as old. */
+const OPTIMISTIC_TIMER_ENTRY_ID_PREFIX = "optimistic-active-timer:";
+const PRUNED_CORRELATIONS_MAX = 500;
+/** Records removed in the last day, so a late admission naming one can put it back. */
+const prunedTimerEntryIdCorrelations = new Map<string, { record: TimerEntryIdCorrelationRecord; prunedAtMs: number }>();
+
+function forgetStalePrunedCorrelations(nowMs = Date.now()) {
+  for (const [localId, entry] of prunedTimerEntryIdCorrelations) {
+    if (
+      nowMs - entry.prunedAtMs > TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS ||
+      prunedTimerEntryIdCorrelations.size > PRUNED_CORRELATIONS_MAX
+    ) prunedTimerEntryIdCorrelations.delete(localId);
+  }
+}
+
+setTimerEntryIdNoteListener((localId) => {
+  if (!prunedTimerEntryIdCorrelations.has(localId)) return;
+  void withTimerEntryIdCorrelationMutation(async () => {
+    const entry = prunedTimerEntryIdCorrelations.get(localId);
+    if (!entry) return;
+    prunedTimerEntryIdCorrelations.delete(localId);
+    const records = await readAllTimerEntryIdCorrelations(entry.record, { forWrite: true });
+    if (records.some((record) => mobileAccountOwnersEqual(record, entry.record) && record.localId === localId)) return;
+    await writeAllTimerEntryIdCorrelations([...records, { ...entry.record, recordedAt: new Date().toISOString() }]);
+  }).catch(() => undefined);
+});
+
 function timerEntryIdCorrelationAgeMs(record: TimerEntryIdCorrelationRecord, nowMs: number) {
   const recordedAtMs = record.recordedAt ? Date.parse(record.recordedAt) : Number.NaN;
-  return Number.isFinite(recordedAtMs) ? nowMs - recordedAtMs : Number.POSITIVE_INFINITY;
+  return Number.isFinite(recordedAtMs) ? nowMs - recordedAtMs : 0;
 }
 
 async function timerEntryIdsReferencedByDurableWork(owner: MobileAccountOwner) {
@@ -1100,20 +1164,34 @@ async function timerEntryIdsReferencedByDurableWork(owner: MobileAccountOwner) {
 
 export type StorageQuarantineDiagnostics = {
   count: number;
-  /** Reason, time and size only: a quarantined blob's contents never leave the iPhone. */
-  records: Array<{ container: StorageQuarantineContainer; quarantinedAt: string; reason: string; byteLength: number }>;
+  /**
+   * Reason, time and size only: a quarantined blob's contents never leave the iPhone. `contentsKept`
+   * is false once they were deleted (after 7 days, or when the account changed).
+   */
+  records: Array<{
+    container: StorageQuarantineContainer;
+    quarantinedAt: string;
+    reason: string;
+    byteLength: number;
+    contentsKept: boolean;
+    removedAt: string | null;
+    removal: StorageQuarantineRemoval | null;
+  }>;
 };
 
 /** For Sync help's support details: queue and correlation containers that could not be read. */
 export async function getStorageQuarantineDiagnostics(): Promise<StorageQuarantineDiagnostics> {
-  const records = await readStorageQuarantine();
+  const records = await sweepStorageQuarantine();
   return {
     count: records.length,
     records: records.map((record) => ({
       container: record.container,
       quarantinedAt: record.quarantinedAt,
       reason: record.reason,
-      byteLength: record.raw.length
+      byteLength: record.byteLength,
+      contentsKept: record.raw !== undefined,
+      removedAt: record.removedAt ?? null,
+      removal: record.removal ?? null
     }))
   };
 }
@@ -3043,7 +3121,21 @@ async function readAllTimerEntryIdCorrelations(
     timerEntryIdCorrelationCache = { raw, records };
     return records;
   }
-  if (!isRecord(parsed) || !legacyOwner) return [];
+  if (!isRecord(parsed) || !legacyOwner) {
+    // Valid JSON of a shape this build cannot read is kept aside like unparseable text (Codex r1 on #552).
+    try {
+      await quarantineStorageContainer(
+        "timer_entry_id_correlations",
+        raw,
+        "The correlation container had an unsupported shape."
+      );
+    } catch (error) {
+      if (options.forWrite) throw error;
+      return [];
+    }
+    timerEntryIdCorrelationCache = { raw, records: [] };
+    return [];
+  }
   const migrated = Object.entries(parsed).flatMap(([localId, timeEntryId]) =>
     localId && typeof timeEntryId === "string" && timeEntryId
       ? [{ ...legacyOwner, localId, timeEntryId }]
@@ -3060,12 +3152,26 @@ async function writeAllTimerEntryIdCorrelations(records: TimerEntryIdCorrelation
 }
 
 type StorageQuarantineContainer = "activity_queue" | "timer_entry_id_correlations";
+type StorageQuarantineRemoval = "expired" | "account_changed";
 type StorageQuarantineRecord = {
   container: StorageQuarantineContainer;
   quarantinedAt: string;
   reason: string;
-  raw: string;
+  byteLength: number;
+  /** The account active when it was kept: contents never outlive that account's session. */
+  ownerKey: string | null;
+  /** Absent once deleted; the record then stays as a note that a copy existed. */
+  raw?: string;
+  removedAt?: string;
+  removal?: StorageQuarantineRemoval;
 };
+
+/** Every read-modify-write of the quarantine key runs here, whichever container is recovering. */
+function withStorageQuarantineMutation<Result>(operation: () => Promise<Result>) {
+  const result = storageQuarantineMutationTail.catch(() => undefined).then(operation);
+  storageQuarantineMutationTail = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
   const raw = await AsyncStorage.getItem(STORAGE_QUARANTINE_KEY);
@@ -3080,34 +3186,104 @@ async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
         : null;
       const quarantinedAt = validIsoString(value.quarantinedAt);
       const reason = optionalQueueOwnerText(value.reason);
-      return container && quarantinedAt && reason && typeof value.raw === "string"
-        ? [{ container, quarantinedAt, reason, raw: value.raw }]
-        : [];
+      const removal = value.removal === "expired" || value.removal === "account_changed" ? value.removal : undefined;
+      const removedAt = validIsoString(value.removedAt);
+      const contents = typeof value.raw === "string" ? value.raw : undefined;
+      if (!container || !quarantinedAt || !reason || (contents === undefined && !removal)) return [];
+      return [{
+        container,
+        quarantinedAt,
+        reason,
+        byteLength: typeof value.byteLength === "number" ? value.byteLength : contents?.length ?? 0,
+        ownerKey: typeof value.ownerKey === "string" ? value.ownerKey : null,
+        ...(contents !== undefined ? { raw: contents } : {}),
+        ...(removedAt ? { removedAt } : {}),
+        ...(removal ? { removal } : {})
+      }];
     });
   } catch {
     return [];
   }
 }
 
+/**
+ * Deletes contents older than 7 days or kept under another account (or none: signed out), keeping a
+ * metadata note, and bounds the copies and notes. Call under `withStorageQuarantineMutation`.
+ */
+function retainStorageQuarantine(
+  records: readonly StorageQuarantineRecord[],
+  activeOwnerKey: string | null,
+  nowMs: number
+) {
+  const swept = records.map((record): StorageQuarantineRecord => {
+    if (record.raw === undefined) return record;
+    const removal: StorageQuarantineRemoval | null =
+      nowMs - Date.parse(record.quarantinedAt) > STORAGE_QUARANTINE_RAW_MAX_AGE_MS
+        ? "expired"
+        : record.ownerKey !== activeOwnerKey ? "account_changed" : null;
+    if (!removal) return record;
+    const { raw: _raw, ...note } = record;
+    return { ...note, removedAt: new Date(nowMs).toISOString(), removal };
+  });
+  const kept: StorageQuarantineRecord[] = [];
+  const copies = new Map<StorageQuarantineContainer, number>();
+  let notes = 0;
+  for (const record of [...swept].reverse()) {
+    if (record.raw !== undefined) {
+      const count = copies.get(record.container) ?? 0;
+      if (count >= STORAGE_QUARANTINE_MAX_PER_CONTAINER) continue;
+      copies.set(record.container, count + 1);
+    } else {
+      if (notes >= STORAGE_QUARANTINE_MAX_NOTES) continue;
+      notes += 1;
+    }
+    kept.unshift(record);
+  }
+  return kept;
+}
+
+async function writeStorageQuarantine(records: readonly StorageQuarantineRecord[]) {
+  if (records.length === 0) await AsyncStorage.removeItem(STORAGE_QUARANTINE_KEY);
+  else await AsyncStorage.setItem(STORAGE_QUARANTINE_KEY, JSON.stringify(records));
+}
+
 /** Keeps the newest blobs per container; a blob already kept (a second reader of the same text) is not added twice. */
-async function quarantineStorageContainer(
+function quarantineStorageContainer(
   container: StorageQuarantineContainer,
   raw: string,
   reason: string
 ) {
-  const current = await readStorageQuarantine();
-  if (current.some((record) => record.container === container && record.raw === raw)) return;
-  const combined = [...current, { container, quarantinedAt: new Date().toISOString(), reason, raw }];
-  const kept: StorageQuarantineRecord[] = [];
-  const perContainer = new Map<StorageQuarantineContainer, number>();
-  for (const record of [...combined].reverse()) {
-    const count = perContainer.get(record.container) ?? 0;
-    if (count >= STORAGE_QUARANTINE_MAX_PER_CONTAINER) continue;
-    perContainer.set(record.container, count + 1);
-    kept.unshift(record);
-  }
-  await AsyncStorage.setItem(STORAGE_QUARANTINE_KEY, JSON.stringify(kept));
+  return withStorageQuarantineMutation(async () => {
+    const owner = await readActiveMobileAccount();
+    const ownerKey = owner ? mobileAccountKey(owner) : null;
+    const current = await readStorageQuarantine();
+    if (current.some((record) => record.container === container && record.raw === raw)) return;
+    await writeStorageQuarantine(retainStorageQuarantine([
+      ...current,
+      { container, quarantinedAt: new Date().toISOString(), reason, byteLength: raw.length, ownerKey, raw }
+    ], ownerKey, Date.now()));
+  });
 }
+
+/** Applies the retention rules now (account changes, diagnostics, periodic pruning). */
+function sweepStorageQuarantine() {
+  return withStorageQuarantineMutation(async () => {
+    const current = await readStorageQuarantine();
+    if (current.length === 0) return current;
+    const owner = await readActiveMobileAccount();
+    const next = retainStorageQuarantine(current, owner ? mobileAccountKey(owner) : null, Date.now());
+    if (JSON.stringify(next) !== JSON.stringify(current)) await writeStorageQuarantine(next);
+    return next;
+  });
+}
+
+/** Logout and account replacement delete quarantined contents (Codex r1 on #552). Runs at load. */
+export function watchStorageQuarantineAccountChanges() {
+  return subscribeActiveMobileAccount(() => {
+    void sweepStorageQuarantine().catch(() => undefined);
+  });
+}
+watchStorageQuarantineAccountChanges();
 
 function optionalQueueOwnerText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
