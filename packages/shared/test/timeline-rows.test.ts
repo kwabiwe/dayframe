@@ -42,13 +42,15 @@ describe("Calendar › List location rows (location v4 steps 9–10)", () => {
     expect(all.at(-1)).toMatchObject({ fromMs: ms(0) });
   });
 
-  it("adds the journey in progress, named from its origin, and never shows ignored or still-open places as not logged", () => {
+  it("adds the journey in progress, named from its origin, never shows ignored places, and counts a place you are still at up to now", () => {
     const day = timeline([place("office", 400, 600, { name: "Office", placeId: "p-office", matchKind: "saved" }),
       place("ignored", 610, 700, { status: "ignored" }), place("here", 720, null)],
     { kind: "open_trip", fromId: "office", startedAt: at(600), lastObservedAt: at(640), mode: "walking", legs: [] });
     const rows = locationListRows(day, [], { nowMs: ms(800), showAll: false });
-    expect(rows.map((row) => row.key)).toEqual(["open-trip"]);
-    expect(rows[0]).toMatchObject({ fromName: "Office" });
+    // Still there at 800, 80 minutes not in a block (Codex r1 on #565).
+    expect(rows.map((row) => row.key)).toEqual(["place-here", "open-trip"]);
+    expect(rows[0]).toMatchObject({ unloggedSeconds: 80 * 60, spanEndMs: ms(800) });
+    expect(rows[1]).toMatchObject({ fromName: "Office" });
     expect(locationListRows(null, [], { nowMs: 0, showAll: true })).toEqual([]);
   });
 

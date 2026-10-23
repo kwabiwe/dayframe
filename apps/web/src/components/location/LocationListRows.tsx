@@ -19,28 +19,32 @@ import { formatDuration, formatTime } from "@/lib/format";
 /**
  * The day's location timeline for Calendar › List (location v4 step 10): fetched for the shown day and
  * again whenever `refreshKey` changes (the runtime's bootstrap refresh). Null until it arrives or when it
- * fails; the List then shows blocks only, as before.
+ * fails; the List then shows blocks only, as before. Kept per owner (workspace and user) and day, so a
+ * workspace switch never shows another workspace's places; a replaced or unmounted request is aborted.
  */
-export function useLocationTimeline(date: string | null, refreshKey: unknown) {
-  const [timeline, setTimeline] = useState<LocationTimeline | null>(null);
+export function useLocationTimeline(date: string | null, refreshKey: unknown, owner: string) {
+  const [loaded, setLoaded] = useState<{ owner: string; timeline: LocationTimeline } | null>(null);
   useEffect(() => {
     if (!date) return;
-    let cancelled = false;
-    clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store" })
+    const controller = new AbortController();
+    clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
       .catch(() => null)
       .then((next) => {
-        if (!cancelled) setTimeline((current) => next ?? (current?.date === date ? current : null));
+        if (controller.signal.aborted) return;
+        // A failed refresh keeps the same owner's same day; anything else clears.
+        setLoaded((current) => next ? { owner, timeline: next }
+          : current?.owner === owner && current.timeline.date === date ? current : null);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [date, refreshKey]);
-  return date && timeline?.date === date ? timeline : null;
+    return () => controller.abort();
+  }, [date, owner, refreshKey]);
+  return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
 
-function timeSpan(startedAt: string, endMs: number, open: boolean, clock: ClockFormat) {
-  return open ? `since ${formatTime(startedAt, clock)}` : `${formatTime(startedAt, clock)}–${formatTime(new Date(endMs), clock)}`;
+/** A place's span on the shown day: from where the day clips it, to its end (or "since" while you are there). */
+function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockFormat) {
+  const from = formatTime(new Date(fromMs), clock);
+  return open ? `since ${from}` : `${from}–${formatTime(new Date(endMs), clock)}`;
 }
 
 /** One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the journey in progress. */
@@ -68,7 +72,7 @@ export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat;
   }
   const { place } = row;
   const open = place.stoppedAt == null;
-  const span = timeSpan(place.startedAt, row.spanEndMs, open, clock);
+  const span = timeSpan(row.fromMs, row.spanEndMs, open, clock);
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
   if (row.faint) {
@@ -88,7 +92,7 @@ export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat;
         <td className="tabular px-3 py-3" />
         <td className="tabular px-3 py-3 timeline-list-duration">
           <div className="timeline-list-duration-content timeline-location-note">
-            {place.role === "home" || row.unloggedSeconds < 60 ? "not logged" : `${formatDuration(row.unloggedSeconds)} not logged`}
+            {row.unloggedSeconds < 60 ? "logged" : place.role === "home" ? "not logged" : `${formatDuration(row.unloggedSeconds)} not logged`}
           </div>
         </td>
         <td className="px-3 py-3" />
@@ -146,11 +150,32 @@ export function TripLegsToggle({ expanded, onToggle, title }: { expanded: boolea
   );
 }
 
-/** A trip's legs, opened under its block: mode, length, distance and how sure, and when each began. */
-export function TripLegRows({ clock, legs }: { clock: ClockFormat; legs: readonly TripLeg[] }) {
+/**
+ * A trip's legs under its block: mode, length, distance and how sure, and when each began. Motion
+ * contract: the chevron owns it; the row opens and closes its height (grid rows 0fr ↔ 1fr, 220 ms
+ * ease-out) so the rows below move with it rather than jump, and stays mounted until it has closed; a
+ * click mid-way reverses it; with Reduce Motion it opens and closes at once.
+ */
+export function TripLegRows({ clock, expanded, legs }: { clock: ClockFormat; expanded: boolean; legs: readonly TripLeg[] }) {
+  const [mounted, setMounted] = useState(expanded);
+  const [open, setOpen] = useState(expanded);
+  // Mount as soon as it opens (adjusting state while rendering), then open on the next frame.
+  if (expanded && !mounted) setMounted(true);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setOpen(expanded));
+    const reduceMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = expanded ? undefined : setTimeout(() => setMounted(false), reduceMotion ? 0 : TRIP_LEGS_MOTION_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timer) clearTimeout(timer);
+    };
+  }, [expanded]);
+  if (!mounted) return null;
   return (
     <tr className="timeline-trip-legs-row">
       <td colSpan={4}>
+        <div className="timeline-trip-legs-wrap" data-open={open && expanded ? "true" : "false"}>
+        <div className="timeline-trip-legs-clip">
         <ol className="timeline-trip-legs" aria-label="Legs">
           {legs.map((leg, index) => (
             <li className={`timeline-trip-leg${leg.confidence === "unsure" ? " is-unsure" : ""}`} key={`${leg.startedAt}-${index}`}>
@@ -163,10 +188,15 @@ export function TripLegRows({ clock, legs }: { clock: ClockFormat; legs: readonl
             </li>
           ))}
         </ol>
+        </div>
+        </div>
       </td>
     </tr>
   );
 }
+
+/** How long the legs row takes to open or close; matches `.timeline-trip-legs-wrap` in globals.css. */
+const TRIP_LEGS_MOTION_MS = 220;
 
 /** "Show Home and every place" under the List. */
 export function ShowEveryPlaceToggle({ onToggle, pressed }: { onToggle: () => void; pressed: boolean }) {

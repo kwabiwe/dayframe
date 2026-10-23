@@ -13785,6 +13785,7 @@ dialog.ui-dialog.df-palette {
 }
 
 .timeline-trip-legs-toggle {
+  position: relative;
   display: inline-grid;
   width: 32px;
   height: 32px;
@@ -13802,26 +13803,45 @@ dialog.ui-dialog.df-palette {
   transition: transform 220ms ease-out;
 }
 
+/* A 44 × 44 target around the 32 px chevron. */
+.timeline-trip-legs-toggle::before {
+  position: absolute;
+  inset: -6px;
+  content: "";
+}
+
 .timeline-trip-legs-toggle[aria-expanded="true"] svg {
   transform: rotate(180deg);
 }
 
 .timeline-trip-legs-row > td {
-  padding: 0 12px 10px 60px;
+  padding: 0 12px 0 60px;
+}
+
+/* The legs row opens and closes its own height, so the rows below move with it (motion contract in TripLegRows). */
+.timeline-trip-legs-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 220ms ease-out, opacity 220ms ease-out;
+}
+
+.timeline-trip-legs-wrap[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.timeline-trip-legs-clip {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .timeline-trip-legs {
   display: grid;
   gap: 4px;
   margin: 0;
-  padding: 0;
+  padding: 0 0 10px;
   list-style: none;
-  animation: timeline-trip-legs-in 220ms ease-out;
-}
-
-@keyframes timeline-trip-legs-in {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
 }
 
 .timeline-trip-leg {
@@ -13889,8 +13909,8 @@ dialog.ui-dialog.df-palette {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .timeline-trip-legs {
-    animation: none;
+  .timeline-trip-legs-wrap {
+    transition: none;
   }
 
   .timeline-trip-legs-toggle svg {

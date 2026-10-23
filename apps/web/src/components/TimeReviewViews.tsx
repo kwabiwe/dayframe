@@ -205,7 +205,8 @@ export function TimeReviewViews({
   const searchParams = useSearchParams();
   const state = timelineStateFromSearchParams(searchParams, { preference: initialPreference });
   // The shown day's location timeline for the List (location v4 step 10), fetched again with each bootstrap refresh.
-  const locationTimeline = useLocationTimeline(state.view === "list" && state.scope === "day" ? state.date : null, data);
+  const locationTimeline = useLocationTimeline(state.view === "list" && state.scope === "day" ? state.date : null, data,
+    `${data.workspace.id}:${data.user.id}`);
   const preferenceState = useMemo(
     () => ({ scope: state.scope, view: state.view }),
     [state.scope, state.view]

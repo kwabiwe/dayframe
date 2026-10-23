@@ -61,7 +61,8 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     if (!(spanEndMs > fromMs)) continue;
     const unloggedSeconds = uncoveredSeconds(fromMs, spanEndMs, entries, options.nowMs);
     const known = item.matchKind === "saved" || item.matchKind === "learned";
-    const unlogged = item.stoppedAt != null && unloggedSeconds >= UNLOGGED_PLACE_MINIMUM_SECONDS;
+    // A place you are still at counts up to now.
+    const unlogged = unloggedSeconds >= UNLOGGED_PLACE_MINIMUM_SECONDS;
     if (!known && unlogged) {
       rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds, faint: false });
     } else if (options.showAll) {

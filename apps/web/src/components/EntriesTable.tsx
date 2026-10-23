@@ -276,6 +276,12 @@ export function EntriesTable({
     [entries, localTimeReady, locationTimeline, nowMs, showEveryPlace]
   );
   const tripByBlock = useMemo(() => tripsByBlockId(locationTimeline), [locationTimeline]);
+  const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
+    const next = new Set(current);
+    if (next.has(entryId)) next.delete(entryId);
+    else next.add(entryId);
+    return next;
+  });
 
   useEffect(() => {
     inlineEditorRef.current = inlineEditor;
@@ -325,16 +331,28 @@ export function EntriesTable({
     }));
   }, [capturedNow, displayRange, displayedEntries]);
   // Location rows go before the first group that started before them (newest first, like the blocks).
+  // An expanded group lists its occurrences under its heading: a row that falls among them goes before
+  // the first occurrence that started before it, so the expanded run stays in time order (Codex r1 on #565).
   const locationRowsByGroup = useMemo(() => {
     const before: LocationListRow[][] = grouped.map(() => []);
+    const byOccurrence = new Map<string, LocationListRow[]>();
     const after: LocationListRow[] = [];
     for (const row of locationRows) {
+      const expanded = grouped.find((group) => group.entries.length > 1 &&
+        (expandedGroups.has(group.key) || group.entries.some((occurrence) => occurrence.id === highlightedEntryId)) &&
+        row.atMs < Date.parse(group.representative.startedAt) &&
+        group.entries.some((occurrence) => row.atMs >= Date.parse(occurrence.startedAt)));
+      const occurrence = expanded?.entries.find((candidate) => row.atMs >= Date.parse(candidate.startedAt));
+      if (occurrence) {
+        byOccurrence.set(occurrence.id, [...(byOccurrence.get(occurrence.id) ?? []), row]);
+        continue;
+      }
       const index = grouped.findIndex((group) => row.atMs >= Date.parse(group.representative.startedAt));
       if (index >= 0) before[index].push(row);
       else after.push(row);
     }
-    return { after, before };
-  }, [grouped, locationRows]);
+    return { after, before, byOccurrence };
+  }, [expandedGroups, grouped, highlightedEntryId, locationRows]);
   // Each day heading carries that day's time: every block's shown interval clipped to the local day
   // (an overnight block counts on both days; a running one up to the captured time).
   const dayTotals = useMemo(
@@ -905,12 +923,7 @@ export function EntriesTable({
                       {!isGrouped && tripByBlock.get(entry.id) ? (
                         <TripLegsToggle
                           expanded={expandedTrips.has(entry.id)}
-                          onToggle={() => setExpandedTrips((current) => {
-                            const next = new Set(current);
-                            if (next.has(entry.id)) next.delete(entry.id);
-                            else next.add(entry.id);
-                            return next;
-                          })}
+                          onToggle={() => toggleTripLegs(entry.id)}
                           title={timeEntryTitle(entry)}
                         />
                       ) : null}
@@ -955,17 +968,21 @@ export function EntriesTable({
                     </div>
                   </td>
                 </tr>
-                {!isGrouped && expandedTrips.has(entry.id) && tripByBlock.get(entry.id)
-                  ? <TripLegRows clock={clock} legs={tripByBlock.get(entry.id)!.legs} />
+                {!isGrouped && tripByBlock.get(entry.id)
+                  ? <TripLegRows clock={clock} expanded={expandedTrips.has(entry.id)} legs={tripByBlock.get(entry.id)!.legs} />
                   : null}
                 {isExpanded ? group.entries.map((occurrence) => {
                   const occurrenceInterval = timelineEntryDisplayInterval(occurrence, displayRange, capturedNow);
                   const highlighted = highlightedEntryId === occurrence.id;
+                  const occurrenceTrip = tripByBlock.get(occurrence.id);
                   return (
+                    <Fragment key={occurrence.id}>
+                    {(locationRowsByGroup.byOccurrence.get(occurrence.id) ?? []).map((row) => (
+                      <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+                    ))}
                     <tr
                       className={`timeline-occurrence-row motion-row timeline-list-row align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
                       id={`timeline-entry-${occurrence.id}`}
-                      key={occurrence.id}
                     >
                       <td className="px-3 py-3">
                         <div className="timeline-task-cell timeline-occurrence-task">
@@ -979,6 +996,7 @@ export function EntriesTable({
                               {occurrence.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
                               <TagMetadata compact tagNames={occurrence.tagNames} />
                             </span>
+                            {occurrenceTrip ? <TripModesLine legs={occurrenceTrip.legs} route={occurrenceTrip.route} /> : null}
                             {renderInlineStatus(occurrence)}
                             {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
                               <span
@@ -1010,6 +1028,13 @@ export function EntriesTable({
                       <td className="tabular px-3 py-3 timeline-list-duration">
                         <div className="timeline-list-duration-content">
                           {renderDuration(occurrence, intervalSeconds(occurrenceInterval, capturedNow))}
+                          {occurrenceTrip ? (
+                            <TripLegsToggle
+                              expanded={expandedTrips.has(occurrence.id)}
+                              onToggle={() => toggleTripLegs(occurrence.id)}
+                              title={timeEntryTitle(occurrence)}
+                            />
+                          ) : null}
                         </div>
                       </td>
                       <td className="px-3 py-3">
@@ -1035,6 +1060,10 @@ export function EntriesTable({
                         </div>
                       </td>
                     </tr>
+                    {occurrenceTrip
+                      ? <TripLegRows clock={clock} expanded={expandedTrips.has(occurrence.id)} legs={occurrenceTrip.legs} />
+                      : null}
+                    </Fragment>
                   );
                 }) : null}
                 </Fragment>

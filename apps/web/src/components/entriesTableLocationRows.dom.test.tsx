@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@/lib/location/location-timeline-service";
 import type { TimeEntryRow } from "@/lib/queries";
@@ -12,9 +12,12 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/AppShellRuntime", () => ({
   useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
 }));
-vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: vi.fn() }));
+const clientFetch = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
 
 const { EntriesTable } = await import("./EntriesTable");
+const { useLocationTimeline } = await import("./location/LocationListRows");
+const { formatTime } = await import("@/lib/format");
 
 // Location v4 step 10: synthetic day, made-up names.
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 7, 11, hour, minute)).toISOString();
@@ -84,5 +87,76 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
     await screen.findByText("Planning");
     expect(screen.queryByText(/Travelling since/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Show Home and every place" })).toBeNull();
+  });
+  it("keeps the legs of grouped trips, and places a row among an expanded group's occurrences in time order (Codex r1 on #565)", async () => {
+    const day: LocationTimeline = { ...timeline, openTrip: null, items: [
+      { ...timeline.items[1], blockIds: ["trip-a", "trip-b"] } as LocationTimeline["items"][number],
+      { kind: "place", id: "shop", status: "finalised", startedAt: at(9), stoppedAt: at(9, 40), placeId: null, learnedPlaceId: null,
+        name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] }] };
+    render(
+      <EntriesTable capturedNow={new Date(at(11, 55))} categories={[]} groupByDay locationTimeline={day}
+        entries={[entry("trip-a", "Getting around", at(11), at(11, 30)), entry("trip-b", "Getting around", at(8), at(8, 40))]}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Expand 2 Getting around blocks" }));
+    expect(screen.getAllByRole("button", { name: /Show the legs of Getting around/ })).toHaveLength(2);
+    const text = screen.getAllByRole("row").map((row) => row.textContent ?? "");
+    // The occurrences, newest first: the 11:00 trip (30 minutes), then the 08:00 one (40 minutes).
+    const occurrences = text.flatMap((value, index) => value.startsWith("Getting around") && !value.includes("occurrences") ? [index] : []);
+    expect(occurrences).toHaveLength(2);
+    const [at11, at08] = occurrences;
+    expect(text[at11]).toMatch(/30m$/);
+    const shop = text.findIndex((value) => value.includes("not in a block"));
+    expect(at11).toBeLessThan(shop);
+    expect(shop).toBeLessThan(at08);
+  });
+
+  it("says a place you logged in full is logged, and shows a place clipped to the day from midnight (Codex r1 on #565)", async () => {
+    const day: LocationTimeline = { ...timeline, openTrip: null, items: [
+      { kind: "place", id: "overnight", status: "finalised", startedAt: new Date(Date.parse(at(0)) - 3_600_000).toISOString(), stoppedAt: at(1),
+        placeId: "p-friend", learnedPlaceId: null, name: "Friend's", role: null, matchKind: "saved", confidence: "high", blockIds: [] },
+      { kind: "place", id: "office", status: "finalised", startedAt: at(11), stoppedAt: at(11, 30), placeId: "p-office", learnedPlaceId: null,
+        name: "Office", role: null, matchKind: "saved", confidence: "high", blockIds: [] }] };
+    render(
+      <EntriesTable capturedNow={new Date(at(11, 55))} categories={[]} groupByDay locationTimeline={day}
+        entries={[entry("planning", "Planning", at(11), at(11, 30))]}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Show Home and every place" }));
+    expect(screen.getByText(/Office · /).closest("tr")?.textContent).toMatch(/logged$/);
+    expect(screen.getByText(/Office · /).closest("tr")?.textContent).not.toContain("not logged");
+    // From the day's start, in the viewer's zone, not from the evening before.
+    expect(screen.getByText(/Friend's · /).textContent).toBe(`Friend's · ${formatTime(at(0), "24h")}–${formatTime(at(1), "24h")}`);
+  });
+
+  it("keeps the legs row while it closes, then removes it (Codex r1 on #565)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    try {
+      renderList(timeline);
+      const toggle = screen.getByRole("button", { name: "Show the legs of Getting around" });
+      fireEvent.click(toggle);
+      act(() => { vi.advanceTimersByTime(20); });
+      expect(document.querySelector(".timeline-trip-legs-wrap")?.getAttribute("data-open")).toBe("true");
+      fireEvent.click(screen.getByRole("button", { name: "Hide the legs of Getting around" }));
+      act(() => { vi.advanceTimersByTime(20); });
+      expect(document.querySelector(".timeline-trip-legs-wrap")?.getAttribute("data-open")).toBe("false");
+      act(() => { vi.advanceTimersByTime(300); });
+      expect(document.querySelector(".timeline-trip-legs-wrap")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never shows one workspace's places in another while it loads or when it fails (Codex r1 on #565)", async () => {
+    clientFetch.mockReset();
+    clientFetch.mockResolvedValueOnce({ ok: true, json: async () => timeline });
+    const { result, rerender } = renderHook(({ owner }) => useLocationTimeline("2026-08-11", "data", owner), { initialProps: { owner: "w1:u1" } });
+    await waitFor(() => expect(result.current?.date).toBe("2026-08-11"));
+    clientFetch.mockResolvedValueOnce({ ok: false, json: async () => ({}) });
+    rerender({ owner: "w2:u1" });
+    expect(result.current).toBeNull();
+    await waitFor(() => expect(clientFetch).toHaveBeenCalledTimes(2));
+    expect(result.current).toBeNull();
+    expect(clientFetch.mock.calls[0][1].signal.aborted).toBe(true);
   });
 });
