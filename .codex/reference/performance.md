@@ -64,6 +64,7 @@ These run in CI, so a regression fails the PR before a device measurement is nee
 | An Apple Health wake runs one bounded pass: at most four query pages per kind, capture stopped at 12 s, the pass at 20 s, both from the wake's arrival (native finishes the wake at 25 s), wakes during capture join the pass, and only Health events upload in the background | `healthBackgroundSync.test.ts`, `health.test.ts` page cap, `api.test.ts` Health scope, `DayframeHealthWakeLedgerTests` (`swift test` in the module) |
 | The freeze watchdog costs nothing in the background: JS answers native once a second and native probes the main thread only while Dayframe is in front; long JS work is named by a fixed `withJsTask` label (new long JS work adds one) | `stallWatchdog.test.ts`, `jsTasks.test.ts`, `diagnosticsNative.contract.test.ts`, `validate-ios-diagnostics.sh` |
 
+| No synchronous locationd call on main: Location status answers from cached delegate state, `locationServicesEnabled()` runs on a background queue, and a CoreLocation callback appends one journal line off main without waiting for the store | `nativeMainThreadBlocking.contract.test.ts`, `validate-ios-location-signals.sh` |
 A new hot path adds its guard here in the PR that creates it.
 
 ## Release gate
