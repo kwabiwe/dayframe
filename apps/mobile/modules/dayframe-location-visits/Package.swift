@@ -17,7 +17,7 @@ let package = Package(
         "DayframeLocationVisitsModule.swift",
         "Tests"
       ],
-      sources: ["DayframeLocationVisitService.swift"],
+      sources: ["DayframeLocationSignalStore.swift", "DayframeLocationVisitService.swift"],
       linkerSettings: [
         .linkedFramework("CoreLocation"),
         .linkedFramework("UIKit")
