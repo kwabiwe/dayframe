@@ -272,5 +272,14 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const described = await db.query(`select title from review_items where location_segment_id = $1`, [stayId]);
     expect(described.rows[0].title).toBe("Chores");
     await db.query(`update places set default_activity_description = null where id = $1`, [homeId]);
+    // An unlinked learned place goes by its trimmed name, and no place at all by "Unknown place", as replay names them (Codex r9 on #566).
+    const unlinked = (await db.query<{ id: string }>(
+      `insert into learned_places (workspace_id, user_id, cluster_key, name, latitude, longitude, status, first_seen_at, last_seen_at)
+       values ($1, $2, 'zz-cluster-2', '  Corner spot  ', 10, 20, 'accepted', $3, $3) returning id`, [workspaceId, userId, at(0)])).rows[0].id;
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-d", placeId: null, learnedPlaceId: unlinked }, session);
+    expect((await db.query(`select title from review_items where location_segment_id = $1`, [stayId])).rows[0].title).toBe("Corner spot");
+    await db.query(`update review_items set title = 'Chores' where location_segment_id = $1`, [stayId]);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-d", placeId: null, learnedPlaceId: null }, session);
+    expect((await db.query(`select title from review_items where location_segment_id = $1`, [stayId])).rows[0].title).toBe("Unknown place");
   });
 });
