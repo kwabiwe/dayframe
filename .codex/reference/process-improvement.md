@@ -50,14 +50,13 @@ After every 3 to 5 Dayframe changes, do a short process review:
 
 ## Merge Gate
 
-A PR is ready to merge only when all of these hold, read at merge time:
+A PR is ready to merge only when all of these hold, read at merge time for the exact head being merged:
 
-- The checks list for the PR head is non-empty and has at least 6 entries. An empty or short list means "not ready", never "nothing failed": GitHub Actions does not run on a PR that conflicts with `main`, so only the Vercel rows remain.
-- `Validation gate` and `Workspace unit tests, typecheck and lint` are present and passing.
-- Every other check is `pass` or `skipping`; anything `fail`, `pending` or `cancel` blocks the merge.
+- `Validation gate` and `Workspace unit tests, typecheck and lint` are present and passing. Both run on every PR (no path filters; the gate uses `if: always()`), so a list without them means CI has not run, not that nothing failed. GitHub Actions does not run on a PR that conflicts with `main`, which leaves only the Vercel rows.
+- Every other check is `pass` or `skipping`. Path-based skips (PostGIS on mobile-only or docs-only PRs, iOS on web or docs PRs) are expected; anything `fail`, `pending` or `cancel` blocks the merge.
 - The PR's remote head SHA equals the SHA that was reviewed and tested; merge with `--match-head-commit`.
 
-Merge PRs one at a time, and merge `main` into the next PR after each merge (every PR adds a tracker row, so the others conflict). A merge script that only checks "no listed check failed" is wrong: on 23 Oct 2026 one merged #541 with `Disposable PostGIS (base)` failing.
+Merge PRs one at a time. When the next PR conflicts with `main` after a merge (usually a tracker row), merge `main` into it and wait for its CI again. A merge script that only checks "no listed check failed" is wrong: on 23 Oct 2026 one merged #541 with `Disposable PostGIS (base)` failing.
 
 ## Anti-Patterns
 
