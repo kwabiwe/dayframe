@@ -44,7 +44,7 @@ struct DayframeStallContext {
 
 /// Detects a thread that stops answering while Dayframe is in front. Main is probed: a probe sent and
 /// not answered for `threshold` is a stall, timed from the probe, so a late watchdog tick never counts
-/// as main being blocked. JS answers on its own once-a-second timer: a gap of `threshold` between its
+/// as main being blocked. JS answers on its own 1.25 s timer (`STALL_ANSWER_INTERVAL_MS`): a gap of `threshold` between its
 /// answers is a stall. A gap found only when the answer arrives (between two checks), or when Dayframe
 /// leaves the front, is still recorded. Times are `systemUptime` seconds, so a wall clock change never
 /// makes or hides a stall.

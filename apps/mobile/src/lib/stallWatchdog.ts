@@ -1,5 +1,5 @@
 // The JS half of the freeze watchdog (staging freeze, 22 Oct 2026: no hang report, no requests). While
-// Dayframe is in front, JS answers native once a second; native records any stretch of 3 s or more
+// Dayframe is in front, JS answers native every 1.25 s; native records any stretch of 3 s or more
 // without an answer, with the labelled JS tasks then running (`jsTasks.ts`), and saves it at once, so a
 // force-close keeps it. Native also watches the main thread and saves MetricKit hang and crash reports.
 // Everything stays on this iPhone until the person shares Sync help's support details.
@@ -40,7 +40,17 @@ type AppStateLike = {
   addEventListener(type: "change", listener: (state: string) => void): { remove(): void };
 };
 
-export const STALL_ANSWER_INTERVAL_MS = 1000;
+/**
+ * How often JS answers native. Just over React Native's `RCTTiming` sleep threshold (`kMinimumSleepInterval`,
+ * 1 s): a repeating timer due within 1 s keeps the display link calling back every frame for as long as
+ * Dayframe is in front, while one due later pauses it and sleeps on an `NSTimer` (TestFlight 126 release
+ * gate, 23 Oct 2026). Native's 3 s silence threshold still allows one answer to run 1.75 s late.
+ */
+export const STALL_ANSWER_INTERVAL_MS = 1250;
+/** `RCTTiming`'s `kMinimumSleepInterval` (React Native 0.85, `RCTTiming.mm`). */
+export const RN_TIMING_SLEEP_THRESHOLD_MS = 1000;
+/** `DayframeStallTracker.threshold` in `DayframeDiagnosticsCore.swift`. */
+export const NATIVE_STALL_THRESHOLD_MS = 3000;
 
 export function installStallWatchdog(
   native: NativeDiagnostics | null | undefined,
