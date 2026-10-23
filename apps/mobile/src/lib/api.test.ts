@@ -35,7 +35,7 @@ const healthDiscard = vi.hoisted(() => vi.fn(async (_items: unknown[]) => 0));
 vi.mock("./healthSyncStore",()=>({recordHealthAcknowledgement:healthAcknowledgement,discardQueuedHealthDeliveries:healthDiscard}));
 const reviewNudge = vi.hoisted(() => ({ cancel: vi.fn(() => Promise.resolve()), note: vi.fn(() => Promise.resolve()) }));
 vi.mock("./reviewNudge",()=>({cancelReviewNudgeForLogout:reviewNudge.cancel,noteReviewCount:reviewNudge.note}));
-const healthSignOut = vi.hoisted(() => ({ end: vi.fn(() => Promise.resolve()), mark: vi.fn(() => Promise.resolve()) }));
+const healthSignOut = vi.hoisted(() => ({ end: vi.fn((_markerId: string) => Promise.resolve()), mark: vi.fn(() => Promise.resolve("synthetic-marker")) }));
 vi.mock("./healthSignOut",()=>({endHealthCaptureAfterLogout:healthSignOut.end,markSignedOutHealthExpiryPending:healthSignOut.mark}));
 
 vi.mock("expo-secure-store", () => ({
@@ -252,16 +252,19 @@ describe("mobile API client", () => {
 
   it("records the Health journal expiry before logout completes; failing to record it fails logout (Codex r1 on #549)", async () => {
     storeBoundSession("session-token");
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ok:true})));
+    const fetchMock = vi.fn(async () => jsonResponse({ok:true}));
+    vi.stubGlobal("fetch", fetchMock);
     healthSignOut.mark.mockClear();
     healthSignOut.mark.mockRejectedValueOnce(new Error("Synthetic storage failure"));
     await expect(logout()).rejects.toThrow("Synthetic storage failure");
+    // Failed before the server session was revoked: still consistently signed in (Codex r2 on #549).
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(await getSessionToken()).toBe("session-token");
     healthSignOut.end.mockClear();
     await logout();
     expect(healthSignOut.mark).toHaveBeenCalledTimes(2);
     expect(await getSessionToken()).toBeNull();
-    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(healthSignOut.end).toHaveBeenCalledWith("synthetic-marker"));
   });
 
   it("ends Apple Health capture for the account after logout completes, never for a fenced one (health-3, health-4)", async () => {

@@ -8,6 +8,8 @@ const h = vi.hoisted(() => ({
   session: { status: "signed_out" as "signed_out" | "authenticated", generation: 1, owner: null as Owner | null, token: "" },
   sessionListeners: new Set<() => void>(),
   expireResult: 0 as number | null | Error,
+  gate: null as Promise<void> | null,
+  expiring: null as (() => void) | null,
   keepers: [] as Array<{ keep: unknown } | null>,
   calls: [] as boolean[],
   native: { setEnabled: vi.fn(async (enabled: boolean) => { h.calls.push(enabled); return enabled; }) },
@@ -34,6 +36,8 @@ vi.mock("./healthSyncStore", () => ({
     const keeper = await resolveKeep();
     h.keepers.push(keeper && { keep: keeper.keep });
     if (!keeper) return null;
+    h.expiring?.();
+    if (h.gate) await h.gate;
     if (h.expireResult instanceof Error) throw h.expireResult;
     return h.expireResult;
   },
@@ -60,6 +64,8 @@ beforeEach(async () => {
   h.sessionListeners.clear();
   h.session = { status: "signed_out", generation: 1, owner: null, token: "" };
   h.expireResult = 0;
+  h.gate = null;
+  h.expiring = null;
   h.keepers = [];
   h.calls = [];
   h.native.setEnabled.mockClear();
@@ -126,12 +132,18 @@ describe("Health journal after logout (health-3)", () => {
     expect(h.keepers).toEqual([null, { keep: { ...B, backendId: "staging-fixture" } }, null, { keep: null }]);
   });
 
+  const marker = () => h.asyncStore.get(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY);
+  const earlierLaunchMarker = (id: string, done = false) =>
+    h.asyncStore.set(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY, JSON.stringify({ id, launch: "earlier-launch", done }));
+
   it("a recorded logout expiry survives deferral and failure, and clears only after it ran", async () => {
-    await signOut.markSignedOutHealthExpiryPending();
-    const marker = () => h.asyncStore.get(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY);
+    // An earlier launch's logout stopped after recording it.
+    earlierLaunchMarker("earlier");
     await account.activateMobileAccount(A);
+    signIn(B);
     expect(await signOut.runPendingSignedOutHealthExpiry()).toBe(false);
     expect(marker()).toBeTruthy();
+    signOutSession();
     await account.deactivateMobileAccount(A);
     h.expireResult = new Error("Synthetic SQLite failure");
     await expect(signOut.runPendingSignedOutHealthExpiry()).rejects.toThrow("Synthetic");
@@ -143,9 +155,38 @@ describe("Health journal after logout (health-3)", () => {
     expect(await signOut.runPendingSignedOutHealthExpiry()).toBe(false);
   });
 
+  it("never consumes a marker before the logout that wrote it has finished (Codex r2 on #549)", async () => {
+    signIn(B);
+    await account.activateMobileAccount(B);
+    // B's logout has recorded its expiry but not yet signed out: a cleanup running now leaves it.
+    const id = await signOut.markSignedOutHealthExpiryPending();
+    expect(await signOut.runPendingSignedOutHealthExpiry()).toBe(false);
+    expect(h.keepers).toEqual([]);
+    expect(JSON.parse(marker()!)).toMatchObject({ id, done: false });
+    await account.deactivateMobileAccount(B);
+    signOutSession();
+    await signOut.endHealthCaptureAfterLogout(id);
+    expect(h.keepers).toEqual([{ keep: null }]);
+    expect(marker()).toBeUndefined();
+  });
+
+  it("an older cleanup never removes a newer logout's marker (Codex r2 on #549)", async () => {
+    earlierLaunchMarker("older", true);
+    let release!: () => void;
+    h.gate = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { h.expiring = resolve; });
+    const cleanup = signOut.runPendingSignedOutHealthExpiry();
+    await started;
+    // While the older expiry runs, a newer logout records its own marker.
+    const newer = await signOut.markSignedOutHealthExpiryPending();
+    release();
+    expect(await cleanup).toBe(true);
+    expect(JSON.parse(marker()!)).toMatchObject({ id: newer, done: false });
+  });
+
   it("logout stops delivery and runs its recorded expiry", async () => {
-    await signOut.markSignedOutHealthExpiryPending();
-    await signOut.endHealthCaptureAfterLogout();
+    const id = await signOut.markSignedOutHealthExpiryPending();
+    await signOut.endHealthCaptureAfterLogout(id);
     expect(h.calls).toEqual([false]);
     expect(h.keepers).toEqual([{ keep: null }]);
     expect(h.asyncStore.has(signOut.HEALTH_SIGNED_OUT_EXPIRY_PENDING_KEY)).toBe(false);

@@ -611,11 +611,7 @@ describe("Health journal of signed-out accounts (stability audit health-3)", () 
     await page([sample("waiting-1", 60_000)], { owner: unsettled });
     const refused = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(departed))!.id);
     const waiting = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(unsettled))!.id);
-    // Only a queued row is settled: one still waiting for handoff is not what the queue removed.
-    expect(await store.discardQueuedHealthDeliveries([
-      { owner: departed, clientEventId: refused },
-      { owner: unsettled, clientEventId: waiting },
-    ])).toBe(1);
+    expect(await store.discardQueuedHealthDeliveries([{ owner: departed, clientEventId: refused }])).toBe(1);
     expect(db.prepare("select state,payload_json from health_deliveries where client_event_id=?").get(refused))
       .toEqual({ state: "discarded", payload_json: null });
     // Prune no longer protects its samples; signed-out expiry deletes it and its episode.
@@ -625,6 +621,25 @@ describe("Health journal of signed-out accounts (stability audit health-3)", () 
     expect(rowsOf(departed, "health_deliveries") + rowsOf(departed, "health_episodes")).toBe(0);
     expect(db.prepare("select state from health_deliveries where client_event_id=?").get(waiting)!.state).toBe("pending_handoff");
     expect(rowsOf(unsettled, "health_episodes")).toBe(1);
+  });
+
+  it("settles a removed event whose handoff was interrupted, so the next handoff cannot bring it back (Codex r2 on #549)", async () => {
+    await page([sample("interrupted-1")], { owner: departed });
+    const id = String(db.prepare("select client_event_id id from health_deliveries").get()!.id);
+    // The event reached the durable queue, but the process stopped before the journal recorded it.
+    mocks.failHandoff = true;
+    await expect(store.handoffHealthEvents(departed, (async () => undefined) as never, () => true)).rejects.toThrow();
+    mocks.failHandoff = false;
+    expect(db.prepare("select state from health_deliveries").get()!.state).toBe("pending_handoff");
+    expect(await store.discardQueuedHealthDeliveries([{ owner: departed, clientEventId: id }])).toBe(1);
+    const enqueue = vi.fn(async () => undefined);
+    expect(await store.handoffHealthEvents(departed, enqueue as never, () => true)).toEqual({ queuedCount: 0 });
+    expect(enqueue).not.toHaveBeenCalled();
+    // An acknowledged row is not changed by a discard.
+    await page([sample("acknowledged-1")], { owner: signedIn });
+    await acknowledgeAll(signedIn);
+    const acknowledged = String(db.prepare("select client_event_id id from health_deliveries where owner_key=?").get(store.healthOwnerKey(signedIn))!.id);
+    expect(await store.discardQueuedHealthDeliveries([{ owner: signedIn, clientEventId: acknowledged }])).toBe(0);
   });
 
   it("reads the account to keep when its turn in the journal's lane comes, not when it was asked", async () => {

@@ -774,6 +774,12 @@ export async function logout() {
       return endLocationCaptureOwnership("logout", logoutOwner ?? undefined, isCurrent);
     });
     requireCurrent();
+    // Recorded before the server session is revoked, so the Health journal expiry started below is
+    // retried at a later launch, signed out or not; a failed write fails logout while still signed in
+    // (Codex r1 and r2 on #549).
+    const healthExpiryMarker = await import("./healthSignOut")
+      .then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending());
+    requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
       method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -791,10 +797,6 @@ export async function logout() {
       clearShortcutCatalog();
     }).catch(() => undefined);
     requireCurrent();
-    // Recorded before logout completes, so the Health journal expiry it starts below is retried at
-    // the next launch, signed out or not, if it fails or the app stops first (Codex r1 on #549).
-    await import("./healthSignOut").then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending());
-    requireCurrent();
     if (activeOwner) await deactivateMobileAccount(activeOwner);
     accountDeactivated = true;
     requireCurrent();
@@ -805,7 +807,7 @@ export async function logout() {
     // So do its Health journal and HealthKit's background wakes (health-3, health-4). Unsettled
     // Health deliveries stay with the durable queue that still holds them; the recorded expiry
     // survives a failure here.
-    void import("./healthSignOut").then(({ endHealthCaptureAfterLogout }) => endHealthCaptureAfterLogout()).catch(() => undefined);
+    void import("./healthSignOut").then(({ endHealthCaptureAfterLogout }) => endHealthCaptureAfterLogout(healthExpiryMarker)).catch(() => undefined);
   } finally {
     unsubscribe();
     finishBootstrapLogoutRequest?.();
