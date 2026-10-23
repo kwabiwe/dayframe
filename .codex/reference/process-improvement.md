@@ -48,6 +48,17 @@ After every 3 to 5 Dayframe changes, do a short process review:
 - Which old notes can be archived?
 - Which recurring lessons belong in `AGENTS.md`?
 
+## Merge Gate
+
+A PR is ready to merge only when all of these hold, read at merge time:
+
+- The checks list for the PR head is non-empty and has at least 6 entries. An empty or short list means "not ready", never "nothing failed": GitHub Actions does not run on a PR that conflicts with `main`, so only the Vercel rows remain.
+- `Validation gate` and `Workspace unit tests, typecheck and lint` are present and passing.
+- Every other check is `pass` or `skipping`; anything `fail`, `pending` or `cancel` blocks the merge.
+- The PR's remote head SHA equals the SHA that was reviewed and tested; merge with `--match-head-commit`.
+
+Merge PRs one at a time, and merge `main` into the next PR after each merge (every PR adds a tracker row, so the others conflict). A merge script that only checks "no listed check failed" is wrong: on 23 Oct 2026 one merged #541 with `Disposable PostGIS (base)` failing.
+
 ## Anti-Patterns
 
 - Giant prompt files that are not tied to the repo.
@@ -56,3 +67,4 @@ After every 3 to 5 Dayframe changes, do a short process review:
 - Treating local simulator results as proof for real HealthKit behaviour.
 - Adding docs instead of fixing missing tests or diagnostics.
 - Letting investigation notes become a second product spec.
+- Merging on "no failing checks" instead of "all required checks passed" (see Merge Gate).
