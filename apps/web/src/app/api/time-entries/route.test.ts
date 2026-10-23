@@ -23,6 +23,10 @@ vi.mock("@/lib/event-service", () => ({
   processActivityEvent: mocks.processActivityEvent,
   createManualEntry: mocks.createManualEntry,
   splitActiveEntry: mocks.splitActiveEntry,
+  TimerStopBeforeStartError: class TimerStopBeforeStartError extends Error {
+    status = 422;
+    code = "timer_stop_before_start";
+  },
   TimerReplacementWindowError: class TimerReplacementWindowError extends Error {
     status = 409;
 

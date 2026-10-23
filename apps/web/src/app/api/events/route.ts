@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { authErrorResponse, databaseReadinessResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { processActivityEvent, TimerMutationBusyError } from "@/lib/event-service";
+import { processActivityEvent, TimerMutationBusyError, TimerReplacementWindowError, TimerStopBeforeStartError } from "@/lib/event-service";
 import { isDatabasePayloadError, isDatabaseReadinessError, isMissingRequiredColumnError, isStatementTimeoutError, isLockNotAvailableError } from "@/lib/db";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { openReviewCountFor, withReviewCount } from "@/lib/review-count";
@@ -36,6 +36,14 @@ export async function POST(request: Request) {
     if (authResponse) return authResponse;
     if (error instanceof ZodError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    // Timer events the timeline can't take are permanent (422 with a code), never a generic 500 the
+    // phone retries forever while every later timer change waits behind it (stability audit 22 Oct).
+    if (error instanceof TimerReplacementWindowError) {
+      return NextResponse.json({ code: "timer_start_before_running_block", error: error.message }, { status: 422 });
+    }
+    if (error instanceof TimerStopBeforeStartError) {
+      return NextResponse.json({ code: error.code, error: error.message }, { status: error.status });
     }
     if (error instanceof TimerMutationBusyError) {
       return NextResponse.json(
