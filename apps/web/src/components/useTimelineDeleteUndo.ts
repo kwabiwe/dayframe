@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import {
   TimelineDeleteUndoController,
@@ -18,17 +18,27 @@ export function useTimelineDeleteUndo({
   onSynced: () => Promise<void>;
 }) {
   const [state, setState] = useState<TimelineDeleteUndoState>(initialTimelineDeleteUndoState);
-  const [controller] = useState(() => new TimelineDeleteUndoController(
-    async (transaction, options) => {
-      await commitTimelineDelete(transaction, options);
-      try {
-        await onSynced();
-      } catch {
-        // The server commit succeeded. Keep the transaction hidden until a later reconciliation.
-      }
-    },
-    setState
-  ));
+  // The controller outlives renders; a delete that commits after a period change must reload the
+  // period shown then, so it calls the newest onSynced, never the first render's (WEB-UI-3).
+  const [{ controller, latest }] = useState(() => {
+    let latestOnSynced = onSynced;
+    const latest = { set: (next: () => Promise<void>) => { latestOnSynced = next; } };
+    const controller = new TimelineDeleteUndoController(
+      async (transaction, options) => {
+        await commitTimelineDelete(transaction, options);
+        try {
+          await latestOnSynced();
+        } catch {
+          // The server commit succeeded. Keep the transaction hidden until a later reconciliation.
+        }
+      },
+      setState
+    );
+    return { controller, latest };
+  });
+  useLayoutEffect(() => {
+    latest.set(onSynced);
+  }, [latest, onSynced]);
 
   useEffect(() => {
     const finalizeForPageHide = () => controller.finalizePendingDelete();
