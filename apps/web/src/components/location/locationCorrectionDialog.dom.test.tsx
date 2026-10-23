@@ -82,6 +82,14 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     // 01:35 on the night the clocks go back happens twice: the one nearer the 01:30 GMT it replaces.
     expect(editedInstant("2026-10-25T01:30:00.000Z", "01:35")).toBe("2026-10-25T01:35:00.000Z");
     expect(editedInstant("2026-10-25T00:30:00.000Z", "01:35")).toBe("2026-10-25T00:35:00.000Z");
+    // A half-hour clock change (Lord Howe Island, 5 Apr 2026): the second 01:45 → 01:50 is five minutes on.
+    process.env.TZ = "Australia/Lord_Howe";
+    try {
+      expect(editedInstant("2026-04-04T15:15:00.000Z", "01:50")).toBe("2026-04-04T15:20:00.000Z");
+      expect(editedInstant("2026-04-04T14:45:00.000Z", "01:50")).toBe("2026-04-04T14:50:00.000Z");
+    } finally {
+      process.env.TZ = "Europe/London";
+    }
   });
 
   it("sends only the edited time, keeping the other instant exact on the night the clocks go back", async () => {

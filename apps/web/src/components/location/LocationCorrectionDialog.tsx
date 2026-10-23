@@ -54,9 +54,11 @@ export function editedInstant(original: string, value: string) {
   const date = new Date(from.getFullYear(), from.getMonth(), from.getDate() + shift, hours, minutes, 0, 0);
   // A time the clocks skip normalises to another hour: it isn't a time that day.
   if (date.getHours() !== hours || date.getMinutes() !== minutes) return null;
-  // A time the clocks repeat has two instants: the one nearer the time it replaces (Codex r2 on #567).
+  // A time the clocks repeat has two instants: the one nearer the time it replaces (Codex r2 on #567). Clock
+  // changes are 30 minutes to 2 hours, so the instants up to 2 hours either side, a quarter-hour apart, are
+  // every one that can show this time (Codex r3 on #567).
   const same = (candidate: Date) => candidate.getHours() === hours && candidate.getMinutes() === minutes;
-  const instants = [date, new Date(date.getTime() - 3_600_000), new Date(date.getTime() + 3_600_000)].filter(same);
+  const instants = Array.from({ length: 17 }, (_, step) => new Date(date.getTime() + (step - 8) * 15 * 60_000)).filter(same);
   const originalMs = from.getTime();
   return instants.reduce((best, candidate) =>
     Math.abs(candidate.getTime() - originalMs) < Math.abs(best.getTime() - originalMs) ? candidate : best).toISOString();
