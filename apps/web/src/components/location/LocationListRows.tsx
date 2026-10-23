@@ -155,6 +155,7 @@ export function TripLegsToggle({ expanded, onToggle, title }: { expanded: boolea
       aria-expanded={expanded}
       aria-label={`${expanded ? "Hide" : "Show"} the legs of ${title}`}
       className="timeline-trip-legs-toggle"
+      data-tip={expanded ? "Hide legs" : "Show legs"}
       onClick={onToggle}
       type="button"
     >
