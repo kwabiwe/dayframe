@@ -128,6 +128,19 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
       .map(({ mode, from, to }) => ({ mode, from, to }))).toEqual([{ mode: "automotive", from: 0, to: 20 }]);
   });
 
+  it("joins short spells of two vehicles alternating across stops into one leg (Codex r5 on #562)", () => {
+    // Twenty drive and cycle spells of 90–109 seconds, each followed by a one-minute stop.
+    const steps: Array<[number, MotionActivity]> = [];
+    let minute = 0;
+    for (let spell = 0; spell < 20; spell += 1) {
+      steps.push([minute, spell % 2 ? "cycling" : "automotive"]);
+      minute += (90 + spell) / 60;
+      steps.push([minute, "stationary"]);
+      minute += 1;
+    }
+    expect(legs(0, minute, steps)).toHaveLength(1);
+  });
+
   it("never counts a carried Core Motion label as agreement", () => {
     // The whole trip sits in an unknown spell between two drives: the label is carried, so only speed agrees.
     const readings = [reading(31, 0, 12), reading(34, 2_000, 13), reading(38, 5_000, 12)];

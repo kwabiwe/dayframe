@@ -197,6 +197,19 @@ export function deriveTripLegs({
     const survivor = run.prev && run.prev.label === label ? joinNext(run.prev) : run;
     return joinNext(survivor);
   };
+  /** Joins a run with a same-label moving run across one stop on either side; the stop never holds the mode. */
+  const joinAcrossStops = (start: Run) => {
+    let run = start;
+    if (run.prev?.label === "still" && run.prev.prev?.label === run.label) {
+      run.prev.observedMs = 0;
+      run = relabel(run.prev, run.label);
+    }
+    if (run.next?.label === "still" && run.next.next?.label === run.label) {
+      run.next.observedMs = 0;
+      run = relabel(run.next, run.label);
+    }
+    return run;
+  };
   const movingBefore = (run: Run) => {
     let other = run.prev;
     while (other && other.label === "still") other = other.prev;
@@ -227,7 +240,10 @@ export function deriveTripLegs({
     runCount += 1;
     if (shortMoving(run)) heap.push(run);
   }
-  // Every merge relabels a run to a different label, so this ends; the cap only guards against a mistake.
+  // Every merge joins the short run into its neighbour, across any stop between them, so each one removes
+  // at least one moving run (at most runCount merges, each pushing at most three runs): the cap is never
+  // reached and only guards against a mistake. Relabelling without joining could swap two modes back and
+  // forth across stops (Codex r5 on #562).
   for (let guard = runCount * 8; heap.size && guard > 0; guard -= 1) {
     const { run, key } = heap.pop();
     if (!shortMoving(run) || key !== run.observedMs) continue;
@@ -239,7 +255,7 @@ export function deriveTripLegs({
     const into = before && after ? (after.observedMs > before.observedMs ? after : before) : before ?? after;
     // Already its neighbour's mode across a stop: the stop pass below joins them.
     if (!into || into.label === run.label) continue;
-    const survivor = relabel(run, into.label);
+    const survivor = joinAcrossStops(relabel(run, into.label));
     if (shortMoving(survivor)) heap.push(survivor);
     // A neighbour's change can end another short run's change-walk exemption.
     for (const other of [movingBefore(survivor), movingAfter(survivor)]) if (other && shortMoving(other)) heap.push(other);
