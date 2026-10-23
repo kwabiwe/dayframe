@@ -287,7 +287,11 @@ Temporal invariants:
   Underground and `unobserved`, while readings better than 500 m inside it
   are sparse (no more than one per `tripUnseenSparseReadingIntervalMs`, 3 min:
   underground, station Wi-Fi gives a 70–130 m reading now and then, where a
-  drive gives one a minute). It is sure when both ends are within
+  drive gives one a minute). A genuine reading too broad to accept (200–500
+  m) breaks it outright: the server keeps such readings as rejected without
+  positions, and replay (and the scoring harness, from the export's rejected
+  rows) passes the engine their times only (`broadReadingTimes`). It is sure
+  when both ends are within
   `tripStationRadiusMeters` of Underground stations, otherwise unsure with
   `runnerUp: "train"`; its distance runs through every silence's anchors. A
   vehicle leg is a train only with a sustained speed (3+ credible readings,
