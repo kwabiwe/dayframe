@@ -56,6 +56,7 @@ import {
 } from "./mobileAccount";
 import {
   markPendingTimerStopFailure,
+  readPendingTimerStops,
   removePendingTimerStop,
   timerStopOwnerMatches,
   type PendingTimerStop,
@@ -72,6 +73,22 @@ import { withJsTask } from "./jsTasks";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
+/**
+ * Unreadable queue or correlation containers are moved here, never dropped (stability audit 22 Oct 2026,
+ * iphone-timer-sync-12). Device-scoped: a corrupt blob has no trustworthy owner. At most
+ * `STORAGE_QUARANTINE_MAX_PER_CONTAINER` raw blobs are kept per container; support details report only
+ * their reason, time and size, never their contents.
+ */
+const STORAGE_QUARANTINE_KEY = "dayframe.offlineQueue.quarantine.v1";
+const STORAGE_QUARANTINE_MAX_PER_CONTAINER = 2;
+/**
+ * Correlation bounds (stability audit 22 Oct 2026, iphone-timer-sync-7). A correlation that queued
+ * work, an Edit/Delete, a Stop or the refusal fence still names is always kept, so no durable work is
+ * stranded. Otherwise it is kept for a day (in-memory callers may still resolve the optimistic ID),
+ * and for at most 30 days while an on-screen block still shows its optimistic ID.
+ */
+const TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS = 24 * 60 * 60 * 1_000;
+const TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
 const MOBILE_OPENING_REQUEST_TIMEOUT_MS = 15_000;
@@ -820,69 +837,135 @@ export async function logout() {
 export { clearSessionToken, getSessionToken };
 
 export async function enqueueEvent(input: ActivityEventDraft) {
+  const result = await enqueueActivityEvents([input]);
+  if (result.error !== undefined) throw result.error;
+  return result.queue;
+}
+
+export type EnqueueEventsResult = {
+  /** How many events, from the start of the batch, are now queued (new or already there). */
+  acceptedCount: number;
+  /** Why the event at `acceptedCount` could not be queued; the ones before it were still written. */
+  error?: unknown;
+};
+
+/**
+ * Queues many events with one read and one write of the queue under the shared queue lock (stability
+ * audit 22 Oct 2026, iphone-timer-sync-8: a Health handoff used to rewrite the whole queue per event).
+ * Events are taken in order with `enqueueEvent`'s rules; the first one that cannot be queued stops the
+ * batch, and the ones before it are kept, as a loop of `enqueueEvent` calls would.
+ */
+export async function enqueueEvents(inputs: readonly ActivityEventDraft[]): Promise<EnqueueEventsResult> {
+  if (inputs.length === 0) return { acceptedCount: 0 };
+  const { acceptedCount, error } = await enqueueActivityEvents(inputs);
+  return error === undefined ? { acceptedCount } : { acceptedCount, error };
+}
+
+function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
   return withQueueMutation(async () => {
     const activeOwner = await readActiveMobileAccount();
-    const owner = input.owner ?? activeOwner;
-    if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
-      throw new Error("An authenticated account is required to queue activity.");
-    }
-    const isHealth = input.source === "health_sleep" || input.source === "health_workout";
-    const healthOwner = input.healthOwner ?? (isHealth && DAYFRAME_BACKEND_ID ? {...owner, backendId:DAYFRAME_BACKEND_ID} : undefined);
-    if (isHealth && (!healthOwner || !DAYFRAME_BACKEND_ID || healthOwner.backendId !== DAYFRAME_BACKEND_ID || !mobileAccountOwnersEqual(owner,healthOwner))) {
-      throw new StaleMobileSessionResponseError();
-    }
-    const {
-      localId,
-      owner: _owner,
-      healthOwner: _healthOwner,
-      requestImmediateDelivery,
-      ...eventInput
-    } = input;
-    const parsed = ActivityEventInputSchema.parse({
-      ...eventInput,
-      occurredAt: input.occurredAt ?? new Date(),
-      rawPayload: eventInput.rawPayload ?? {}
-    });
-    const all = await readAllQueue(owner);
-    const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
-    const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
-    if (queue.some((item) => item.localId === queuedLocalId)) {
-      if (requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type)) {
-        await reserveTimerBackgroundExecution(
-          activityQueueBackgroundExecutionKey(owner),
-          "Dayframe timer Start sync"
-        );
+    let all: QueuedEvent[] | null = null;
+    let changed = false;
+    let acceptedCount = 0;
+    let error: unknown;
+    let lastOwner: MobileAccountOwner | null = null;
+    const reservationOwners = new Map<string, MobileAccountOwner>();
+    const ownedLocalIds = new Map<string, Set<string>>();
+    let untaggedByLocalId: Map<string, QueuedEvent> | null = null;
+    const ownedIdsFor = (queue: readonly QueuedEvent[], owner: MobileAccountOwner) => {
+      const key = mobileAccountKey(owner);
+      let ids = ownedLocalIds.get(key);
+      if (!ids) {
+        ids = new Set(queue.filter((item) => queuedEventMatchesOwner(item, owner)).map((item) => item.localId));
+        ownedLocalIds.set(key, ids);
       }
-      return queue;
-    }
-    const nextItem: QueuedEvent = {
-      ...queuedEventFromParsedEvent(parsed),
-      localId: queuedLocalId,
-      queuedAt: new Date().toISOString(),
-      userId: owner.userId,
-      workspaceId: owner.workspaceId,
-      ...(healthOwner ? {healthOwner} : {})
+      return ids;
     };
-    // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
-    // when its complete immutable event body agrees. Owner UUIDs alone are not proof.
-    const legacy = input.healthOwner && localId?.startsWith("healthkit:") ? all.find(item =>
-      item.localId === queuedLocalId && !item.healthOwner && mobileAccountOwnersEqual(item,owner)) : undefined;
-    if (legacy) {
-      const {canonicalHealthJson} = await import("./healthFingerprint");
-      if (canonicalHealthJson(queuedEventRequestBody(legacy)) !== canonicalHealthJson(queuedEventRequestBody(nextItem))) {
-        throw new Error("The retained Health event does not match its capture journal. It was preserved for review.");
+    for (const input of inputs) {
+      try {
+        const owner = input.owner ?? activeOwner;
+        if (!owner || !mobileAccountOwnersEqual(activeOwner, owner)) {
+          throw new Error("An authenticated account is required to queue activity.");
+        }
+        const isHealth = input.source === "health_sleep" || input.source === "health_workout";
+        const healthOwner = input.healthOwner ?? (isHealth && DAYFRAME_BACKEND_ID ? {...owner, backendId:DAYFRAME_BACKEND_ID} : undefined);
+        if (isHealth && (!healthOwner || !DAYFRAME_BACKEND_ID || healthOwner.backendId !== DAYFRAME_BACKEND_ID || !mobileAccountOwnersEqual(owner,healthOwner))) {
+          throw new StaleMobileSessionResponseError();
+        }
+        const {
+          localId,
+          owner: _owner,
+          healthOwner: _healthOwner,
+          requestImmediateDelivery,
+          ...eventInput
+        } = input;
+        const parsed = ActivityEventInputSchema.parse({
+          ...eventInput,
+          occurredAt: input.occurredAt ?? new Date(),
+          rawPayload: eventInput.rawPayload ?? {}
+        });
+        all ??= await readAllQueue(owner);
+        const queuedIds = ownedIdsFor(all, owner);
+        const queuedLocalId = normalizeLocalId(localId) ?? generatedLocalId();
+        const reserve = requestImmediateDelivery && isExplicitTimerMutationEventType(parsed.type);
+        if (queuedIds.has(queuedLocalId)) {
+          if (reserve) reservationOwners.set(mobileAccountKey(owner), owner);
+          acceptedCount += 1;
+          lastOwner = owner;
+          continue;
+        }
+        const nextItem: QueuedEvent = {
+          ...queuedEventFromParsedEvent(parsed),
+          localId: queuedLocalId,
+          queuedAt: new Date().toISOString(),
+          userId: owner.userId,
+          workspaceId: owner.workspaceId,
+          ...(healthOwner ? {healthOwner} : {})
+        };
+        // A journal-owned same-ID replay may repair a pre-upgrade untagged handoff only
+        // when its complete immutable event body agrees. Owner UUIDs alone are not proof.
+        let legacy: QueuedEvent | undefined;
+        if (input.healthOwner && localId?.startsWith("healthkit:")) {
+          if (!untaggedByLocalId) {
+            untaggedByLocalId = new Map<string, QueuedEvent>();
+            for (const item of all) {
+              if (!item.healthOwner && !untaggedByLocalId.has(item.localId)) untaggedByLocalId.set(item.localId, item);
+            }
+          }
+          const candidate: QueuedEvent | undefined = untaggedByLocalId.get(queuedLocalId);
+          legacy = candidate && mobileAccountOwnersEqual(candidate, owner) ? candidate : undefined;
+        }
+        if (legacy) {
+          const {canonicalHealthJson} = await import("./healthFingerprint");
+          if (canonicalHealthJson(queuedEventRequestBody(legacy)) !== canonicalHealthJson(queuedEventRequestBody(nextItem))) {
+            throw new Error("The retained Health event does not match its capture journal. It was preserved for review.");
+          }
+          const repaired: QueuedEvent = legacy;
+          all = all.map((item): QueuedEvent => item === repaired ? {...item, healthOwner} : item);
+          untaggedByLocalId?.delete(queuedLocalId);
+        } else {
+          all = [...all, nextItem];
+        }
+        queuedIds.add(queuedLocalId);
+        changed = true;
+        if (reserve) reservationOwners.set(mobileAccountKey(owner), owner);
+        acceptedCount += 1;
+        lastOwner = owner;
+      } catch (caught) {
+        error = caught;
+        break;
       }
-      await writeAllQueue(all.map(item=>item===legacy ? {...item,healthOwner} : item));
-    } else {
-      await writeAllQueue([...all, nextItem]);
     }
-    if (requestImmediateDelivery && isExplicitTimerMutationEventType(nextItem.type)) {
+    if (changed && all) await writeAllQueue(all);
+    for (const owner of reservationOwners.values()) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
         "Dayframe timer Start sync"
       );
     }
-    return [...queue, nextItem];
+    const resultOwner = lastOwner;
+    const queue = all && resultOwner ? all.filter((item) => queuedEventMatchesOwner(item, resultOwner)) : [];
+    return { queue, acceptedCount, error };
   });
 }
 
@@ -895,7 +978,7 @@ function queuedEventMatchesOwner(item: QueuedEvent, owner: MobileAccountOwner) {
 export async function readQueue(owner?: MobileAccountOwner): Promise<QueuedEvent[]> {
   const resolvedOwner = owner ?? await readActiveMobileAccount();
   if (!resolvedOwner) return [];
-  return (await readAllQueue(resolvedOwner))
+  return (await readAllQueue(resolvedOwner, { unlocked: true }))
     .filter((item) => queuedEventMatchesOwner(item, resolvedOwner));
 }
 
@@ -919,15 +1002,12 @@ export async function recordTimerEntryIdCorrelation(
   return withTimerEntryIdCorrelationMutation(async () => {
     const resolvedOwner = owner ?? await readActiveMobileAccount();
     if (!resolvedOwner) return false;
-    const records = await readAllTimerEntryIdCorrelations(resolvedOwner);
+    const records = await readAllTimerEntryIdCorrelations(resolvedOwner, { forWrite: true });
     const next = records.filter((record) =>
       !mobileAccountOwnersEqual(record, resolvedOwner) || record.localId !== localId
     );
-    next.push({ ...resolvedOwner, localId, timeEntryId });
-    await AsyncStorage.setItem(
-      TIMER_ENTRY_ID_CORRELATIONS_KEY,
-      JSON.stringify(next)
-    );
+    next.push({ ...resolvedOwner, localId, timeEntryId, recordedAt: new Date().toISOString() });
+    await writeAllTimerEntryIdCorrelations(next);
     return true;
   });
 }
@@ -939,17 +1019,103 @@ export async function removeTimerEntryIdCorrelation(
   return withTimerEntryIdCorrelationMutation(async () => {
     const resolvedOwner = owner ?? await readActiveMobileAccount();
     if (!resolvedOwner) return false;
-    const records = await readAllTimerEntryIdCorrelations(resolvedOwner);
+    const records = await readAllTimerEntryIdCorrelations(resolvedOwner, { forWrite: true });
     const next = records.filter((record) =>
       !mobileAccountOwnersEqual(record, resolvedOwner) || record.localId !== localId
     );
     if (next.length === records.length) return false;
-    await AsyncStorage.setItem(
-      TIMER_ENTRY_ID_CORRELATIONS_KEY,
-      JSON.stringify(next)
-    );
+    await writeAllTimerEntryIdCorrelations(next);
     return true;
   });
+}
+
+/**
+ * Drops the owner's correlations nothing needs any more (stability audit 22 Oct 2026,
+ * iphone-timer-sync-7): not named by queued activity, an Edit/Delete, a Stop or the refusal fence,
+ * older than a day, and not on screen (`retainLocalIds`, kept for at most 30 days). Durable work is
+ * only read when some correlation is old enough to go. Returns the local IDs it removed.
+ */
+export async function pruneTimerEntryIdCorrelations(input: {
+  owner: MobileAccountOwner;
+  retainLocalIds?: Iterable<string>;
+  now?: Date;
+}): Promise<string[]> {
+  const nowMs = (input.now ?? new Date()).getTime();
+  return withTimerEntryIdCorrelationMutation(async () => {
+    const records = await readAllTimerEntryIdCorrelations(input.owner, { forWrite: true });
+    const candidates = records.filter((record) =>
+      mobileAccountOwnersEqual(record, input.owner) &&
+      timerEntryIdCorrelationAgeMs(record, nowMs) > TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS
+    );
+    if (candidates.length === 0) return [];
+    const referenced = await timerEntryIdsReferencedByDurableWork(input.owner);
+    const retained = new Set(input.retainLocalIds ?? []);
+    const removed = new Set<string>();
+    for (const record of candidates) {
+      if (referenced.has(record.localId)) continue;
+      if (
+        retained.has(record.localId) &&
+        timerEntryIdCorrelationAgeMs(record, nowMs) <= TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS
+      ) continue;
+      removed.add(record.localId);
+    }
+    if (removed.size === 0) return [];
+    await writeAllTimerEntryIdCorrelations(records.filter((record) =>
+      !mobileAccountOwnersEqual(record, input.owner) || !removed.has(record.localId)
+    ));
+    return [...removed];
+  });
+}
+
+/** A record from before `recordedAt` was kept belongs to an earlier process, so it counts as old. */
+function timerEntryIdCorrelationAgeMs(record: TimerEntryIdCorrelationRecord, nowMs: number) {
+  const recordedAtMs = record.recordedAt ? Date.parse(record.recordedAt) : Number.NaN;
+  return Number.isFinite(recordedAtMs) ? nowMs - recordedAtMs : Number.POSITIVE_INFINITY;
+}
+
+async function timerEntryIdsReferencedByDurableWork(owner: MobileAccountOwner) {
+  const { readPendingTimeEntryCommands, readRefusedStartFenceEntryIds } = await import("./timeEntryOutbox");
+  const [queue, commands, stops, fenced] = await Promise.all([
+    readQueue(owner),
+    readPendingTimeEntryCommands(owner),
+    readPendingTimerStops(),
+    readRefusedStartFenceEntryIds(owner)
+  ]);
+  const referenced = new Set<string>(fenced);
+  for (const item of queue) {
+    referenced.add(item.localId);
+    // A queued event may name a block by its local ID in its payload (a Stop's target, say).
+    for (const value of Object.values(item.rawPayload ?? {})) {
+      if (typeof value === "string") referenced.add(value);
+    }
+  }
+  for (const command of commands) {
+    if (command.optimisticEntryId) referenced.add(command.optimisticEntryId);
+  }
+  for (const stop of stops) {
+    if (stop.optimisticEntryId && timerStopOwnerMatches(stop, owner)) referenced.add(stop.optimisticEntryId);
+  }
+  return referenced;
+}
+
+export type StorageQuarantineDiagnostics = {
+  count: number;
+  /** Reason, time and size only: a quarantined blob's contents never leave the iPhone. */
+  records: Array<{ container: StorageQuarantineContainer; quarantinedAt: string; reason: string; byteLength: number }>;
+};
+
+/** For Sync help's support details: queue and correlation containers that could not be read. */
+export async function getStorageQuarantineDiagnostics(): Promise<StorageQuarantineDiagnostics> {
+  const records = await readStorageQuarantine();
+  return {
+    count: records.length,
+    records: records.map((record) => ({
+      container: record.container,
+      quarantinedAt: record.quarantinedAt,
+      reason: record.reason,
+      byteLength: record.raw.length
+    }))
+  };
 }
 
 /**
@@ -2752,16 +2918,37 @@ function withTimerEntryIdCorrelationMutation<Result>(operation: () => Promise<Re
   return result;
 }
 
-async function readAllQueue(legacyOwner?: MobileAccountOwner): Promise<QueuedEvent[]> {
+/**
+ * `unlocked` readers (`readQueue`) never change an unreadable queue themselves: they schedule its
+ * quarantine under the queue lock, so it cannot race a locked writer's fresh queue.
+ */
+async function readAllQueue(
+  legacyOwner?: MobileAccountOwner,
+  options: { unlocked?: boolean } = {}
+): Promise<QueuedEvent[]> {
   const raw = await AsyncStorage.getItem(QUEUE_KEY);
   if (!raw) return [];
-  let parsed: StoredQueuedEvent[];
+  let value: unknown;
+  let unreadable: string | null = null;
   try {
-    const value = JSON.parse(raw) as unknown;
-    parsed = Array.isArray(value) ? value as StoredQueuedEvent[] : [];
+    value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) unreadable = "The queue container was not an array.";
   } catch {
-    parsed = [];
+    unreadable = "The queue JSON could not be parsed.";
   }
+  if (unreadable) {
+    if (options.unlocked) {
+      void withQueueMutation(() => readAllQueue(legacyOwner)).catch(() => undefined);
+      return [];
+    }
+    // Kept before the queue starts again: if the copy cannot be written, this throws and nothing
+    // is overwritten (stability audit 22 Oct 2026, iphone-timer-sync-12).
+    await quarantineStorageContainer("activity_queue", raw, unreadable);
+    await AsyncStorage.removeItem(QUEUE_KEY);
+    for (const listener of activityQueueListeners) listener();
+    return [];
+  }
+  const parsed = value as StoredQueuedEvent[];
   const migrated = parsed.flatMap((item, index) => {
     const event = migrateQueuedEvent(item, index, legacyOwner);
     return event ? [event] : [];
@@ -2801,38 +2988,125 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type TimerEntryIdCorrelationRecord = MobileAccountOwner & {
   localId: string;
   timeEntryId: string;
+  recordedAt?: string;
 };
 
+/**
+ * The parsed container, keyed by its exact stored text: hot-path readers (every durable-work refresh,
+ * Stop delivery and Edit) parse it once per change rather than on every read (iphone-timer-sync-7).
+ * Readers never mutate the cached array.
+ */
+let timerEntryIdCorrelationCache: { raw: string; records: TimerEntryIdCorrelationRecord[] } | null = null;
+
+/**
+ * `forWrite` callers hold the correlation lock and are about to replace the container: an unreadable
+ * one must be copied aside first, or they throw. Plain readers never change it.
+ */
 async function readAllTimerEntryIdCorrelations(
-  legacyOwner?: MobileAccountOwner
+  legacyOwner?: MobileAccountOwner,
+  options: { forWrite?: boolean } = {}
 ): Promise<TimerEntryIdCorrelationRecord[]> {
   const raw = await AsyncStorage.getItem(TIMER_ENTRY_ID_CORRELATIONS_KEY);
   if (!raw) return [];
+  if (timerEntryIdCorrelationCache?.raw === raw) return timerEntryIdCorrelationCache.records;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    // Copied aside before any writer replaces it (iphone-timer-sync-12): commands waiting on an
+    // optimistic ID stay explainable.
+    try {
+      await quarantineStorageContainer(
+        "timer_entry_id_correlations",
+        raw,
+        "The correlation JSON could not be parsed."
+      );
+    } catch (error) {
+      if (options.forWrite) throw error;
+      return [];
+    }
+    timerEntryIdCorrelationCache = { raw, records: [] };
+    return [];
+  }
+  if (Array.isArray(parsed)) {
+    const records = parsed.flatMap((value): TimerEntryIdCorrelationRecord[] => {
+      if (!isRecord(value)) return [];
+      const userId = optionalQueueOwnerText(value.userId);
+      const workspaceId = optionalQueueOwnerText(value.workspaceId);
+      const localId = optionalQueueOwnerText(value.localId);
+      const timeEntryId = optionalQueueOwnerText(value.timeEntryId);
+      const recordedAt = validIsoString(value.recordedAt);
+      return userId && workspaceId && localId && timeEntryId
+        ? [{ userId, workspaceId, localId, timeEntryId, ...(recordedAt ? { recordedAt } : {}) }]
+        : [];
+    });
+    timerEntryIdCorrelationCache = { raw, records };
+    return records;
+  }
+  if (!isRecord(parsed) || !legacyOwner) return [];
+  const migrated = Object.entries(parsed).flatMap(([localId, timeEntryId]) =>
+    localId && typeof timeEntryId === "string" && timeEntryId
+      ? [{ ...legacyOwner, localId, timeEntryId }]
+      : []
+  );
+  await writeAllTimerEntryIdCorrelations(migrated);
+  return migrated;
+}
+
+async function writeAllTimerEntryIdCorrelations(records: TimerEntryIdCorrelationRecord[]) {
+  const raw = JSON.stringify(records);
+  await AsyncStorage.setItem(TIMER_ENTRY_ID_CORRELATIONS_KEY, raw);
+  timerEntryIdCorrelationCache = { raw, records };
+}
+
+type StorageQuarantineContainer = "activity_queue" | "timer_entry_id_correlations";
+type StorageQuarantineRecord = {
+  container: StorageQuarantineContainer;
+  quarantinedAt: string;
+  reason: string;
+  raw: string;
+};
+
+async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
+  const raw = await AsyncStorage.getItem(STORAGE_QUARANTINE_KEY);
+  if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) {
-      return parsed.flatMap((value) => {
-        if (!isRecord(value)) return [];
-        const userId = optionalQueueOwnerText(value.userId);
-        const workspaceId = optionalQueueOwnerText(value.workspaceId);
-        const localId = optionalQueueOwnerText(value.localId);
-        const timeEntryId = optionalQueueOwnerText(value.timeEntryId);
-        return userId && workspaceId && localId && timeEntryId
-          ? [{ userId, workspaceId, localId, timeEntryId }]
-          : [];
-      });
-    }
-    if (!isRecord(parsed) || !legacyOwner) return [];
-    const migrated = Object.entries(parsed).flatMap(([localId, timeEntryId]) =>
-      localId && typeof timeEntryId === "string" && timeEntryId
-        ? [{ ...legacyOwner, localId, timeEntryId }]
-        : []
-    );
-    await AsyncStorage.setItem(TIMER_ENTRY_ID_CORRELATIONS_KEY, JSON.stringify(migrated));
-    return migrated;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): StorageQuarantineRecord[] => {
+      if (!isRecord(value)) return [];
+      const container = value.container === "activity_queue" || value.container === "timer_entry_id_correlations"
+        ? value.container
+        : null;
+      const quarantinedAt = validIsoString(value.quarantinedAt);
+      const reason = optionalQueueOwnerText(value.reason);
+      return container && quarantinedAt && reason && typeof value.raw === "string"
+        ? [{ container, quarantinedAt, reason, raw: value.raw }]
+        : [];
+    });
   } catch {
     return [];
   }
+}
+
+/** Keeps the newest blobs per container; a blob already kept (a second reader of the same text) is not added twice. */
+async function quarantineStorageContainer(
+  container: StorageQuarantineContainer,
+  raw: string,
+  reason: string
+) {
+  const current = await readStorageQuarantine();
+  if (current.some((record) => record.container === container && record.raw === raw)) return;
+  const combined = [...current, { container, quarantinedAt: new Date().toISOString(), reason, raw }];
+  const kept: StorageQuarantineRecord[] = [];
+  const perContainer = new Map<StorageQuarantineContainer, number>();
+  for (const record of [...combined].reverse()) {
+    const count = perContainer.get(record.container) ?? 0;
+    if (count >= STORAGE_QUARANTINE_MAX_PER_CONTAINER) continue;
+    perContainer.set(record.container, count + 1);
+    kept.unshift(record);
+  }
+  await AsyncStorage.setItem(STORAGE_QUARANTINE_KEY, JSON.stringify(kept));
 }
 
 function optionalQueueOwnerText(value: unknown) {

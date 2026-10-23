@@ -198,9 +198,9 @@ describe("Health journal real SQLite boundaries", () => {
     await page([sample("early")]);
     const queue = new Map<string, unknown>();
     const enqueue = vi.fn(
-      async (event: Parameters<typeof import("./api").enqueueEvent>[0]) => {
-        queue.set(event.localId!, event);
-        return [];
+      async (events: Parameters<typeof import("./api").enqueueEvents>[0]) => {
+        for (const event of events) queue.set(event.localId!, event);
+        return { acceptedCount: events.length };
       },
     );
     mocks.failHandoff = true;
@@ -214,7 +214,8 @@ describe("Health journal real SQLite boundaries", () => {
     expect(enqueue).toHaveBeenCalledTimes(2);
     expect(queue.size).toBe(1);
     expect(enqueue.mock.calls[0][0]).toEqual(enqueue.mock.calls[1][0]);
-    expect(enqueue.mock.calls[0][0].healthOwner).toEqual(owner);
+    expect(enqueue.mock.calls[0][0]).toHaveLength(1);
+    expect(enqueue.mock.calls[0][0][0].healthOwner).toEqual(owner);
     expect(db.prepare("select state from health_deliveries").get()!.state).toBe(
       "queued",
     );
@@ -263,14 +264,14 @@ describe("Health journal real SQLite boundaries", () => {
     mocks.failUpgrade = false;
     expect((await store.getHealthCheckpoint(owner, "sleep")).anchor).toBe("anchor-2");
     expect(db.prepare("PRAGMA user_version").get()!.user_version).toBe(2);
-    const enqueue = vi.fn(async () => []);
+    const enqueue = vi.fn(async (events: readonly unknown[]) => ({ acceptedCount: events.length }));
     await store.handoffHealthEvents({ ...owner, backendId: "production-fixture" }, enqueue, () => true);
     expect(enqueue).not.toHaveBeenCalled();
     await store.handoffHealthEvents(owner, enqueue, () => true);
-    expect(enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+    expect(enqueue).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({
       localId: queuedId, healthOwner: owner,
       rawPayload: JSON.parse(String(before[1].payload_json)).rawPayload,
-    }));
+    })]);
     expect(db.prepare("select payload_json from health_deliveries where client_event_id=?").get(queuedId)!.payload_json).toBe(before[1].payload_json);
     expect(db.prepare("select * from health_deliveries where client_event_id=?").get(acknowledgedId)).toEqual(acknowledged);
     // A normal reopen must not keep resetting an already upgraded queue.
@@ -444,8 +445,9 @@ describe("Health journal real SQLite boundaries", () => {
     const wait = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const enqueue = vi.fn(async () => {
+    const enqueue = vi.fn(async (events: readonly unknown[]) => {
       await wait;
+      return { acceptedCount: events.length };
     });
     const first = store.handoffHealthEvents(
       owner,

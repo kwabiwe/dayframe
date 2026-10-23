@@ -3665,3 +3665,198 @@ describe("server messages in block wording (UIA-100)", () => {
     await expect(updateTimeEntry("entry-1", { description: "Long" })).rejects.toThrow("Blocks can be no longer than 24 hours.");
   });
 });
+
+describe("bounded activity queue and correlation storage (stability audit 22 Oct 2026, timer-7/8/12)", () => {
+  const QUEUE_KEY = "dayframe.offlineQueue.v1";
+  const CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
+  const QUARANTINE_KEY = "dayframe.offlineQueue.quarantine.v1";
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  beforeEach(async () => {
+    vi.useRealTimers();
+    resetSessionTokenCacheForTesting();
+    secureStore.clear();
+    asyncStore.clear();
+    appState.currentState = "active";
+    vi.restoreAllMocks();
+    healthBackend.id = "staging-fixture";
+    __resetMobileAccountForTests();
+    await activateMobileAccount(TIMER_STOP_OWNER);
+    storeBoundSession("session-token");
+  });
+
+  function queueWrites() {
+    return vi.mocked(AsyncStorage.setItem).mock.calls.filter(([key]) => key === QUEUE_KEY).length;
+  }
+
+  it("keeps correlations that durable work or the screen still names and drops stale ones", async () => {
+    const api = await import("./api");
+    const { enqueueTimeEntryUpdate } = await import("./timeEntryOutbox");
+    const ids = ["queued", "edit", "stop", "screen", "stale", "fresh"].map((name) => `optimistic-active-timer:${name}`);
+    for (const [index, localId] of ids.entries()) {
+      await api.recordTimerEntryIdCorrelation(localId, `80000000-0000-4000-8000-00000000010${index}`, TIMER_STOP_OWNER);
+    }
+    // An account's records never decide another account's.
+    await api.recordTimerEntryIdCorrelation("optimistic-active-timer:other", "80000000-0000-4000-8000-000000000199", ACCOUNT_B_OWNER);
+    await api.enqueueEvent({ localId: "shortcut-1", source: "shortcut", type: "shortcut_action", rawPayload: { entryId: ids[0] } });
+    await enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[1] }, patch: { description: "Synthetic" } });
+    await getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[2] } });
+
+    // Within the grace period nothing goes, and durable work is not even read.
+    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER })).resolves.toEqual([]);
+
+    const twoDaysLater = new Date(Date.now() + 2 * DAY_MS);
+    await expect(api.pruneTimerEntryIdCorrelations({
+      owner: TIMER_STOP_OWNER,
+      retainLocalIds: [ids[3]],
+      now: twoDaysLater
+    })).resolves.toEqual([ids[4], ids[5]]);
+    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 4));
+
+    // On screen keeps one for at most 30 days; durable work keeps it for as long as it waits.
+    await expect(api.pruneTimerEntryIdCorrelations({
+      owner: TIMER_STOP_OWNER,
+      retainLocalIds: [ids[3]],
+      now: new Date(Date.now() + 31 * DAY_MS)
+    })).resolves.toEqual([ids[3]]);
+    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 3));
+    expect((await api.readTimerEntryIdCorrelations(ACCOUNT_B_OWNER)).size).toBe(1);
+  });
+
+  it("drops a legacy correlation without a recorded time once nothing names it", async () => {
+    const api = await import("./api");
+    asyncStore.set(CORRELATIONS_KEY, JSON.stringify([
+      { ...TIMER_STOP_OWNER, localId: "optimistic-active-timer:legacy", timeEntryId: TIMER_TARGET_A }
+    ]));
+    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER })).resolves.toEqual([
+      "optimistic-active-timer:legacy"
+    ]);
+    expect(JSON.parse(asyncStore.get(CORRELATIONS_KEY)!)).toEqual([]);
+  });
+
+  it("parses the correlation container once per change, not on every hot-path read", async () => {
+    const api = await import("./api");
+    for (let index = 0; index < 50; index++) {
+      await api.recordTimerEntryIdCorrelation(`optimistic-active-timer:${index}`, `entry-${index}`, TIMER_STOP_OWNER);
+    }
+    const raw = asyncStore.get(CORRELATIONS_KEY)!;
+    const parse = vi.spyOn(JSON, "parse");
+    for (let read = 0; read < 20; read++) await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER);
+    expect(parse.mock.calls.filter(([text]) => text === raw)).toHaveLength(0);
+    // Another writer's text is still honoured.
+    asyncStore.set(CORRELATIONS_KEY, JSON.stringify([{ ...TIMER_STOP_OWNER, localId: "elsewhere", timeEntryId: "entry-x" }]));
+    expect(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).toEqual(new Map([["elsewhere", "entry-x"]]));
+  });
+
+  it("queues a 500-event Health handoff with one queue write (budget at a realistic volume)", async () => {
+    const api = await import("./api");
+    const healthOwner = { ...TIMER_STOP_OWNER, backendId: "staging-fixture" };
+    // An existing backlog, as after a few days offline.
+    await api.enqueueEvent({ localId: "backlog-start", source: "mobile_app", type: "timer_start" });
+    const events = Array.from({ length: 500 }, (_, index) => ({
+      localId: `healthkit:sleep:budget:${index}`,
+      source: "health_sleep" as const,
+      type: "health_sleep_import" as const,
+      occurredAt: new Date(Date.UTC(2026, 6, 1) + index * 60_000),
+      owner: TIMER_STOP_OWNER,
+      healthOwner,
+      rawPayload: { sourceSampleIds: [`synthetic-${index}`], stage: "asleep_core" }
+    }));
+    const listener = vi.fn();
+    const unsubscribe = api.subscribeActivityQueue(listener);
+    const writesBefore = queueWrites();
+    const parse = vi.spyOn(JSON, "parse");
+
+    await expect(api.enqueueEvents(events)).resolves.toEqual({ acceptedCount: 500 });
+
+    expect(queueWrites() - writesBefore).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledTimes(1);
+    const queue = await api.readQueue();
+    expect(queue).toHaveLength(501);
+    expect(queue.slice(1).map((item) => item.localId)).toEqual(events.map((event) => event.localId));
+
+    // A replay of the same page (a crash before the journal marked it) is deduplicated, with no write.
+    await expect(api.enqueueEvents(events)).resolves.toEqual({ acceptedCount: 500 });
+    expect(queueWrites() - writesBefore).toBe(1);
+    unsubscribe();
+  });
+
+  it("keeps the events before the first one that cannot be queued, in one write", async () => {
+    const api = await import("./api");
+    const writesBefore = queueWrites();
+    const result = await api.enqueueEvents([
+      { localId: "first", source: "shortcut", type: "shortcut_action" },
+      { localId: "second", source: "shortcut", type: "shortcut_action" },
+      { localId: "wrong-owner", source: "shortcut", type: "shortcut_action", owner: ACCOUNT_B_OWNER },
+      { localId: "after", source: "shortcut", type: "shortcut_action" }
+    ]);
+    expect(result.acceptedCount).toBe(2);
+    expect(result.error).toBeInstanceOf(Error);
+    expect(queueWrites() - writesBefore).toBe(1);
+    expect((await api.readQueue()).map((item) => item.localId)).toEqual(["first", "second"]);
+  });
+
+  it("quarantines a corrupt queue instead of losing it, and reports it without its contents", async () => {
+    const api = await import("./api");
+    const corrupt = '[{"localId":"optimistic-active-timer:lost","type":"timer_start","descr';
+    asyncStore.set(QUEUE_KEY, corrupt);
+
+    // A plain read neither shows nor changes it; the next locked write moves it aside first.
+    await expect(api.readQueue()).resolves.toEqual([]);
+    await api.enqueueEvent({ localId: "after-corruption", source: "shortcut", type: "shortcut_action" });
+
+    const quarantine = JSON.parse(asyncStore.get(QUARANTINE_KEY)!) as Array<Record<string, unknown>>;
+    expect(quarantine).toEqual([expect.objectContaining({ container: "activity_queue", raw: corrupt })]);
+    expect((await api.readQueue()).map((item) => item.localId)).toEqual(["after-corruption"]);
+
+    const diagnostics = await api.getStorageQuarantineDiagnostics();
+    expect(diagnostics).toEqual({
+      count: 1,
+      records: [{
+        container: "activity_queue",
+        quarantinedAt: expect.any(String),
+        reason: "The queue JSON could not be parsed.",
+        byteLength: corrupt.length
+      }]
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain("optimistic-active-timer:lost");
+  });
+
+  it("refuses to overwrite a corrupt queue when its copy cannot be kept", async () => {
+    const api = await import("./api");
+    const corrupt = "{not json";
+    asyncStore.set(QUEUE_KEY, corrupt);
+    // The quarantine copy is the first write the recovery makes.
+    vi.mocked(AsyncStorage.setItem).mockImplementationOnce((key: string) => Promise.reject(
+      new Error(key === QUARANTINE_KEY ? "Storage full" : `unexpected write to ${key}`)
+    ));
+    await expect(api.enqueueEvent({ localId: "blocked", source: "shortcut", type: "shortcut_action" }))
+      .rejects.toThrow("Storage full");
+    expect(asyncStore.get(QUEUE_KEY)).toBe(corrupt);
+  });
+
+  it("keeps at most two quarantined blobs per container", async () => {
+    const api = await import("./api");
+    for (const index of [1, 2, 3]) {
+      asyncStore.set(QUEUE_KEY, `corrupt-${index}`);
+      await api.enqueueEvent({ localId: `after-${index}`, source: "shortcut", type: "shortcut_action" });
+      asyncStore.delete(QUEUE_KEY);
+    }
+    asyncStore.set(CORRELATIONS_KEY, "corrupt-correlations");
+    await expect(api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).resolves.toEqual(new Map());
+    const quarantine = JSON.parse(asyncStore.get(QUARANTINE_KEY)!) as Array<{ container: string; raw: string }>;
+    expect(quarantine.map((record) => [record.container, record.raw])).toEqual([
+      ["activity_queue", "corrupt-2"],
+      ["activity_queue", "corrupt-3"],
+      ["timer_entry_id_correlations", "corrupt-correlations"]
+    ]);
+    // Readers leave it in place; the next correlation written replaces it, the copy already kept.
+    expect(asyncStore.get(CORRELATIONS_KEY)).toBe("corrupt-correlations");
+    await api.recordTimerEntryIdCorrelation("optimistic-active-timer:new", TIMER_TARGET_A, TIMER_STOP_OWNER);
+    expect(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).toEqual(
+      new Map([["optimistic-active-timer:new", TIMER_TARGET_A]])
+    );
+    expect(JSON.parse(asyncStore.get(QUARANTINE_KEY)!)).toHaveLength(3);
+  });
+});

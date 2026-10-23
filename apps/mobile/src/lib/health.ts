@@ -22,7 +22,7 @@ import {
   type SleepStage,
 } from "@dayframe/shared";
 import {
-  enqueueEvent,
+  enqueueEvents,
   reprocessHealthReviewItems,
   type HealthReviewReprocessResult,
 } from "./api";
@@ -417,7 +417,7 @@ async function captureHealthKindUnsafe(
     partial = false,
     queried = false;
   // Recover a committed source page even when its former process died before enqueue.
-  importedCount += (await handoffHealthEvents(owner, enqueueEvent, isCurrent))
+  importedCount += (await handoffHealthEvents(owner, enqueueEvents, isCurrent))
     .queuedCount;
   const maxPages = Math.min(20, Math.max(1, options.maxPages ?? 20));
   for (let page = 0; page < maxPages; page++) {
@@ -585,7 +585,7 @@ async function captureHealthKindUnsafe(
       capturedCount += committed.usableSampleCount;
       deletionCount += committed.deletionCount;
       importedCount += (
-        await handoffHealthEvents(owner, enqueueEvent, isCurrent)
+        await handoffHealthEvents(owner, enqueueEvents, isCurrent)
       ).queuedCount;
       partial = !complete;
       if (complete) break;
