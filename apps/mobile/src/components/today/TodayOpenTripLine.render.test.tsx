@@ -19,7 +19,7 @@ const theme = { mode: "dark", textMuted: "#707B91", textPrimary: "#FFF", textSec
 const trip = { startedAt: "2026-10-22T13:44:00.000Z", lastObservedAt: "2026-10-22T14:18:00.000Z", fromPlaceId: null, travelMode: null };
 
 function text(node: ReturnType<typeof create>["root"]): string {
-  return node.findAllByType("Text" as never).filter((item) => item.parent?.type !== "Text")
+  return node.findAllByType("Text" as never).filter((item) => (item.parent?.type as unknown) !== "Text")
     .map((item) => item.children.map((child) => typeof child === "string" ? child : child.children.join("")).join("")).join("");
 }
 
