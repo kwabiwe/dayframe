@@ -40,16 +40,26 @@ type Shape = {
   continuous?: boolean;
   /** The origin is a saved place whose geofence exit fires at this minute. */
   exitAt?: number;
+  /** With `exitAt`: the exit is half of a registration snapshot (an entry 2.4 s later). */
+  snapshot?: boolean;
+  /** A moving reading exactly at the origin stay's end (the departure itself). */
+  departureMoving?: boolean;
+  /** A newer completed Visit (minutes 30–100) attached to the origin with no reported accuracy. */
+  newerVisitWithoutAccuracy?: boolean;
 };
 
 function journey(shape: Shape = {}) {
   const visitEndsAt = shape.visitEndsAt === undefined ? 240 : shape.visitEndsAt;
   const stillNorth = shape.stillNorth ?? 100;
-  const own = [visit("origin-arrival", 0, null, 16), ...(visitEndsAt == null ? [] : [visit("origin-visit", 0, visitEndsAt, 104)])];
+  const own = [visit("origin-arrival", 0, null, 16), ...(visitEndsAt == null ? [] : [visit("origin-visit", 0, visitEndsAt, 104)]),
+    ...(shape.newerVisitWithoutAccuracy ? [{ ...visit("origin-newer-visit", 30, 100, 0),
+      evidence: { ...visit("origin-newer-visit", 30, 100, 0).evidence, horizontalAccuracyMeters: null } }] : [])];
   const fixes = [reading("origin-a", 5, -40, 0), reading("origin-b", 50, -30, 10)];
   // The origin stay ended early (a stray reading split it): the stretch to minute 240 is not its own.
-  const exit = shape.exitAt == null ? [] : [reading("origin-exit", shape.exitAt, 0, 0, { kind: "geofence_exit", latitude: null,
-    longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: ORIGIN_PLACE_ID })];
+  const callback = (id: string, minutes: number, kind: "geofence_exit" | "geofence_enter") => reading(id, minutes, 0, 0, { kind,
+    latitude: null, longitude: null, horizontalAccuracyMeters: null, speedMetersPerSecond: null, savedPlaceId: ORIGIN_PLACE_ID });
+  const exit = shape.exitAt == null ? [] : [callback("origin-exit", shape.exitAt, "geofence_exit"),
+    ...(shape.snapshot ? [callback("origin-snapshot-enter", shape.exitAt + 0.04, "geofence_enter")] : [])];
   const from = { ...stay("origin", 0, 60, 0, [...own, ...fixes, ...exit].map(({ evidence }) => evidence.clientEvidenceId)),
     ...(shape.exitAt == null ? {} : { placeId: ORIGIN_PLACE_ID, placeMatchKind: "saved" as const }) };
   const to = stay("destination", 262, null, 1_500, ["destination-a"]);
@@ -57,11 +67,13 @@ function journey(shape: Shape = {}) {
     reading("still-1", 90, stillNorth, 0), reading("still-2", 180, stillNorth, 10), reading("still-3", 220, stillNorth, -10)
   ];
   const route = shape.continuous
-    ? Array.from({ length: 100 }, (_, index) => reading(`walk-${index}`, 62 + index * 2, 0, 10 + index * 14, { speedMetersPerSecond: 1.4 }))
+    ? Array.from({ length: 100 }, (_, index) => reading(`walk-${index}`, 62 + index * 2, 0, 10 + index * 14,
+      { speedMetersPerSecond: index < 10 ? 0.3 : 1.6 }))
     : [reading("walk-1", 242, 150, 150, { speedMetersPerSecond: 1.7, horizontalAccuracyMeters: 9 }),
       reading("walk-2", 248, 100, 600, { speedMetersPerSecond: 1.5 }),
       reading("walk-3", 255, 50, 1_100, { speedMetersPerSecond: 1.4 })];
-  const evidence = [...own, ...fixes, ...exit, ...still, ...route, reading("destination-a", 262, 0, 1_500)]
+  const departure = shape.departureMoving ? [reading("departure", 60, 0, 20, { speedMetersPerSecond: 8, horizontalAccuracyMeters: 8 })] : [];
+  const evidence = [...own, ...fixes, ...exit, ...departure, ...still, ...route, reading("destination-a", 262, 0, 1_500)]
     .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt));
   const stays = shape.continuous ? [from, stay("destination", 264, null, 1_500, ["destination-a"])] : [from, to];
   if (shape.continuous) evidence.find(({ evidence: e }) => e.clientEvidenceId === "destination-a")!.evidence.occurredAt = at(264);
@@ -103,7 +115,22 @@ describe("journey start guard (location v4 Fix B)", () => {
     expect(move.startedAt).toBe(at(60));
   });
 
-  it("leaves a continuous journey unchanged", () => {
+  it("counts movement at the start itself: the departure reading keeps the start", () => {
+    const [move] = journey({ visitEndsAt: null, departureMoving: true });
+    expect(move.startedAt).toBe(at(60));
+  });
+
+  it("picks the covering Visit as Fix A does: a newer Visit without a radius covers nothing", () => {
+    const [move] = journey({ newerVisitWithoutAccuracy: true });
+    expect(move.startedAt).toBe(at(220));
+  });
+
+  it("never lets a registration snapshot's exit overrule the Visit", () => {
+    const [move] = journey({ exitAt: 61, snapshot: true });
+    expect(move.startedAt).toBe(at(240));
+  });
+
+  it("leaves a continuous journey unchanged, still readings before movement included", () => {
     const [move] = journey({ visitEndsAt: null, continuous: true });
     expect(move.startedAt).toBe(at(60));
     expect(move.continuityStatus).toBe("continuous");

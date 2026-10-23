@@ -833,7 +833,7 @@ export function deriveCommutes(
     // Fix B (location v4 §9): a journey never claims time its origin's own
     // completed Visit covers, and one that would span a silence over the
     // continuity limit starts where movement was seen.
-    startedAtMs = ownVisitCoverEndMs(from, acceptedEvidence, occurredAtMs, ownedByDestination, startedAtMs, stoppedAtMs, config);
+    startedAtMs = ownVisitCoverEndMs(from, acceptedEvidence, occurredAtMs, ownedByDestination, snapshots, startedAtMs, stoppedAtMs, config);
     startedAtMs = movementSupportedStartMs(to, acceptedEvidence, occurredAtMs, speedOf, ownedByDestination, snapshots,
       options.interiorStops ?? [], startedAtMs, stoppedAtMs, config);
     // Time away from a saved or learned place is measured from the place
@@ -1224,7 +1224,8 @@ export function deriveCommutes(
  * A departure at or after the destination leaves no journey.
  */
 function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], occurredAtMs: readonly number[],
-  ownedByDestination: ReadonlySet<string>, startedAtMs: number, stoppedAtMs: number, config: LocationEngineConfig) {
+  ownedByDestination: ReadonlySet<string>, snapshots: ReadonlySet<ClassifiedEvidence>, startedAtMs: number, stoppedAtMs: number,
+  config: LocationEngineConfig) {
   const fromIds = new Set(from.evidenceIds);
   const fromStartMs = Date.parse(from.startedAt);
   const fromStopMs = Date.parse(from.stoppedAt ?? from.startedAt);
@@ -1233,8 +1234,8 @@ function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], o
   let covering: ClassifiedEvidence["evidence"] | null = null;
   for (const item of evidence) {
     const visit = item.evidence;
-    if (visit.kind !== "visit" || visit.endedAt == null || visit.isSimulated === true || visit.horizontalAccuracyMeters == null ||
-      evidencePoint(item) == null || ownedByDestination.has(visit.clientEvidenceId)) continue;
+    if (visit.kind !== "visit" || visit.endedAt == null || visit.isSimulated === true || evidencePoint(item) == null ||
+      ownedByDestination.has(visit.clientEvidenceId)) continue;
     if (!fromIds.has(visit.clientEvidenceId) && !attachedArrivals.has(`${visit.deviceId}:${visit.occurredAt}`)) continue;
     const arrivedMs = Date.parse(visit.occurredAt);
     if (!(arrivedMs >= fromStartMs && arrivedMs <= fromStopMs)) continue;
@@ -1242,7 +1243,8 @@ function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], o
     if (arrivedMs > coveringArrivedMs ||
       arrivedMs === coveringArrivedMs && Date.parse(visit.endedAt) < Date.parse(covering!.endedAt!)) covering = visit;
   }
-  if (!covering) return startedAtMs;
+  // As in Fix A, the latest Visit is iOS's judgement even without a radius; then it covers nothing.
+  if (!covering || covering.horizontalAccuracyMeters == null) return startedAtMs;
   const departedMs = Date.parse(covering.endedAt!);
   if (!(departedMs > startedAtMs)) return startedAtMs;
   const centre = { latitude: covering.latitude!, longitude: covering.longitude! };
@@ -1251,8 +1253,9 @@ function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], o
     const at = occurredAtMs[index];
     if (at < fromStopMs || at >= Math.min(departedMs, stoppedAtMs) || item.evidence.isSimulated === true ||
       ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
-    // The origin's own exit is the device leaving, whatever the Visit says.
-    if (item.evidence.kind === "geofence_exit" && evidenceMatchesStay(item, from)) return startedAtMs;
+    // The origin's own exit is the device leaving, whatever the Visit says; a
+    // registration snapshot's exit is not.
+    if (item.evidence.kind === "geofence_exit" && evidenceMatchesStay(item, from) && !snapshots.has(item)) return startedAtMs;
     if (item.evidence.kind === "visit" || !accurateFix(item, config)) continue;
     if (distanceMeters(centre, evidencePoint(item)!) > covering.horizontalAccuracyMeters! + item.evidence.horizontalAccuracyMeters!) {
       return startedAtMs;
@@ -1264,7 +1267,7 @@ function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], o
 
 /**
  * Where a journey starts when it would span a silence over the continuity
- * limit before any movement was seen. Movement is a reading with credible
+ * limit before any movement was seen (movement at the start itself counts). Movement is a reading with credible
  * accuracy whose speed (native from any copy, else an accurate fix's implied
  * speed) reaches the movement threshold. When observations between the start
  * and the first movement leave a silence over `maxContinuityGapMs`, the device
@@ -1289,13 +1292,14 @@ function movementSupportedStartMs(to: StaySegment, evidence: ClassifiedEvidence[
   let movedMs: number | null = null;
   for (const [index, item] of evidence.entries()) {
     const at = occurredAtMs[index];
-    if (at <= startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null || snapshots.has(item) ||
+    if (at < startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null || snapshots.has(item) ||
       ownedByDestination.has(item.evidence.clientEvidenceId) || evidenceMatchesStay(item, to)) continue;
+    // Movement at the start itself (the departure reading) shows the journey began there.
     if (moving(item)) {
       movedMs = at;
       break;
     }
-    observed.push(at);
+    if (at > startedAtMs) observed.push(at);
   }
   if (movedMs == null || observed.length === 0) return startedAtMs;
   if (interiorStops.some((stop) => Date.parse(stop.startedAt) > startedAtMs && Date.parse(stop.startedAt) < movedMs!)) return startedAtMs;
