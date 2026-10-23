@@ -103,6 +103,8 @@ async function database() {
           checkpoint_advanced integer not null, outcome text not null, primary key(owner_key,run_id));
         create index if not exists health_sample_window on health_samples(owner_key,kind,stopped_at);
         create index if not exists health_delivery_pending on health_deliveries(owner_key,state,created_at);
+        create table if not exists health_prune_runs (owner_key text primary key, pruned_at text not null);
+        create index if not exists health_query_run_finished on health_query_runs(owner_key,finished_at);
         `);
         if ((version?.user_version ?? 0) < 2) {
           // Re-handoff pre-identity queue records with their original journal
@@ -404,6 +406,7 @@ export async function commitHealthCapturePage(input: {
         input.previousAnchor !== input.newAnchor ? 1 : 0,
         input.complete ? "query_completed" : "partial",
       );
+      await expireHealthQueryRuns(transaction, key);
     });
     return {
       generatedCount: generated,
@@ -598,18 +601,42 @@ export async function recordHealthQueryFailure(input: {
   reason: "query_failed" | "invalid_anchor" | "storage_full";
 }) {
   const db = await database();
+  const key = healthOwnerKey(input.owner);
   await serial(() =>
-    db.runAsync(
-      `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
+    db.withExclusiveTransactionAsync(async (transaction) => {
+      await transaction.runAsync(
+        `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
     additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome) values(?,?,?,?,?,?,0,0,0,0,0,0,?)`,
-      healthOwnerKey(input.owner),
-      input.runId,
-      input.contract.kind,
-      canonicalHealthJson(input.contract),
-      input.startedAt,
-      new Date().toISOString(),
-      input.reason,
-    ),
+        key,
+        input.runId,
+        input.contract.kind,
+        canonicalHealthJson(input.contract),
+        input.startedAt,
+        new Date().toISOString(),
+        input.reason,
+      );
+      await expireHealthQueryRuns(transaction, key);
+    }),
+  );
+}
+
+/**
+ * Query-run diagnostics are written by every capture, background wakes included, which skip the
+ * daily prune. Each write therefore also expires that owner's runs past provenance retention:
+ * one indexed range delete (`health_query_run_finished`), so the history stays bounded however
+ * rarely the app is opened.
+ */
+export const HEALTH_QUERY_RUN_EXPIRY_SQL =
+  "delete from health_query_runs where owner_key=? and finished_at<?";
+async function expireHealthQueryRuns(
+  transaction: Pick<SQLite.SQLiteDatabase, "runAsync">,
+  key: string,
+  now = Date.now(),
+) {
+  await transaction.runAsync(
+    HEALTH_QUERY_RUN_EXPIRY_SQL,
+    key,
+    new Date(now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000).toISOString(),
   );
 }
 
@@ -650,64 +677,134 @@ export async function keepRecordedHealthTime(
   });
 }
 
+/** Journal maintenance runs at most this often per owner (see `pruneAcknowledgedHealthCaptureIfDue`). */
+export const HEALTH_PRUNE_INTERVAL_MS = 86_400_000;
+
+/**
+ * Expires acknowledged raw capture (14 days) and compact provenance (90 days) for one owner.
+ * Every statement is linear in the journal: the protected source members (those of any
+ * unacknowledged delivery or unresolved correction) are collected once per statement as a
+ * non-correlated set, never re-derived per row. Unacknowledged intent is never pruned.
+ */
 export async function pruneAcknowledgedHealthCapture(
   owner: HealthCaptureOwner,
   now = Date.now(),
 ) {
   const db = await database();
+  await serial(() =>
+    db.withExclusiveTransactionAsync((transaction) =>
+      pruneOwnerJournal(transaction, healthOwnerKey(owner), now),
+    ),
+  );
+}
+
+/**
+ * Foreground maintenance entry point: prunes at most once per `HEALTH_PRUNE_INTERVAL_MS` per
+ * owner and returns whether it ran. A background wake never calls this (health.ts), so its
+ * bounded capture budget is spent on capture.
+ */
+export async function pruneAcknowledgedHealthCaptureIfDue(
+  owner: HealthCaptureOwner,
+  now = Date.now(),
+) {
+  const db = await database();
   const key = healthOwnerKey(owner);
+  return serial(async () => {
+    let ran = false;
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      const last = await transaction.getFirstAsync<{ pruned_at: string }>(
+        "select pruned_at from health_prune_runs where owner_key=?",
+        key,
+      );
+      const lastAt = last ? Date.parse(last.pruned_at) : Number.NaN;
+      // A clock set back past the last run must not postpone maintenance until it catches up.
+      if (
+        Number.isFinite(lastAt) &&
+        lastAt <= now &&
+        now - lastAt < HEALTH_PRUNE_INTERVAL_MS
+      )
+        return;
+      await pruneOwnerJournal(transaction, key, now);
+      await transaction.runAsync(
+        `insert into health_prune_runs(owner_key,pruned_at) values(?,?)
+        on conflict(owner_key) do update set pruned_at=excluded.pruned_at`,
+        key,
+        new Date(now).toISOString(),
+      );
+      ran = true;
+    });
+    return ran;
+  });
+}
+
+type PruneTransaction = Pick<SQLite.SQLiteDatabase, "runAsync">;
+
+async function pruneOwnerJournal(
+  transaction: PruneTransaction,
+  key: string,
+  now: number,
+) {
   const rawBefore = new Date(
     now - HEALTH_RAW_RETENTION_DAYS * 86_400_000,
   ).toISOString();
   const provenanceBefore = new Date(
     now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000,
   ).toISOString();
-  await serial(() =>
-    db.withExclusiveTransactionAsync(async (transaction) => {
-      // Every unacknowledged delivery and unresolved correction protects its source members.
-      const unprotected = `not exists(select 1 from health_episodes e,json_each(e.sample_ids_json) member
-      where e.owner_key=health_samples.owner_key and member.value=health_samples.sample_id and
-      (exists(select 1 from health_deliveries d where d.owner_key=e.owner_key and d.episode_id=e.episode_id and d.state!='acknowledged')
-       or exists(select 1 from health_source_corrections c where c.owner_key=e.owner_key and c.episode_id=e.episode_id and c.state='needs_attention')))`;
-      await transaction.runAsync(
-        `update health_samples set sample_json=null where owner_key=? and updated_at<? and ${unprotected}`,
-        key,
-        rawBefore,
-      );
-      await transaction.runAsync(
-        `update health_deliveries set payload_json=null where owner_key=? and state='acknowledged' and acknowledged_at<?
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
-        key,
-        rawBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_samples where owner_key=? and updated_at<? and ${unprotected}`,
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        "delete from health_query_runs where owner_key=? and finished_at<?",
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        "delete from health_source_corrections where owner_key=? and state!='needs_attention' and resolved_at<?",
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_episodes where owner_key=? and updated_at<?
-      and not exists(select 1 from health_deliveries d where d.owner_key=health_episodes.owner_key and d.episode_id=health_episodes.episode_id)
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_episodes.owner_key and c.episode_id=health_episodes.episode_id and c.state='needs_attention')`,
-        key,
-        provenanceBefore,
-      );
-    }),
+  // Episodes with an unresolved correction, and episodes with any unacknowledged delivery.
+  const corrected = `select c.episode_id from health_source_corrections c where c.owner_key=? and c.state='needs_attention'`;
+  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state!='acknowledged'`;
+  // Their source members, gathered once: one json_each pass over the protecting episodes only.
+  const protectedSamples = `select member.value from health_episodes e,json_each(e.sample_ids_json) member
+      where e.owner_key=? and member.value is not null
+      and (e.episode_id in (${unsettled}) or e.episode_id in (${corrected}))`;
+  await transaction.runAsync(
+    `update health_samples set sample_json=null where owner_key=? and updated_at<? and sample_json is not null
+      and sample_id not in (${protectedSamples})`,
+    key,
+    rawBefore,
+    key,
+    key,
+    key,
+  );
+  await transaction.runAsync(
+    `update health_deliveries set payload_json=null where owner_key=? and state='acknowledged' and acknowledged_at<?
+      and payload_json is not null and episode_id not in (${corrected})`,
+    key,
+    rawBefore,
+    key,
+  );
+  await transaction.runAsync(
+    `delete from health_samples where owner_key=? and updated_at<? and sample_id not in (${protectedSamples})`,
+    key,
+    provenanceBefore,
+    key,
+    key,
+    key,
+  );
+  await transaction.runAsync(
+    `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
+      and episode_id not in (${corrected})`,
+    key,
+    provenanceBefore,
+    key,
+  );
+  await transaction.runAsync(
+    "delete from health_query_runs where owner_key=? and finished_at<?",
+    key,
+    provenanceBefore,
+  );
+  await transaction.runAsync(
+    "delete from health_source_corrections where owner_key=? and state!='needs_attention' and resolved_at<?",
+    key,
+    provenanceBefore,
+  );
+  await transaction.runAsync(
+    `delete from health_episodes where owner_key=? and updated_at<?
+      and episode_id not in (select d.episode_id from health_deliveries d where d.owner_key=?)
+      and episode_id not in (${corrected})`,
+    key,
+    provenanceBefore,
+    key,
+    key,
   );
 }

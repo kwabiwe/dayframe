@@ -2156,16 +2156,19 @@ export async function updatePlace(
   },
   session: RequestSession = getDevSession()
 ) {
-  const hasName = Object.prototype.hasOwnProperty.call(input, "name");
-  const hasLatitude = Object.prototype.hasOwnProperty.call(input, "latitude");
-  const hasLongitude = Object.prototype.hasOwnProperty.call(input, "longitude");
-  const hasRadius = Object.prototype.hasOwnProperty.call(input, "radiusMeters");
-  const hasPriority = Object.prototype.hasOwnProperty.call(input, "priority");
-  const hasDefaultCategory = Object.prototype.hasOwnProperty.call(input, "defaultCategoryId");
-  const hasDefaultActivityDescription = Object.prototype.hasOwnProperty.call(input, "defaultActivityDescription");
-  const hasAutoStart = Object.prototype.hasOwnProperty.call(input, "autoStart");
-  const hasLoggingEnabled = Object.prototype.hasOwnProperty.call(input, "loggingEnabled");
-  const hasAutoLog = Object.prototype.hasOwnProperty.call(input, "autoLog");
+  // A field is updated only when the caller sent a value; a key present as `undefined` is left
+  // alone (null still clears), so a partial update never erases what it omitted (audit server-3).
+  const sent = (key: keyof typeof input) => Object.prototype.hasOwnProperty.call(input, key) && input[key] !== undefined;
+  const hasName = sent("name");
+  const hasLatitude = sent("latitude");
+  const hasLongitude = sent("longitude");
+  const hasRadius = sent("radiusMeters");
+  const hasPriority = sent("priority");
+  const hasDefaultCategory = sent("defaultCategoryId");
+  const hasDefaultActivityDescription = sent("defaultActivityDescription");
+  const hasAutoStart = sent("autoStart");
+  const hasLoggingEnabled = sent("loggingEnabled");
+  const hasAutoLog = sent("autoLog");
 
   try {
     const result = await query<PlaceRowLike>(

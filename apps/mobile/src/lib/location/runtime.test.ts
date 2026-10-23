@@ -78,7 +78,8 @@ vi.mock("../../../modules/dayframe-location-visits", () => ({
   startMonitoring: vi.fn(),
   stopMonitoring: mocks.stopMonitoring
 }));
-const { configureLocationIntelligence, drainNativeLocationSignalsInBatches, syncLocationIntelligenceOnForeground } = await import("./runtime");
+const { configureLocationIntelligence, drainNativeLocationSignalsInBatches, refreshLocalJournalReplayForDiagnostics, syncLocationIntelligenceOnForeground } = await import("./runtime");
+const { runningJsTasks } = await import("../jsTasks");
 function bootstrap(userId = "user-a", workspaceId = "workspace-a", mode: MobileBootstrap["locationRolloutMode"] = "v2_shadow") {
   state.owner = { userId, workspaceId };
   return { user: { id: userId, email: `${userId}@example.test`, name: userId }, workspace: { id: workspaceId, name: workspaceId },
@@ -104,8 +105,8 @@ describe("location runtime binding and drain", () => {
     await configureLocationIntelligence(bootstrap());
     expect(mocks.clearAllSignals).not.toHaveBeenCalled();
     expect(state.binding).toBe(binding);
-    // The local journal replay is asked for each time; the store throttles it (refreshLocalJournalReplayIfDue).
-    expect(mocks.refreshLocalJournalReplayIfDue).toHaveBeenCalledTimes(2);
+    // A bootstrap publish never runs the local journal replay (stability audit 22 Oct 2026, location-3).
+    expect(mocks.refreshLocalJournalReplayIfDue).not.toHaveBeenCalled();
   });
   it("clears native evidence before binding a different account", async () => {
     await configureLocationIntelligence(bootstrap());
@@ -203,10 +204,28 @@ describe("location runtime binding and drain", () => {
     expect(mocks.recordMotionCaptureFailure).toHaveBeenCalledOnce();
   });
 
-  it("refreshes the local journal replay when due and forces the server replay on foreground without new signals", async () => {
+  it("forces the server replay on foreground without new signals, and never runs the local journal replay", async () => {
     await configureLocationIntelligence(bootstrap()); vi.clearAllMocks();
     await syncLocationIntelligenceOnForeground();
-    expect(mocks.refreshLocalJournalReplayIfDue).toHaveBeenCalledOnce();
+    expect(mocks.refreshLocalJournalReplayIfDue).not.toHaveBeenCalled();
     expect(mocks.syncLocationEvidence).toHaveBeenCalledWith({ forceReplay: true });
+  });
+  it("a failing local journal replay never blocks bootstrap or foreground sync (stability audit location-4)", async () => {
+    mocks.refreshLocalJournalReplayIfDue.mockRejectedValue(new Error("synthetic replay failure"));
+    try {
+      await expect(configureLocationIntelligence(bootstrap())).resolves.toBeUndefined();
+      expect(mocks.syncLocationEvidence).toHaveBeenCalledOnce();
+      await expect(syncLocationIntelligenceOnForeground()).resolves.toMatchObject({ synced: true });
+      expect(mocks.syncLocationEvidence).toHaveBeenLastCalledWith({ forceReplay: true });
+    } finally { mocks.refreshLocalJournalReplayIfDue.mockResolvedValue([]); }
+  });
+  it("runs the local journal replay only for the diagnostics export, labelled location-replay", async () => {
+    let release!: () => void;
+    mocks.refreshLocalJournalReplayIfDue.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve([]); }));
+    const run = refreshLocalJournalReplayForDiagnostics();
+    expect(runningJsTasks().running).toContain("location-replay");
+    release(); await run;
+    expect(mocks.refreshLocalJournalReplayIfDue).toHaveBeenCalledOnce();
+    expect(runningJsTasks().running).not.toContain("location-replay");
   });
 });
