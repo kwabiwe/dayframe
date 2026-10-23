@@ -215,6 +215,54 @@ describe("PATCH /api/time-entries/[id]", () => {
     expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
   });
 
+  it("passes the block version an edit was based on through for the version check (Codex r3 on #539)", async () => {
+    const response = await PATCH(
+      jsonRequest({ description: "app testing", expectedDetails: { description: "BAU" }, expectedUpdatedAt: "2026-07-31T15:00:00.000Z" }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith(
+      "entry-1",
+      { description: "app testing", expectedDetails: { description: "BAU" }, expectedUpdatedAt: "2026-07-31T15:00:00.000Z" },
+      session
+    );
+  });
+
+  it("refuses a save at a stale version with the same 409 and the current block", async () => {
+    const current = { id: "entry-1", description: "BAU", categoryId: "coding", tagNames: [], stoppedAt: null, updatedAt: "2026-07-31T15:01:00.000Z" };
+    mocks.updateTimeEntry.mockRejectedValueOnce(new mocks.TimeEntryConflictError());
+    mocks.getTimeEntryById.mockResolvedValueOnce(current);
+
+    const response = await PATCH(
+      jsonRequest({ description: "app testing", expectedUpdatedAt: "2026-07-31T15:00:00.000Z" }),
+      routeContext()
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "time_entry_details_conflict", entry: current });
+  });
+
+  it("keeps an iPhone PATCH (no expectedUpdatedAt, no expectedDetails) exactly as before", async () => {
+    const body = { categoryId: categoryId(), description: "Walk", tagNames: ["Outside"], startedAt: new Date(Date.now() - 60_000).toISOString() };
+    const response = await PATCH(jsonRequest(body), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", body, session);
+    const [, update] = mocks.updateTimeEntry.mock.calls[0]!;
+    expect(update).not.toHaveProperty("expectedUpdatedAt");
+  });
+
+  it("treats a null expectedUpdatedAt as absent and rejects a malformed one", async () => {
+    const accepted = await PATCH(jsonRequest({ description: "BAU", expectedUpdatedAt: null }), routeContext());
+    expect(accepted.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", { description: "BAU" }, session);
+
+    const rejected = await PATCH(jsonRequest({ description: "BAU", expectedUpdatedAt: "yesterday" }), routeContext());
+    expect(rejected.status).toBe(400);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a start time after a completed entry finish time", async () => {
     const response = await PATCH(
       jsonRequest({

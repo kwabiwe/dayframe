@@ -52,7 +52,7 @@ import {
   query
 } from "./db";
 import { getNormalizationContext } from "./queries";
-import { detailsChangedSince, type ExpectedDetails } from "./time-entry-details-precondition";
+import { detailsChangedSince, versionChangedSince, type ExpectedDetails } from "./time-entry-details-precondition";
 import { getDevSession, type RequestSession } from "./session";
 import { createTag, syncTimeEntryTags } from "./tag-service";
 import type pg from "pg";
@@ -2500,6 +2500,8 @@ export async function updateTimeEntry(
     tagNames?: string[];
     /** The details this edit was based on: refused (409) if any has changed since. */
     expectedDetails?: ExpectedDetails;
+    /** The block's version this edit was based on: refused (409) if it has been written since. */
+    expectedUpdatedAt?: string;
   },
   session: RequestSession = getDevSession()
 ) {
@@ -2526,6 +2528,17 @@ export async function updateTimeEntry(
       [id, session.workspaceId, session.userId]
     );
     if (!locked.rows[0]) throw new TimeEntryNotFoundError();
+    if (input.expectedUpdatedAt) {
+      // A fresh statement after the lock, as below: it sees a write that committed while this one waited.
+      const version = await client.query<{ updatedAt: string | Date }>(
+        `select updated_at as "updatedAt" from time_entries
+         where id = $1 and workspace_id = $2 and user_id = $3`,
+        [id, session.workspaceId, session.userId]
+      );
+      const row = version.rows[0];
+      if (!row) throw new TimeEntryNotFoundError();
+      if (versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
+    }
     if (input.expectedDetails) {
       const stored = await client.query<{
         categoryId: string | null;
