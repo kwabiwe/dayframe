@@ -231,6 +231,15 @@ export function deriveTripLegs({
     run = relabel(run, neighbour.label);
   }
 
+  // A stop between two runs of one mode does not change the mode (a car at lights): join them before any
+  // short-run decision, so their seen time together holds the mode; the stop's time never does (Codex r6 on #562).
+  for (let run: Run | null = head; run; run = run.next) {
+    if (run.label === "still" && run.prev && run.next && run.prev.label === run.next.label) {
+      run.observedMs = 0;
+      run = relabel(run, run.prev.label);
+    }
+  }
+
   // Short moving runs join their longer moving neighbour, across stops, shortest first. A walk that
   // lasts `tripChangeWalkMinimumMs` between two vehicle legs (a change of train, a walk to the bus) stays.
   const heap = new RunHeap();

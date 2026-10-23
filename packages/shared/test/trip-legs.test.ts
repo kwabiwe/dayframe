@@ -141,6 +141,12 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
     expect(legs(0, minute, steps)).toHaveLength(1);
   });
 
+  it("joins one mode across a stop before deciding which runs are short (Codex r6 on #562)", () => {
+    // 90 s driving, a one-minute stop, 90 s driving, then ten minutes' walk: a three-minute drive and the walk.
+    expect(legs(0, 14, [[0, "automotive"], [1.5, "stationary"], [2.5, "automotive"], [4, "walking"]])
+      .map(({ mode, from, to }) => ({ mode, from, to }))).toEqual([{ mode: "automotive", from: 0, to: 4 }, { mode: "walking", from: 4, to: 14 }]);
+  });
+
   it("never counts a carried Core Motion label as agreement", () => {
     // The whole trip sits in an unknown spell between two drives: the label is carried, so only speed agrees.
     const readings = [reading(31, 0, 12), reading(34, 2_000, 13), reading(38, 5_000, 12)];
