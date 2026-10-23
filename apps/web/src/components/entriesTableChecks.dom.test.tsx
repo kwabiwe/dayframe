@@ -52,6 +52,20 @@ const reviewItems = [
     suggestedStoppedAt: at(6) })
 ];
 
+// A reply that passes the acknowledgement check for what was sent (Codex r2 on #568).
+function acknowledge(url: string, init: RequestInit) {
+  const envelope = JSON.parse(init.body as string);
+  const reviewItemId = url.split("/").pop() as string;
+  const action = envelope.mutation.action as string;
+  const base = { ok: true, action, clientMutationId: envelope.clientMutationId, reviewItemId };
+  if (action === "confirm_outing" || action === "ignore_outing") {
+    const ids = [reviewItemId, ...envelope.mutation.memberReviewItemIds];
+    return { ...base, reviewItemIds: ids, status: action === "ignore_outing" ? "ignored" : "accepted",
+      ...(action === "confirm_outing" ? { entryIds: ids.map((id) => `entry-${id}`) } : {}) };
+  }
+  return action.startsWith("ignore") ? { ...base, status: "ignored" } : { ...base, status: "accepted", entryId: `entry-${reviewItemId}` };
+}
+
 function renderList() {
   return render(
     <EntriesTable capturedNow={new Date(at(12))} categories={[]} groupByDay locationTimeline={timeline} reviewItems={reviewItems}
@@ -60,13 +74,12 @@ function renderList() {
   );
 }
 
+const baseProps = () => ({ capturedNow: new Date(at(12)), categories: [], groupByDay: true, locationTimeline: timeline, entries: [],
+  onChanged: vi.fn(async () => undefined), onDeleteEntries: vi.fn(), onScroll: vi.fn(), scrollContainerRef: vi.fn(), tags: [] });
+
 describe("things to check in Calendar › List (location v4 step 14)", () => {
   beforeEach(() => {
-    clientFetch.mockReset().mockImplementation(async (url: string, init: RequestInit) => {
-      const envelope = JSON.parse(init.body as string);
-      return new Response(JSON.stringify({ ok: true, action: envelope.mutation.action, status: "accepted",
-        clientMutationId: envelope.clientMutationId, reviewItemId: url.split("/").pop(), entryIds: ["e1"] }), { status: 200 });
-    });
+    clientFetch.mockReset().mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
     Element.prototype.scrollIntoView ??= () => undefined;
   });
   afterEach(() => {
@@ -95,6 +108,10 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(clientFetch).toHaveBeenCalledTimes(1);
     expect(clientFetch.mock.calls[0][0]).toBe(`/api/review/${PLACE}`);
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "confirm" });
+    // Saved, not rolled back: the "?" stays away and no error shows.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByRole("button", { name: "Check Office" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("brings a skipped suggestion back with Undo and saves nothing", async () => {
@@ -135,6 +152,9 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByRole("button", { name: "Check Unknown place" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("brings an answered card back with Undo even after a refresh dropped it, and moves focus on (Codex r1 on #568)", async () => {
@@ -158,5 +178,76 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     );
     expect(await screen.findByRole("button", { name: "Check Sleep" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "3 to check" })).toBeTruthy();
+  });
+
+  it("keeps a revived card away once it is answered again and saved (Codex r2 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    const withoutSleep = reviewItems.filter((item) => item.id !== SLEEP);
+    rerender(<EntriesTable {...baseProps()} reviewItems={withoutSleep} />);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    rerender(<EntriesTable {...baseProps()} reviewItems={[...withoutSleep]} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByRole("button", { name: "Check Sleep" })).toBeNull();
+  });
+
+  it("brings back only the outing's cards the server says are still open (Codex r2 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const stay = suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
+      rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } });
+    const walk = suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
+      suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } });
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "open", [walk.id]: "accepted" } }), { status: 409 }));
+    const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    // The refresh after the answer no longer lists either card.
+    rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // The stay comes back on its own: the accepted trip is not folded into the next answer.
+    expect(screen.getByRole("button", { name: "Check Unknown place" })).toBeTruthy();
+    clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    expect(screen.queryByText(/With its trips/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(JSON.parse(clientFetch.mock.calls.at(-1)?.[1].body).mutation.action).not.toBe("ignore_outing");
+  });
+
+  it("moves focus to the List when the last question is answered (Codex r2 on #568)", async () => {
+    const { container } = render(<EntriesTable {...baseProps()} reviewItems={[reviewItems[2]]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".timeline-list-scroll")));
+  });
+
+  it("brings a refused answer back through the List's transition (Codex r2 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const startViewTransition = vi.fn((update: () => void) => { update(); });
+    Object.assign(document, { startViewTransition });
+    window.matchMedia = vi.fn(() => ({ matches: false }) as MediaQueryList);
+    try {
+      clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, error: "Nope" }), { status: 500 }));
+      render(<EntriesTable {...baseProps()} reviewItems={reviewItems} />);
+      fireEvent.click(screen.getByRole("button", { name: "Check Sleep" }));
+      fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+      const before = startViewTransition.mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByRole("button", { name: "Check Sleep" })).toBeTruthy();
+      expect(startViewTransition.mock.calls.length).toBeGreaterThan(before);
+    } finally {
+      delete (document as { startViewTransition?: unknown }).startViewTransition;
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
   });
 });

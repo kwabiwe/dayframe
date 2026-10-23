@@ -13,10 +13,23 @@ import { onBeforeSessionChange } from "@/lib/session-change";
  */
 export function useReviewDecisions(
   openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>,
-  onOutingConflict: (stayId: string, statuses: Record<string, string>) => void
+  onOutingConflict: (stayId: string, statuses: Record<string, string>) => void,
+  /**
+   * How a restore (Undo, or a refused save) reaches the page: the List runs it through its own
+   * transition. Read once, when the controller is made: pass a stable function.
+   */
+  applyRestore?: (update: () => void) => void
 ) {
   const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
-  const [controller] = useState(() => new ReviewDecisionController(setState));
+  const [controller] = useState(() => {
+    let restoredSequence = 0;
+    return new ReviewDecisionController((next) => {
+      const restoring = next.restored !== null && next.restored.sequence !== restoredSequence;
+      if (next.restored) restoredSequence = next.restored.sequence;
+      if (restoring && applyRestore) applyRestore(() => setState(next));
+      else setState(next);
+    });
+  });
   // The save reads the newest data: a held suggestion a refresh changed is not what the user
   // decided about. One a refresh no longer lists (decided elsewhere, or past the newest 100) is
   // still sent, and the server says.

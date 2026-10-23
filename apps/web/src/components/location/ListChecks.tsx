@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DAYFRAME_APP_ICONS, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -36,33 +36,71 @@ function segmentOf(item: ReviewItemRow) {
 }
 
 export function useListChecks({
+  applyTransition,
   categories,
   refresh,
   reviewItems
 }: {
+  /** The List's transition, which owns every change a "?" makes, restores included. */
+  applyTransition: (update: () => void) => void;
   categories: readonly CategoryRow[];
   refresh: () => Promise<unknown>;
   reviewItems: readonly ReviewItemRow[];
 }) {
   const openItems = useMemo(() => reviewItems.filter((item) => item.status === "open"), [reviewItems]);
-  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, () => undefined);
-  // As on the deck (Codex r1 on #568): what was answered here, so Undo or a refused save brings it back
-  // even when a refresh no longer lists it; and an answered outing's trips, kept folded while its answer is held.
+  // As the deck (Codex r1/r2 on #568): a refused outing's canonical statuses, so only its open cards
+  // return; and cards the server says are decided stay away until newer data lists them open.
+  const outingConflictStatuses = useRef(new Map<string, Record<string, string>>());
+  const [closedByServer, setClosedByServer] = useState<ReadonlyMap<string, unknown>>(() => new Map());
+  const openItemsAtConflict = useRef<unknown>(openItems);
+  useLayoutEffect(() => {
+    openItemsAtConflict.current = openItems;
+  }, [openItems]);
+  const onOutingConflict = useCallback((stayId: string, statuses: Record<string, string>) => {
+    outingConflictStatuses.current.set(stayId, statuses);
+    const closed = Object.entries(statuses).filter(([, status]) => status !== "open").map(([id]) => id);
+    const over = openItemsAtConflict.current;
+    if (closed.length) setClosedByServer((current) => new Map([...current, ...closed.map((id) => [id, over] as const)]));
+  }, []);
+  const { state, decide, undo, clearError } = useReviewDecisions(openItems, refresh, onOutingConflict, applyTransition);
+  // What was answered here, so Undo or a refused save brings it back even when a refresh no longer lists
+  // it; and an answered outing's trips, kept folded while its answer is held, saving or saved.
   const [snapshots, setSnapshots] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [revived, setRevived] = useState<ReadonlyMap<string, ReviewItemRow>>(() => new Map());
   const [heldOutings, setHeldOutings] = useState<ReadonlyMap<string, readonly ReviewItemRow[]>>(() => new Map());
-  const [seenRestore, setSeenRestore] = useState(0);
+  // Kept current for the restore effect below.
+  const restoreSources = useRef({ snapshots, heldOutings });
+  useLayoutEffect(() => {
+    restoreSources.current = { snapshots, heldOutings };
+  });
   const loadedIds = useMemo(() => new Set(openItems.map((item) => item.id)), [openItems]);
-  // Adjusting state while rendering: a restore brings back its snapshot; the data listing it again takes over.
-  if (state.restored && state.restored.sequence !== seenRestore) {
-    setSeenRestore(state.restored.sequence);
-    // The answered card, and an outing's trips with it, as the deck brings a whole outing back.
-    const back = [snapshots.get(state.restored.itemId), ...(heldOutings.get(state.restored.itemId) ?? [])]
-      .filter((item): item is ReviewItemRow => Boolean(item) && !loadedIds.has(item!.id));
-    if (back.length) setRevived(new Map([...revived, ...back.map((item) => [item.id, item] as const)]));
-  }
+  const loadedRef = useRef(loadedIds);
+  useLayoutEffect(() => {
+    loadedRef.current = loadedIds;
+  }, [loadedIds]);
+  // As the deck's restore effect: an outing comes back whole, its Stay and every member the data no longer
+  // lists, except cards a refused save says are no longer open.
+  useEffect(() => {
+    if (!state.restored) return;
+    const restoredId = state.restored.itemId;
+    const statuses = outingConflictStatuses.current.get(restoredId);
+    outingConflictStatuses.current.delete(restoredId);
+    const stillOpen = (id: string) => !statuses || statuses[id] === undefined || statuses[id] === "open";
+    const loaded = loadedRef.current;
+    const snapshot = restoreSources.current.snapshots.get(restoredId);
+    const back = [...(snapshot && !loaded.has(restoredId) ? [snapshot] : []),
+      ...(restoreSources.current.heldOutings.get(restoredId) ?? []).filter((member) => !loaded.has(member.id) && stillOpen(member.id))];
+    if (back.length) applyTransition(() => setRevived((current) => new Map([...current, ...back.map((item) => [item.id, item] as const)])));
+  }, [applyTransition, state.restored]);
+  // A revived card the data lists again is the data's card from then on.
   if ([...revived.keys()].some((id) => loadedIds.has(id))) setRevived(new Map([...revived].filter(([id]) => !loadedIds.has(id))));
-  const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id))], [loadedIds, openItems, revived]);
+  // Newer data listing a card open again lifts the server's earlier "decided" for it.
+  const reopened = (id: string, over: unknown) => over !== openItems && loadedIds.has(id);
+  if ([...closedByServer].some(([id, over]) => reopened(id, over))) {
+    setClosedByServer(new Map([...closedByServer].filter(([id, over]) => !reopened(id, over))));
+  }
+  const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id))],
+    [closedByServer, loadedIds, openItems, revived]);
   // An outing (an unknown stay with its trips there and back) is one "?" on its stay, as on the deck.
   const outings = useMemo(() => reviewOutings(items), [items]);
   const memberIds = useMemo(() => new Set([
@@ -71,23 +109,23 @@ export function useListChecks({
   ]), [heldOutings, outings, state.hiddenIds]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const checks = useMemo<ListCheck[]>(() => items
-    .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id))
+    .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
     .map((item) => ({ id: item.id, segmentId: segmentOf(item), startedAt: item.suggestedStartedAt, stoppedAt: item.suggestedStoppedAt })),
-  [items, memberIds, state.hiddenIds]);
+  [closedByServer, items, memberIds, state.hiddenIds]);
 
   const answer = useCallback((itemId: string, kind: ReviewDecisionKind) => {
     const item = itemsById.get(itemId);
     if (!item || (kind === "log" && !reviewWindow(item))) return;
     const outing = outings.get(item.id);
-    setSnapshots((current) => new Map([...current, [item.id, item], ...(outing?.members ?? []).map((member) => [member.id, member] as const)]));
-    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members));
     const span = reviewWindow(item);
     const category = reviewCardCategory(item, undefined, categories);
     const outingMs = outing ? outing.members.reduce((sum, member) => {
       const memberSpan = reviewWindow(member);
       return sum + (memberSpan ? memberSpan.stopMs - memberSpan.startMs : 0);
     }, 0) : 0;
-    decide({
+    setSnapshots((current) => new Map([...current, [item.id, item], ...(outing?.members ?? []).map((member) => [member.id, member] as const)]));
+    if (outing) setHeldOutings((current) => new Map(current).set(item.id, outing.members));
+    const held = decide({
       itemId: item.id,
       kind,
       mutation: outing ? outingMutationFor(outing, kind, undefined) : reviewMutationFor(item, kind, undefined),
@@ -97,7 +135,15 @@ export function useListChecks({
       color: category?.color ?? null,
       colorName: category?.name ?? ""
     });
-  }, [categories, decide, itemsById, outings]);
+    // A held answer retires the copy Undo brought back, as on the deck.
+    if (held && revived.has(item.id)) {
+      setRevived((current) => {
+        const next = new Map(current);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }, [categories, decide, itemsById, outings, revived]);
 
   return { answer, checks, clearError, itemsById, outings, state, undo };
 }

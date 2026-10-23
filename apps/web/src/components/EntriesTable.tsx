@@ -296,7 +296,7 @@ export function EntriesTable({
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
-  const listChecks = useListChecks({ categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
   const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   const locationRows = useMemo(
@@ -345,28 +345,45 @@ export function EntriesTable({
                 listChecks.answer(item.id, kind);
                 setFocusedCheck(null);
               });
-              setTimeout(() => focusCheck(following?.key ?? null), 0);
+              focusCheck(following?.key ?? null);
             }}
             onPickPlace={row.kind === "place" && !row.place.blockIds.length ? () => correctPlace(row.place, label) : undefined} />
         ) : null}
       </Fragment>
     );
   };
-  /** Focus a row's "?" by its key, else the chip, else the List. */
+  /**
+   * Where focus goes once the List has committed the change (a transition commits later): a row's "?" by
+   * its key, else the chip, else the List itself (Codex r1/r2 on #568). Undefined: nothing to move.
+   */
+  const pendingFocus = useRef<string | null | undefined>(undefined);
+  // Undo or a refused save brings a "?" back: its toggle takes focus once the row is listed again.
+  const pendingRestore = useRef<string | null>(null);
   const focusCheck = (key: string | null) => {
-    const target = (key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null) ??
-      document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current;
-    target?.focus();
+    pendingRestore.current = null;
+    pendingFocus.current = key;
   };
-  // Undo or a refused save brings a "?" back: its toggle takes focus.
-  const restoredKey = listChecks.state.restored
-    ? locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === listChecks.state.restored!.itemId)?.key ?? null
-    : null;
+  const restoredItemId = listChecks.state.restored?.itemId ?? null;
   const restoredSequence = listChecks.state.restored?.sequence ?? 0;
   useEffect(() => {
-    if (restoredSequence && restoredKey) setTimeout(() => focusCheck(restoredKey), 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per restore
-  }, [restoredSequence]);
+    if (restoredSequence && restoredItemId) pendingRestore.current = restoredItemId;
+  }, [restoredItemId, restoredSequence]);
+  useEffect(() => {
+    if (pendingRestore.current) {
+      const restoredId = pendingRestore.current;
+      const restoredRow = locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === restoredId);
+      if (!restoredRow) return;
+      pendingRestore.current = null;
+      pendingFocus.current = restoredRow.key;
+    }
+    const key = pendingFocus.current;
+    if (key === undefined) return;
+    const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
+    // Wait while the "?" it moves to has not rendered yet.
+    if (key && !row && checkRows.some((other) => other.key === key)) return;
+    pendingFocus.current = undefined;
+    (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+  });
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -869,6 +886,8 @@ export function EntriesTable({
         aria-busy={localTimeReady ? undefined : true}
         className="timeline-list-scroll"
         onScroll={onScroll}
+        // Focus can land on the List itself when no "?" or chip is left to take it.
+        tabIndex={-1}
         ref={(element) => {
           listScrollRef.current = element;
           scrollContainerRef(element);
@@ -1179,7 +1198,7 @@ export function EntriesTable({
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
         {listChecks.state.notice ? (
           <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
-            message={listChecks.state.notice.label} onAction={() => applyTimelineRegroup(() => listChecks.undo())}
+            message={listChecks.state.notice.label} onAction={listChecks.undo}
             swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>
