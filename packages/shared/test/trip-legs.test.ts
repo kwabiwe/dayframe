@@ -113,6 +113,22 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
     expect(run(simulated)).toEqual(run([]));
   });
 
+  it("lets readings too broad to accept still break a silence, through the whole engine (Codex r2 on #563)", () => {
+    // A seven-minute drive, its accurate fixes six minutes and 5.5 km apart, seen six times at 300 m in between.
+    const stay = (id: string, from: number, to: number, east: number) => Array.from({ length: 8 }, (_, index) =>
+      reading(from + index * ((to - from) / 7), east, 0).evidence).map((item, index) => ({ ...item, clientEvidenceId: `${id}-${index}` }));
+    const anchors = [reading(101, 0, 12).evidence, reading(101.5, 400, 13).evidence, reading(107.5, 5_900, 13).evidence, reading(108, 6_300, 12).evidence];
+    const broad = [102, 103, 104, 105, 106, 107].map((minute) => ({ ...reading(minute, (minute - 101) * 900, null, 300).evidence,
+      clientEvidenceId: `broad-${minute}` }));
+    const driving = motion([[0, "stationary"], [101, "automotive"], [108, "stationary"]]).map((item) => item.evidence);
+    const run = (extra: LocationEvidence[]) => runLocationEngine({ priorState: { algorithmVersion: config.algorithmVersion, mode: "idle",
+      activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null }, config: { ...config, tripStationsEnabled: false }, processingAt: at(200),
+      acceptedLearnedPlaces: [], savedPlaces: [], evidence: [...stay("a", 70, 100, 0), ...anchors, ...stay("b", 109, 140, 6_300), ...driving, ...extra] })
+      .segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute").flatMap((trip) => trip.tripLegs?.map((leg) => leg.mode) ?? []);
+    expect(run([])).toContain("underground");
+    expect(run(broad)).not.toContain("underground");
+  });
+
   it("never takes a speed from a simulated copy of a reading", () => {
     const genuine = [reading(1, 0, null), reading(3, 150, null), reading(5, 300, null)];
     const simulated = genuine.map((item) => ({ ...item, evidence: { ...item.evidence, clientEvidenceId: `${item.evidence.clientEvidenceId}-sim`,

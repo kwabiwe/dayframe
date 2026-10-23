@@ -131,6 +131,20 @@ describe("trip legs, part 2 (location v4 step 7)", () => {
     expect(legs([reading(0, from, 12), reading(4, to, 12)], [[0, "automotive"]], 4).map(({ mode }) => mode)).toEqual(["underground"]);
   });
 
+  it("needs end witnesses inside the leg, near its own ends (Codex r2 on #563)", () => {
+    // Two fixes near one station, mid-leg, 12 seconds apart: it passed the station.
+    const [station] = pairOf("u", ["rail"]);
+    const nearby = { latitude: station.latitude + 0.0013, longitude: station.longitude };
+    expect(legs([reading(1.9, station, 12), reading(2.1, nearby, 12)], [[0, "automotive"]], 4).map(({ mode }) => mode)).toEqual(["automotive"]);
+    // A half-hour fast drive whose station fixes sit two minutes outside it, in the walks either side.
+    const [from, to] = pairOf("r");
+    const aside = (share: number) => ({ ...toward(from, to, share), latitude: toward(from, to, share).latitude + 0.02 });
+    const readings = [reading(0, from, 1.2), ...[6, 10, 14, 18, 22, 26, 28].map((minute) => reading(minute, aside((minute - 2) / 30), 25)),
+      reading(34, to, 1.2)];
+    const result = legs(readings, [[0, "walking"], [2, "automotive"], [32, "walking"]], 34);
+    expect(result.map(({ mode }) => mode)).not.toContain("train");
+  });
+
   it("keeps every silence's distance when two Underground runs join across a stop (Codex r1 on #563)", () => {
     const [from, to] = pairOf("u");
     const each = distanceMeters(from, to);

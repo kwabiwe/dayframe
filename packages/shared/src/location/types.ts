@@ -353,6 +353,12 @@ export type LocationEngineOutput = {
   nextState: LocationEngineState;
   acceptedEvidence: ClassifiedEvidence[];
   rejectedEvidence: RejectedEvidence[];
+  /**
+   * When genuine readings too broad to accept (worse than `maxAcceptedHorizontalAccuracyMeters`) but better
+   * than cell-only (`tripUnseenObservedAccuracyMeters`) were taken, sorted, in epoch ms: times only, never
+   * positions. They show the phone was seen, so a trip's silence is no silence (location v4 step 7).
+   */
+  broadReadingTimes?: number[];
   segmentUpserts: LocationSegment[];
   finalisedSegments: LocationSegment[];
   /** The journey in progress, when there is one. Never persisted as a segment and never logged. */

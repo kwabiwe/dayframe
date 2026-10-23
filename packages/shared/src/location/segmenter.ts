@@ -1027,6 +1027,7 @@ function preprocess(input: LocationEngineInput) {
   const savedIndex = indexPlacesByLatitude(input.savedPlaces, input.config);
   const learnedIndex = indexPlacesByLatitude(input.acceptedLearnedPlaces, input.config);
   const rejectedEvidence: RejectedEvidence[] = [];
+  const broadReadingTimes: number[] = [];
   const seen = new Set<string>();
   const sorted = input.evidence.map((evidence) => ({ ...evidence, metadata: evidence.metadata ? { ...evidence.metadata } : undefined })).sort((a, b) => {
     const timeDifference = Date.parse(a.occurredAt) - Date.parse(b.occurredAt);
@@ -1064,6 +1065,8 @@ function preprocess(input: LocationEngineInput) {
       evidence.horizontalAccuracyMeters > input.config.maxAcceptedHorizontalAccuracyMeters
     ) {
       rejectedEvidence.push({ clientEvidenceId: evidence.clientEvidenceId, kind: evidence.kind, occurredAt: evidence.occurredAt, reason: "accuracy_too_broad" });
+      if ((evidence.kind === "standard_location" || evidence.kind === "significant_change") && evidence.isSimulated !== true &&
+        evidence.horizontalAccuracyMeters < input.config.tripUnseenObservedAccuracyMeters) broadReadingTimes.push(occurredAtMs);
       continue;
     }
     let impliedSpeedMetersPerSecond: number | null = null;
@@ -1122,7 +1125,7 @@ function preprocess(input: LocationEngineInput) {
     }
     accepted.push({ evidence: normalisedEvidence, match, impliedSpeedMetersPerSecond });
   }
-  return { accepted, rejectedEvidence };
+  return { accepted, rejectedEvidence, broadReadingTimes };
 }
 
 function resolveCorroboratedCoincidentVisits(accepted: ClassifiedEvidence[], input: LocationEngineInput) {
@@ -1440,7 +1443,7 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
 }
 
 function runLocationEnginePass(input: LocationEngineInput): { output: LocationEngineOutput; unusedCompanionIds: string[] } {
-  const { accepted: acceptedWithMotion, rejectedEvidence } = preprocess(input);
+  const { accepted: acceptedWithMotion, rejectedEvidence, broadReadingTimes } = preprocess(input);
   // Motion & Fitness activity is not a location observation: stays, physical
   // stops and continuity never see it. Only journey timing uses it, below.
   const accepted = acceptedWithMotion.filter((item) => !isMotionEvidence(item.evidence));
@@ -1986,7 +1989,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     learnedPlaces: input.acceptedLearnedPlaces
   });
   // Every journey replay can persist carries its legs (location v4 step 6).
-  const commutes = withTripLegs(assembled, acceptedWithMotion, input.config, input.processingAt, motionTimeline);
+  const commutes = withTripLegs(assembled, acceptedWithMotion, input.config, input.processingAt, motionTimeline, broadReadingTimes);
 
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
@@ -2016,10 +2019,11 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     },
     acceptedEvidence: acceptedWithMotion,
     rejectedEvidence,
+    broadReadingTimes,
     segmentUpserts: segments,
     finalisedSegments,
     openTrip: activeStay ? null : openTripWithLegs(deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
-      acceptedWithMotion, input.config, input.processingAt, motionTimeline),
+      acceptedWithMotion, input.config, input.processingAt, motionTimeline, broadReadingTimes),
     diagnostics: {
       inputCount: input.evidence.length,
       acceptedCount: acceptedWithMotion.length,
