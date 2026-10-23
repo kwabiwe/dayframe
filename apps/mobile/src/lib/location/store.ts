@@ -70,6 +70,18 @@ const MAX_LOCAL_MOTION_ITEMS = 10_000;
  */
 export const MOTION_KIND_EXPRESSION = "(json_extract(evidence_json, '$.kind') = 'motion_activity')";
 export const RETENTION_EXPIRY_SQL = "delete from location_evidence_journal where expires_at < ?";
+/**
+ * A settled upload body (acknowledged, partial or rejected) is never read again: retries re-read only
+ * pending rows, diagnostics count only pending rows, and the local replay and the Share location details
+ * export read the journal. It still holds every reading's coordinates, so it is deleted a day after it
+ * settled (stability audit 22 Oct 2026, location-5), a bounded number per retention pass, so a backlog
+ * from older builds drains over a few samples instead of in one large write. Pending bodies are queued
+ * work and are never expired here.
+ */
+export const SETTLED_UPLOAD_RETENTION_MS = 86_400_000;
+export const SETTLED_UPLOAD_EXPIRY_BATCH = 50;
+export const SETTLED_UPLOAD_EXPIRY_SQL = `delete from location_upload_outbox where rowid in (
+  select rowid from location_upload_outbox where state <> 'pending' and updated_at < ? limit ?)`;
 export function retentionKindCountSql(motion: boolean) {
   return `select count(*) as count from location_evidence_journal where ${MOTION_KIND_EXPRESSION} = ${motion ? 1 : 0}`;
 }
@@ -269,6 +281,8 @@ async function database() {
           where client_batch_id is not null;
         create index if not exists location_upload_outbox_account_state_idx
           on location_upload_outbox(account_key, state, next_attempt_at);
+        create index if not exists location_upload_outbox_settled_idx
+          on location_upload_outbox(updated_at) where state <> 'pending';
       `);
     } catch {
       // The next open tries again.
@@ -1465,6 +1479,8 @@ async function applyLocationRetentionUnsafe() {
     const prior = Number(await metadata("dropped_evidence_count") ?? 0);
     await setMetadata("dropped_evidence_count", String(prior + result.changes));
   }
+  await db.runAsync(SETTLED_UPLOAD_EXPIRY_SQL,
+    new Date(Date.parse(now) - SETTLED_UPLOAD_RETENTION_MS).toISOString(), SETTLED_UPLOAD_EXPIRY_BATCH);
   await setMetadata("retention_cleanup_deleted_count", String(expired.changes));
   await setMetadata("retention_cleanup_at", now);
   return { deletedCount: expired.changes, cleanedAt: now };
