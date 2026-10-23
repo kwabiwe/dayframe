@@ -265,6 +265,33 @@ describe("complete saved-place snapshot replay", () => {
   await store.processPendingLocationEvidence(new Date(start+11*60_000).toISOString());
   expect((await store.getLocationStoreDiagnostics()).lastLocalReplayAt).toBe(new Date(start+11*60_000).toISOString());
  });
+ it("a failing local journal replay never rejects: it records an error name, keeps the last snapshot and retries at most every ten minutes (stability audit location-4)", async () => {
+  vi.useFakeTimers({toFake:["Date"]});
+  const start=Date.parse("2026-10-13T12:00:00Z");vi.setSystemTime(start);
+  await persistEvidence([{clientEvidenceId:"journal-ok",deviceId:"ios-synthetic",algorithmVersion:LOCATION_ENGINE_V2_CONFIG.algorithmVersion,
+   kind:"significant_change",occurredAt:new Date(start-60_000).toISOString(),receivedAt:new Date(start-60_000).toISOString(),timeZone:"Europe/London",latitude:51.5,longitude:-0.1,horizontalAccuracyMeters:10,metadata:{}}]);
+  await store.refreshLocalJournalReplayIfDue(start);
+  const state=db.prepare("select * from location_engine_state").all();
+  const key=db.prepare("select account_key from location_account_context").get()!.account_key as string;
+  // A stored row a later schema no longer parses (synthetic, already uploaded so sync never reads it).
+  db.prepare("insert into location_evidence_journal(client_evidence_id,account_key,occurred_at,expires_at,evidence_json,upload_state,inserted_at) values(?,?,?,?,?,?,?)")
+   .run("journal-poison",key,new Date(start).toISOString(),new Date(start+7*86_400_000).toISOString(),JSON.stringify({kind:"not-a-kind"}),"acknowledged",new Date(start).toISOString());
+  vi.setSystemTime(start+10*60_000);
+  await expect(store.refreshLocalJournalReplayIfDue(start+10*60_000)).resolves.toEqual([]);
+  let diagnostics=await store.getLocationStoreDiagnostics();
+  expect(diagnostics).toMatchObject({lastLocalReplayAt:new Date(start).toISOString(),lastLocalReplayInputCount:1,
+   lastLocalReplayFailedAt:new Date(start+10*60_000).toISOString(),lastLocalReplayError:"ZodError",localReplayFailureCount:1});
+  expect(JSON.stringify(diagnostics)).not.toContain("not-a-kind");
+  expect(db.prepare("select * from location_engine_state").all()).toEqual(state);
+  // A failure is throttled like a run, so a poison row cannot cost the engine on every call.
+  await store.refreshLocalJournalReplayIfDue(start+15*60_000);
+  expect((await store.getLocationStoreDiagnostics()).localReplayFailureCount).toBe(1);
+  await store.refreshLocalJournalReplayIfDue(start+20*60_000);
+  expect((await store.getLocationStoreDiagnostics()).localReplayFailureCount).toBe(2);
+  // Upload and the server replay are untouched.
+  await expect(store.syncLocationEvidence({forceReplay:true})).resolves.toBeTruthy();
+  expect(mocks.fetch.mock.calls.some(([url])=>String(url).endsWith("/replay"))).toBe(true);
+ });
  it("never takes another backend's replay time as this account's (Codex r1 on #381)", async () => {
   vi.useFakeTimers({toFake:["Date"]});
   const start=Date.parse("2026-10-13T12:00:00Z");vi.setSystemTime(start);
