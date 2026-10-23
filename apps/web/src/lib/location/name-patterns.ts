@@ -57,9 +57,13 @@ export async function namePatternsFor(
       if (row.latitude != null && row.longitude != null) endCentres.set(row.id, { latitude: row.latitude, longitude: row.longitude });
     }
   }
-  const roundTripOf = (segment: CommuteSegment) => correctedMoves.has(segment.clientSegmentId)
-    ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
-    : isRoundTrip(segment);
+  // A corrected Move is a round trip when its two ends are one place: saved or learned (Codex r6 on #566).
+  const sameEnds = (segment: CommuteSegment) => {
+    const from = endKeys.get(stayIds.get(segment.fromStaySegmentId) ?? "");
+    return Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId) ||
+      Boolean(from && from === endKeys.get(stayIds.get(segment.toStaySegmentId) ?? ""));
+  };
+  const roundTripOf = (segment: CommuteSegment) => correctedMoves.has(segment.clientSegmentId) ? sameEnds(segment) : isRoundTrip(segment);
   const roundTrips = moves.filter(({ segment }) => roundTripOf(segment));
   // A round trip's turnaround: the farthest of its route readings and its stops from where it began
   // (an outing with a stop may have no route links at all; Codex r1 on #458).
@@ -101,7 +105,8 @@ export async function namePatternsFor(
       latitude: number | null; longitude: number | null }>(
       `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as "placeMatchKind",
               st_y(centre::geometry) as latitude, st_x(centre::geometry) as longitude
-       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+         and (continuity_status = 'manual' or metadata ? 'setByYou')`,
       [session.workspaceId, session.userId, ids]);
     for (const row of result.rows) manualKeys.set(row.id, persistedStayKey(row));
   }

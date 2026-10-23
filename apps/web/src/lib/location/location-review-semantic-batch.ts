@@ -56,6 +56,8 @@ async function moveEndpoints(
   const moves = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
   const saved = new Map<string, MoveEndpoint>();
   const learned = new Map<string, MoveEndpoint>();
+  // Each end Stay's learned place, so a Move between two ends at one learned place is a round trip too.
+  const learnedOf = new Map<string, string>();
   const placeIds = [...new Set(moves.flatMap((segment) => [segment.fromPlaceId, segment.toPlaceId].filter((id): id is string => Boolean(id))))].sort();
   const stayDbIds = [...new Set(moves.flatMap((segment) => [
     segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId),
@@ -70,13 +72,16 @@ async function moveEndpoints(
   }
   for (const ids of chunks(stayDbIds)) {
     // A learned place linked to a saved place goes by the saved place's display name, as its Stay does.
-    const result = await client.query<{ id: string; name: string; role: string | null }>(`select ss.id, coalesce(${placeDisplayNameSql("p")}, lp.name) as name,
-      p.role
+    const result = await client.query<{ id: string; name: string; role: string | null; learnedPlaceId: string }>(`select ss.id,
+      coalesce(${placeDisplayNameSql("p")}, lp.name) as name, p.role, lp.id as "learnedPlaceId"
       from stay_segments ss
       join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
       left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and lp.status = 'accepted'
       where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
-    for (const row of result.rows) learned.set(row.id, { name: row.name, role: role(row.role) });
+    for (const row of result.rows) {
+      learned.set(row.id, { name: row.name, role: role(row.role) });
+      learnedOf.set(row.id, row.learnedPlaceId);
+    }
   }
   const unknown: MoveEndpoint = { name: null, role: null };
   const end = (placeId: string | null | undefined, staySegmentId: string) => {
@@ -89,8 +94,11 @@ async function moveEndpoints(
     const to = end(segment.toPlaceId, segment.toStaySegmentId);
     // A corrected Move is a round trip only when its corrected ends are one place; the engine's
     // qualification still governs policy, never this name.
+    const fromLearned = segment.fromPlaceId ? undefined : learnedOf.get(stayIds.get(segment.fromStaySegmentId) ?? "");
+    const toLearned = segment.toPlaceId ? undefined : learnedOf.get(stayIds.get(segment.toStaySegmentId) ?? "");
     const sameEndpoint = correctedMoves.has(segment.clientSegmentId)
-      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
+      // One place at both ends, saved or learned (Codex r6 on #566).
+      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId) || Boolean(fromLearned && fromLearned === toLearned)
       : isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
         Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
     return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,

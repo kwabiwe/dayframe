@@ -190,6 +190,10 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const source = await db.query(`select e.raw_payload ? 'nameSource' as "hasSource" from activity_events e join review_items ri on ri.event_id = e.id
         where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
     expect(source.rows[0].hasSource).toBe(false);
+    // Every title Dayframe offered for it, the outgoing ones too (Codex r6 on #566).
+    const titles = await db.query(`select e.raw_payload -> 'reviewSuggestedTitles' as titles from activity_events e
+        join review_items ri on ri.event_id = e.id where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
+    expect(titles.rows[0].titles).toEqual(expect.arrayContaining(["Unknown place", "Home"]));
     // The person's place, never `manual` (a place you are still at closes when you leave), and the trips either
     // side are named from it at emission, as for Review's own corrections (Codex r3/r4 on #566).
     const kept = await db.query(`select client_segment_id as id, continuity_status as status, metadata ->> 'setByYou' as "setByYou"
@@ -213,6 +217,14 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
         startedAt: at(800), stoppedAt: at(820) }
     ] as Parameters<typeof withCorrectedStayPlaces>[2], new Map([["seg-c", seg]]));
     expect(learned.correctedMoves.has("trip-c")).toBe(true);
+    // There and back at one corrected place is a round trip, learned places too: with no known turnaround it
+    // gets no pattern, never a point-to-point one other outings would share (Codex r6 on #566).
+    const { namePatternsFor } = await import("./name-patterns");
+    const trip = { kind: "commute", clientSegmentId: "trip-c", fromStaySegmentId: "seg-c", toStaySegmentId: "seg-c", fromPlaceId: null,
+      toPlaceId: null, startedAt: at(800), stoppedAt: at(820), evidenceIds: [], travelMode: "walking" } as unknown as Parameters<typeof namePatternsFor>[2][number]["segment"];
+    const patterns = await namePatternsFor(db, session, [{ clientEventId: "e-trip-c", segment: trip }], new Map([["seg-c", seg]]), new Map(),
+      new Map(), new Set(["trip-c"]));
+    expect(patterns.has("e-trip-c")).toBe(false);
     expect(emitted.segments[0]).toMatchObject({ fromPlaceId: homeId, toPlaceId: homeId });
 
     // A place the person picked, then deleted: replay skips that correction instead of writing a missing place back.

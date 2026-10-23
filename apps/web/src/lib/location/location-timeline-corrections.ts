@@ -10,6 +10,7 @@ import { withSyncTransaction } from "../sync-transaction";
 import type { RequestSession } from "../session";
 import { placeDisplayNameSql } from "../place-display";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+import { recordReviewTitleHistory } from "./review-title-history";
 
 /**
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
@@ -244,7 +245,14 @@ async function applyToSegment(
           where id = $1 and workspace_id = $2 and user_id = $3`,
         [...scope, request.placeId, request.learnedPlaceId, request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown", spanJson]);
       // Its open Review suggestion, and its event, offer the place the person set: confirming it logs that
-      // place, as Review's own "change place" does (Codex r2 on #566).
+      // place, as Review's own "change place" does (Codex r2 on #566). The outgoing and new titles join the
+      // suggestion's title history, so an editor still showing an older title never teaches it as the
+      // person's own (Codex r6 on #566).
+      const suggestionEvents = (await client.query<{ eventId: string }>(
+        `select event_id as "eventId" from review_items
+          where location_segment_id = $1 and workspace_id = $2 and user_id = $3 and status = 'open' and event_id is not null`,
+        scope)).rows.map((row) => row.eventId);
+      await recordReviewTitleHistory(client, session, suggestionEvents);
       await client.query(
         `with suggestion as (
            update review_items ri
@@ -259,6 +267,7 @@ async function applyToSegment(
            from suggestion
           where ae.id = suggestion.event_id and ae.workspace_id = $2 and ae.user_id = $3`,
         [...scope, request.placeId, request.learnedPlaceId]);
+      await recordReviewTitleHistory(client, session, suggestionEvents);
       return;
     case "times":
       // Trusted table name from the subject.
