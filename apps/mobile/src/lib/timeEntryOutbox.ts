@@ -24,6 +24,16 @@ import {
 
 const TIME_ENTRY_OUTBOX_KEY = "dayframe.timeEntryOutbox.v1";
 const TIME_ENTRY_OUTBOX_QUARANTINE_KEY = "dayframe.timeEntryOutbox.quarantine.v1";
+/**
+ * The refusal fence (Codex r3 on #532): the optimistic block IDs whose queued Start the server refused,
+ * per account. Any Edit or Delete written for one later (a group deletion's loop still writing, say)
+ * is refused as it is written, so nothing can wait for a Start that Clear has already removed. Only
+ * opaque local IDs are kept, for 30 days and at most 200 records.
+ */
+const TIME_ENTRY_REFUSED_STARTS_KEY = "dayframe.timeEntryOutbox.refusedStarts.v1";
+const REFUSED_START_FENCE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
+const REFUSED_START_FENCE_MAX_RECORDS = 200;
+export const REFUSED_START_COMMAND_MESSAGE = "The block this change was for was never saved.";
 export const MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS = 8_000;
 const PERMANENT_STATUS_CODES = new Set([400, 409, 413, 422]);
 const RETRY_BACKOFF_SECONDS = [5, 15, 30, 120, 300, 900];
@@ -43,6 +53,8 @@ export type PendingTimeEntryCommand = MobileAccountOwner & {
   lastError?: string;
   lastStatusCode?: number;
   failureKind?: "retryable" | "permanent";
+  /** Its block's queued Start was refused, so it can never be delivered: Discard only. */
+  refusedStart?: boolean;
 };
 
 export type TimeEntryCommandTarget =
@@ -148,6 +160,48 @@ export async function releaseTimeEntryCommands(
       }
     }
     return releasedCount;
+  });
+}
+
+/**
+ * A queued Start the server refused never gets a block: the Edits and Deletes made for it become sync
+ * issues (permanent, `refusedStart`) that the person can see and discard in Sync help, never retry.
+ * Holding them permanent also keeps them from holding the account's outbox. Idempotent: the sync
+ * pass runs it for every refused Start until it succeeds.
+ */
+export async function refuseTimeEntryCommandsForOptimisticEntry(
+  owner: MobileAccountOwner,
+  optimisticEntryId: string,
+  message: string = REFUSED_START_COMMAND_MESSAGE
+) {
+  return withMutation(async () => {
+    // The fence first, under the same lock as every enqueue: a command written after this is refused
+    // as it is written, and one written before is refused below.
+    const fence = await readRefusedStartFence();
+    if (!fence.some((record) => fencedFor(record, owner, optimisticEntryId))) {
+      await writeRefusedStartFence([
+        ...fence,
+        { userId: owner.userId, workspaceId: owner.workspaceId, optimisticEntryId, message, refusedAt: new Date().toISOString() }
+      ]);
+    }
+    const all = await readAllCommands();
+    const now = new Date().toISOString();
+    let refusedCount = 0;
+    const next = all.map((command) => {
+      if (
+        !mobileAccountOwnersEqual(command, owner) ||
+        command.optimisticEntryId !== optimisticEntryId ||
+        command.targetEntryId ||
+        command.failureKind === "permanent"
+      ) {
+        return command;
+      }
+      refusedCount += 1;
+      const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
+      return { ...rest, failureKind: "permanent" as const, refusedStart: true, lastError: message, updatedAt: now };
+    });
+    if (refusedCount > 0) await writeAllCommands(next);
+    return refusedCount;
   });
 }
 
@@ -304,6 +358,7 @@ export async function retryTimeEntrySyncIssue(
       if (
         command.clientCommandId !== clientCommandId ||
         command.failureKind !== "permanent" ||
+        command.refusedStart ||
         !mobileAccountOwnersEqual(command, resolvedOwner)
       ) {
         return command;
@@ -441,6 +496,8 @@ async function runTimeEntryCommandDrain(input: {
         : undefined
     );
     if (!targetEntryId) {
+      // A refused Start's block never exists: its command is refused, not waited for (Codex r3 on #532).
+      if (original.optimisticEntryId && await refuseFencedCommand(input.owner, original.clientCommandId)) continue;
       return outboxResult(all, input.owner, deliveredCount, true, "dependency_wait");
     }
     if (
@@ -544,6 +601,10 @@ async function enqueueTimeEntryCommand(input: {
   }
   return withMutation(async () => {
     const now = new Date().toISOString();
+    const fenced = input.target.optimisticEntryId
+      ? (await readRefusedStartFence()).find((record) =>
+          fencedFor(record, input.owner, input.target.optimisticEntryId as string))
+      : undefined;
     const command: PendingTimeEntryCommand = {
       clientCommandId: generatedCommandId(),
       operation: input.operation,
@@ -551,14 +612,17 @@ async function enqueueTimeEntryCommand(input: {
       workspaceId: input.owner.workspaceId,
       ...input.target,
       ...(input.operation === "update" ? { patch: input.patch ?? {} } : {}),
-      ...(validIso(input.deliverAfter) ? { deliverAfter: input.deliverAfter } : {}),
+      ...(validIso(input.deliverAfter) && !fenced ? { deliverAfter: input.deliverAfter } : {}),
       createdAt: now,
       updatedAt: now,
-      attemptCount: 0
+      attemptCount: 0,
+      // Its block's Start was refused: a sync issue from the start (Discard only), never waiting.
+      ...(fenced ? { failureKind: "permanent" as const, refusedStart: true, lastError: fenced.message } : {})
     };
     const all = await readAllCommands();
     await writeAllCommands([...all, command]);
     if (
+      !fenced &&
       input.requestImmediateDelivery &&
       isTimeEntryCommandTransportReady(command, new Map(), {
         force: true,
@@ -741,6 +805,85 @@ function recoverQuarantineOwner(value: unknown): MobileAccountOwner | null {
   return userId && workspaceId ? { userId, workspaceId } : null;
 }
 
+type RefusedStartFenceRecord = MobileAccountOwner & {
+  optimisticEntryId: string;
+  message: string;
+  refusedAt: string;
+};
+
+function fencedFor(record: RefusedStartFenceRecord, owner: MobileAccountOwner, optimisticEntryId: string) {
+  return record.optimisticEntryId === optimisticEntryId && mobileAccountOwnersEqual(record, owner);
+}
+
+/** Refuses one waiting command whose Start is fenced; false when it isn't (or storage failed). */
+async function refuseFencedCommand(owner: MobileAccountOwner, clientCommandId: string) {
+  try {
+    return await withMutation(async () => {
+      const fence = await readRefusedStartFence();
+      const all = await readAllCommands();
+      let refused = false;
+      const now = new Date().toISOString();
+      const next = all.map((command) => {
+        if (
+          command.clientCommandId !== clientCommandId ||
+          command.failureKind === "permanent" ||
+          command.targetEntryId ||
+          !command.optimisticEntryId ||
+          !mobileAccountOwnersEqual(command, owner)
+        ) {
+          return command;
+        }
+        const record = fence.find((candidate) => fencedFor(candidate, owner, command.optimisticEntryId as string));
+        if (!record) return command;
+        refused = true;
+        const { nextAttemptAt: _nextAttemptAt, deliverAfter: _deliverAfter, ...rest } = command;
+        return { ...rest, failureKind: "permanent" as const, refusedStart: true, lastError: record.message, updatedAt: now };
+      });
+      if (refused) await writeAllCommands(next);
+      return refused;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function readRefusedStartFence(now = Date.now()): Promise<RefusedStartFenceRecord[]> {
+  const raw = await AsyncStorage.getItem(TIME_ENTRY_REFUSED_STARTS_KEY);
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value): RefusedStartFenceRecord[] => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    const userId = optionalText(item.userId);
+    const workspaceId = optionalText(item.workspaceId);
+    const optimisticEntryId = optionalText(item.optimisticEntryId);
+    const refusedAt = validIso(item.refusedAt);
+    if (!userId || !workspaceId || !optimisticEntryId || !refusedAt) return [];
+    if (now - Date.parse(refusedAt) > REFUSED_START_FENCE_MAX_AGE_MS) return [];
+    return [{
+      userId,
+      workspaceId,
+      optimisticEntryId,
+      message: optionalText(item.message) ?? REFUSED_START_COMMAND_MESSAGE,
+      refusedAt
+    }];
+  });
+}
+
+async function writeRefusedStartFence(records: readonly RefusedStartFenceRecord[]) {
+  const now = Date.now();
+  const kept = records
+    .filter((record) => now - Date.parse(record.refusedAt) <= REFUSED_START_FENCE_MAX_AGE_MS)
+    .slice(-REFUSED_START_FENCE_MAX_RECORDS);
+  await AsyncStorage.setItem(TIME_ENTRY_REFUSED_STARTS_KEY, JSON.stringify(kept));
+}
+
 async function writeAllCommands(commands: readonly PendingTimeEntryCommand[]) {
   await AsyncStorage.setItem(TIME_ENTRY_OUTBOX_KEY, JSON.stringify(commands));
   for (const listener of listeners) listener();
@@ -888,7 +1031,8 @@ function parseCommand(value: unknown): PendingTimeEntryCommand | null {
       : {}),
     ...(item.failureKind === "retryable" || item.failureKind === "permanent"
       ? { failureKind: item.failureKind }
-      : {})
+      : {}),
+    ...(item.refusedStart === true ? { refusedStart: true } : {})
   };
 }
 
