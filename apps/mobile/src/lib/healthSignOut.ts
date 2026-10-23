@@ -14,6 +14,7 @@
 //   expiry. Unsettled deliveries stay with the durable queue that still holds them.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { requireBackendIdentity } from "./backendIdentity";
+import { subscribeMobileSignedOut } from "./mobileSessionTransition";
 import { expireInactiveHealthOwners, type HealthJournalKeeper } from "./healthSyncStore";
 import {
   getActiveMobileAccountSnapshot,
@@ -213,17 +214,21 @@ export function stopHealthBackgroundDeliveryWhileSignedOut(native?: HealthBackgr
  * delivery, and a logout's unfinished journal expiry is retried.
  */
 export function watchSignedOutHealthBackground(native: HealthBackgroundSwitch) {
-  // Every session or account change (a 401 sign-out included) also retries a pending expiry.
+  // Every session or account change, and every signed-out announcement, also retries a pending expiry.
   const changed = () => {
     void stopHealthBackgroundDeliveryWhileSignedOut(native).catch(() => undefined);
     void runPendingSignedOutHealthExpiry().catch(() => undefined);
   };
   const unsubscribeAccount = subscribeActiveMobileAccount(changed);
   const unsubscribeSession = subscribeAuthenticatedSession(changed);
+  // A rejected session (401) is announced only here, and may leave no account record to remove
+  // (Codex r4 on #549).
+  const unsubscribeSignedOut = subscribeMobileSignedOut(changed);
   changed();
   return () => {
     unsubscribeAccount();
     unsubscribeSession();
+    unsubscribeSignedOut();
   };
 }
 
