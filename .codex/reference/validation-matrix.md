@@ -651,6 +651,7 @@ Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` o
 2. "Copy details for support" includes a `freezes` section (empty lists at first) and nothing else changed.
 3. After a day or two of normal use, the row or the export shows any MetricKit reports Apple delivered (none is also a pass).
 4. Background CPU over a 30-minute background window stays within the budget in `.codex/reference/performance.md` (the watchdog does nothing in the background).
+5. Location energy (location v4 step 3): Sync help › "Location energy" reads "Not reported yet…" on a fresh install; after a day or two iOS delivers MetricKit's daily metrics and the row shows best-accuracy time a day against the 20-minute budget, background location time and CPU (a 7-day average). "Copy details for support" has a `locationEnergy` section with counts only (no positions). Compare a week's figures with Settings › Battery › Dayframe.
 
 ## Bounded mobile sync recovery
 

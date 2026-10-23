@@ -78,4 +78,18 @@ describe("native freeze and crash diagnostics", () => {
     expect(read("app/_layout.tsx")).toContain("installStallWatchdog(NativeModules.DayframeDiagnosticsModule");
     expect(read("app/settings.tsx")).toContain("freezes: supportFreezeDiagnostics(freezes)");
   });
+
+  it("keeps MetricKit's daily energy metrics as counts for Sync help (location v4 step 3)", () => {
+    const service = read("ios/Dayframe/DayframeDiagnostics.swift");
+    const core = read("ios/Dayframe/DayframeDiagnosticsCore.swift");
+    expect(service).toContain("func didReceive(_ payloads: [MXMetricPayload])");
+    expect(service).toContain("self.ingestMetrics(MXMetricManager.shared.pastPayloads)");
+    expect(service).toContain('"energy": DayframeEnergySummary(');
+    expect(core).toContain("struct DayframeEnergyDay: Codable");
+    expect(core).toContain("static let bestAccuracyBudgetSeconds = 20.0 * 60");
+    // Counts only: no positions or place names ever reach the energy record.
+    expect(core.slice(core.indexOf("struct DayframeEnergyDay"), core.indexOf("struct DayframeEnergySummary"))).not.toMatch(/latitude|longitude|coordinate|place/i);
+    expect(read("app/settings.tsx")).toContain('title="Location energy"');
+    expect(read("app/settings.tsx")).toContain("locationEnergy: supportEnergyDiagnostics(freezes?.energy, freezes?.energyDays)");
+  });
 });

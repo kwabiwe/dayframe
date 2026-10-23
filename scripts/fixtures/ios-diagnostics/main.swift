@@ -207,4 +207,29 @@ check(store.reports().count == DayframeDiagnosticsStore.maxReports, "keeps 12 re
 store.clear()
 check(store.stalls().isEmpty && store.reports().isEmpty, "clear removes everything")
 
+// Daily energy metrics (location v4 step 3): counts only, one record per day, newest 30 kept.
+func energyDay(_ index: Int, best: Double, backgroundLocation: Double = 600) -> DayframeEnergyDay {
+  DayframeEnergyDay(
+    begin: date.addingTimeInterval(Double(index) * 86_400), end: date.addingTimeInterval(Double(index + 1) * 86_400),
+    appVersion: "0.1.0", bestAccuracySeconds: best, tenMetresSeconds: 60, hundredMetresSeconds: 120,
+    kilometreSeconds: 30, threeKilometresSeconds: 0, foregroundSeconds: 1800, backgroundSeconds: 7200,
+    backgroundLocationSeconds: backgroundLocation, cpuSeconds: 90
+  )
+}
+check(DayframeEnergySummary([]) == nil, "no summary without days")
+check(store.saveEnergyDay(energyDay(0, best: 300)), "saves a day")
+check(store.saveEnergyDay(energyDay(0, best: 600)), "a re-delivered day replaces it")
+check(store.energyDays().count == 1 && store.energyDays()[0].bestAccuracySeconds == 600, "one record per day")
+for index in 1..<40 { store.saveEnergyDay(energyDay(index, best: index % 5 == 0 ? 1500 : 300)) }
+check(store.energyDays().count == DayframeDiagnosticsStore.maxEnergyDays, "keeps 30 days")
+check(store.energyDays().first?.begin == date.addingTimeInterval(10 * 86_400), "drops the oldest")
+let energy = DayframeEnergySummary(store.energyDays())
+check(energy?.days == 7, "averages the newest 7 days")
+// Days 33–39: day 35 is over the 20-minute best-accuracy budget.
+check(energy?.daysOverBudget == 1, "one day over budget: \(String(describing: energy))")
+check(abs((energy?.bestAccuracySecondsPerDay ?? 0) - (6 * 300 + 1500) / 7) < 0.001, "best-accuracy average")
+check((energy?.dictionary["bestAccuracyBudgetSeconds"] as? Double) == 1200, "budget reported")
+store.clear()
+check(store.energyDays().isEmpty, "clear removes energy days")
+
 print("Native diagnostics validation passed: \(checks) checks.")
