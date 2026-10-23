@@ -35,6 +35,8 @@ type EpisodeRow = {
   sample_ids_json: string;
   started_at: string;
   stopped_at: string;
+  revision: string;
+  source_revision: string | null;
 };
 type DeliveryRow = {
   client_event_id: string;
@@ -86,7 +88,7 @@ async function database() {
         create table if not exists health_episodes (
           owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
           sample_ids_json text not null, started_at text not null, stopped_at text not null,
-          revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+          revision text not null, updated_at text not null, source_revision text, primary key(owner_key,episode_id));
         create table if not exists health_deliveries (
           owner_key text not null, client_event_id text not null, episode_id text not null, revision text not null,
           payload_json text, state text not null default 'pending_handoff', created_at text not null,
@@ -103,7 +105,18 @@ async function database() {
           checkpoint_advanced integer not null, outcome text not null, primary key(owner_key,run_id));
         create index if not exists health_sample_window on health_samples(owner_key,kind,stopped_at);
         create index if not exists health_delivery_pending on health_deliveries(owner_key,state,created_at);
+        create table if not exists health_prune_runs (owner_key text primary key, pruned_at text not null);
+        create index if not exists health_query_run_finished on health_query_runs(owner_key,finished_at);
         `);
+        // Journals from builds before source-fact revisions have no source_revision column; their
+        // episodes are adopted on the next commit without a re-send (see sourceRevisionFor).
+        const episodeColumns = await transaction.getAllAsync<{ name: string }>(
+          "PRAGMA table_info(health_episodes)",
+        );
+        if (!episodeColumns.some((column) => column.name === "source_revision"))
+          await transaction.execAsync(
+            "alter table health_episodes add column source_revision text",
+          );
         if ((version?.user_version ?? 0) < 2) {
           // Re-handoff pre-identity queue records with their original journal
           // owner and immutable payload. Acknowledged deliveries stay settled.
@@ -272,15 +285,17 @@ export async function commitHealthCapturePage(input: {
         key,
         input.contract.kind,
       );
-      const drafts = input.derive(
-        sampleRows.map((row) => ({
-          id: row.sample_id,
-          sourceKey: row.source_key,
-          startedAt: row.started_at,
-          stoppedAt: row.stopped_at,
-          value: JSON.parse(row.sample_json),
-        })),
+      const journalSamples = sampleRows.map((row) => ({
+        id: row.sample_id,
+        sourceKey: row.source_key,
+        startedAt: row.started_at,
+        stoppedAt: row.stopped_at,
+        value: JSON.parse(row.sample_json) as Record<string, unknown>,
+      }));
+      const samplesById = new Map(
+        journalSamples.map((sample) => [sample.id, sample]),
       );
+      const drafts = input.derive(journalSamples);
       for (const draft of drafts) {
         const members = [...new Set(draft.sampleIds)].sort();
         const matches = oldEpisodes
@@ -306,6 +321,36 @@ export async function commitHealthCapturePage(input: {
           episodeId,
         );
         if (unresolved?.n) continue; // Explicit correction preserves the existing union and user-visible time.
+        const sourceRevision = await healthSourceRevision(
+          input.contract.kind,
+          draft.sourceKey,
+          members,
+          samplesById,
+        );
+        const existing = oldEpisodes.find(
+          (episode) => episode.episode_id === episodeId,
+        );
+        // Unchanged source facts: nothing to send, whatever the current mapping or event shape.
+        // An episode journaled before source revisions is adopted when its members and window
+        // are unchanged, so an upgrade never re-sends the retained journal.
+        const unchanged =
+          !!existing &&
+          (existing.source_revision === sourceRevision ||
+            (existing.source_revision == null &&
+              existing.source_key === draft.sourceKey &&
+              existing.sample_ids_json === JSON.stringify(members) &&
+              existing.started_at === draft.startedAt &&
+              existing.stopped_at === draft.stoppedAt));
+        if (unchanged) {
+          await transaction.runAsync(
+            "update health_episodes set source_revision=?,updated_at=? where owner_key=? and episode_id=?",
+            sourceRevision,
+            now,
+            key,
+            episodeId,
+          );
+          continue;
+        }
         const {
           localId: _legacyId,
           owner: _owner,
@@ -320,7 +365,7 @@ export async function commitHealthCapturePage(input: {
             logicalEpisodeId: episodeId,
           },
         };
-        const revision = await healthFingerprint(payload);
+        const revision = sourceRevision;
         const clientEventId = `healthkit:${input.contract.kind}:${episodeId}:${revision}`;
         const event = {
           ...payload,
@@ -346,9 +391,10 @@ export async function commitHealthCapturePage(input: {
         );
         generated += inserted.changes;
         await transaction.runAsync(
-          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at)
-          values(?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
-          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,updated_at=excluded.updated_at`,
+          `insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,source_revision,updated_at)
+          values(?,?,?,?,?,?,?,?,?,?) on conflict(owner_key,episode_id) do update set sample_ids_json=excluded.sample_ids_json,
+          started_at=excluded.started_at,stopped_at=excluded.stopped_at,revision=excluded.revision,
+          source_revision=excluded.source_revision,updated_at=excluded.updated_at`,
           key,
           input.contract.kind,
           episodeId,
@@ -357,6 +403,7 @@ export async function commitHealthCapturePage(input: {
           draft.startedAt,
           draft.stoppedAt,
           revision,
+          sourceRevision,
           now,
         );
       }
@@ -404,6 +451,7 @@ export async function commitHealthCapturePage(input: {
         input.previousAnchor !== input.newAnchor ? 1 : 0,
         input.complete ? "query_completed" : "partial",
       );
+      await expireHealthQueryRuns(transaction, key);
     });
     return {
       generatedCount: generated,
@@ -411,6 +459,44 @@ export async function commitHealthCapturePage(input: {
       usableSampleCount: input.additions.length,
     };
   });
+}
+
+/**
+ * An episode revision identifies its HealthKit source facts only: the member sample identities,
+ * their times and source, and the native sleep stage or workout activity type. Dayframe's
+ * activity mapping and the derived event's shape are deliberately excluded, so a mapping change
+ * or a new build never re-sends an unchanged episode (mapping changes reach the server through
+ * the explicit Health reprocess instead). A changed or added member is a new revision.
+ */
+async function healthSourceRevision(
+  kind: HealthCaptureKind,
+  sourceKey: string,
+  members: string[],
+  samplesById: Map<string, HealthJournalSample>,
+) {
+  return healthFingerprint([
+    "health-source-v1",
+    kind,
+    sourceKey,
+    members.map((id) => {
+      const sample = samplesById.get(id);
+      const value = sample?.value ?? {};
+      const raw = (value.rawPayload ?? {}) as Record<string, unknown>;
+      const source = (
+        (raw.sourceRevision ?? {}) as { source?: Record<string, unknown> }
+      ).source;
+      return [
+        id,
+        sample?.sourceKey ?? null,
+        sample?.startedAt ?? null,
+        sample?.stoppedAt ?? null,
+        kind === "sleep"
+          ? (value.stage ?? null)
+          : (raw.workoutActivityType ?? value.workoutType ?? null),
+        source?.bundleIdentifier ?? null,
+      ];
+    }),
+  ]);
 }
 
 export async function handoffHealthEvents(
@@ -598,18 +684,42 @@ export async function recordHealthQueryFailure(input: {
   reason: "query_failed" | "invalid_anchor" | "storage_full";
 }) {
   const db = await database();
+  const key = healthOwnerKey(input.owner);
   await serial(() =>
-    db.runAsync(
-      `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
+    db.withExclusiveTransactionAsync(async (transaction) => {
+      await transaction.runAsync(
+        `insert or ignore into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,
     additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome) values(?,?,?,?,?,?,0,0,0,0,0,0,?)`,
-      healthOwnerKey(input.owner),
-      input.runId,
-      input.contract.kind,
-      canonicalHealthJson(input.contract),
-      input.startedAt,
-      new Date().toISOString(),
-      input.reason,
-    ),
+        key,
+        input.runId,
+        input.contract.kind,
+        canonicalHealthJson(input.contract),
+        input.startedAt,
+        new Date().toISOString(),
+        input.reason,
+      );
+      await expireHealthQueryRuns(transaction, key);
+    }),
+  );
+}
+
+/**
+ * Query-run diagnostics are written by every capture, background wakes included, which skip the
+ * daily prune. Each write therefore also expires that owner's runs past provenance retention:
+ * one indexed range delete (`health_query_run_finished`), so the history stays bounded however
+ * rarely the app is opened.
+ */
+export const HEALTH_QUERY_RUN_EXPIRY_SQL =
+  "delete from health_query_runs where owner_key=? and finished_at<?";
+async function expireHealthQueryRuns(
+  transaction: Pick<SQLite.SQLiteDatabase, "runAsync">,
+  key: string,
+  now = Date.now(),
+) {
+  await transaction.runAsync(
+    HEALTH_QUERY_RUN_EXPIRY_SQL,
+    key,
+    new Date(now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000).toISOString(),
   );
 }
 
@@ -650,64 +760,134 @@ export async function keepRecordedHealthTime(
   });
 }
 
+/** Journal maintenance runs at most this often per owner (see `pruneAcknowledgedHealthCaptureIfDue`). */
+export const HEALTH_PRUNE_INTERVAL_MS = 86_400_000;
+
+/**
+ * Expires acknowledged raw capture (14 days) and compact provenance (90 days) for one owner.
+ * Every statement is linear in the journal: the protected source members (those of any
+ * unacknowledged delivery or unresolved correction) are collected once per statement as a
+ * non-correlated set, never re-derived per row. Unacknowledged intent is never pruned.
+ */
 export async function pruneAcknowledgedHealthCapture(
   owner: HealthCaptureOwner,
   now = Date.now(),
 ) {
   const db = await database();
+  await serial(() =>
+    db.withExclusiveTransactionAsync((transaction) =>
+      pruneOwnerJournal(transaction, healthOwnerKey(owner), now),
+    ),
+  );
+}
+
+/**
+ * Foreground maintenance entry point: prunes at most once per `HEALTH_PRUNE_INTERVAL_MS` per
+ * owner and returns whether it ran. A background wake never calls this (health.ts), so its
+ * bounded capture budget is spent on capture.
+ */
+export async function pruneAcknowledgedHealthCaptureIfDue(
+  owner: HealthCaptureOwner,
+  now = Date.now(),
+) {
+  const db = await database();
   const key = healthOwnerKey(owner);
+  return serial(async () => {
+    let ran = false;
+    await db.withExclusiveTransactionAsync(async (transaction) => {
+      const last = await transaction.getFirstAsync<{ pruned_at: string }>(
+        "select pruned_at from health_prune_runs where owner_key=?",
+        key,
+      );
+      const lastAt = last ? Date.parse(last.pruned_at) : Number.NaN;
+      // A clock set back past the last run must not postpone maintenance until it catches up.
+      if (
+        Number.isFinite(lastAt) &&
+        lastAt <= now &&
+        now - lastAt < HEALTH_PRUNE_INTERVAL_MS
+      )
+        return;
+      await pruneOwnerJournal(transaction, key, now);
+      await transaction.runAsync(
+        `insert into health_prune_runs(owner_key,pruned_at) values(?,?)
+        on conflict(owner_key) do update set pruned_at=excluded.pruned_at`,
+        key,
+        new Date(now).toISOString(),
+      );
+      ran = true;
+    });
+    return ran;
+  });
+}
+
+type PruneTransaction = Pick<SQLite.SQLiteDatabase, "runAsync">;
+
+async function pruneOwnerJournal(
+  transaction: PruneTransaction,
+  key: string,
+  now: number,
+) {
   const rawBefore = new Date(
     now - HEALTH_RAW_RETENTION_DAYS * 86_400_000,
   ).toISOString();
   const provenanceBefore = new Date(
     now - HEALTH_PROVENANCE_RETENTION_DAYS * 86_400_000,
   ).toISOString();
-  await serial(() =>
-    db.withExclusiveTransactionAsync(async (transaction) => {
-      // Every unacknowledged delivery and unresolved correction protects its source members.
-      const unprotected = `not exists(select 1 from health_episodes e,json_each(e.sample_ids_json) member
-      where e.owner_key=health_samples.owner_key and member.value=health_samples.sample_id and
-      (exists(select 1 from health_deliveries d where d.owner_key=e.owner_key and d.episode_id=e.episode_id and d.state!='acknowledged')
-       or exists(select 1 from health_source_corrections c where c.owner_key=e.owner_key and c.episode_id=e.episode_id and c.state='needs_attention')))`;
-      await transaction.runAsync(
-        `update health_samples set sample_json=null where owner_key=? and updated_at<? and ${unprotected}`,
-        key,
-        rawBefore,
-      );
-      await transaction.runAsync(
-        `update health_deliveries set payload_json=null where owner_key=? and state='acknowledged' and acknowledged_at<?
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
-        key,
-        rawBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_samples where owner_key=? and updated_at<? and ${unprotected}`,
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_deliveries.owner_key and c.episode_id=health_deliveries.episode_id and c.state='needs_attention')`,
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        "delete from health_query_runs where owner_key=? and finished_at<?",
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        "delete from health_source_corrections where owner_key=? and state!='needs_attention' and resolved_at<?",
-        key,
-        provenanceBefore,
-      );
-      await transaction.runAsync(
-        `delete from health_episodes where owner_key=? and updated_at<?
-      and not exists(select 1 from health_deliveries d where d.owner_key=health_episodes.owner_key and d.episode_id=health_episodes.episode_id)
-      and not exists(select 1 from health_source_corrections c where c.owner_key=health_episodes.owner_key and c.episode_id=health_episodes.episode_id and c.state='needs_attention')`,
-        key,
-        provenanceBefore,
-      );
-    }),
+  // Episodes with an unresolved correction, and episodes with any unacknowledged delivery.
+  const corrected = `select c.episode_id from health_source_corrections c where c.owner_key=? and c.state='needs_attention'`;
+  const unsettled = `select d.episode_id from health_deliveries d where d.owner_key=? and d.state!='acknowledged'`;
+  // Their source members, gathered once: one json_each pass over the protecting episodes only.
+  const protectedSamples = `select member.value from health_episodes e,json_each(e.sample_ids_json) member
+      where e.owner_key=? and member.value is not null
+      and (e.episode_id in (${unsettled}) or e.episode_id in (${corrected}))`;
+  await transaction.runAsync(
+    `update health_samples set sample_json=null where owner_key=? and updated_at<? and sample_json is not null
+      and sample_id not in (${protectedSamples})`,
+    key,
+    rawBefore,
+    key,
+    key,
+    key,
+  );
+  await transaction.runAsync(
+    `update health_deliveries set payload_json=null where owner_key=? and state='acknowledged' and acknowledged_at<?
+      and payload_json is not null and episode_id not in (${corrected})`,
+    key,
+    rawBefore,
+    key,
+  );
+  await transaction.runAsync(
+    `delete from health_samples where owner_key=? and updated_at<? and sample_id not in (${protectedSamples})`,
+    key,
+    provenanceBefore,
+    key,
+    key,
+    key,
+  );
+  await transaction.runAsync(
+    `delete from health_deliveries where owner_key=? and state='acknowledged' and acknowledged_at<?
+      and episode_id not in (${corrected})`,
+    key,
+    provenanceBefore,
+    key,
+  );
+  await transaction.runAsync(
+    "delete from health_query_runs where owner_key=? and finished_at<?",
+    key,
+    provenanceBefore,
+  );
+  await transaction.runAsync(
+    "delete from health_source_corrections where owner_key=? and state!='needs_attention' and resolved_at<?",
+    key,
+    provenanceBefore,
+  );
+  await transaction.runAsync(
+    `delete from health_episodes where owner_key=? and updated_at<?
+      and episode_id not in (select d.episode_id from health_deliveries d where d.owner_key=?)
+      and episode_id not in (${corrected})`,
+    key,
+    provenanceBefore,
+    key,
+    key,
   );
 }

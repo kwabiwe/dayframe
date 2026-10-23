@@ -7,7 +7,12 @@ import type {
   HealthJournalSample,
 } from "./healthSyncStore";
 
-const mocks = vi.hoisted(() => ({ open: vi.fn(), failHandoff: false, failUpgrade: false }));
+const mocks = vi.hoisted(() => ({
+  open: vi.fn(),
+  failHandoff: false,
+  failUpgrade: false,
+  recorded: null as null | Array<{ sql: string; args: unknown[] }>,
+}));
 vi.mock("expo-sqlite", () => ({ openDatabaseAsync: mocks.open }));
 vi.mock("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "sha256" },
@@ -33,6 +38,7 @@ function adapter() {
     getAllAsync: async (sql: string, ...args: never[]) =>
       db.prepare(sql).all(...args),
     runAsync: async (sql: string, ...args: never[]) => {
+      mocks.recorded?.push({ sql, args });
       if (mocks.failHandoff && sql.includes("handed_off_at=?"))
         throw new Error("crash after durable enqueue");
       return db.prepare(sql).run(...args);
@@ -56,6 +62,7 @@ beforeEach(async () => {
   vi.resetModules();
   mocks.failHandoff = false;
   mocks.failUpgrade = false;
+  mocks.recorded = null;
   db = new DatabaseSync(":memory:");
   mocks.open.mockResolvedValue(adapter());
   store = await import("./healthSyncStore");
@@ -72,6 +79,17 @@ const sample = (id: string, offset = 0): HealthJournalSample => ({
   value: { externalSampleId: id, stage: "asleep_core" },
 });
 function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
+  return deriveWith({})(samples);
+}
+/** The same episodes under a different Dayframe mapping or build-specific event shape. */
+function deriveWith(mapping: { categoryId?: string; description?: string; shape?: string }) {
+  return (samples: HealthJournalSample[]): HealthEpisodeDraft[] =>
+    deriveMapped(samples, mapping);
+}
+function deriveMapped(
+  samples: HealthJournalSample[],
+  mapping: { categoryId?: string; description?: string; shape?: string },
+): HealthEpisodeDraft[] {
   if (!samples.length) return [];
   const startedAt = samples[0].startedAt,
     stoppedAt = samples.at(-1)!.stoppedAt;
@@ -85,11 +103,13 @@ function derive(samples: HealthJournalSample[]): HealthEpisodeDraft[] {
         source: "health_sleep",
         type: "health_sleep_import",
         occurredAt: new Date(startedAt),
-        description: "Sleep",
+        categoryId: mapping.categoryId,
+        description: mapping.description ?? "Sleep",
         rawPayload: {
           startedAt,
           stoppedAt,
           samples: samples.map((sample) => sample.value),
+          ...(mapping.shape ? { buildShape: mapping.shape } : {}),
         },
       },
     },
@@ -102,6 +122,7 @@ async function page(
     deletedIds?: string[];
     isCurrent?: () => boolean;
     repair?: { startedAt: string; stoppedAt: string };
+    derive?: (samples: HealthJournalSample[]) => HealthEpisodeDraft[];
   } = {},
 ) {
   const active = options.owner ?? owner;
@@ -122,7 +143,7 @@ async function page(
     returnedCount: additions.length,
     complete: true,
     isCurrent: options.isCurrent ?? (() => true),
-    derive,
+    derive: options.derive ?? derive,
   });
 }
 
@@ -465,5 +486,249 @@ describe("Health journal real SQLite boundaries", () => {
         .prepare("select workout_complete,sleep_complete from health_repairs")
         .get(),
     ).toMatchObject({ workout_complete: 0, sleep_complete: 0 });
+  });
+});
+
+// Synthetic journal at steady state: one night per day for 90 days, `perNight` source samples
+// each (40 ≈ one Watch, 120 ≈ three sources). IDs and times are synthetic; no Health values.
+function seedJournal(
+  nights: number,
+  perNight: number,
+  now: number,
+  protect: (night: number) => "acknowledged" | "pending" | "correction",
+) {
+  const key = store.healthOwnerKey(owner);
+  const sampleRow = db.prepare(
+    "insert into health_samples(owner_key,kind,sample_id,source_key,started_at,stopped_at,sample_json,updated_at) values(?,?,?,?,?,?,?,?)",
+  );
+  const episodeRow = db.prepare(
+    "insert into health_episodes(owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at) values(?,?,?,?,?,?,?,?,?)",
+  );
+  const deliveryRow = db.prepare(
+    "insert into health_deliveries(owner_key,client_event_id,episode_id,revision,payload_json,state,created_at,acknowledged_at) values(?,?,?,?,?,?,?,?)",
+  );
+  const correctionRow = db.prepare(
+    "insert into health_source_corrections(owner_key,correction_id,episode_id,deleted_ids_json,created_at) values(?,?,?,?,?)",
+  );
+  db.exec("begin");
+  for (let night = 0; night < nights; night++) {
+    const at = new Date(now - (night + 1) * 86_400_000).toISOString();
+    const ids = Array.from(
+      { length: perNight },
+      (_, index) => `synthetic-${night}-${index}`,
+    );
+    for (const id of ids)
+      sampleRow.run(key, "sleep", id, "fixture", at, at, "{}", at);
+    const episodeId = `episode-${night}`;
+    episodeRow.run(key, "sleep", episodeId, "fixture", JSON.stringify(ids), at, at, "r", at);
+    const state = protect(night);
+    deliveryRow.run(
+      key,
+      `delivery-${night}`,
+      episodeId,
+      "r",
+      "{}",
+      state === "pending" ? "queued" : "acknowledged",
+      at,
+      state === "pending" ? null : at,
+    );
+    if (state === "correction")
+      correctionRow.run(key, `correction-${night}`, episodeId, "[]", at);
+  }
+  db.exec("commit");
+}
+
+describe("Health journal prune budget (stability audit health-1)", () => {
+  it("prunes 90 days of three-source journal with no per-row correlated subquery", async () => {
+    const now = Date.now();
+    seedJournal(90, 120, now, () => "acknowledged");
+    mocks.recorded = [];
+    const startedAt = performance.now();
+    await store.pruneAcknowledgedHealthCapture(owner, now);
+    const elapsed = performance.now() - startedAt;
+    const statements = mocks.recorded;
+    mocks.recorded = null;
+    expect(statements.length).toBeGreaterThanOrEqual(7);
+    // Deterministic bound: a correlated subquery is re-run for every journal row (quadratic in
+    // journal age); each statement may only build its protected set once.
+    const correlated = statements.flatMap(({ sql, args }) =>
+      (
+        db.prepare(`explain query plan ${sql}`).all(...(args as never[])) as Array<{
+          detail: string;
+        }>
+      )
+        .filter((row) => /CORRELATED/.test(row.detail))
+        .map((row) => `${sql.replace(/\s+/g, " ").slice(0, 60)} → ${row.detail}`),
+    );
+    expect(correlated).toEqual([]);
+    // Loose wall-clock backstop only (measured 6.5 s before the fix, a few ms after).
+    expect(elapsed).toBeLessThan(1_000);
+    expect(
+      Number(
+        db.prepare("select count(*) n from health_samples where sample_json is not null").get()!.n,
+      ),
+    ).toBe(14 * 120);
+  }, 30_000);
+
+  it("never prunes members of an unacknowledged delivery or unresolved correction, however old", async () => {
+    const now = Date.now();
+    // Nights 0-119: every 10th still queued, every 10th+5 corrected, the rest acknowledged.
+    seedJournal(120, 4, now, (night) =>
+      night % 10 === 0 ? "pending" : night % 10 === 5 ? "correction" : "acknowledged",
+    );
+    await store.pruneAcknowledgedHealthCapture(owner, now);
+    const protectedNights = Array.from({ length: 120 }, (_, night) => night).filter(
+      (night) => night % 10 === 0 || night % 10 === 5,
+    );
+    for (const night of protectedNights) {
+      const rows = db
+        .prepare("select sample_json from health_samples where sample_id like ?")
+        .all(`synthetic-${night}-%`) as Array<{ sample_json: string | null }>;
+      expect(rows).toHaveLength(4);
+      expect(rows.every((row) => row.sample_json !== null)).toBe(true);
+      expect(
+        db.prepare("select payload_json from health_deliveries where episode_id=?").get(`episode-${night}`),
+      ).toMatchObject({ payload_json: "{}" });
+      expect(
+        db.prepare("select count(*) n from health_episodes where episode_id=?").get(`episode-${night}`)!.n,
+      ).toBe(1);
+    }
+    // Acknowledged nights: raw nulled after 14 days, everything gone after 90.
+    expect(
+      db.prepare("select sample_json from health_samples where sample_id='synthetic-21-0'").get(),
+    ).toMatchObject({ sample_json: null });
+    expect(
+      db.prepare("select count(*) n from health_samples where sample_id like 'synthetic-101-%'").get()!.n,
+    ).toBe(0);
+    expect(
+      db.prepare("select count(*) n from health_episodes where episode_id='episode-101'").get()!.n,
+    ).toBe(0);
+    expect(
+      db.prepare("select sample_json from health_samples where sample_id='synthetic-3-0'").get(),
+    ).toMatchObject({ sample_json: "{}" });
+  });
+
+  it("bounds query-run history on every capture write, without the daily prune", async () => {
+    const key = store.healthOwnerKey(owner);
+    const otherKey = store.healthOwnerKey({ ...owner, userId: "other" });
+    const now = Date.now();
+    const insert = db.prepare(
+      "insert into health_query_runs(owner_key,run_id,kind,contract_json,started_at,finished_at,additions,deletions,usable,generated,ignored,checkpoint_advanced,outcome) values(?,?,'sleep','{}',?,?,0,0,0,0,0,0,'query_completed')",
+    );
+    // 101 daily background captures, none followed by a foreground prune.
+    for (let day = 0; day <= 100; day++) {
+      const at = new Date(now - day * 86_400_000 - 60_000).toISOString();
+      insert.run(key, `synthetic-run-${day}`, at, at);
+      insert.run(otherKey, `synthetic-other-${day}`, at, at);
+    }
+    const runs = (owner_key: string) =>
+      Number(db.prepare("select count(*) n from health_query_runs where owner_key=?").get(owner_key)!.n);
+    const { contract } = await store.getHealthCheckpoint(owner, "sleep");
+    await store.recordHealthQueryFailure({
+      owner,
+      contract,
+      runId: "synthetic-full",
+      startedAt: new Date(now).toISOString(),
+      reason: "storage_full",
+    });
+    // Days 0-89 survive (day 90 is exactly past retention), plus the new failure row.
+    expect(runs(key)).toBe(91);
+    expect(runs(otherKey)).toBe(101);
+    insert.run(key, "synthetic-stale", new Date(now - 95 * 86_400_000).toISOString(), new Date(now - 95 * 86_400_000).toISOString());
+    await page([]);
+    expect(runs(key)).toBe(92);
+    expect(
+      db.prepare("select count(*) n from health_query_runs where owner_key=? and finished_at<?")
+        .get(key, new Date(now - 90 * 86_400_000).toISOString())!.n,
+    ).toBe(0);
+    expect(
+      JSON.stringify(
+        db.prepare(`explain query plan ${store.HEALTH_QUERY_RUN_EXPIRY_SQL}`).all(key, new Date(now).toISOString()),
+      ),
+    ).toContain("health_query_run_finished");
+  });
+
+  it("runs the foreground maintenance prune at most once a day per owner", async () => {
+    const now = Date.now();
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now)).toBe(true);
+    seedJournal(30, 2, now, () => "acknowledged");
+    const raw = () =>
+      Number(db.prepare("select count(*) n from health_samples where sample_json is not null").get()!.n);
+    expect(raw()).toBe(60);
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + 3_600_000)).toBe(false);
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + store.HEALTH_PRUNE_INTERVAL_MS - 1),
+    ).toBe(false);
+    expect(raw()).toBe(60);
+    // Another owner has its own schedule.
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue({ ...owner, userId: "other" }, now + 1),
+    ).toBe(true);
+    expect(
+      await store.pruneAcknowledgedHealthCaptureIfDue(owner, now + store.HEALTH_PRUNE_INTERVAL_MS),
+    ).toBe(true);
+    expect(raw()).toBe(26);
+    // A clock set back before the last run does not postpone maintenance.
+    expect(await store.pruneAcknowledgedHealthCaptureIfDue(owner, now - 86_400_000)).toBe(true);
+  });
+});
+
+describe("Health revision identity comes from source facts only (stability audit health-2)", () => {
+  const deliveries = () =>
+    db
+      .prepare("select client_event_id,revision,payload_json from health_deliveries order by created_at,rowid")
+      .all();
+  it("does not re-send an unchanged episode after a mapping or event-shape change", async () => {
+    await page([sample("early"), sample("late", 3_600_000)]);
+    const [original] = deliveries();
+    expect(deliveries()).toHaveLength(1);
+    // Settings > Apple Health "Logs as" / Name change, then a capture with no new samples.
+    await page([], { derive: deriveWith({ categoryId: "category-rest", description: "Rest" }) });
+    // A newer build that changes a label or payload field of the derived event.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    expect(deliveries()).toEqual([original]);
+    expect(db.prepare("select revision from health_episodes").get()!.revision).toBe(original.revision);
+  });
+  it("re-sends a genuine source change with the current mapping", async () => {
+    const early = sample("early");
+    await page([early]);
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toHaveLength(1);
+    // An added member and an edited member (different times) are both source changes.
+    await page([sample("late", 3_600_000)], { derive: deriveWith({ description: "Rest" }) });
+    await page([{ ...early, stoppedAt: new Date(Date.parse(early.stoppedAt) + 600_000).toISOString() }], {
+      derive: deriveWith({ description: "Rest" }),
+    });
+    const sent = deliveries();
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((row) => row.client_event_id)).size).toBe(3);
+    expect(JSON.parse(String(sent[2].payload_json)).description).toBe("Rest");
+  });
+  it("adopts episodes journaled by an older build without re-sending them on upgrade", async () => {
+    // Journal written by a build whose revision fingerprinted the event (mapping and shape).
+    await page([sample("early"), sample("late", 3_600_000)], {
+      derive: deriveWith({ description: "Legacy", shape: "build-1" }),
+    });
+    await page([sample("other", 30 * 3_600_000)], { derive: deriveWith({ description: "Legacy", shape: "build-1" }) });
+    const legacyColumns = "owner_key,kind,episode_id,source_key,sample_ids_json,started_at,stopped_at,revision,updated_at";
+    db.exec(`create table legacy_episodes as select ${legacyColumns} from health_episodes;
+      drop table health_episodes;
+      create table health_episodes (
+        owner_key text not null, kind text not null, episode_id text not null, source_key text not null,
+        sample_ids_json text not null, started_at text not null, stopped_at text not null,
+        revision text not null, updated_at text not null, primary key(owner_key,episode_id));
+      insert into health_episodes select * from legacy_episodes; drop table legacy_episodes;`);
+    const before = deliveries();
+    expect(before).toHaveLength(2);
+    vi.resetModules();
+    store = await import("./healthSyncStore");
+    // The upgraded build derives the same episodes with its own mapping and event shape.
+    await page([], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ description: "Rest" }) });
+    expect(deliveries()).toEqual(before);
+    // A genuine change to an adopted episode still re-sends, once.
+    await page([sample("later", 30 * 3_600_000 + 3_600_000)], { derive: deriveWith({ shape: "build-2" }) });
+    await page([], { derive: deriveWith({ shape: "build-3" }) });
+    expect(deliveries()).toHaveLength(3);
   });
 });

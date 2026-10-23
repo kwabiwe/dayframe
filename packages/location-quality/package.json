@@ -1,0 +1,21 @@
+{
+  "name": "@dayframe/location-quality",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local scoring harness: replays the shared location engine and scores it against a Google Timeline answer key.",
+  "scripts": {
+    "score": "tsx src/cli.ts",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dayframe/shared": "0.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^4.0.15"
+  }
+}

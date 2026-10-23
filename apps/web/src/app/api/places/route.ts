@@ -110,8 +110,14 @@ function normalizePlaceLoggingInput<T extends {
 }>(input: T) {
   return {
     ...input,
-    defaultCategoryId: input.loggingEnabled === false ? null : input.defaultCategoryId,
-    defaultActivityDescription: input.loggingEnabled === false ? null : input.defaultActivityDescription,
+    // Turning logging off clears the defaults; otherwise only a default the client sent is touched,
+    // so a partial PATCH (a name or a switch alone) never erases them (stability audit server-3).
+    ...(input.loggingEnabled === false
+      ? { defaultCategoryId: null, defaultActivityDescription: null }
+      : {
+          ...(input.defaultCategoryId === undefined ? {} : { defaultCategoryId: input.defaultCategoryId }),
+          ...(input.defaultActivityDescription === undefined ? {} : { defaultActivityDescription: input.defaultActivityDescription })
+        }),
     // Only when the client sent it (or turned logging off): an app build that predates the switch
     // sends no autoLog, and its saves must never turn a place's Log automatically off.
     ...(input.loggingEnabled === false ? { autoLog: false } : input.autoLog === undefined ? {} : { autoLog: input.autoLog }),

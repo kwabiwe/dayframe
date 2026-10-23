@@ -47,6 +47,48 @@ describe("deletion coordinator", () => {
     expect(harness.coordinator.current()).toBeNull();
   });
 
+  it("tells its owner the Undo window opened before publishing it (stability audit timer-1)", () => {
+    const order: string[] = [];
+    let activatedAt: number | null = null;
+    const harness = coordinatorHarness({
+      onActivate: (pending) => {
+        activatedAt = pending.activatedAt;
+        order.push(`activate:${harness.pendingChanges.length}`);
+      }
+    });
+    const prepared = required(harness.coordinator.prepare([entry("entry-1")], snapshot("entry-1")));
+    harness.clock.advanceBy(2_000);
+    harness.coordinator.activate(prepared.token);
+
+    expect(activatedAt).toBe(3_000);
+    // One change published (the preparation) when the hook ran; the active window came after it.
+    expect(order).toEqual(["activate:1"]);
+    expect(harness.pendingChanges.at(-1)).toMatchObject({ phase: "active" });
+  });
+
+  it("refuses Undo and commits, without restoring, when the delete already left", () => {
+    const refused: number[] = [];
+    let canRestore = false;
+    const harness = coordinatorHarness({
+      canRestore: () => canRestore,
+      onRestoreRefused: (pending) => refused.push(pending.token)
+    });
+    const prepared = required(harness.coordinator.prepare([entry("entry-1")], snapshot("entry-1")));
+    harness.coordinator.activate(prepared.token);
+
+    expect(harness.coordinator.undo(prepared.token)).toBe(false);
+    expect(harness.restores).toEqual([]);
+    expect(harness.commits.map(({ token }) => token)).toEqual([prepared.token]);
+    expect(refused).toEqual([prepared.token]);
+    expect(harness.coordinator.current()).toBeNull();
+
+    canRestore = true;
+    const next = required(harness.coordinator.prepare([entry("entry-2")], snapshot("entry-2")));
+    harness.coordinator.activate(next.token);
+    expect(harness.coordinator.undo(next.token)).toBe(true);
+    expect(harness.restores.map(({ token }) => token)).toEqual([next.token]);
+  });
+
   it("reschedules an early timer instead of shortening the visible window", () => {
     const harness = coordinatorHarness();
     const prepared = required(harness.coordinator.prepare([entry("entry-1")], snapshot("entry-1")));
@@ -392,12 +434,18 @@ function required<T>(value: T | null): T {
   return value;
 }
 
-function coordinatorHarness() {
+function coordinatorHarness(
+  hooks: Pick<
+    Parameters<typeof createDeletionCoordinator<Entry, Snapshot>>[0],
+    "canRestore" | "onActivate" | "onRestoreRefused"
+  > = {}
+) {
   const clock = createFakeClock(1_000);
   const commits: PendingDeletion<Entry, Snapshot>[] = [];
   const restores: PendingDeletion<Entry, Snapshot>[] = [];
   const pendingChanges: Array<PendingDeletion<Entry, Snapshot> | null> = [];
   const coordinator = createDeletionCoordinator<Entry, Snapshot>({
+    ...hooks,
     clearTimer: clock.clearTimer,
     now: clock.now,
     onCommit: (pending) => commits.push(pending),
