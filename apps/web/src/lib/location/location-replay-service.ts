@@ -32,6 +32,7 @@ import type pg from "pg";
 import { OPEN_TRIP_ORIGIN_LOOKBACK_MS } from "./open-trip-window";
 import type { RequestSession } from "../session";
 import { reviewLeavesSegmentToReplay, SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
+import { withTimelineCorrections } from "./location-timeline-corrections";
 import {
   autoLogStayTiming, autoLoggedUneditedSql, lockAutoLoggedBlocks, retireAutoLoggedMissingStays, type AutoLogOrphan, type AutoLogReconciliation
 } from "./location-auto-log";
@@ -245,7 +246,8 @@ export async function replayLocationEvidence(
   observeLocationTiming(options, "protected_replacement_checks", "started");
   const protectedReplacement = await excludeProtectedReplacements(client, session, options, output.segmentUpserts, output.acceptedEvidence, places,
     output.broadReadingTimes);
-  const segments = protectedReplacement.segments;
+  // What the person set on their timeline (location v4 step 11) wins over what the engine derived again.
+  const segments = await withTimelineCorrections(client, session, protectedReplacement.segments, options.processingAt);
   observeLocationTiming(options, "protected_replacement_checks", "completed");
   observeLocationCount(options, "protectedSegments", protectedReplacement.count);
   const nextStayClientIds = segments
@@ -847,7 +849,9 @@ async function persistStays(
         ...(segment.approximateArrival ? { approximateArrival: true } : {}),
         ...(segment.formation ? { formation: segment.formation } : {}),
         // Motion & Fitness moved the end: keep the location-only end for rebuilds.
-        ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {})
+        ...(segment.locationOnlyStoppedAt ? { locationOnlyStoppedAt: segment.locationOnlyStoppedAt } : {}),
+        // The person corrected its place or times (location v4 step 11).
+        ...(segment.setByYou ? { setByYou: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.
@@ -1043,7 +1047,8 @@ async function persistCommutes(
         // Legs (location v4 step 6, design §14 metadata.legs): times, mode, confidence and metres only.
         ...(segment.tripLegs?.length ? { legs: segment.tripLegs } : {}),
         ...(segment.motionSupported ? { motionSupported: true } : {}),
-        ...(segment.motionTimed ? { motionTimed: true } : {})
+        ...(segment.motionTimed ? { motionTimed: true } : {}),
+        ...(segment.setByYou ? { setByYou: true } : {})
       })
     ]);
     // Trusted SQL template; only parameter positions vary with the bounded row index.

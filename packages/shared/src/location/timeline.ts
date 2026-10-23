@@ -20,6 +20,8 @@ export type TimelinePlace = {
   confidence: string;
   /** The user's blocks made from this place (its event's segment), so the List can tell logged from not. */
   blockIds: string[];
+  /** The person corrected this place's place or times (location v4 step 11): the List shows "You set this". */
+  setByYou?: true;
 };
 
 export type TimelineTrip = {
@@ -39,6 +41,8 @@ export type TimelineTrip = {
   reason: string | null;
   /** The blocks made from this trip, which show its legs. */
   blockIds: string[];
+  /** The person corrected this trip's times (location v4 step 11). */
+  setByYou?: true;
 };
 
 export type TimelineOpenTrip = {

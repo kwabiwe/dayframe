@@ -395,6 +395,8 @@ Track visit count, distinct days, sample count, cumulative and longest dwell, fi
 
 Ignored clusters stay suppressed. Noise or one-off rows may later become place candidates when new repeat evidence arrives, but direct place promotion must require `classification = 'place_candidate'`.
 
+Timeline corrections (location v4 step 11, migration 021): what the person sets on their timeline lives in `location_timeline_corrections`, tied to the engine's span for the item (a later correction of an already corrected item keeps that span, so it still finds the engine's item after its times changed). Replay applies every active correction after the protected-history check and before it persists (`withTimelineCorrections` → `applyTimelineCorrections`: an item is the one overlapping at least half the span most; oldest first, so the newest of a kind wins; a newer correction of the same kind and span replaces the older). Corrected stays and trips carry `metadata.setByYou`, corrected legs `setByYou`; a deleted trip leaves the run, so replay's supersession retires it and its open Review suggestion. Part 1 covers place, times, trip delete and leg mode; split, merge and leg boundaries come with the correction sheets. Items that already have a block are refused: the block is what the person edits.
+
 ## Geocoding and labels
 
 `apps/mobile/src/lib/locationGeocoding.ts` owns the provider abstraction. Expo/Apple reverse geocoding is the default and requires no external key. A future external Places/POI implementation must be optional, implement `ReverseGeocodingProvider`, document its key/cost/privacy behavior, and preserve the Expo fallback.

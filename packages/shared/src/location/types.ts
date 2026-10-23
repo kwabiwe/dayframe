@@ -149,6 +149,8 @@ export type StaySegment = {
   evidenceIds: string[];
   parentSegmentId?: string | null;
   supersedesSegmentId?: string | null;
+  /** The person corrected this place's place or times (a timeline correction, location v4 step 11). */
+  setByYou?: true;
 };
 
 /**
@@ -172,6 +174,8 @@ export type TripLeg = {
   /** No position was observed during the leg (underground, or no signal): its route is unknown. */
   unobserved?: true;
   distanceMeters: number | null;
+  /** The person set this leg's mode (a timeline correction); replay never changes it. */
+  setByYou?: true;
 };
 
 export type CommuteSegment = {
@@ -203,6 +207,8 @@ export type CommuteSegment = {
   travelMode?: MotionTravelMode;
   /** The trip's legs in time order (location v4 step 6); absent when nothing could tell them apart. */
   tripLegs?: TripLeg[];
+  /** The person corrected this trip's times (a timeline correction, location v4 step 11). */
+  setByYou?: true;
   /**
    * Set when Motion & Fitness activity, not GPS, showed the movement that qualified
    * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.

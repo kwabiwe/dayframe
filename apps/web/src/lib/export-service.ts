@@ -48,6 +48,7 @@ export async function buildWorkspaceExport(session: RequestSession) {
     table("health_sleep_segments", session),
     table("stay_segments", session),
     table("commute_segments", session),
+    table("location_timeline_corrections", session),
     locationEvidenceTable(session),
     table("place_match_feedback", session),
     table("location_name_patterns", session),
@@ -133,6 +134,7 @@ async function table(tableName: string, session: RequestSession) {
     "health_sleep_segments",
     "stay_segments",
     "commute_segments",
+    "location_timeline_corrections",
     "location_evidence",
     "place_match_feedback",
     "location_name_patterns"

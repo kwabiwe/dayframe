@@ -22,6 +22,8 @@ const tables = [
   // Location stays and moves, including the Apple venue Place IDs kept for stays (location v3 PR 8).
   "stay_segments",
   "commute_segments",
+  // What the person set on their location timeline (location v4 step 11).
+  "location_timeline_corrections",
   "health_sleep_segments",
   "location_name_patterns",
   "import_runs"
