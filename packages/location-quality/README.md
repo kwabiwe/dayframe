@@ -20,12 +20,14 @@ owner's Mac only.
 ## Running it
 
 ```bash
-npm run score:location -- \
+npm --silent run score:location -- \
   --answer-key <private>/Timeline.json \
   --rows <private>/week-rows.psv --places <private>/places.psv --origin-latitude <private> \
   --from 2026-10-15T12:00:00Z --to 2026-10-22T15:30:00Z --at 2026-10-22T15:45:00Z
 ```
 
+- Always run it with `npm --silent` (or `--silent` before `run`): npm's own banner otherwise echoes
+  the command line, private file names included, before the harness starts.
 - `--from`/`--to` set the scoring window; `--at` is the replay's processing time (default `--to`).
 - `--segments <run.json>` scores a saved run instead of replaying; `--save-segments` writes one.
 - Relative paths are read from the folder the command is typed in.

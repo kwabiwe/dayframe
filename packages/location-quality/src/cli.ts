@@ -13,7 +13,7 @@ import { HarnessError } from "./errors";
 const USAGE = `Location quality harness (location v4 §13). Private inputs and outputs must live outside the repository.
 
 Replay main's engine over private evidence rows and score it:
-  npm run score -w @dayframe/location-quality -- --answer-key <Timeline.json> \\
+  npm --silent run score:location -- --answer-key <Timeline.json> \\
     --rows <evidence.psv> --places <places.psv> --from <ISO> --to <ISO> [--at <ISO>]
 
 Replay needs --origin-latitude <deg>: the latitude the private rows were exported around.
