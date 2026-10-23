@@ -308,8 +308,9 @@ const OPEN_TRIP_FRESH_MS = LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs;
 /**
  * The journey replay last saw in progress, from its origin stay's `openTrip` metadata (a stamp with no
  * journey is skipped). Only stays begun within `OPEN_TRIP_ORIGIN_LOOKBACK_MS` are read (a bounded range of
- * idx_stay_segments_user_time), and the origin's own fields never decide it, so an older replay's rewrite of
- * the stay cannot hide a newer journey. Stale entries (no replay since the phone went quiet) are not shown.
+ * idx_stay_segments_user_time), and the origin's own fields (its end, its status) never decide it, so an
+ * older replay's rewrite or supersession of the stay cannot hide a newer journey; every newer replay clears
+ * the keys it does not keep. Stale entries (no replay since the phone went quiet) are not shown.
  */
 export async function getOpenTrip(session: RequestSession, capturedNow: string): Promise<OpenTripRow | null> {
   const result = await query<{ startedAt: string; lastObservedAt: string; fromPlaceId: string | null; travelMode: string | null }>(
@@ -318,7 +319,7 @@ export async function getOpenTrip(session: RequestSession, capturedNow: string):
             sg.place_id as "fromPlaceId",
             sg.metadata->'openTrip'->>'travelMode' as "travelMode"
        from stay_segments sg
-      where sg.workspace_id = $1 and sg.user_id = $2 and sg.status <> 'superseded'
+      where sg.workspace_id = $1 and sg.user_id = $2
         and sg.started_at >= $3::timestamptz - make_interval(secs => $5::double precision / 1000)
         and sg.metadata -> 'openTrip' ? 'startedAt'
         and (sg.metadata -> 'openTrip' ->> 'lastObservedAt')::timestamptz >= $3::timestamptz - make_interval(secs => $4::double precision / 1000)

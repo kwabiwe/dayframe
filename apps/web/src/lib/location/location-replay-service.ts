@@ -20,6 +20,7 @@ import {
   type ClassifiedEvidence,
   type CommuteDerivationOptions,
   type CommuteSegment,
+  type LocationEngineOutput,
   type LocationEvidence,
   type LocationSegment,
   type OpenTrip,
@@ -235,6 +236,8 @@ export async function replayLocationEvidence(
   const nextCommuteClientIds = segments
     .filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .map((segment) => segment.clientSegmentId);
+  // What Today showed before this replay touches any stay, for the refresh signal.
+  const openTripShownBefore = await shownOpenTrip(client, session, options.deviceId, options.processingAt);
   observeLocationTiming(options, "obsolete_segment_handling", "started");
   const autoLogOrphans = await supersedeMissingSegments(client, session, options, nextStayClientIds, nextCommuteClientIds, autoLogLocked,
     options.autoLogReconciliation ? autoLogStayTiming(segments, options.autoLogReconciliation, learnedToSaved) : { offered: [], held: [] });
@@ -257,19 +260,14 @@ export async function replayLocationEvidence(
     });
   const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "commute_persistence", "completed");
-  // The journey in progress, re-derived when a decided origin keeps a different end than the engine's.
-  const engineStays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
-  const engineOrigin = output.openTrip ? engineStays.find((stay) => stay.clientSegmentId === output.openTrip!.fromStaySegmentId) : undefined;
+  // The journey in progress, derived again when a decided origin keeps a different end than the engine's.
+  const engineOrigin = output.openTrip ? output.segmentUpserts.find((segment): segment is StaySegment =>
+    segment.kind === "stay" && segment.clientSegmentId === output.openTrip!.fromStaySegmentId) : undefined;
   const engineConfig = { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion };
   const openTripChanged = await persistOpenTrip(client, session, options.deviceId, output.openTrip ?? null, stayIds, options.processingAt,
-    engineOrigin ? {
+    openTripShownBefore, engineOrigin ? {
       engineStoppedAt: engineOrigin.stoppedAt ?? null,
-      rederive: (persistedStoppedAt) => {
-        const decided = engineStays.map((stay) => stay === engineOrigin
-          ? { ...stay, stoppedAt: persistedStoppedAt, locationOnlyStoppedAt: undefined, stopLowerBoundAt: null, stopUpperBoundAt: null } : stay);
-        const rebuilt = deriveOpenTrip(decided, output.acceptedEvidence, engineConfig, options.processingAt);
-        return rebuilt?.fromStaySegmentId === engineOrigin.clientSegmentId ? rebuilt : null;
-      }
+      rederive: (persistedStoppedAt) => openTripAgainstDecidedOrigin(output, persistedStoppedAt, engineConfig, options.processingAt)
     } : null);
   // Today's "Travelling since…" line is something the app shows: its change asks the phone to refresh.
   if (openTripChanged && options.semanticChanges) options.semanticChanges.count += 1;
@@ -877,6 +875,40 @@ async function persistStays(
   return ids;
 }
 
+/** What Today shows for the device now: the newest stamped journey ("stay id:start"), or null for none or a stamp alone. */
+export async function shownOpenTrip(client: pg.PoolClient, session: RequestSession, deviceId: string, replayedAt: string) {
+  const since = new Date(Date.parse(replayedAt) - OPEN_TRIP_ORIGIN_LOOKBACK_MS).toISOString();
+  const current = (await client.query<{ id: string; trip: Record<string, unknown> }>(
+    `select id, metadata -> 'openTrip' as "trip" from stay_segments
+      where workspace_id = $1 and user_id = $2 and device_id = $3 and started_at >= $4::timestamptz and metadata ? 'openTrip'
+      order by (metadata -> 'openTrip' ->> 'asOf')::timestamptz desc nulls last
+      limit 1`,
+    [session.workspaceId, session.userId, deviceId, since])).rows[0];
+  return current && typeof current.trip?.startedAt === "string" ? `${current.id}:${current.trip.startedAt}` : null;
+}
+
+/**
+ * The engine's journey in progress derived again against its origin's persisted (decided) end, with the
+ * run's journeys (and the legs a trip replaced) so a journey through a short stop keeps its origin; null
+ * when it no longer qualifies or would start from another stay.
+ */
+export function openTripAgainstDecidedOrigin(
+  output: Pick<LocationEngineOutput, "segmentUpserts" | "acceptedEvidence" | "openTrip">,
+  persistedStoppedAt: string,
+  config: typeof LOCATION_ENGINE_V2_CONFIG,
+  processingAt: string
+) {
+  const stays = output.segmentUpserts.filter((segment): segment is StaySegment => segment.kind === "stay");
+  const origin = stays.find((stay) => stay.clientSegmentId === output.openTrip?.fromStaySegmentId);
+  if (!origin) return null;
+  const decided = stays.map((stay) => stay === origin
+    ? { ...stay, stoppedAt: persistedStoppedAt, locationOnlyStoppedAt: undefined, stopLowerBoundAt: null, stopUpperBoundAt: null } : stay);
+  const journeys = output.segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute")
+    .flatMap((journey) => [journey, ...(journey.legs ?? [])]);
+  const rebuilt = deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys);
+  return rebuilt?.fromStaySegmentId === origin.clientSegmentId ? rebuilt : null;
+}
+
 /**
  * The journey in progress (location v4 step 5) lives only under its origin stay's `openTrip` metadata
  * key: never a commute row, so nothing logs, reviews or reports it. Times, counts, metres and the mode
@@ -886,11 +918,11 @@ async function persistStays(
  *
  * When the origin's persisted end differs from the engine's (a decided stay keeps its boundary), the
  * journey is derived again against the persisted end (`rederive`); a persisted origin still open holds
- * none. Returns whether what the app shows changed (a journey appeared, went, or moved its start), for
- * the reply's refresh signal.
+ * none. Returns whether what the app shows changed from `shownBefore` (read with `shownOpenTrip` before
+ * the replay touched any stay): a journey appeared, went, or moved its start, for the refresh signal.
  */
 export async function persistOpenTrip(client: pg.PoolClient, session: RequestSession, deviceId: string,
-  openTrip: OpenTrip | null, stayIds: Map<string, string>, replayedAt: string,
+  openTrip: OpenTrip | null, stayIds: Map<string, string>, replayedAt: string, shownBefore: string | null,
   origin: { engineStoppedAt: string | null; rederive: (persistedStoppedAt: string) => OpenTrip | null } | null = null) {
   const since = new Date(Date.parse(replayedAt) - OPEN_TRIP_ORIGIN_LOOKBACK_MS).toISOString();
   const current = (await client.query<{ id: string; trip: Record<string, unknown> }>(
@@ -901,7 +933,6 @@ export async function persistOpenTrip(client: pg.PoolClient, session: RequestSes
     [session.workspaceId, session.userId, deviceId, since])).rows[0];
   const currentAsOf = typeof current?.trip?.asOf === "string" ? Date.parse(current.trip.asOf) : NaN;
   if (Number.isFinite(currentAsOf) && currentAsOf > Date.parse(replayedAt)) return false;
-  const shownBefore = current && typeof current.trip?.startedAt === "string" ? `${current.id}:${current.trip.startedAt}` : null;
 
   let trip = openTrip;
   const originId = trip ? stayIds.get(trip.fromStaySegmentId) ?? null : null;

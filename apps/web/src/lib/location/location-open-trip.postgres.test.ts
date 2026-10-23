@@ -67,11 +67,13 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
     (await database!.query<{ metadata: Record<string, unknown> }>("select metadata from stay_segments where id = $1", [ids[segmentId]])).rows[0].metadata;
   let changed: boolean[] = [];
   const persist = async (openTrip: OpenTrip | null, replayedAt = at(0),
-    origin: Parameters<typeof import("./location-replay-service").persistOpenTrip>[6] = null, as = session) => {
-    const { persistOpenTrip } = await import("./location-replay-service");
+    origin: Parameters<typeof import("./location-replay-service").persistOpenTrip>[7] = null, as = session) => {
+    const { persistOpenTrip, shownOpenTrip } = await import("./location-replay-service");
     const client = await database!.connect();
     try {
-      changed.push(await persistOpenTrip(client, as, "device-1", openTrip, new Map(Object.entries(ids)), replayedAt, origin));
+      // As replay does: what Today showed is read before anything else this replay writes.
+      const shownBefore = await shownOpenTrip(client, as, "device-1", replayedAt);
+      changed.push(await persistOpenTrip(client, as, "device-1", openTrip, new Map(Object.entries(ids)), replayedAt, shownBefore, origin));
     } finally {
       client.release();
     }
@@ -96,10 +98,10 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
     expect(await getOpenTrip(otherSession, now)).toBeNull();
     expect(await getOpenTrip(session, at(-1 + 12))).not.toBeNull();
     expect(await getOpenTrip(session, at(-1 + 13))).toBeNull();
-    // An older replay can rewrite the origin's end; the journey still shows.
-    await database!.query("update stay_segments set stopped_at = null where id = $1", [ids["seg-origin"]]);
+    // An older replay can rewrite or supersede the origin; the journey still shows.
+    await database!.query("update stay_segments set stopped_at = null, status = 'superseded' where id = $1", [ids["seg-origin"]]);
     expect(await getOpenTrip(session, now)).not.toBeNull();
-    await database!.query("update stay_segments set stopped_at = $2 where id = $1", [ids["seg-origin"], at(-31)]);
+    await database!.query("update stay_segments set stopped_at = $2, status = 'finalised' where id = $1", [ids["seg-origin"], at(-31)]);
   });
 
   it("never lets an older replay overwrite or clear a newer journey", async () => {
