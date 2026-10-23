@@ -1,4 +1,4 @@
-import { inspectHealthSourceRevision, type HealthSourceDecision } from "./health-source-provenance";
+import { inspectHealthSourceRevision, supersedeEarlierHealthRevisionReviews, type HealthSourceDecision } from "./health-source-provenance";
 import { withoutServerReviewDecision } from "./review-decision-signal";
 import { withSyncTransaction, setSyncPhase, syncFailureMetadata, SyncOperationError, type SyncTransactionOptions } from "./sync-transaction";
 import {
@@ -957,6 +957,12 @@ async function processActivityEventWithClient(
         ]
       );
       reviewItemId = createdReview.rows[0]?.id;
+    }
+
+    // A newer revision of the same Health episode, now visible as a block or its own card, retires
+    // the earlier revisions' still-open cards in this transaction (stability audit health-6).
+    if (isHealthEvent(parsed.type) && (timeEntryId || reviewItemId)) {
+      await supersedeEarlierHealthRevisionReviews(client, session, parsed.type, eventId, parsed.rawPayload);
     }
 
     if (parsed.type === "health_sleep_import") {
