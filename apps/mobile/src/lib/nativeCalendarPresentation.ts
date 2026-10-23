@@ -2,9 +2,11 @@ import { formatLocaleDate } from "./localeDateFormat";
 import {
   analyzeTimeIntervals,
   blockColorsFor,
+  CALENDAR_BLOCK_LABEL,
   calendarBlockContinuationEdges,
   formatClockTime,
   layoutTimeIntervals,
+  resolveActivityIcon,
   namedPatternBrackets,
   type ClockFormat,
   type TimeIntervalLayout
@@ -55,14 +57,24 @@ export type NativeCalendarPresentationEntry = {
   actionKind: NativeCalendarActionKind;
   accessibilityLabel: string;
   color: string;
+  /**
+   * Location v4 C6: iOS puts each group's blocks in side-by-side columns over their drawn extents,
+   * recomputed at every zoom step; logged blocks and Review suggestions are separate groups.
+   */
+  columnGroup: "logged" | "review";
   continuesIntoNextDay: boolean;
   entryId: string;
+  /** The activity's registry glyph, drawn alone in a column under 34 points wide. */
+  glyph: string;
   isActive: boolean;
   isReview: boolean;
   isUncategorized: boolean;
   laneCount: number;
   laneIndex: number;
   layoutMode: TimeIntervalLayout["mode"];
+  /** The whole entry's length after the title: "11m", "1h 45m" (a running block's so far). */
+  lengthLabel: string;
+  /** The detail line from 34 points: "Deep work · 10:45–12:30". */
   meta: string;
   offsetFraction: number;
   /**
@@ -75,6 +87,9 @@ export type NativeCalendarPresentationEntry = {
   overlapCount: number;
   overlapSeconds: number;
   placeText: string | null;
+  /** The part of the day column the group draws in: left of the Review lane, or the lane. */
+  regionOffsetFraction: number;
+  regionWidthFraction: number;
   startedAtMs: number;
   startsBeforeDay: boolean;
   stoppedAtMs: number | null;
@@ -174,8 +189,14 @@ export const REVIEW_LANE_MAX_LANES = 2;
  * DayframeCalendarCore.swift exactly (DayframeCalendarCoreTests checks the same boundary cases).
  */
 export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
-/** iOS draws a block at least 4 points tall: 5 minutes at 48 points an hour. */
+/**
+ * A short block's drawn height at 48 points an hour ranges from an older native build's 4 points
+ * (5 minutes) to a current build's one label line at the largest text size (location v4 C6: 15
+ * points × 1.3, DayframeCalendarDayLayout.labelMinimumHeight), so its drawn middle can sit anywhere
+ * between. The envelope covers the target wherever it is centred in that range, for either build.
+ */
 export const REVIEW_LANE_MIN_VISIBLE_MS = 5 * 60_000;
+export const REVIEW_LANE_MAX_VISIBLE_MS = ((CALENDAR_BLOCK_LABEL.iosMinimumHeight * CALENDAR_BLOCK_LABEL.iosMaximumTextScale) / 48) * 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /**
@@ -199,10 +220,14 @@ export function reviewTargetEnvelope(startMs: number, endMs: number, dayStartMs:
   const start = dayStartMs + wallClockOffsetMs(startMs, dayStartMs, dayEndMs);
   const end = Math.max(start, dayStartMs + wallClockOffsetMs(endMs, dayStartMs, dayEndMs));
   if (end - start >= REVIEW_LANE_TARGET_MS) return { start, end };
-  // Centred on the drawn block, which starts at the real start and is at least 4 points tall.
-  const middle = start + Math.max(end - start, REVIEW_LANE_MIN_VISIBLE_MS) / 2;
-  const envelopeStart = Math.min(Math.max(dayStartMs, middle - REVIEW_LANE_TARGET_MS / 2), dayStartMs + DAY_MS - REVIEW_LANE_TARGET_MS);
-  return { start: envelopeStart, end: envelopeStart + REVIEW_LANE_TARGET_MS };
+  // Centred on the drawn block, which starts at the real start and is at least one label line tall
+  // (shortest and tallest line across text sizes), kept inside the day like iOS keeps its target.
+  const lowMiddle = start + Math.max(end - start, REVIEW_LANE_MIN_VISIBLE_MS) / 2;
+  const highMiddle = start + Math.max(end - start, REVIEW_LANE_MAX_VISIBLE_MS) / 2;
+  const dayLast = dayStartMs + DAY_MS;
+  const from = Math.min(Math.max(dayStartMs, lowMiddle - REVIEW_LANE_TARGET_MS / 2), dayLast - REVIEW_LANE_TARGET_MS);
+  const to = Math.max(Math.min(dayLast, highMiddle + REVIEW_LANE_TARGET_MS / 2), dayStartMs + REVIEW_LANE_TARGET_MS);
+  return { start: from, end: Math.max(to, from + REVIEW_LANE_TARGET_MS) };
 }
 
 function targetEnvelopeOf(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date) {
@@ -451,7 +476,16 @@ export function buildNativeCalendarBridgeState({
         // envelope), so iOS gives each its full 44-point height even when the times overlap.
         isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : hitAnalysis(entry.id),
         isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0,
-        bracketParts.get(entry.id)
+        bracketParts.get(entry.id),
+        // Where iOS lays out each group's columns: the Review lane on the right, logged blocks
+        // that meet a suggestion left of it, every other logged block across the day.
+        reviewIds.has(entry.id)
+          ? { offset: 1 - REVIEW_LANE_WIDTH, width: REVIEW_LANE_WIDTH }
+          : besideReview.has(entry.id) ? { offset: 0, width: 1 - REVIEW_LANE_WIDTH } : { offset: 0, width: 1 },
+        resolveActivityIcon({
+          icon: data?.categories?.find((category) => category.id === entry.categoryId)?.icon,
+          name: entry.categoryName
+        }).glyph
       )),
       modelVersion: 4,
       monthTitle: formatMonthTitle(selectedDate, new Date(now)),
@@ -521,7 +555,9 @@ function serializeCalendarEntry(
   analysis?: { overlapCount: number; overlapSeconds: number },
   warningOverlapCount = 0,
   /** "Part 2 of 3 of School run": a named pattern's part (location v3 PR 14b). */
-  partOf?: string
+  partOf?: string,
+  region: { offset: number; width: number } = { offset: 0, width: 1 },
+  glyph: string = resolveActivityIcon({}).glyph
 ): NativeCalendarPresentationEntry {
   const reviewNeeded = isCalendarReviewNeeded(entry);
   const startedAtMs = Date.parse(entry.startedAt);
@@ -549,27 +585,34 @@ function serializeCalendarEntry(
   const tagText = entry.tags?.map((tag) => tag.name).join(" · ")
     || entry.tagNames?.join(" · ")
     || null;
+  const timeRange = `${formatClockTime(new Date(startedAtMs), clockFormat)} to ${stoppedAtMs === null ? "now" : formatClockTime(new Date(stoppedAtMs), clockFormat)}`;
+  const length = spokenDuration(entryLengthSeconds(entry, now));
 
   return {
     actionId,
     actionKind,
     accessibilityLabel: entry.reviewCrowd
       ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs, clockFormat)
-      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${partOf ? `. ${partOf}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
+      : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}, ${timeRange}, ${length}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${partOf ? `. ${partOf}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
+    columnGroup: reviewNeeded ? "review" : "logged",
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
+    glyph,
     isActive: entry.isActive,
     isReview: reviewNeeded,
     isUncategorized,
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
     layoutMode: layout?.mode ?? "full",
+    lengthLabel: formatDuration(entryLengthSeconds(entry, now)),
     meta: calendarBlockMeta(entry, now, reviewNeeded, continuation.continuesIntoNextDay, clockFormat),
     offsetFraction: layout?.offsetFraction ?? 0,
     overlapCount: analysis?.overlapCount ?? 0,
     overlapSeconds: analysis?.overlapSeconds ?? 0,
     placeText: entry.placeName,
+    regionOffsetFraction: region.offset,
+    regionWidthFraction: region.width,
     startedAtMs: Number.isFinite(startedAtMs) ? startedAtMs : dayStart.getTime(),
     startsBeforeDay: continuation.startsBeforeDay,
     stoppedAtMs: stoppedAtMs !== null && Number.isFinite(stoppedAtMs) ? stoppedAtMs : null,
@@ -672,8 +715,9 @@ export function collapseCrowdedReviewLane(
       const bounded = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs);
       const drawnStart = bounded ? wallClockOffsetMs(realStart, dayStartMs, dayEndMs) : realStart;
       const rawDrawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
-      // iOS draws at least 4 points (5 minutes at the widest zoom) from the drawn start, also when
-      // the clock folds back inside the item and its drawn end comes before its start.
+      // iOS draws at least 4 points (5 minutes at the widest zoom; a current build one label line, which
+      // only lengthens it) from the drawn start, also when the clock folds back inside the item and its
+      // drawn end comes before its start.
       const drawnEnd = drawnStart + Math.max(rawDrawnEnd - drawnStart, REVIEW_LANE_MIN_VISIBLE_MS);
       return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd, rawDrawnEnd };
     })
@@ -855,6 +899,10 @@ function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
   return Number.isFinite(startedAt) && Number.isFinite(stoppedAt) && startedAt < dayEnd.getTime() && stoppedAt > dayStart.getTime();
 }
 
+/**
+ * The detail line from 34 points (location v4 C6): "Deep work · 10:45–12:30" — the activity unless it
+ * is already the title, then the times; a running block ends "now". Review and next-day notes lead.
+ */
 function calendarBlockMeta(
   entry: NativeCalendarEntry,
   now: number,
@@ -864,14 +912,33 @@ function calendarBlockMeta(
 ) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  const timeLabel = `${formatClockTime(startedAt, clockFormat)}-${entry.stoppedAt ? formatClockTime(stoppedAt, clockFormat) : "now"}`;
-  const suffix = entry.isActive ? "running" : formatDuration(entryDurationSeconds(entry, now));
+  const timeLabel = `${formatClockTime(startedAt, clockFormat)}–${entry.stoppedAt ? formatClockTime(stoppedAt, clockFormat) : "now"}`;
+  const activity = entry.categoryName && entry.categoryName !== displayEntryTitle(entry) ? entry.categoryName : null;
   return [
     reviewNeeded ? REVIEW_COPY.needsReview : null,
     continuesIntoNextDay ? "Continues next day" : null,
-    timeLabel,
-    suffix
+    activity,
+    timeLabel
   ].filter(Boolean).join(" · ");
+}
+
+/** The block's real length from its own times (a running one up to now). */
+function entryLengthSeconds(entry: NativeCalendarEntry, now: number) {
+  const startedAt = Date.parse(entry.startedAt);
+  const stoppedAt = entry.stoppedAt ? Date.parse(entry.stoppedAt) : now;
+  return Number.isFinite(startedAt) && Number.isFinite(stoppedAt)
+    ? Math.max(0, Math.floor((stoppedAt - startedAt) / 1000))
+    : entryDurationSeconds(entry, now);
+}
+
+/** "1 hour 10 minutes" for VoiceOver. */
+function spokenDuration(seconds: number) {
+  const minutes = Math.max(0, Math.floor(seconds / 60));
+  if (minutes === 0) return "under a minute";
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const part = (value: number, unit: string) => `${value} ${unit}${value === 1 ? "" : "s"}`;
+  return [hours ? part(hours, "hour") : null, rest ? part(rest, "minute") : null].filter(Boolean).join(" ");
 }
 
 function displayEntryTitle(entry: MobileTimeEntry) {

@@ -35,19 +35,29 @@ struct DayframeCalendarEntryRecord: Codable {
   var actionKind = "completed"
   var accessibilityLabel = ""
   var color = "#7F91AB"
+  /// "logged" or "review" (location v4 C6): Swift puts the group's blocks in columns at every zoom.
+  /// Absent from an older bundle, which keeps the fractions below.
+  var columnGroup: String?
   var continuesIntoNextDay = false
   var entryId = ""
+  /// The activity's registry glyph, drawn alone in a column under 34 points wide.
+  var glyph: String?
   var isActive = false
   var isReview = false
   var isUncategorized = false
   var laneCount = 1
   var laneIndex = 0
   var layoutMode = "full"
+  /// The whole entry's length, printed after the title: "11m", "1h 45m".
+  var lengthLabel: String?
   var meta = ""
   var offsetFraction: Double = 0
   var overlapCount = 0
   var overlapSeconds: Double = 0
   var placeText: String?
+  /// The part of the day column the group draws in (left of the Review lane, or the lane itself).
+  var regionOffsetFraction: Double?
+  var regionWidthFraction: Double?
   var startedAtMs: Double = 0
   var startsBeforeDay = false
   var stoppedAtMs: Double?

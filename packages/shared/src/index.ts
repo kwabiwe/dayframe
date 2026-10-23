@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isHomePlace, placeDisplayName, type PlaceRole } from "./placeRoles";
+export { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "./timeEntryCommand";
 export { ReportSummaryRequestSchema, ReportSummarySchema, REPORT_MAX_RANGE_MS, type ReportSummaryRequest, type ReportSummary } from "./reportSummary";
 
 export {
@@ -123,6 +124,7 @@ export * from "./location";
 export * from "./reviewMutations";
 export * from "./reviewPresentation";
 export * from "./timeIntervals";
+export * from "./calendarBlockLayout";
 export * from "./coveredActivityTotals";
 export * from "./durations";
 export * from "./previousEndStart";

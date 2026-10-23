@@ -67,19 +67,24 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let accessibilityLabel: String
   let actionTarget: DayframeCalendarActionTarget
   let color: String
+  let columnGroup: String?
   let continuesIntoNextDay: Bool
   let entryId: String
+  let glyph: String?
   let isActive: Bool
   let isReview: Bool
   let isUncategorized: Bool
   let laneCount: Int
   let laneIndex: Int
   let layoutMode: String
+  let lengthLabel: String?
   let meta: String
   let offsetFraction: Double
   let overlapCount: Int
   let overlapSeconds: Double
   let placeText: String?
+  let regionOffsetFraction: Double
+  let regionWidthFraction: Double
   let startedAtMs: Double
   let startsBeforeDay: Bool
   let stoppedAtMs: Double?
@@ -100,19 +105,24 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
       kind: DayframeCalendarActionKind(rawValue: record.actionKind) ?? .completed
     )
     color = record.color
+    columnGroup = record.columnGroup
     continuesIntoNextDay = record.continuesIntoNextDay
     entryId = record.entryId
+    glyph = record.glyph
     isActive = record.isActive
     isReview = record.isReview
     isUncategorized = record.isUncategorized
     laneCount = max(1, record.laneCount)
     laneIndex = max(0, record.laneIndex)
     layoutMode = record.layoutMode
+    lengthLabel = record.lengthLabel
     meta = record.meta
     offsetFraction = record.offsetFraction
     overlapCount = max(0, record.overlapCount)
     overlapSeconds = max(0, record.overlapSeconds)
     placeText = record.placeText
+    regionOffsetFraction = record.regionOffsetFraction ?? 0
+    regionWidthFraction = record.regionWidthFraction ?? 1
     startedAtMs = record.startedAtMs
     startsBeforeDay = record.startsBeforeDay
     stoppedAtMs = record.stoppedAtMs
@@ -123,6 +133,20 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     warningOverlapCount = max(0, record.warningOverlapCount)
     widthFraction = record.widthFraction
     zIndex = record.zIndex
+  }
+
+  var layoutInput: DayframeCalendarLayoutInput {
+    DayframeCalendarLayoutInput(
+      id: entryId,
+      startedAtMs: startedAtMs,
+      stoppedAtMs: stoppedAtMs,
+      columnGroup: columnGroup,
+      regionOffsetFraction: regionOffsetFraction,
+      regionWidthFraction: regionWidthFraction,
+      fallbackOffsetFraction: offsetFraction,
+      fallbackWidthFraction: widthFraction,
+      fallbackZIndex: zIndex
+    )
   }
 }
 
@@ -233,6 +257,9 @@ final class DayframeCalendarViewModel: ObservableObject {
   @Published private(set) var hourHeight = CGFloat(DayframeCalendarConstants.defaultHourHeight)
   @Published private(set) var creationPreview: DayframeCalendarCreationPreview?
   @Published private(set) var zoomRequest: DayframeCalendarZoomRequest?
+  /// The Dynamic Type scale of the block labels, set by the hosting view from its traits, so drawing
+  /// and hit testing size the one-line minimum alike (location v4 C6).
+  @Published private(set) var labelTextScale: Double = 1
   private var nextCreationSessionToken: UInt64 = 0
   private var nextZoomToken: UInt64 = 0
 
@@ -270,8 +297,21 @@ final class DayframeCalendarViewModel: ObservableObject {
   func updateHourHeight(_ nextHourHeight: Double) {
     let clamped = CGFloat(DayframeCalendarZoomMath.clampHourHeight(nextHourHeight))
     guard clamped != hourHeight else { return }
-    withTransaction(Transaction(animation: nil)) {
+    // Zoom is direct manipulation: columns and label tiers follow the fingers with no easing, so
+    // even the lane modifier's own animation is disabled for zoom-driven changes.
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
       hourHeight = clamped
+    }
+  }
+
+  func updateLabelTextScale(_ scale: Double) {
+    guard scale.isFinite, abs(scale - labelTextScale) > 0.001 else { return }
+    var transaction = Transaction(animation: nil)
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      labelTextScale = scale
     }
   }
 
