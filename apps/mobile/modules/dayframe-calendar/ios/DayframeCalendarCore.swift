@@ -20,8 +20,8 @@ public enum DayframeCalendarConstants {
   public static let legStripMinimumHeight = 44.0
   /// A column narrower than this shows the activity icon only.
   public static let iconOnlyMaximumWidth = 34.0
-  /// A column narrower than this shows the length alone (scaled to fit whole), not the title.
-  public static let lengthOnlyMaximumWidth = 72.0
+  /// In a column narrower than this the length takes at most half the line, scaled to fit whole.
+  public static let compactLengthMaximumWidth = 72.0
   /// From this drawn height a block also lists its place and tags under the detail line.
   public static let extraLinesMinimumHeight = 58.0
   /// Below this drawn height the title uses the smaller label size.
