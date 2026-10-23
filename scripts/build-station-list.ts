@@ -14,27 +14,35 @@ const source = process.argv[2];
 if (!source) throw new Error("Pass the NaPTAN access-nodes CSV path.");
 const target = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../packages/shared/src/location/stations.generated.ts");
 
-/** One CSV line into fields: quoted fields may hold commas and doubled quotes. */
-function fields(line: string) {
-  const out: string[] = [];
+/** CSV text into records of fields: quoted fields may hold commas, doubled quotes and line breaks. */
+function records(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
   let value = "";
   let quoted = false;
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
     if (quoted) {
-      if (character === '"' && line[index + 1] === '"') { value += '"'; index += 1; }
+      if (character === '"' && text[index + 1] === '"') { value += '"'; index += 1; }
       else if (character === '"') quoted = false;
       else value += character;
     } else if (character === '"') quoted = true;
-    else if (character === ",") { out.push(value); value = ""; }
-    else value += character;
+    else if (character === ",") { row.push(value); value = ""; }
+    else if (character === "\n" || character === "\r") {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(value);
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      value = "";
+    } else value += character;
   }
-  out.push(value);
-  return out;
+  row.push(value);
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
 }
 
-const [header, ...lines] = fs.readFileSync(source, "utf8").split(/\r?\n/).filter(Boolean);
-const columns = fields(header);
+// A UTF-8 byte-order mark would otherwise hide the first column's name.
+const [columns, ...rows] = records(fs.readFileSync(source, "utf8").replace(/^\uFEFF/, ""));
 const column = (name: string) => {
   const index = columns.indexOf(name);
   if (index < 0) throw new Error(`The CSV has no ${name} column.`);
@@ -45,8 +53,7 @@ const [atco, stopType, status, latitudeColumn, longitudeColumn] =
 
 // Kinds: r rail, u Underground (London and Glasgow), m other metro, light rail and tram.
 const stations: Array<[string, number, number]> = [];
-for (const line of lines) {
-  const row = fields(line);
+for (const row of rows) {
   if (row[status] !== "active" || (row[stopType] !== "RLY" && row[stopType] !== "MET")) continue;
   const latitude = Number(row[latitudeColumn]);
   const longitude = Number(row[longitudeColumn]);

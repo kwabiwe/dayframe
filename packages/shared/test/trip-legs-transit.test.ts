@@ -4,7 +4,7 @@ import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { distanceMeters } from "../src/location/geo";
 import { deriveTripLegs } from "../src/location/legs";
 import { buildMotionTimeline } from "../src/location/motionActivity";
-import { nearestStation } from "../src/location/stations";
+import { nearestStation, type StationKind } from "../src/location/stations";
 import { STATIONS_PACKED } from "../src/location/stations.generated";
 import { DAYFRAME_GLYPHS } from "../src/iconGlyphs";
 import { DAYFRAME_LEG_MODE_ICONS } from "../src/icons";
@@ -19,8 +19,9 @@ const packed = STATIONS_PACKED.split(";").map((entry) => {
   return { kind: entry[0], latitude, longitude };
 });
 /** Two bundled stations of one kind, 6–12 km apart (a 13-minute silence between them is 7–15 m/s). */
-function pairOf(kind: string) {
-  const list = packed.filter((station) => station.kind === kind);
+function pairOf(kind: string, awayFrom: StationKind[] = []) {
+  const list = packed.filter((station) => station.kind === kind &&
+    (!awayFrom.length || !nearestStation(station, awayFrom, config.tripStationRadiusMeters)));
   for (const a of list) for (const b of list) {
     const meters = distanceMeters(a, b);
     if (meters >= 6_000 && meters <= 12_000) return [a, b];
@@ -30,11 +31,11 @@ function pairOf(kind: string) {
 const toward = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }, share: number) =>
   ({ latitude: a.latitude + (b.latitude - a.latitude) * share, longitude: a.longitude + (b.longitude - a.longitude) * share });
 
-function reading(minutes: number, point: { latitude: number; longitude: number }, speed: number | null): ClassifiedEvidence {
+function reading(minutes: number, point: { latitude: number; longitude: number }, speed: number | null, accuracy = 8): ClassifiedEvidence {
   return { evidence: { clientEvidenceId: `r-${minutes}`, deviceId: "device-t", algorithmVersion: config.algorithmVersion,
     // Only the position: a bundled station's own fields (its kind) never reach the reading.
     kind: "standard_location", occurredAt: at(minutes), receivedAt: at(300), timeZone: "UTC", latitude: point.latitude, longitude: point.longitude,
-    horizontalAccuracyMeters: 8, speedMetersPerSecond: speed, isSimulated: false } as LocationEvidence,
+    horizontalAccuracyMeters: accuracy, speedMetersPerSecond: speed, isSimulated: false } as LocationEvidence,
     impliedSpeedMetersPerSecond: null, match: null };
 }
 function motion(steps: Array<[number, MotionActivity]>): ClassifiedEvidence[] {
@@ -79,13 +80,64 @@ describe("trip legs, part 2 (location v4 step 7)", () => {
     expect(tube).toMatchObject({ confidence: "unsure", runnerUp: "train", unobserved: true });
   });
 
-  it("makes a fast leg between rail stations a train (sure), and one above any road speed a likely train", () => {
+  it("makes a fast leg between rail stations a train (sure), and one above any road speed an unsure train, car the runner-up", () => {
     const [from, to] = pairOf("r");
     const readings = [0, 1, 2, 3, 4, 5, 6].map((minute) => reading(minute, toward(from, to, minute / 6), 30));
     expect(legs(readings, [[0, "automotive"]], 6).map(({ mode, confidence }) => ({ mode, confidence }))).toEqual([{ mode: "train", confidence: "sure" }]);
     expect(legs(readings, [[0, "automotive"]], 6, false).map(({ mode }) => mode)).toEqual(["automotive"]);
     const fast = [0, 1, 2, 3, 4, 5, 6].map((minute) => reading(minute, toward(from, to, minute / 6), 36));
-    expect(legs(fast, [[0, "automotive"]], 6, false).map(({ mode, confidence }) => ({ mode, confidence }))).toEqual([{ mode: "train", confidence: "likely" }]);
+    // A drive at 36 m/s matches it too (Codex r1 on #563): the person settles it.
+    expect(legs(fast, [[0, "automotive"]], 6, false).map(({ mode, confidence, runnerUp }) => ({ mode, confidence, runnerUp })))
+      .toEqual([{ mode: "train", confidence: "unsure", runnerUp: "automotive" }]);
+  });
+
+  it("keeps a drive seen every minute at 100 m a drive, never a silence (Codex r1 on #563)", () => {
+    const [from, to] = pairOf("r");
+    const readings = [reading(0, from, 15), ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((minute) => reading(minute, toward(from, to, minute / 10), 15, 100)),
+      reading(10, to, 15)];
+    expect(legs(readings, [[0, "automotive"]], 10, false).map(({ mode }) => mode)).toEqual(["automotive"]);
+    // Station Wi-Fi now and then underground leaves the silence a silence.
+    const sparse = [reading(0, from, 1.2), reading(6, toward(from, to, 0.5), null, 120), reading(13, to, 1.2)];
+    expect(legs(sparse, [], 13, false).map(({ mode }) => mode)).toEqual(["underground"]);
+  });
+
+  it("keeps Underground and tram between their own stations, never a train (Codex r1 on #563)", () => {
+    const [from, to] = pairOf("u", ["rail"]);
+    const minutes = Math.ceil(distanceMeters(from, to) / 20 / 60);
+    const tube = Array.from({ length: minutes + 1 }, (_, minute) => reading(minute, toward(from, to, minute / minutes), 20));
+    expect(legs(tube, [[0, "automotive"]], minutes).map(({ mode, confidence }) => ({ mode, confidence })))
+      .toEqual([{ mode: "underground", confidence: "sure" }]);
+    const [stop, next] = pairOf("m", ["rail", "underground"]);
+    const tramMinutes = Math.ceil(distanceMeters(stop, next) / 18 / 60);
+    const tram = Array.from({ length: tramMinutes + 1 }, (_, minute) => reading(minute, toward(stop, next, minute / tramMinutes), 18));
+    expect(legs(tram, [[0, "automotive"]], tramMinutes).map(({ mode }) => mode)).toEqual(["tram"]);
+  });
+
+  it("needs a sustained train speed with few stops (Codex r1 on #563)", () => {
+    const [from, to] = pairOf("r");
+    // An hour's drive between stations with one fast departure reading and a stopped arrival.
+    expect(legs([reading(0, from, 20), reading(60, to, 0)], [[0, "automotive"]], 60).map(({ mode }) => mode)).toEqual(["automotive"]);
+    // Stopping every 20 seconds, hundreds of metres apart: not a train.
+    const stopping = Array.from({ length: 31 }, (_, step) => reading(step / 3, toward(from, to, step / 30), step % 2 ? 0 : 20));
+    expect(legs(stopping, [[0, "automotive"]], 10).map(({ mode }) => mode)).not.toContain("train");
+  });
+
+  it("never lets one fix passing a station prove both ends (Codex r1 on #563)", () => {
+    // A four-minute drive whose only fix is at an Underground station, midway: it passed the station.
+    const [station] = pairOf("u", ["rail"]);
+    expect(legs([reading(2, station, 12)], [[0, "automotive"]], 4).map(({ mode }) => mode)).toEqual(["automotive"]);
+    // Fixes at both ends, at stations, still make it the Underground.
+    const [from, to] = pairOf("u", ["rail"]);
+    expect(legs([reading(0, from, 12), reading(4, to, 12)], [[0, "automotive"]], 4).map(({ mode }) => mode)).toEqual(["underground"]);
+  });
+
+  it("keeps every silence's distance when two Underground runs join across a stop (Codex r1 on #563)", () => {
+    const [from, to] = pairOf("u");
+    const each = distanceMeters(from, to);
+    const readings = [reading(0, from, 1.2), reading(13, to, 0), reading(14, to, 0), reading(27, from, 1.2)];
+    const tube = legs(readings, [], 27, false).filter((leg) => leg.mode === "underground");
+    const total = tube.reduce((sum, leg) => sum + (leg.distanceMeters ?? 0), 0);
+    expect(total).toBeGreaterThan(each * 1.95);
   });
 
   it("makes a slower leg between metro or tram stops a tram, and leaves a drive elsewhere a drive", () => {

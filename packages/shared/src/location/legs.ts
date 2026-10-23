@@ -42,6 +42,8 @@ type Run = { label: Label; first: number; last: number; observedMs: number; prev
 const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling", "unseen"]);
 /** How long one reading's speed speaks for the time after it. */
 const SPEED_HOLD_MS = 120_000;
+/** A credible speed under this is stillness, for counting a train's stops. */
+const STOP_SPEED_MPS = 1.5;
 
 function speedClass(speed: number, config: LocationEngineConfig): SpeedClass {
   if (speed < config.tripStillSpeedMps) return "still";
@@ -151,9 +153,23 @@ export function deriveTripLegs({
   });
   const fixes = timed.filter(({ item }) => genuineLegFix(item, config))
     .map(({ item, atMs }) => ({ atMs, point: { latitude: item.evidence.latitude!, longitude: item.evidence.longitude! } }));
-  // Unseen stretches: nothing observed between two distant genuine fixes, at train or Underground speed.
+  // Genuine readings better than cell-only accuracy (design §8). A run between distant fixes stays a
+  // silence while they are sparse: underground, station Wi-Fi gives a reading of 70–130 m now and then
+  // (one to three in 5–24 minutes in the owner's week), where a drive gives one every minute.
+  const observedTimes = timed.filter(({ item }) => {
+    const { kind, isSimulated, latitude, longitude, horizontalAccuracyMeters } = item.evidence;
+    return (kind === "standard_location" || kind === "significant_change") && isSimulated !== true &&
+      latitude != null && longitude != null && horizontalAccuracyMeters != null &&
+      horizontalAccuracyMeters < config.tripUnseenObservedAccuracyMeters;
+  }).map(({ atMs }) => atMs).sort((a, b) => a - b);
+  let observedFrom = 0;
+  // Unseen stretches: nothing much observed between two distant genuine fixes, at train or Underground speed.
   const unseen = fixes.slice(1).flatMap((next, index) => {
     const before = fixes[index];
+    while (observedFrom < observedTimes.length && observedTimes[observedFrom] <= before.atMs) observedFrom += 1;
+    let inside = 0;
+    while (observedFrom + inside < observedTimes.length && observedTimes[observedFrom + inside] < next.atMs) inside += 1;
+    if (inside * config.tripUnseenSparseReadingIntervalMs > next.atMs - before.atMs) return [];
     const gapMs = next.atMs - before.atMs;
     const meters = distanceMeters(before.point, next.point);
     const mps = meters / (gapMs / 1_000);
@@ -307,20 +323,33 @@ export function deriveTripLegs({
     const speed = speedOf(item);
     return speed != null && Number.isFinite(speed) && speed >= 0 ? [{ atMs, speed }] : [];
   });
-  /** The genuine fix nearest a leg's end, within the unseen-leg minimum. */
-  const endPoint = (atMs: number) => {
-    let best: (typeof fixes)[number] | null = null;
+  /**
+   * A leg's two end witnesses: the genuine fix nearest its start in its first half, and the one nearest
+   * its end in its second half, each within the unseen-leg minimum. Two different fixes, so passing a
+   * station mid-leg never proves both ends.
+   */
+  const endPoints = (fromMs: number, toMs: number) => {
+    const midMs = (fromMs + toMs) / 2;
+    let start: (typeof fixes)[number] | null = null;
+    let end: (typeof fixes)[number] | null = null;
     for (const fix of fixes) {
-      if (Math.abs(fix.atMs - atMs) <= config.tripUnseenLegMinimumMs && (!best || Math.abs(fix.atMs - atMs) < Math.abs(best.atMs - atMs))) best = fix;
+      const fromStart = Math.abs(fix.atMs - fromMs);
+      const fromEnd = Math.abs(fix.atMs - toMs);
+      if (fix.atMs < midMs && fromStart <= config.tripUnseenLegMinimumMs && (!start || fromStart < Math.abs(start.atMs - fromMs))) start = fix;
+      if (fix.atMs > midMs && fromEnd <= config.tripUnseenLegMinimumMs && (!end || fromEnd < Math.abs(end.atMs - toMs))) end = fix;
     }
-    return best?.point ?? null;
+    return start && end ? { from: start.point, to: end.point } : null;
   };
   const bothAt = (fromMs: number, toMs: number, kinds: readonly StationKind[]) => {
     if (!config.tripStationsEnabled) return false;
-    const from = endPoint(fromMs);
-    const to = endPoint(toMs);
-    return Boolean(from && to && nearestStation(from, kinds, config.tripStationRadiusMeters) &&
-      nearestStation(to, kinds, config.tripStationRadiusMeters));
+    const ends = endPoints(fromMs, toMs);
+    return Boolean(ends && nearestStation(ends.from, kinds, config.tripStationRadiusMeters) &&
+      nearestStation(ends.to, kinds, config.tripStationRadiusMeters));
+  };
+  /** Distance along the genuine accurate fixes in [fromMs, toMs], through every gap's two anchors; null with fewer than two. */
+  const pathMeters = (fromMs: number, toMs: number) => {
+    const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
+    return points.length >= 2 ? Math.round(points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0)) : null;
   };
   return moving.map((run, index): TripLeg => {
     // Stillness at the trip's ends belongs to the first or last leg, whose times are the trip's own.
@@ -330,11 +359,10 @@ export function deriveTripLegs({
     const stoppedAt = new Date(toMs).toISOString();
     if (run.label === "unseen") {
       const sure = bothAt(slices[run.first].fromMs, slices[run.last].toMs, ["underground"]);
-      const from = endPoint(slices[run.first].fromMs);
-      const to = endPoint(slices[run.last].toMs);
+      // Unseen runs merged across a stop keep every gap's anchors in their distance.
       return { startedAt, stoppedAt, mode: "underground", confidence: sure ? "sure" : "unsure",
         ...(sure ? {} : { runnerUp: "train" as const }), unobserved: true,
-        distanceMeters: from && to ? Math.round(distanceMeters(from, to)) : null };
+        distanceMeters: pathMeters(slices[run.first].fromMs, slices[run.last].toMs) };
     }
     const mode = run.label as MotionTravelMode;
     let covered = 0;
@@ -346,24 +374,36 @@ export function deriveTripLegs({
     const motionAgrees = agreeing > 0 && agreeing * 2 >= covered;
     const inLeg = speeds.filter(({ atMs }) => atMs >= fromMs && atMs < toMs);
     const speedAgrees = inLeg.length > 0 && inLeg.filter(({ speed }) => speedFits(mode, speed)).length * 2 >= inLeg.length;
-    const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
-    const distance = points.length >= 2
-      ? points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0) : null;
     const confidence: TripLeg["confidence"] = motionAgrees && speedAgrees ? "sure" : motionAgrees || speedAgrees ? "likely" : "unsure";
-    const meters = distance == null ? null : Math.round(distance);
+    const meters = pathMeters(fromMs, toMs);
     if (mode === "automotive") {
-      const legSpeeds = rawSpeeds.filter(({ atMs }) => atMs >= fromMs && atMs < toMs).map(({ speed }) => speed).sort((a, b) => a - b);
-      const fast = legSpeeds.filter((speed) => speed >= config.tripTrainMinimumSpeedMps).length;
-      const trainSpeed = legSpeeds.length > 0 && fast * 2 >= legSpeeds.length && legSpeeds.at(-1)! <= config.tripTrainMaximumSpeedMps;
-      const median = legSpeeds.length ? legSpeeds[legSpeeds.length >> 1] : null;
-      const atStations = trainSpeed && bothAt(fromMs, toMs, ["rail", "underground", "metro"]);
-      // Without stations at both ends, only a speed no road allows makes a train.
-      const speedOnlyTrain = !atStations && legSpeeds.length >= config.tripTrainSpeedOnlyMinimumReadings && median != null &&
-        median >= config.tripTrainSpeedOnlyMinimumMps && legSpeeds.at(-1)! <= config.tripTrainMaximumSpeedMps;
-      const transit: TripLegMode | null = atStations || speedOnlyTrain ? "train"
-        : bothAt(fromMs, toMs, ["underground"]) ? "underground"
+      // Every credible reading of the leg, its arrival included, in time order.
+      const legSpeeds = rawSpeeds.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs);
+      const sorted = legSpeeds.map(({ speed }) => speed).sort((a, b) => a - b);
+      const median = sorted.length ? sorted[sorted.length >> 1] : null;
+      const fastTimes = legSpeeds.filter(({ speed }) => speed >= config.tripTrainMinimumSpeedMps).map(({ atMs }) => atMs);
+      // Sustained: enough readings, half of them at train speed, spread over at least half the leg.
+      const sustained = legSpeeds.length >= config.tripTrainSustainedMinimumReadings && fastTimes.length >= 2 &&
+        fastTimes.length * 2 >= legSpeeds.length && (fastTimes.at(-1)! - fastTimes[0]) * 2 >= toMs - fromMs &&
+        sorted.at(-1)! <= config.tripTrainMaximumSpeedMps;
+      // Few stops: the stretches of stillness inside the leg are on average far apart (not a bus's).
+      let stops = 0;
+      for (let at = 1; at < legSpeeds.length - 1; at += 1) {
+        if (legSpeeds[at].speed < STOP_SPEED_MPS && legSpeeds[at - 1].speed >= STOP_SPEED_MPS) stops += 1;
+      }
+      const spanMeters = meters ?? (median == null ? 0 : median * (toMs - fromMs) / 1_000);
+      const trainLike = sustained && (stops === 0 || spanMeters / stops >= config.tripTrainMinimumStopSpacingMeters);
+      const atRail = trainLike && bothAt(fromMs, toMs, ["rail"]);
+      // Without stations at both ends, a sustained speed above UK motorway limits is a train, but one a
+      // fast drive can match: unsure, with car as the runner-up, for the person to settle.
+      const speedOnlyTrain = !atRail && trainLike && median != null && legSpeeds.length >= config.tripTrainSpeedOnlyMinimumReadings &&
+        median >= config.tripTrainSpeedOnlyMinimumMps;
+      const atUnderground = !atRail && !speedOnlyTrain && bothAt(fromMs, toMs, ["underground"]);
+      const transit: TripLegMode | null = atRail || speedOnlyTrain ? "train"
+        : atUnderground ? "underground"
           : median != null && median <= config.tripTramMaximumSpeedMps && bothAt(fromMs, toMs, ["metro"]) ? "tram" : null;
-      if (transit) return { startedAt, stoppedAt, mode: transit, confidence: atStations ? "sure" : "likely", distanceMeters: meters };
+      if (speedOnlyTrain) return { startedAt, stoppedAt, mode: "train", confidence: "unsure", runnerUp: "automotive", distanceMeters: meters };
+      if (transit) return { startedAt, stoppedAt, mode: transit, confidence: atRail || atUnderground ? "sure" : "likely", distanceMeters: meters };
     }
     return { startedAt, stoppedAt, mode, confidence, distanceMeters: meters };
   });
