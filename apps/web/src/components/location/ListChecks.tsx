@@ -99,14 +99,18 @@ export function useListChecks({
   if ([...closedByServer].some(([id, over]) => reopened(id, over))) {
     setClosedByServer(new Map([...closedByServer].filter(([id, over]) => !reopened(id, over))));
   }
-  const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id) && !closedByServer.has(item.id))],
-    [closedByServer, loadedIds, openItems, revived]);
+  // Cards the server says are decided leave before outings are grouped, from the data as from revived copies,
+  // so no answer covers them again and an open trip under a decided stay stands on its own (Codex r3 on #568).
+  const items = useMemo(() => [...openItems, ...[...revived.values()].filter((item) => !loadedIds.has(item.id))]
+    .filter((item) => !closedByServer.has(item.id)), [closedByServer, loadedIds, openItems, revived]);
   // An outing (an unknown stay with its trips there and back) is one "?" on its stay, as on the deck.
   const outings = useMemo(() => reviewOutings(items), [items]);
   const memberIds = useMemo(() => new Set([
     ...[...outings.values()].flatMap((outing) => outing.members.map((member) => member.id)),
-    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId)).flatMap(([, members]) => members.map((member) => member.id))
-  ]), [heldOutings, outings, state.hiddenIds]);
+    // A held outing keeps its trips folded, unless the server says its stay is decided: its open trips then stand alone.
+    ...[...heldOutings].filter(([anchorId]) => state.hiddenIds.has(anchorId) && !closedByServer.has(anchorId))
+      .flatMap(([, members]) => members.map((member) => member.id))
+  ]), [closedByServer, heldOutings, outings, state.hiddenIds]);
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const checks = useMemo<ListCheck[]>(() => items
     .filter((item) => !state.hiddenIds.has(item.id) && !memberIds.has(item.id) && !closedByServer.has(item.id))
@@ -135,13 +139,10 @@ export function useListChecks({
       color: category?.color ?? null,
       colorName: category?.name ?? ""
     });
-    // A held answer retires the copy Undo brought back, as on the deck.
-    if (held && revived.has(item.id)) {
-      setRevived((current) => {
-        const next = new Map(current);
-        next.delete(item.id);
-        return next;
-      });
+    // A held answer retires the copies Undo brought back, its outing's members too, as on the deck (Codex r3 on #568).
+    const answered = [item.id, ...(outing?.members ?? []).map((member) => member.id)];
+    if (held && answered.some((id) => revived.has(id))) {
+      setRevived((current) => new Map([...current].filter(([id]) => !answered.includes(id))));
     }
   }, [categories, decide, itemsById, outings, revived]);
 

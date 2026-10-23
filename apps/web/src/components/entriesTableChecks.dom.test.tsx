@@ -250,4 +250,64 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       delete (window as { matchMedia?: unknown }).matchMedia;
     }
   });
+
+  const outingPair = () => [
+    suggestion("00000000-0000-4000-8000-0000000000b1", { title: "Unknown place", suggestedStartedAt: at(10, 30), suggestedStoppedAt: at(11),
+      rawPayload: { clientSegmentId: "seg-cafe", outingKey: "o1", outingRole: "stay" } }),
+    suggestion("00000000-0000-4000-8000-0000000000b2", { title: "Walk", eventType: "commute_detected", suggestedStartedAt: at(10),
+      suggestedStoppedAt: at(10, 30), rawPayload: { clientSegmentId: "seg-trip", outingKey: "o1", outingRole: "in" } })
+  ];
+
+  it("keeps a revived outing's trip away once the outing is answered again and saved (Codex r3 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const [stay, walk] = outingPair();
+    const { rerender } = render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(clientFetch).toHaveBeenCalledTimes(1);
+    rerender(<EntriesTable {...baseProps()} reviewItems={[]} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.queryByRole("button", { name: "Check Walk" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /to check$/ })).toBeNull();
+  });
+
+  it("drops server-decided cards from stale data before grouping the outing (Codex r3 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const [stay, walk] = outingPair();
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "open", [walk.id]: "accepted" } }), { status: 409 }));
+    // No replacement data arrives: the stale bootstrap still lists both.
+    render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    clientFetch.mockImplementation(async (url: string, init: RequestInit) => new Response(JSON.stringify(acknowledge(url, init)), { status: 200 }));
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    const last = JSON.parse(clientFetch.mock.calls.at(-1)?.[1].body).mutation;
+    expect(last.action).not.toBe("ignore_outing");
+  });
+
+  it("shows an open trip on its own when the server says its stay is decided (Codex r3 on #568)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const [stay, walk] = outingPair();
+    clientFetch.mockImplementation(async () => new Response(JSON.stringify({ ok: false, code: "resolution_conflict",
+      canonicalReviewStatuses: { [stay.id]: "accepted", [walk.id]: "open" } }), { status: 409 }));
+    render(<EntriesTable {...baseProps()} reviewItems={[stay, walk]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByRole("button", { name: "Check Unknown place" })).toBeNull();
+    expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
+  });
 });
+
