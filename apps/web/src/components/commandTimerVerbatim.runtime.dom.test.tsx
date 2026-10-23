@@ -782,6 +782,99 @@ describe("Stop never starts a new block (production incident, 13 Oct 2026)", () 
   });
 });
 
+describe("Stop and leaving the page never lose a typed description (stability audit WEB-UI-10, WEB-UI-2)", () => {
+  const keepalive = () => server.patchInits.map((init) => init.keepalive === true);
+
+  it("Stop clicked while the autosave PATCH is in flight stops the block with every typed word", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    // Typed after the autosave left, and then Stop at once (inside the next debounce).
+    await user.keyboard(" later");
+    const stop = screen.getByRole("button", { name: "Stop recording" }) as HTMLButtonElement;
+    expect(stop.disabled).toBe(false);
+    await user.click(stop);
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(descriptions()).toEqual(["Fix bug more", "Fix bug more later"]);
+    // The second PATCH was based on the first one's text, so it was not refused as stale.
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
+    expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
+    await wait(1_000);
+    // Exactly one Stop, no Start, no PATCH after it.
+    expect(server.stops).toEqual(["active"]);
+    expect(server.posts).toEqual([]);
+    expect(server.patches).toHaveLength(2);
+  });
+
+  it("a keyboard Stop (the runtime's stopTimer) during an in-flight autosave waits for it instead of being refused", async () => {
+    const { input, stop } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    let outcome: unknown;
+    const stopping = stop().then((value) => { outcome = value; });
+    await act(async () => { server.release?.(); });
+    await act(async () => { await stopping; });
+    expect(outcome).toEqual({ ok: true });
+    expect(server.stops).toEqual(["active"]);
+    expect(server.completed).toMatchObject({ description: "Fix bug more" });
+    // Nothing newer was typed, so the Stop sends no second PATCH.
+    expect(server.patches).toHaveLength(1);
+  });
+
+  it("pagehide inside the autosave debounce sends the edit at once with keepalive", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    expect(server.patches).toEqual([]);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" } }]);
+    expect(keepalive()).toEqual([true]);
+    await wait(1_000);
+    // The debounce does not send it a second time (that copy would be refused as stale).
+    expect(server.patches).toHaveLength(1);
+    expect(server.entry?.description).toBe("Fix bug more");
+    expect(input.value).toBe("Fix bug more");
+  });
+
+  it("the tab going hidden inside the debounce sends the edit with keepalive", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    } finally {
+      visibility.mockRestore();
+    }
+    expect(descriptions()).toEqual(["Fix bug more"]);
+    expect(keepalive()).toEqual([true]);
+    await wait(1_000);
+    expect(server.patches).toHaveLength(1);
+  });
+
+  it("pagehide while an autosave is in flight also sends the newer edit, based on the one in flight", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
+    expect(keepalive()).toEqual([true, true]);
+  });
+});
+
 function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
   const entries = activeEntry ? [activeEntry] : [];
   return {

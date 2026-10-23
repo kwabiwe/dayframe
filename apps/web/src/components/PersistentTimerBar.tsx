@@ -835,12 +835,12 @@ export function PersistentTimerBar({ workspaceMode = false }: { workspaceMode?: 
 
         {/* Always type="button": Stop re-renders this same button as Start before the browser's
             default click action runs, so a submit type would start a new block straight after
-            every Stop (production since 1 Sep, fixed 13 Oct). Start submits the form explicitly. */}
+            every Stop (production since 1 Sep, fixed 13 Oct). Start submits the form explicitly.
+            Never disabled: a Stop during an autosave or a Start waits for it in the runtime's
+            gate and then stops the block with every typed edit (stability audit WEB-UI-10). */}
         <button
           className={`df-cmd-go${active ? " is-stop" : ""}`}
           type="button"
-          disabled={Boolean(active) && isTimerBusy}
-          aria-busy={(Boolean(active) && isTimerBusy) || undefined}
           aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}
           onClick={(event) => {
             if (active) {

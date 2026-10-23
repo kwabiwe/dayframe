@@ -475,8 +475,10 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     // back to the previous text) is newer and survives its acknowledgement (Codex r7).
     setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), activeEntry.id);
     try {
+      // keepalive: a save in flight when the tab closes or reloads still reaches the server.
       const response = await clientFetch(`/api/time-entries/${targetId}`, {
         method: "PATCH",
+        keepalive: true,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch.body)
       });
@@ -613,13 +615,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const stopTimer = useCallback(async (input: TimerDraftInput = {}): Promise<MutationOutcome> => {
     const requested = dataRef.current?.activeEntry;
     if (!requested) return { ok: false, error: "There is no running block to stop." };
-    // A block whose Start is still in flight has no server id yet: Stop waits behind that Start
-    // in the mutation gate and then stops the real block (Codex r10). If the Start was rejected,
-    // the block it would have stopped is gone, so nothing is stopped.
-    if (!serverEntryId(requested.id)) {
+    // Stop is never turned away by a mutation already in the gate (stability audit WEB-UI-10): it
+    // waits for it and then stops the block still on screen, with the edits made since (the patch
+    // below is computed after the wait, against the base that save left). A block whose Start is
+    // still in flight has no server id yet, so Stop waits behind that Start and then stops the
+    // real block (Codex r10). If the Start was rejected, the block it would have stopped is gone,
+    // so nothing is stopped.
+    const startPending = !serverEntryId(requested.id);
+    if (startPending || mutationGateRef.current.isActive()) {
       await mutationGateRef.current.whenIdle();
+      // Nothing may slip in between this check and `run` below: no await separates them.
+      while (mutationGateRef.current.isActive()) await mutationGateRef.current.whenIdle();
       if (dataRef.current?.activeEntry?.id !== requested.id) {
-        return { ok: false, error: "That block did not start, so there was nothing to stop." };
+        return startPending
+          ? { ok: false, error: "That block did not start, so there was nothing to stop." }
+          : { ok: false, error: "There is no running block to stop." };
       }
     }
     const snapshot = dataRef.current!;
@@ -742,6 +752,41 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [refresh, saveActiveDetails, serverEntryId]);
+
+  // The tab is closing, reloading or going to the background (stability audit WEB-UI-2): edits
+  // autosave would send after its 650 ms debounce go now, keepalive, so they outlive the page.
+  // With the gate free this is the ordinary save (its base moves, so the debounce sends nothing
+  // again). With a save already in flight, only on pagehide, the newer edits are sent beside it
+  // against the base that save left, best effort, as the unmount below does.
+  useEffect(() => {
+    function flush(leaving: boolean) {
+      const entry = dataRef.current?.activeEntry;
+      const targetId = entry ? serverEntryId(entry.id) : null;
+      const patch = entry ? timerDetailsPatch(draftRef.current, baseFor(entry)) : null;
+      if (!entry || !targetId || !patch) return;
+      if (!mutationGateRef.current.isActive()) {
+        void updateActiveDetails(draftRef.current);
+        return;
+      }
+      if (!leaving) return;
+      void clientFetch(`/api/time-entries/${targetId}`, {
+        method: "PATCH",
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch.body)
+      }).catch(() => undefined);
+    }
+    const onPageHide = () => flush(true);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush(false);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [baseFor, serverEntryId, updateActiveDetails]);
 
   const updateActiveEntryFromCalendar = useCallback(async (
     input: ActiveEntryCompactMutationInput
