@@ -123,13 +123,35 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const [dateLoadError, setDateLoadError] = useState<string | null>(null);
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false);
   const dataRef = useRef<BootstrapData | null>(null);
+  // Snapshots by workspace and day (dateDataCacheKey). It only ever holds the workspace of the
+  // newest commit: a commit for another workspace (a switch) empties it first (WEB-UI-6).
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
+  const dateDataCacheWorkspaceRef = useRef<string | null>(null);
+  // The workspace lifetime: bumped when a commit accepts another workspace (a switch). A load or
+  // refresh started in an earlier lifetime never commits, so a late answer from the workspace
+  // left never undoes the switch (Codex r1 on #544).
+  const workspaceGenerationRef = useRef(0);
+  // Polls the timer state now, inside the running poll chain (set by that chain; WEB-UI-4).
+  const pollTimerStateNowRef = useRef<(() => void) | null>(null);
+  // The period the URL shows now, read by `refresh` so it is one stable callback: a refresh asked
+  // for (or a Delete's onSynced bound) before a period change loads the period shown when it runs,
+  // and an answer for a period left meanwhile is dropped (WEB-UI-3).
+  const selectedDateRef = useRef(selectedDate);
+  useLayoutEffect(() => {
+    selectedDateRef.current = selectedDate;
+  }, [selectedDate]);
+  // The day whose shown copy came from the cache and is not yet confirmed by a fresh load: it is
+  // revalidated once it is the URL's period (stale-while-revalidate, WEB-UI-5).
+  const cacheShownDateRef = useRef<string | null>(null);
   /**
-   * A cached day, only when its ranges were built for the zone the browser sends now (Codex r1 on
-   * #484): a snapshot from before the zone cookie existed, or from another zone, is fetched again.
+   * A cached day of the current workspace, only when its ranges were built for the zone the
+   * browser sends now (Codex r1 on #484): a snapshot from before the zone cookie existed, or from
+   * another zone, is fetched again.
    */
   const cachedDateData = useCallback((date: string) => {
-    const cached = dateDataCacheRef.current.get(date);
+    const workspaceId = dataRef.current?.workspace.id;
+    if (!workspaceId) return undefined;
+    const cached = dateDataCacheRef.current.get(dateDataCacheKey(workspaceId, date));
     if (!cached) return undefined;
     // A misfit stays until a fresh load of that day replaces it.
     return snapshotFitsViewerZone(cached.viewerTimeZone, typeof document === "undefined" ? null : document.cookie) ? cached : undefined;
@@ -174,7 +196,6 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const lastCommitAtRef = useRef(0);
   const mutationGateRef = useRef(createTimerMutationGate());
   const timerStateRef = useRef<TimerStateFingerprint | null>(null);
-  const timerStatePollInFlightRef = useRef(false);
 
   useEffect(() => {
     const gate = mutationGateRef.current;
@@ -207,8 +228,20 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       };
     }
     if (nextData) {
-      dateDataCacheRef.current.delete(nextData.dateRange.selectedDate);
-      dateDataCacheRef.current.set(nextData.dateRange.selectedDate, nextData);
+      const cache = dateDataCacheRef.current;
+      if (dateDataCacheWorkspaceRef.current !== nextData.workspace.id) {
+        if (dateDataCacheWorkspaceRef.current !== null) workspaceGenerationRef.current += 1;
+        cache.clear();
+        dateDataCacheWorkspaceRef.current = nextData.workspace.id;
+      }
+      const date = nextData.dateRange.selectedDate;
+      // Only a fresh load confirms a day shown from the cache: a page's passive hydrate (its
+      // page-load props, often older still) keeps the revalidation due (Codex r1 on #544).
+      if (source === "cache") cacheShownDateRef.current = date;
+      else if (source === "canonical" && cacheShownDateRef.current === date) cacheShownDateRef.current = null;
+      const key = dateDataCacheKey(nextData.workspace.id, date);
+      cache.delete(key);
+      cache.set(key, nextData);
       while (dateDataCacheRef.current.size > DATE_DATA_CACHE_LIMIT) {
         const oldestDate = dateDataCacheRef.current.keys().next().value as string | undefined;
         if (!oldestDate) break;
@@ -276,24 +309,32 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   const refresh = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     if (!force && mutationGateRef.current.isActive()) return dataRef.current;
     const requestId = ++refreshRequestRef.current;
+    const date = selectedDateRef.current;
+    const generation = workspaceGenerationRef.current;
     try {
-      const response = await clientFetch(`/api/bootstrap?date=${selectedDate}`, { cache: "no-store" });
+      const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
       if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
-      // A newer load (or a mutation's own data) may have landed while this body was read: an
-      // older answer never replaces it.
-      if (requestId !== refreshRequestRef.current) return dataRef.current;
+      // A newer load (or a mutation's own data) may have landed while this body was read, or the
+      // period may have changed: an older answer, or one for a period left, never replaces it.
+      if (
+        requestId !== refreshRequestRef.current ||
+        date !== selectedDateRef.current ||
+        generation !== workspaceGenerationRef.current
+      ) return dataRef.current;
       commitData(payload, "canonical");
       return payload;
     } catch {
       return dataRef.current;
     }
-  }, [commitData, selectedDate]);
+  }, [commitData]);
 
   const loadDate = useCallback(async (date: string): Promise<DateLoadOutcome> => {
     const cached = cachedDateData(date);
     if (cached) {
       setDateLoadError(null);
+      // Like a network load, a cache commit supersedes any refresh still in flight.
+      refreshRequestRef.current += 1;
       commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
       return { ok: true };
     }
@@ -303,6 +344,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
     refreshRequestRef.current += 1;
     const requestId = ++dateLoadRequestRef.current;
+    const generation = workspaceGenerationRef.current;
     isDateLoadingRef.current = true;
     setIsDateLoading(true);
     setDateLoadError(null);
@@ -312,6 +354,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const payload = (await response.json()) as BootstrapData;
       if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
         throw new Error("The period response did not match the requested date.");
+      }
+      // The workspace changed while this loaded: the period it asked for belongs to the workspace
+      // left, so it is dropped quietly (the caller does not navigate).
+      if (generation !== workspaceGenerationRef.current) {
+        return { ok: false, error: "The workspace changed while that period loaded." };
       }
       commitData(payload, "canonical");
       return { ok: true };
@@ -329,10 +376,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
   useLayoutEffect(() => {
     // Read inline (not through cachedDateData), the same check, so this stays a ref-driven sync.
-    const cached = dateDataCacheRef.current.get(selectedDate);
+    const workspaceId = dataRef.current?.workspace.id;
+    const cached = workspaceId ? dateDataCacheRef.current.get(dateDataCacheKey(workspaceId, selectedDate)) : undefined;
     if (!cached || !snapshotFitsViewerZone(cached.viewerTimeZone, document.cookie)) return;
     setDateLoadError(null);
     if (dataRef.current?.dateRange.selectedDate !== selectedDate) {
+      refreshRequestRef.current += 1;
       commitData(withCurrentSharedBootstrap(cached, dataRef.current), "cache");
     }
   }, [commitData, selectedDate]);
@@ -342,7 +391,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const current = dataRef.current;
       const currentFits = current?.dateRange.selectedDate === selectedDate &&
         snapshotFitsViewerZone(current.viewerTimeZone, document.cookie);
-      if (!currentFits && !cachedDateData(selectedDate)) {
+      // A day shown from the cache is drawn at once and then fetched again, so another device's
+      // change to it appears (stale-while-revalidate).
+      if ((!currentFits && !cachedDateData(selectedDate)) || cacheShownDateRef.current === selectedDate) {
         void refresh();
       }
     }, 0);
@@ -364,8 +415,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     };
   }, [cachedDateData, commitData, refresh, selectedDate]);
 
+  // One poll chain for the provider's life (`refresh` is stable): a period change never restarts
+  // it. The in-flight flag belongs to this chain, and a chain torn down mid-request discards its
+  // answer, so a new chain always starts and the old one never acts (WEB-UI-4).
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     let timeout: number | null = null;
     let consecutiveFailures = 0;
 
@@ -376,16 +431,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     };
 
     const poll = async () => {
-      if (
-        cancelled ||
-        document.visibilityState !== "visible" ||
-        timerStatePollInFlightRef.current
-      ) return;
-      timerStatePollInFlightRef.current = true;
+      if (cancelled || document.visibilityState !== "visible" || inFlight) return;
+      inFlight = true;
       try {
         const response = await clientFetch("/api/timer-state", { cache: "no-store" });
+        if (cancelled) return;
         if (!response.ok) throw new Error(`Unable to check the recording state: ${response.status}`);
         const next = (await response.json()) as TimerStateFingerprint;
+        if (cancelled) return;
         const changed = timerStateChanged(timerStateRef.current, next);
         timerStateRef.current = next;
         consecutiveFailures = 0;
@@ -393,10 +446,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       } catch {
         consecutiveFailures += 1;
       } finally {
-        timerStatePollInFlightRef.current = false;
+        inFlight = false;
         schedule(timerStatePollDelay(consecutiveFailures));
       }
     };
+
+    pollTimerStateNowRef.current = () => schedule(0);
 
     const resume = () => {
       if (document.visibilityState !== "visible") {
@@ -412,11 +467,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
+      pollTimerStateNowRef.current = null;
       if (timeout !== null) window.clearTimeout(timeout);
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
   }, [refresh]);
+
+  // A period change asks the running chain for one poll now (never a second chain), so another
+  // device's Start or Stop shows as soon as the new period does.
+  const polledDateRef = useRef(selectedDate);
+  useEffect(() => {
+    if (polledDateRef.current === selectedDate) return;
+    polledDateRef.current = selectedDate;
+    pollTimerStateNowRef.current?.();
+  }, [selectedDate]);
 
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;
@@ -428,6 +493,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const current = dataRef.current;
       if (current?.dateRange.selectedDate === selectedDate && snapshotFitsViewerZone(current.viewerTimeZone, document.cookie)) return;
       commitData(nextData, "hydrate");
+      // A page's layout effect runs before the provider's: the period it hydrates is current.
+      selectedDateRef.current = selectedDate;
       void refresh();
       return;
     }
@@ -1038,6 +1105,10 @@ export function useRuntimePageData(initialData: BootstrapData) {
   }
   if (initialData.dateRange.selectedDate === runtime.selectedDate) return initialData;
   return runtime.data ?? initialData;
+}
+
+function dateDataCacheKey(workspaceId: string, date: string) {
+  return `${workspaceId}|${date}`;
 }
 
 function withCurrentSharedBootstrap(
