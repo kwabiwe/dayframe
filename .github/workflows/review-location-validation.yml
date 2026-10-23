@@ -208,6 +208,11 @@ jobs:
         env:
           DAYFRAME_BROAD_READINGS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-broad-readings.postgres.test.ts
+      - name: Location timeline API (location v4 step 8)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_TIMELINE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/location-timeline.postgres.test.ts
       # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
         if: always()
