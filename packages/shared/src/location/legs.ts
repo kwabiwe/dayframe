@@ -24,7 +24,7 @@ type Slice = {
   label: Label | null;
   /** Core Motion's own report for the slice, never a carried label. */
   reported: Label | null;
-  /** Whether the label was seen (reported by Core Motion, or from speed), not only carried across a spell: only seen time holds a change. */
+  /** Whether the label was seen (reported by Core Motion, or backed by a speed in its range), not only carried: only seen time holds a change. */
   seen: boolean;
 };
 /** A run of slices [first, last] with one label; `observedMs` leaves indeterminate slices out. */
@@ -51,6 +51,11 @@ function sliceLabel(motion: Label | null, speed: SpeedClass | null): Label | nul
     case "still": return "still";
     default: return null;
   }
+}
+
+/** Whether a speed regime supports a label: a moving mode's own range, or stillness for a stop. */
+function speedSupports(label: Label, speed: SpeedClass): boolean {
+  return label === "still" ? speed === "still" : speedFits(label, speed);
 }
 
 /** Whether a reading's speed fits a leg's mode, for its confidence. */
@@ -150,7 +155,9 @@ export function deriveTripLegs({
     while (speedIndex + 1 < speeds.length && speeds[speedIndex + 1].atMs <= midMs) speedIndex += 1;
     const speed = speedIndex >= 0 && midMs - speeds[speedIndex].atMs <= SPEED_HOLD_MS ? speeds[speedIndex].speed : null;
     const reported = motion && !motion.carried ? motion.label : null;
-    slices.push({ fromMs, toMs, label: sliceLabel(motion?.label ?? null, speed), reported, seen: reported != null || speed != null });
+    const label = sliceLabel(motion?.label ?? null, speed);
+    // Seen: Core Motion reported it, or a speed whose regime fits it (a speed that contradicts a carried label never holds it).
+    slices.push({ fromMs, toMs, label, reported, seen: reported != null || label != null && speed != null && speedSupports(label, speed) });
   }
   const sliceMs = (slice: Slice) => slice.toMs - slice.fromMs;
 

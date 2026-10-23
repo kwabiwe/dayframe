@@ -91,6 +91,9 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
     // Walk, 30 s driving, 4½ min unknown (carried as driving), 30 s driving, walk: one minute of reported driving.
     expect(legs(0, 20, [[0, "walking"], [6, "automotive"], [6.5, "unknown"], [11, "automotive"], [11.5, "walking"]]).map(({ mode }) => mode))
       .toEqual(["walking"]);
+    // Still fixes inside the carried spell contradict it: they never hold the drive either.
+    expect(legs(0, 20, [[0, "walking"], [6, "automotive"], [6.5, "unknown"], [11, "automotive"], [11.5, "walking"]],
+      [reading(7, 500, 0), reading(9, 500, 0)]).map(({ mode }) => mode)).toEqual(["walking"]);
   });
 
   it("never takes a speed from a simulated copy of a reading", () => {
