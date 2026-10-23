@@ -37,6 +37,13 @@ vi.mock("@/lib/event-service", () => ({
       super(message);
       this.name = "TimerMutationBusyError";
     }
+  },
+  TimerReplacementWindowError: class TimerReplacementWindowError extends Error {
+    status = 409;
+  },
+  TimerStopBeforeStartError: class TimerStopBeforeStartError extends Error {
+    status = 422;
+    code = "timer_stop_before_start";
   }
 }));
 
@@ -46,12 +53,28 @@ vi.mock("@/lib/live-activity-post-response", () => ({
 
 const { databasePayloadError, databaseReadinessError, missingRequiredColumnError } = await import("@/lib/db");
 const { POST } = await import("./route");
+const eventService = await import("@/lib/event-service");
 
 describe("POST /api/events", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.resolveRequestSession.mockResolvedValue(session);
     mocks.processActivityEvent.mockResolvedValue({ eventId: "event-1", candidate: { action: "create_review_item" } });
+  });
+
+  it("answers timer events the timeline can't take with a permanent 422 and a code, never a retried 500", async () => {
+    const post = (body: object) => POST(new Request("https://dayframe.test/api/events", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body)
+    }));
+    mocks.processActivityEvent.mockRejectedValueOnce(new eventService.TimerReplacementWindowError("late"));
+    const start = await post({ type: "timer_start", clientEventId: "start-late" });
+    expect(start.status).toBe(422);
+    expect(await start.json()).toMatchObject({ code: "timer_start_before_running_block" });
+
+    mocks.processActivityEvent.mockRejectedValueOnce(new eventService.TimerStopBeforeStartError("early"));
+    const stop = await post({ type: "timer_stop", clientEventId: "stop-early" });
+    expect(stop.status).toBe(422);
+    expect(await stop.json()).toMatchObject({ code: "timer_stop_before_start" });
   });
 
   it("retires location Move cards a newly imported Health workout covers, never for a duplicate (PRD D19)", async () => {
