@@ -779,6 +779,9 @@ export function deriveCommutes(
   // the same timestamps; parse once rather than twice per evidence/stay pair.
   // Keep the original array/filter order and strict endpoint comparisons.
   let shortProof: ReadonlySet<ClassifiedEvidence> | undefined;
+  // Built only when a journey window holds a reading to judge.
+  let nativeSpeed: ReturnType<typeof nativeSpeedResolver> | undefined;
+  const speedOf = (item: ClassifiedEvidence) => (nativeSpeed ??= nativeSpeedResolver(acceptedEvidence))(item);
   const occurredAtMs = acceptedEvidence.map(({ evidence }) => Date.parse(evidence.occurredAt));
   const farFrom = positionIndex(acceptedEvidence, occurredAtMs, config);
   const evidenceById = new Map(acceptedEvidence.map((item) => [item.evidence.clientEvidenceId, item]));
@@ -827,6 +830,12 @@ export function deriveCommutes(
         returnedMs = observedReturnMs(to, gapEvidence, config, returnedMs, snapshots)
       ) startedAtMs = returnedMs;
     }
+    // Fix B (location v4 §9): a journey never claims time its origin's own
+    // completed Visit covers, and one that would span a silence over the
+    // continuity limit starts where movement was seen.
+    startedAtMs = ownVisitCoverEndMs(from, acceptedEvidence, occurredAtMs, ownedByDestination, snapshots, startedAtMs, stoppedAtMs, config);
+    startedAtMs = movementSupportedStartMs(acceptedEvidence, occurredAtMs, speedOf, ownedByDestination, snapshots,
+      options.interiorStops ?? [], startedAtMs, stoppedAtMs, config);
     // Time away from a saved or learned place is measured from the place
     // itself (a stay's observed centre can sit well inside its circle), and
     // only between two stays both identified as it, never an ambiguous match.
@@ -1198,6 +1207,107 @@ export function deriveCommutes(
     }
   }
   return commutes;
+}
+
+/**
+ * When the origin's own completed Visit ends, if the journey would start
+ * inside it. The covering Visit is the one iOS judged last: of the genuine
+ * completed Visits that arrived within the origin stay (attached to it, or
+ * sharing an attached Visit's arrival time, as iOS reports a Visit's arrival
+ * and completion), the latest arrived, on a tie the earliest departure. The
+ * journey starts at its departure when the device was seen there after the
+ * stay ended (an accurate genuine reading within the Visit's reported radius
+ * plus its own accuracy) and every accurate genuine reading from the stay's
+ * end to that departure lies there. A reading beyond it, or the origin's own
+ * geofence exit, shows the device left first, and the start stands; with no
+ * reading there after the stay ended, nothing shows the Visit outlasted it.
+ * A departure at or after the destination leaves no journey.
+ */
+function ownVisitCoverEndMs(from: StaySegment, evidence: ClassifiedEvidence[], occurredAtMs: readonly number[],
+  ownedByDestination: ReadonlySet<string>, snapshots: ReadonlySet<ClassifiedEvidence>, startedAtMs: number, stoppedAtMs: number,
+  config: LocationEngineConfig) {
+  const fromIds = new Set(from.evidenceIds);
+  const fromStartMs = Date.parse(from.startedAt);
+  const fromStopMs = Date.parse(from.stoppedAt ?? from.startedAt);
+  const attachedArrivals = new Set(evidence.filter((item) => item.evidence.kind === "visit" && fromIds.has(item.evidence.clientEvidenceId))
+    .map(({ evidence: visit }) => `${visit.deviceId}:${visit.occurredAt}`));
+  let covering: ClassifiedEvidence["evidence"] | null = null;
+  for (const item of evidence) {
+    const visit = item.evidence;
+    if (visit.kind !== "visit" || visit.endedAt == null || visit.isSimulated === true || evidencePoint(item) == null ||
+      ownedByDestination.has(visit.clientEvidenceId)) continue;
+    if (!fromIds.has(visit.clientEvidenceId) && !attachedArrivals.has(`${visit.deviceId}:${visit.occurredAt}`)) continue;
+    const arrivedMs = Date.parse(visit.occurredAt);
+    if (!(arrivedMs >= fromStartMs && arrivedMs <= fromStopMs)) continue;
+    const coveringArrivedMs = covering ? Date.parse(covering.occurredAt) : -Infinity;
+    if (arrivedMs > coveringArrivedMs ||
+      arrivedMs === coveringArrivedMs && Date.parse(visit.endedAt) < Date.parse(covering!.endedAt!)) covering = visit;
+  }
+  // As in Fix A, the latest Visit is iOS's judgement even without a radius; then it covers nothing.
+  if (!covering || covering.horizontalAccuracyMeters == null) return startedAtMs;
+  const departedMs = Date.parse(covering.endedAt!);
+  if (!(departedMs > startedAtMs)) return startedAtMs;
+  const centre = { latitude: covering.latitude!, longitude: covering.longitude! };
+  let inside = 0;
+  for (const [index, item] of evidence.entries()) {
+    const at = occurredAtMs[index];
+    if (at < fromStopMs || at >= Math.min(departedMs, stoppedAtMs) || item.evidence.isSimulated === true ||
+      ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
+    // The origin's own exit is the device leaving, whatever the Visit says; a
+    // registration snapshot's exit is not.
+    if (item.evidence.kind === "geofence_exit" && evidenceMatchesStay(item, from) && !snapshots.has(item)) return startedAtMs;
+    if (item.evidence.kind === "visit" || !accurateFix(item, config)) continue;
+    if (distanceMeters(centre, evidencePoint(item)!) > covering.horizontalAccuracyMeters! + item.evidence.horizontalAccuracyMeters!) {
+      return startedAtMs;
+    }
+    if (at > fromStopMs) inside += 1;
+  }
+  return inside > 0 ? departedMs : startedAtMs;
+}
+
+/**
+ * Where a journey starts when it would span a silence over the continuity
+ * limit before any movement was seen (movement at the start itself counts). Movement is a reading with credible
+ * accuracy whose speed (native from any copy, else an accurate fix's implied
+ * speed) reaches the movement threshold. When observations between the start
+ * and the first movement leave a silence over `maxContinuityGapMs`, the device
+ * was last seen there before it moved, so the journey starts at the latest of
+ * them; time before that is unobserved, not travel. A journey with no
+ * movement seen, no observation before its first movement, or a recorded stop
+ * before it keeps its start. Readings at the destination's place count (in a
+ * round trip they are the origin's own departure); only readings the
+ * destination stay owns are left out.
+ */
+function movementSupportedStartMs(evidence: ClassifiedEvidence[],
+  occurredAtMs: readonly number[], nativeSpeed: (item: ClassifiedEvidence) => number | null, ownedByDestination: ReadonlySet<string>,
+  snapshots: ReadonlySet<ClassifiedEvidence>, interiorStops: readonly StaySegment[], startedAtMs: number, stoppedAtMs: number, config: LocationEngineConfig) {
+  const moving = (item: ClassifiedEvidence) => {
+    const { kind, horizontalAccuracyMeters } = item.evidence;
+    if (kind !== "standard_location" && kind !== "significant_change" || item.evidence.isSimulated === true ||
+      horizontalAccuracyMeters == null || horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) return false;
+    const native = nativeSpeed(item);
+    if (native != null) return native >= config.movementSpeedThresholdMps;
+    const implied = item.impliedSpeedMetersPerSecond;
+    return accurateFix(item, config) && implied != null && Number.isFinite(implied) && implied >= config.movementSpeedThresholdMps;
+  };
+  const observed: number[] = [];
+  let movedMs: number | null = null;
+  for (const [index, item] of evidence.entries()) {
+    const at = occurredAtMs[index];
+    if (at < startedAtMs || at >= stoppedAtMs || evidencePoint(item) == null || snapshots.has(item) ||
+      ownedByDestination.has(item.evidence.clientEvidenceId)) continue;
+    // Movement at the start itself (the departure reading) shows the journey began there.
+    if (moving(item)) {
+      movedMs = at;
+      break;
+    }
+    if (at > startedAtMs) observed.push(at);
+  }
+  if (movedMs == null || observed.length === 0) return startedAtMs;
+  if (interiorStops.some((stop) => Date.parse(stop.startedAt) > startedAtMs && Date.parse(stop.startedAt) < movedMs!)) return startedAtMs;
+  const times = [startedAtMs, ...observed, movedMs];
+  const silent = times.some((at, index) => index > 0 && at - times[index - 1] > config.maxContinuityGapMs);
+  return silent ? Math.max(startedAtMs, observed[observed.length - 1]) : startedAtMs;
 }
 
 function everyPortionShowsMovement(
