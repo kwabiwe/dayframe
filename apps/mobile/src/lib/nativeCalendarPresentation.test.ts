@@ -74,7 +74,10 @@ describe("native Calendar presentation boundary", () => {
       isActive: true,
       stoppedAtMs: null
     });
-    expect(serialized.meta).toContain("running");
+    // Location v4 C6: a running block's detail line ends "now"; its label prints the length so far.
+    expect(serialized.meta).toMatch(/–now$/);
+    expect(serialized.lengthLabel).toMatch(/^\d+(h|m)/);
+    expect(serialized.accessibilityLabel).toMatch(/ to now, /);
     expect(state.model.totalSeconds).toBe(2 * 60 * 60);
   });
 
@@ -276,23 +279,25 @@ describe("native Calendar presentation boundary", () => {
       expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
     });
 
-    it("reserves the target around iOS's 4-point minimum block, not the raw time (Codex r9)", () => {
-      // 09:00–09:01 draws 4 points tall, so its target centres at 09:02:30 and reaches 09:30; the
-      // 09:53–09:58 target starts at 09:28. They overlap, so they need their own lanes.
+    it("reserves the target around iOS's one-line minimum block at every text size, not the raw time (Codex r9; location v4 C6)", () => {
+      // 09:00–09:01 draws one label line (12–19.5 points at 48 an hour: 15–24.375 minutes), so its
+      // 55-minute target centres between 09:07:30 and 09:12:11.25: the envelope is 08:40–09:39:41.25.
+      // The 09:53–09:58 envelope starts at 09:33. They overlap, so they need their own lanes.
+      const seconds = (value: number) => value * 1000;
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 9, 1), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 30) });
+        .toEqual({ start: localTime(2026, 7, 10, 8, 40), end: localTime(2026, 7, 10, 9, 39) + seconds(41.25) });
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 53), localTime(2026, 7, 10, 9, 58), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 23) });
+        .toEqual({ start: localTime(2026, 7, 10, 9, 33), end: localTime(2026, 7, 10, 10, 32) + seconds(41.25) });
       const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 53, 5)] }));
       const lane = state.model.entries;
       expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
       expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
     });
 
-    it("targets that do not overlap share a lane (09:00–09:01 and 09:58–10:03)", () => {
-      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 58, 5)] }));
+    it("targets that do not overlap share a lane (09:00–09:01 and 10:02–10:07)", () => {
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 10, 2, 5)] }));
       const lane = state.model.entries;
-      // a reaches 09:30; b (09:58–10:03) starts its target at 09:33.
+      // a's envelope reaches 09:39:41; b (10:02–10:07) starts its envelope at 09:42 (location v4 C6).
       expect(lane[0].offsetFraction).toBeCloseTo(lane[1].offsetFraction);
       expect(lane[0].widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     });
@@ -833,8 +838,9 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd[0].stoppedAtMs).toBeGreaterThan(crowd[0].startedAtMs);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:00");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("01:50");
-      expect(crowd[0].accessibilityLabel).toContain("01:00 to 01:50");
+      // c ends where its one-line minimum (15 minutes at the widest zoom, smallest text) ends.
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:00");
+      expect(crowd[0].accessibilityLabel).toContain("01:00 to 02:00");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -856,7 +862,7 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd).toHaveLength(1);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:30");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("01:55");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:05");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -878,7 +884,7 @@ describe("native Calendar Blocks presentation", () => {
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(new Date(crowd[0].startedAtMs).getDate()).toBe(10);
       expect(clock(crowd[0].startedAtMs)).toBe("00:00");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("00:07");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("00:17");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -899,7 +905,7 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd).toHaveLength(1);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:40");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:04");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:14");
       expect(crowd[0].stoppedAtMs!).toBeGreaterThan(crowd[0].startedAtMs);
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
@@ -1056,10 +1062,11 @@ describe("native Calendar Blocks presentation", () => {
     };
     const twentyFour = buildNativeCalendarBridgeState(base).model;
     expect(twentyFour.clockFormat).toBe("24h");
-    expect(twentyFour.entries[0].meta).toContain("21:05-22:00");
+    expect(twentyFour.entries[0].meta).toContain("21:05–22:00");
+    expect(twentyFour.entries[0].accessibilityLabel).toContain("21:05 to 22:00, 55 minutes");
     const twelve = buildNativeCalendarBridgeState({ ...base, clockFormat: "12h" }).model;
     expect(twelve.clockFormat).toBe("12h");
-    expect(twelve.entries[0].meta).toContain("9:05 PM-10:00 PM");
+    expect(twelve.entries[0].meta).toContain("9:05 PM–10:00 PM");
   });
 
   describe("named patterns (location v3 PR 14b)", () => {
@@ -1095,7 +1102,7 @@ describe("native Calendar Blocks presentation", () => {
 
     it("says each part's place in the trip once, in that part's own label", () => {
       const state = build(at(12, 0), bootstrap([...trip(), entry({ id: "work", startedAt: iso(at(9, 0)), stoppedAt: iso(at(11, 0)) })]));
-      expect(label(state, "there")).toBe("Open time block: there. Part 1 of 3 of School run");
+      expect(label(state, "there")).toBe("Open time block: there, 08:00 to 08:10, 10 minutes. Part 1 of 3 of School run");
       expect(label(state, "stay")).toContain(". Part 2 of 3 of School run");
       expect(label(state, "back")).toContain(". Part 3 of 3 of School run");
       expect(label(state, "work")).not.toContain("School run");

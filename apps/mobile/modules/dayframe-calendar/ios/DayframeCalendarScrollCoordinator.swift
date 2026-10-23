@@ -500,24 +500,27 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         return nil
       }
 
+      // The same day layout the blocks are drawn from (location v4 C6), so a press lands where they are.
+      let dayLayout = DayframeCalendarDayLayout.layout(
+        entries: presentation.entries.map(\.layoutInput),
+        nowMs: presentation.nowMs,
+        dayStartMs: presentation.dayStartMs,
+        dayEndMs: presentation.dayEndMs,
+        hourHeight: hourHeight,
+        textScale: model.labelTextScale
+      )
       let hitFrames = presentation.entries.compactMap { entry -> DayframeCalendarHitFrame? in
-        guard let block = DayframeCalendarBlockMath.metrics(
-          startedAtMs: entry.startedAtMs,
-          stoppedAtMs: entry.stoppedAtMs,
-          nowMs: presentation.nowMs,
-          dayStartMs: presentation.dayStartMs,
-          dayEndMs: presentation.dayEndMs,
-          hourHeight: hourHeight
-        ) else {
+        guard let laidOut = dayLayout[entry.entryId] else {
           return nil
         }
+        let block = laidOut.block
         return DayframeCalendarEntryGeometryMath.metrics(
           availableWidth: layout.availableWidth,
           hourLabelWidth: layout.hourLabelWidth,
           semanticTop: block.top,
           semanticHeight: block.height,
-          offsetFraction: entry.offsetFraction,
-          widthFraction: entry.widthFraction,
+          offsetFraction: laidOut.offsetFraction,
+          widthFraction: laidOut.widthFraction,
           overlapCount: entry.overlapCount,
           textDensity: entry.textDensity,
           timelineHeight: 24 * hourHeight,

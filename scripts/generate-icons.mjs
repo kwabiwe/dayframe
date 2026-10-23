@@ -51,7 +51,20 @@ const TAB_POINTS = 26;
 // with the DayframeCalendar pod and tinted by SwiftUI. Swift scales them to the text they sit beside.
 const calendarGlyphDir = join(root, "apps/mobile/modules/dayframe-calendar/ios/Glyphs");
 const calendarManifestPath = join(calendarGlyphDir, "manifest.json");
-const CALENDAR_ICONS = { place: "map-pin", tag: "tag", "zoom-in": "plus", "zoom-out": "minus" };
+// Every activity glyph too (location v4 C6): a Calendar column under 34 points wide shows its
+// activity's icon alone. Read from the shared registry so a new activity icon is never missed.
+const activityIconsSource = readFileSync(join(root, "packages/shared/src/icons.ts"), "utf8");
+const ACTIVITY_GLYPHS = [...new Set([
+  ...[...activityIconsSource.matchAll(/glyph: "([a-z0-9-]+)"/g)].map((match) => match[1]),
+  ...[...activityIconsSource.matchAll(/DAYFRAME_ACTIVITY_ICON_FALLBACK_GLYPH\b[^=]*= "([a-z0-9-]+)"/g)].map((match) => match[1])
+])].sort();
+const CALENDAR_ICONS = {
+  place: "map-pin",
+  tag: "tag",
+  "zoom-in": "plus",
+  "zoom-out": "minus",
+  ...Object.fromEntries(ACTIVITY_GLYPHS.map((glyph) => [`activity-${glyph}`, glyph]))
+};
 const CALENDAR_POINTS = 24;
 
 async function lucideNodes(name) {

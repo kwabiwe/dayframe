@@ -206,6 +206,7 @@ private struct DayframeCalendarTimelineCanvas: View {
           availableWidth: geometry.size.width,
           hourHeight: hourHeight,
           hourLabelWidth: hourLabelWidth,
+          labelTextScale: model.labelTextScale,
           presentation: presentation
         )
         .id(presentation.selectedDayKey)
@@ -458,9 +459,20 @@ private struct DayframeCalendarEntriesLayer: View {
   let availableWidth: CGFloat
   let hourHeight: CGFloat
   let hourLabelWidth: CGFloat
+  let labelTextScale: Double
   let presentation: DayframeCalendarPresentation
 
   var body: some View {
+    // One layout per zoom step and text size (location v4 C6): every block at least one label line
+    // tall, colliding drawn blocks side by side. The scroll coordinator hit-tests the same layout.
+    let dayLayout = DayframeCalendarDayLayout.layout(
+      entries: presentation.entries.map(\.layoutInput),
+      nowMs: presentation.nowMs,
+      dayStartMs: presentation.dayStartMs,
+      dayEndMs: presentation.dayEndMs,
+      hourHeight: Double(hourHeight),
+      textScale: labelTextScale
+    )
     ZStack(alignment: .topLeading) {
       // Named patterns (location v3 PR 14b): each bracket in the rail left of the blocks, spanning
       // its parts as they are drawn (the blocks' own maths, part by part), so zoom, scroll and a
@@ -474,7 +486,8 @@ private struct DayframeCalendarEntriesLayer: View {
           nowMs: presentation.nowMs,
           dayStartMs: presentation.dayStartMs,
           dayEndMs: presentation.dayEndMs,
-          hourHeight: Double(hourHeight)
+          hourHeight: Double(hourHeight),
+          minimumHeight: DayframeCalendarDayLayout.labelMinimumHeight(textScale: labelTextScale)
         ) {
           let height = CGFloat(metrics.height)
           DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)
@@ -493,25 +506,19 @@ private struct DayframeCalendarEntriesLayer: View {
       }
 
       ForEach(presentation.entries) { entry in
-        if let metrics = DayframeCalendarBlockMath.metrics(
-          startedAtMs: entry.startedAtMs,
-          stoppedAtMs: entry.stoppedAtMs,
-          nowMs: presentation.nowMs,
-          dayStartMs: presentation.dayStartMs,
-          dayEndMs: presentation.dayEndMs,
-          hourHeight: Double(hourHeight)
-        ), let entryGeometry = DayframeCalendarEntryGeometryMath.metrics(
+        if let laidOut = dayLayout[entry.entryId], let entryGeometry = DayframeCalendarEntryGeometryMath.metrics(
           availableWidth: Double(availableWidth),
           hourLabelWidth: Double(hourLabelWidth),
-          semanticTop: metrics.top,
-          semanticHeight: metrics.height,
-          offsetFraction: entry.offsetFraction,
-          widthFraction: entry.widthFraction,
+          semanticTop: laidOut.block.top,
+          semanticHeight: laidOut.block.height,
+          offsetFraction: laidOut.offsetFraction,
+          widthFraction: laidOut.widthFraction,
           overlapCount: entry.overlapCount,
           textDensity: entry.textDensity,
           timelineHeight: 24 * Double(hourHeight),
           leadingInset: presentation.entryLeadingInset
         ) {
+          let metrics = laidOut.block
           let visualMetrics = DayframeCalendarBlockVisualMath.metrics(
             semanticHeight: metrics.height,
             continuesIntoNextDay: metrics.continuesIntoNextDay
@@ -530,6 +537,7 @@ private struct DayframeCalendarEntriesLayer: View {
               cornerRadius: CGFloat(visualMetrics.cornerRadius),
               entry: entry,
               horizontal: horizontal,
+              labelTextScale: labelTextScale,
               metrics: metrics,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -560,7 +568,7 @@ private struct DayframeCalendarEntriesLayer: View {
               ? .identity
               : .opacity.animation(.easeOut(duration: 0.21))
           )
-          .zIndex(Double(entry.zIndex))
+          .zIndex(Double(laidOut.zIndex))
           .accessibilityLabel(entry.accessibilityLabel)
           .accessibilityHint(entry.isReview ? "Opens Review" : entry.isActive ? "Opens Edit Timer" : "Opens entry editor")
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
@@ -577,6 +585,7 @@ private struct DayframeCalendarBlockView: View {
   let cornerRadius: CGFloat
   let entry: DayframeCalendarEntry
   let horizontal: DayframeCalendarHorizontalMetrics
+  let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -609,22 +618,24 @@ private struct DayframeCalendarBlockView: View {
         }
       }
 
-      if metrics.showTitle && horizontal.showTitle {
-        VStack(alignment: .leading, spacing: 1) {
-          Text(entry.isReview ? "\(entry.title) · review" : entry.title)
-            .font(.footnote.weight(.bold))
-            .foregroundStyle(textColor)
-            .lineLimit(1)
+      // Titles at every zoom (location v4 C6, mock-up #ios-grid): one line "Title 11m" under 34 pt,
+      // a detail line from 34 pt, the activity icon alone in a column under 34 pt wide. Sizes follow
+      // Dynamic Type up to the metadata cap, like the one-line minimum height.
+      let scale = CGFloat(min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, labelTextScale)))
+      if horizontal.showTitle {
+        VStack(alignment: .leading, spacing: 0) {
+          titleLine(scale: scale)
 
-          if metrics.showMeta && horizontal.showMeta {
+          if metrics.showMeta && !entry.meta.isEmpty {
             Text(entry.meta)
-              .font(.caption2.weight(.semibold))
+              .font(.system(size: 11 * scale, weight: .semibold))
               .monospacedDigit()
               .foregroundStyle(textColor)
-              .lineLimit(metrics.height < DayframeCalendarConstants.metaMinimumHeight + 16 ? 1 : 2)
+              .lineLimit(1)
           }
 
-          if metrics.showMeta, horizontal.showMeta, let placeText = entry.placeText, !placeText.isEmpty {
+          // Room for more: the place and tags, as before, from the same height as before.
+          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight, let placeText = entry.placeText, !placeText.isEmpty {
             HStack(spacing: 4) {
               DayframeCalendarGlyph(name: "place", size: 11)
                 .accessibilityHidden(true)
@@ -635,7 +646,7 @@ private struct DayframeCalendarBlockView: View {
             .foregroundStyle(textColor)
           }
 
-          if metrics.showMeta, horizontal.showMeta, let tagText = entry.tagText, !tagText.isEmpty {
+          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight, let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
               DayframeCalendarGlyph(name: "tag", size: 11)
                 .accessibilityHidden(true)
@@ -648,16 +659,21 @@ private struct DayframeCalendarBlockView: View {
         }
         // Review text sits on an opaque surface plate: theme text on the theme surface is the
         // measured pair, whatever the hatch colour underneath (Reduce Transparency included).
-        .padding(.horizontal, entry.isReview ? 5 : 0)
-        .padding(.vertical, entry.isReview ? 1 : 0)
+        .padding(.horizontal, entry.isReview ? 4 : 0)
         .background {
           if entry.isReview {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
               .fill(Color(dayframeCSS: theme.surface))
           }
         }
-        .padding(.horizontal, entry.isReview ? 5 : 10)
-        .padding(.vertical, metrics.compact ? (entry.isReview ? 2 : 3) : (entry.isReview ? 5 : 6))
+        .padding(.horizontal, entry.isReview ? 4 : 6)
+        .padding(.top, metrics.tiny ? 0 : 3)
+        .frame(maxHeight: metrics.tiny ? .infinity : nil, alignment: .center)
+      } else if let glyph = entry.glyph {
+        DayframeCalendarGlyph(name: "activity-\(glyph)", size: 12)
+          .foregroundStyle(textColor)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .accessibilityHidden(true)
       }
     }
     .shadow(
@@ -675,6 +691,29 @@ private struct DayframeCalendarBlockView: View {
           .accessibilityHidden(true)
       }
     }
+  }
+}
+
+private extension DayframeCalendarBlockView {
+  /// "Coffee 4m": the title truncates on its own and the whole entry's length always shows.
+  func titleLine(scale: CGFloat) -> some View {
+    let textColor = Color(dayframeCSS: entry.textColor)
+    let size: CGFloat = (metrics.tiny ? 11 : 12.5) * scale
+    return HStack(spacing: 4) {
+      Text(entry.isReview ? "\(entry.title) · review" : entry.title)
+        .font(.system(size: size, weight: .bold))
+        .lineLimit(1)
+        .truncationMode(.tail)
+      if let length = entry.lengthLabel, !length.isEmpty {
+        // Measured on-block text stays opaque; the length differs by weight only.
+        Text(length)
+          .font(.system(size: size, weight: .semibold))
+          .monospacedDigit()
+          .lineLimit(1)
+          .fixedSize()
+      }
+    }
+    .foregroundStyle(textColor)
   }
 }
 

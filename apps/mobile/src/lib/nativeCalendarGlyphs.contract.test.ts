@@ -25,7 +25,10 @@ describe("native Calendar draws Dayframe registry glyphs (UIA-064)", () => {
     expect(rootView).toContain('.accessibilityLabel(direction > 0 ? "Zoom in" : "Zoom out")');
 
     const manifest = JSON.parse(readFileSync(`${iosRoot}Glyphs/manifest.json`, "utf8")) as Record<string, { glyph: string }>;
-    expect(Object.fromEntries(Object.entries(manifest).map(([key, value]) => [key, value.glyph]))).toEqual({
+    // Plus every activity glyph as "activity-<glyph>" (location v4 C6: icon-only narrow columns).
+    const own = Object.fromEntries(Object.entries(manifest).filter(([key]) => !key.startsWith("activity-")).map(([key, value]) => [key, value.glyph]));
+    expect(Object.entries(manifest).filter(([key]) => key.startsWith("activity-")).every(([key, value]) => key === `activity-${value.glyph}`)).toBe(true);
+    expect(own).toEqual({
       place: "map-pin",
       tag: "tag",
       "zoom-in": "plus",

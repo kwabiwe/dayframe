@@ -5,14 +5,27 @@ public enum DayframeCalendarConstants {
   public static let minimumHourHeight = 48.0
   public static let maximumHourHeight = 128.0
   public static let minutesPerDay = 24.0 * 60.0
-  public static let minimumVisibleBlockHeight = 4.0
   public static let minimumVisualBlockHeight = 1.0
   public static let blockCornerRadius = 10.0
   public static let blockVisualGap = 1.0
-  public static let titleMinimumHeight = 24.0
-  public static let metaMinimumHeight = 58.0
-  public static let titleMinimumWidth = 64.0
-  public static let metaMinimumWidth = 150.0
+  // Calendar titles at every zoom (location v4 C6). Mirrors CALENDAR_BLOCK_LABEL in
+  // packages/shared/src/calendarBlockLayout.ts; nativeCalendar.contract.test.ts keeps them equal.
+  /// Every block is drawn at least one label line tall: 15 pt at the default text size.
+  public static let labelLineMinimumHeight = 15.0
+  /// The label (and so the minimum height) grows with Dynamic Type up to this scale.
+  public static let maximumLabelTextScale = 1.3
+  /// From this drawn height a block shows a detail line under its title.
+  public static let twoLineMinimumHeight = 34.0
+  /// From this drawn height a trip block shows its leg strip (legs arrive in a later step).
+  public static let legStripMinimumHeight = 44.0
+  /// A column narrower than this shows the activity icon only.
+  public static let iconOnlyMaximumWidth = 34.0
+  /// From this drawn height a block also lists its place and tags under the detail line.
+  public static let extraLinesMinimumHeight = 58.0
+  /// Below this drawn height the title uses the smaller label size.
+  public static let compactTextMaximumHeight = 22.0
+  /// Drawn edges this close count as touching, not colliding.
+  public static let columnTouchTolerance = 0.5
   public static let longPressMinimumDuration = 0.50
   public static let longPressAllowableMovement = 11.0
   public static let longPressSnapMinutes = 15
@@ -58,14 +71,14 @@ public enum DayframeCalendarHorizontalMath {
     )
     let width = safeAvailableWidth * safeWidthFraction
     let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
-    let densityAllowsTitle = textDensity != "none"
-    let densityAllowsMeta = textDensity == "full"
+    // Every column keeps its title (location v4 C6); one under 34 pt wide shows the icon only.
+    let wordsFit = width >= DayframeCalendarConstants.iconOnlyMaximumWidth
     return DayframeCalendarHorizontalMetrics(
       offset: safeAvailableWidth * safeOffsetFraction,
       width: width,
       hitHeight: overlapCount > 0 ? safeSemanticHeight : max(44, safeSemanticHeight),
-      showMeta: densityAllowsMeta && width >= DayframeCalendarConstants.metaMinimumWidth,
-      showTitle: densityAllowsTitle && width >= DayframeCalendarConstants.titleMinimumWidth
+      showMeta: wordsFit,
+      showTitle: wordsFit
     )
   }
 }
@@ -659,7 +672,7 @@ public enum DayframeCalendarBlockVisualMath {
     semanticHeight: Double,
     continuesIntoNextDay: Bool
   ) -> DayframeCalendarBlockVisualMetrics {
-    // Semantic block math normally supplies at least 4 pt. Clamp malformed direct
+    // Semantic block math supplies at least one label line. Clamp malformed direct
     // callers to 1 pt so drawing remains finite without changing valid geometry.
     let safeSemanticHeight = max(
       DayframeCalendarConstants.minimumVisualBlockHeight,
@@ -842,6 +855,7 @@ public enum DayframeCalendarBlockMath {
     dayStartMs: Double,
     dayEndMs: Double,
     hourHeight: Double,
+    minimumHeight: Double = DayframeCalendarConstants.labelLineMinimumHeight,
     calendar: Calendar = .current
   ) -> DayframeCalendarBlockMetrics? {
     let effectiveStopMs = stoppedAtMs ?? nowMs
@@ -874,18 +888,20 @@ public enum DayframeCalendarBlockMath {
     )
     let durationMinutes = max(1, endMinute - startMinute)
     let safeHourHeight = DayframeCalendarZoomMath.clampHourHeight(hourHeight)
-    let height = max(
-      DayframeCalendarConstants.minimumVisibleBlockHeight,
-      (durationMinutes / 60.0) * safeHourHeight
+    // Never shorter than one label line (location v4 C6): the label prints the real length.
+    let safeMinimumHeight = max(
+      DayframeCalendarConstants.minimumVisualBlockHeight,
+      minimumHeight.isFinite ? minimumHeight : DayframeCalendarConstants.labelLineMinimumHeight
     )
+    let height = max(safeMinimumHeight, (durationMinutes / 60.0) * safeHourHeight)
     return DayframeCalendarBlockMetrics(
-      compact: height < DayframeCalendarConstants.metaMinimumHeight,
+      compact: height < DayframeCalendarConstants.twoLineMinimumHeight,
       continuesIntoNextDay: effectiveStopMs > dayEndMs,
       height: height,
-      showMeta: height >= DayframeCalendarConstants.metaMinimumHeight,
-      showTitle: height >= DayframeCalendarConstants.titleMinimumHeight,
+      showMeta: height >= DayframeCalendarConstants.twoLineMinimumHeight,
+      showTitle: true,
       startsBeforeDay: startedAtMs < dayStartMs,
-      tiny: height < DayframeCalendarConstants.titleMinimumHeight,
+      tiny: height < DayframeCalendarConstants.compactTextMaximumHeight,
       top: (startMinute / 60.0) * safeHourHeight
     )
   }
@@ -904,6 +920,272 @@ public enum DayframeCalendarBlockMath {
       + Double(components.minute ?? 0)
       + Double(components.second ?? 0) / 60.0
       + Double(components.nanosecond ?? 0) / 60_000_000_000.0
+  }
+}
+
+/// A block as drawn at the current zoom: top and bottom in points, one label line at least.
+public struct DayframeCalendarDrawnBlock: Equatable {
+  public let id: String
+  public let top: Double
+  public let bottom: Double
+
+  public init(id: String, top: Double, bottom: Double) {
+    self.id = id
+    self.top = top
+    self.bottom = bottom
+  }
+}
+
+public struct DayframeCalendarColumn: Equatable {
+  public let id: String
+  public let columnIndex: Int
+  public let columnCount: Int
+  public let offsetFraction: Double
+  public let widthFraction: Double
+  public let zIndex: Int
+}
+
+/// Side-by-side columns over drawn extents (location v4 C6), the same rule as the shared
+/// `layoutCalendarBlockColumns` on the web: blocks are taken by top, then id; a cluster
+/// grows while the next block starts above its lowest bottom; each block takes the leftmost column
+/// whose last block has ended by its top. Every block in a cluster is 1 / columns wide.
+/// O(n log n): one sort, then two heaps (columns in use by bottom, freed columns by index).
+public enum DayframeCalendarColumnMath {
+  public static func layout(_ blocks: [DayframeCalendarDrawnBlock]) -> [DayframeCalendarColumn] {
+    let tolerance = DayframeCalendarConstants.columnTouchTolerance
+    var seen = Set<String>()
+    let items = blocks
+      .filter { block in
+        guard !block.id.isEmpty, block.top.isFinite, block.bottom.isFinite, !seen.contains(block.id) else { return false }
+        seen.insert(block.id)
+        return true
+      }
+      .map { DayframeCalendarDrawnBlock(id: $0.id, top: $0.top, bottom: max($0.top, $0.bottom)) }
+      .sorted { left, right in
+        if left.top != right.top { return left.top < right.top }
+        // Never by length: a running block growing past a neighbour that started with it keeps its column.
+        return left.id.utf16.lexicographicallyPrecedes(right.id.utf16)
+      }
+
+    var out: [DayframeCalendarColumn] = []
+    out.reserveCapacity(items.count)
+    var cluster: [(id: String, column: Int)] = []
+    var clusterBottom = -Double.infinity
+    var columnCount = 0
+    var busy = DayframeMinHeap<(bottom: Double, column: Int)> { left, right in
+      left.bottom != right.bottom ? left.bottom < right.bottom : left.column < right.column
+    }
+    var free = DayframeMinHeap<Int> { $0 < $1 }
+    func flush() {
+      guard !cluster.isEmpty else { return }
+      let count = columnCount
+      for member in cluster {
+        out.append(DayframeCalendarColumn(
+          id: member.id,
+          columnIndex: member.column,
+          columnCount: count,
+          offsetFraction: Double(member.column) / Double(count),
+          widthFraction: 1 / Double(count),
+          zIndex: count > 1 ? member.column + 1 : 0
+        ))
+      }
+      cluster.removeAll(keepingCapacity: true)
+      columnCount = 0
+      busy.removeAll()
+      free.removeAll()
+    }
+    for item in items {
+      if item.top >= clusterBottom - tolerance {
+        flush()
+        clusterBottom = item.bottom
+      }
+      while let next = busy.peek, next.bottom <= item.top + tolerance {
+        free.push(busy.pop()!.column)
+      }
+      let column: Int
+      if let freed = free.pop() {
+        column = freed
+      } else {
+        column = columnCount
+        columnCount += 1
+      }
+      busy.push((item.bottom, column))
+      cluster.append((item.id, column))
+      clusterBottom = max(clusterBottom, item.bottom)
+    }
+    flush()
+    return out
+  }
+}
+
+/// A small binary min-heap for the column sweep.
+struct DayframeMinHeap<Element> {
+  private var items: [Element] = []
+  private let less: (Element, Element) -> Bool
+
+  init(less: @escaping (Element, Element) -> Bool) {
+    self.less = less
+  }
+
+  var peek: Element? { items.first }
+
+  mutating func removeAll() {
+    items.removeAll(keepingCapacity: true)
+  }
+
+  mutating func push(_ element: Element) {
+    items.append(element)
+    var index = items.count - 1
+    while index > 0 {
+      let parent = (index - 1) / 2
+      guard less(items[index], items[parent]) else { break }
+      items.swapAt(index, parent)
+      index = parent
+    }
+  }
+
+  mutating func pop() -> Element? {
+    guard !items.isEmpty else { return nil }
+    let top = items[0]
+    let last = items.removeLast()
+    if !items.isEmpty {
+      items[0] = last
+      var index = 0
+      while true {
+        let left = index * 2 + 1
+        let right = left + 1
+        var smallest = index
+        if left < items.count, less(items[left], items[smallest]) { smallest = left }
+        if right < items.count, less(items[right], items[smallest]) { smallest = right }
+        if smallest == index { break }
+        items.swapAt(index, smallest)
+        index = smallest
+      }
+    }
+    return top
+  }
+}
+
+/// What the day layout needs from one presentation entry.
+public struct DayframeCalendarLayoutInput: Equatable {
+  public let id: String
+  public let startedAtMs: Double
+  public let stoppedAtMs: Double?
+  /// "logged" or "review": blocks are put in columns within their own group. Nil (a model from an
+  /// older bundle) keeps the fractions React sent.
+  public let columnGroup: String?
+  /// The part of the day column the group draws in (logged blocks beside the Review lane use the left part).
+  public let regionOffsetFraction: Double
+  public let regionWidthFraction: Double
+  public let fallbackOffsetFraction: Double
+  public let fallbackWidthFraction: Double
+  public let fallbackZIndex: Int
+
+  public init(
+    id: String,
+    startedAtMs: Double,
+    stoppedAtMs: Double?,
+    columnGroup: String?,
+    regionOffsetFraction: Double,
+    regionWidthFraction: Double,
+    fallbackOffsetFraction: Double,
+    fallbackWidthFraction: Double,
+    fallbackZIndex: Int
+  ) {
+    self.id = id
+    self.startedAtMs = startedAtMs
+    self.stoppedAtMs = stoppedAtMs
+    self.columnGroup = columnGroup
+    self.regionOffsetFraction = regionOffsetFraction
+    self.regionWidthFraction = regionWidthFraction
+    self.fallbackOffsetFraction = fallbackOffsetFraction
+    self.fallbackWidthFraction = fallbackWidthFraction
+    self.fallbackZIndex = fallbackZIndex
+  }
+}
+
+public struct DayframeCalendarLaidOutEntry: Equatable {
+  public let block: DayframeCalendarBlockMetrics
+  public let offsetFraction: Double
+  public let widthFraction: Double
+  public let columnCount: Int
+  public let zIndex: Int
+}
+
+/// One layout for the day at one zoom and text size, used by drawing and by hit testing alike.
+public enum DayframeCalendarDayLayout {
+  public static let reviewZIndexBase = 1_000
+
+  /// One label line at the given Dynamic Type scale (capped like the metadata text).
+  public static func labelMinimumHeight(textScale: Double) -> Double {
+    let safe = textScale.isFinite ? textScale : 1
+    return DayframeCalendarConstants.labelLineMinimumHeight
+      * min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, safe))
+  }
+
+  public static func layout(
+    entries: [DayframeCalendarLayoutInput],
+    nowMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    hourHeight: Double,
+    textScale: Double = 1,
+    calendar: Calendar = .current
+  ) -> [String: DayframeCalendarLaidOutEntry] {
+    let minimumHeight = labelMinimumHeight(textScale: textScale)
+    var blocks: [String: DayframeCalendarBlockMetrics] = [:]
+    var groups: [String: [DayframeCalendarDrawnBlock]] = [:]
+    for entry in entries {
+      guard let block = DayframeCalendarBlockMath.metrics(
+        startedAtMs: entry.startedAtMs,
+        stoppedAtMs: entry.stoppedAtMs,
+        nowMs: nowMs,
+        dayStartMs: dayStartMs,
+        dayEndMs: dayEndMs,
+        hourHeight: hourHeight,
+        minimumHeight: minimumHeight,
+        calendar: calendar
+      ) else { continue }
+      blocks[entry.id] = block
+      if let group = entry.columnGroup {
+        groups[group, default: []].append(DayframeCalendarDrawnBlock(id: entry.id, top: block.top, bottom: block.top + block.height))
+      }
+    }
+    var columns: [String: DayframeCalendarColumn] = [:]
+    for (_, members) in groups {
+      for column in DayframeCalendarColumnMath.layout(members) { columns[column.id] = column }
+    }
+
+    var placed: [(id: String, block: DayframeCalendarBlockMetrics, offset: Double, width: Double, count: Int, z: Int)] = []
+    for entry in entries {
+      guard let block = blocks[entry.id] else { continue }
+      if entry.columnGroup != nil, let column = columns[entry.id] {
+        let regionOffset = min(1, max(0, entry.regionOffsetFraction.isFinite ? entry.regionOffsetFraction : 0))
+        let regionWidth = min(1 - regionOffset, max(0, entry.regionWidthFraction.isFinite ? entry.regionWidthFraction : 1))
+        placed.append((
+          entry.id,
+          block,
+          regionOffset + column.offsetFraction * regionWidth,
+          column.widthFraction * regionWidth,
+          column.columnCount,
+          (entry.columnGroup == "review" ? reviewZIndexBase : 0) + column.zIndex
+        ))
+      } else {
+        placed.append((entry.id, block, entry.fallbackOffsetFraction, entry.fallbackWidthFraction, 1, entry.fallbackZIndex))
+      }
+    }
+
+    var out: [String: DayframeCalendarLaidOutEntry] = [:]
+    for item in placed {
+      out[item.id] = DayframeCalendarLaidOutEntry(
+        block: item.block,
+        offsetFraction: item.offset,
+        widthFraction: item.width,
+        columnCount: item.count,
+        zIndex: item.z
+      )
+    }
+    return out
   }
 }
 
@@ -927,6 +1209,7 @@ public enum DayframeCalendarBracketMath {
     dayStartMs: Double,
     dayEndMs: Double,
     hourHeight: Double,
+    minimumHeight: Double = DayframeCalendarConstants.labelLineMinimumHeight,
     calendar: Calendar = .current
   ) -> DayframeCalendarBracketSpan? {
     let blocks = parts.compactMap { part in
@@ -937,6 +1220,7 @@ public enum DayframeCalendarBracketMath {
         dayStartMs: dayStartMs,
         dayEndMs: dayEndMs,
         hourHeight: hourHeight,
+        minimumHeight: minimumHeight,
         calendar: calendar
       )
     }

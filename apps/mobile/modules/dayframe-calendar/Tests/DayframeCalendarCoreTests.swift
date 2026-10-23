@@ -168,7 +168,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let dayStart = try milliseconds("2026-07-10T00:00:00Z")
     let dayEnd = try milliseconds("2026-07-11T00:00:00Z")
-    func target(_ start: String, _ stop: String, hourHeight: Double) throws -> DayframeCalendarHitFrame {
+    func target(_ start: String, _ stop: String, hourHeight: Double, textScale: Double) throws -> DayframeCalendarHitFrame {
       let block = try XCTUnwrap(DayframeCalendarBlockMath.metrics(
         startedAtMs: try milliseconds(start),
         stoppedAtMs: try milliseconds(stop),
@@ -176,6 +176,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
         dayStartMs: dayStart,
         dayEndMs: dayEnd,
         hourHeight: hourHeight,
+        minimumHeight: DayframeCalendarDayLayout.labelMinimumHeight(textScale: textScale),
         calendar: calendar
       ))
       return try XCTUnwrap(DayframeCalendarEntryGeometryMath.metrics(
@@ -190,23 +191,20 @@ final class DayframeCalendarCoreTests: XCTestCase {
         timelineHeight: 24 * hourHeight
       )).hitFrame
     }
-    // Envelope 08:35–09:30 and 09:28–10:23 at 48 points an hour.
-    let first = try target("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", hourHeight: 48)
-    XCTAssertEqual(first.minY, 8 * 48 + 35.0 / 60 * 48, accuracy: 0.001)
-    XCTAssertEqual(first.maxY, 9.5 * 48, accuracy: 0.001)
-    let second = try target("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", hourHeight: 48)
-    XCTAssertEqual(second.minY, 9 * 48 + 28.0 / 60 * 48, accuracy: 0.001)
-    XCTAssertEqual(second.maxY, 10 * 48 + 23.0 / 60 * 48, accuracy: 0.001)
-    // Closer zooms stay inside the envelope, in minutes.
-    for hourHeight in [49.0, 72, 128] {
-      let cases: [(String, String, Double, Double)] = [
-        ("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", 515, 570),
-        ("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", 568, 623)
-      ]
-      for (start, stop, envelopeStart, envelopeEnd) in cases {
-        let frame = try target(start, stop, hourHeight: hourHeight)
-        XCTAssertGreaterThanOrEqual(frame.minY / hourHeight * 60, envelopeStart - 0.001)
-        XCTAssertLessThanOrEqual(frame.maxY / hourHeight * 60, envelopeEnd + 0.001)
+    // Location v4 C6: the drawn block is one label line at least (12–19.5 points across text
+    // sizes), and React's envelopes cover the target wherever that centres it: 08:40–09:39:41.25 and
+    // 09:33–10:32:41.25, in minutes of the day.
+    for textScale in [0.8, 1.0, 1.3] {
+      for hourHeight in [48.0, 49, 72, 128] {
+        let cases: [(String, String, Double, Double)] = [
+          ("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", 520, 579.6875),
+          ("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", 573, 632.6875)
+        ]
+        for (start, stop, envelopeStart, envelopeEnd) in cases {
+          let frame = try target(start, stop, hourHeight: hourHeight, textScale: textScale)
+          XCTAssertGreaterThanOrEqual(frame.minY / hourHeight * 60, envelopeStart - 0.001)
+          XCTAssertLessThanOrEqual(frame.maxY / hourHeight * 60, envelopeEnd + 0.001)
+        }
       }
     }
   }
@@ -226,10 +224,11 @@ final class DayframeCalendarCoreTests: XCTestCase {
       calendar: calendar
     )
 
-    XCTAssertEqual(tiny?.height, 4)
+    // Location v4 C6: one label line at least, always titled.
+    XCTAssertEqual(tiny?.height, 15)
     XCTAssertEqual(tiny?.tiny, true)
     XCTAssertEqual(tiny?.compact, true)
-    XCTAssertEqual(tiny?.showTitle, false)
+    XCTAssertEqual(tiny?.showTitle, true)
     XCTAssertEqual(tiny?.showMeta, false)
   }
 
@@ -246,7 +245,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
   }
 
   func testNormalShortAndTinyBlocksShareOneNominalRadius() {
-    let heights = [72.0, 18.0, DayframeCalendarConstants.minimumVisibleBlockHeight]
+    let heights = [72.0, 18.0, 4.0]
     let metrics = heights.map {
       DayframeCalendarBlockVisualMath.metrics(
         semanticHeight: $0,
@@ -301,7 +300,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       continuesIntoNextDay: semantic.continuesIntoNextDay
     )
 
-    XCTAssertEqual(semantic.height, DayframeCalendarConstants.titleMinimumHeight)
+    XCTAssertEqual(semantic.height, 24)
     XCTAssertTrue(semantic.showTitle)
     XCTAssertFalse(semantic.showMeta)
     XCTAssertEqual(visual.visualHeight, semantic.height - 1)
@@ -341,11 +340,12 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(overlay.offset, 42, accuracy: 0.001)
     XCTAssertEqual(overlay.width, 258, accuracy: 0.001)
     XCTAssertEqual(overlay.hitHeight, 24)
+    // Width allows words; whether the detail line shows is the block height's call (location v4 C6).
     XCTAssertTrue(overlay.showTitle)
-    XCTAssertFalse(overlay.showMeta)
+    XCTAssertTrue(overlay.showMeta)
   }
 
-  func testDenseNarrowLanesHideTextAndDoNotStealAdjacentTaps() {
+  func testNarrowColumnsShowTheIconOnlyAndDoNotStealAdjacentTaps() {
     let dense = DayframeCalendarHorizontalMath.metrics(
       availableWidth: 180,
       offsetFraction: 2.0 / 3.0,
@@ -357,8 +357,18 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(dense.offset, 120, accuracy: 0.001)
     XCTAssertEqual(dense.width, 60, accuracy: 0.001)
     XCTAssertEqual(dense.hitHeight, 12)
-    XCTAssertFalse(dense.showTitle)
-    XCTAssertFalse(dense.showMeta)
+    // 60 points wide keeps words; under 34 shows the icon alone (location v4 C6).
+    XCTAssertTrue(dense.showTitle)
+    let narrow = DayframeCalendarHorizontalMath.metrics(
+      availableWidth: 100,
+      offsetFraction: 0,
+      widthFraction: 0.33,
+      semanticHeight: 40,
+      overlapCount: 2,
+      textDensity: "full"
+    )
+    XCTAssertFalse(narrow.showTitle)
+    XCTAssertFalse(narrow.showMeta)
   }
 
   func testIsolatedShortBlocksRetainMinimumTouchHeight() {
@@ -668,7 +678,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
   }
 
   func testBracketSpansAShortFinalPartAtItsMinimumHeight() throws {
-    // Location v3 PR 14b (Codex r1 on #511): a one-minute last part is drawn 4 points tall, past
+    // Location v3 PR 14b (Codex r1 on #511): a one-minute last part is drawn one label line tall, past
     // the trip's own end; the bracket follows the part, at every zoom.
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -693,7 +703,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
     XCTAssertEqual(try XCTUnwrap(DayframeCalendarBracketMath.span(
       parts: parts, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar
-    )).height, 59.0 / 60 * 48 + 4, accuracy: 0.001)
+    )).height, 59.0 / 60 * 48 + DayframeCalendarConstants.labelLineMinimumHeight, accuracy: 0.001)
     XCTAssertNil(DayframeCalendarBracketMath.span(
       parts: [], nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar
     ))
@@ -723,7 +733,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
     // 01:10 GMT is the earliest drawn top; the folded middle part is 4 points at 01:50.
     XCTAssertEqual(span.top, 70.0 / 60 * hourHeight, accuracy: 0.001)
-    XCTAssertEqual(span.top + span.height, 110.0 / 60 * hourHeight + 4, accuracy: 0.001)
+    XCTAssertEqual(span.top + span.height, 110.0 / 60 * hourHeight + DayframeCalendarConstants.labelLineMinimumHeight, accuracy: 0.001)
     for block in drawn {
       XCTAssertLessThanOrEqual(span.top, block.top + 0.001)
       XCTAssertGreaterThanOrEqual(span.top + span.height, block.top + block.height - 0.001)
@@ -1182,5 +1192,138 @@ final class DayframeCalendarCoreTests: XCTestCase {
       overlapCount: overlapCount,
       textDensity: "full"
     )
+  }
+
+  // MARK: Calendar titles at every zoom (location v4 C6)
+
+  private func drawn(_ blocks: [(String, Double, Double)], hourHeight: Double, minimum: Double) -> [DayframeCalendarDrawnBlock] {
+    blocks.map { id, start, end in
+      let top = (start - 360) / 60 * hourHeight
+      return DayframeCalendarDrawnBlock(id: id, top: top, bottom: top + max(minimum, (end - start) / 60 * hourHeight))
+    }
+  }
+
+  func testColumnsMatchTheSharedRuleOnTheMockupThursday() {
+    let minute = { (hour: Double, minute: Double) in hour * 60 + minute }
+    let thursday: [(String, Double, Double)] = [
+      ("school-run", minute(8, 36), minute(8, 47)),
+      ("getting-around-am", minute(8, 47), minute(10, 39)),
+      ("quarterly-plan", minute(10, 45), minute(12, 30)),
+      ("call-with-sam", minute(11, 30), minute(11, 45)),
+      ("coffee", minute(12, 30), minute(12, 34)),
+      ("team-sync", minute(13, 30), minute(14, 40)),
+      ("getting-around-pm", minute(14, 40), minute(16, 26))
+    ]
+    let layout = Dictionary(uniqueKeysWithValues: DayframeCalendarColumnMath.layout(drawn(thursday, hourHeight: 48, minimum: 15)).map { ($0.id, $0) })
+    XCTAssertEqual(layout["school-run"]?.columnIndex, 0)
+    XCTAssertEqual(layout["school-run"]?.columnCount, 2)
+    XCTAssertEqual(layout["getting-around-am"]?.columnIndex, 1)
+    XCTAssertEqual(layout["call-with-sam"]?.columnIndex, 1)
+    XCTAssertEqual(layout["quarterly-plan"]?.columnCount, 2)
+    XCTAssertEqual(layout["coffee"]?.columnCount, 1)
+    XCTAssertEqual(layout["team-sync"]?.columnCount, 1)
+    XCTAssertEqual(layout["getting-around-pm"]?.widthFraction, 1)
+  }
+
+  func testZoomingInCanFreeAColumn() {
+    let blocks: [(String, Double, Double)] = [("a", 540, 545), ("b", 550, 600)]
+    XCTAssertEqual(DayframeCalendarColumnMath.layout(drawn(blocks, hourHeight: 48, minimum: 15)).map(\.columnCount), [2, 2])
+    XCTAssertEqual(DayframeCalendarColumnMath.layout(drawn(blocks, hourHeight: 128, minimum: 15)).map(\.columnCount), [1, 1])
+  }
+
+  func testColumnsReuseFreedColumnsAndKeepTouchingBlocksApart() {
+    let layout = Dictionary(uniqueKeysWithValues: DayframeCalendarColumnMath.layout([
+      DayframeCalendarDrawnBlock(id: "long", top: 0, bottom: 300),
+      DayframeCalendarDrawnBlock(id: "first", top: 10, bottom: 60),
+      DayframeCalendarDrawnBlock(id: "second", top: 80, bottom: 120),
+      DayframeCalendarDrawnBlock(id: "third", top: 100, bottom: 140),
+      DayframeCalendarDrawnBlock(id: "after", top: 300.4, bottom: 320)
+    ]).map { ($0.id, $0) })
+    XCTAssertEqual(layout["first"]?.columnIndex, 1)
+    XCTAssertEqual(layout["second"]?.columnIndex, 1)
+    XCTAssertEqual(layout["third"]?.columnIndex, 2)
+    XCTAssertEqual(layout["third"]?.columnCount, 3)
+    XCTAssertEqual(layout["after"]?.columnCount, 1)
+    XCTAssertEqual(layout["after"]?.zIndex, 0)
+  }
+
+  func testDayLayoutPutsGroupsInTheirRegionsAndGrowsTheMinimumWithText() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = try milliseconds("2026-07-11T00:00:00Z")
+    let at = { (hhmm: String) in try self.milliseconds("2026-07-10T\(hhmm):00Z") }
+    let entries = [
+      DayframeCalendarLayoutInput(id: "a", startedAtMs: try at("09:00"), stoppedAtMs: try at("09:04"), columnGroup: "logged", regionOffsetFraction: 0, regionWidthFraction: 0.56, fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0),
+      DayframeCalendarLayoutInput(id: "b", startedAtMs: try at("09:10"), stoppedAtMs: try at("10:00"), columnGroup: "logged", regionOffsetFraction: 0, regionWidthFraction: 0.56, fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0),
+      DayframeCalendarLayoutInput(id: "r", startedAtMs: try at("09:00"), stoppedAtMs: try at("09:30"), columnGroup: "review", regionOffsetFraction: 0.56, regionWidthFraction: 0.44, fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0),
+      DayframeCalendarLayoutInput(id: "old", startedAtMs: try at("12:00"), stoppedAtMs: try at("13:00"), columnGroup: nil, regionOffsetFraction: 0, regionWidthFraction: 1, fallbackOffsetFraction: 0.25, fallbackWidthFraction: 0.5, fallbackZIndex: 3)
+    ]
+    let layout = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar)
+    XCTAssertEqual(layout["a"]?.block.height, 15)
+    XCTAssertEqual(layout["a"]?.offsetFraction ?? -1, 0, accuracy: 1e-9)
+    XCTAssertEqual(layout["a"]?.widthFraction ?? -1, 0.28, accuracy: 1e-9)
+    XCTAssertEqual(layout["b"]?.offsetFraction ?? -1, 0.28, accuracy: 1e-9)
+    XCTAssertEqual(layout["r"]?.offsetFraction ?? -1, 0.56, accuracy: 1e-9)
+    XCTAssertEqual(layout["r"]?.zIndex, DayframeCalendarDayLayout.reviewZIndexBase)
+    // A model from an older bundle keeps React's fractions.
+    XCTAssertEqual(layout["old"]?.offsetFraction, 0.25)
+    XCTAssertEqual(layout["old"]?.zIndex, 3)
+    // Larger text: a taller line, capped at 1.3 times.
+    let large = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, textScale: 2, calendar: calendar)
+    XCTAssertEqual(large["a"]?.block.height ?? 0, 19.5, accuracy: 1e-9)
+    // Zoomed in, A's line no longer reaches B: both full width of their region again.
+    let close = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 128, calendar: calendar)
+    XCTAssertEqual(close["a"]?.columnCount, 1)
+    XCTAssertEqual(close["a"]?.widthFraction ?? -1, 0.56, accuracy: 1e-9)
+  }
+
+  func testSixtyBlocksAtTheMostZoomedOutLayOutWithinFourMilliseconds() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = dayStart + 86_400_000
+    let entries = (0..<60).map { (index: Int) -> DayframeCalendarLayoutInput in
+      let start: Double = dayStart + Double(index * 13) * 60_000
+      let minutes: Double = Double(5 + (index % 7) * 9)
+      let isReview: Bool = index % 9 == 0
+      return DayframeCalendarLayoutInput(
+        id: "b\(index)",
+        startedAtMs: start,
+        stoppedAtMs: start + minutes * 60_000,
+        columnGroup: isReview ? "review" : "logged",
+        regionOffsetFraction: isReview ? 0.56 : 0,
+        regionWidthFraction: isReview ? 0.44 : 1,
+        fallbackOffsetFraction: 0,
+        fallbackWidthFraction: 1,
+        fallbackZIndex: 0
+      )
+    }
+    _ = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar)
+    let runs = 50
+    let started = Date()
+    for _ in 0..<runs {
+      _ = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar)
+    }
+    let perLayoutMs = Date().timeIntervalSince(started) * 1000 / Double(runs)
+    XCTAssertLessThan(perLayoutMs, 4, "60 blocks at 48 pt/h took \(perLayoutMs) ms")
+  }
+
+  func testARunningBlockGrowingPastItsNeighbourKeepsItsColumn() {
+    func columns(_ runningBottom: Double) -> [String: Int] {
+      Dictionary(uniqueKeysWithValues: DayframeCalendarColumnMath.layout([
+        DayframeCalendarDrawnBlock(id: "done", top: 576, bottom: 608),
+        DayframeCalendarDrawnBlock(id: "running", top: 576, bottom: runningBottom)
+      ]).map { ($0.id, $0.columnIndex) })
+    }
+    XCTAssertEqual(columns(597), columns(610))
+  }
+
+  func testCoincidentBlocksStayLinear() {
+    let blocks = (0..<4000).map { DayframeCalendarDrawnBlock(id: "c\($0)", top: 0, bottom: 20) }
+    let started = Date()
+    let layout = DayframeCalendarColumnMath.layout(blocks)
+    XCTAssertLessThan(Date().timeIntervalSince(started), 0.5)
+    XCTAssertEqual(Set(layout.map(\.columnIndex)).count, 4000)
   }
 }
