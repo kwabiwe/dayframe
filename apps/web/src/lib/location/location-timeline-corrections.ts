@@ -14,8 +14,9 @@ import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
  * Timeline corrections (location v4 §4, §14; build step 11). Event-first, in one owner-locked
  * transaction: an activity event, the correction row tied to the time it covers, then the segment it
  * changes. Replay applies every active correction again (`activeTimelineCorrections` +
- * `applyTimelineCorrections`), so replay never undoes what the person set. A place or trip that already
- * has a block is not corrected here: its block is what the person edits. Never coordinates.
+ * `applyTimelineCorrections`), so replay never undoes what the person set. A place's place or times, or a
+ * trip's times or existence, are not corrected here once it has a block: its block is what the person
+ * edits. A leg's mode is, on any trip. Never coordinates.
  */
 
 export class TimelineCorrectionError extends Error {
@@ -159,7 +160,8 @@ export async function correctLocationTimeline(input: unknown, session: RequestSe
     phase("effect");
     const table = request.subject === "place" ? "stay_segments" : "commute_segments";
     const row = await lockSegment(client, session, table, request.itemId);
-    if (await hasBlock(client, session, request.itemId, row)) {
+    // A leg's mode changes only the trip's legs, so a trip's block keeps it too (its leg strip, step 16).
+    if (request.kind !== "leg_mode" && await hasBlock(client, session, request.itemId, row)) {
       throw new TimelineCorrectionError(request.subject === "place"
         ? "This place is already in a block. Edit the block instead."
         : "This trip is already in a block. Edit the block instead.", 409);

@@ -105,6 +105,9 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       .rejects.toMatchObject({ status: 422 });
     await expect(correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-missing" }, session)).rejects.toMatchObject({ status: 404 });
     await expect(correctLocationTimeline({ kind: "delete", subject: "trip", itemId: "trip-1" }, session)).rejects.toMatchObject({ status: 409 });
+    // A leg's mode on a trip that is a block is still the person's to set.
+    const leg = await correctLocationTimeline({ kind: "leg_mode", subject: "leg", itemId: "trip-1", legStartedAt: at(480), legStoppedAt: at(490), mode: "running" }, session);
+    expect(leg.correction).toMatchObject({ subject: "leg", kind: "leg_mode", target: { mode: "running" } });
     await expect(correctLocationTimeline({ kind: "times", subject: "place", itemId: "seg-a", startedAt: at(900), stoppedAt: at(950) }, session))
       .rejects.toMatchObject({ status: 422 });
   });
