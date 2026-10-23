@@ -2014,7 +2014,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     rejectedEvidence,
     segmentUpserts: segments,
     finalisedSegments,
-    openTrip: activeStay ? null : deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt),
+    openTrip: activeStay ? null : deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
     diagnostics: {
       inputCount: input.evidence.length,
       acceptedCount: acceptedWithMotion.length,

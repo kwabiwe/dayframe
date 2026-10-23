@@ -65,11 +65,11 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
 
   const metadataOf = async (segmentId: string) =>
     (await database!.query<{ metadata: Record<string, unknown> }>("select metadata from stay_segments where id = $1", [ids[segmentId]])).rows[0].metadata;
-  const persist = async (openTrip: OpenTrip | null, as = session) => {
+  const persist = async (openTrip: OpenTrip | null, replayedAt = at(0), as = session) => {
     const { persistOpenTrip } = await import("./location-replay-service");
     const client = await database!.connect();
     try {
-      await persistOpenTrip(client, as, "device-1", openTrip, new Map(Object.entries(ids)));
+      await persistOpenTrip(client, as, "device-1", openTrip, new Map(Object.entries(ids)), replayedAt);
     } finally {
       client.release();
     }
@@ -77,7 +77,7 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
 
   it("stores the trip under its origin stay only, clears stale ones, and keeps the stay's other metadata", async () => {
     await persist(trip("seg-origin", -2));
-    expect((await metadataOf("seg-origin")).openTrip).toEqual({ startedAt: at(-30), lastObservedAt: at(-2), routeSampleCount: 12,
+    expect((await metadataOf("seg-origin")).openTrip).toEqual({ asOf: at(0), startedAt: at(-30), lastObservedAt: at(-2), routeSampleCount: 12,
       routeDistanceMeters: 2_400, travelMode: "automotive" });
     expect((await metadataOf("seg-origin")).locationOnlyStoppedAt).toBe(at(-31));
     expect(await metadataOf("seg-earlier")).not.toHaveProperty("openTrip");
@@ -92,8 +92,28 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
     expect(await getOpenTrip(session, at(-2 + 13))).toBeNull();
   });
 
+  it("never lets an older replay overwrite or clear a newer journey", async () => {
+    await persist(trip("seg-earlier", -270), at(-60));
+    expect((await metadataOf("seg-origin")).openTrip).toMatchObject({ asOf: at(0), lastObservedAt: at(-2) });
+    expect(await metadataOf("seg-earlier")).not.toHaveProperty("openTrip");
+    await persist(null, at(-30));
+    expect((await metadataOf("seg-origin")).openTrip).toMatchObject({ asOf: at(0) });
+  });
+
+  it("never starts before the origin's persisted end, and holds none while the persisted origin is open", async () => {
+    // A corrected origin ends at -20 (the engine still thought -31): the journey starts there.
+    await database!.query("update stay_segments set stopped_at = $2 where id = $1", [ids["seg-origin"], at(-20)]);
+    await persist(trip("seg-origin", -2), at(1));
+    expect((await metadataOf("seg-origin")).openTrip).toMatchObject({ asOf: at(1), startedAt: at(-20) });
+    await database!.query("update stay_segments set stopped_at = null where id = $1", [ids["seg-origin"]]);
+    await persist(trip("seg-origin", -1), at(2));
+    expect(await metadataOf("seg-origin")).not.toHaveProperty("openTrip");
+    await database!.query("update stay_segments set stopped_at = $2 where id = $1", [ids["seg-origin"], at(-30)]);
+    await persist(trip("seg-origin", -2), at(3));
+  });
+
   it("is cleared by a replay with no journey in progress", async () => {
-    await persist(null);
+    await persist(null, at(4));
     expect(await metadataOf("seg-origin")).not.toHaveProperty("openTrip");
     const { getOpenTrip } = await import("../queries");
     expect(await getOpenTrip(session, now)).toBeNull();
@@ -101,7 +121,7 @@ describeWithDatabase("open trip on disposable PostgreSQL (location v4 step 5)", 
 
   it("never touches another user's stays", async () => {
     await database!.query(`update stay_segments set metadata = metadata || '{"openTrip":{"startedAt":"x"}}'::jsonb where id = $1`, [ids["seg-other"]]);
-    await persist(null);
+    await persist(null, at(5));
     expect(await metadataOf("seg-other")).toHaveProperty("openTrip");
   });
 });

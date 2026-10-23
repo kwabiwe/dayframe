@@ -3,7 +3,7 @@ import { deriveOpenTrip } from "../src/location/commute";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { largeBuildingAt, largeBuildingVisitFixture } from "../src/location/largeBuildingVisitFixture";
 import { runLocationEngine } from "../src/location/segmenter";
-import type { ClassifiedEvidence, LocationEvidence, StaySegment } from "../src/location/types";
+import type { ClassifiedEvidence, CommuteSegment, LocationEvidence, StaySegment } from "../src/location/types";
 
 // Location v4 step 5, "Travelling since…": synthetic equatorial geometry in metres around a made-up
 // origin, synthetic identities.
@@ -68,6 +68,17 @@ describe("open trip, Travelling since… (location v4 step 5)", () => {
     const visit = reading("transfer-visit", 68, 600, { kind: "visit", speedMetersPerSecond: null, endedAt: at(70) });
     const onwards = reading("onwards", 71, 900, { speedMetersPerSecond: 9 });
     expect(deriveOpenTrip([origin()], evidence([visit, onwards]), config, at(72))).toMatchObject({ startedAt: at(60), lastObservedAt: at(71) });
+  });
+
+  it("runs on through a short stop the journey reached, from the place before it", () => {
+    const stop: StaySegment = { ...origin(), clientSegmentId: "stop", startedAt: at(68), stoppedAt: at(73), centreLongitude: 600 / 111_320,
+      evidenceIds: ["stop-a"] };
+    const reached = { kind: "commute", clientSegmentId: "to-stop", fromStaySegmentId: "origin", toStaySegmentId: "stop" } as CommuteSegment;
+    const moving = [reading("stop-a", 70, 600), reading("on-1", 75, 900, { speedMetersPerSecond: 9 }), reading("on-2", 77, 1_900, { speedMetersPerSecond: 10 })];
+    expect(deriveOpenTrip([origin(), stop], evidence(moving), config, at(78), [reached]))
+      .toMatchObject({ fromStaySegmentId: "origin", startedAt: at(60), lastObservedAt: at(77) });
+    // Without a journey to the stop, it is a place of its own: the trip runs from there.
+    expect(deriveOpenTrip([origin(), stop], evidence(moving), config, at(78), [])).toMatchObject({ fromStaySegmentId: "stop" });
   });
 
   it("needs movement and a reading clearly away from the origin", () => {

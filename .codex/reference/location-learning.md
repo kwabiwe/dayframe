@@ -230,12 +230,18 @@ Temporal invariants:
   reviewed or reported; `commute_segments` cannot hold it (its destination
   and end are NOT NULL), hence no migration. Bootstrap returns it while its
   latest observation is within the same limit, and the iPhone checks again
-  on the minute. Replaying the 15–22 Oct week as received every 5 minutes
-  against the Google answer key: shown at 80% of the moments Google calls
-  travel (precision) and at 73% of the travel moments with no finished trip
-  yet (recall), start within 0.3 min of Google's (median). Most misses are the
-  minutes after arrival before the stay forms, and journeys whose first
-  reading arrives late.
+  on the minute. Replay stamps it with its own time (`asOf`): an older replay
+  never overwrites or clears a newer journey (replay's stay rewrite keeps a
+  newer key too); it never starts before the origin's persisted end (a
+  corrected stay keeps its boundary), a persisted origin that is still open
+  holds none, and a short unknown stop a journey reached is inside it (the
+  journey runs from the place before). Reads and cleanup look only at stays
+  begun within 14 days. Replaying the 15–22 Oct week as received every 5
+  minutes against the Google answer key: of the moments it shows, 80 % are
+  travel by Google (precision); of the travel moments with no finished trip
+  yet, it shows at 73 % (recall); its start is within 0.3 min of Google's
+  (median). Most misses are the minutes after arrival before the stay forms,
+  and journeys whose first reading arrives late.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

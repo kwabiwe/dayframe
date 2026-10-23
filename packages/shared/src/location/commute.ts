@@ -1212,7 +1212,8 @@ export function deriveCommutes(
 
 /**
  * The journey in progress after the last stay (location v4 §9, "Travelling
- * since…"): when no stay is open, the device left the last stay and, since its
+ * since…"): when no stay is open, the device left the last stay (or, when that
+ * is a short unknown stop a journey reached, the place before it) and, since its
  * departure (found as for a finished journey: the latest sign of the origin,
  * then the journey start guard), it was seen moving (a reading with credible
  * accuracy at or above the movement threshold) and away (an accurate reading
@@ -1228,10 +1229,20 @@ export function deriveOpenTrip(
   stays: StaySegment[],
   evidenceWithMotion: ClassifiedEvidence[],
   config: LocationEngineConfig,
-  processingAt: string
+  processingAt: string,
+  /** The day's journeys between consecutive stays, before they are joined through stops. */
+  legs: readonly CommuteSegment[] = []
 ): OpenTrip | null {
   if (stays.some((stay) => stay.status === "open")) return null;
-  const from = stays.at(-1);
+  // A short unknown stop the journey reached (a change, a wait) is inside it, as for a finished trip:
+  // the journey runs from the place before it.
+  const minorStop = (stay: StaySegment) => stay.placeMatchKind === "unknown" && stay.stoppedAt != null &&
+    Date.parse(locationOnlyStayEnd(stay) ?? stay.stoppedAt) - Date.parse(stay.startedAt) < config.unknownStayReviewDwellMs;
+  let originIndex = stays.length - 1;
+  while (originIndex > 0 && minorStop(stays[originIndex]) && stays[originIndex - 1].stoppedAt &&
+    legs.some((leg) => leg.fromStaySegmentId === stays[originIndex - 1].clientSegmentId &&
+      leg.toStaySegmentId === stays[originIndex].clientSegmentId)) originIndex -= 1;
+  const from = stays[originIndex];
   if (!from?.stoppedAt) return null;
   const processingMs = Date.parse(processingAt);
   // No journey runs longer than a finished one could.
