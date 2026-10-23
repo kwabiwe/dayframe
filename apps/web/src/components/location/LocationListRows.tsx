@@ -159,10 +159,13 @@ export function TripLegsToggle({ expanded, onToggle, title }: { expanded: boolea
 export function TripLegRows({ clock, expanded, legs }: { clock: ClockFormat; expanded: boolean; legs: readonly TripLeg[] }) {
   const [mounted, setMounted] = useState(expanded);
   const [open, setOpen] = useState(expanded);
-  // Mount as soon as it opens (adjusting state while rendering), then open on the next frame.
+  // Mount as soon as it opens (adjusting state while rendering), then open once the closed state is styled.
   if (expanded && !mounted) setMounted(true);
   useEffect(() => {
-    const frame = requestAnimationFrame(() => setOpen(expanded));
+    // Two frames: the closed state is styled first, so opening runs its transition.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => setOpen(expanded));
+    });
     const reduceMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const timer = expanded ? undefined : setTimeout(() => setMounted(false), reduceMotion ? 0 : TRIP_LEGS_MOTION_MS);
     return () => {

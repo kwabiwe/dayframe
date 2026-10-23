@@ -135,10 +135,10 @@ describe("Calendar › List location rows (location v4 step 10)", () => {
       renderList(timeline);
       const toggle = screen.getByRole("button", { name: "Show the legs of Getting around" });
       fireEvent.click(toggle);
-      act(() => { vi.advanceTimersByTime(20); });
+      act(() => { vi.advanceTimersByTime(40); });
       expect(document.querySelector(".timeline-trip-legs-wrap")?.getAttribute("data-open")).toBe("true");
       fireEvent.click(screen.getByRole("button", { name: "Hide the legs of Getting around" }));
-      act(() => { vi.advanceTimersByTime(20); });
+      act(() => { vi.advanceTimersByTime(40); });
       expect(document.querySelector(".timeline-trip-legs-wrap")?.getAttribute("data-open")).toBe("false");
       act(() => { vi.advanceTimersByTime(300); });
       expect(document.querySelector(".timeline-trip-legs-wrap")).toBeNull();
