@@ -29,11 +29,16 @@ export type PendingDeletion<Entry, Snapshot> =
 type TimerHandle = unknown;
 
 type DeletionCoordinatorOptions<Entry extends { id: string }, Snapshot> = {
+  /** False when the deletion already reached the server: Undo then commits instead of restoring. */
+  canRestore?: (pending: ActiveDeletion<Entry, Snapshot>) => boolean;
   clearTimer?: (handle: TimerHandle) => void;
   now?: () => number;
+  /** The Undo window has just opened, before it is published: the delete's hold must cover it. */
+  onActivate?: (pending: ActiveDeletion<Entry, Snapshot>) => void;
   onCommit: (pending: PendingDeletion<Entry, Snapshot>) => void;
   onPendingChange: (pending: PendingDeletion<Entry, Snapshot> | null) => void;
   onRestore: (pending: ActiveDeletion<Entry, Snapshot>) => void;
+  onRestoreRefused?: (pending: ActiveDeletion<Entry, Snapshot>) => void;
   setTimer?: (callback: () => void, delayMs: number) => TimerHandle;
   undoWindowMs?: number;
 };
@@ -44,13 +49,16 @@ type DeletionCoordinatorOptions<Entry extends { id: string }, Snapshot> = {
  * Undo window only after the sheet reports that its exit has completed.
  */
 export function createDeletionCoordinator<Entry extends { id: string }, Snapshot>({
+  canRestore,
   clearTimer: clearScheduledTimer = (handle) => {
     clearTimeout(handle as ReturnType<typeof setTimeout>);
   },
   now = Date.now,
+  onActivate,
   onCommit,
   onPendingChange,
   onRestore,
+  onRestoreRefused,
   setTimer: scheduleTimer = (callback, delayMs) => setTimeout(callback, delayMs),
   undoWindowMs = DELETION_UNDO_MS
 }: DeletionCoordinatorOptions<Entry, Snapshot>) {
@@ -162,6 +170,7 @@ export function createDeletionCoordinator<Entry extends { id: string }, Snapshot
       expiresAt: activatedAt + undoWindowMs,
       phase: "active"
     };
+    onActivate?.(active);
     publish(active);
     scheduleExpiry(active);
     return true;
@@ -194,6 +203,12 @@ export function createDeletionCoordinator<Entry extends { id: string }, Snapshot
       if (pending?.phase === "active" && token === pending.token && now() >= pending.expiresAt) {
         expire(pending.token);
       }
+      return false;
+    }
+    if (canRestore && !canRestore(pending)) {
+      const refused = pending;
+      commit(refused.token);
+      onRestoreRefused?.(refused);
       return false;
     }
     const restored = clearCurrent(token);

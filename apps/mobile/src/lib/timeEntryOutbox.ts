@@ -93,6 +93,17 @@ type TimeEntryCommandDrainControl = {
 };
 const syncInFlightByOwner = new Map<string, ActiveTimeEntryCommandDrain>();
 const listeners = new Set<() => void>();
+/**
+ * Deletes whose Undo is still open, or not open yet (stability audit timer-1): held in this process
+ * until the Undo lifecycle releases or removes them, whatever `deliverAfter` says. A sheet deletion's
+ * Undo opens only once the sheet has left, which can be long after the delete was written (the app
+ * backgrounded mid-dismiss). The durable `deliverAfter` stays the fallback after a force-quit, when
+ * no Undo can follow.
+ */
+const heldCommandIds = new Set<string>();
+/** Commands a request was sent for in this process, so an Undo can tell it is too late. */
+const dispatchedCommandIds = new Set<string>();
+const DISPATCHED_COMMAND_IDS_MAX = 500;
 
 export async function enqueueTimeEntryUpdate(input: {
   owner: MobileAccountOwner;
@@ -113,6 +124,8 @@ export async function enqueueTimeEntryDelete(input: {
   owner: MobileAccountOwner;
   target: TimeEntryCommandTarget;
   deliverAfter?: string;
+  /** Held in this process until released or removed (an Undo window), not just until `deliverAfter`. */
+  holdUntilReleased?: boolean;
   requestImmediateDelivery?: boolean;
 }) {
   return enqueueTimeEntryCommand({
@@ -120,8 +133,51 @@ export async function enqueueTimeEntryDelete(input: {
     target: input.target,
     operation: "delete",
     deliverAfter: input.deliverAfter,
+    holdUntilReleased: input.holdUntilReleased,
     requestImmediateDelivery: input.requestImmediateDelivery
   });
+}
+
+/**
+ * Moves the durable hold of still-held commands out to at least `deliverAfter` (an Undo window that has
+ * just opened), so a force-quit during that window still waits for it to close. Never shortens a hold
+ * and never touches a command that was released or delivered.
+ */
+export async function extendTimeEntryCommandHold(
+  clientCommandIds: readonly string[],
+  deliverAfter: string
+) {
+  const ids = new Set(clientCommandIds);
+  const until = Date.parse(deliverAfter);
+  if (ids.size === 0 || !Number.isFinite(until)) return 0;
+  return withMutation(async () => {
+    const all = await readAllCommands();
+    let extendedCount = 0;
+    const next = all.map((command) => {
+      if (
+        !ids.has(command.clientCommandId) ||
+        !heldCommandIds.has(command.clientCommandId) ||
+        !command.deliverAfter ||
+        Date.parse(command.deliverAfter) >= until
+      ) {
+        return command;
+      }
+      extendedCount += 1;
+      return { ...command, deliverAfter, updatedAt: new Date().toISOString() };
+    });
+    if (extendedCount > 0) await writeAllCommands(next);
+    return extendedCount;
+  });
+}
+
+/** Drops this process's hold (the Undo owner went away); the durable `deliverAfter` still applies. */
+export function unholdTimeEntryCommands(clientCommandIds: readonly string[]) {
+  for (const id of clientCommandIds) heldCommandIds.delete(id);
+}
+
+/** True when a request for any of these commands was sent in this process: Undo is too late. */
+export function wereTimeEntryCommandsDispatched(clientCommandIds: readonly string[]) {
+  return clientCommandIds.some((id) => dispatchedCommandIds.has(id));
 }
 
 export async function releaseTimeEntryCommands(
@@ -136,14 +192,22 @@ export async function releaseTimeEntryCommands(
   return withMutation(async () => {
     const all = await readAllCommands();
     let releasedCount = 0;
+    let rewritten = false;
     const next = all.map((command) => {
-      if (!ids.has(command.clientCommandId) || !command.deliverAfter) return command;
+      if (!ids.has(command.clientCommandId)) return command;
+      const wasHeld = heldCommandIds.delete(command.clientCommandId);
+      if (!command.deliverAfter) {
+        if (wasHeld) releasedCount += 1;
+        return command;
+      }
       releasedCount += 1;
+      rewritten = true;
       const { deliverAfter: _deliverAfter, ...released } = command;
       return { ...released, updatedAt: new Date().toISOString() };
     });
+    for (const id of ids) heldCommandIds.delete(id);
     if (releasedCount > 0) {
-      await writeAllCommands(next);
+      if (rewritten) await writeAllCommands(next);
       if (
         options.requestImmediateDelivery &&
         options.owner &&
@@ -209,6 +273,7 @@ export async function removeTimeEntryCommands(clientCommandIds: readonly string[
   const ids = new Set(clientCommandIds);
   if (ids.size === 0) return 0;
   return withMutation(async () => {
+    for (const id of ids) heldCommandIds.delete(id);
     const all = await readAllCommands();
     const next = all.filter((command) => !ids.has(command.clientCommandId));
     const removedCount = all.length - next.length;
@@ -428,6 +493,8 @@ export function __resetTimeEntryOutboxForTests() {
   mutationTail = Promise.resolve();
   syncInFlightByOwner.clear();
   listeners.clear();
+  heldCommandIds.clear();
+  dispatchedCommandIds.clear();
 }
 
 async function runTimeEntryCommandDrain(input: {
@@ -487,7 +554,7 @@ async function runTimeEntryCommandDrain(input: {
       };
     });
     if (!original) return outboxResult(all, input.owner, deliveredCount, false);
-    if (original.deliverAfter && Date.parse(original.deliverAfter) > now.getTime()) {
+    if (isHeld(original, now)) {
       return outboxResult(all, input.owner, deliveredCount, true, "deferred");
     }
     const targetEntryId = original.targetEntryId ?? (
@@ -522,6 +589,11 @@ async function runTimeEntryCommandDrain(input: {
       return currentOutboxResult(input.owner, deliveredCount, true, "session_changed");
     }
 
+    // Re-checked after the session reads: an Undo window may have opened meanwhile.
+    if (heldCommandIds.has(original.clientCommandId)) {
+      return currentOutboxResult(input.owner, deliveredCount, true, "deferred");
+    }
+    markDispatched(original.clientCommandId);
     try {
       const response = await mobileFetchWithTimeout(
         `${DAYFRAME_API_BASE}/api/time-entries/${encodeURIComponent(targetEntryId)}`,
@@ -593,6 +665,7 @@ async function enqueueTimeEntryCommand(input: {
   operation: "update" | "delete";
   patch?: TimeEntryUpdatePatch;
   deliverAfter?: string;
+  holdUntilReleased?: boolean;
   requestImmediateDelivery?: boolean;
 }) {
   const activeOwner = await readActiveMobileAccount();
@@ -619,8 +692,15 @@ async function enqueueTimeEntryCommand(input: {
       // Its block's Start was refused: a sync issue from the start (Discard only), never waiting.
       ...(fenced ? { failureKind: "permanent" as const, refusedStart: true, lastError: fenced.message } : {})
     };
+    // Held before it is written, so no drain can see it unheld.
+    if (input.holdUntilReleased && !fenced) heldCommandIds.add(command.clientCommandId);
     const all = await readAllCommands();
-    await writeAllCommands([...all, command]);
+    try {
+      await writeAllCommands([...all, command]);
+    } catch (error) {
+      heldCommandIds.delete(command.clientCommandId);
+      throw error;
+    }
     if (
       !fenced &&
       input.requestImmediateDelivery &&
@@ -642,9 +722,7 @@ export function isTimeEntryCommandTransportReady(
 ) {
   if (command.failureKind === "permanent") return false;
   const now = options.now ?? new Date();
-  if (command.deliverAfter && Date.parse(command.deliverAfter) > now.getTime()) {
-    return false;
-  }
+  if (isHeld(command, now)) return false;
   if (!command.targetEntryId && !(
     command.optimisticEntryId && correlations.has(command.optimisticEntryId)
   )) {
@@ -652,6 +730,21 @@ export function isTimeEntryCommandTransportReady(
   }
   return options.force === true || !command.nextAttemptAt ||
     Date.parse(command.nextAttemptAt) <= now.getTime();
+}
+
+function isHeld(command: PendingTimeEntryCommand, now: Date) {
+  return heldCommandIds.has(command.clientCommandId) ||
+    Boolean(command.deliverAfter && Date.parse(command.deliverAfter) > now.getTime());
+}
+
+function markDispatched(clientCommandId: string) {
+  dispatchedCommandIds.delete(clientCommandId);
+  dispatchedCommandIds.add(clientCommandId);
+  while (dispatchedCommandIds.size > DISPATCHED_COMMAND_IDS_MAX) {
+    const oldest = dispatchedCommandIds.values().next().value;
+    if (oldest === undefined) break;
+    dispatchedCommandIds.delete(oldest);
+  }
 }
 
 function timeEntryBackgroundExecutionKey(owner: MobileAccountOwner) {

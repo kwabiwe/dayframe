@@ -197,10 +197,10 @@ import {
 } from "@/lib/timerStopSync";
 import { endAllTimerBackgroundExecution } from "@/lib/timerBackgroundExecution";
 import {
-  enqueueTimeEntryDelete,
   enqueueTimeEntryUpdate,
   releaseTimeEntryCommands,
   removeTimeEntryCommands,
+  unholdTimeEntryCommands,
   synchroniseTimeEntryCommands
 } from "@/lib/timeEntryOutbox";
 import {
@@ -209,9 +209,13 @@ import {
 } from "@/lib/timeEntrySheetPresentation";
 import {
   createDeletionCoordinator,
-  DELETION_UNDO_MS,
   type PendingDeletion
 } from "@/lib/historyDeletion";
+import {
+  canUndoDeletes,
+  enqueueUndoableTimeEntryDelete,
+  holdDeletesForOpenedUndoWindow
+} from "@/lib/deletionUndoHold";
 import {
   buildHistoryDaySections,
   groupHistoryDayEntries,
@@ -544,6 +548,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     if (blankStart) blankTimerStartGate.current.release(blankStart.token);
     deletionCoordinator.current?.dispose();
     deletionCoordinator.current = null;
+    unholdTimeEntryCommands([...deletionCommandIds.current.values()].flat());
     deletionCommandIds.current.clear();
     deletionPreparationInFlight.current = false;
     activeSheetDeletionToken.current = null;
@@ -1254,6 +1259,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     // A provider teardown cannot safely finish an account-scoped mutation. Treat
     // outstanding Undo work as cancelled so the server copy remains recoverable.
     deletionCoordinator.current?.dispose();
+    unholdTimeEntryCommands([...deletionCommandIds.current.values()].flat());
   }, []);
 
   useEffect(() => {
@@ -2638,14 +2644,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     try {
       for (const entry of entries) {
         const persistedId = persistedTimerEntryId(entry.id);
-        const command = await enqueueTimeEntryDelete({
+        // Held until the Undo window, which may open only after the sheet has left, closes
+        // (stability audit timer-1). A force-quit keeps the deletion durable.
+        const command = await enqueueUndoableTimeEntryDelete({
           owner,
           target: persistedId
             ? { targetEntryId: persistedId }
-            : { optimisticEntryId: entry.id },
-          // A force-quit during Undo keeps the deletion durable. The normal
-          // coordinator releases this hold as soon as the Undo window commits.
-          deliverAfter: new Date(Date.now() + DELETION_UNDO_MS + 1_000).toISOString()
+            : { optimisticEntryId: entry.id }
         });
         commandIds.push(command.clientCommandId);
       }
@@ -2725,6 +2730,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         TimeEntry,
         MobileBootstrap | null
       >({
+        canRestore: ({ token }) => canUndoDeletes(deletionCommandIds.current.get(token) ?? []),
+        onActivate: ({ activatedAt, token }) => {
+          void holdDeletesForOpenedUndoWindow(
+            deletionCommandIds.current.get(token) ?? [],
+            activatedAt
+          ).catch(() => undefined);
+        },
         onCommit: ({ entries, snapshot, token }) => {
           clearSheetDeletionToken(token);
           commitDeletion(entries, snapshot, token);
@@ -2740,6 +2752,12 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             entries.map((entry) => entry.id),
             optimisticTimerIds.current
           ));
+        },
+        // The delete already reached the server (it can't while held; belt and braces): no ghost.
+        onRestoreRefused: ({ entries }) => {
+          AccessibilityInfo.announceForAccessibility(
+            entries.length > 1 ? "Blocks already deleted." : "Block already deleted."
+          );
         }
       });
     }
