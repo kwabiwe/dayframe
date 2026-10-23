@@ -72,7 +72,7 @@ describeWithDatabase("location timeline on disposable PostgreSQL (location v4 st
     await database.end();
     const { pool } = await import("../db");
     await pool.end();
-  });
+  }, 60_000);
 
   it("returns the day's places, trips with legs, the journey in progress and the gaps, without coordinates", async () => {
     const { getLocationTimeline } = await import("./location-timeline-service");
@@ -110,4 +110,64 @@ describeWithDatabase("location timeline on disposable PostgreSQL (location v4 st
     // That day runs 10:00–10:00 UTC (UTC+14): the Home stay ended before it.
     expect(kiritimati.items.map((item) => item.id)).toEqual(["seg-unknown"]);
   });
+  it("links blocks by segment whatever day they sit on, maps correction events, and keeps a journey whose origin was superseded (Codex r1 on #564)", async () => {
+    const db = database!;
+    const { getLocationTimeline } = await import("./location-timeline-service");
+    // A block of the unknown place (20 Oct) that the user moved to 25 Oct keeps its link.
+    const eventId = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', '{"clientSegmentId":"seg-unknown"}'::jsonb) returning id`,
+      [workspaceId, userId, at(520)])).rows[0].id;
+    await db.query(
+      `insert into time_entries (id, workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
+       values ('65000000-0000-4000-8000-000000000302', $1, $2, 'location_learning', $3, $4, $5)`,
+      [workspaceId, userId, at(5 * 1_440 + 60), at(5 * 1_440 + 120), eventId]);
+    // A Review correction's part names its row id; on 21 Oct.
+    const part = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'seg-part', 'device-1', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb) returning id`,
+      [workspaceId, userId, at(1_440 + 600), at(1_440 + 700)])).rows[0].id;
+    const correction = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload)
+       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', $4::jsonb) returning id`,
+      [workspaceId, userId, at(1_440 + 600), JSON.stringify({ segmentId: part, correction: true, startedAt: at(1_440 + 600) })])).rows[0].id;
+    await db.query(
+      `insert into time_entries (id, workspace_id, user_id, source, started_at, stopped_at, created_from_event_id)
+       values ('65000000-0000-4000-8000-000000000303', $1, $2, 'location_learning', $3, $4, $5)`,
+      [workspaceId, userId, at(1_440 + 600), at(1_440 + 700), correction]);
+    // 22 Oct: a fresh journey whose origin stay an older replay superseded.
+    await db.query(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'seg-origin', 'device-1', 'superseded', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, $5::jsonb)`,
+      [workspaceId, userId, at(2 * 1_440 + 400), at(2 * 1_440 + 500), JSON.stringify({ openTrip: { startedAt: at(2 * 1_440 + 500),
+        lastObservedAt: at(2 * 1_440 + 530), legs: [] } })]);
+
+    const first = await getLocationTimeline(session, { date: "2026-10-20", timeZone: "UTC", now: new Date(at(6 * 1_440)) });
+    expect(first.items.find((item) => item.id === "seg-unknown")?.blockIds).toEqual(["65000000-0000-4000-8000-000000000302"]);
+    const second = await getLocationTimeline(session, { date: "2026-10-21", timeZone: "UTC", now: new Date(at(6 * 1_440)) });
+    expect(second.items.find((item) => item.id === "seg-part")?.blockIds).toEqual(["65000000-0000-4000-8000-000000000303"]);
+    const third = await getLocationTimeline(session, { date: "2026-10-22", timeZone: "UTC", now: new Date(at(2 * 1_440 + 535)) });
+    expect(third.openTrip).toMatchObject({ fromId: "seg-origin", startedAt: at(2 * 1_440 + 500) });
+    expect(third.items.map((item) => item.id)).not.toContain("seg-origin");
+
+    // With 20 months of history, the day's stay read is a bounded range on the user-time index.
+    await db.query(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       select $1, $2, 'seg-history-' || n, 'device-1', 'finalised', $3::timestamptz - n * interval '5 hours',
+              $3::timestamptz - n * interval '5 hours' + interval '40 minutes', ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{}'::jsonb
+         from generate_series(1, 3000) as n`, [workspaceId, userId, at(-1_440)]);
+    await db.query("analyze stay_segments");
+    const client = await db.connect();
+    try {
+      const plan = (await client.query<{ "QUERY PLAN": string }>(
+        `explain select s.id from stay_segments s
+          where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded' and s.client_segment_id is not null
+            and s.started_at >= $3::timestamptz and s.started_at < $4::timestamptz and coalesce(s.stopped_at, $5::timestamptz) > $6::timestamptz`,
+        [workspaceId, userId, at(-31 * 1_440), at(1_440), at(6 * 1_440), at(0)])).rows.map((row) => row["QUERY PLAN"]).join("\n");
+      expect(plan).toContain("idx_stay_segments_user_time");
+      expect(plan).toMatch(/started_at >= /);
+    } finally {
+      client.release();
+    }
+  }, 60_000);
 });

@@ -16,7 +16,11 @@ export async function GET(request: Request) {
     const session = await resolveRequestSession(request, { requiredScopes: ["app:read"] });
     const url = new URL(request.url);
     const date = url.searchParams.get("date") ?? "";
-    if (!DATE_KEY.test(date)) return NextResponse.json({ error: "Pass date as YYYY-MM-DD" }, { status: 400 });
+    // A real calendar date: the range helper would quietly roll 2026-02-30 into March (Codex r1 on #564).
+    const dayMs = DATE_KEY.test(date) ? Date.parse(`${date}T00:00:00Z`) : NaN;
+    if (!Number.isFinite(dayMs) || new Date(dayMs).toISOString().slice(0, 10) !== date) {
+      return NextResponse.json({ error: "Pass date as YYYY-MM-DD" }, { status: 400 });
+    }
     const zone = url.searchParams.get("tz");
     const timeZone = zone ? normalizeViewerTimeZone(zone) : viewerTimeZoneForRequest(request);
     const timeline = await getLocationTimeline(session, { date, timeZone, now: new Date() });
