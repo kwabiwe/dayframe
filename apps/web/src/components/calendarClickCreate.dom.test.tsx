@@ -258,7 +258,19 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
   });
 
-  it("renders the same structured primary line at short, medium, and full densities", () => {
+  it("keeps a short block full width when its drawn edge only touches the next block (Codex r2 on #545)", () => {
+    const content = { categoryColor: "#64748b", categoryId: "work", categoryName: "Work", tagNames: [] };
+    renderCalendar([
+      entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T09:04:00.000Z", { ...content, id: "coffee", description: "Coffee" }),
+      entryAt("2026-08-02T09:15:00.000Z", "2026-08-02T10:00:00.000Z", { ...content, id: "work", description: "Work" })
+    ]);
+    // Coffee is drawn 16 px (to 09:15 at 64 px an hour); its semantic 17 px would reach 1 px into Work.
+    for (const id of ["coffee", "work"]) {
+      expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("full");
+    }
+  });
+
+  it("titles every block with its real length and adds the detail line from 34 px (location v4 C6)", () => {
     const content = {
       categoryColor: "#64748b",
       categoryId: "work",
@@ -266,10 +278,10 @@ describe("Calendar click-to-create DOM interactions", () => {
       tagNames: ["Planning", "Review", "Deep work"]
     };
     renderCalendar([
-      entryAt("2026-08-02T07:00:00.000Z", "2026-08-02T07:15:00.000Z", {
+      entryAt("2026-08-02T07:00:00.000Z", "2026-08-02T07:04:00.000Z", {
         ...content,
-        id: "short-entry",
-        description: "Short block"
+        id: "tiny-entry",
+        description: "Coffee"
       }),
       entryAt("2026-08-02T08:00:00.000Z", "2026-08-02T08:30:00.000Z", {
         ...content,
@@ -283,32 +295,33 @@ describe("Calendar click-to-create DOM interactions", () => {
       })
     ]);
 
-    for (const [id, description] of [
-      ["short-entry", "Short block"],
-      ["medium-entry", "Medium block"],
-      ["full-entry", "Full block"]
+    for (const [id, title, length] of [
+      ["tiny-entry", "Coffee", "4m"],
+      ["medium-entry", "Medium block", "30m"],
+      ["full-entry", "Full block", "1h"]
     ] as const) {
       const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`) as HTMLElement;
-      const primary = block.querySelector<HTMLElement>(".calendar-entry-primary-line") as HTMLElement;
-      expect(primary).not.toBeNull();
-      expect(primary.querySelector(".calendar-entry-description")?.textContent).toBe(description);
-      expect(primary.querySelector(".calendar-entry-category")?.textContent).toBe("Work");
-      expect(primary.querySelectorAll(".calendar-entry-tag")).toHaveLength(1);
-      expect(primary.querySelector(".calendar-entry-tag")?.textContent).toBe("#Planning");
-      expect(primary.querySelector(".calendar-entry-tag-count")?.textContent).toBe(" +2");
-      expect(primary.textContent).toBe(`${description} · Work · #Planning +2`);
-      expect(block.querySelector(".calendar-compact-category-dot")).toBeNull();
+      const line = block.querySelector<HTMLElement>(".calendar-entry-title-line") as HTMLElement;
+      expect(line.querySelector(".calendar-entry-title")?.textContent).toBe(title);
+      expect(line.querySelector(".calendar-entry-length")?.textContent).toBe(length);
+      expect(line.textContent).toBe(`${title} ${length}`);
+      expect(block.querySelector(".calendar-entry-glyph svg")).not.toBeNull();
+      // Activity, tags and times stay in the block's name for screen readers and the tooltip.
+      expect(block.querySelector(".calendar-entry-primary")?.getAttribute("aria-label")).toContain(`${title} · Work · #Planning +2.`);
     }
 
-    const short = document.querySelector<HTMLElement>('[data-entry-id="short-entry"]') as HTMLElement;
+    const tiny = document.querySelector<HTMLElement>('[data-entry-id="tiny-entry"]') as HTMLElement;
     const medium = document.querySelector<HTMLElement>('[data-entry-id="medium-entry"]') as HTMLElement;
     const full = document.querySelector<HTMLElement>('[data-entry-id="full-entry"]') as HTMLElement;
-    expect(short.dataset.calendarSemanticHeight).toBe("18");
+    // A 4-minute block is drawn one 16 px label line tall at 64 px an hour (17 px with its gap).
+    expect(tiny.dataset.calendarSemanticHeight).toBe("17");
+    expect(tiny.style.height).toBe("16px");
     expect(medium.dataset.calendarSemanticHeight).toBe("32");
     expect(full.dataset.calendarSemanticHeight).toBe("64");
-    expect(short.querySelector(".calendar-entry-secondary-line")).toBeNull();
-    expect(medium.querySelector(".calendar-entry-secondary-line")).toBeNull();
-    expect(full.querySelector(".calendar-entry-secondary-line")?.textContent).toMatch(/^1h \(.+ – .+\)$/);
+    expect(tiny.className).toContain("is-tiny");
+    expect(tiny.querySelector(".calendar-entry-detail-line")).toBeNull();
+    expect(medium.querySelector(".calendar-entry-detail-line")).toBeNull();
+    expect(full.querySelector(".calendar-entry-detail-line")?.textContent).toMatch(/^Work · .+–.+$/);
   });
 });
 
