@@ -325,6 +325,11 @@ export type LocationEngineInput = {
   acceptedLearnedPlaces: LearnedPlaceForMatching[];
   config: LocationEngineConfig;
   processingAt: string;
+  /**
+   * Times (epoch ms) of genuine readings stored as rejected for being too broad but better than cell-only:
+   * replay reads them from the rows ingest kept without positions (see `broadReadingTimes` on the output).
+   */
+  broadReadingTimes?: readonly number[];
 };
 
 /**

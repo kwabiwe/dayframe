@@ -152,6 +152,20 @@ export async function replayLocationEvidence(
       options.processingAt
     ]
   );
+  // Readings ingest stored as rejected for being too broad (positions dropped) still show the phone was
+  // seen: their times, never their positions, keep a trip's silence from reading as Underground (location
+  // v4 step 7, Codex r3 on #563).
+  const broadResult = await client.query<{ occurredAt: Date | string }>(
+    `select occurred_at as "occurredAt"
+     from location_evidence
+     where workspace_id = $1 and user_id = $2 and device_id = $3
+       and algorithm_version = $4 and accepted = false and rejection_reason = 'accuracy_too_broad'
+       and evidence_type in ('standard_location', 'significant_change') and is_simulated is not true
+       and horizontal_accuracy_m < $6 and expires_at > $5::timestamptz
+     order by occurred_at`,
+    [session.workspaceId, session.userId, options.deviceId, options.algorithmVersion, options.processingAt,
+      LOCATION_ENGINE_V2_CONFIG.tripUnseenObservedAccuracyMeters]
+  );
   observeLocationTiming(options, "evidence_read", "completed");
   observeLocationCount(options, "evidenceRows", evidenceResult.rows.length);
   observeLocationStage(options, "catalogue_read");
@@ -216,7 +230,8 @@ export async function replayLocationEvidence(
     savedPlaces: places.savedPlaces,
     acceptedLearnedPlaces: places.learnedPlaces,
     config: { ...LOCATION_ENGINE_V2_CONFIG, algorithmVersion: options.algorithmVersion },
-    processingAt: options.processingAt
+    processingAt: options.processingAt,
+    broadReadingTimes: (broadResult.rows ?? []).map((row) => new Date(row.occurredAt).getTime())
   });
   observeLocationTiming(options, "engine_computation", "completed");
 

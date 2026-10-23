@@ -1443,7 +1443,10 @@ export function runLocationEngine(input: LocationEngineInput): LocationEngineOut
 }
 
 function runLocationEnginePass(input: LocationEngineInput): { output: LocationEngineOutput; unusedCompanionIds: string[] } {
-  const { accepted: acceptedWithMotion, rejectedEvidence, broadReadingTimes } = preprocess(input);
+  const preprocessed = preprocess(input);
+  const { accepted: acceptedWithMotion, rejectedEvidence } = preprocessed;
+  // This run's own broad readings, and those stored earlier as rejected (times only, never positions).
+  const broadReadingTimes = [...preprocessed.broadReadingTimes, ...(input.broadReadingTimes ?? [])].sort((a, b) => a - b);
   // Motion & Fitness activity is not a location observation: stays, physical
   // stops and continuity never see it. Only journey timing uses it, below.
   const accepted = acceptedWithMotion.filter((item) => !isMotionEvidence(item.evidence));
