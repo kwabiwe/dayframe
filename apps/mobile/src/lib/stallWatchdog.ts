@@ -3,6 +3,7 @@
 // without an answer, with the labelled JS tasks then running (`jsTasks.ts`), and saves it at once, so a
 // force-close keeps it. Native also watches the main thread and saves MetricKit hang and crash reports.
 // Everything stays on this iPhone until the person shares Sync help's support details.
+import type { NativeEnergyDay, NativeEnergySummary } from "./energyMetrics";
 import { setJsTaskSink, type JsTaskLabel } from "./jsTasks";
 
 export type NativeDiagnostics = {
@@ -33,6 +34,10 @@ export type NativeDiagnosticsSnapshot = {
   reportCount?: number;
   /** Every stored pause; the overview lists only the last few. */
   stallCount?: number;
+  /** MetricKit's daily energy metrics, averaged over the newest seven days (location v4 step 3). */
+  energy?: NativeEnergySummary | null;
+  /** Every stored day (snapshot only). */
+  energyDays?: NativeEnergyDay[];
 };
 
 type AppStateLike = {

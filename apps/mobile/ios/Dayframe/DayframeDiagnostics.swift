@@ -3,7 +3,7 @@ import MetricKit
 import React
 import UIKit
 
-/// Saves MetricKit hang and crash diagnostics, and records any stretch of 3 s or more in which the
+/// Saves MetricKit hang and crash diagnostics and its daily energy metrics (location v4 step 3), and records any stretch of 3 s or more in which the
 /// main or JS thread stops answering while Dayframe is in front (`DayframeDiagnosticsCore`). Nothing
 /// leaves the iPhone until the person shares Sync help's support details.
 final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
@@ -41,11 +41,17 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
       self.store = directory.map { DayframeDiagnosticsStore(directory: $0) }
       // Read off the main thread, after launch work (Codex r1 on #525).
       self.ingest(MXMetricManager.shared.pastDiagnosticPayloads)
+      self.ingestMetrics(MXMetricManager.shared.pastPayloads)
     }
   }
 
   func didReceive(_ payloads: [MXDiagnosticPayload]) {
     ioQueue.async { self.ingest(payloads) }
+  }
+
+  /// iOS delivers about one a day: location accuracy time, background time and CPU (counts only).
+  func didReceive(_ payloads: [MXMetricPayload]) {
+    ioQueue.async { self.ingestMetrics(payloads) }
   }
 
   // MARK: React Native (called on `queue`)
@@ -69,7 +75,8 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
         "stalls": overview.stalls.compactMap(Self.dictionary),
         "stallCount": overview.stallCount,
         "reports": [],
-        "reportCount": overview.reportCount
+        "reportCount": overview.reportCount,
+        "energy": DayframeEnergySummary(self.store?.energyDays() ?? [])?.dictionary ?? NSNull()
       ])
     }
   }
@@ -78,11 +85,14 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     ioQueue.async {
       let stalls = self.store?.stalls() ?? []
       let reports = self.store?.reports() ?? []
+      let energyDays = self.store?.energyDays() ?? []
       completion([
         "stalls": stalls.compactMap(Self.dictionary),
         "stallCount": stalls.count,
         "reports": reports,
-        "reportCount": reports.count
+        "reportCount": reports.count,
+        "energy": DayframeEnergySummary(energyDays)?.dictionary ?? NSNull(),
+        "energyDays": energyDays.compactMap(Self.dictionary)
       ])
     }
   }
@@ -147,7 +157,7 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     )
   }
 
-  private static func dictionary(_ record: DayframeStallRecord) -> [String: Any]? {
+  private static func dictionary<Record: Encodable>(_ record: Record) -> [String: Any]? {
     guard
       let data = try? encoder.encode(record),
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -170,6 +180,31 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
       }
       store?.saveReport(object, receivedAt: receivedAt)
     }
+  }
+
+  /// On `ioQueue`.
+  private func ingestMetrics(_ payloads: [MXMetricPayload]) {
+    for payload in payloads { store?.saveEnergyDay(Self.energyDay(payload)) }
+  }
+
+  private static func energyDay(_ payload: MXMetricPayload) -> DayframeEnergyDay {
+    let seconds = { (value: Measurement<UnitDuration>?) -> Double in value?.converted(to: .seconds).value ?? 0 }
+    let location = payload.locationActivityMetrics
+    let time = payload.applicationTimeMetrics
+    return DayframeEnergyDay(
+      begin: payload.timeStampBegin,
+      end: payload.timeStampEnd,
+      appVersion: payload.latestApplicationVersion,
+      bestAccuracySeconds: seconds(location?.cumulativeBestAccuracyTime) + seconds(location?.cumulativeBestAccuracyForNavigationTime),
+      tenMetresSeconds: seconds(location?.cumulativeNearestTenMetersAccuracyTime),
+      hundredMetresSeconds: seconds(location?.cumulativeHundredMetersAccuracyTime),
+      kilometreSeconds: seconds(location?.cumulativeKilometerAccuracyTime),
+      threeKilometresSeconds: seconds(location?.cumulativeThreeKilometersAccuracyTime),
+      foregroundSeconds: seconds(time?.cumulativeForegroundTime),
+      backgroundSeconds: seconds(time?.cumulativeBackgroundTime),
+      backgroundLocationSeconds: seconds(time?.cumulativeBackgroundLocationTime),
+      cpuSeconds: seconds(payload.cpuMetrics?.cumulativeCPUTime)
+    )
   }
 
   private static let encoder: JSONEncoder = {
