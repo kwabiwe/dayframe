@@ -127,6 +127,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // newest commit: a commit for another workspace (a switch) empties it first (WEB-UI-6).
   const dateDataCacheRef = useRef(new Map<string, BootstrapData>());
   const dateDataCacheWorkspaceRef = useRef<string | null>(null);
+  // The workspace lifetime: bumped when a commit accepts another workspace (a switch). A load or
+  // refresh started in an earlier lifetime never commits, so a late answer from the workspace
+  // left never undoes the switch (Codex r1 on #544).
+  const workspaceGenerationRef = useRef(0);
+  // Polls the timer state now, inside the running poll chain (set by that chain; WEB-UI-4).
+  const pollTimerStateNowRef = useRef<(() => void) | null>(null);
   // The period the URL shows now, read by `refresh` so it is one stable callback: a refresh asked
   // for (or a Delete's onSynced bound) before a period change loads the period shown when it runs,
   // and an answer for a period left meanwhile is dropped (WEB-UI-3).
@@ -224,12 +230,15 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (nextData) {
       const cache = dateDataCacheRef.current;
       if (dateDataCacheWorkspaceRef.current !== nextData.workspace.id) {
+        if (dateDataCacheWorkspaceRef.current !== null) workspaceGenerationRef.current += 1;
         cache.clear();
         dateDataCacheWorkspaceRef.current = nextData.workspace.id;
       }
       const date = nextData.dateRange.selectedDate;
+      // Only a fresh load confirms a day shown from the cache: a page's passive hydrate (its
+      // page-load props, often older still) keeps the revalidation due (Codex r1 on #544).
       if (source === "cache") cacheShownDateRef.current = date;
-      else if (source !== "optimistic" && cacheShownDateRef.current === date) cacheShownDateRef.current = null;
+      else if (source === "canonical" && cacheShownDateRef.current === date) cacheShownDateRef.current = null;
       const key = dateDataCacheKey(nextData.workspace.id, date);
       cache.delete(key);
       cache.set(key, nextData);
@@ -301,13 +310,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!force && mutationGateRef.current.isActive()) return dataRef.current;
     const requestId = ++refreshRequestRef.current;
     const date = selectedDateRef.current;
+    const generation = workspaceGenerationRef.current;
     try {
       const response = await clientFetch(`/api/bootstrap?date=${date}`, { cache: "no-store" });
       if (!response.ok || requestId !== refreshRequestRef.current) return dataRef.current;
       const payload = (await response.json()) as BootstrapData;
       // A newer load (or a mutation's own data) may have landed while this body was read, or the
       // period may have changed: an older answer, or one for a period left, never replaces it.
-      if (requestId !== refreshRequestRef.current || date !== selectedDateRef.current) return dataRef.current;
+      if (
+        requestId !== refreshRequestRef.current ||
+        date !== selectedDateRef.current ||
+        generation !== workspaceGenerationRef.current
+      ) return dataRef.current;
       commitData(payload, "canonical");
       return payload;
     } catch {
@@ -330,6 +344,7 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 
     refreshRequestRef.current += 1;
     const requestId = ++dateLoadRequestRef.current;
+    const generation = workspaceGenerationRef.current;
     isDateLoadingRef.current = true;
     setIsDateLoading(true);
     setDateLoadError(null);
@@ -339,6 +354,11 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       const payload = (await response.json()) as BootstrapData;
       if (requestId !== dateLoadRequestRef.current || payload.dateRange.selectedDate !== date) {
         throw new Error("The period response did not match the requested date.");
+      }
+      // The workspace changed while this loaded: the period it asked for belongs to the workspace
+      // left, so it is dropped quietly (the caller does not navigate).
+      if (generation !== workspaceGenerationRef.current) {
+        return { ok: false, error: "The workspace changed while that period loaded." };
       }
       commitData(payload, "canonical");
       return { ok: true };
@@ -431,6 +451,8 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
     };
 
+    pollTimerStateNowRef.current = () => schedule(0);
+
     const resume = () => {
       if (document.visibilityState !== "visible") {
         if (timeout !== null) window.clearTimeout(timeout);
@@ -445,11 +467,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     document.addEventListener("visibilitychange", resume);
     return () => {
       cancelled = true;
+      pollTimerStateNowRef.current = null;
       if (timeout !== null) window.clearTimeout(timeout);
       window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", resume);
     };
   }, [refresh]);
+
+  // A period change asks the running chain for one poll now (never a second chain), so another
+  // device's Start or Stop shows as soon as the new period does.
+  const polledDateRef = useRef(selectedDate);
+  useEffect(() => {
+    if (polledDateRef.current === selectedDate) return;
+    polledDateRef.current = selectedDate;
+    pollTimerStateNowRef.current?.();
+  }, [selectedDate]);
 
   const hydrate = useCallback((nextData: BootstrapData) => {
     if (mutationGateRef.current.isActive()) return;

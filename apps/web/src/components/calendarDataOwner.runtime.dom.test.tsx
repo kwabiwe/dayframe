@@ -21,7 +21,10 @@ const server = vi.hoisted(() => ({
   requests: [] as string[],
   /** When set, timer-state requests wait to be released (one at a time). */
   holdTimerState: false,
-  held: [] as Array<() => void>
+  held: [] as Array<() => void>,
+  /** A bootstrap for this date is read on arrival and answered only when released. */
+  holdBootstrapDate: null as string | null,
+  releaseBootstrap: null as (() => void) | null
 }));
 
 vi.mock("@/lib/client-auth-fetch", () => ({
@@ -36,6 +39,10 @@ vi.mock("@/lib/client-auth-fetch", () => ({
     if (url.startsWith("/api/bootstrap")) {
       const date = new URL(url, "http://dayframe.test").searchParams.get("date") ?? "2026-08-17";
       const body = bootstrap(date, server.workspace, server.revision);
+      if (server.holdBootstrapDate === date) {
+        server.holdBootstrapDate = null;
+        await new Promise<void>((resolve) => { server.releaseBootstrap = resolve; });
+      }
       return { ok: true, status: 200, json: async () => body };
     }
     if (method === "DELETE") return { ok: true, status: 200, json: async () => ({ ok: true }) };
@@ -43,7 +50,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
   })
 }));
 
-const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
+const { AppShellRuntimeProvider, useAppShellRuntime, useRuntimePageData } = await import("./AppShellRuntime");
 const { useTimelineDeleteUndo } = await import("./useTimelineDeleteUndo");
 
 const ENTRY_IDS: ReadonlySet<string> = new Set(["block-1"]);
@@ -57,6 +64,9 @@ beforeEach(() => {
   server.requests = [];
   server.holdTimerState = false;
   server.held = [];
+  server.holdBootstrapDate = null;
+  server.releaseBootstrap = null;
+  page = "shell";
   probe.runtime = null;
   probe.shown = [];
 });
@@ -85,7 +95,22 @@ function Harness() {
   </>;
 }
 
-const tree = () => <AppShellRuntimeProvider><Harness /></AppShellRuntimeProvider>;
+// The Calendar page as the app renders it: its server props (drawn at page load, for the first
+// period) hydrate the runtime from a layout effect, and it shows what useRuntimePageData returns.
+const PAGE_PROPS = bootstrap("2026-08-17", "workspace-A", 1);
+function PageHarness() {
+  const current = useAppShellRuntime();
+  const data = useRuntimePageData(PAGE_PROPS);
+  const shown = `${data.workspace.id}@${data.dateRange.selectedDate}#r${data.dateRange.weekStart.slice(-2, -1)}`;
+  useLayoutEffect(() => {
+    probe.runtime = current;
+    if (probe.shown.at(-1) !== shown) probe.shown.push(shown);
+  });
+  return <output data-testid="shown">{shown}</output>;
+}
+
+let page: "shell" | "page" = "shell";
+const tree = () => <AppShellRuntimeProvider>{page === "page" ? <PageHarness /> : <Harness />}</AppShellRuntimeProvider>;
 
 /** Calendar navigation: load the period, then push its URL. */
 async function navigate(view: ReturnType<typeof render>, date: string) {
@@ -170,6 +195,63 @@ describe("web Calendar data owner (stability audit WEB-UI-3/4/5/6)", () => {
     await settle();
     expect(bootstrapRequests().slice(before)).toEqual(["GET /api/bootstrap?date=2026-08-17"]);
     expect(shown()).toBe("workspace-A@2026-08-17#r2");
+  });
+
+  it("a cached return to the page's own first period is revalidated through its passive hydrate (Codex r1 on #544)", async () => {
+    page = "page";
+    const view = render(tree());
+    await settle();
+    expect(shown()).toBe("workspace-A@2026-08-17#r1");
+    await navigate(view, "2026-08-10");
+    expect(shown()).toBe("workspace-A@2026-08-10#r1");
+    server.revision = 2;
+    const before = bootstrapRequests().length;
+
+    await navigate(view, "2026-08-17"); // the cache commit, then the page's hydrate of its old props
+    await settle();
+    expect(bootstrapRequests().slice(before)).toEqual(["GET /api/bootstrap?date=2026-08-17"]);
+    expect(shown()).toBe("workspace-A@2026-08-17#r2");
+  });
+
+  it("a navigation polls the timer state at once, inside the running chain (Codex r1 on #544)", async () => {
+    vi.useFakeTimers();
+    const view = render(tree());
+    await settle(10);
+    const polls = () => server.requests.filter((request) => request.includes("/api/timer-state")).length;
+    expect(polls()).toBe(1);
+    await settle(1_000); // mid-way to the next scheduled poll (backing off after a failure)
+    expect(polls()).toBe(1);
+    await navigate(view, "2026-08-10");
+    expect(polls()).toBe(2);
+  });
+
+  it("a period load still pending from the workspace left never undoes the switch (Codex r1 on #544)", async () => {
+    const view = render(tree());
+    await settle();
+    expect(shown()).toBe("workspace-A@2026-08-17#r1");
+
+    server.holdBootstrapDate = "2026-08-10";
+    let outcome: Awaited<ReturnType<NonNullable<typeof probe.runtime>["loadDate"]>> | null = null;
+    const pending = probe.runtime!.loadDate("2026-08-10").then((result) => { outcome = result; });
+    await settle();
+    expect(server.releaseBootstrap).not.toBeNull(); // A's answer for the 10th is held
+
+    server.workspace = "workspace-B";
+    await act(async () => { await probe.runtime!.refresh({ force: true }); });
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
+    const switchedAt = probe.shown.length - 1;
+
+    await act(async () => { server.releaseBootstrap?.(); await pending; });
+    await settle();
+    expect(outcome).toMatchObject({ ok: false });
+    expect(shown()).toBe("workspace-B@2026-08-17#r1");
+    expect(probe.shown.slice(switchedAt).filter((value) => value.startsWith("workspace-A"))).toEqual([]);
+    expect(probe.runtime!.dateLoadError).toBeNull(); // dropped quietly, no "Couldn’t load" error
+    expect(probe.runtime!.isDateLoading).toBe(false);
+
+    // Nothing is left loading: the next navigation loads B's period.
+    await navigate(view, "2026-08-10");
+    expect(shown()).toBe("workspace-B@2026-08-10#r1");
   });
 
   it("after a workspace switch, the old workspace's cached days are never shown (WEB-UI-6)", async () => {
