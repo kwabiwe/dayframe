@@ -65,29 +65,26 @@ export function timelineGaps(spans: ReadonlyArray<readonly [number, number]>, fr
   return gaps;
 }
 
-/** A stay shown on a day started at most this long before it (a longer stay is cut from the timeline). */
+/**
+ * The day's stay read reaches back this far by start time; an open stay, or one longer than this, is read
+ * through its own partial index (`idx_stay_segments_open_or_long`, whose 31 days must match).
+ */
 export const TIMELINE_STAY_LOOKBACK_MS = 31 * 24 * 60 * 60_000;
-/** A location segment's event occurs within the segment; this much slack either side bounds the read. */
-const SEGMENT_EVENT_SLACK_MS = 24 * 60 * 60_000;
 
 /**
  * The user's blocks made from these segments, by client segment id, whatever day the blocks now sit on.
  * A block's event names its segment: `clientSegmentId`, or for a Review correction (`correction: true`)
- * the corrected part's row id (`segmentId`), mapped back to that row's client segment id. Read through the
- * segments' own events (which occur within them), so a block moved to another day keeps its link.
+ * the corrected part's row id (`segmentId`), mapped back to that row's client segment id. Both are read
+ * through their expression indexes (migration 021), never by time.
  */
 async function blocksForSegments(
   session: RequestSession,
-  stays: ReadonlyArray<{ id: string; rowId: string; startedAt: Date; stoppedAt: Date | null }>,
-  trips: ReadonlyArray<{ id: string; startedAt: Date; stoppedAt: Date }>,
-  nowIso: string
+  stays: ReadonlyArray<{ id: string; rowId: string }>,
+  trips: ReadonlyArray<{ id: string }>
 ) {
   const blocksBySegment = new Map<string, string[]>();
-  const spans = [...stays, ...trips];
-  if (!spans.length) return blocksBySegment;
-  const fromMs = Math.min(...spans.map((row) => new Date(row.startedAt).getTime())) - SEGMENT_EVENT_SLACK_MS;
-  const toMs = Math.max(...spans.map((row) => row.stoppedAt ? new Date(row.stoppedAt).getTime() : Date.parse(nowIso))) + SEGMENT_EVENT_SLACK_MS;
-  const clientIds = spans.map((row) => row.id);
+  const clientIds = [...stays, ...trips].map((row) => row.id);
+  if (!clientIds.length) return blocksBySegment;
   const rowIds = new Map(stays.map((row) => [row.rowId, row.id]));
   const result = await query<{ clientSegmentId: string | null; segmentId: string | null; correction: boolean; entryId: string }>(
     `select ae.raw_payload ->> 'clientSegmentId' as "clientSegmentId", ae.raw_payload ->> 'segmentId' as "segmentId",
@@ -95,10 +92,10 @@ async function blocksForSegments(
        from activity_events ae
        join time_entries te on te.created_from_event_id = ae.id and te.workspace_id = ae.workspace_id and te.user_id = ae.user_id
       where ae.workspace_id = $1 and ae.user_id = $2
-        and ae.occurred_at >= $3::timestamptz and ae.occurred_at <= $4::timestamptz
-        and (ae.raw_payload ->> 'clientSegmentId' = any($5::text[]) or ae.raw_payload ->> 'segmentId' = any($6::text[]))
+        and ((ae.raw_payload ? 'clientSegmentId' and ae.raw_payload ->> 'clientSegmentId' = any($3::text[]))
+          or (ae.raw_payload ? 'segmentId' and ae.raw_payload ->> 'segmentId' = any($4::text[])))
       order by te.started_at, te.id`,
-    [session.workspaceId, session.userId, new Date(fromMs).toISOString(), new Date(toMs).toISOString(), clientIds, [...rowIds.keys()]]);
+    [session.workspaceId, session.userId, clientIds, [...rowIds.keys()]]);
   const shown = new Set(clientIds);
   for (const row of result.rows) {
     const segment = row.correction ? (row.segmentId ? rowIds.get(row.segmentId) : undefined) : row.clientSegmentId ?? undefined;
@@ -113,26 +110,34 @@ export async function getLocationTimeline(
 ): Promise<LocationTimeline> {
   const range = buildDashboardDateRange(options.date, options.timeZone);
   const nowIso = options.now.toISOString();
-  // Bounded reads (Codex r1 on #564): a stay shown on this day started at most `TIMELINE_STAY_LOOKBACK_MS`
-  // before it, and a trip at most the longest journey before it.
+  // Index-backed reads (Codex r1–r2 on #564): stays started in the 31 days before the day (the user-time
+  // index), plus open and longer stays (their own partial index, migration 021); trips started at most
+  // the longest journey before the day (the trip time index).
   const staysFrom = new Date(Date.parse(range.dayStart) - TIMELINE_STAY_LOOKBACK_MS).toISOString();
   const tripsFrom = new Date(Date.parse(range.dayStart) - LOCATION_ENGINE_V2_CONFIG.commuteMaximumDurationMs).toISOString();
+  const stayColumns = `s.client_segment_id as "id", s.id as "rowId", s.status, s.started_at as "startedAt", s.stopped_at as "stoppedAt",
+              s.place_id as "placeId", s.learned_place_id as "learnedPlaceId", p.name as "placeName", p.role as "placeRole",
+              lp.name as "learnedName", s.metadata->>'placeMatchKind' as "matchKind", s.confidence`;
+  const stayJoins = `from stay_segments s
+         left join places p on p.id = s.place_id and p.workspace_id = s.workspace_id
+         left join learned_places lp on lp.id = s.learned_place_id and lp.workspace_id = s.workspace_id`;
   const [stays, trips] = await Promise.all([
     query<{
       id: string; rowId: string; status: string; startedAt: Date; stoppedAt: Date | null; placeId: string | null; learnedPlaceId: string | null;
       placeName: string | null; placeRole: string | null; learnedName: string | null; matchKind: string | null; confidence: string;
     }>(
-      `select s.client_segment_id as "id", s.id as "rowId", s.status, s.started_at as "startedAt", s.stopped_at as "stoppedAt",
-              s.place_id as "placeId", s.learned_place_id as "learnedPlaceId", p.name as "placeName", p.role as "placeRole",
-              lp.name as "learnedName", s.metadata->>'placeMatchKind' as "matchKind", s.confidence
-         from stay_segments s
-         left join places p on p.id = s.place_id and p.workspace_id = s.workspace_id
-         left join learned_places lp on lp.id = s.learned_place_id and lp.workspace_id = s.workspace_id
-        where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded'
-          and s.client_segment_id is not null
-          and s.started_at >= $6::timestamptz and s.started_at < $4::timestamptz
-          and coalesce(s.stopped_at, $5::timestamptz) > $3::timestamptz
-        order by s.started_at, s.client_segment_id`,
+      `select * from (
+         select ${stayColumns} ${stayJoins}
+          where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded' and s.client_segment_id is not null
+            and s.started_at >= $6::timestamptz and s.started_at < $4::timestamptz
+            and coalesce(s.stopped_at, $5::timestamptz) > $3::timestamptz
+         union all
+         select ${stayColumns} ${stayJoins}
+          where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded' and s.client_segment_id is not null
+            and (s.stopped_at is null or s.stopped_at - s.started_at > interval '31 days')
+            and s.started_at < $6::timestamptz and coalesce(s.stopped_at, $5::timestamptz) > $3::timestamptz
+       ) day_stays
+       order by "startedAt", "id"`,
       [session.workspaceId, session.userId, range.dayStart, range.dayEnd, nowIso, staysFrom]),
     query<{
       id: string; status: string; startedAt: Date; stoppedAt: Date; fromId: string; toId: string; confidence: string;
@@ -149,7 +154,7 @@ export async function getLocationTimeline(
         order by c.started_at, c.client_segment_id`,
       [session.workspaceId, session.userId, range.dayStart, range.dayEnd, tripsFrom])
   ]);
-  const blocksBySegment = await blocksForSegments(session, stays.rows, trips.rows, nowIso);
+  const blocksBySegment = await blocksForSegments(session, stays.rows, trips.rows);
   const placeItems = stays.rows.map((row): TimelinePlace => ({
     kind: "place",
     id: row.id,
