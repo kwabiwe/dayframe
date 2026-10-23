@@ -2796,7 +2796,7 @@ export default function SettingsScreen() {
                     <SettingsIssueRow
                       // Items still retrying on their own are only "waiting" (background, AGENTS rule);
                       // this row is for items the server will not accept as they are.
-                      detail={`${queueDiagnostics.permanentFailedCount} ${queueDiagnostics.permanentFailedCount === 1 ? "item" : "items"} from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes ${queueDiagnostics.permanentFailedCount === 1 ? "it" : "them"} from this iPhone.`}
+                      detail={`${queueDiagnostics.permanentFailedCount} ${queueDiagnostics.permanentFailedCount === 1 ? "item" : "items"} from this iPhone couldn't be saved. Updating Dayframe and trying again may help; clearing removes ${queueDiagnostics.permanentFailedCount === 1 ? "it" : "them"} from this iPhone.${queueDiagnostics.clearableFailedCount < queueDiagnostics.permanentFailedCount ? " Apple Health items keep retrying on their own and can't be cleared." : ""}`}
                       divider={timerStopSyncIssues.length + timeEntrySyncIssues.length + reviewSyncIssues.length > 0}
                       theme={theme}
                       title="Couldn't be sent"
