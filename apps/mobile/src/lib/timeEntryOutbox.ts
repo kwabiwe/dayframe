@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { DAYFRAME_API_BASE } from "./config";
 import {
   MobileRequestTimeoutError,
@@ -643,7 +644,12 @@ async function runTimeEntryCommandDrain(input: {
           method: original.operation === "delete" ? "DELETE" : "PATCH",
           headers: {
             ...(original.operation === "update" ? { "Content-Type": "application/json" } : {}),
-            Authorization: `Bearer ${sessionRead.snapshot.token}`
+            Authorization: `Bearer ${sessionRead.snapshot.token}`,
+            // The same id on every attempt: the server answers a resend of an Edit it already applied
+            // as delivered instead of applying it again over a newer change (item 17).
+            ...(TimeEntryClientCommandIdSchema.safeParse(original.clientCommandId).success
+              ? { [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: original.clientCommandId }
+              : {})
           },
           ...(original.operation === "update"
             ? { body: JSON.stringify(original.patch ?? {}) }

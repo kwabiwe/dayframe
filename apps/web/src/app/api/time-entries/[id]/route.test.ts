@@ -263,6 +263,35 @@ describe("PATCH /api/time-entries/[id]", () => {
     expect(mocks.updateTimeEntry).toHaveBeenCalledTimes(1);
   });
 
+  it("passes the iPhone outbox command id through and answers an applied resend with the current block (item 17)", async () => {
+    const body = { description: "phone A" };
+    const current = { id: "entry-1", description: "web B" };
+    mocks.updateTimeEntry.mockResolvedValue({ id: "entry-1", updatedAt: "2026-07-31T15:00:00.000Z", replayed: true });
+    mocks.getTimeEntryById.mockResolvedValue(current);
+    const response = await PATCH(jsonRequest(body, { "X-Dayframe-Client-Command-Id": "mobile-time-entry:abc:def" }), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(mocks.updateTimeEntry).toHaveBeenCalledWith("entry-1", { ...body, clientCommandId: "mobile-time-entry:abc:def" }, session);
+    expect(await response.json()).toMatchObject({ ok: true, replayed: true, entry: current });
+    expect(mocks.scheduleLiveActivityNotification).not.toHaveBeenCalled();
+  });
+
+  it("answers a resend for a block deleted since as delivered, with no block", async () => {
+    mocks.updateTimeEntry.mockResolvedValue({ id: "entry-1", updatedAt: null, replayed: true });
+    const response = await PATCH(jsonRequest({ description: "phone A" }, { "X-Dayframe-Client-Command-Id": "mobile-time-entry:abc:def" }), routeContext());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, replayed: true, entry: null });
+    expect(mocks.getTimeEntryById).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed command id without applying the edit", async () => {
+    const response = await PATCH(jsonRequest({ description: "phone A" }, { "X-Dayframe-Client-Command-Id": "has spaces" }), routeContext());
+
+    expect(response.status).toBe(400);
+    expect(mocks.updateTimeEntry).not.toHaveBeenCalled();
+  });
+
   it("rejects a start time after a completed entry finish time", async () => {
     const response = await PATCH(
       jsonRequest({
@@ -324,10 +353,10 @@ describe("DELETE /api/time-entries/[id]", () => {
   });
 });
 
-function jsonRequest(body: unknown) {
+function jsonRequest(body: unknown, headers: Record<string, string> = {}) {
   return new Request("https://dayframe.test/api/time-entries/entry-1", {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body)
   });
 }

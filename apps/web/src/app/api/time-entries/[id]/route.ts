@@ -9,7 +9,7 @@ import {
 } from "@/lib/event-service";
 import { authErrorResponse } from "@/lib/api-errors";
 import { resolveRequestSession } from "@/lib/ingest-auth";
-import { TagNameSchema } from "@dayframe/shared";
+import { TagNameSchema, TIME_ENTRY_CLIENT_COMMAND_ID_HEADER, TimeEntryClientCommandIdSchema } from "@dayframe/shared";
 import { scheduleLiveActivityNotification } from "@/lib/live-activity-post-response";
 import { getTimeEntryById } from "@/lib/queries";
 import { ExpectedDetailsSchema, ExpectedUpdatedAtSchema } from "@/lib/time-entry-details-precondition";
@@ -40,8 +40,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (Object.prototype.hasOwnProperty.call(body, "expectedUpdatedAt") && body.expectedUpdatedAt != null) {
       update.expectedUpdatedAt = ExpectedUpdatedAtSchema.parse(body.expectedUpdatedAt);
     }
+    // Optional iPhone outbox command id (item 17): a resend of an edit already applied is answered as
+    // success with the current block instead of applying it again. Absent: as before (web, older iPhone).
+    const clientCommandId = requestClientCommandId(request);
+    if (clientCommandId) update.clientCommandId = clientCommandId;
     validateTimeWindow(update);
     const result = await updateTimeEntry(id, update, session);
+    if (result.replayed) {
+      const entry = result.updatedAt ? await getTimeEntryById(session, id) : null;
+      return NextResponse.json({ ok: true, ...result, entry });
+    }
     scheduleLiveActivityNotification(session);
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {
@@ -79,6 +87,14 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     }
     throw error;
   }
+}
+
+function requestClientCommandId(request: Request) {
+  const header = request.headers.get(TIME_ENTRY_CLIENT_COMMAND_ID_HEADER);
+  if (header === null) return undefined;
+  const parsed = TimeEntryClientCommandIdSchema.safeParse(header);
+  if (!parsed.success) throw new BadRequestError(`${TIME_ENTRY_CLIENT_COMMAND_ID_HEADER} is malformed.`);
+  return parsed.data;
 }
 
 function optionalString(value: unknown) {

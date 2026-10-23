@@ -660,6 +660,41 @@ describe("durable time-entry outbox", () => {
     await expect(outbox.removeTimeEntryCommands([undone.clientCommandId])).resolves.toBe(1);
     await expect(outbox.readPendingTimeEntryCommands(OWNER_A)).resolves.toEqual([]);
   });
+
+  it.each(["update", "delete"] as const)(
+    "sends the %s command's own id, unchanged, on the first attempt and on a resend after a lost response (item 17)",
+    async (operation) => {
+      const patch = { categoryId: "cat-x", description: "phone A", tagNames: ["alpha"] };
+      if (operation === "update") {
+        await outbox.enqueueTimeEntryUpdate({ owner: OWNER_A, target: { targetEntryId: "entry-1" }, patch });
+      } else {
+        await outbox.enqueueTimeEntryDelete({ owner: OWNER_A, target: { targetEntryId: "entry-1" } });
+      }
+      const [queued] = await outbox.readPendingTimeEntryCommands(OWNER_A);
+      const sent: Array<{ headers: Record<string, string>; body?: unknown }> = [];
+      vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => {
+        sent.push({ headers: init?.headers as Record<string, string>, body: init?.body });
+        // The first attempt reaches the server but its response is lost.
+        if (sent.length === 1) return new Promise(() => undefined);
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      }));
+
+      const first = outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true });
+      await vi.advanceTimersByTimeAsync(outbox.MOBILE_TIME_ENTRY_COMMAND_TIMEOUT_MS);
+      expect(await first).toMatchObject({ reason: "retryable_failure", waitingCount: 1 });
+      expect(await outbox.synchroniseTimeEntryCommands({ owner: OWNER_A, correlations: new Map(), force: true }))
+        .toMatchObject({ deliveredCount: 1, waitingCount: 0 });
+
+      expect(sent).toHaveLength(2);
+      expect(queued?.clientCommandId).toMatch(/^mobile-time-entry:/);
+      for (const request of sent) {
+        expect(request.headers["X-Dayframe-Client-Command-Id"]).toBe(queued?.clientCommandId);
+      }
+      // The Edit body is exactly what an older build sends: the id travels only in the header.
+      expect(sent[0]?.body).toBe(operation === "update" ? JSON.stringify(patch) : undefined);
+      expect(sent[1]?.body).toBe(sent[0]?.body);
+    }
+  );
 });
 
 function commandFixture(input: {
