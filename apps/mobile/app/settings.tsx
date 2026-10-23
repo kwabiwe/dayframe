@@ -184,7 +184,8 @@ import {
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   configureLocationIntelligence,
-  getNativeLocationIntelligenceStatus
+  getNativeLocationIntelligenceStatus,
+  refreshLocalJournalReplayForDiagnostics
 } from "@/lib/location/runtime";
 import {
   getLocationStoreDiagnostics,
@@ -1860,8 +1861,11 @@ export default function SettingsScreen() {
     if (!owner) return;
     const session = await readOwnedAuthenticatedSessionSnapshot(owner);
     if (session.status !== "authenticated") return;
-    // The local journal replay's numbers are from its last run (`lastLocalReplayAt`): foreground refreshes
-    // them at most every ten minutes. The export never waits for a replay of the whole journal.
+    // The local journal replay is this export's alone (stability audit 22 Oct 2026, location-3): it runs
+    // here, at most every ten minutes, never on a bootstrap or foreground pass, and never rejects. Its
+    // numbers carry their run time (`lastLocalReplayAt`) and any failure (`lastLocalReplayError`).
+    await refreshLocalJournalReplayForDiagnostics();
+    if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount())) return;
     const [local, native] = await Promise.all([getLocationStoreDiagnostics(), getNativeLocationIntelligenceStatus().catch(() => null)]);
     if (!mobileAccountOwnersEqual(owner, await readActiveMobileAccount()) || !isAuthenticatedSessionSnapshotCurrent(session.snapshot)) return;
     await Share.share({
@@ -1883,6 +1887,9 @@ export default function SettingsScreen() {
         lastLocalReplayAt: local.lastLocalReplayAt,
         lastLocalReplayComputeMs: local.lastLocalReplayComputeMs,
         lastLocalReplayInputCount: local.lastLocalReplayInputCount,
+        lastLocalReplayFailedAt: local.lastLocalReplayFailedAt,
+        lastLocalReplayError: local.lastLocalReplayError,
+        localReplayFailureCount: local.localReplayFailureCount,
         activeProvisionalSegmentKind: local.activeProvisionalSegmentKind,
         lastGapDurationSeconds: local.lastGapDurationSeconds,
         rejectedEvidenceCounts: local.rejectedEvidenceCounts,
