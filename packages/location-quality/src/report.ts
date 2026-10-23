@@ -50,7 +50,7 @@ export function renderReport(report: QualityReport, timeZone: string, options: {
   out.push(`  start error: ${errors(R.tripStartErrors)}`);
   out.push(`  end error:   ${errors(R.tripEndErrors)}`);
   out.push(`  leg count right: ${R.legs[0]}/${R.legs[1]} matched trips`);
-  out.push(`  multi-leg trips split into the right legs: 0/${R.multiLegFound} (the engine has no legs today)`);
+  out.push(`  multi-leg trips split into the right number of legs: ${R.multiLegRight}/${R.multiLegFound}`);
   const dp = R.distancePairs;
   if (dp.length) {
     const ratios = dp.map((p) => p.engineRouteM / p.keyM).sort((x, y) => x - y);

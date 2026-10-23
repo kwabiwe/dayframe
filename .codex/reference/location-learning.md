@@ -246,6 +246,35 @@ Temporal invariants:
   yet, it shows at 73 % (recall); its start is within 0.3 min of Google's
   (median). Most misses are the minutes after arrival before the stay forms,
   and journeys whose first reading arrives late.
+  on the minute. Replaying the 15–22 Oct week as received every 5 minutes
+  against the Google answer key: shown at 80% of the moments Google calls
+  travel (precision) and at 73% of the travel moments with no finished trip
+  yet (recall), start within 0.3 min of Google's (median). Most misses are the
+  minutes after arrival before the stay forms, and journeys whose first
+  reading arrives late.
+- Trip legs, part 1 (location v4 step 6; `deriveTripLegs` in `legs.ts`,
+  `CommuteSegment.tripLegs`, also the open trip's legs so far). Each trip is
+  cut into legs of walk, run, cycle or drive from Core Motion labels (carried
+  drive and ride spells as for the trip's label) and the speed regime of
+  credible readings (`credibleSpeedResolver`: native speed from any copy, else
+  an accurate fix's implied speed; still under `tripStillSpeedMps`, on foot up
+  to `tripFootMaximumSpeedMps`, a vehicle from `tripVehicleMinimumSpeedMps`,
+  which outvotes walking or stillness, as iOS reports both on smooth trains).
+  Indeterminate time joins the leg before it. Stillness of
+  `tripStopMinimumMs` (1 min) or more is a stop: it separates legs of
+  different modes and is no leg; between two legs of one mode it joins them
+  (a car at lights), and at the trip's ends it belongs to the first or last
+  leg, so legs always span the trip's own times. Legs under `tripLegMinimumMs`
+  (2 min) merge into the longer moving neighbour, except a walk of
+  `tripChangeWalkMinimumMs` (90 s) or more between two vehicle legs (a
+  change). Confidence: sure when Core Motion and speed agree over the leg,
+  likely with one of them, unsure with neither. Distance is along the leg's
+  accurate readings. Stored in the trip's metadata (`legs`, design §14; times, mode,
+  confidence, metres). Scored against the Google answer key (the harness now
+  takes each minute's mode from its leg): week 89 → 90, no day worse; fine
+  mode 58 % → 66 %, walking minutes right 19 % → 77 %, car 87 % → 88 %;
+  leg count right 28/32, multi-leg trips split into the right number of legs
+  1/4 (rail, Underground and bus come with step 7's bundled stations).
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

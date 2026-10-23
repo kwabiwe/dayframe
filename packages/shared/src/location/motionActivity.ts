@@ -273,6 +273,20 @@ function carriedModes(intervals: readonly MotionInterval[]) {
   return carried;
 }
 
+/**
+ * Each Core Motion interval's label for splitting a journey into legs: its travel mode (confident, or
+ * carried across an indeterminate spell between two drives or two rides, as for the journey label),
+ * "still" for medium- or high-confidence stillness, or null when indeterminate.
+ */
+export function motionLegLabels(timeline: MotionTimeline): Array<{ fromMs: number; toMs: number; label: MotionTravelMode | "still" | null }> {
+  const carried = carriedModes(timeline.intervals);
+  return timeline.intervals.map((interval, index) => ({
+    fromMs: interval.fromMs,
+    toMs: interval.toMs,
+    label: carried[index] ?? (interval.activity === "stationary" && interval.confidence !== "low" ? "still" : null)
+  }));
+}
+
 /** The fastest mode sustained through a fair share of a journey's movement, when movement covers enough of it. */
 export function motionTravelMode(timeline: MotionTimeline | null, startMs: number, stopMs: number, config: LocationEngineConfig) {
   if (!timeline || !(stopMs > startMs)) return null;

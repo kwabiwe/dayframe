@@ -68,6 +68,8 @@ export type DayResult = {
   legs: [number, number];
   distancePairs: Array<{ engineRouteM: number; keyM: number; routeSamples: number; minutes: number }>;
   multiLegFound: number;
+  /** Multi-leg trips the engine split into the same number of legs. */
+  multiLegRight: number;
   multiLegTrips: number;
   travelMinutes: number;
   modeFine: number;
@@ -171,6 +173,12 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
   const engineModeAt = new Map<number, string>();
   for (const move of engineMoves) {
     for (const m of minutesOf(move)) if (!engineStayMinutes.has(m)) engineModeAt.set(m, ENGINE_FINE_MODE[move.mode ?? ""] ?? "none");
+    // A trip with legs (location v4 step 6) takes each minute's mode from its leg; the trip's own mode
+    // stays for minutes between legs (a wait or a change).
+    for (const leg of move.legs ?? []) {
+      const interval = { a: Date.parse(leg.startedAt) / 1000, b: Date.parse(leg.stoppedAt) / 1000 };
+      for (const m of minutesOf(interval)) if (engineModeAt.has(m)) engineModeAt.set(m, ENGINE_FINE_MODE[leg.mode ?? ""] ?? "none");
+    }
   }
 
   const allMinutes: number[] = [];
@@ -263,6 +271,7 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
     const tripEndErrors: number[] = [];
     const distancePairs: DayResult["distancePairs"] = [];
     let legsRight = 0;
+    let multiLegRight = 0;
     for (const x of keyTrips) {
       let best: EngineMove | null = null;
       for (const y of engineMoves) if (!best || overlap(x, y) > overlap(x, best)) best = y;
@@ -272,8 +281,14 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
         found.push(x);
         if (x.a > W0) tripStartErrors.push((best.a - x.a) / 60);
         if (x.b < W1) tripEndErrors.push((best.b - x.b) / 60);
-        // The engine gives one leg per Move today.
-        if (x.legs.length === 1) legsRight += 1;
+        // A Move without legs is one leg; with legs (location v4 step 6), its legs overlapping the key trip.
+        const engineLegs = best.legs?.length
+          ? best.legs.filter((leg) => overlap(x, { a: Date.parse(leg.startedAt) / 1000, b: Date.parse(leg.stoppedAt) / 1000 }) > 0).length
+          : 1;
+        if (engineLegs === x.legs.length) {
+          legsRight += 1;
+          if (x.legs.length > 1) multiLegRight += 1;
+        }
         if (x.legs.length === 1 && x.legs[0].mode === "car" && best.routeM && x.legs[0].dist > 500) {
           distancePairs.push({ engineRouteM: best.routeM, keyM: x.legs[0].dist, routeSamples: best.routeSamples || 0, minutes: size(best) / 60 });
         }
@@ -315,7 +330,7 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
       keyTrips: keyTrips.length, tripMatched: found.length, engineMoves: scoredMoves.length,
       phantomMoves: scoredMoves.length - realMoves.length, movePrecision, realMoves,
       phantomTravelMinutes: dayMinutes.filter((m) => keyStayMinutes.has(m) && engineMoveMinutes.has(m)).length,
-      tripStartErrors, tripEndErrors, legs: [legsRight, found.length], distancePairs,
+      tripStartErrors, tripEndErrors, legs: [legsRight, found.length], multiLegRight, distancePairs,
       multiLegFound: found.filter((x) => x.legs.length > 1).length,
       multiLegTrips: keyTrips.filter((x) => x.legs.length > 1).length,
       travelMinutes: travel.length, modeFine, modeCoarse, byMode, byModeRight

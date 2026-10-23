@@ -339,6 +339,24 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   return latest;
 }
 
+/**
+ * A reading's speed when it is credible for judging movement: a location reading within
+ * `commuteMaximumSpeedAccuracyMeters`, with native speed from any copy of the observation, else an
+ * accurate fix's implied speed. Null otherwise.
+ */
+export function credibleSpeedResolver(evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
+  let nativeSpeed: ReturnType<typeof nativeSpeedResolver> | undefined;
+  return (item: ClassifiedEvidence) => {
+    const { kind, horizontalAccuracyMeters } = item.evidence;
+    if (kind !== "standard_location" && kind !== "significant_change" || item.evidence.isSimulated === true ||
+      horizontalAccuracyMeters == null || horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) return null;
+    const native = (nativeSpeed ??= nativeSpeedResolver(evidence))(item);
+    if (native != null) return native;
+    const implied = item.impliedSpeedMetersPerSecond;
+    return accurateFix(item, config) && implied != null && Number.isFinite(implied) ? implied : null;
+  };
+}
+
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
 const MIRROR_WINDOW_MS = 5_000;
 // Readings away this much farther from the place than the first one after a

@@ -958,7 +958,9 @@ export async function persistOpenTrip(client: pg.PoolClient, session: RequestSes
       lastObservedAt: trip.lastObservedAt,
       routeSampleCount: trip.routeSampleCount,
       routeDistanceMeters: trip.routeDistanceMeters,
-      ...(trip.travelMode ? { travelMode: trip.travelMode } : {})
+      ...(trip.travelMode ? { travelMode: trip.travelMode } : {}),
+      // Legs so far (location v4 step 6): times, mode, confidence and metres only.
+      ...(trip.tripLegs?.length ? { legs: trip.tripLegs } : {})
     };
     await client.query(
       `update stay_segments set metadata = jsonb_set(metadata, '{openTrip}', $4::jsonb), updated_at = now()
@@ -1015,6 +1017,8 @@ async function persistCommutes(
         ...(segment.stops?.length ? { stops: segment.stops } : {}),
         // From Motion & Fitness: how it was travelled, and whether motion alone showed the movement.
         ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+        // Legs (location v4 step 6, design §14 metadata.legs): times, mode, confidence and metres only.
+        ...(segment.tripLegs?.length ? { legs: segment.tripLegs } : {}),
         ...(segment.motionSupported ? { motionSupported: true } : {}),
         ...(segment.motionTimed ? { motionTimed: true } : {})
       })
