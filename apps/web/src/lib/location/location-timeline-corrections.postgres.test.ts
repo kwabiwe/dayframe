@@ -265,5 +265,12 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const offered = await db.query(`select ri.suggested_place_id as "placeId", ri.title, e.suggested_place_id as "eventPlaceId"
         from review_items ri join activity_events e on e.id = ri.event_id where ri.location_segment_id = $1`, [stayId]);
     expect(offered.rows[0]).toEqual({ placeId: homeId, title: "Home", eventPlaceId: homeId });
+
+    // The place's own default description names it, as replay does (Codex r8 on #566).
+    await db.query(`update places set default_activity_description = 'Chores' where id = $1`, [homeId]);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-d", placeId: null, learnedPlaceId: learnedId }, session);
+    const described = await db.query(`select title from review_items where location_segment_id = $1`, [stayId]);
+    expect(described.rows[0].title).toBe("Chores");
+    await db.query(`update places set default_activity_description = null where id = $1`, [homeId]);
   });
 });

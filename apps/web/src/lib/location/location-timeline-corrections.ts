@@ -264,7 +264,9 @@ async function applyToSegment(
         `with suggestion as (
            update review_items ri
               set suggested_place_id = $4,
-                  title = coalesce((select ${placeDisplayNameSql("p")} from places p where p.id = $4 and p.workspace_id = $2),
+                  -- As replay names it: the place's own default description wins, then its name (Codex r8 on #566).
+                  title = coalesce((select coalesce(nullif(btrim(p.default_activity_description), ''), ${placeDisplayNameSql("p")})
+                      from places p where p.id = $4 and p.workspace_id = $2),
                     (select lp.name from learned_places lp where lp.id = $5 and lp.workspace_id = $2 and lp.user_id = $3), ri.title)
             where ri.workspace_id = $2 and ri.user_id = $3 and ri.location_segment_id = $1 and ri.status = 'open'
             returning ri.event_id)
