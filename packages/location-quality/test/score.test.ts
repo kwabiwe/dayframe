@@ -131,12 +131,13 @@ describe("scoring trip legs (location v4 step 6)", () => {
   });
 
   it("never lets a leg speak for another trip's minutes", () => {
-    // The morning drive's leg reaches over the midday trip: the midday trip's own mode stands.
-    const leaking = exampletonSegments.map((segment) => segment.startedAt === at("08:01") ? {
+    // The midday trip's leg reaches back over the morning drive, which is scored first: the drive's own mode stands.
+    const leaking = exampletonSegments.map((segment) => segment.startedAt === at("12:00") ? {
       ...segment, legs: [{ startedAt: at("08:01"), stoppedAt: at("12:25"), mode: "train" }]
     } : segment);
-    const midday = (segments: typeof exampletonSegments) => scoreRun(key, segments, options).week.byModeRight;
-    expect(midday(leaking).get("walk") ?? 0).toBe(midday(exampletonSegments).get("walk") ?? 0);
+    const right = (segments: typeof exampletonSegments) => scoreRun(key, segments, options).week.byModeRight;
+    expect(right(leaking).get("car") ?? 0).toBe(right(exampletonSegments).get("car") ?? 0);
+    expect(right(exampletonSegments).get("car") ?? 0).toBeGreaterThan(0);
   });
 
   it("counts a multi-leg trip split into the right number of legs", () => {

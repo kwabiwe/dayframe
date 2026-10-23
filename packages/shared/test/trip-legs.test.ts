@@ -96,12 +96,31 @@ describe("trip legs, part 1 (location v4 step 6)", () => {
       [reading(7, 500, 0), reading(9, 500, 0)]).map(({ mode }) => mode)).toEqual(["walking"]);
   });
 
+  it("never takes an implied speed from a simulated predecessor, through the whole engine", () => {
+    // Accurate speedless fixes walking 70 m a minute, with confident walking motion: a walk.
+    const genuine = Array.from({ length: 21 }, (_, index) => reading(100 + index, index * 70, null)).map((item) => item.evidence);
+    // Simulated speedless fixes 100 m away, six seconds before each genuine one.
+    const simulated = genuine.map((item, index) => ({ ...item, clientEvidenceId: `sim-${index}`, isSimulated: true,
+      occurredAt: new Date(Date.parse(item.occurredAt) - 6_000).toISOString(), longitude: (index * 70 + 100) / 111_320 }));
+    const stay = (id: string, from: number, to: number, east: number) => Array.from({ length: 8 }, (_, index) =>
+      reading(from + index * ((to - from) / 7), east, 0).evidence).map((item, index) => ({ ...item, clientEvidenceId: `${id}-${index}` }));
+    const walking = motion([[0, "stationary"], [100, "walking"], [120, "stationary"]]).map((item) => item.evidence);
+    const run = (extra: LocationEvidence[]) => runLocationEngine({ priorState: { algorithmVersion: config.algorithmVersion, mode: "idle",
+      activeSegmentId: null, processedEvidenceIds: [], lastProcessedAt: null }, config, processingAt: at(200), acceptedLearnedPlaces: [], savedPlaces: [],
+      evidence: [...stay("a", 70, 99, 0), ...genuine, ...stay("b", 121, 150, 1_400), ...walking, ...extra] })
+      .segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute").map((trip) => trip.tripLegs?.map((leg) => leg.mode));
+    expect(run([])).toEqual([["walking"]]);
+    expect(run(simulated)).toEqual(run([]));
+  });
+
   it("never takes a speed from a simulated copy of a reading", () => {
     const genuine = [reading(1, 0, null), reading(3, 150, null), reading(5, 300, null)];
     const simulated = genuine.map((item) => ({ ...item, evidence: { ...item.evidence, clientEvidenceId: `${item.evidence.clientEvidenceId}-sim`,
       kind: "significant_change" as const, isSimulated: true, speedMetersPerSecond: 25 } }));
     const speedOf = credibleSpeedResolver([...genuine, ...simulated], config);
-    expect(genuine.map(speedOf)).toEqual([null, null, null]);
+    // Exactly what the genuine readings alone give (an implied walking pace), never the simulated 25 m/s.
+    expect(genuine.map(speedOf)).toEqual(genuine.map(credibleSpeedResolver(genuine, config)));
+    expect(genuine.map(speedOf).every((speed) => speed == null || speed < 2)).toBe(true);
   });
 
   it("merges a short leg into its moving neighbour across stops", () => {
