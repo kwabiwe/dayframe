@@ -244,4 +244,26 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
       client.release();
     }
   });
+
+  it("offers a learned place's linked saved place in the open suggestion, as replay would (Codex r7 on #566)", async () => {
+    const db = database!;
+    const learnedId = (await db.query<{ id: string }>(
+      `insert into learned_places (workspace_id, user_id, place_id, cluster_key, name, latitude, longitude, status, first_seen_at, last_seen_at)
+       values ($1, $2, $3, 'zz-cluster', 'Learned spot', 10, 20, 'accepted', $4, $4) returning id`, [workspaceId, userId, homeId, at(0)])).rows[0].id;
+    const stayId = (await db.query<{ id: string }>(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'seg-d', 'device-1', 'finalised', $3, $4, ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, '{"placeMatchKind":"unknown"}'::jsonb)
+       returning id`, [workspaceId, userId, at(1_100), at(1_200)])).rows[0].id;
+    const eventId = (await db.query<{ id: string }>(
+      `insert into activity_events (workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload, review_status)
+       values ($1, $2, 'location_learning', 'unknown_stay', $3, 'low', '{"clientSegmentId":"seg-d"}'::jsonb, 'needs_review') returning id`,
+      [workspaceId, userId, at(1_100)])).rows[0].id;
+    await db.query(`insert into review_items (workspace_id, user_id, event_id, location_segment_id, type, title, status)
+       values ($1, $2, $3, $4, 'unknown_stay', 'Unknown place', 'open')`, [workspaceId, userId, eventId, stayId]);
+    const { correctLocationTimeline } = await import("./location-timeline-corrections");
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-d", placeId: null, learnedPlaceId: learnedId }, session);
+    const offered = await db.query(`select ri.suggested_place_id as "placeId", ri.title, e.suggested_place_id as "eventPlaceId"
+        from review_items ri join activity_events e on e.id = ri.event_id where ri.location_segment_id = $1`, [stayId]);
+    expect(offered.rows[0]).toEqual({ placeId: homeId, title: "Home", eventPlaceId: homeId });
+  });
 });

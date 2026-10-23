@@ -253,6 +253,13 @@ async function applyToSegment(
           where location_segment_id = $1 and workspace_id = $2 and user_id = $3 and status = 'open' and event_id is not null`,
         scope)).rows.map((row) => row.eventId);
       await recordReviewTitleHistory(client, session, suggestionEvents);
+      // A learned place linked to a saved place offers the saved place, as Review emission resolves it, so
+      // confirming before replay logs the same place as after (Codex r7 on #566).
+      const offeredPlaceId = request.placeId ?? (request.learnedPlaceId ? (await client.query<{ placeId: string | null }>(
+        `select lp.place_id as "placeId" from learned_places lp
+           join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id
+          where lp.id = $1 and lp.workspace_id = $2 and lp.user_id = $3 and lp.status = 'accepted'`,
+        [request.learnedPlaceId, session.workspaceId, session.userId])).rows[0]?.placeId ?? null : null);
       await client.query(
         `with suggestion as (
            update review_items ri
@@ -266,7 +273,7 @@ async function applyToSegment(
          update activity_events ae set suggested_place_id = $4, raw_payload = ae.raw_payload - 'semanticReason' - 'nameSource'
            from suggestion
           where ae.id = suggestion.event_id and ae.workspace_id = $2 and ae.user_id = $3`,
-        [...scope, request.placeId, request.learnedPlaceId]);
+        [...scope, offeredPlaceId, request.learnedPlaceId]);
       await recordReviewTitleHistory(client, session, suggestionEvents);
       return;
     case "times":
