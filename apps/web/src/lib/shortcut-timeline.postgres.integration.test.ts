@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { pool } from "./db";
-import { processActivityEvent } from "./event-service";
+import {
+  processActivityEvent,
+  TimerReplacementWindowError,
+  TimerStopBeforeStartError,
+  updateTimeEntry,
+  updateTimeEntryDescriptions
+} from "./event-service";
 
 const runDatabaseIntegration = process.env.DAYFRAME_RUN_DB_INTEGRATION === "1";
 
@@ -65,6 +71,27 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
       occurredAt: at(minute),
       rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" },
       source: "shortcut",
+      type: "timer_stop"
+    }, session);
+  }
+
+  function appStart(minute: number, description: string) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`,
+      occurredAt: at(minute),
+      rawPayload: { origin: "mobile_timer_start", startedAt: at(minute).toISOString(), tagNames: [] },
+      description,
+      source: "mobile_app",
+      type: "timer_start"
+    }, session);
+  }
+
+  function appStop(minute: number, targetEntryId?: string) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`,
+      occurredAt: at(minute),
+      rawPayload: targetEntryId ? { origin: "mobile_home", stopScope: "entry", targetEntryId } : { origin: "mobile_home" },
+      source: "mobile_app",
       type: "timer_stop"
     }, session);
   }
@@ -150,7 +177,7 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
         timeline: [["P", 0, 10], ["A", 10, 20], ["B", 30, 40]],
       });
     }
-  });
+  }, 30_000);
 
   it("ends a finished block at an earlier Stop that arrives after it", async () => {
     await block(0, 30, "mobile_app", "P");
@@ -192,6 +219,329 @@ describe.runIf(runDatabaseIntegration)("Shortcut Stops and late Shortcut Starts 
       `select description from time_entries where workspace_id = $1 and stopped_at is null`, [workspaceId]
     );
     expect(running.rows).toEqual([{ description: "A" }]);
+  });
+
+  // Owner decision 22 Oct 2026 (PR A option a): a Start made in the iPhone app that reaches the server
+  // late is placed like a Shortcut Start; it used to fail on every retry (stability audit SERVER-1).
+  it("places an in-app Start older than a block started elsewhere in its own slot", async () => {
+    await block(20, null, "web", "W");
+    const result = await appStart(10, "Y");
+    expect(result).toMatchObject({ startOutcome: "recorded_completed" });
+    expect(typeof result.timeEntryId).toBe("string");
+    expect(await timeline()).toEqual([["Y", 10, 20], ["W", 20, null]]);
+  });
+
+  it("an in-app Start newer than the running block still replaces it", async () => {
+    await block(0, null, "web", "P");
+    const result = await appStart(10, "Y");
+    expect(result.startOutcome).toBeUndefined();
+    expect(await timeline()).toEqual([["P", 0, 10], ["Y", 10, null]]);
+  });
+
+  it("refuses an in-app Start at a running block's own start with a typed error, never a silent drop", async () => {
+    await block(10, null, "web", "W");
+    await expect(appStart(10, "Y")).rejects.toBeInstanceOf(TimerReplacementWindowError);
+    expect(await timeline()).toEqual([["W", 10, null]]);
+  });
+
+  it("refuses a Stop earlier than its block's start instead of failing the database rule", async () => {
+    const running = await block(20, null, "web", "W");
+    await expect(appStop(10, running)).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    await expect(appStop(10)).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    expect(await timeline()).toEqual([["W", 20, null]]);
+    await expect(appStop(30, running)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["W", 20, 30]]);
+  });
+
+  it("ends a late-placed in-app Start where its own queued Stop ran, never touching the newer block (Codex r1 on #531)", async () => {
+    await block(20, null, "web", "W");
+    const start = await appStart(0, "Y");
+    expect(await timeline()).toEqual([["Y", 0, 20], ["W", 20, null]]);
+    await expect(appStop(10, start.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y", 0, 10], ["W", 20, null]]);
+  });
+
+  it("ends a block a later Start replaced where its own earlier Stop ran (offline Start, Stop, Start)", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "Z");
+    expect(await timeline()).toEqual([["Y", 0, 30], ["Z", 30, null]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 30, null]]);
+  });
+
+  it("keeps an end a person set, even one equal to the next block's start (Codex r2 on #531)", async () => {
+    const edited = await block(0, 15, "web", "E");
+    await updateTimeEntry(edited, { stoppedAt: at(20).toISOString() }, session);
+    await block(20, null, "web", "N");
+    await expect(appStop(10, edited)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["E", 0, 20], ["N", 20, null]]);
+  });
+
+  // Codex r3 on #531: a saved title, activity or tags is not an end a person chose.
+  it("ends a block at its own earlier Stop after a person edited only its details", async () => {
+    const y = await appStart(0, "Y");
+    await updateTimeEntry(y.timeEntryId!, { description: "Y titled", tagNames: ["focus"] }, session);
+    await appStart(20, "W");
+    expect(await timeline()).toEqual([["Y titled", 0, 20], ["W", 20, null]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y titled", 0, 10], ["W", 20, null]]);
+  });
+
+  it("ends a block at its own earlier Stop after a details save that resent its unchanged times", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(20, "W");
+    await updateTimeEntry(y.timeEntryId!, {
+      description: "Y titled", startedAt: at(0).toISOString(), stoppedAt: at(20).toISOString()
+    }, session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y titled", 0, 10], ["W", 20, null]]);
+  });
+
+  it("keeps an end a person set through an edit, also after a later details-only save", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await updateTimeEntry(y.timeEntryId!, { stoppedAt: at(25).toISOString() }, session);
+    await updateTimeEntry(y.timeEntryId!, { description: "Y titled" }, session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["Y titled", 0, 25], ["W", 30, null]]);
+  });
+
+  // Codex r4 on #531: an edit made before edits were recorded has no audit row, and keeps its end.
+  async function editedBeforeRecording(id: string) {
+    await pool.query("update time_entries set user_edited_at = now() - interval '1 day' where id = $1", [id]);
+  }
+
+  it("keeps the end of a block edited before edits were recorded", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await editedBeforeRecording(y.timeEntryId!);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["Y", 0, 30], ["W", 30, null]]);
+  });
+
+  it("keeps that legacy end through a later details-only edit, single or grouped", async () => {
+    const y = await appStart(0, "Y");
+    const w = await appStart(30, "W");
+    await appStart(60, "V");
+    await editedBeforeRecording(y.timeEntryId!);
+    await editedBeforeRecording(w.timeEntryId!);
+    await updateTimeEntry(y.timeEntryId!, { description: "Y titled" }, session);
+    await updateTimeEntryDescriptions([w.timeEntryId!, y.timeEntryId!], "Both", session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    await expect(appStop(40, w.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["Both", 0, 30], ["Both", 30, 60], ["V", 60, null]]);
+  });
+
+  it("ends a block at its own earlier Stop after a grouped description save", async () => {
+    const y = await appStart(0, "Y");
+    const w = await appStart(30, "W");
+    await appStart(60, "V");
+    await updateTimeEntryDescriptions([y.timeEntryId!, w.timeEntryId!], "Both", session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Both", 0, 10], ["Both", 30, 60], ["V", 60, null]]);
+  });
+
+  it("records an end moved by less than a millisecond as one a person set", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await pool.query("update time_entries set stopped_at = '2026-10-14T09:25:00.123100Z' where id = $1", [y.timeEntryId]);
+    await updateTimeEntry(y.timeEntryId!, { stoppedAt: "2026-10-14T09:25:00.123900Z" }, session);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    const end = await pool.query<{ end: string }>(
+      "select to_char(stopped_at at time zone 'UTC', 'HH24:MI:SS.US') as end from time_entries where id = $1", [y.timeEntryId]
+    );
+    expect(end.rows[0]!.end).toBe("09:25:00.123900");
+  });
+
+  it("keeps an earlier end when a later Stop for the block arrives", async () => {
+    const finished = await block(0, 15, "web", "E");
+    await expect(appStop(30, finished)).resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["E", 0, 15]]);
+  });
+
+  it("ends a late Start bounded by a recorded Stop where its own Stop ran (Codex r2 on #531)", async () => {
+    await block(0, null, "mobile_app", "P");
+    await shortcutStop(20);
+    const y = await appStart(5, "Y");
+    expect(await timeline()).toEqual([["P", 0, 5], ["Y", 5, 20]]);
+    await expect(appStop(10, y.timeEntryId!)).resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["P", 0, 5], ["Y", 5, 10]]);
+  });
+
+  it("sees a replacement committed while the Stop waited for the block's lock (Codex r2 on #531)", async () => {
+    const y = await block(0, null, "mobile_app", "Y");
+    const replacer = await pool.connect();
+    try {
+      await replacer.query("begin");
+      await replacer.query("update time_entries set stopped_at = $1 where id = $2", [at(20), y]);
+      await replacer.query(
+        `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
+         values ($1, $2, $3, 'web', 'high', 'confirmed', 'Z', $4)`,
+        [randomUUID(), workspaceId, userId, at(20)]
+      );
+      const replacerPid = (await replacer.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      const stop = appStop(10, y);
+      for (let tries = 0; tries < 200; tries += 1) {
+        const waiting = await pool.query(
+          "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+          [replacerPid]
+        );
+        if (waiting.rows.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await replacer.query("commit");
+      await expect(stop).resolves.toMatchObject({ stopOutcome: "stopped" });
+    } finally {
+      replacer.release();
+    }
+    expect(await timeline()).toEqual([["Y", 0, 10], ["Z", 20, null]]);
+  });
+
+  // Codex r4 on #531: a PATCH holds its transaction (the same writes updateTimeEntry makes) until the
+  // entry-scoped Stop waits on the row, then commits. The Stop must judge the end by that edit's audit row.
+  async function stopWhileEditHeld(entryId: string, stopMinute: number, endMinute: number | null, action: string) {
+    const editor = await pool.connect();
+    try {
+      await editor.query("begin");
+      await editor.query(
+        `update time_entries set stopped_at = coalesce($1, stopped_at), user_edited_at = now(), updated_at = now()
+         where id = $2`,
+        [endMinute === null ? null : at(endMinute), entryId]
+      );
+      await editor.query(
+        `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+         select workspace_id, user_id, $2, 'time_entry', id,
+                case when $2 = 'time_entry.end_set' then jsonb_build_object('stoppedAt', stopped_at) else '{}'::jsonb end,
+                user_edited_at
+         from time_entries where id = $1`,
+        [entryId, action]
+      );
+      const editorPid = (await editor.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      const stop = appStop(stopMinute, entryId);
+      for (let tries = 0; tries < 200; tries += 1) {
+        const waiting = await pool.query(
+          "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+          [editorPid]
+        );
+        if (waiting.rows.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await editor.query("commit");
+      return await stop;
+    } finally {
+      editor.release();
+    }
+  }
+
+  it("keeps an end a person set while the Stop waited for the block's lock (Codex r4 on #531)", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await expect(stopWhileEditHeld(y.timeEntryId!, 10, 25, "time_entry.end_set"))
+      .resolves.toMatchObject({ stopOutcome: "superseded" });
+    expect(await timeline()).toEqual([["Y", 0, 25], ["W", 30, null]]);
+  });
+
+  it("pulls back an end after a details edit committed while the Stop waited (Codex r4 on #531)", async () => {
+    const y = await appStart(0, "Y");
+    await appStart(30, "W");
+    await expect(stopWhileEditHeld(y.timeEntryId!, 10, null, "time_entry.edited"))
+      .resolves.toMatchObject({ stopOutcome: "stopped" });
+    expect(await timeline()).toEqual([["Y", 0, 10], ["W", 30, null]]);
+  });
+
+  // Codex r3 on #531: a block another client stopped a second ago bounds an in-app Start only once the
+  // Start is more than ten seconds old, so a phone clock a little behind never finishes a fresh Start.
+  async function stoppedElsewhereJustNow(now: number) {
+    const id = randomUUID();
+    await pool.query(
+      `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at)
+       values ($1, $2, $3, 'manual_app', 'high', 'confirmed', 'P', $4)`,
+      [id, workspaceId, userId, new Date(now - 30 * 60_000)]
+    );
+    await expect(processActivityEvent({
+      clientEventId: `web:${randomUUID()}`, occurredAt: new Date(now - 1_000),
+      rawPayload: { origin: "web_timer_stop", stopScope: "entry", targetEntryId: id },
+      source: "manual_app", type: "timer_stop"
+    }, session)).resolves.toMatchObject({ stopOutcome: "stopped" });
+  }
+
+  function appStartAt(startedAt: Date) {
+    return processActivityEvent({
+      clientEventId: `mobile:${randomUUID()}`, occurredAt: startedAt, description: "Y", source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start", startedAt: startedAt.toISOString(), tagNames: [] }
+    }, session);
+  }
+
+  async function runningDescriptions() {
+    return (await pool.query<{ description: string }>(
+      "select description from time_entries where workspace_id = $1 and stopped_at is null", [workspaceId]
+    )).rows.map((row) => row.description);
+  }
+
+  it("an in-app Start delivered within ten seconds runs even just before a Stop recorded elsewhere", async () => {
+    const now = Date.now();
+    await stoppedElsewhereJustNow(now);
+    const result = await appStartAt(new Date(now - 4_000));
+    expect(result.startOutcome).toBeUndefined();
+    expect(await runningDescriptions()).toEqual(["Y"]);
+  });
+
+  it("an in-app Start more than ten seconds old ends at a Stop recorded elsewhere after it", async () => {
+    const now = Date.now();
+    await stoppedElsewhereJustNow(now);
+    const startedAt = new Date(now - 20_000);
+    const result = await appStartAt(startedAt);
+    expect(result.startOutcome).toBe("recorded_completed");
+    expect(await runningDescriptions()).toEqual([]);
+    const y = (await pool.query<{ startedAt: Date; stoppedAt: Date }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries where id = $1`, [result.timeEntryId]
+    )).rows[0]!;
+    expect([y.startedAt.getTime(), y.stoppedAt.getTime()]).toEqual([startedAt.getTime(), now - 1_000]);
+  });
+
+  it("refuses an in-app Start at another block's exact start even when a later bound exists (Codex r1 on #531)", async () => {
+    await block(10, null, "web", "W");
+    await block(30, 40, "web", "L");
+    await expect(appStart(10, "Y")).rejects.toBeInstanceOf(TimerReplacementWindowError);
+    expect(await timeline()).toEqual([["W", 10, null], ["L", 30, 40]]);
+  });
+
+  it("checks an unscoped Stop against a start edited while it waited for the block (Codex r1 on #531)", async () => {
+    const running = await block(0, null, "web", "W");
+    const editor = await pool.connect();
+    try {
+      await editor.query("begin");
+      await editor.query("update time_entries set started_at = $1 where id = $2", [at(20), running]);
+      const editorPid = (await editor.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]!.pid;
+      const stop = appStop(10);
+      // Commit only once the Stop is waiting on the edited row, so it has already passed (or is
+      // holding) its check: deterministic whatever the machine's speed.
+      for (let tries = 0; tries < 200; tries += 1) {
+        const waiting = await pool.query(
+          "select 1 from pg_stat_activity where wait_event_type = 'Lock' and $1 = any(pg_blocking_pids(pid))",
+          [editorPid]
+        );
+        if (waiting.rows.length) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await editor.query("commit");
+      await expect(stop).rejects.toBeInstanceOf(TimerStopBeforeStartError);
+    } finally {
+      editor.release();
+    }
+    expect(await timeline()).toEqual([["W", 20, null]]);
+  });
+
+  it("repeats a late-placed in-app Start's outcome when it is delivered again", async () => {
+    await block(20, null, "web", "W");
+    const clientEventId = `mobile:${randomUUID()}`;
+    const deliver = () => processActivityEvent({
+      clientEventId, occurredAt: at(10), description: "Y", source: "mobile_app", type: "timer_start",
+      rawPayload: { origin: "mobile_timer_start", startedAt: at(10).toISOString(), tagNames: [] }
+    }, session);
+    const first = await deliver();
+    const again = await deliver();
+    expect(again).toMatchObject({ startOutcome: "recorded_completed", timeEntryId: first.timeEntryId });
   });
 
   it("never stops a running Health entry", async () => {

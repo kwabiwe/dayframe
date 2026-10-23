@@ -203,6 +203,22 @@ export class ReviewResolutionError extends Error {
   }
 }
 
+/**
+ * A Stop dated at or before the start of the block it stops (another device's clock, or the start
+ * edited later than the Stop). It used to break the stops-after-start constraint and answer a generic
+ * 500, so the phone retried the same moment forever while the block kept running (stability audit
+ * SERVER-4). It is refused as a permanent validation error; the phone restores server truth.
+ */
+export class TimerStopBeforeStartError extends Error {
+  status = 422;
+  code = "timer_stop_before_start";
+
+  constructor(message = "This Stop is earlier than the block's start.") {
+    super(message);
+    this.name = "TimerStopBeforeStartError";
+  }
+}
+
 export class TimerReplacementWindowError extends Error {
   status = 409;
 
@@ -794,32 +810,8 @@ async function processActivityEventWithClient(
             [parsed.occurredAt, parsed.workspaceId, parsed.userId]
           )
         : stopScope.mode === "entry"
-        ? await client.query<{ id: string }>(
-            `update time_entries
-             set stopped_at = $1, updated_at = now()
-             where workspace_id = $2
-               and user_id = $3
-               and id = $4
-               and stopped_at is null
-             returning id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId, stopScope.targetEntryId]
-          )
-        : await client.query<{ id: string }>(
-            `with current_timer as (
-               select id
-               from time_entries
-               where workspace_id = $2 and user_id = $3 and stopped_at is null
-               order by started_at desc
-               limit 1
-               for update
-             )
-             update time_entries te
-             set stopped_at = $1, updated_at = now()
-             from current_timer
-             where te.id = current_timer.id
-             returning te.id`,
-            [parsed.occurredAt, parsed.workspaceId, parsed.userId]
-          );
+        ? await stopEntryAt(client, parsed, stopScope.targetEntryId)
+        : await stopCurrentTimerAt(client, parsed);
       if (stopScope.mode === "entry") {
         lockWaitMilliseconds = Date.now() - scopedStopStartedAt;
       }
@@ -840,8 +832,11 @@ async function processActivityEventWithClient(
       // offline, or the app delivered it after a Stop). It then fills its own slot instead of replacing
       // the running block: the block it interrupted ends at its start, and it ends where the next block
       // starts or where the earliest later Stop ran (owner decision 14 Oct, #403 option c).
-      const lateStart = parsed.source === "shortcut" && isExplicitStartEvent(parsed.type)
-        ? await lateShortcutStartWindow(client, session, startedAt)
+      // A Start made in the iPhone app and queued offline gets the same placement (owner decision
+      // 22 Oct, PR A option a); it used to fail on every retry and hold every later timer change behind it.
+      const lateStart = (parsed.source === "shortcut" || parsed.source === "mobile_app") &&
+          isExplicitStartEvent(parsed.type)
+        ? await lateShortcutStartWindow(client, session, startedAt, { sameStartSupersedes: parsed.source === "shortcut" })
         : null;
       if (lateStart?.kind === "same_start") {
         startOutcome = "superseded";
@@ -1124,7 +1119,7 @@ async function duplicateShortcutStartOutcome(
   session: RequestSession,
   execute: typeof query = query
 ): Promise<{ startOutcome?: "recorded_completed" | "superseded" }> {
-  if (event.source !== "shortcut" || !isExplicitStartEvent(event.type)) return {};
+  if ((event.source !== "shortcut" && event.source !== "mobile_app") || !isExplicitStartEvent(event.type)) return {};
   if (!timeEntryId) return { startOutcome: "superseded" };
   const result = await execute<{ stopped: boolean }>(
     `select stopped_at is not null as stopped from time_entries
@@ -1237,7 +1232,10 @@ const LATE_SHORTCUT_START_MS = 10_000;
 async function lateShortcutStartWindow(
   client: pg.PoolClient,
   session: RequestSession,
-  startedAt: string | Date
+  startedAt: string | Date,
+  // The phone needs a block for every in-app Start it delivers, so only a Shortcut Start at the same
+  // moment as an existing block is folded into it.
+  options: { sameStartSupersedes: boolean } = { sameStartSupersedes: true }
 ): Promise<
   | { kind: "window"; stoppedAt: Date; interruptedEntryIds: string[] }
   | { kind: "same_start" }
@@ -1252,7 +1250,12 @@ async function lateShortcutStartWindow(
      limit 1`,
     [session.workspaceId, session.userId, at]
   );
-  if (sameStart.rows.length) return { kind: "same_start" };
+  if (sameStart.rows.length) {
+    // An in-app Start at exactly another block's start is refused rather than placed beside it (Codex r1
+    // on #531): the phone needs a block of its own for it, and two blocks can't share a start.
+    if (!options.sameStartSupersedes) throw new TimerReplacementWindowError();
+    return { kind: "same_start" };
+  }
   // Lock what covers the Start's moment first, so a concurrent entry-scoped Stop (which does not take the
   // timer lock) either commits before these rows are read or waits for this transaction.
   const covering = await client.query<{ id: string; stoppedAt: string | Date | null }>(
@@ -1301,6 +1304,115 @@ async function lateShortcutStartWindow(
     stoppedAt: new Date(Math.min(...bounds)),
     interruptedEntryIds: covering.rows.map((row) => row.id),
   };
+}
+
+/**
+ * The audit action recorded when a person moves a block's end through an edit. Only an end still equal
+ * to the one recorded counts: one a later Stop or Start has since moved is no longer the person's.
+ * `user_edited_at` can't tell this apart, since a saved title, activity or tags sets it too (Codex r3 on
+ * #531).
+ */
+const PERSON_SET_END_ACTION = "time_entry.end_set";
+/** The audit action recorded by every other person edit, so the edit is never mistaken for a legacy one. */
+const PERSON_EDIT_ACTION = "time_entry.edited";
+/**
+ * An edit made before edits were recorded (Codex r4 on #531): `user_edited_at` is set but no recorded
+ * edit explains it. Every edit path that sets `user_edited_at` also writes one of the actions above in
+ * the same transaction with `created_at = user_edited_at`, so only an edit made by earlier code (or one
+ * recorded by a path that forgot to) reads as legacy, and its end is kept as before this change. This
+ * needs no backfill and no deploy-time cutoff: it holds whenever each database gets the new code.
+ */
+const LEGACY_PERSON_EDIT_SQL = `(te.user_edited_at is not null and not exists (
+  select 1 from audit_log a
+  where a.workspace_id = te.workspace_id and a.entity_type = 'time_entry' and a.entity_id = te.id
+    and a.action in ('${PERSON_SET_END_ACTION}', '${PERSON_EDIT_ACTION}')
+    and a.created_at >= te.user_edited_at
+))`;
+const PERSON_SET_END_SQL = `(exists (
+  select 1 from audit_log a
+  where a.workspace_id = te.workspace_id and a.entity_type = 'time_entry' and a.entity_id = te.id
+    and a.action = '${PERSON_SET_END_ACTION}'
+    and (a.metadata->>'stoppedAt')::timestamptz = te.stopped_at
+) or ${LEGACY_PERSON_EDIT_SQL})`;
+
+async function stopEntryAt(
+  client: pg.PoolClient,
+  event: { occurredAt: string | Date; workspaceId: string; userId: string },
+  targetEntryId: string
+) {
+  // Lock first, read provenance after (Codex r4 on #531). Under READ COMMITTED a statement that waits for
+  // the row lock returns the row as the blocker committed it, but its subqueries keep the snapshot taken
+  // before the wait, so they would miss the audit row that a concurrent end edit inserted.
+  const target = await client.query<{ startedAt: string | Date; stoppedAt: string | Date | null; health: boolean }>(
+    `select te.started_at as "startedAt", te.stopped_at as "stoppedAt",
+            te.source in ('health_sleep', 'health_workout') as "health"
+     from time_entries te
+     where te.workspace_id = $1 and te.user_id = $2 and te.id = $3
+     for update of te`,
+    [event.workspaceId, event.userId, targetEntryId]
+  );
+  const block = target.rows[0];
+  if (!block) return { rows: [] as Array<{ id: string }> };
+  const startedMs = new Date(block.startedAt).getTime();
+  const stopMs = new Date(event.occurredAt).getTime();
+  if (block.stoppedAt === null) {
+    if (startedMs >= stopMs) throw new TimerStopBeforeStartError();
+  } else {
+    // A block that already ended later than its own Stop, at an end no person chose (a later Start
+    // replaced it, a late Start was placed or bounded, or another device stopped it later), ends where
+    // this Stop ran: the phone queued it first (PRD D20; Codex r1–r4 on #531, stability audit
+    // iphone-timer-sync-2). An end a person set, a Health entry, or an earlier end stays; a saved title,
+    // activity or tags is not an end a person chose. The facts come from the locked row itself, so a
+    // concurrent replacement can't hide them.
+    const laterEnd = !block.health && new Date(block.stoppedAt).getTime() > stopMs && startedMs < stopMs;
+    if (!laterEnd) return { rows: [] as Array<{ id: string }> };
+    // A fresh statement, so it sees every edit committed before this transaction got the lock.
+    const provenance = await client.query<{ personSetEnd: boolean }>(
+      `select ${PERSON_SET_END_SQL} as "personSetEnd"
+       from time_entries te
+       where te.workspace_id = $1 and te.user_id = $2 and te.id = $3`,
+      [event.workspaceId, event.userId, targetEntryId]
+    );
+    if (provenance.rows[0]?.personSetEnd !== false) return { rows: [] as Array<{ id: string }> };
+  }
+  return client.query<{ id: string }>(
+    `update time_entries
+     set stopped_at = $1, updated_at = now()
+     where workspace_id = $2
+       and user_id = $3
+       and id = $4
+     returning id`,
+    [event.occurredAt, event.workspaceId, event.userId, targetEntryId]
+  );
+}
+
+/**
+ * The unscoped Stop: the newest running block, locked before its start is checked so a concurrent start
+ * edit can't move it past the Stop between the check and the update (Codex r1 on #531).
+ */
+async function stopCurrentTimerAt(
+  client: pg.PoolClient,
+  event: { occurredAt: string | Date; workspaceId: string; userId: string }
+) {
+  const current = await client.query<{ id: string; startedAt: string | Date }>(
+    `select id, started_at as "startedAt" from time_entries
+     where workspace_id = $1 and user_id = $2 and stopped_at is null
+     order by started_at desc
+     limit 1
+     for update`,
+    [event.workspaceId, event.userId]
+  );
+  const running = current.rows[0];
+  if (!running) return { rows: [] as Array<{ id: string }> };
+  if (new Date(running.startedAt).getTime() >= new Date(event.occurredAt).getTime()) {
+    throw new TimerStopBeforeStartError();
+  }
+  return client.query<{ id: string }>(
+    `update time_entries set stopped_at = $1, updated_at = now()
+     where workspace_id = $2 and user_id = $3 and id = $4 and stopped_at is null
+     returning id`,
+    [event.occurredAt, event.workspaceId, event.userId, running.id]
+  );
 }
 
 async function closeActiveTimersForReplacement(
@@ -2320,18 +2432,19 @@ export async function updateTimeEntry(
 
   try {
     await client.query("begin");
+    // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
+    // snapshot, so the reads below (after any concurrent save has committed and released the lock)
+    // see that save's description, category, tags, times and recorded edits. Reading them in the
+    // locking statement would pair the updated row with older related rows (Codex r1 on #387, r4 on
+    // #531).
+    const locked = await client.query(
+      `select id from time_entries
+       where id = $1 and workspace_id = $2 and user_id = $3
+       for update`,
+      [id, session.workspaceId, session.userId]
+    );
+    if (!locked.rows[0]) throw new TimeEntryNotFoundError();
     if (input.expectedDetails) {
-      // Lock the row in its own statement first. Under READ COMMITTED each statement takes a new
-      // snapshot, so the read below (after any concurrent save has committed and released the
-      // lock) sees that save's description, category and tags. Reading tags in the locking
-      // statement would pair the updated row with its pre-change tags (Codex r1 on #387).
-      const locked = await client.query(
-        `select id from time_entries
-         where id = $1 and workspace_id = $2 and user_id = $3
-         for update`,
-        [id, session.workspaceId, session.userId]
-      );
-      if (!locked.rows[0]) throw new TimeEntryNotFoundError();
       const stored = await client.query<{
         categoryId: string | null;
         description: string | null;
@@ -2353,19 +2466,25 @@ export async function updateTimeEntry(
       if (!current) throw new TimeEntryNotFoundError();
       if (detailsChangedSince(current, input.expectedDetails)) throw new TimeEntryConflictError();
     }
+    // Clients resend unchanged times with a details save, so only a different end is one a person set.
+    // Postgres decides "different" against the stored value at its own (microsecond) precision, so a
+    // sub-millisecond change still counts (Codex r4 on #531).
+    const existing = await client.query<{
+      startedAt: string | Date;
+      stoppedAt: string | Date | null;
+      endChanged: boolean;
+      legacyPersonSetEnd: boolean;
+    }>(
+      `select started_at as "startedAt", stopped_at as "stoppedAt",
+              ($4::boolean and $5::timestamptz is not null and $5::timestamptz is distinct from te.stopped_at) as "endChanged",
+              (te.stopped_at is not null and ${LEGACY_PERSON_EDIT_SQL}) as "legacyPersonSetEnd"
+       from time_entries te
+       where te.id = $1 and te.workspace_id = $2 and te.user_id = $3`,
+      [id, session.workspaceId, session.userId, hasStoppedAt, hasStoppedAt ? input.stoppedAt ?? null : null]
+    );
+    const current = existing.rows[0];
+    if (!current) throw new TimeEntryNotFoundError();
     if (hasStartedAt || hasStoppedAt) {
-      const existing = await client.query<{
-        startedAt: string | Date;
-        stoppedAt: string | Date | null;
-      }>(
-        `select started_at as "startedAt", stopped_at as "stoppedAt"
-         from time_entries
-         where id = $1 and workspace_id = $2 and user_id = $3
-         for update`,
-        [id, session.workspaceId, session.userId]
-      );
-      const current = existing.rows[0];
-      if (!current) throw new TimeEntryNotFoundError();
       validateResolvedTimeEntryWindow({
         startedAt: hasStartedAt ? input.startedAt : current.startedAt,
         stoppedAt: hasStoppedAt ? input.stoppedAt ?? null : current.stoppedAt
@@ -2403,6 +2522,10 @@ export async function updateTimeEntry(
       ]
     );
     if (!result.rows[0]) throw new TimeEntryNotFoundError();
+    // Every edit is recorded so an earlier queued Stop never pulls back an end a person chose, and a
+    // details edit is never read as a legacy one (see stopEntryAt). An end edited before edits were
+    // recorded keeps its protection through this edit too (Codex r4 on #531).
+    await recordTimeEntryEdits(client, [id], session, current.endChanged || current.legacyPersonSetEnd ? [id] : []);
     if (hasTagNames) {
       await syncTimeEntryTags(client, id, input.tagNames ?? [], session);
     }
@@ -2414,6 +2537,30 @@ export async function updateTimeEntry(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Records a person's edit of these blocks in the same transaction as the edit: `time_entry.end_set` with
+ * the block's end for the blocks in `endSetIds` (only an ended block), else `time_entry.edited`.
+ * `created_at` is the block's `user_edited_at`, which the edit has just set.
+ */
+async function recordTimeEntryEdits(
+  client: pg.PoolClient,
+  ids: string[],
+  session: RequestSession,
+  endSetIds: string[]
+) {
+  await client.query(
+    `insert into audit_log (workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+     select workspace_id, user_id,
+            case when id = any($4::uuid[]) and stopped_at is not null then '${PERSON_SET_END_ACTION}' else '${PERSON_EDIT_ACTION}' end,
+            'time_entry', id,
+            case when id = any($4::uuid[]) and stopped_at is not null then jsonb_build_object('stoppedAt', stopped_at) else '{}'::jsonb end,
+            user_edited_at
+     from time_entries
+     where id = any($1::uuid[]) and workspace_id = $2 and user_id = $3 and user_edited_at is not null`,
+    [ids, session.workspaceId, session.userId, endSetIds]
+  );
 }
 
 export class TimeEntryNotFoundError extends Error {
@@ -2539,6 +2686,14 @@ export async function updateTimeEntryDescriptions(
       throw new TimeEntryValidationError("Grouped descriptions can only update completed blocks.");
     }
 
+    // Read after the lock (fresh snapshot): an end edited before edits were recorded keeps its
+    // protection through this description save (Codex r4 on #531).
+    const legacy = await client.query<{ id: string }>(
+      `select te.id from time_entries te
+       where te.id = any($1::uuid[]) and te.workspace_id = $2 and te.user_id = $3 and ${LEGACY_PERSON_EDIT_SQL}`,
+      [uniqueIds, session.workspaceId, session.userId]
+    );
+
     const updated = await client.query<{ id: string }>(
       `update time_entries
        set description = $2,
@@ -2549,6 +2704,8 @@ export async function updateTimeEntryDescriptions(
       [uniqueIds, description, session.workspaceId, session.userId]
     );
     if (updated.rows.length !== uniqueIds.length) throw new TimeEntryNotFoundError();
+    // A description is not an end a person chose; recorded so it never reads as a legacy edit.
+    await recordTimeEntryEdits(client, uniqueIds, session, legacy.rows.map((row) => row.id));
     await client.query("commit");
     return { ids: updated.rows.map((row) => row.id), updatedCount: updated.rows.length };
   } catch (error) {

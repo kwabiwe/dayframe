@@ -4,7 +4,7 @@ import { placeDisplayNameSql } from "./place-display";
 const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("./db", () => ({ query: mocks.query }));
 
-import { buildJsonExport, buildTimeEntriesCsv } from "./export-service";
+import { buildJsonExport, buildTimeEntriesCsv, buildWorkspaceExport } from "./export-service";
 
 const session = {
   authMode: "provider" as const,
@@ -32,5 +32,16 @@ describe("time-entry exports", () => {
     expect(sql).toContain(`coalesce(${placeDisplayNameSql("pl")}, te.place_label) as place_name`);
     expect(sql).toContain("end as place_kind");
     expect(sql).toContain("te.workspace_id = $1 and te.user_id = $2");
+  });
+
+  it("includes which blocks a person edited and the end they set, scoped to the session", async () => {
+    mocks.query.mockResolvedValue({ rows: [] });
+    const exported = await buildWorkspaceExport(session);
+    expect(exported.timeEntryEdits).toEqual([]);
+    const call = mocks.query.mock.calls.find(([sql]) => String(sql).includes("from audit_log"));
+    const sql = String(call?.[0]);
+    expect(sql).toContain("select entity_id as time_entry_id, action, metadata->>'stoppedAt' as stopped_at, created_at");
+    expect(sql).toContain("action in ('time_entry.end_set', 'time_entry.edited')");
+    expect(call?.[1]).toEqual([session.workspaceId, session.userId]);
   });
 });
