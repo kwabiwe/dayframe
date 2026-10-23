@@ -62,13 +62,15 @@ export type EvidenceRowOptions = {
 
 export function parseEvidenceRows(text: string, projection: Projection, options: EvidenceRowOptions): LocationEvidence[] {
   const out: LocationEvidence[] = [];
-  for (const line of lines(text)) {
+  for (const [index, line] of lines(text).entries()) {
     const [n, kind, occurredAt, endedAt, receivedAt, x, y, accuracy, speed, course, place, simulated, activity, confidence,
       continuation, open, callbackAt, authorization, accuracyAuthorization, accepted, timeZone, geofence, altitude] = line.split("|");
     if (accepted !== "true") continue;
+    // Errors name the line, never a value from the row.
+    if (!/^\d+$/.test(n)) throw new Error(`Evidence line ${index + 1} has an invalid row number.`);
     // Times go into the engine's segments verbatim: only strict ISO instants, never free text.
     for (const time of [occurredAt, receivedAt, ...(endedAt ? [endedAt] : []), ...(callbackAt ? [callbackAt] : [])]) {
-      if (!isIsoInstant(time)) throw new Error(`Evidence row ${n} has an invalid timestamp.`);
+      if (!isIsoInstant(time)) throw new Error(`Evidence line ${index + 1} has an invalid timestamp.`);
     }
     if (options.dropMotion && kind === "motion_activity") continue;
     if (options.receivedUntil !== undefined && Date.parse(receivedAt) > options.receivedUntil) continue;
