@@ -14,7 +14,9 @@ vi.mock("next/link", () => ({
 vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch: mocks.fetch }));
 vi.mock("@/lib/session-change", () => ({
   beforeSessionChange: mocks.beforeSessionChange,
-  onBeforeSessionChange: () => () => undefined
+  onBeforeSessionChange: () => () => undefined,
+  onSessionChangeFailed: () => () => undefined,
+  sessionChangeRequest: (send: () => Promise<Response>) => send()
 }));
 
 const { AppShellRuntimeProvider } = await import("@/components/AppShellRuntime");

@@ -14,6 +14,25 @@ export function onBeforeSessionChange(flusher: Flusher) {
   };
 }
 
+// The change's own request failed, so this session goes on: holders that fenced it re-open.
+const failureListeners = new Set<() => void>();
+export function onSessionChangeFailed(listener: () => void) {
+  failureListeners.add(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
+}
+
+/** Sends the session-changing request; a failure (an error status or no answer) re-opens this session. */
+export async function sessionChangeRequest(send: () => Promise<Response>) {
+  const response = await send().catch((error: unknown) => {
+    failureListeners.forEach((listener) => listener());
+    throw error;
+  });
+  if (!response.ok) failureListeners.forEach((listener) => listener());
+  return response;
+}
+
 export async function beforeSessionChange(timeoutMs = SESSION_CHANGE_FLUSH_TIMEOUT_MS) {
   if (!flushers.size) return;
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/Primitives";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { OPEN_SHORTCUTS_EVENT } from "@/lib/shell-nav";
-import { beforeSessionChange } from "@/lib/session-change";
+import { beforeSessionChange, sessionChangeRequest } from "@/lib/session-change";
 
 type SettingsAuthMode = "dev" | "local" | "provider" | "token";
 
@@ -127,11 +127,11 @@ export function AccountSettings({
     void run("create-workspace", async () => {
       // The new workspace becomes the current one: held Review decisions save first.
       await beforeSessionChange();
-      const response = await clientFetch("/api/workspaces", {
+      const response = await sessionChangeRequest(() => clientFetch("/api/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: trimmedName })
-      });
+      }));
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to create a workspace."));
       setNewWorkspaceName("");
       setMessage("Workspace created and selected.");
@@ -145,11 +145,11 @@ export function AccountSettings({
     void run("switch-workspace", async () => {
       // Held Review decisions are saved under the workspace they were made in.
       await beforeSessionChange();
-      const response = await clientFetch("/api/workspace/switch", {
+      const response = await sessionChangeRequest(() => clientFetch("/api/workspace/switch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspaceId })
-      });
+      }));
       if (!response.ok) throw new Error(await safeResponseMessage(response, "Unable to switch workspace."));
       setWorkspaceName(nextWorkspaceName);
       setMessage(`Switched to ${nextWorkspaceName}.`);

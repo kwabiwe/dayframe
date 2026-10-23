@@ -10,7 +10,7 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { onBeforeSessionChange } from "@/lib/session-change";
+import { onBeforeSessionChange, onSessionChangeFailed } from "@/lib/session-change";
 import {
   applyPendingTimerDetails,
   clearPendingTimerDetails,
@@ -586,10 +586,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   // before it (a queued Start's save of the block it replaces) still goes, and so does the
   // cutoff's own save (stability audit WEB-UI-8; Codex r1 #3, r2 on #557). Each write carries
   // #539's store generation from when its text was captured.
+  // A change whose request failed re-opens the session: its generations count as its own again.
   const sessionChangeSaveRef = useRef(false);
-  const sessionEnded = useCallback((snapshot: BootstrapData | null, captured: number) => (
-    !sessionChangeSaveRef.current && pendingOwner(snapshot).generation !== captured
-  ), [pendingOwner]);
+  const reopenedGenerationsRef = useRef(new Set<number>());
+  const sessionEnded = useCallback((snapshot: BootstrapData | null, captured: number) => {
+    const own = pendingOwner(snapshot).generation;
+    return !sessionChangeSaveRef.current && own !== captured
+      && !(reopenedGenerationsRef.current.has(own) && reopenedGenerationsRef.current.has(captured));
+  }, [pendingOwner]);
 
   // Sends one description PATCH. It is keepalive (it outlives the page if the tab closes or
   // reloads) whenever it fits the browser's keepalive budget beside any other keepalive request
@@ -1153,10 +1157,17 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       endPendingTimerDetailsSession();
       await saveDetailsBeforeSessionChange();
     });
+    const unregisterFailed = onSessionChangeFailed(() => {
+      const session = pendingStoreSessionRef.current;
+      if (!session) return;
+      reopenedGenerationsRef.current.add(session.generation).add(pendingTimerDetailsGeneration());
+      session.generation = pendingTimerDetailsGeneration();
+    });
     return () => {
       window.removeEventListener("pageshow", onShow);
       document.removeEventListener("visibilitychange", onShow);
       unregister();
+      unregisterFailed();
     };
   }, [pendingOwner, restorePendingDetails, saveDetailsBeforeSessionChange]);
 

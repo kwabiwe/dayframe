@@ -1370,6 +1370,25 @@ describe("a workspace switch saves the typed description first (stability audit 
     expect(descriptions()).toEqual(["Fix bug more"]);
   });
 
+  it.each([
+    ["an error status", () => Promise.resolve(new Response("{}", { status: 500 }))],
+    ["no answer", () => Promise.reject(new TypeError("Failed to fetch"))]
+  ])("Codex r3: after a switch that fails with %s, the same workspace saves and stops with new text", async (_, send) => {
+    const { beforeSessionChange, sessionChangeRequest } = await import("@/lib/session-change");
+    const { input, stop } = await renderShell(entry({ description: "Plan" }));
+    await act(async () => {
+      await beforeSessionChange();
+      await sessionChangeRequest(send).catch(() => undefined);
+    });
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.clear(input);
+    await user.keyboard("A whole new description");
+    await waitFor(() => expect(server.entry?.description).toBe("A whole new description"), { timeout: 2_000 });
+    await act(async () => { await stop(); });
+    expect(server.completed).toMatchObject({ id: "active", description: "A whole new description" });
+  });
+
   it("Codex r2: a Start queued before the switch still saves the block it replaces with its final text", async () => {
     const { beforeSessionChange } = await import("@/lib/session-change");
     const shell = await renderShell(entry({ description: "Plan" }));
