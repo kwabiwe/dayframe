@@ -110,6 +110,7 @@ export function createHealthWakeRunner(deps: HealthWakeDependencies): HealthWake
           const options: HealthCaptureOptions = {
             observerChange: true,
             fresh: true,
+            background: true,
             signal: pass.captureSignal,
             maxPages: HEALTH_WAKE_MAX_PAGES
           };
