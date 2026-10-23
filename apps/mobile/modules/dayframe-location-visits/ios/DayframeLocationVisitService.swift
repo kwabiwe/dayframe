@@ -3,199 +3,35 @@ import CryptoKit
 import Foundation
 import UIKit
 
-struct DayframeLocationSignal: Codable {
-  let id: String
-  let kind: String
-  let occurredAt: String
-  let endedAt: String?
-  let latitude: Double?
-  let longitude: Double?
-  let horizontalAccuracyMeters: Double?
-  let metadata: [String: String]
-  /// Significant-change fixes only. Optional so earlier queued records still decode.
-  var speedMetersPerSecond: Double? = nil
-
-  var dictionary: [String: Any] {
-    var result: [String: Any] = [
-      "id": id,
-      "kind": kind,
-      "occurredAt": occurredAt,
-      "metadata": metadata
-    ]
-    result["endedAt"] = endedAt ?? NSNull()
-    result["latitude"] = latitude ?? NSNull()
-    result["longitude"] = longitude ?? NSNull()
-    result["horizontalAccuracyMeters"] = horizontalAccuracyMeters ?? NSNull()
-    result["speedMetersPerSecond"] = speedMetersPerSecond ?? NSNull()
-    return result
-  }
-}
-
-final class DayframeLocationSignalStore: @unchecked Sendable {
-  static let shared = DayframeLocationSignalStore()
-
-  private let queue = DispatchQueue(label: "com.dayframe.location-signals")
-  private let encoder = JSONEncoder()
-  private let decoder = JSONDecoder()
-  private let maximumCount: Int?
-  private let retentionSeconds: TimeInterval
-  private let now: () -> Date
-  private let fileURL: URL?
-  private var storageErrorCode: String?
-
-  init(
-    fileURL: URL? = nil,
-    maximumCount: Int? = nil,
-    retentionSeconds: TimeInterval = 7 * 24 * 60 * 60,
-    now: @escaping () -> Date = Date.init
-  ) {
-    self.maximumCount = maximumCount
-    self.retentionSeconds = retentionSeconds
-    self.now = now
-    if let fileURL {
-      self.fileURL = fileURL
-      return
-    }
-    do {
-      let manager = FileManager.default
-      let support = try manager.url(
-        for: .applicationSupportDirectory,
-        in: .userDomainMask,
-        appropriateFor: nil,
-        create: true
-      )
-      let directory = support.appendingPathComponent("DayframeLocation", isDirectory: true)
-      try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-      try (directory as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
-      self.fileURL = directory.appendingPathComponent("signals.json")
-    } catch {
-      self.fileURL = nil
-      self.storageErrorCode = "storage_directory_unavailable"
-    }
-  }
-
-  func append(_ signal: DayframeLocationSignal) {
-    queue.sync {
-      var signals = loadUnlocked()
-      guard !signals.contains(where: { $0.id == signal.id }) else { return }
-      signals.append(signal)
-      persistUnlocked(prune(signals))
-    }
-  }
-
-  func read(limit: Int) -> [DayframeLocationSignal] {
-    queue.sync { Array(loadAndPersistPrunedUnlocked().prefix(limit)) }
-  }
-
-  func count() -> Int {
-    queue.sync { loadAndPersistPrunedUnlocked().count }
-  }
-
-  func lastErrorCode() -> String? {
-    queue.sync { storageErrorCode }
-  }
-
-  @discardableResult
-  func remove(ids: Set<String>) -> Int {
-    queue.sync {
-      let existing = prune(loadUnlocked())
-      let retained = existing.filter { !ids.contains($0.id) }
-      persistUnlocked(retained)
-      return existing.count - retained.count
-    }
-  }
-
-  @discardableResult
-  func removeAll() -> Int {
-    queue.sync {
-      let count = loadUnlocked().count
-      persistUnlocked([])
-      return count
-    }
-  }
-
-  private func loadUnlocked() -> [DayframeLocationSignal] {
-    guard let fileURL else { return [] }
-    guard let data = try? Data(contentsOf: fileURL) else { return [] }
-    guard let text = String(data: data, encoding: .utf8) else { return [] }
-    return text.split(separator: "\n").compactMap { line in
-      try? decoder.decode(DayframeLocationSignal.self, from: Data(line.utf8))
-    }
-  }
-
-  private func persistUnlocked(_ signals: [DayframeLocationSignal]) {
-    guard let fileURL else { return }
-    let records = signals.compactMap { signal in
-      (try? encoder.encode(signal)).flatMap { String(data: $0, encoding: .utf8) }
-    }
-    guard let data = records.joined(separator: "\n").data(using: .utf8) else { return }
-    do {
-      try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-      try (fileURL as NSURL).setResourceValue(true, forKey: .isExcludedFromBackupKey)
-      storageErrorCode = nil
-    } catch {
-      storageErrorCode = "storage_write_failed"
-    }
-  }
-
-  private func loadAndPersistPrunedUnlocked() -> [DayframeLocationSignal] {
-    let existing = loadUnlocked()
-    let retained = prune(existing)
-    if retained.count != existing.count {
-      persistUnlocked(retained)
-    }
-    return retained
-  }
-
-  private func prune(_ signals: [DayframeLocationSignal]) -> [DayframeLocationSignal] {
-    let cutoff = now().addingTimeInterval(-retentionSeconds)
-    let retained = signals.filter {
-      DayframeSignalTime.parse($0.occurredAt).map { $0 >= cutoff } ?? false
-    }
-    guard let maximumCount else { return retained }
-    return Array(retained.suffix(maximumCount))
-  }
-}
-
-/// Signal timestamps. Visits keep whole seconds (their two callbacks pair on the
-/// exact arrival text); significant-change fixes and callback times keep milliseconds.
-enum DayframeSignalTime {
-  // Reused because retention parses every journal record. ISO8601DateFormatter
-  // is thread-safe, and these are never mutated after creation.
-  nonisolated(unsafe) private static let wholeSeconds = ISO8601DateFormatter()
-  nonisolated(unsafe) private static let fractionalSeconds: ISO8601DateFormatter = {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter
-  }()
-
-  static func seconds(_ date: Date) -> String {
-    wholeSeconds.string(from: date)
-  }
-
-  static func milliseconds(_ date: Date) -> String {
-    fractionalSeconds.string(from: date)
-  }
-
-  static func parse(_ text: String) -> Date? {
-    fractionalSeconds.date(from: text) ?? wholeSeconds.date(from: text)
-  }
-}
-
 @MainActor
 public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLocationManagerDelegate {
   public static let shared = DayframeLocationVisitService()
 
   private static let enabledKey = "dayframe.locationVisits.enabled.v1"
+  /// `CLLocationManager.locationServicesEnabled()` blocks on locationd, so it runs here, never on main.
+  nonisolated private static let locationStateQueue = DispatchQueue(label: "com.dayframe.location-state", qos: .utility)
   private var manager: CLLocationManager?
   private var restoredForLocationRelaunch = false
+  // Location state is cached from `locationManagerDidChangeAuthorization` on the long-lived manager
+  // (iOS calls it when the manager is created and on every change), so `status()` never makes a
+  // synchronous locationd call on the main thread (TestFlight 125 report; stability audit
+  // 22 Oct 2026, finding 11).
+  private var authorizationStatus: CLAuthorizationStatus?
+  private var accuracyAuthorization: CLAccuracyAuthorization?
+  private var locationServicesEnabled: Bool?
+  private var locationServicesGeneration = 0
+  /// Uptime of the last background ask. With no manager yet, no callback reports a system-wide
+  /// Location Services switch, so `status()` asks again at most once a minute.
+  private var locationServicesAskedAt: TimeInterval?
+  private static let locationServicesRefreshSeconds: TimeInterval = 60
+  private lazy var significantChangesAvailable = CLLocationManager.significantLocationChangeMonitoringAvailable()
 
   public func startMonitoring(restoredForRelaunch: Bool = false) {
     UserDefaults.standard.set(true, forKey: Self.enabledKey)
     restoredForLocationRelaunch = restoredForLocationRelaunch || restoredForRelaunch
     let manager = configuredManager()
     manager.startMonitoringVisits()
-    if CLLocationManager.significantLocationChangeMonitoringAvailable() {
+    if significantChangesAvailable {
       manager.startMonitoringSignificantLocationChanges()
     }
   }
@@ -215,20 +51,44 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
     enabled
   }
 
+  /// Main-actor status from cached state only. The journal's pending count and storage error are
+  /// added by the module off the main thread (`DayframeLocationVisitsModule.status()`).
   public func status() -> [String: Any] {
     let enabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+    let uptime = ProcessInfo.processInfo.systemUptime
+    if locationServicesAskedAt.map({ uptime - $0 >= Self.locationServicesRefreshSeconds }) ?? true {
+      refreshLocationServicesEnabled()
+    }
     return [
       "enabled": enabled,
-      "authorizationStatus": authorizationName(CLLocationManager().authorizationStatus),
-      "accuracyAuthorization": accuracyName(manager?.accuracyAuthorization),
-      "locationServicesEnabled": CLLocationManager.locationServicesEnabled(),
+      "authorizationStatus": authorizationStatus.map { authorizationName($0) } ?? "unknown",
+      "accuracyAuthorization": accuracyName(accuracyAuthorization),
+      // Until the first background answer: iOS reports every app denied while Location Services are off.
+      "locationServicesEnabled": locationServicesEnabled ?? Self.isAuthorized(authorizationStatus),
       "backgroundRefreshStatus": backgroundRefreshName(UIApplication.shared.backgroundRefreshStatus),
-      "pendingSignalCount": DayframeLocationSignalStore.shared.count(),
       "monitoringVisits": enabled,
-      "monitoringSignificantChanges": enabled && CLLocationManager.significantLocationChangeMonitoringAvailable(),
-      "restoredForLocationRelaunch": restoredForLocationRelaunch,
-      "nativeStoreErrorCode": DayframeLocationSignalStore.shared.lastErrorCode() ?? NSNull()
+      "monitoringSignificantChanges": enabled && significantChangesAvailable,
+      "restoredForLocationRelaunch": restoredForLocationRelaunch
     ]
+  }
+
+  private static func isAuthorized(_ status: CLAuthorizationStatus?) -> Bool {
+    status == .authorizedAlways || status == .authorizedWhenInUse
+  }
+
+  /// Asks off the main thread; only the newest answer is kept.
+  private func refreshLocationServicesEnabled() {
+    locationServicesGeneration += 1
+    locationServicesAskedAt = ProcessInfo.processInfo.systemUptime
+    let generation = locationServicesGeneration
+    Self.locationStateQueue.async {
+      let enabled = CLLocationManager.locationServicesEnabled()
+      Task { @MainActor in
+        let service = DayframeLocationVisitService.shared
+        guard service.locationServicesGeneration == generation else { return }
+        service.locationServicesEnabled = enabled
+      }
+    }
   }
 
   private func configuredManager() -> CLLocationManager {
@@ -269,12 +129,18 @@ public final class DayframeLocationVisitService: NSObject, @preconcurrency CLLoc
   }
 
   public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    let status = manager.authorizationStatus
+    let accuracy = manager.accuracyAuthorization
+    authorizationStatus = status
+    accuracyAuthorization = accuracy
+    // A Location Services switch also arrives here as an authorisation change.
+    refreshLocationServicesEnabled()
     appendSignal(
       kind: "provider_status",
       occurredAt: Date(),
       metadata: [
-        "authorizationStatus": authorizationName(manager.authorizationStatus),
-        "accuracyAuthorization": accuracyName(manager.accuracyAuthorization)
+        "authorizationStatus": authorizationName(status),
+        "accuracyAuthorization": accuracyName(accuracy)
       ]
     )
   }

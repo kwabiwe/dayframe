@@ -246,6 +246,7 @@ jobs:
           npm run check:ios-config
           bash scripts/validate-ios-shared-storage.sh
           bash scripts/validate-ios-diagnostics.sh
+          bash scripts/validate-ios-location-signals.sh
       # Pushes to main never restore the caches, so main always gets a clean build from nothing, and that
       # build seeds them. A pull request restores only caches made for its exact key: changed native code,
       # dependencies or Xcode find none and build clean too.
