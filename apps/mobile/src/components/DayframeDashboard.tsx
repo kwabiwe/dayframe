@@ -758,7 +758,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }
     for (const entryId of deletionCoordinator.current?.current()?.entryIds ?? []) onScreen.add(entryId);
     // Open editors keep the entry they opened with, which may still carry its optimistic ID (Codex r1
-    // on #552); a Save from one restores a pruned mapping anyway (`timerEntryIdReferences.ts`).
+    // on #552).
     for (const entryId of [calendarEditEntryRef.current?.id, activeEditorEntryId.current]) {
       if (entryId?.startsWith(OPTIMISTIC_TIMER_ID_PREFIX)) onScreen.add(entryId);
     }

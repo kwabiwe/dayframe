@@ -71,12 +71,6 @@ import {
 } from "./timerBackgroundExecution";
 import { isExplicitTimerMutationEventType } from "./timerMutationEvents";
 import { withJsTask } from "./jsTasks";
-import {
-  forgetStaleTimerEntryIdNotes,
-  noteTimerEntryIdReference,
-  setTimerEntryIdNoteListener,
-  wasTimerEntryIdNotedRecently
-} from "./timerEntryIdReferences";
 
 const QUEUE_KEY = "dayframe.offlineQueue.v1";
 const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
@@ -88,17 +82,19 @@ const TIMER_ENTRY_ID_CORRELATIONS_KEY = "dayframe.timerEntryIdCorrelations.v1";
  */
 const STORAGE_QUARANTINE_KEY = "dayframe.offlineQueue.quarantine.v1";
 const STORAGE_QUARANTINE_MAX_PER_CONTAINER = 2;
-/** A copy's contents are deleted after 7 days or when the account changes; a metadata note stays. */
+/**
+ * A copy's contents are deleted after 7 days, before logout revokes the session, before another
+ * account's session is installed, and at every launch for any copy the session authority's account
+ * does not own (a copy made signed out survives only the launch that made it). A metadata note stays.
+ */
+const STORAGE_QUARANTINE_LAUNCH = `${Date.now()}:${Math.random().toString(36).slice(2)}`;
 const STORAGE_QUARANTINE_RAW_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 const STORAGE_QUARANTINE_MAX_NOTES = 5;
 let storageQuarantineMutationTail: Promise<void> = Promise.resolve();
 /**
- * Correlation bounds (stability audit 22 Oct 2026, iphone-timer-sync-7). A correlation that queued
- * work, an Edit/Delete, a Stop or the refusal fence still names is always kept, so no durable work is
- * stranded. Otherwise it is kept for a day (in-memory callers may still resolve the optimistic ID),
- * and for at most 30 days while an on-screen block still shows its optimistic ID.
+ * Correlation bound (stability audit 22 Oct 2026, iphone-timer-sync-7): a correlation is removed only
+ * once it is more than 30 days old and nothing names it. See `pruneTimerEntryIdCorrelations`.
  */
-const TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS = 24 * 60 * 60 * 1_000;
 const TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const DEFAULT_PLACE_RADIUS_METERS = 100;
 const DEFAULT_PLACE_PRIORITY = 5;
@@ -819,6 +815,10 @@ export async function logout() {
     const healthExpiryMarker = await import("./healthSignOut")
       .then(({ markSignedOutHealthExpiryPending }) => markSignedOutHealthExpiryPending(logoutOwner ?? null));
     requireCurrent();
+    // Quarantined queue/correlation contents leave with the account, before the session is revoked; a
+    // failed delete fails logout while still signed in (Codex r2 on #552).
+    await purgeStorageQuarantineContents({ removal: "logout" });
+    requireCurrent();
     const token = session.status === "authenticated" ? session.snapshot.token : null;
     await mobileFetch(`${DAYFRAME_API_BASE}/api/auth/logout`, {
       method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : {}
@@ -988,17 +988,7 @@ function enqueueActivityEvents(inputs: readonly ActivityEventDraft[]) {
         break;
       }
     }
-    if (changed && all) {
-      // Noted before the write, so correlation pruning keeps what these events name (Codex r1 on #552).
-      for (const input of inputs.slice(0, acceptedCount)) {
-        for (const value of Object.values(input.rawPayload ?? {})) {
-          if (typeof value === "string" && value.startsWith(OPTIMISTIC_TIMER_ENTRY_ID_PREFIX)) {
-            noteTimerEntryIdReference(value);
-          }
-        }
-      }
-      await writeAllQueue(all);
-    }
+    if (changed && all) await writeAllQueue(all);
     for (const owner of reservationOwners.values()) {
       await reserveTimerBackgroundExecution(
         activityQueueBackgroundExecutionKey(owner),
@@ -1073,12 +1063,16 @@ export async function removeTimerEntryIdCorrelation(
 
 /**
  * Drops the owner's correlations nothing needs any more (stability audit 22 Oct 2026,
- * iphone-timer-sync-7): not named by queued activity, an Edit/Delete, a Stop or the refusal fence,
- * not noted by an admission in the last day, older than a day, and not held on screen
- * (`retainLocalIds`, kept for at most 30 days). A record from before `recordedAt` existed is stamped
- * now on first sight and then follows the same rules. Durable work is only read when some correlation
- * is old enough to go. A removed record that an admission names afterwards is restored
- * (`timerEntryIdReferences.ts`). Returns the local IDs it removed.
+ * iphone-timer-sync-7). Age-only and conservative: a correlation goes only when it is more than 30
+ * days old, no queued activity, Edit/Delete, Stop or refusal-fence record names it, and no open
+ * presentation holds it (`retainLocalIds`). A record from before `recordedAt` existed is stamped now
+ * on first sight, so its 30 days start then. Durable work is read only when some record is old enough,
+ * and read again just before the write, inside the correlation lock.
+ *
+ * Remaining race (accepted): a brand-new command naming an optimistic ID more than 30 days old,
+ * admitted between that final check and the write, would lose its mapping. Today's UI cannot do that:
+ * new commands come from blocks on screen or in an open editor, and those IDs are retained.
+ * Returns the local IDs it removed.
  */
 export async function pruneTimerEntryIdCorrelations(input: {
   owner: MobileAccountOwner;
@@ -1088,8 +1082,6 @@ export async function pruneTimerEntryIdCorrelations(input: {
   const nowMs = (input.now ?? new Date()).getTime();
   void sweepStorageQuarantine().catch(() => undefined);
   return withTimerEntryIdCorrelationMutation(async () => {
-    forgetStaleTimerEntryIdNotes();
-    forgetStalePrunedCorrelations();
     const stored = await readAllTimerEntryIdCorrelations(input.owner, { forWrite: true });
     let stamped = false;
     const records = stored.map((record) => {
@@ -1097,61 +1089,29 @@ export async function pruneTimerEntryIdCorrelations(input: {
       stamped = true;
       return { ...record, recordedAt: new Date(nowMs).toISOString() };
     });
+    const retained = new Set(input.retainLocalIds ?? []);
     const candidates = records.filter((record) =>
       mobileAccountOwnersEqual(record, input.owner) &&
-      timerEntryIdCorrelationAgeMs(record, nowMs) > TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS
+      !retained.has(record.localId) &&
+      timerEntryIdCorrelationAgeMs(record, nowMs) > TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS
     );
-    const referenced = candidates.length > 0
-      ? await timerEntryIdsReferencedByDurableWork(input.owner)
-      : new Set<string>();
-    const retained = new Set(input.retainLocalIds ?? []);
-    const removed = new Map<string, TimerEntryIdCorrelationRecord>();
-    // From here to the write nothing awaits: an admission noted after this check finds its record in
-    // `prunedTimerEntryIdCorrelations` and restores it behind this lock.
-    for (const record of candidates) {
-      if (referenced.has(record.localId) || wasTimerEntryIdNotedRecently(record.localId)) continue;
-      if (
-        retained.has(record.localId) &&
-        timerEntryIdCorrelationAgeMs(record, nowMs) <= TIMER_ENTRY_ID_CORRELATION_MAX_AGE_MS
-      ) continue;
-      removed.set(record.localId, record);
+    let removed = new Set<string>();
+    if (candidates.length > 0) {
+      const referenced = await timerEntryIdsReferencedByDurableWork(input.owner);
+      removed = new Set(candidates.map((record) => record.localId).filter((localId) => !referenced.has(localId)));
+      if (removed.size > 0) {
+        // Checked again as late as possible, so a command admitted during the first scan keeps its mapping.
+        const latest = await timerEntryIdsReferencedByDurableWork(input.owner);
+        for (const localId of latest) removed.delete(localId);
+      }
     }
     if (removed.size === 0 && !stamped) return [];
-    for (const [localId, record] of removed) {
-      prunedTimerEntryIdCorrelations.set(localId, { record, prunedAtMs: Date.now() });
-    }
     await writeAllTimerEntryIdCorrelations(records.filter((record) =>
       !mobileAccountOwnersEqual(record, input.owner) || !removed.has(record.localId)
     ));
-    return [...removed.keys()];
+    return [...removed];
   });
 }
-
-const OPTIMISTIC_TIMER_ENTRY_ID_PREFIX = "optimistic-active-timer:";
-const PRUNED_CORRELATIONS_MAX = 500;
-/** Records removed in the last day, so a late admission naming one can put it back. */
-const prunedTimerEntryIdCorrelations = new Map<string, { record: TimerEntryIdCorrelationRecord; prunedAtMs: number }>();
-
-function forgetStalePrunedCorrelations(nowMs = Date.now()) {
-  for (const [localId, entry] of prunedTimerEntryIdCorrelations) {
-    if (
-      nowMs - entry.prunedAtMs > TIMER_ENTRY_ID_CORRELATION_UNREFERENCED_GRACE_MS ||
-      prunedTimerEntryIdCorrelations.size > PRUNED_CORRELATIONS_MAX
-    ) prunedTimerEntryIdCorrelations.delete(localId);
-  }
-}
-
-setTimerEntryIdNoteListener((localId) => {
-  if (!prunedTimerEntryIdCorrelations.has(localId)) return;
-  void withTimerEntryIdCorrelationMutation(async () => {
-    const entry = prunedTimerEntryIdCorrelations.get(localId);
-    if (!entry) return;
-    prunedTimerEntryIdCorrelations.delete(localId);
-    const records = await readAllTimerEntryIdCorrelations(entry.record, { forWrite: true });
-    if (records.some((record) => mobileAccountOwnersEqual(record, entry.record) && record.localId === localId)) return;
-    await writeAllTimerEntryIdCorrelations([...records, { ...entry.record, recordedAt: new Date().toISOString() }]);
-  }).catch(() => undefined);
-});
 
 function timerEntryIdCorrelationAgeMs(record: TimerEntryIdCorrelationRecord, nowMs: number) {
   const recordedAtMs = record.recordedAt ? Date.parse(record.recordedAt) : Number.NaN;
@@ -3199,14 +3159,16 @@ async function writeAllTimerEntryIdCorrelations(records: TimerEntryIdCorrelation
 }
 
 type StorageQuarantineContainer = "activity_queue" | "timer_entry_id_correlations";
-type StorageQuarantineRemoval = "expired" | "account_changed";
+type StorageQuarantineRemoval = "expired" | "account_changed" | "logout";
 type StorageQuarantineRecord = {
   container: StorageQuarantineContainer;
   quarantinedAt: string;
   reason: string;
   byteLength: number;
-  /** The account active when it was kept: contents never outlive that account's session. */
+  /** The session authority's account when it was kept (null: signed out or undecided). */
   ownerKey: string | null;
+  /** The launch that kept it: a copy without an account lives only for that launch. */
+  launch: string;
   /** Absent once deleted; the record then stays as a note that a copy existed. */
   raw?: string;
   removedAt?: string;
@@ -3233,7 +3195,9 @@ async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
         : null;
       const quarantinedAt = validIsoString(value.quarantinedAt);
       const reason = optionalQueueOwnerText(value.reason);
-      const removal = value.removal === "expired" || value.removal === "account_changed" ? value.removal : undefined;
+      const removal = value.removal === "expired" || value.removal === "account_changed" || value.removal === "logout"
+        ? value.removal
+        : undefined;
       const removedAt = validIsoString(value.removedAt);
       const contents = typeof value.raw === "string" ? value.raw : undefined;
       if (!container || !quarantinedAt || !reason || (contents === undefined && !removal)) return [];
@@ -3243,6 +3207,7 @@ async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
         reason,
         byteLength: typeof value.byteLength === "number" ? value.byteLength : contents?.length ?? 0,
         ownerKey: typeof value.ownerKey === "string" ? value.ownerKey : null,
+        launch: typeof value.launch === "string" ? value.launch : "",
         ...(contents !== undefined ? { raw: contents } : {}),
         ...(removedAt ? { removedAt } : {}),
         ...(removal ? { removal } : {})
@@ -3254,20 +3219,35 @@ async function readStorageQuarantine(): Promise<StorageQuarantineRecord[]> {
 }
 
 /**
- * Deletes contents older than 7 days or kept under another account (or none: signed out), keeping a
- * metadata note, and bounds the copies and notes. Call under `withStorageQuarantineMutation`.
+ * The account whose copies may keep their contents, from the session authority (as the Health journal
+ * expiry decides, #549): null when signed out, undefined while undecided (a session change in flight,
+ * an unreadable Keychain or an unbound legacy session), when only expiry applies.
  */
+async function storageQuarantineKeeper(): Promise<{ ownerKey: string | null } | undefined> {
+  let session: Awaited<ReturnType<typeof readAuthenticatedSessionSnapshot>>;
+  try {
+    session = await readAuthenticatedSessionSnapshot();
+  } catch {
+    return undefined;
+  }
+  if (session.status === "signed_out") return { ownerKey: null };
+  if (session.status !== "authenticated" || !session.snapshot.owner) return undefined;
+  return { ownerKey: mobileAccountKey(session.snapshot.owner) };
+}
+
+type StorageQuarantineRule = (record: StorageQuarantineRecord) => StorageQuarantineRemoval | null;
+
+/** Deletes contents the rule (or the 7-day limit) removes, keeping a metadata note; bounds copies and notes. */
 function retainStorageQuarantine(
   records: readonly StorageQuarantineRecord[],
-  activeOwnerKey: string | null,
+  rule: StorageQuarantineRule,
   nowMs: number
 ) {
   const swept = records.map((record): StorageQuarantineRecord => {
     if (record.raw === undefined) return record;
-    const removal: StorageQuarantineRemoval | null =
-      nowMs - Date.parse(record.quarantinedAt) > STORAGE_QUARANTINE_RAW_MAX_AGE_MS
-        ? "expired"
-        : record.ownerKey !== activeOwnerKey ? "account_changed" : null;
+    const removal = nowMs - Date.parse(record.quarantinedAt) > STORAGE_QUARANTINE_RAW_MAX_AGE_MS
+      ? "expired"
+      : rule(record);
     if (!removal) return record;
     const { raw: _raw, ...note } = record;
     return { ...note, removedAt: new Date(nowMs).toISOString(), removal };
@@ -3289,9 +3269,29 @@ function retainStorageQuarantine(
   return kept;
 }
 
+/** Keeps contents only where the keeper owns them; a copy without an account only in its own launch. */
+function storageQuarantineKeeperRule(keeper: { ownerKey: string | null } | undefined): StorageQuarantineRule {
+  return (record) => {
+    if (!keeper) return null;
+    if (record.ownerKey === null) return record.launch === STORAGE_QUARANTINE_LAUNCH ? null : "account_changed";
+    return record.ownerKey === keeper.ownerKey ? null : "account_changed";
+  };
+}
+
 async function writeStorageQuarantine(records: readonly StorageQuarantineRecord[]) {
   if (records.length === 0) await AsyncStorage.removeItem(STORAGE_QUARANTINE_KEY);
   else await AsyncStorage.setItem(STORAGE_QUARANTINE_KEY, JSON.stringify(records));
+}
+
+/** The rule is built only when a copy exists, so the common empty case never reads the session. */
+function updateStorageQuarantine(rule: () => Promise<StorageQuarantineRule> | StorageQuarantineRule) {
+  return withStorageQuarantineMutation(async () => {
+    const current = await readStorageQuarantine();
+    if (current.length === 0) return current;
+    const next = retainStorageQuarantine(current, await rule(), Date.now());
+    if (JSON.stringify(next) !== JSON.stringify(current)) await writeStorageQuarantine(next);
+    return next;
+  });
 }
 
 /** Keeps the newest blobs per container; a blob already kept (a second reader of the same text) is not added twice. */
@@ -3301,30 +3301,41 @@ function quarantineStorageContainer(
   reason: string
 ) {
   return withStorageQuarantineMutation(async () => {
-    const owner = await readActiveMobileAccount();
-    const ownerKey = owner ? mobileAccountKey(owner) : null;
+    const keeper = await storageQuarantineKeeper();
     const current = await readStorageQuarantine();
     if (current.some((record) => record.container === container && record.raw === raw)) return;
     await writeStorageQuarantine(retainStorageQuarantine([
       ...current,
-      { container, quarantinedAt: new Date().toISOString(), reason, byteLength: raw.length, ownerKey, raw }
-    ], ownerKey, Date.now()));
+      {
+        container,
+        quarantinedAt: new Date().toISOString(),
+        reason,
+        byteLength: raw.length,
+        ownerKey: keeper?.ownerKey ?? null,
+        launch: STORAGE_QUARANTINE_LAUNCH,
+        raw
+      }
+    ], storageQuarantineKeeperRule(keeper), Date.now()));
   });
 }
 
-/** Applies the retention rules now (account changes, diagnostics, periodic pruning). */
-function sweepStorageQuarantine() {
-  return withStorageQuarantineMutation(async () => {
-    const current = await readStorageQuarantine();
-    if (current.length === 0) return current;
-    const owner = await readActiveMobileAccount();
-    const next = retainStorageQuarantine(current, owner ? mobileAccountKey(owner) : null, Date.now());
-    if (JSON.stringify(next) !== JSON.stringify(current)) await writeStorageQuarantine(next);
-    return next;
-  });
+/** Applies the retention rules for the session authority's account (launch, account changes, diagnostics, pruning). */
+export function sweepStorageQuarantine() {
+  return updateStorageQuarantine(async () => storageQuarantineKeeperRule(await storageQuarantineKeeper()));
 }
 
-/** Logout and account replacement delete quarantined contents (Codex r1 on #552). Runs at load. */
+/**
+ * Deletes every copy's contents (logout, before it revokes the session) or every copy another account
+ * owns (before a new account's session is installed). Awaited: a failure fails that logout or sign-in.
+ */
+function purgeStorageQuarantineContents(input: { keepOwner?: MobileAccountOwner; removal: StorageQuarantineRemoval }) {
+  const keepKey = input.keepOwner ? mobileAccountKey(input.keepOwner) : undefined;
+  return updateStorageQuarantine(() => (record) =>
+    keepKey !== undefined && record.ownerKey === keepKey ? null : input.removal
+  );
+}
+
+/** Account changes re-apply the rules; `app/_layout.tsx` also runs the sweep at every launch. */
 export function watchStorageQuarantineAccountChanges() {
   return subscribeActiveMobileAccount(() => {
     void sweepStorageQuarantine().catch(() => undefined);
@@ -3372,6 +3383,8 @@ async function authenticate(path: string, body: Record<string, unknown>): Promis
     userId: payload.user.id,
     workspaceId: payload.workspace.id
   };
+  // Another account's quarantined contents go before this session is installed (Codex r2 on #552).
+  await purgeStorageQuarantineContents({ keepOwner: owner, removal: "account_changed" });
   await setSessionToken(payload.token, owner);
   await activateMobileAccount(owner);
   await import("./location/runtime")

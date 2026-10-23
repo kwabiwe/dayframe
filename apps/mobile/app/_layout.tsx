@@ -14,12 +14,17 @@ import { MOBILE_MOTION, useReduceMotionPreference } from "@/lib/motion";
 import { createNavigationColors } from "@/lib/navigationTheme";
 import { primeSettingsLastKnown } from "@/lib/settingsLastKnown";
 import { installHealthBackgroundSync } from "@/lib/healthBackgroundSync";
+import { sweepStorageQuarantine } from "@/lib/api";
 import { installTrackingNotice } from "@/lib/trackingNotice";
 import { installStallWatchdog, type NativeDiagnostics } from "@/lib/stallWatchdog";
 
 // Apple Health wakes (new sleep or workouts, or a background app refresh) are handled from module
 // evaluation, so a cold background launch captures and uploads without any screen becoming active.
 installHealthBackgroundSync();
+
+// Quarantined queue/correlation contents another account owns, or kept signed out in an earlier
+// launch, are deleted at every launch, background launches and signed-out ones included (Codex r2 on #552).
+void sweepStorageQuarantine().catch(() => undefined);
 
 // The tracking-stopped notice's armed flag is kept current from module evaluation (headless
 // launches included), because iOS reads it natively while ending Dayframe.

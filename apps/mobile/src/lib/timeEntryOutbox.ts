@@ -16,7 +16,6 @@ import {
   type MobileAccountOwner
 } from "./mobileAccount";
 import type { TimeEntryUpdatePatch } from "./api";
-import { noteTimerEntryIdReference } from "./timerEntryIdReferences";
 import {
   hasTimerBackgroundExecutionReservation,
   reserveTimerBackgroundExecution,
@@ -752,7 +751,6 @@ async function enqueueTimeEntryCommand(input: {
         lease
       });
     }
-    noteTimerEntryIdReference(command.optimisticEntryId);
     const all = await readAllCommands();
     try {
       await writeAllCommands([...all, command]);

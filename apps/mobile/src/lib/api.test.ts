@@ -3740,7 +3740,6 @@ describe("bounded activity queue and correlation storage (stability audit 22 Oct
     __resetMobileAccountForTests();
     await activateMobileAccount(TIMER_STOP_OWNER);
     storeBoundSession("session-token");
-    (await import("./timerEntryIdReferences")).__resetTimerEntryIdNotesForTests();
     // The account reset above drops listeners, including the one the api module adds at load.
     (await import("./api")).watchStorageQuarantineAccountChanges();
   });
@@ -3749,10 +3748,10 @@ describe("bounded activity queue and correlation storage (stability audit 22 Oct
     return vi.mocked(AsyncStorage.setItem).mock.calls.filter(([key]) => key === QUEUE_KEY).length;
   }
 
-  it("keeps correlations that durable work or the screen still names and drops stale ones", async () => {
+  it("keeps correlations that durable work or an open presentation names, and drops only stale ones after 30 days", async () => {
     const api = await import("./api");
     const { enqueueTimeEntryUpdate } = await import("./timeEntryOutbox");
-    const ids = ["queued", "edit", "stop", "screen", "stale", "fresh"].map((name) => `optimistic-active-timer:${name}`);
+    const ids = ["queued", "edit", "stop", "screen", "stale", "other-stale"].map((name) => `optimistic-active-timer:${name}`);
     for (const [index, localId] of ids.entries()) {
       await api.recordTimerEntryIdCorrelation(localId, `80000000-0000-4000-8000-00000000010${index}`, TIMER_STOP_OWNER);
     }
@@ -3762,28 +3761,29 @@ describe("bounded activity queue and correlation storage (stability audit 22 Oct
     await enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[1] }, patch: { description: "Synthetic" } });
     await getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[2] } });
 
-    // Within the grace period nothing goes, and durable work is not even read.
-    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER })).resolves.toEqual([]);
+    // Young mappings stay, referenced or not, and durable work is not even read.
+    const getItem = vi.mocked(AsyncStorage.getItem);
+    getItem.mockClear();
+    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: new Date(Date.now() + 29 * DAY_MS) }))
+      .resolves.toEqual([]);
+    expect(getItem.mock.calls.some(([key]) => key === "dayframe.timerStopOutbox.v1")).toBe(false);
 
-    const twoDaysLater = new Date(Date.now() + 2 * DAY_MS);
-    await expect(api.pruneTimerEntryIdCorrelations({
-      owner: TIMER_STOP_OWNER,
-      retainLocalIds: [ids[3]],
-      now: twoDaysLater
-    })).resolves.toEqual([ids[4], ids[5]]);
-    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 4));
-
-    // On screen keeps one for at most 30 days; durable work keeps it for as long as it waits.
     await expect(api.pruneTimerEntryIdCorrelations({
       owner: TIMER_STOP_OWNER,
       retainLocalIds: [ids[3]],
       now: new Date(Date.now() + 31 * DAY_MS)
-    })).resolves.toEqual([ids[3]]);
-    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 3));
+    })).resolves.toEqual([ids[4], ids[5]]);
+    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 4));
     expect((await api.readTimerEntryIdCorrelations(ACCOUNT_B_OWNER)).size).toBe(1);
+
+    // However old, a mapping durable work names survives every later prune (it is all in storage, so a
+    // restart changes nothing).
+    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: new Date(Date.now() + 400 * DAY_MS) }))
+      .resolves.toEqual([ids[3]]);
+    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual(ids.slice(0, 3));
   });
 
-  it("stamps a legacy correlation on first sight, then applies the normal day and 30-day rules", async () => {
+  it("stamps a legacy correlation on first sight, so its 30 days start then", async () => {
     const api = await import("./api");
     asyncStore.set(CORRELATIONS_KEY, JSON.stringify([
       { ...TIMER_STOP_OWNER, localId: "optimistic-active-timer:legacy", timeEntryId: TIMER_TARGET_A },
@@ -3794,59 +3794,58 @@ describe("bounded activity queue and correlation storage (stability audit 22 Oct
       .every((record) => typeof record.recordedAt === "string")).toBe(true);
     const retainLocalIds = ["optimistic-active-timer:legacy-shown"];
     await expect(api.pruneTimerEntryIdCorrelations({
-      owner: TIMER_STOP_OWNER, retainLocalIds, now: new Date(Date.now() + 2 * DAY_MS)
-    })).resolves.toEqual(["optimistic-active-timer:legacy"]);
+      owner: TIMER_STOP_OWNER, retainLocalIds, now: new Date(Date.now() + 29 * DAY_MS)
+    })).resolves.toEqual([]);
     await expect(api.pruneTimerEntryIdCorrelations({
       owner: TIMER_STOP_OWNER, retainLocalIds, now: new Date(Date.now() + 31 * DAY_MS)
-    })).resolves.toEqual(["optimistic-active-timer:legacy-shown"]);
+    })).resolves.toEqual(["optimistic-active-timer:legacy"]);
   });
 
-  it("never strands a Stop or Edit admitted while a prune scans, writes, or after it removed the mapping", async () => {
+  it("keeps the mapping of a Stop admitted while the prune scans, and never touches young or referenced ones whatever the timing", async () => {
     const api = await import("./api");
-    const { enqueueTimeEntryUpdate } = await import("./timeEntryOutbox");
-    const later = new Date(Date.now() + 2 * DAY_MS);
-    const ids = ["during-scan", "during-write", "after"].map((name) => `optimistic-active-timer:${name}`);
-    for (const [index, localId] of ids.entries()) {
-      await api.recordTimerEntryIdCorrelation(localId, `entry-${index}`, TIMER_STOP_OWNER);
-    }
-    // 1. The Stop is written after the prune read the Stop outbox, while it still reads the Edit outbox.
-    const scanGate = deferred<void>();
+    const old = new Date(Date.now() + 31 * DAY_MS);
+    await api.recordTimerEntryIdCorrelation("optimistic-active-timer:stop-during-scan", "entry-0", TIMER_STOP_OWNER);
+    // The Stop is written after the first scan read the Stop outbox; the final check finds it.
+    const gate = deferred<void>();
     const originalGet = vi.mocked(AsyncStorage.getItem).getMockImplementation()!;
+    let edits = 0;
     vi.mocked(AsyncStorage.getItem).mockImplementation(async (key: string) => {
-      if (key === "dayframe.timeEntryOutbox.v1") await scanGate.promise;
+      if (key === "dayframe.timeEntryOutbox.v1" && ++edits === 1) await gate.promise;
       return originalGet(key);
     });
     vi.mocked(AsyncStorage.getItem).mockClear();
-    const firstPrune = api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, retainLocalIds: [ids[1]], now: later });
+    const prune = api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: old });
     await vi.waitFor(() => expect(vi.mocked(AsyncStorage.getItem).mock.calls
       .some(([key]) => key === "dayframe.timerStopOutbox.v1")).toBe(true));
-    await getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[0] } });
-    scanGate.resolve();
+    await getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-active-timer:stop-during-scan" } });
+    gate.resolve();
+    await expect(prune).resolves.toEqual([]);
     vi.mocked(AsyncStorage.getItem).mockImplementation(originalGet);
-    expect(await firstPrune).toEqual([ids[2]]);
+    expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).get("optimistic-active-timer:stop-during-scan")).toBe("entry-0");
 
-    // 2. The Stop is written while the prune's correlation write is in flight.
-    const writeGate = deferred<void>();
+    // A young mapping stays even with nothing naming it and a Stop arriving during the write.
+    await api.recordTimerEntryIdCorrelation("optimistic-active-timer:young", "entry-1", TIMER_STOP_OWNER);
+    const write = deferred<void>();
     const originalSet = vi.mocked(AsyncStorage.setItem).getMockImplementation()!;
-    vi.mocked(AsyncStorage.setItem).mockClear();
     vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async (key: string, value: string) => {
-      await writeGate.promise;
+      await write.promise;
       return originalSet(key, value);
     });
-    const secondPrune = api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: new Date(Date.now() + 3 * DAY_MS) });
-    await vi.waitFor(() => expect(vi.mocked(AsyncStorage.setItem).mock.calls
-      .some(([key]) => key === CORRELATIONS_KEY)).toBe(true));
-    const stopWrite = getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[1] } });
-    writeGate.resolve();
-    await stopWrite;
-    expect(await secondPrune).toEqual([ids[1]]);
-    await vi.waitFor(async () => expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).get(ids[1])).toBe("entry-1"));
+    const second = api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: new Date(Date.now() + 29 * DAY_MS) });
+    const stop = getOrCreatePendingStop({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: "optimistic-active-timer:young" } });
+    write.resolve();
+    await Promise.all([second, stop]);
+    expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).get("optimistic-active-timer:young")).toBe("entry-1");
 
-    // 3. An Edit from an editor left open after its mapping went puts the mapping back.
-    expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).has(ids[2])).toBe(false);
-    await enqueueTimeEntryUpdate({ owner: TIMER_STOP_OWNER, target: { optimisticEntryId: ids[2] }, patch: { description: "Synthetic" } });
-    await vi.waitFor(async () => expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).get(ids[2])).toBe("entry-2"));
-    expect((await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).get(ids[0])).toBe("entry-0");
+    // A failed correlation write loses nothing: the prune throws and every mapping is still there.
+    await api.recordTimerEntryIdCorrelation("optimistic-active-timer:stale", "entry-2", TIMER_STOP_OWNER);
+    vi.mocked(AsyncStorage.setItem).mockImplementationOnce(async () => { throw new Error("Storage full"); });
+    await expect(api.pruneTimerEntryIdCorrelations({ owner: TIMER_STOP_OWNER, now: old })).rejects.toThrow("Storage full");
+    expect([...(await api.readTimerEntryIdCorrelations(TIMER_STOP_OWNER)).keys()]).toEqual([
+      "optimistic-active-timer:stop-during-scan",
+      "optimistic-active-timer:young",
+      "optimistic-active-timer:stale"
+    ]);
   });
 
   it("parses the correlation container once per change, not on every hot-path read", async () => {
@@ -4006,26 +4005,93 @@ describe("bounded activity queue and correlation storage (stability audit 22 Oct
     }
   );
 
-  it("deletes quarantined contents on logout and account replacement, keeping a note for support", async () => {
+  it("deletes quarantined contents before logout completes, so a quick same-account sign-in cannot keep them", async () => {
     const api = await import("./api");
-    const { deactivateMobileAccount } = await import("./mobileAccount");
     asyncStore.set(QUEUE_KEY, "corrupt-a");
     await api.enqueueEvent({ localId: "after-a", source: "shortcut", type: "shortcut_action" });
-    await activateMobileAccount(ACCOUNT_B_OWNER);
-    await vi.waitFor(() => expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("corrupt-a"));
-
-    asyncStore.set(QUEUE_KEY, "corrupt-b");
-    storeBoundSession("session-b", ACCOUNT_B_OWNER);
-    await api.enqueueEvent({ localId: "after-b", source: "shortcut", type: "shortcut_action" });
-    expect(asyncStore.get(QUARANTINE_KEY)).toContain("corrupt-b");
-    await deactivateMobileAccount(ACCOUNT_B_OWNER);
-    await vi.waitFor(() => expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("corrupt-b"));
-
+    expect(asyncStore.get(QUARANTINE_KEY)).toContain("corrupt-a");
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
+    await api.logout();
+    // Gone when logout resolves: nothing is left for a shutdown to strand.
+    expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("corrupt-a");
+    await setSessionToken("same-account-again", TIMER_STOP_OWNER);
+    await activateMobileAccount(TIMER_STOP_OWNER);
     const diagnostics = await api.getStorageQuarantineDiagnostics();
     expect(diagnostics.records).toEqual([
-      expect.objectContaining({ container: "activity_queue", byteLength: 9, contentsKept: false, removal: "account_changed", removedAt: expect.any(String) }),
-      expect.objectContaining({ container: "activity_queue", byteLength: 9, contentsKept: false, removal: "account_changed" })
+      expect.objectContaining({ container: "activity_queue", byteLength: 9, contentsKept: false, removal: "logout", removedAt: expect.any(String) })
     ]);
+  });
+
+  it("fails logout before revoking the session when the contents cannot be deleted", async () => {
+    const api = await import("./api");
+    asyncStore.set(QUEUE_KEY, "corrupt-a");
+    await api.enqueueEvent({ localId: "after-a", source: "shortcut", type: "shortcut_action" });
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const originalSet = vi.mocked(AsyncStorage.setItem).getMockImplementation()!;
+    vi.mocked(AsyncStorage.setItem).mockImplementation(async (key: string, value: string) => {
+      if (key === QUARANTINE_KEY) throw new Error("Synthetic storage failure");
+      return originalSet(key, value);
+    });
+    try {
+      await expect(api.logout()).rejects.toThrow("Synthetic storage failure");
+    } finally {
+      vi.mocked(AsyncStorage.setItem).mockImplementation(originalSet);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await getSessionToken()).toBe("session-token");
+    expect(asyncStore.get(QUARANTINE_KEY)).toContain("corrupt-a");
+  });
+
+  it("deletes another account's contents before a new account's session is installed", async () => {
+    const api = await import("./api");
+    asyncStore.set(QUEUE_KEY, "corrupt-a");
+    await api.enqueueEvent({ localId: "after-a", source: "shortcut", type: "shortcut_action" });
+    const setItem = vi.mocked(AsyncStorage.setItem);
+    setItem.mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+      token: "token-b",
+      user: { id: ACCOUNT_B_OWNER.userId, email: "b@example.test", name: "B" },
+      workspace: { id: ACCOUNT_B_OWNER.workspaceId, name: "B" },
+      expiresAt: "2026-12-01T00:00:00.000Z"
+    })));
+    await api.login("b@example.test", "password");
+    expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("corrupt-a");
+    const quarantineWrite = setItem.mock.calls.findIndex(([key]) => key === QUARANTINE_KEY);
+    expect(quarantineWrite).toBeGreaterThanOrEqual(0);
+    expect(SecureStore.setItemAsync).toHaveBeenCalled();
+    expect(setItem.mock.invocationCallOrder[quarantineWrite]).toBeLessThan(
+      vi.mocked(SecureStore.setItemAsync).mock.invocationCallOrder.at(-1)!
+    );
+  });
+
+  it("sweeps at launch, signed out or not: copies of another account or an earlier signed-out launch lose their contents", async () => {
+    const api = await import("./api");
+    const at = new Date().toISOString();
+    const copy = (raw: string, ownerKey: string | null, launch: string) =>
+      ({ container: "activity_queue", quarantinedAt: at, reason: "The queue JSON could not be parsed.", byteLength: raw.length, ownerKey, launch, raw });
+    // Left by a logout or account change that stopped before its delete was written.
+    asyncStore.set(QUARANTINE_KEY, JSON.stringify([
+      copy("left-by-a", "workspace-a:user-a", "earlier-launch"),
+      copy("signed-out-earlier", null, "earlier-launch")
+    ]));
+    // A signed-out launch (the account record may still be there); `app/_layout.tsx` runs this sweep.
+    secureStore.clear();
+    resetSessionTokenCacheForTesting();
+    const restarted = api;
+    await restarted.sweepStorageQuarantine();
+    expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("left-by-a");
+    expect(asyncStore.get(QUARANTINE_KEY)).not.toContain("signed-out-earlier");
+    expect((await restarted.getStorageQuarantineDiagnostics()).records.map((record) => record.contentsKept)).toEqual([false, false]);
+    // A copy made signed out in this launch stays for this launch.
+    asyncStore.set(QUEUE_KEY, "signed-out-now");
+    await restarted.enqueueEvent({ localId: "after-now", source: "shortcut", type: "shortcut_action" });
+    await restarted.sweepStorageQuarantine();
+    expect(asyncStore.get(QUARANTINE_KEY)).toContain("signed-out-now");
+    // The launch call site, at module evaluation of the root layout (the behaviour is the sweep above).
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync(new URL("../../app/_layout.tsx", import.meta.url), "utf8"))
+      .toMatch(/^void sweepStorageQuarantine\(\)\.catch\(\(\) => undefined\);$/m);
   });
 
   it("deletes quarantined contents after 7 days, keeping a note for support", async () => {

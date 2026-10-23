@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readActiveMobileAccount } from "./mobileAccount";
-import { noteTimerEntryIdReference } from "./timerEntryIdReferences";
 
 const TIMER_STOP_OUTBOX_KEY = "dayframe.timerStopOutbox.v1";
 let timerStopOutboxMutationTail: Promise<void> = Promise.resolve();
@@ -53,7 +52,6 @@ export async function getOrCreatePendingStop(input: {
         ? { targetEntryId: requiredText(input.target.targetEntryId, "targetEntryId") }
         : { optimisticEntryId: requiredText(input.target.optimisticEntryId, "optimisticEntryId") })
     };
-    noteTimerEntryIdReference(next.optimisticEntryId);
     await writePendingTimerStops([...outbox, next]);
     return next;
   });
