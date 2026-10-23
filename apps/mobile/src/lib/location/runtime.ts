@@ -269,8 +269,10 @@ export async function configureLocationIntelligence(bootstrap: MobileBootstrap) 
       await clearNativeLocationSignals();
       return;
     }
+    // No local journal replay here or on foreground (stability audit 22 Oct 2026, location-3/4): it is a
+    // diagnostic that ran the whole engine on the JS thread on every bootstrap publish, and its throw
+    // skipped the upload and the geofence refresh. Only Share location details asks for it.
     await drainNativeLocationSignalsInBatchesUnsafe();
-    await refreshLocalJournalReplayIfDue();
   });
   if (ownerIsCurrent(owner, revision)) void syncLocationEvidence().catch(recordLocationStoreError);
 }
@@ -279,9 +281,16 @@ export function syncLocationIntelligenceOnForeground(options: LocationSyncOption
   return withJsTask("location-foreground", async () => {
     if (await getLocationRolloutMode() === "v1") return { synced: false, reason: "v1" as const };
     await drainNativeLocationSignalsInBatches();
-    await withJsTask("location-replay", () => refreshLocalJournalReplayIfDue());
     return syncLocationEvidence({ forceReplay: true, ...options });
   });
+}
+
+/**
+ * Settings › Sync help › Share location details, its only reader: refreshes the local journal replay when
+ * its last run is ten minutes old. It never rejects (the store records a failure) and never gates sync.
+ */
+export function refreshLocalJournalReplayForDiagnostics() {
+  return withJsTask("location-replay", () => refreshLocalJournalReplayIfDue());
 }
 
 // Call only inside withLocationCaptureLifecycle; all callers are in geofence.ts.

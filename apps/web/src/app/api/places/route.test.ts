@@ -214,6 +214,20 @@ describe("/api/places", () => {
     expect(mocks.updatePlace).toHaveBeenLastCalledWith(placeId(), expect.objectContaining({ autoLog: false }), session);
   });
 
+  it("passes the default activity fields only when sent, so a partial PATCH never erases them", async () => {
+    await PATCH(jsonRequest({ id: placeId(), name: "Gym" }));
+    const nameOnly = mocks.updatePlace.mock.lastCall?.[1] ?? {};
+    expect(Object.prototype.hasOwnProperty.call(nameOnly, "defaultCategoryId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(nameOnly, "defaultActivityDescription")).toBe(false);
+    await PATCH(jsonRequest({ id: placeId(), autoLog: false }));
+    const switchOnly = mocks.updatePlace.mock.lastCall?.[1] ?? {};
+    expect(Object.prototype.hasOwnProperty.call(switchOnly, "defaultCategoryId")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(switchOnly, "defaultActivityDescription")).toBe(false);
+    await PATCH(jsonRequest({ id: placeId(), defaultActivityDescription: null }));
+    expect(mocks.updatePlace).toHaveBeenLastCalledWith(placeId(), expect.objectContaining({ defaultActivityDescription: null }), session);
+    expect(Object.prototype.hasOwnProperty.call(mocks.updatePlace.mock.lastCall?.[1] ?? {}, "defaultCategoryId")).toBe(false);
+  });
+
   it("deletes a place by id", async () => {
     const response = await DELETE(new Request(`https://dayframe.test/api/places?id=${placeId()}`, { method: "DELETE" }));
 

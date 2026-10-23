@@ -40,6 +40,8 @@ describe("Apple Health wake runner", () => {
     expect(deps.captureSleep).not.toHaveBeenCalled();
     expect(deps.captureWorkouts).toHaveBeenCalledWith(expect.objectContaining({
       observerChange: true,
+      fresh: true,
+      background: true,
       maxPages: HEALTH_WAKE_MAX_PAGES,
       signal: expect.any(AbortSignal)
     }));
