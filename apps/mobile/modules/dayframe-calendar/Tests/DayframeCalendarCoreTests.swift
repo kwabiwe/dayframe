@@ -1433,4 +1433,24 @@ final class DayframeCalendarCoreTests: XCTestCase {
     _ = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, calendar: calendar)
     XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)
   }
+
+  func testLabelTiersGrowWithTheTextSoTheirLinesFit() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    func metrics(minutes: Double, scale: Double) throws -> DayframeCalendarBlockMetrics {
+      try XCTUnwrap(DayframeCalendarBlockMath.metrics(
+        startedAtMs: dayStart + 9 * 3_600_000, stoppedAtMs: dayStart + 9 * 3_600_000 + minutes * 60_000,
+        nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000,
+        hourHeight: 60, minimumHeight: DayframeCalendarDayLayout.labelMinimumHeight(textScale: scale),
+        textScale: scale, calendar: calendar
+      ))
+    }
+    // 36 points: two lines at the default size, one at ×1.3 (two need 44.2 there).
+    XCTAssertTrue(try metrics(minutes: 36, scale: 1).showMeta)
+    XCTAssertFalse(try metrics(minutes: 36, scale: 1.3).showMeta)
+    XCTAssertTrue(try metrics(minutes: 45, scale: 1.3).showMeta)
+    XCTAssertTrue(try metrics(minutes: 25, scale: 1.3).tiny)
+    XCTAssertFalse(try metrics(minutes: 25, scale: 1).tiny)
+  }
 }

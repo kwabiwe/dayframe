@@ -126,7 +126,7 @@ describe("native Calendar production contract", () => {
     expect(model).toContain("tagText = record.tagText");
     expect(rootView).toContain("DayframeCalendarGlyph(name: \"tag\"");
     // Location v4 C6: place and tag lines stay, under the detail line, on blocks with room for them.
-    expect(rootView).toContain("metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight, let tagText = entry.tagText");
+    expect(rootView).toContain("metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight * Double(scale), let tagText = entry.tagText");
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });

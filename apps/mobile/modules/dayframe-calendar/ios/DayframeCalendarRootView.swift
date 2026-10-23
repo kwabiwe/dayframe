@@ -622,11 +622,16 @@ private struct DayframeCalendarBlockView: View {
       // a detail line from 34 pt, the activity icon alone in a column under 34 pt wide. Sizes follow
       // Dynamic Type up to the metadata cap, like the one-line minimum height.
       let scale = CGFloat(min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, labelTextScale)))
-      if horizontal.showTitle {
+      // A model from an older JS bundle (no column group) keeps its old label rules: its blocks keep
+      // the 4-point minimum React laid them out for, so text shows only where it used to fit.
+      let legacy = entry.columnGroup == nil
+      let showsTitle = horizontal.showTitle && (!legacy || (metrics.height >= 24 && horizontal.width >= 64))
+      let showsMeta = legacy ? metrics.height >= 58 && horizontal.width >= 150 : metrics.showMeta
+      if showsTitle {
         VStack(alignment: .leading, spacing: 0) {
           titleLine(scale: scale)
 
-          if metrics.showMeta && !entry.meta.isEmpty {
+          if showsMeta && !entry.meta.isEmpty {
             Text(entry.meta)
               .font(.system(size: 11 * scale, weight: .semibold))
               .monospacedDigit()
@@ -635,23 +640,23 @@ private struct DayframeCalendarBlockView: View {
           }
 
           // Room for more: the place and tags, as before, from the same height as before.
-          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight, let placeText = entry.placeText, !placeText.isEmpty {
+          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight * Double(scale), let placeText = entry.placeText, !placeText.isEmpty {
             HStack(spacing: 4) {
               DayframeCalendarGlyph(name: "place", size: 11)
                 .accessibilityHidden(true)
               Text(placeText)
-                .font(.caption2)
+                .font(.system(size: 11 * scale))
                 .lineLimit(1)
             }
             .foregroundStyle(textColor)
           }
 
-          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight, let tagText = entry.tagText, !tagText.isEmpty {
+          if metrics.height >= DayframeCalendarConstants.extraLinesMinimumHeight * Double(scale), let tagText = entry.tagText, !tagText.isEmpty {
             HStack(spacing: 4) {
               DayframeCalendarGlyph(name: "tag", size: 11)
                 .accessibilityHidden(true)
               Text(tagText)
-                .font(.caption2)
+                .font(.system(size: 11 * scale))
                 .lineLimit(1)
             }
             .foregroundStyle(textColor)
@@ -669,7 +674,7 @@ private struct DayframeCalendarBlockView: View {
         .padding(.horizontal, entry.isReview ? 4 : 6)
         .padding(.top, metrics.tiny ? 0 : 3)
         .frame(maxHeight: metrics.tiny ? .infinity : nil, alignment: .center)
-      } else if let glyph = entry.glyph {
+      } else if !legacy, let glyph = entry.glyph {
         DayframeCalendarGlyph(name: "activity-\(glyph)", size: 12)
           .foregroundStyle(textColor)
           .frame(maxWidth: .infinity, maxHeight: .infinity)

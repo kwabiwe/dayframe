@@ -861,6 +861,7 @@ public enum DayframeCalendarBlockMath {
     dayEndMs: Double,
     hourHeight: Double,
     minimumHeight: Double = DayframeCalendarConstants.labelLineMinimumHeight,
+    textScale: Double = 1,
     calendar: Calendar = .current
   ) -> DayframeCalendarBlockMetrics? {
     let effectiveStopMs = stoppedAtMs ?? nowMs
@@ -899,14 +900,16 @@ public enum DayframeCalendarBlockMath {
       minimumHeight.isFinite ? minimumHeight : DayframeCalendarConstants.labelLineMinimumHeight
     )
     let height = max(safeMinimumHeight, (durationMinutes / 60.0) * safeHourHeight)
+    // The tiers grow with the label's text size, so the lines they add always fit.
+    let scale = DayframeCalendarDayLayout.clampedTextScale(textScale)
     return DayframeCalendarBlockMetrics(
-      compact: height < DayframeCalendarConstants.twoLineMinimumHeight,
+      compact: height < DayframeCalendarConstants.twoLineMinimumHeight * scale,
       continuesIntoNextDay: effectiveStopMs > dayEndMs,
       height: height,
-      showMeta: height >= DayframeCalendarConstants.twoLineMinimumHeight,
+      showMeta: height >= DayframeCalendarConstants.twoLineMinimumHeight * scale,
       showTitle: true,
       startsBeforeDay: startedAtMs < dayStartMs,
-      tiny: height < DayframeCalendarConstants.compactTextMaximumHeight,
+      tiny: height < DayframeCalendarConstants.compactTextMaximumHeight * scale,
       top: (startMinute / 60.0) * safeHourHeight
     )
   }
@@ -1129,9 +1132,13 @@ public enum DayframeCalendarDayLayout {
 
   /// One label line at the given Dynamic Type scale (capped like the metadata text).
   public static func labelMinimumHeight(textScale: Double) -> Double {
+    DayframeCalendarConstants.labelLineMinimumHeight * clampedTextScale(textScale)
+  }
+
+  /// The label's Dynamic Type scale, capped like the metadata text.
+  public static func clampedTextScale(_ textScale: Double) -> Double {
     let safe = textScale.isFinite ? textScale : 1
-    return DayframeCalendarConstants.labelLineMinimumHeight
-      * min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, safe))
+    return min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, safe))
   }
 
   public static func layout(
@@ -1155,6 +1162,7 @@ public enum DayframeCalendarDayLayout {
         dayEndMs: dayEndMs,
         hourHeight: hourHeight,
         minimumHeight: entry.columnGroup == nil ? DayframeCalendarConstants.legacyMinimumBlockHeight : minimumHeight,
+        textScale: textScale,
         calendar: calendar
       ) else { continue }
       blocks[entry.id] = block
