@@ -8,6 +8,7 @@ import {
 } from "@dayframe/shared";
 import { withSyncTransaction } from "../sync-transaction";
 import type { RequestSession } from "../session";
+import { placeDisplayNameSql } from "../place-display";
 import { SUPERSEDED_REVIEW_SCOPE } from "./location-review-supersession";
 
 /**
@@ -66,7 +67,25 @@ export async function withTimelineCorrections(
   const nowMs = Date.parse(processingAt);
   const to = segments.reduce((max, segment) => Math.max(max, segment.stoppedAt ? Date.parse(segment.stoppedAt) : nowMs), from);
   const corrections = await activeTimelineCorrections(client, session, new Date(from).toISOString(), new Date(Math.max(to, from + 1)).toISOString());
-  return corrections.length ? applyTimelineCorrections(segments, corrections, nowMs) : segments;
+  if (!corrections.length) return segments;
+  // A place the person picked that has since been deleted (or a learned place no longer accepted) is no
+  // longer theirs to apply: that correction is skipped, never written back (Codex r2 on #566).
+  const placeIds = [...new Set(corrections.flatMap((correction) => correction.target.placeId ? [correction.target.placeId] : []))];
+  const learnedIds = [...new Set(corrections.flatMap((correction) => correction.target.learnedPlaceId ? [correction.target.learnedPlaceId] : []))];
+  const known = new Set<string>();
+  if (placeIds.length) {
+    for (const row of (await client.query<{ id: string }>(`select id from places where workspace_id = $1 and id = any($2::uuid[])`,
+      [session.workspaceId, placeIds])).rows) known.add(row.id);
+  }
+  if (learnedIds.length) {
+    for (const row of (await client.query<{ id: string }>(
+      `select id from learned_places where workspace_id = $1 and user_id = $2 and status = 'accepted' and id = any($3::uuid[])`,
+      [session.workspaceId, session.userId, learnedIds])).rows) known.add(row.id);
+  }
+  const usable = corrections.filter((correction) => correction.kind !== "place" ||
+    ((!correction.target.placeId || known.has(correction.target.placeId)) &&
+      (!correction.target.learnedPlaceId || known.has(correction.target.learnedPlaceId))));
+  return usable.length ? applyTimelineCorrections(segments, usable, nowMs) : segments;
 }
 
 type SegmentRow = {
@@ -220,6 +239,25 @@ async function applyToSegment(
                 updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
         [...scope, request.placeId, request.learnedPlaceId, request.placeId ? "saved" : request.learnedPlaceId ? "learned" : "unknown", spanJson]);
+      // Its open Review suggestion, and its event, offer the place the person set: confirming it logs that
+      // place, as Review's own "change place" does (Codex r2 on #566).
+      await client.query(
+        `with suggestion as (
+           update review_items ri
+              set suggested_place_id = $4,
+                  title = coalesce((select ${placeDisplayNameSql("p")} from places p where p.id = $4 and p.workspace_id = $2),
+                    (select lp.name from learned_places lp where lp.id = $5 and lp.workspace_id = $2 and lp.user_id = $3), ri.title)
+            where ri.workspace_id = $2 and ri.user_id = $3 and ri.location_segment_id = $1 and ri.status = 'open'
+            returning ri.event_id)
+         update activity_events ae set suggested_place_id = $4
+           from suggestion
+          where ae.id = suggestion.event_id and ae.workspace_id = $2 and ae.user_id = $3`,
+        [...scope, request.placeId, request.learnedPlaceId]);
+      // The trips either side start or end at the place the person set (Codex r2 on #566).
+      await client.query(`update commute_segments set from_place_id = $4, updated_at = now()
+          where from_stay_segment_id = $1 and workspace_id = $2 and user_id = $3 and status <> 'superseded'`, [...scope, request.placeId]);
+      await client.query(`update commute_segments set to_place_id = $4, updated_at = now()
+          where to_stay_segment_id = $1 and workspace_id = $2 and user_id = $3 and status <> 'superseded'`, [...scope, request.placeId]);
       return;
     case "times":
       // Trusted table name from the subject.
@@ -228,6 +266,11 @@ async function applyToSegment(
                 metadata = metadata || jsonb_build_object('setByYou', true, 'correctionSpan', $6::jsonb), updated_at = now()
           where id = $1 and workspace_id = $2 and user_id = $3`,
         [...scope, iso(request.startedAt), iso(request.stoppedAt), spanJson]);
+      // Its open Review suggestion offers the times the person set (Codex r2 on #566).
+      await client.query(
+        `update review_items set suggested_started_at = $4, suggested_stopped_at = $5
+          where workspace_id = $2 and user_id = $3 and location_segment_id = $1 and status = 'open'`,
+        [...scope, iso(request.startedAt), iso(request.stoppedAt)]);
       return;
     case "leg_mode":
       await client.query(

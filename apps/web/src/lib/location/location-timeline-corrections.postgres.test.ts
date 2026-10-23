@@ -177,4 +177,33 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     const kept = await database!.query(`select replaced_at from location_timeline_corrections where id = $1`, [neighbour.correction.id]);
     expect(kept.rows[0].replaced_at).toBeNull();
   });
+  it("offers the corrected place and times in the open Review suggestion, routes the trip from it, and skips a deleted place on replay (Codex r2 on #566)", async () => {
+    const db = database!;
+    // The first place's open suggestion now offers Home, from 00:10 to 09:20 (its last corrections).
+    const suggestion = await db.query(`select suggested_place_id as "placeId", title, suggested_started_at as "startedAt",
+        suggested_stopped_at as "stoppedAt" from review_items where workspace_id = $1 and type = 'unknown_stay'`, [workspaceId]);
+    expect(suggestion.rows[0]).toMatchObject({ placeId: homeId, title: "Home", startedAt: new Date(at(10)), stoppedAt: new Date(at(560)) });
+    const event = await db.query(`select e.suggested_place_id as "placeId" from activity_events e join review_items ri on ri.event_id = e.id
+        where ri.workspace_id = $1 and ri.type = 'unknown_stay'`, [workspaceId]);
+    expect(event.rows[0].placeId).toBe(homeId);
+    const trip = await db.query(`select from_place_id as "fromPlaceId" from commute_segments where workspace_id = $1 and client_segment_id = 'trip-1'`, [workspaceId]);
+    expect(trip.rows[0].fromPlaceId).toBe(homeId);
+
+    // A place the person picked, then deleted: replay skips that correction instead of writing a missing place back.
+    const { correctLocationTimeline, withTimelineCorrections } = await import("./location-timeline-corrections");
+    const gone = "66000000-0000-4000-8000-000000000103";
+    await db.query(`insert into places (id, workspace_id, name, latitude, longitude, radius_meters) values ($1, $2, 'Gone', 12, 22, 100)`, [gone, workspaceId]);
+    await correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-c", placeId: gone, learnedPlaceId: null }, session);
+    await db.query(`update stay_segments set place_id = null where place_id = $1`, [gone]);
+    await db.query(`delete from places where id = $1`, [gone]);
+    const client = await db.connect();
+    try {
+      const replayed = await withTimelineCorrections(client, session, [
+        { kind: "stay", clientSegmentId: "seg-c", startedAt: at(760), stoppedAt: null, placeId: null, learnedPlaceId: null, placeMatchKind: "unknown" }
+      ] as Parameters<typeof withTimelineCorrections>[2], at(1_000));
+      expect(replayed[0]).toMatchObject({ placeId: null });
+    } finally {
+      client.release();
+    }
+  });
 });

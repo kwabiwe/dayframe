@@ -149,6 +149,16 @@ export function applyTimelineCorrections(segments: readonly LocationSegment[], c
       trips.set(engine, { ...trip, tripLegs: legsWithMode(trip.tripLegs, correction) });
     }
   }
+  // A place the person set is where the trips either side start or end (Codex r2 on #566).
+  const placeOf = new Map([...stays.values()].filter((stay) => stay.setByYou).map((stay) => [stay.clientSegmentId, stay.placeId ?? null]));
+  for (const [engine, trip] of trips) {
+    if (!trip || (!placeOf.has(trip.fromStaySegmentId) && !placeOf.has(trip.toStaySegmentId))) continue;
+    trips.set(engine, {
+      ...trip,
+      ...(placeOf.has(trip.fromStaySegmentId) ? { fromPlaceId: placeOf.get(trip.fromStaySegmentId) } : {}),
+      ...(placeOf.has(trip.toStaySegmentId) ? { toPlaceId: placeOf.get(trip.toStaySegmentId) } : {})
+    });
+  }
   const out: LocationSegment[] = [...stays.values(), ...[...trips.values()].filter((trip): trip is CommuteSegment => trip != null)];
   return out.sort((a, b) => ms(a.startedAt) - ms(b.startedAt) || a.kind.localeCompare(b.kind));
 }
