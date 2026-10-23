@@ -193,6 +193,7 @@ import {
 } from "@/lib/location/store";
 import { getLocationReviewEvidencePrefetchDiagnostics } from "@/lib/locationReviewEvidenceCache";
 import { useMapKitChecks } from "@/lib/useMapKitChecks";
+import { runPreparedExport } from "@/lib/preparedExport";
 import { motionFitnessPresentation, readMotionFitnessStatus, requestMotionFitness } from "@/lib/location/motionPermission";
 import type { DayframeMotionAuthorizationStatus } from "../modules/dayframe-motion-activity";
 import {
@@ -494,6 +495,8 @@ export default function SettingsScreen() {
   // which only rows, labels and switch positions read; every action reads the live state instead.
   const lastKnown = useSettingsLastKnown();
   const [exportingHealthDebug, setExportingHealthDebug] = useState(false);
+  const [preparingLocationDiagnostics, setPreparingLocationDiagnostics] = useState(false);
+  const locationDiagnosticsExport = useRef(false);
   const refreshes = useRef(createOwnerSyncCoalescer<void>());
   // I1: every Settings page paints from its cached snapshot first. Mount-time reads (SQLite and
   // AsyncStorage outboxes, native permission/HealthKit/geofence reads, the bootstrap refresh) start
@@ -1856,7 +1859,12 @@ export default function SettingsScreen() {
     }
   }
 
-  async function shareLocationDiagnostics() {
+  // The row reads "Preparing…" and is disabled before the replay blocks JS; a second press does nothing.
+  function shareLocationDiagnostics() {
+    return runPreparedExport(locationDiagnosticsExport, setPreparingLocationDiagnostics, shareLocationDiagnosticsNow);
+  }
+
+  async function shareLocationDiagnosticsNow() {
     const owner = await readActiveMobileAccount();
     if (!owner) return;
     const session = await readOwnedAuthenticatedSessionSnapshot(owner);
@@ -2852,8 +2860,9 @@ export default function SettingsScreen() {
                   title="Copy details for support"
                 />
                 <SettingsBlockRow
+                  disabled={preparingLocationDiagnostics}
                   onPress={() => void shareLocationDiagnostics()}
-                  subtitle="How location capture is running, without places or points"
+                  subtitle={preparingLocationDiagnostics ? "Preparing…" : "How location capture is running, without places or points"}
                   testID="sync-help-location"
                   theme={theme}
                   title="Share location details"

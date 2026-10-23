@@ -20,16 +20,23 @@ describe("location finalisation replay contracts", () => {
     // seven-day journal, so it is throttled and never runs after each stored sample. 22 Oct stability
     // audit (location-3/4): it ran the whole engine on the JS thread on every bootstrap publish and its
     // throw skipped upload and geofence refresh, so no bootstrap, configuration or foreground path runs it.
-    const between = (from: string, to: string) => runtimeSource.slice(runtimeSource.indexOf(from), runtimeSource.indexOf(to));
-    expect(between("export async function configureLocationIntelligence", "export function syncLocationIntelligenceOnForeground"))
-      .not.toContain("refreshLocalJournalReplayIfDue");
-    expect(between("export function syncLocationIntelligenceOnForeground", "export function refreshLocalJournalReplayForDiagnostics"))
-      .not.toContain("refreshLocalJournalReplayIfDue");
+    const between = (from: string, to: string) => {
+      const start = runtimeSource.indexOf(from), end = runtimeSource.indexOf(to);
+      expect(start, from).toBeGreaterThanOrEqual(0);
+      expect(end, to).toBeGreaterThan(start);
+      return runtimeSource.slice(start, end);
+    };
+    const configure = between("export async function configureLocationIntelligence", "export function syncLocationIntelligenceOnForeground");
+    const foreground = between("export function syncLocationIntelligenceOnForeground", "/**\n * Settings › Sync help › Share location details");
+    for (const path of [configure, foreground]) {
+      expect(path).toContain("drainNativeLocationSignals");
+      expect(path).not.toMatch(/refreshLocalJournalReplay(IfDue|ForDiagnostics)|processPendingLocationEvidence/);
+    }
     expect(runtimeSource.match(/refreshLocalJournalReplayIfDue\(/g)).toHaveLength(1);
     expect(runtimeSource).toContain('withJsTask("location-replay", () => refreshLocalJournalReplayIfDue())');
     expect(settingsSource).toContain("await refreshLocalJournalReplayForDiagnostics();");
-    for (const source of [dashboardSource, recoveryOwnerSource, geofenceSource]) {
-      expect(source).not.toMatch(/refreshLocalJournalReplay|processPendingLocationEvidence/);
+    for (const caller of [dashboardSource, recoveryOwnerSource, geofenceSource, source("../manualSyncRuntime.ts")]) {
+      expect(caller).not.toMatch(/refreshLocalJournalReplay|processPendingLocationEvidence/);
     }
     expect(runtimeSource).not.toContain("await processPendingLocationEvidence()");
     const persistPath = storeSource.slice(storeSource.indexOf("async function persistLocationEvidenceUnsafe"), storeSource.indexOf("export const LOCAL_JOURNAL_REPLAY_MIN_INTERVAL_MS"));
