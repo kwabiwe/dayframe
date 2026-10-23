@@ -54,7 +54,8 @@ export function calendarDrawnExtent(top: number, timeHeight: number, minimumHeig
 }
 
 /**
- * One clustering pass over drawn extents. Blocks are taken by top, longer first, then id; a cluster
+ * One clustering pass over drawn extents. Blocks are taken by top, then id (never by length, so a
+ * running block growing past a neighbour that started with it keeps its column); a cluster
  * grows while the next block starts above its lowest bottom; inside a cluster each block takes the
  * leftmost column whose last block has ended by its top (greedy interval partitioning). Every block
  * in a cluster is 1 / columns wide; a block that collides with nothing keeps the full width.
@@ -70,7 +71,7 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
       return true;
     })
     .map((block) => ({ id: block.id, top: block.top, bottom: Math.max(block.top, block.bottom) }))
-    .sort((left, right) => left.top - right.top || right.bottom - left.bottom || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    .sort((left, right) => left.top - right.top || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 
   const out: CalendarBlockColumn[] = [];
   let cluster: Array<{ id: string; columnIndex: number }> = [];

@@ -258,6 +258,18 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
   });
 
+  it("keeps a short block full width when its drawn edge only touches the next block (Codex r2 on #545)", () => {
+    const content = { categoryColor: "#64748b", categoryId: "work", categoryName: "Work", tagNames: [] };
+    renderCalendar([
+      entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T09:04:00.000Z", { ...content, id: "coffee", description: "Coffee" }),
+      entryAt("2026-08-02T09:15:00.000Z", "2026-08-02T10:00:00.000Z", { ...content, id: "work", description: "Work" })
+    ]);
+    // Coffee is drawn 16 px (to 09:15 at 64 px an hour); its semantic 17 px would reach 1 px into Work.
+    for (const id of ["coffee", "work"]) {
+      expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("full");
+    }
+  });
+
   it("titles every block with its real length and adds the detail line from 34 px (location v4 C6)", () => {
     const content = {
       categoryColor: "#64748b",

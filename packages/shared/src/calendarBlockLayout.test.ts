@@ -83,8 +83,18 @@ describe("calendar block columns over drawn extents", () => {
     ];
     const forward = layoutCalendarBlockColumns(blocks);
     const backward = layoutCalendarBlockColumns([...blocks].reverse().filter((block) => block.top !== 500));
-    expect(forward.map((item) => item.id)).toEqual(["c", "a", "b"]);
+    expect(forward.map((item) => item.id)).toEqual(["a", "b", "c"]);
     expect(byId(forward)).toEqual(byId(backward));
+  });
+
+  it("keeps columns while a running block grows past a neighbour that started with it (Codex r2 on #545)", () => {
+    const at = (runningBottom: number) => byId(layoutCalendarBlockColumns([
+      { id: "done", top: 576, bottom: 608 },
+      { id: "running", top: 576, bottom: runningBottom }
+    ]));
+    const before = at(597);
+    const after = at(610);
+    expect([before.done.columnIndex, before.running.columnIndex]).toEqual([after.done.columnIndex, after.running.columnIndex]);
   });
 
   it("stays O(n log n) when every block collides at once", () => {

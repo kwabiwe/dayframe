@@ -6662,8 +6662,8 @@ dialog.ui-dialog.df-range-custom {
 }
 
 /* Calendar phone layout (owner-approved 17 Oct 2026): a 104 px gutter and 130 px day columns on wider
-   screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Short
-   blocks stay data marks; List is the phone path for detail (WUI-045). */
+   screens; at ≤560 px a 60 px gutter, the grid takes the rest, and zoom floats over the grid. Every
+   block keeps its title (location v4 C6); List is the phone path for detail (WUI-045). */
 .timeline-calendar-workspace {
   --calendar-axis-width: 104px;
   --calendar-day-min-width: 130px;

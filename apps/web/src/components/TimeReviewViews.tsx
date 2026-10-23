@@ -1715,10 +1715,12 @@ export function CalendarReview({
                     };
                   })
                   .filter((block): block is NonNullable<typeof block> => Boolean(block));
+                // Columns over the blocks as drawn (after the 1 px visual gap), so blocks whose drawn
+                // edges only touch stay full width (location v4 C6, Codex r2 on #545).
                 const lanes = layoutTimeBlockLanes(blocks.map((block) => ({
                   key: block.blockKey,
-                  top: block.semanticBlockPositionStyle.top,
-                  height: block.semanticBlockPositionStyle.height
+                  top: block.blockPositionStyle.top,
+                  height: block.blockPositionStyle.height
                 })));
 
                 return blocks.map((block) => {
