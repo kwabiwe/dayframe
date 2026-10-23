@@ -52,8 +52,9 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain("<CalendarEntryCompactEditor");
     expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
-    expect(timeline).toContain('className="calendar-entry-primary-line"');
-    expect(timeline).toContain('className="calendar-entry-secondary-line tabular"');
+    expect(timeline).toContain('className="calendar-entry-title-line"');
+    expect(timeline).toContain('className="calendar-entry-detail-line tabular"');
+    expect(timeline).toContain('className="calendar-entry-glyph" aria-hidden="true"');
   });
 
   it("preserves a distinct running state and compact hover action", () => {
@@ -68,7 +69,8 @@ describe("Calendar readability and restart contract", () => {
     expect(styles).toMatch(/@media \(hover: none\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
     expect(styles).toMatch(/@media \(pointer: coarse\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/);
     expect(styles).toMatch(/@media \(hover: hover\) and \(pointer: fine\)[\s\S]*\.calendar-time-block:hover \.calendar-start-again/);
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 27px\)[\s\S]*\.calendar-start-again \{[^}]*display: none;/s);
+    // Play shows only where the column reserves room for it (Codex r3 on #545).
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 111\.98px\) \{\s*\.calendar-start-again \{[^}]*display: none;/s);
     expect(styles).not.toContain(".calendar-time-block.is-selected .calendar-start-again");
     expect(styles).not.toContain(".calendar-time-block:focus-within .calendar-start-again");
   });

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // Calendar on phones (owner-approved 17 Oct 2026, moved from the Blocks chat): a narrow gutter, a
 // grid that takes the width, a near-full-screen card in a page that scrolls, floating zoom, and Day
-// on a phone's first visit. Short blocks stay data marks; List is the phone path (WUI-045).
+// on a phone's first visit. Every block keeps its title (location v4 C6); List is the phone path (WUI-045).
 const root = join(process.cwd(), "src");
 const styles = readFileSync(join(root, "app/globals.css"), "utf8");
 const views = readFileSync(join(root, "components/TimeReviewViews.tsx"), "utf8");
