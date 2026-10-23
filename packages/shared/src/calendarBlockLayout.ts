@@ -25,6 +25,8 @@ export const CALENDAR_BLOCK_LABEL = {
   legStripMinimumHeight: 44,
   /** A column narrower than this shows the activity icon only. */
   iconOnlyMaximumWidth: 34,
+  /** A column narrower than this shows the length alone (scaled to fit whole), not the title. */
+  lengthOnlyMaximumWidth: 72,
   /** Below this drawn height the title line uses the smaller label size. */
   compactTextMaximumHeight: 22,
   /** Drawn edges this close count as touching, not colliding (rounding and the 1 px/pt gap). */

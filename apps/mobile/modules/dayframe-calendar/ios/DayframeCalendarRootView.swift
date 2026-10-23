@@ -695,16 +695,26 @@ private struct DayframeCalendarBlockView: View {
 }
 
 private extension DayframeCalendarBlockView {
-  /// "Coffee 4m": the title truncates on its own and the whole entry's length always shows.
+  /// "Coffee 4m": the title truncates on its own and the whole entry's length always shows. A column
+  /// under 72 points shows the length alone, scaled down to fit whole (the title is in VoiceOver).
   func titleLine(scale: CGFloat) -> some View {
     let textColor = Color(dayframeCSS: entry.textColor)
     let size: CGFloat = (metrics.tiny ? 11 : 12.5) * scale
+    let lengthOnly = horizontal.width < DayframeCalendarConstants.lengthOnlyMaximumWidth && !(entry.lengthLabel ?? "").isEmpty
     return HStack(spacing: 4) {
-      Text(entry.isReview ? "\(entry.title) · review" : entry.title)
-        .font(.system(size: size, weight: .bold))
-        .lineLimit(1)
-        .truncationMode(.tail)
-      if let length = entry.lengthLabel, !length.isEmpty {
+      if !lengthOnly {
+        Text(entry.isReview ? "\(entry.title) · review" : entry.title)
+          .font(.system(size: size, weight: .bold))
+          .lineLimit(1)
+          .truncationMode(.tail)
+      }
+      if let length = entry.lengthLabel, !length.isEmpty, lengthOnly {
+        Text(length)
+          .font(.system(size: size, weight: .semibold))
+          .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.3)
+      } else if let length = entry.lengthLabel, !length.isEmpty {
         // Measured on-block text stays opaque; the length differs by weight only.
         Text(length)
           .font(.system(size: size, weight: .semibold))
