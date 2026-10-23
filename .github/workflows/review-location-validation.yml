@@ -152,6 +152,11 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/shortcut-timeline.postgres.integration.test.ts
+      - name: Offline iPhone timer queue replayed through the event routes
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_RUN_DB_INTEGRATION: "1"
+        run: npm run test -w @dayframe/web -- src/app/api/events/offline-replay.postgres.integration.test.ts
       - name: Home and Work place roles
         if: ${{ !cancelled() }}
         env:
