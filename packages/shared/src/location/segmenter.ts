@@ -1,6 +1,6 @@
 import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
-import { assembleTripsThroughStops, credibleSpeedResolver, deriveCommutes, deriveOpenTrip } from "./commute";
-import { deriveTripLegs, withTripLegs } from "./legs";
+import { assembleTripsThroughStops, deriveCommutes, deriveOpenTrip } from "./commute";
+import { openTripWithLegs, withTripLegs } from "./legs";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { indexPlacesByLatitude, matchLocationToPlaces, placesNearLatitude } from "./placeMatcher";
@@ -12,7 +12,6 @@ import type {
   LocationEngineInput,
   LocationEngineOutput,
   LocationEvidence,
-  OpenTrip,
   PlaceMatch,
   RejectedEvidence,
   SavedPlaceForMatching,
@@ -1988,19 +1987,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   });
   // Every journey replay can persist carries its legs (location v4 step 6).
   const commutes = withTripLegs(assembled, acceptedWithMotion, input.config, input.processingAt, motionTimeline);
-  // The open trip's legs so far, from its readings and Core Motion over its window.
-  const speedOf = credibleSpeedResolver(accepted, input.config);
-  const byEvidenceId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
-  const legsFor = (startedAt: string, stoppedAt: string, evidenceIds: readonly string[]) => deriveTripLegs({
-    startMs: Date.parse(startedAt), endMs: Date.parse(stoppedAt), timeline: motionTimeline, speedOf, config: input.config,
-    readings: evidenceIds.flatMap((id) => byEvidenceId.get(id) ?? [])
-      .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
-  });
-  const withLegsSoFar = (trip: OpenTrip | null) => {
-    if (!trip) return null;
-    const tripLegs = legsFor(trip.startedAt, trip.lastObservedAt, trip.evidenceIds);
-    return tripLegs.length ? { ...trip, tripLegs } : trip;
-  };
+
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
   const processedEvidenceIds = [...new Set([
@@ -2031,7 +2018,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     rejectedEvidence,
     segmentUpserts: segments,
     finalisedSegments,
-    openTrip: activeStay ? null : withLegsSoFar(deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs)),
+    openTrip: activeStay ? null : openTripWithLegs(deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
+      acceptedWithMotion, input.config, input.processingAt, motionTimeline),
     diagnostics: {
       inputCount: input.evidence.length,
       acceptedCount: acceptedWithMotion.length,

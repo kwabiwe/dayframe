@@ -2,7 +2,7 @@ import type { LocationEngineConfig } from "./config";
 import { distanceMeters } from "./geo";
 import { credibleSpeedResolver } from "./commute";
 import { buildMotionTimeline, isMotionEvidence, motionLegLabels, type MotionTimeline } from "./motionActivity";
-import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, TripLeg } from "./types";
+import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, TripLeg } from "./types";
 
 /**
  * Legs of a trip, part 1 (location v4 §8, build step 6): walk, run, cycle and drive. Change points are
@@ -300,4 +300,27 @@ export function withTripLegs(
     };
   };
   return commutes.map(annotate);
+}
+
+/** The journey in progress with its legs so far, from its readings and Core Motion up to its latest observation. */
+export function openTripWithLegs(
+  trip: OpenTrip | null,
+  evidenceWithMotion: readonly ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  processingAt: string,
+  timeline?: MotionTimeline | null
+): OpenTrip | null {
+  if (!trip) return null;
+  const accepted = evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence));
+  const motion = timeline !== undefined ? timeline
+    : accepted.length === evidenceWithMotion.length ? null : buildMotionTimeline([...evidenceWithMotion], config, Date.parse(processingAt));
+  const byId = new Map(accepted.map((item) => [item.evidence.clientEvidenceId, item]));
+  const tripLegs = deriveTripLegs({
+    startMs: Date.parse(trip.startedAt), endMs: Date.parse(trip.lastObservedAt), timeline: motion,
+    speedOf: credibleSpeedResolver(accepted, config), config,
+    readings: trip.evidenceIds.flatMap((id) => byId.get(id) ?? [])
+      .sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt))
+  });
+  const { tripLegs: _previous, ...rest } = trip;
+  return tripLegs.length ? { ...rest, tripLegs } : rest;
 }

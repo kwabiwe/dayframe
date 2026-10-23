@@ -11,6 +11,7 @@ import {
 import {
   deriveCommutes,
   deriveOpenTrip,
+  openTripWithLegs,
   outingQualifies,
   withTripLegs,
   isTimeAway,
@@ -907,7 +908,9 @@ export function openTripAgainstDecidedOrigin(
     ? { ...stay, stoppedAt: persistedStoppedAt, locationOnlyStoppedAt: undefined, stopLowerBoundAt: null, stopUpperBoundAt: null } : stay);
   const journeys = output.segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .flatMap((journey) => [journey, ...(journey.legs ?? [])]);
-  const rebuilt = deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys);
+  // With its legs so far (location v4 step 6).
+  const rebuilt = openTripWithLegs(deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys),
+    output.acceptedEvidence, config, processingAt);
   return rebuilt?.fromStaySegmentId === origin.clientSegmentId ? rebuilt : null;
 }
 
