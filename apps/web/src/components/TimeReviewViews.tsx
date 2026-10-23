@@ -2002,10 +2002,16 @@ function CalendarBlockTitleLine({
   entry: Parameters<typeof calendarBlockPrimaryParts>[0];
 }) {
   const { description } = calendarBlockPrimaryParts(entry);
+  const length = calendarBlockDurationLabel(entry, capturedNow);
   return (
     <span className="calendar-entry-title-line">
       <span className="calendar-entry-title">{description}</span>{" "}
-      <span className="calendar-entry-length tabular">{calendarBlockDurationLabel(entry, capturedNow)}</span>
+      <span
+        className="calendar-entry-length tabular"
+        style={{ "--calendar-length-chars": length.length } as CSSProperties}
+      >
+        {length}
+      </span>
     </span>
   );
 }

@@ -2167,20 +2167,29 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   opacity: 0.58;
 }
 
-@container calendar-time-block (max-width: 27px) {
+/* Hover Play only where the column reserves room for it (112 px and wider, below): in a narrower
+   column it would lie over the label, the block's own target (Codex r3 on #545). */
+@container calendar-time-block (max-width: 111.98px) {
   .calendar-start-again {
     display: none;
+  }
+}
+
+/* Under 72 px the label is the length alone, scaled down so the whole length always fits (the title
+   stays in the name and tooltip); under 34 px the activity icon alone (below). */
+@container calendar-time-block (max-width: 71.98px) {
+  .calendar-entry-title {
+    display: none;
+  }
+
+  .calendar-entry-length {
+    font-size: min(1em, calc((100cqw - 12px) / (var(--calendar-length-chars, 3) * 0.82)));
   }
 }
 
 @container calendar-time-block (max-width: 33.98px) {
   .calendar-entry-primary {
     padding: 0;
-  }
-
-  /* The icon-only column is the block's own tap target: no hover Play over it. */
-  .calendar-start-again {
-    display: none;
   }
 
   .calendar-entry-title-line,
