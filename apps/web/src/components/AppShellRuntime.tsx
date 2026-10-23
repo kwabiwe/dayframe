@@ -16,6 +16,7 @@ import {
   clearPendingTimerDetails,
   endPendingTimerDetailsSession,
   fitsKeepalive,
+  KEEPALIVE_BODY_LIMIT_BYTES,
   pendingTimerDetailsDecision,
   pendingTimerDetailsGeneration,
   readPendingTimerDetails,
@@ -38,12 +39,15 @@ import {
   reconcileTimerDraftWithBase,
   runActiveEntryCompactMutation,
   runTimerStartMutation,
+  timerDetailEquivalent,
+  timerDetailWireValue,
   timerDetailsPatch,
   timerDraftBaseAfterSave,
   timerDraftEditedFields,
   timerDraftForEntry,
   timerDraftsEqual,
   timerDraftVersion,
+  type TimerDetailField,
   type TimerDraft,
   type TimerDraftInput,
   type TimerStartOutcome,
@@ -464,17 +468,19 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return true;
   }, [commitData, setTimerDraft, setTimerDraftBase]);
 
-  // The details save in flight (its block and the base it was sent against), and the outcome of
-  // the last one: a Stop that waited for it, or gave up waiting, uses both (Codex r1 on #539).
-  const detailsInFlightRef = useRef<{ entryId: string; base: TimerDraft } | null>(null);
+  // The details save in flight (its block, the base it was sent against, and whether it travels
+  // keepalive), and the outcome of the last one: a Stop that waited for it, or gave up waiting,
+  // uses both (Codex r1 on #539).
+  const detailsInFlightRef = useRef<{ entryId: string; base: TimerDraft; keepalive: boolean } | null>(null);
   const detailsOutcomeRef = useRef<{ seq: number; entryId: string; conflict: boolean; error: string | null }>(
     { seq: 0, entryId: "", conflict: false, error: null }
   );
   const pendingStopRef = useRef<Promise<MutationOutcome> | null>(null);
   const [isStopPending, setIsStopPending] = useState(false);
-  // A Stop that went ahead past a hung save: the text it stopped with, re-sent if that save lands
-  // later, so the hung save's text is never the block's last word (Codex r2 on #539).
-  const stopCorrectionsRef = useRef(new Map<string, { targetId: string; draft: TimerDraft }>());
+  // Every description write this tab sends is numbered: only the newest may retry after a 409 that
+  // only its version caused; an older one (a hung save a Stop went past) is dropped (Codex r3).
+  const detailsWriteSeqRef = useRef(0);
+  const keepaliveBytesRef = useRef(0);
   // The pending-details store's owner and session token (lib/timer-draft-store.ts).
   const pendingStoreSessionRef = useRef<{ owner: string; generation: number } | null>(null);
   const pendingOwner = useCallback((snapshot: BootstrapData | null) => {
@@ -486,14 +492,41 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return { owner, generation: pendingStoreSessionRef.current.generation };
   }, []);
 
+  // Sends one description PATCH. It is keepalive (it outlives the page if the tab closes or
+  // reloads) whenever it fits the browser's keepalive budget beside any other keepalive request
+  // this tab has in flight (Codex r3 on #539); `onSent` learns which.
+  const sendDetailsPatch = useCallback(async (
+    targetId: string,
+    body: Record<string, unknown>,
+    onSent?: (keepalive: boolean) => void
+  ) => {
+    const text = JSON.stringify(body);
+    const bytes = new TextEncoder().encode(text).length;
+    const keepalive = keepaliveBytesRef.current + bytes <= KEEPALIVE_BODY_LIMIT_BYTES;
+    if (keepalive) keepaliveBytesRef.current += bytes;
+    onSent?.(keepalive);
+    try {
+      return await clientFetch(`/api/time-entries/${targetId}`, {
+        method: "PATCH",
+        ...(keepalive ? { keepalive: true } : {}),
+        headers: { "Content-Type": "application/json" },
+        body: text
+      });
+    } finally {
+      if (keepalive) keepaliveBytesRef.current -= bytes;
+    }
+  }, []);
+
   // Saves the running block's details; the caller holds the mutation gate. Only the fields the
-  // user edited (against `base`, the copy the edit was based on) are sent, with their base values.
-  // `keepalive` only for a close-time flush (a foreground save may exceed its 64 KiB budget).
+  // user edited (against `base`, the copy the edit was based on) are sent, with their base values
+  // and the version of the block this tab last had from the server (`expectedUpdatedAt`): a write
+  // that landed since, whatever it changed, makes this one 409. A 409 its version alone caused (the
+  // fields still hold the base) is retried once at the new version, if this is still the newest
+  // write for a block still on screen; otherwise it is dropped.
   const saveActiveDetails = useCallback(async (
     snapshot: BootstrapData,
     draft: TimerDraft,
-    explicitBase?: TimerDraft,
-    options: { keepalive?: boolean } = {}
+    explicitBase?: TimerDraft
   ): Promise<MutationOutcome> => {
     const activeEntry = snapshot.activeEntry!;
     const base = explicitBase ?? baseFor(activeEntry);
@@ -505,13 +538,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     setTimerError(null);
     refreshRequestRef.current += 1;
     detailsSavesInFlightRef.current += 1;
+    const writeSeq = ++detailsWriteSeqRef.current;
     const sending = pickTimerDraftFields(draft, timerDraftForEntry(activeEntry), patch.fields);
     const optimistic = applyOptimisticActiveEntryPatch(snapshot, sending);
     commitData(optimistic, "optimistic");
     // What is being saved is now the base, so an edit made while the save is pending (even one
     // back to the previous text) is newer and survives its acknowledgement (Codex r7).
     setTimerDraftBase(timerDraftBaseAfterSave(base, draft, patch.fields), activeEntry.id);
-    const inFlight = { entryId: activeEntry.id, base };
+    const inFlight = { entryId: activeEntry.id, base, keepalive: false };
     detailsInFlightRef.current = inFlight;
     // A save that settles after a Stop went ahead without it (`stopTimer`'s deadline) leaves the
     // stopped block alone: no rollback brings it back and its notice is the Stop's.
@@ -520,18 +554,25 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       detailsOutcomeRef.current = { seq: detailsOutcomeRef.current.seq + 1, entryId: activeEntry.id, conflict, error };
     };
     try {
-      const body = JSON.stringify(patch.body);
-      const response = await clientFetch(`/api/time-entries/${targetId}`, {
-        method: "PATCH",
-        ...(options.keepalive && fitsKeepalive(body) ? { keepalive: true } : {}),
-        headers: { "Content-Type": "application/json" },
-        body
+      const version = entryVersion(activeEntry);
+      let response = await sendDetailsPatch(targetId, withVersion(patch.body, version), (keepalive) => {
+        inFlight.keepalive = keepalive;
       });
+      let conflict: { entry?: TimeEntryRow } | null = null;
       if (response.status === 409) {
-        const conflict = await response.json().catch(() => null) as { entry?: TimeEntryRow } | null;
-        stopCorrectionsRef.current.delete(activeEntry.id);
+        conflict = await response.json().catch(() => null) as { entry?: TimeEntryRow } | null;
+        const current = conflict?.entry;
+        if (current && writeSeq === detailsWriteSeqRef.current && stillShown()
+          && detailsHold(current, base, patch.fields) && entryVersion(current) !== version) {
+          response = await sendDetailsPatch(targetId, withVersion(patch.body, entryVersion(current)));
+          conflict = response.status === 409
+            ? await response.json().catch(() => null) as { entry?: TimeEntryRow } | null
+            : null;
+        }
+      }
+      if (response.status === 409) {
         settle(true, DETAILS_CONFLICT_MESSAGE);
-        if (!stillShown()) return { ok: false, error: DETAILS_CONFLICT_MESSAGE } as const;
+        if (!stillShown() || writeSeq !== detailsWriteSeqRef.current) return { ok: false, error: DETAILS_CONFLICT_MESSAGE } as const;
         if (!adoptServerDetails(activeEntry.id, conflict?.entry)) {
           commitData(snapshot, "optimistic");
           setTimerDraftBase(timerDraftForEntry(snapshot.activeEntry), activeEntry.id);
@@ -550,22 +591,9 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       }
       settle(false, null);
       clearPendingTimerDetails(pendingOwner(dataRef.current ?? snapshot).owner, targetId, draft);
-      const correction = stopCorrectionsRef.current.get(activeEntry.id);
-      stopCorrectionsRef.current.delete(activeEntry.id);
-      const fix = correction && !stillShown()
-        ? timerDetailsPatch(correction.draft, timerDraftBaseAfterSave(base, draft, patch.fields))
-        : null;
-      if (correction && fix) {
-        void clientFetch(`/api/time-entries/${correction.targetId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fix.body)
-        }).catch(() => undefined);
-      }
       return { ok: true } as const;
     } catch {
       const message = DETAILS_FAILED_MESSAGE;
-      stopCorrectionsRef.current.delete(activeEntry.id);
       settle(false, message);
       if (!stillShown()) return { ok: false, error: message } as const;
       commitData(snapshot, "optimistic");
@@ -578,24 +606,18 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       detailsSavesInFlightRef.current -= 1;
       setIsTimerBusy(false);
     }
-  }, [adoptServerDetails, baseFor, commitData, pendingOwner, serverEntryId, setTimerDraft, setTimerDraftBase]);
+  }, [adoptServerDetails, baseFor, commitData, pendingOwner, sendDetailsPatch, serverEntryId, setTimerDraft, setTimerDraftBase]);
 
   // Leaving the shell: details the running block's real id would still get from autosave are sent
-  // now (keepalive, so the request outlives the page). A block whose Start's POST has not come
-  // back has no real id yet; those edits are lost, as on any page left mid-request.
+  // now (keepalive when it fits, so the request outlives the page). A block whose Start's POST has
+  // not come back has no real id yet; those edits are lost, as on any page left mid-request.
   useEffect(() => () => {
     const entry = dataRef.current?.activeEntry;
     const targetId = entry ? serverEntryId(entry.id) : null;
     const patch = entry ? timerDetailsPatch(draftRef.current, baseFor(entry)) : null;
     if (!entry || !targetId || !patch) return;
-    const body = JSON.stringify(patch.body);
-    void clientFetch(`/api/time-entries/${targetId}`, {
-      method: "PATCH",
-      ...(fitsKeepalive(body) ? { keepalive: true } : {}),
-      headers: { "Content-Type": "application/json" },
-      body
-    }).catch(() => undefined);
-  }, [baseFor, serverEntryId]);
+    void sendDetailsPatch(targetId, withVersion(patch.body, entryVersion(entry))).catch(() => undefined);
+  }, [baseFor, sendDetailsPatch, serverEntryId]);
 
   const startTimer = useCallback(async (
     input: TimerDraftInput = {},
@@ -733,14 +755,29 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     if (!targetId) return { ok: false, error: "The block is still starting." };
     const draftSnapshot = draftRef.current;
     const draft = mergeTimerDraft(draftSnapshot, input);
-    // Only what this tab's user edited is saved with the Stop (a stale copy never is). Past a hung
-    // save, against the base that save was sent from, so its edits go too; then, if the server
-    // turns out to hold that save after all (409), once more against what it saved.
+    // Only what this tab's user edited is saved with the Stop (a stale copy never is), at the
+    // block's version as this tab last had it. Past a hung save, against the copy that save was
+    // sent from, and with every field that save or this tab changed, so the Stop's text (a revert
+    // included) is the block's last word whichever lands first (Codex r3 on #539): the hung save,
+    // landing later, is refused by the version this write moves on; landing first, it makes this
+    // write 409, which is then retried once at the new version, since the block holds only this
+    // tab's own text.
     const savedBase = baseFor(activeEntry);
-    const patches = [timerDetailsPatch(draft, bypassed?.base ?? savedBase)];
-    if (bypassed) patches.push(timerDetailsPatch(draft, savedBase));
+    const base = bypassed?.base ?? savedBase;
+    const fields = [...new Set([
+      ...timerDraftEditedFields(draft, base),
+      ...(bypassed ? timerDraftEditedFields(draft, savedBase) : [])
+    ])];
+    const detailsBody = (expected: TimerDraft) => {
+      const body: Record<string, unknown> = {};
+      const expectedDetails: Record<string, unknown> = {};
+      for (const field of fields) {
+        body[field] = timerDetailWireValue(field, draft);
+        expectedDetails[field] = timerDetailWireValue(field, expected);
+      }
+      return { ...body, expectedDetails };
+    };
     let detailsConflict = false;
-    let conflictEntry: TimeEntryRow | null = null;
     const stop = async () => {
       setIsTimerBusy(true);
       setTimerError(null);
@@ -748,34 +785,22 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       commitData(applyOptimisticTimerStop(snapshot, new Date().toISOString()), "optimistic");
 
       try {
-        for (const patch of patches) {
-          // Nothing to send against this base (the draft is that copy, as after a revert): the
-          // next base, if any, is tried, so a revert is enforced over the hung save's text too.
-          if (!patch) continue;
-          const updateResponse = await clientFetch(`/api/time-entries/${targetId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(patch.body)
-          });
-          // Changed elsewhere since this edit's base: the block stops with the other change.
+        if (fields.length) {
+          ++detailsWriteSeqRef.current;
+          let updateResponse = await sendDetailsPatch(targetId, withVersion(detailsBody(base), entryVersion(activeEntry)));
           if (updateResponse.status === 409) {
-            detailsConflict = true;
-            conflictEntry = (await updateResponse.json().catch(() => null) as { entry?: TimeEntryRow } | null)?.entry ?? null;
-            continue;
+            const current = (await updateResponse.json().catch(() => null) as { entry?: TimeEntryRow } | null)?.entry;
+            // Only this tab's own text is there (the hung save landed first, or only the version
+            // moved): once more at the new version. Anything else was changed elsewhere.
+            const own = current && [base, savedBase].find((known) => detailsHold(current, known, fields));
+            updateResponse = current && own
+              ? await sendDetailsPatch(targetId, withVersion(detailsBody(timerDraftForEntry(current)), entryVersion(current)))
+              : updateResponse;
           }
-          if (!updateResponse.ok) {
+          // Changed elsewhere since this edit's base: the block stops with the other change.
+          if (updateResponse.status === 409) detailsConflict = true;
+          else if (!updateResponse.ok) {
             throw new Error(await responseError(updateResponse, `Unable to save the block details: ${updateResponse.status}`));
-          }
-          detailsConflict = false;
-          conflictEntry = null;
-          break;
-        }
-        // Past a hung save, a 409 is a conflict only if the server holds something other than this
-        // edit, its base or the hung save's text (which, landing later, is corrected).
-        if (bypassed && detailsConflict) {
-          const server = conflictEntry ? timerDraftForEntry(conflictEntry) : null;
-          if (server && [draft, savedBase, bypassed.base].some((known) => !timerDraftEditedFields(server, known).length)) {
-            detailsConflict = false;
           }
         }
         const response = await clientFetch("/api/events", {
@@ -810,13 +835,12 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
         setIsTimerBusy(false);
       }
     };
-    if (bypassed) stopCorrectionsRef.current.set(activeEntry.id, { targetId, draft });
     const result = bypassed ? { ran: true as const, value: await stop() } : await gate.run(stop);
     if (result.ran && result.value.ok && !gate.isActive()) {
       await refresh({ force: true });
     }
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
-  }, [baseFor, commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
+  }, [baseFor, commitData, pendingOwner, refresh, sendDetailsPatch, serverEntryId, setTimerDraft]);
 
   // One Stop at a time: pressing again while one waits or runs joins it (no stacked waiters).
   const stopTimer = useCallback((input: TimerDraftInput = {}): Promise<MutationOutcome> => {
@@ -874,16 +898,13 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
     return result.ran ? result.value : { ok: false, error: "A block update is already in progress." };
   }, [commitData, pendingOwner, refresh, serverEntryId, setTimerDraft]);
 
-  const updateActiveDetails = useCallback(async (
-    draft: TimerDraft,
-    options: { keepalive?: boolean } = {}
-  ): Promise<MutationOutcome> => {
+  const updateActiveDetails = useCallback(async (draft: TimerDraft): Promise<MutationOutcome> => {
     const snapshot = dataRef.current;
     if (!snapshot?.activeEntry) return { ok: false, error: "There is no running block to edit." };
     // A block whose Start is still in flight keeps its edits in the draft; the Start saves them to
     // the real block as soon as the server accepts it.
     if (!serverEntryId(snapshot.activeEntry.id)) return { ok: false, error: "The block is still starting." };
-    const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft, undefined, options));
+    const result = await mutationGateRef.current.run(() => saveActiveDetails(snapshot, draft));
     if (result.ran && result.value.ok && !mutationGateRef.current.isActive()) {
       await refresh({ force: true });
     }
@@ -891,13 +912,14 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
   }, [refresh, saveActiveDetails, serverEntryId]);
 
   // The tab is closing, reloading or going to the background (stability audit WEB-UI-2): edits
-  // autosave would send after its 650 ms debounce, and the text of a save still in flight (closing
-  // can cancel it), are first kept in this tab (the pending-details store), then the edits are sent
-  // now. With the gate free this is the ordinary save, keepalive when the body fits, so it outlives
-  // the page; its base moves, so the debounce sends nothing again. With a save already in flight
-  // nothing is sent beside it (its successor would be checked against a write that may not have
-  // committed, and refused; Codex r1 on #539): a reload or restore of this tab puts the kept text
-  // back for autosave. Nothing is kept for a session that has ended (Codex r2).
+  // autosave would send after its 650 ms debounce are sent now through the ordinary save, which is
+  // keepalive when it fits (nearly always), so it outlives the page; its base moves, so the
+  // debounce sends nothing again. With a save already in flight nothing is sent beside it (it is
+  // the one description write a tab has in flight). What keepalive cannot carry is kept in this tab
+  // instead, best effort (the pending-details store; a reload or restore of this tab puts it back
+  // for autosave, a newly opened tab does not have it): a body over the keepalive budget, edits
+  // behind a save still in flight, and a save in flight that is not keepalive. Nothing is kept for
+  // a session that has ended (Codex r1–r3 on #539).
   useEffect(() => {
     function flush() {
       const snapshot = dataRef.current;
@@ -906,17 +928,20 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
       if (!entry || !targetId) return;
       const base = baseFor(entry);
       const draft = draftRef.current;
-      const edited = Boolean(timerDetailsPatch(draft, base));
+      const patch = timerDetailsPatch(draft, base);
       const inFlight = detailsInFlightRef.current?.entryId === entry.id ? detailsInFlightRef.current : null;
-      if (!edited && !inFlight) return;
-      const { owner, generation } = pendingOwner(snapshot);
-      writePendingTimerDetails(owner, {
-        entryId: targetId,
-        draft,
-        bases: inFlight ? [base, inFlight.base] : [base],
-        savedAt: Date.now()
-      }, generation);
-      if (edited && !mutationGateRef.current.isActive()) void updateActiveDetails(draft, { keepalive: true });
+      const keep = (patch && (inFlight || !fitsKeepalive(JSON.stringify(withVersion(patch.body, entryVersion(entry))))))
+        || (inFlight && !inFlight.keepalive);
+      if (keep) {
+        const { owner, generation } = pendingOwner(snapshot);
+        writePendingTimerDetails(owner, {
+          entryId: targetId,
+          draft,
+          bases: inFlight ? [base, inFlight.base] : [base],
+          savedAt: Date.now()
+        }, generation);
+      }
+      if (patch && !mutationGateRef.current.isActive()) void updateActiveDetails(draft);
     }
     const onPageHide = () => flush();
     const onVisibilityChange = () => {
@@ -1238,6 +1263,21 @@ export function AppShellRuntimeProvider({ children }: { children: React.ReactNod
 }
 
 const OPTIMISTIC_TIMER_ID_PREFIX = "optimistic-timer:";
+
+/** The version of a block this tab last had from the server; none for a block still shown optimistically. */
+function entryVersion(entry: TimeEntryRow | null | undefined) {
+  return entry && !entry.id.startsWith(OPTIMISTIC_TIMER_ID_PREFIX) && entry.updatedAt ? String(entry.updatedAt) : undefined;
+}
+
+function withVersion(body: Record<string, unknown>, version: string | undefined) {
+  return version ? { ...body, expectedUpdatedAt: version } : body;
+}
+
+/** Whether `entry` still holds `base` for `fields` (a 409 then came from its version alone). */
+function detailsHold(entry: TimeEntryRow, base: TimerDraft, fields: TimerDetailField[]) {
+  const stored = timerDraftForEntry(entry);
+  return fields.every((field) => timerDetailEquivalent(field, stored, base));
+}
 const DETAILS_CONFLICT_MESSAGE = "This block was changed in another window or device, so its latest details are shown.";
 const DETAILS_CONFLICT_SWITCH_MESSAGE = "Switched. The block you left was changed in another window or device, so your edit to it was not saved.";
 const DETAILS_CONFLICT_STOP_MESSAGE = "Stopped. This block was changed in another window or device, so it kept those details.";

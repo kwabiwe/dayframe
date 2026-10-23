@@ -24,6 +24,8 @@ const server = {
   deletes: [] as string[],
   posts: [] as Record<string, unknown>[],
   conflicts: 0,
+  /** 409s caused by a stale `expectedUpdatedAt` alone. */
+  versionConflicts: 0,
   holdNext: null as Hold | null,
   release: null as (() => void) | null,
   /** A bootstrap held mid-flight answers with the server copy it read when it arrived. */
@@ -59,9 +61,18 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       server.patches.push({ url, body });
       if (url !== `/api/time-entries/${server.entry?.id}`) return reply(404, { error: "Block not found." });
       await maybeHold("patch");
-      const { expectedDetails, ...sent } = body as Partial<Details> & { expectedDetails?: Partial<Details> };
+      const { expectedDetails, expectedUpdatedAt, ...sent } = body as Partial<Details> & {
+        expectedDetails?: Partial<Details>;
+        expectedUpdatedAt?: string;
+      };
       if (expectedDetails && detailsChanged(server.entry!, expectedDetails)) {
         server.conflicts += 1;
+        return reply(409, { error: "Changed elsewhere", code: "time_entry_details_conflict", entry: server.entry });
+      }
+      // As the server: a version written since is refused too (Codex r3 on #539), whatever changed
+      // (the same 409; counted apart when the details alone would have passed).
+      if (expectedUpdatedAt && Date.parse(expectedUpdatedAt) !== Date.parse(server.entry!.updatedAt)) {
+        server.versionConflicts += 1;
         return reply(409, { error: "Changed elsewhere", code: "time_entry_details_conflict", entry: server.entry });
       }
       const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
@@ -107,6 +118,7 @@ beforeEach(() => {
   server.deletes = [];
   server.posts = [];
   server.conflicts = 0;
+  server.versionConflicts = 0;
   server.holdNext = null;
   server.release = null;
 });
@@ -156,7 +168,11 @@ async function openTab() {
   };
 }
 
-const bodies = () => server.patches.map((patch) => patch.body);
+/** Each PATCH body without its version (asserted on its own where it matters). */
+const bodies = () => server.patches.map((patch) => {
+  const { expectedUpdatedAt: _version, ...body } = patch.body as Record<string, unknown>;
+  return body;
+});
 
 describe("a second tab never writes a stale timer description back", () => {
   it("the owner's report: tab Y refreshes onto tab X's edit, adopts it and never PATCHes", async () => {
@@ -248,6 +264,12 @@ describe("a second tab never writes a stale timer description back", () => {
     await y.type("{End} notes");
     await waitFor(() => expect(server.entry?.description).toBe("BAU notes"), { timeout: 3_000 });
     expect(bodies()[1]).toEqual({ description: "BAU notes", expectedDetails: { description: "BAU" } });
+    // Y's copy was a version behind: refused once for its version alone, then sent again at the
+    // current one (its description still held its base), so neither edit is lost (Codex r3 on #539).
+    expect(server.versionConflicts).toBe(1);
+    expect(bodies()[2]).toEqual(bodies()[1]);
+    expect(Date.parse(String(server.patches[2]?.body.expectedUpdatedAt)))
+      .toBeGreaterThan(Date.parse(String(server.patches[1]?.body.expectedUpdatedAt)));
     expect(server.entry).toMatchObject({ categoryId: "coding", description: "BAU notes" });
     await y.refresh();
     expect(y.activity()).toBe("Activity: Coding");

@@ -116,4 +116,101 @@ describe.runIf(runDatabaseIntegration)("running-block details precondition (Post
       client.release();
     }
   });
+
+  it("a version precondition: both orderings of a late save and a newer one end on the newer text (Codex r3 on #539)", async () => {
+    const userId = randomUUID();
+    const workspaceId = randomUUID();
+    const entryId = randomUUID();
+    const session = {
+      authMode: "provider" as const,
+      scopes: ["app:read", "app:write", "events:write"],
+      userId,
+      workspaceId
+    };
+    const client = await pool.connect();
+    const version = async () => {
+      const row = await client.query<{ updatedAt: Date }>(`select updated_at as "updatedAt" from time_entries where id = $1`, [entryId]);
+      return row.rows[0]!.updatedAt.toISOString();
+    };
+    const description = async () =>
+      (await client.query<{ description: string }>("select description from time_entries where id = $1", [entryId])).rows[0]?.description;
+    try {
+      await client.query(`insert into users (id, email, name) values ($1, $2, 'Version precondition test')`,
+        [userId, `dayframe-version-${userId}@example.invalid`]);
+      await client.query(`insert into workspaces (id, name) values ($1, 'Version precondition test')`, [workspaceId]);
+      await client.query(`insert into workspace_members (workspace_id, user_id) values ($1, $2)`, [workspaceId, userId]);
+      await client.query(
+        `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, updated_at)
+         values ($1, $2, $3, 'manual_app', 'high', 'confirmed', 'BAU', now() - interval '30 minutes', now() - interval '1 minute')`,
+        [entryId, workspaceId, userId]
+      );
+      const v0 = await version();
+
+      // The newer write (a Stop's text, a revert to "BAU") lands first; the late save at v0 is refused.
+      await updateTimeEntry(entryId, { description: "BAU", categoryId: null, expectedDetails: { description: "BAU" }, expectedUpdatedAt: v0 }, session);
+      await expect(updateTimeEntry(entryId, { description: "BAU x", expectedDetails: { description: "BAU" }, expectedUpdatedAt: v0 }, session))
+        .rejects.toBeInstanceOf(TimeEntryConflictError);
+      expect(await description()).toBe("BAU");
+
+      // The late save lands first at the current version; the newer write at the old version is
+      // refused, and goes through once at the new one.
+      const v1 = await version();
+      await updateTimeEntry(entryId, { description: "BAU x", expectedDetails: { description: "BAU" }, expectedUpdatedAt: v1 }, session);
+      await expect(updateTimeEntry(entryId, { description: "BAU", expectedDetails: { description: "BAU" }, expectedUpdatedAt: v1 }, session))
+        .rejects.toBeInstanceOf(TimeEntryConflictError);
+      await updateTimeEntry(entryId, { description: "BAU", expectedDetails: { description: "BAU x" }, expectedUpdatedAt: await version() }, session);
+      expect(await description()).toBe("BAU");
+
+      // Without the field (the iPhone): as before.
+      await updateTimeEntry(entryId, { description: "Walk" }, session);
+      expect(await description()).toBe("Walk");
+    } finally {
+      await client.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
+      await client.query("delete from users where id = $1", [userId]).catch(() => undefined);
+      client.release();
+    }
+  });
+
+  it("a save at a version waiting on another's row lock is refused once that write commits", async () => {
+    const userId = randomUUID();
+    const workspaceId = randomUUID();
+    const entryId = randomUUID();
+    const session = {
+      authMode: "provider" as const,
+      scopes: ["app:read", "app:write", "events:write"],
+      userId,
+      workspaceId
+    };
+    const setup = await pool.connect();
+    const other = await pool.connect();
+    try {
+      await setup.query(`insert into users (id, email, name) values ($1, $2, 'Version lock test')`,
+        [userId, `dayframe-version-lock-${userId}@example.invalid`]);
+      await setup.query(`insert into workspaces (id, name) values ($1, 'Version lock test')`, [workspaceId]);
+      await setup.query(`insert into workspace_members (workspace_id, user_id) values ($1, $2)`, [workspaceId, userId]);
+      await setup.query(
+        `insert into time_entries (id, workspace_id, user_id, source, confidence, review_status, description, started_at, updated_at)
+         values ($1, $2, $3, 'manual_app', 'high', 'confirmed', 'BAU', now() - interval '30 minutes', now() - interval '1 minute')`,
+        [entryId, workspaceId, userId]
+      );
+      const v0 = (await setup.query<{ updatedAt: Date }>(`select updated_at as "updatedAt" from time_entries where id = $1`, [entryId]))
+        .rows[0]!.updatedAt.toISOString();
+      await other.query("begin");
+      await other.query("update time_entries set updated_at = now() where id = $1", [entryId]);
+      const waiting = updateTimeEntry(entryId, { description: "BAU x", expectedUpdatedAt: v0 }, session).then(
+        () => ({ ok: true as const }),
+        (error: unknown) => ({ ok: false as const, error })
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await other.query("commit");
+      const result = await waiting;
+      expect(!result.ok && result.error).toBeInstanceOf(TimeEntryConflictError);
+    } finally {
+      await other.query("rollback").catch(() => undefined);
+      other.release();
+      await setup.query("delete from workspaces where id = $1", [workspaceId]).catch(() => undefined);
+      await setup.query("delete from users where id = $1", [userId]).catch(() => undefined);
+      setup.release();
+    }
+  });
 });

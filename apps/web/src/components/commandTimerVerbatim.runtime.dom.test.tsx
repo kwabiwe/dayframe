@@ -36,7 +36,9 @@ const server = {
   /** The page that sent the requests is gone: new requests fail and held responses are lost. */
   dead: false,
   /** A held PATCH, once released, never reaches the server (its request was cancelled). */
-  dropHeld: false
+  dropHeld: false,
+  /** A held PATCH had already reached the server: it lands even after the page closed. */
+  landsAfterClose: false
 };
 
 /** Whether a field the PATCH's edit was based on (`expectedDetails`) has changed since. */
@@ -74,8 +76,8 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(true, bootstrap(server.entry));
     }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
-      const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch> };
-      const { expectedDetails, ...sent } = body;
+      const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch>; expectedUpdatedAt?: string };
+      const { expectedDetails, expectedUpdatedAt, ...sent } = body;
       // Recorded as the details the PATCH asks the block to have: only the fields it sends change
       // (as on the server); the raw request is kept in `sent`.
       const before = server.entry;
@@ -94,11 +96,15 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       const held = server.holdNext === "patch";
       await maybeHold("patch");
       if (held && server.dropHeld) throw new TypeError("Failed to fetch");
+      // The page closed while this was held: only a keepalive request outlives it.
+      if (held && server.dead && !init?.keepalive && !server.landsAfterClose) throw new TypeError("Failed to fetch: page closed");
       const which = target();
       if (!which) return reply(false, { error: "Not found" });
       const current = server[which]!;
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
-      if (expectedDetails && detailsChanged(current, expectedDetails)) {
+      // As the server: a version written since, or a detail changed since, is refused.
+      if ((expectedUpdatedAt && Date.parse(expectedUpdatedAt) !== Date.parse(current.updatedAt))
+        || (expectedDetails && detailsChanged(current, expectedDetails))) {
         return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: current }) };
       }
       const updatedAt = new Date(Date.parse(current.updatedAt) + 60_000).toISOString();
@@ -129,7 +135,11 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       const target = body.rawPayload?.targetEntryId ?? "";
       server.stops.push(target);
       if (body.type !== "timer_stop" || !server.entry || target !== server.entry.id) return reply(false, { error: "Not running" });
-      server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
+      server.completed = {
+        ...server.entry,
+        stoppedAt: new Date().toISOString(),
+        updatedAt: new Date(Date.parse(server.entry.updatedAt) + 60_000).toISOString()
+      };
       server.entry = null;
       return reply(true, { timeEntryId: target });
     }
@@ -159,6 +169,7 @@ beforeEach(() => {
   server.rejectPatches = false;
   server.dead = false;
   server.dropHeld = false;
+  server.landsAfterClose = false;
   window.localStorage.clear();
   window.sessionStorage.clear();
 });
@@ -323,7 +334,7 @@ describe("autosave and Enter while recording", () => {
     expect(input.value).toBe("Fix bug @wri");
     // Only the edited field is sent, with the value the edit was based on.
     await waitFor(() => expect(server.sent).toEqual([
-      { description: "Fix bug @wri", expectedDetails: { description: "Fix bug" } }
+      { description: "Fix bug @wri", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) }
     ]), { timeout: 2_000 });
   });
 
@@ -834,7 +845,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
     expect(descriptions()).toEqual(["Fix bug more", "Fix bug more later"]);
     // The second PATCH was based on the first one's text, so it was not refused as stale.
-    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" }, expectedUpdatedAt: expect.any(String) });
     expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
     await wait(1_000);
     // Exactly one Stop, no Start, no PATCH after it.
@@ -875,7 +886,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(stopButton().getAttribute("aria-busy")).toBe("true");
     await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
     // Sent against the copy the hung save started from, with every edit since.
-    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug" } });
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) });
     expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
     await screen.findByRole("button", { name: "Start a block" });
     // The hung save finally lands: it is refused (the block moved on), the stopped block does not
@@ -907,6 +918,43 @@ describe("Stop and leaving the page never lose a typed description (stability au
     expect(server.completed?.description).toBe("Fix bug");
     expect(screen.queryByText(/changed in another window/)).toBeNull();
     expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r3 #1: a revert plus an activity change before Stop stays final when the hung save lands after Stop", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace} @wri");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Fix bug");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull());
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    await act(async () => { server.release?.(); });
+    await wait(800);
+    expect(server.completed).toMatchObject({ description: "Fix bug", categoryId: "write" });
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r3 #2: a revert before Stop stays final even when the page closes before the hung save lands", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.landsAfterClose = true;
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // The tab closes; the hung save, already at the server, lands afterwards.
+    server.dead = true;
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug");
   });
 
   it("a Stop queued behind an autosave that was refused (409) says the block kept the other change", async () => {
@@ -945,7 +993,7 @@ describe("Stop and leaving the page never lose a typed description (stability au
     await user.keyboard("{End} more");
     expect(server.patches).toEqual([]);
     act(() => { window.dispatchEvent(new Event("pagehide")); });
-    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" } }]);
+    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) }]);
     expect(keepalive()).toEqual([true]);
     await wait(1_000);
     // The debounce does not send it a second time (that copy would be refused as stale), and the
@@ -974,12 +1022,14 @@ describe("Stop and leaving the page never lose a typed description (stability au
   });
 
   /** The tab closes: nothing more leaves it; the next load is a fresh shell on the server's copy. */
-  async function reopen(unmount: () => void) {
+  async function reopen(unmount: () => void, options: { freshTab?: boolean } = {}) {
     server.dead = true;
     act(() => unmount());
     await wait(800);
     server.dead = false;
     cleanup();
+    // A newly opened tab has none of the closed tab's sessionStorage.
+    if (options.freshTab) window.sessionStorage.clear();
     return renderShell(server.entry);
   }
 
@@ -1000,27 +1050,43 @@ describe("Stop and leaving the page never lose a typed description (stability au
     const reopened = await reopen(unmount);
     await waitFor(() => expect(reopened.input.value).toBe("Fix bug more later"));
     await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
-    expect(server.sent.at(-1)).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" } });
+    expect(server.sent.at(-1)).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" }, expectedUpdatedAt: expect.any(String) });
     expect(stored()).toBeNull();
   });
 
-  it("closing during the only pending autosave keeps its text, and a reload saves it when that save was lost", async () => {
+  it("closing during the only pending autosave over the keepalive budget keeps its text, and a reload saves it", async () => {
+    const long = "x".repeat(33_000);
+    const { input, unmount } = await renderShell(entry({ description: long }));
+    server.holdNext = "patch";
+    fireEvent.change(input, { target: { value: `${long} more` } });
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    expect(keepalive()).toEqual([false]);
+    // Nothing typed since the save left; the page closes and cancels it.
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(stored()).not.toBeNull();
+    server.dead = true;
+    await act(async () => { server.release?.(); });
+    expect(server.entry?.description).toBe(long);
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe(`${long} more`));
+    await waitFor(() => expect(server.entry?.description).toBe(`${long} more`), { timeout: 2_000 });
+    expect(stored()).toBeNull();
+  });
+
+  it("Codex r3 #3: the only pending autosave survives the tab closing, so a newly opened tab shows it", async () => {
     const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
     const user = userEvent.setup();
     await user.click(input);
     server.holdNext = "patch";
-    server.dropHeld = true;
     await user.keyboard("{End} more");
     await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
-    // Nothing typed since the save left.
+    expect(keepalive()).toEqual([true]);
     act(() => { window.dispatchEvent(new Event("pagehide")); });
-    expect(stored()).not.toBeNull();
+    server.dead = true;
     await act(async () => { server.release?.(); });
-    expect(server.entry?.description).toBe("Fix bug");
-    const reopened = await reopen(unmount);
+    const reopened = await reopen(unmount, { freshTab: true });
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"));
     await waitFor(() => expect(reopened.input.value).toBe("Fix bug more"));
-    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"), { timeout: 2_000 });
-    expect(stored()).toBeNull();
   });
 
   it("after sign-out or a workspace switch begins, a page exit keeps nothing", async () => {

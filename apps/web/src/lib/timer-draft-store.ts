@@ -7,14 +7,15 @@ import {
 } from "@/lib/timer-runtime";
 
 /**
- * The running block's details a close-time flush could not be sure of delivering (stability
- * audit WEB-UI-2; Codex r1/r2 on #539). The page writes them here before it sends them (and the
- * text of a save still in flight, which closing can cancel), a save of that exact text that the
- * server acknowledges clears them, and a reload or restore of the same tab puts them back in the
- * draft when the server still holds one of the copies they were based on, so autosave sends them
- * again. Per tab (sessionStorage), one record per user, workspace and block, at most a day old.
- * When the session ends (sign-out, workspace switch) every record is removed and writes made for
- * the session that ended are refused (`generation`), so a later page exit cannot write them back.
+ * Best-effort recovery for the running block's details that a closing page cannot send keepalive
+ * (stability audit WEB-UI-2; Codex r1–r3 on #539): a body over the keepalive budget, edits typed
+ * behind a save still in flight, or a save in flight that is not keepalive. Every other description
+ * save is keepalive and outlives the page, so this store is rarely written. A save of that exact
+ * text that the server acknowledges clears it, and a reload or restore of the same tab puts it back
+ * in the draft when the server still holds one of the copies it was based on, so autosave sends it
+ * again. A newly opened tab does not have it (sessionStorage). One record per user, workspace and
+ * block, at most a day old. When the session ends (sign-out, workspace switch) every record is
+ * removed and writes made for the session that ended are refused (`generation`).
  */
 export type PendingTimerDetails = {
   /** The block's server id. */
