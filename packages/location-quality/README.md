@@ -8,9 +8,12 @@ owner's Mac only.
 
 - The answer key, the evidence and place rows, saved runs and score files are private. The CLI refuses
   any of them inside this repository, so they cannot be committed by accident.
-- Evidence and place rows are relative metres (east/north of an arbitrary origin); replay projects them
-  around a synthetic origin latitude (45° by default). Saved runs and reports hold times, counts, metres
-  and anonymous place labels (`P4`) only: no names, addresses or coordinates.
+- Evidence and place rows are relative metres (east/north of an origin); replay projects them back
+  around `--origin-latitude`, which a replay must give: the value the rows were exported with (kept in
+  the private notes beside them, never in Git). The projection moves distances by a few metres, so a
+  different value changes route lengths. Saved runs and reports hold times, counts, metres and anonymous
+  place labels (`P4`) only: no names, addresses or coordinates; a saved run read back is rebuilt from an
+  allowlist of fields, and a file that is not valid JSON is reported without quoting it.
 - Tests use the synthetic Exampleton day in `test/exampleton.ts`. Never copy a real export, real times or
   real place details into a test, PR or chat.
 
@@ -19,12 +22,13 @@ owner's Mac only.
 ```bash
 npm run score:location -- \
   --answer-key <private>/Timeline.json \
-  --rows <private>/week-rows.psv --places <private>/places.psv \
+  --rows <private>/week-rows.psv --places <private>/places.psv --origin-latitude <private> \
   --from 2026-10-15T12:00:00Z --to 2026-10-22T15:30:00Z --at 2026-10-22T15:45:00Z
 ```
 
 - `--from`/`--to` set the scoring window; `--at` is the replay's processing time (default `--to`).
 - `--segments <run.json>` scores a saved run instead of replaying; `--save-segments` writes one.
+- Relative paths are read from the folder the command is typed in.
 - `--engine <checkout>/packages/shared/src/location` replays another checkout's engine (a branch, or
   `git archive` of an older commit), so before and after can be scored on the same evidence.
 - `--summary-json` writes the week and day scores; `--detail` lists each miss, phantom and boundary

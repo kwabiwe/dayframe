@@ -79,6 +79,8 @@ export type Bar = { label: string; right: number; total: number; lowerBound: num
 
 export type QualityReport = {
   window: Interval;
+  /** The Home place's label, or null when it is unknown (a saved run scored without --home-place). */
+  homePlace: string | null;
   key: { stays: number; trips: number; legs: number; stayMinutes: number; travelMinutes: number; unsureMinutes: number };
   engine: { stays: number; moves: number };
   days: DayResult[];
@@ -214,8 +216,9 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
   };
 
   const evaluate = (dayMinutes: number[], label: string): DayResult => {
-    const lo = Math.min(...dayMinutes) * 60;
-    const hi = (Math.max(...dayMinutes) + 1) * 60;
+    // Minutes come in ascending order; no spread, so a long window cannot overflow the stack.
+    const lo = dayMinutes[0] * 60;
+    const hi = (dayMinutes[dayMinutes.length - 1] + 1) * 60;
     const inside = (x: Interval) => x.b > lo && x.a < hi && (x.a + x.b) / 2 >= lo && (x.a + x.b) / 2 < hi;
 
     // 1 coverage and kind agreement, over minutes the key is sure about
@@ -318,9 +321,15 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
     };
   };
 
+  // Every time zone's midnight falls on a quarter hour, so one label per quarter hour is exact.
   const dayBuckets = new Map<string, number[]>();
+  let quarter = Number.NaN;
+  let label = "";
   for (const m of allMinutes) {
-    const label = dayLabel(m * 60);
+    if (Math.floor(m / 15) !== quarter) {
+      quarter = Math.floor(m / 15);
+      label = dayLabel(quarter * 15 * 60);
+    }
     const bucket = dayBuckets.get(label);
     if (bucket) bucket.push(m);
     else dayBuckets.set(label, [m]);
@@ -374,6 +383,7 @@ export function scoreRun(key: AnswerKey, segments: QualitySegment[], options: Sc
 
   return {
     window: { a: W0, b: W1 },
+    homePlace: options.homePlace,
     key: {
       stays: key.stays.length,
       trips: key.trips.length,

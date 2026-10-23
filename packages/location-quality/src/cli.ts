@@ -7,7 +7,7 @@ import { parseEvidenceRows, parsePlaceRows, projectionAround } from "./evidenceR
 import { renderReport, summary } from "./report";
 import { loadEngine, replay, sharedEngine } from "./replay";
 import { scoreRun } from "./score";
-import type { QualitySegment } from "./segments";
+import { sanitizeQualitySegments, type QualitySegment } from "./segments";
 
 const USAGE = `Location quality harness (location v4 §13). Private inputs and outputs must live outside the repository.
 
@@ -15,25 +15,55 @@ Replay main's engine over private evidence rows and score it:
   npm run score -w @dayframe/location-quality -- --answer-key <Timeline.json> \\
     --rows <evidence.psv> --places <places.psv> --from <ISO> --to <ISO> [--at <ISO>]
 
-Score a saved run instead:     --segments <segments.json>
+Replay needs --origin-latitude <deg>: the latitude the private rows were exported around.
+Score a saved run instead:     --segments <segments.json> [--home-place P4]
 Replay another checkout:       --engine <checkout>/packages/shared/src/location
 Write the run or the scores:   --save-segments <file.json>  --summary-json <file.json>
-Also:  --detail  --time-zone Europe/London  --home-place P4  --origin-latitude <deg>
+Also:  --detail  --time-zone Europe/London  --home-place P4
        --drop-motion  --drop-places P2,P5  --received-until <ISO>`;
 
 export const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 /** npm runs workspace scripts in the package folder; relative paths mean the folder the command was typed in. */
-const CALLER_DIRECTORY = process.env.INIT_CWD ?? process.cwd();
+export const callerPath = (file: string) => path.resolve(process.env.INIT_CWD ?? process.cwd(), file);
 
-/** Private inputs and outputs never live inside the repository, so they cannot be committed by accident. */
-export function assertOutsideRepository(file: string, root = REPOSITORY_ROOT): string {
-  const resolved = path.resolve(CALLER_DIRECTORY, file);
-  const relative = path.relative(path.resolve(root), resolved);
-  if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
-    throw new Error(`Refusing ${resolved}: private location inputs and outputs must live outside the repository.`);
+/** The real path of a file, or of its nearest existing parent with the rest appended (an output not written yet). */
+function realPathOf(file: string): string {
+  const missing: string[] = [];
+  let current = file;
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(current), ...missing.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return file;
+      missing.push(path.basename(current));
+      current = parent;
+    }
   }
+}
+
+/**
+ * Private inputs and outputs never live inside the repository, so they cannot be committed by
+ * accident. Containment is by path component after resolving symlinks, so neither `<repo>/..x` nor a
+ * link out of (or into) the repository fools it.
+ */
+export function assertOutsideRepository(file: string, root = REPOSITORY_ROOT): string {
+  const resolved = callerPath(file);
+  const relative = path.relative(realPathOf(path.resolve(root)), realPathOf(resolved));
+  const inside = relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+  if (inside) throw new Error(`Refusing ${resolved}: private location inputs and outputs must live outside the repository.`);
   return resolved;
+}
+
+/** Reads private JSON; a parse failure never quotes the file. */
+function readPrivateJson(file: string, what: string): unknown {
+  const text = fs.readFileSync(assertOutsideRepository(file), "utf8");
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Could not read ${what}: it is not valid JSON.`);
+  }
 }
 
 async function main() {
@@ -49,9 +79,9 @@ async function main() {
       at: { type: "string" },
       "time-zone": { type: "string", default: "Europe/London" },
       "home-place": { type: "string" },
-      // A synthetic mid-latitude. Rows are relative metres, so distances survive any origin to within
-      // a metre; 45° reproduces the design baseline exactly.
-      "origin-latitude": { type: "string", default: "45" },
+      // The latitude the private rows were exported around. Rows are relative metres, but the
+      // projection still moves distances by a few metres, so a replay must use the export's own value.
+      "origin-latitude": { type: "string" },
       "drop-motion": { type: "boolean", default: false },
       "drop-places": { type: "string" },
       "received-until": { type: "string" },
@@ -61,7 +91,9 @@ async function main() {
       help: { type: "boolean", default: false }
     }
   });
-  if (values.help || !values["answer-key"] || !values.from || !values.to || (!values.segments && !(values.rows && values.places))) {
+  const replaying = !values.segments;
+  if (values.help || !values["answer-key"] || !values.from || !values.to
+    || (replaying && !(values.rows && values.places && values["origin-latitude"]))) {
     console.log(USAGE);
     process.exit(values.help ? 0 : 2);
   }
@@ -77,10 +109,12 @@ async function main() {
   let segments: QualitySegment[];
   let homePlace = values["home-place"] ?? null;
   if (values.segments) {
-    segments = JSON.parse(fs.readFileSync(assertOutsideRepository(values.segments), "utf8"));
+    segments = sanitizeQualitySegments(readPrivateJson(values.segments, "the saved run"));
   } else {
-    const engine = values.engine ? await loadEngine(values.engine) : sharedEngine;
-    const projection = projectionAround(Number(values["origin-latitude"]));
+    const engine = values.engine ? await loadEngine(callerPath(values.engine)) : sharedEngine;
+    const originLatitude = Number(values["origin-latitude"]);
+    if (!Number.isFinite(originLatitude) || Math.abs(originLatitude) >= 90) throw new Error("--origin-latitude must be a latitude in degrees.");
+    const projection = projectionAround(originLatitude);
     const dropped = new Set((values["drop-places"] ?? "").split(",").filter(Boolean));
     const places = parsePlaceRows(fs.readFileSync(assertOutsideRepository(values.places!), "utf8"), projection)
       .filter((place) => !dropped.has(place.label));
@@ -96,8 +130,9 @@ async function main() {
     fs.writeFileSync(assertOutsideRepository(values["save-segments"]), `${JSON.stringify(segments, null, 1)}\n`);
   }
 
-  const entries = JSON.parse(fs.readFileSync(assertOutsideRepository(values["answer-key"]), "utf8")) as TimelineEntry[];
-  const report = scoreRun(readAnswerKey(entries, from, to), segments, { from, to, homePlace, timeZone });
+  const entries = readPrivateJson(values["answer-key"], "the answer key");
+  if (!Array.isArray(entries)) throw new Error("The answer key must be a Timeline.json array.");
+  const report = scoreRun(readAnswerKey(entries as TimelineEntry[], from, to), segments, { from, to, homePlace, timeZone });
   process.stdout.write(renderReport(report, timeZone, { detail: values.detail }));
   if (values["summary-json"]) {
     fs.writeFileSync(assertOutsideRepository(values["summary-json"]), `${JSON.stringify(summary(report), null, 2)}\n`);

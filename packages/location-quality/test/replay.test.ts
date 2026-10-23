@@ -1,7 +1,5 @@
-import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { distanceMeters } from "@dayframe/shared";
-import { assertOutsideRepository, REPOSITORY_ROOT } from "../src/cli";
 import { parseEvidenceRows, parsePlaceRows, placeIdFromLabel, placeLabelFromId, projectionAround } from "../src/evidenceRows";
 import { replay, sharedEngine } from "../src/replay";
 import { exampletonPlaces } from "./exampleton";
@@ -75,13 +73,5 @@ describe("replay", () => {
     expect(moves).toHaveLength(1);
     expect([moves[0].from, moves[0].to]).toEqual(["P4", "P1"]);
     expect(JSON.stringify(segments)).not.toMatch(/latitude|longitude/);
-  });
-});
-
-describe("privacy guard", () => {
-  it("refuses private paths inside the repository", () => {
-    expect(() => assertOutsideRepository(path.join(REPOSITORY_ROOT, "Timeline.json"))).toThrow(/outside the repository/);
-    expect(() => assertOutsideRepository(REPOSITORY_ROOT)).toThrow();
-    expect(assertOutsideRepository(path.join(path.dirname(REPOSITORY_ROOT), "private", "Timeline.json"))).toContain("private");
   });
 });

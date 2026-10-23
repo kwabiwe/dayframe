@@ -2,14 +2,20 @@ import { localDayTime, median, p90, type DayResult, type QualityReport } from ".
 
 /**
  * Fixed-point formatting that rounds an exact binary half to even, as Python's format() does, so the
- * report reads the same as the design's prototype on the same run.
+ * report reads the same as the design's prototype on the same run. toFixed already rounds the exact
+ * binary value correctly except at a true tie, where it rounds up; a tie is found on the value's
+ * exact decimal expansion (every double used here has one well within 100 places), never on a
+ * product that floating point could round onto a half.
  */
 export function fixed(value: number, digits: number): string {
-  const scale = 10 ** digits;
-  const scaled = value * scale;
-  if (Number.isInteger(scaled * 2) && !Number.isInteger(scaled)) {
-    const floor = Math.floor(scaled);
-    return ((floor % 2 === 0 ? floor : floor + 1) / scale).toFixed(digits);
+  if (!Number.isFinite(value)) return String(value);
+  const exact = Math.abs(value).toFixed(100);
+  const point = exact.indexOf(".");
+  const tail = exact.slice(point + 1 + digits);
+  if (tail[0] === "5" && /^0*$/.test(tail.slice(1))) {
+    const kept = exact.slice(0, point + 1 + digits).replace(/\.$/, "");
+    const lastDigit = Number(kept[kept.length - 1]);
+    if (lastDigit % 2 === 0) return `${value < 0 && Number(kept) !== 0 ? "-" : ""}${kept}`;
   }
   return value.toFixed(digits);
 }
@@ -53,7 +59,9 @@ export function renderReport(report: QualityReport, timeZone: string, options: {
     + `precision ${fixed(100 * R.stayPrecision, 0)}%); phantom ${R.phantomStays}; split ${R.splitStays}`);
   out.push(`  start error: ${errors(R.stayStartErrors)}`);
   out.push(`  end error:   ${errors(R.stayEndErrors)}`);
-  out.push(`  Home stays matched to the Home place: ${R.home[0]}/${R.home[1]}`);
+  out.push(report.homePlace
+    ? `  Home stays matched to the Home place: ${R.home[0]}/${R.home[1]}`
+    : `  Home stays matched to the Home place: – (no Home place; pass --home-place)`);
   out.push(`Trips: Google ${R.keyTrips} (${R.multiLegTrips} with more than one leg); found ${R.tripMatched} (recall ${pct(R.tripMatched, R.keyTrips)}); `
     + `engine Moves ${R.engineMoves}, phantom ${R.phantomMoves} (precision ${fixed(100 * R.movePrecision, 0)}%); Move minutes inside Google stays ${R.phantomTravelMinutes}`);
   out.push(`  start error: ${errors(R.tripStartErrors)}`);
