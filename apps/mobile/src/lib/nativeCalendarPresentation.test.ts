@@ -279,25 +279,25 @@ describe("native Calendar presentation boundary", () => {
       expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
     });
 
-    it("reserves the target around iOS's one-line minimum block at every text size, not the raw time (Codex r9; location v4 C6)", () => {
-      // 09:00–09:01 draws one label line (12–19.5 points at 48 an hour: 15–24.375 minutes), so its
-      // 55-minute target centres between 09:07:30 and 09:12:11.25: the envelope is 08:40–09:39:41.25.
-      // The 09:53–09:58 envelope starts at 09:33. They overlap, so they need their own lanes.
+    it("reserves the target around iOS's minimum block on old and new builds, not the raw time (Codex r9; location v4 C6)", () => {
+      // 09:00–09:01 draws 4 points on an older build and one label line (up to 19.5 points: 24.375
+      // minutes) on a current one, so its 55-minute target centres between 09:02:30 and 09:12:11.25:
+      // the envelope is 08:35–09:39:41.25. The 09:53–09:58 envelope starts at 09:28. They overlap.
       const seconds = (value: number) => value * 1000;
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 9, 1), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 8, 40), end: localTime(2026, 7, 10, 9, 39) + seconds(41.25) });
+        .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 39) + seconds(41.25) });
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 53), localTime(2026, 7, 10, 9, 58), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 9, 33), end: localTime(2026, 7, 10, 10, 32) + seconds(41.25) });
+        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 32) + seconds(41.25) });
       const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 53, 5)] }));
       const lane = state.model.entries;
       expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
       expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
     });
 
-    it("targets that do not overlap share a lane (09:00–09:01 and 10:02–10:07)", () => {
-      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 10, 2, 5)] }));
+    it("targets that do not overlap share a lane (09:00–09:01 and 10:05–10:10)", () => {
+      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 10, 5, 5)] }));
       const lane = state.model.entries;
-      // a's envelope reaches 09:39:41; b (10:02–10:07) starts its envelope at 09:42 (location v4 C6).
+      // a's envelope reaches 09:39:41; b (10:05–10:10) starts its envelope at 09:40 (location v4 C6).
       expect(lane[0].offsetFraction).toBeCloseTo(lane[1].offsetFraction);
       expect(lane[0].widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
     });
@@ -838,9 +838,8 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd[0].stoppedAtMs).toBeGreaterThan(crowd[0].startedAtMs);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:00");
-      // c ends where its one-line minimum (15 minutes at the widest zoom, smallest text) ends.
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:00");
-      expect(crowd[0].accessibilityLabel).toContain("01:00 to 02:00");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("01:50");
+      expect(crowd[0].accessibilityLabel).toContain("01:00 to 01:50");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -862,7 +861,7 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd).toHaveLength(1);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:30");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:05");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("01:55");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -884,7 +883,7 @@ describe("native Calendar Blocks presentation", () => {
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(new Date(crowd[0].startedAtMs).getDate()).toBe(10);
       expect(clock(crowd[0].startedAtMs)).toBe("00:00");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("00:17");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("00:07");
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
       else process.env.TZ = previousTz;
@@ -905,7 +904,7 @@ describe("native Calendar Blocks presentation", () => {
       expect(crowd).toHaveLength(1);
       const clock = (ms: number) => new Date(ms).toTimeString().slice(0, 5);
       expect(clock(crowd[0].startedAtMs)).toBe("01:40");
-      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:14");
+      expect(clock(crowd[0].stoppedAtMs!)).toBe("02:04");
       expect(crowd[0].stoppedAtMs!).toBeGreaterThan(crowd[0].startedAtMs);
     } finally {
       if (previousTz === undefined) delete process.env.TZ;
@@ -1162,6 +1161,11 @@ const CALENDAR_ZOOMS = [48, 72, 128];
 /**
  * Where iOS draws each block and its tap target at one zoom, mirroring DayframeCalendarBlockMath,
  * DayframeCalendarHorizontalMath and DayframeCalendarVerticalMath (horizontal in column fractions).
+ */
+/**
+ * The hit geometry an older native build (before location v4 C6) gives this model: React's column
+ * fractions and its 4-point minimum. Such builds still read the model, so React's own layout must
+ * stay tap-safe. A current build lays out columns natively; DayframeCalendarCoreTests checks its taps.
  */
 function nativeFrames(state: ReturnType<typeof build>, hourHeight: number) {
   const { dayEndMs, dayStartMs, nowMs } = state.model;

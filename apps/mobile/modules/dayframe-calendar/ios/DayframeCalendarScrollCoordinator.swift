@@ -521,7 +521,7 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           semanticHeight: block.height,
           offsetFraction: laidOut.offsetFraction,
           widthFraction: laidOut.widthFraction,
-          overlapCount: entry.overlapCount,
+          overlapCount: entry.overlapCount + (laidOut.sharesTarget ? 1 : 0),
           textDensity: entry.textDensity,
           timelineHeight: 24 * hourHeight,
           leadingInset: presentation.entryLeadingInset

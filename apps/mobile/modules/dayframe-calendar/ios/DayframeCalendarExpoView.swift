@@ -45,6 +45,14 @@ final class DayframeCalendarExpoView: ExpoView {
     }
   }
 
+  // iOS 16 has no trait registration: the older callback carries Text Size changes there.
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if #unavailable(iOS 17.0), previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+      updateLabelTextScale()
+    }
+  }
+
   /// Block labels follow Dynamic Type (location v4 C6); the one-line minimum height grows with them.
   private func updateLabelTextScale() {
     model.updateLabelTextScale(Double(UIFontMetrics(forTextStyle: .footnote).scaledValue(for: 1, compatibleWith: traitCollection)))

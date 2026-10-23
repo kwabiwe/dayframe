@@ -513,7 +513,7 @@ private struct DayframeCalendarEntriesLayer: View {
           semanticHeight: laidOut.block.height,
           offsetFraction: laidOut.offsetFraction,
           widthFraction: laidOut.widthFraction,
-          overlapCount: entry.overlapCount,
+          overlapCount: entry.overlapCount + (laidOut.sharesTarget ? 1 : 0),
           textDensity: entry.textDensity,
           timelineHeight: 24 * Double(hourHeight),
           leadingInset: presentation.entryLeadingInset

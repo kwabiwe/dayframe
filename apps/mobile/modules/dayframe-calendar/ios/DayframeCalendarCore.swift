@@ -1112,6 +1112,9 @@ public struct DayframeCalendarLaidOutEntry: Equatable {
   public let widthFraction: Double
   public let columnCount: Int
   public let zIndex: Int
+  /// Another block is drawn inside this block's 44-point target in the same horizontal space, so the
+  /// target stays the block's own height and a tap never lands on the wrong block.
+  public let sharesTarget: Bool
 }
 
 /// One layout for the day at one zoom and text size, used by drawing and by hit testing alike.
@@ -1150,7 +1153,12 @@ public enum DayframeCalendarDayLayout {
       ) else { continue }
       blocks[entry.id] = block
       if let group = entry.columnGroup {
-        groups[group, default: []].append(DayframeCalendarDrawnBlock(id: entry.id, top: block.top, bottom: block.top + block.height))
+        // Review suggestions never share a target: their columns are laid out over the 44-point
+        // target each one gets (as hit testing places it), not just over what is drawn.
+        let extent = group == "review"
+          ? targetExtent(top: block.top, height: block.height, timelineHeight: 24 * hourHeight)
+          : (top: block.top, bottom: block.top + block.height)
+        groups[group, default: []].append(DayframeCalendarDrawnBlock(id: entry.id, top: extent.top, bottom: extent.bottom))
       }
     }
     var columns: [String: DayframeCalendarColumn] = [:]
@@ -1177,17 +1185,40 @@ public enum DayframeCalendarDayLayout {
       }
     }
 
+    // A short block's 44-point target may grow only where no other block is drawn in its space.
+    let epsilon = 1e-9
     var out: [String: DayframeCalendarLaidOutEntry] = [:]
     for item in placed {
+      let target = targetExtent(top: item.block.top, height: item.block.height, timelineHeight: 24 * hourHeight)
+      let sharesTarget = placed.contains { other in
+        other.id != item.id
+          && other.offset < item.offset + item.width - epsilon
+          && item.offset < other.offset + other.width - epsilon
+          && other.block.top < target.bottom
+          && target.top < other.block.top + other.block.height
+      }
       out[item.id] = DayframeCalendarLaidOutEntry(
         block: item.block,
         offsetFraction: item.offset,
         widthFraction: item.width,
         columnCount: item.count,
-        zIndex: item.z
+        zIndex: item.z,
+        sharesTarget: sharesTarget
       )
     }
     return out
+  }
+
+  /// The vertical span of a block's full-size tap target, placed as hit testing places it.
+  static func targetExtent(top: Double, height: Double, timelineHeight: Double) -> (top: Double, bottom: Double) {
+    let vertical = DayframeCalendarVerticalMath.metrics(
+      semanticTop: top,
+      semanticHeight: height,
+      hitHeight: max(44, height),
+      timelineHeight: timelineHeight
+    )
+    let hitTop = vertical.hitCenterY - vertical.hitHeight / 2
+    return (hitTop, hitTop + vertical.hitHeight)
   }
 }
 

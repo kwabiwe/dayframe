@@ -192,13 +192,13 @@ final class DayframeCalendarCoreTests: XCTestCase {
       )).hitFrame
     }
     // Location v4 C6: the drawn block is one label line at least (12–19.5 points across text
-    // sizes), and React's envelopes cover the target wherever that centres it: 08:40–09:39:41.25 and
-    // 09:33–10:32:41.25, in minutes of the day.
+    // sizes; an older build's 4 points too), and React's envelopes cover the target wherever that
+    // centres it: 08:35–09:39:41.25 and 09:28–10:32:41.25, in minutes of the day.
     for textScale in [0.8, 1.0, 1.3] {
       for hourHeight in [48.0, 49, 72, 128] {
         let cases: [(String, String, Double, Double)] = [
-          ("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", 520, 579.6875),
-          ("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", 573, 632.6875)
+          ("2026-07-10T09:00:00Z", "2026-07-10T09:01:00Z", 515, 579.6875),
+          ("2026-07-10T09:53:00Z", "2026-07-10T09:58:00Z", 568, 632.6875)
         ]
         for (start, stop, envelopeStart, envelopeEnd) in cases {
           let frame = try target(start, stop, hourHeight: hourHeight, textScale: textScale)
@@ -1325,5 +1325,67 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let layout = DayframeCalendarColumnMath.layout(blocks)
     XCTAssertLessThan(Date().timeIntervalSince(started), 0.5)
     XCTAssertEqual(Set(layout.map(\.columnIndex)).count, 4000)
+  }
+
+  // MARK: Native taps after location v4 C6 (Codex r1 on #548)
+
+  private func tapsResolve(_ entries: [DayframeCalendarLayoutInput], overlapCounts: [String: Int] = [:], file: StaticString = #filePath, line: UInt = #line) throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = dayStart + 86_400_000
+    for textScale in [0.8, 1.0, 1.3] {
+      for hourHeight in [48.0, 72, 128] {
+        let layout = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: hourHeight, textScale: textScale, calendar: calendar)
+        let frames: [(id: String, z: Int, centre: DayframeCalendarPoint, frame: DayframeCalendarHitFrame)] = entries.compactMap { entry in
+          guard let placed = layout[entry.id], let geometry = DayframeCalendarEntryGeometryMath.metrics(
+            availableWidth: 375, hourLabelWidth: 68, semanticTop: placed.block.top, semanticHeight: placed.block.height,
+            offsetFraction: placed.offsetFraction, widthFraction: placed.widthFraction,
+            overlapCount: (overlapCounts[entry.id] ?? 0) + (placed.sharesTarget ? 1 : 0), textDensity: "full",
+            timelineHeight: 24 * hourHeight
+          ) else { return nil }
+          let centre = DayframeCalendarPoint(x: (geometry.hitFrame.minX + geometry.hitFrame.maxX) / 2, y: placed.block.top + placed.block.height / 2)
+          return (entry.id, placed.zIndex, centre, geometry.hitFrame)
+        }
+        for target in frames {
+          // The topmost frame under the painted centre (higher z wins; later draws win ties).
+          let hit = frames.enumerated().filter { $0.element.frame.contains(target.centre) }
+            .max { ($0.element.z, $0.offset) < ($1.element.z, $1.offset) }?.element.id
+          XCTAssertEqual(hit, target.id, "tap on \(target.id) at \(hourHeight) pt/h, text ×\(textScale)", file: file, line: line)
+        }
+      }
+    }
+  }
+
+  private func input(_ id: String, _ start: String, _ stop: String, group: String, region: (Double, Double) = (0, 1)) throws -> DayframeCalendarLayoutInput {
+    DayframeCalendarLayoutInput(
+      id: id, startedAtMs: try milliseconds("2026-07-10T\(start):00Z"), stoppedAtMs: try milliseconds("2026-07-10T\(stop):00Z"),
+      columnGroup: group, regionOffsetFraction: region.0, regionWidthFraction: region.1,
+      fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0
+    )
+  }
+
+  func testShortLoggedBlocksNeverTakeEachOthersTaps() throws {
+    try tapsResolve([
+      try input("a", "09:00", "09:01", group: "logged"),
+      try input("b", "09:10", "09:11", group: "logged"),
+      try input("c", "09:30", "09:31", group: "logged")
+    ])
+  }
+
+  func testReviewSuggestionsNeverShareATargetAtAnyZoom() throws {
+    let lane = (0.56, 0.44)
+    let entries = [
+      try input("r1", "09:00", "09:01", group: "review", region: lane),
+      try input("r2", "09:30", "09:31", group: "review", region: lane)
+    ]
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let layout = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, calendar: calendar)
+    // Their 44-point targets would meet at 48 pt/h, so they sit side by side in the lane.
+    XCTAssertEqual(layout["r1"]?.columnCount, 2)
+    XCTAssertNotEqual(layout["r1"]?.offsetFraction, layout["r2"]?.offsetFraction)
+    try tapsResolve(entries)
   }
 }

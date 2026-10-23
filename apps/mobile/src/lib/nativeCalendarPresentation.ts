@@ -190,14 +190,13 @@ export const REVIEW_LANE_MAX_LANES = 2;
  */
 export const REVIEW_LANE_TARGET_MS = 55 * 60_000;
 /**
- * iOS draws a block at least one label line tall (location v4 C6): 15 points at the default text
- * size, from 0.8 to 1.3 times that with Dynamic Type (DayframeCalendarDayLayout.labelMinimumHeight),
- * so at 48 points an hour a short block's drawn middle moves with the text size. The envelope covers
- * the target wherever it is centred in that range.
+ * A short block's drawn height at 48 points an hour ranges from an older native build's 4 points
+ * (5 minutes) to a current build's one label line at the largest text size (location v4 C6: 15
+ * points × 1.3, DayframeCalendarDayLayout.labelMinimumHeight), so its drawn middle can sit anywhere
+ * between. The envelope covers the target wherever it is centred in that range, for either build.
  */
-const LABEL_LINE_POINTS = CALENDAR_BLOCK_LABEL.iosMinimumHeight;
-export const REVIEW_LANE_MIN_VISIBLE_MS = ((LABEL_LINE_POINTS * 0.8) / 48) * 60 * 60_000;
-export const REVIEW_LANE_MAX_VISIBLE_MS = ((LABEL_LINE_POINTS * CALENDAR_BLOCK_LABEL.iosMaximumTextScale) / 48) * 60 * 60_000;
+export const REVIEW_LANE_MIN_VISIBLE_MS = 5 * 60_000;
+export const REVIEW_LANE_MAX_VISIBLE_MS = ((CALENDAR_BLOCK_LABEL.iosMinimumHeight * CALENDAR_BLOCK_LABEL.iosMaximumTextScale) / 48) * 60 * 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /**
@@ -716,8 +715,9 @@ export function collapseCrowdedReviewLane(
       const bounded = Number.isFinite(dayStartMs) && Number.isFinite(dayEndMs);
       const drawnStart = bounded ? wallClockOffsetMs(realStart, dayStartMs, dayEndMs) : realStart;
       const rawDrawnEnd = bounded ? wallClockOffsetMs(realEnd, dayStartMs, dayEndMs) : realEnd;
-      // iOS draws at least one label line (15 minutes at the widest zoom and smallest text) from the
-      // drawn start, also when the clock folds back inside the item and its drawn end comes before its start.
+      // iOS draws at least 4 points (5 minutes at the widest zoom; a current build one label line, which
+      // only lengthens it) from the drawn start, also when the clock folds back inside the item and its
+      // drawn end comes before its start.
       const drawnEnd = drawnStart + Math.max(rawDrawnEnd - drawnStart, REVIEW_LANE_MIN_VISIBLE_MS);
       return { entry, realStart, start: envelope.start, realEnd, end: envelope.end, drawnStart, drawnEnd, rawDrawnEnd };
     })
