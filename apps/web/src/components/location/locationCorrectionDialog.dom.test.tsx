@@ -79,6 +79,9 @@ describe("correcting the location timeline on the web (location v4 step 13)", ()
     expect(editedInstant("2026-08-10T22:50:00.000Z", "00:05")).toBe("2026-08-10T23:05:00.000Z");
     // 01:30 on the morning the clocks go forward doesn't exist.
     expect(editedInstant("2026-03-29T00:15:00.000Z", "01:30")).toBeNull();
+    // 01:35 on the night the clocks go back happens twice: the one nearer the 01:30 GMT it replaces.
+    expect(editedInstant("2026-10-25T01:30:00.000Z", "01:35")).toBe("2026-10-25T01:35:00.000Z");
+    expect(editedInstant("2026-10-25T00:30:00.000Z", "01:35")).toBe("2026-10-25T00:35:00.000Z");
   });
 
   it("sends only the edited time, keeping the other instant exact on the night the clocks go back", async () => {

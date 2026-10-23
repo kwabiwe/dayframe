@@ -53,7 +53,13 @@ export function editedInstant(original: string, value: string) {
   }, 0);
   const date = new Date(from.getFullYear(), from.getMonth(), from.getDate() + shift, hours, minutes, 0, 0);
   // A time the clocks skip normalises to another hour: it isn't a time that day.
-  return date.getHours() === hours && date.getMinutes() === minutes ? date.toISOString() : null;
+  if (date.getHours() !== hours || date.getMinutes() !== minutes) return null;
+  // A time the clocks repeat has two instants: the one nearer the time it replaces (Codex r2 on #567).
+  const same = (candidate: Date) => candidate.getHours() === hours && candidate.getMinutes() === minutes;
+  const instants = [date, new Date(date.getTime() - 3_600_000), new Date(date.getTime() + 3_600_000)].filter(same);
+  const originalMs = from.getTime();
+  return instants.reduce((best, candidate) =>
+    Math.abs(candidate.getTime() - originalMs) < Math.abs(best.getTime() - originalMs) ? candidate : best).toISOString();
 }
 
 async function sendCorrection(correction: TimelineCorrectionRequest) {

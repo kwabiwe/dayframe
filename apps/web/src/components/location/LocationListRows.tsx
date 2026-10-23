@@ -195,7 +195,8 @@ export function TripLegRows({ clock, expanded, legs, onCorrectLeg }: {
   return (
     <tr className="timeline-trip-legs-row">
       <td colSpan={4}>
-        <div className="timeline-trip-legs-wrap" data-open={open && expanded ? "true" : "false"}>
+        {/* Closing, its legs can't be pressed or focused while it animates away (Codex r2 on #567). */}
+        <div className="timeline-trip-legs-wrap" data-open={open && expanded ? "true" : "false"} inert={!expanded}>
         <div className="timeline-trip-legs-clip">
         <ol className="timeline-trip-legs" aria-label="Legs">
           {legs.map((leg, index) => (
