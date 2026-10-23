@@ -214,6 +214,28 @@ Temporal invariants:
   Scored with the location v4 harness: the 15–22 Oct week is identical (89),
   the capture sweep is 0 worse, and the staging-week and near-radius corpora
   are identical.
+- Open trip, "Travelling since…" (location v4 step 5; `deriveOpenTrip` in
+  `commute.ts`, `LocationEngineOutput.openTrip`). When no stay is open, the
+  journey after the last stay is in progress once, since its departure (found
+  as for a finished journey: latest origin support, then the Fix B guard),
+  the device was seen moving (a credible reading at or above
+  `movementSpeedThresholdMps`) and away (an accurate reading beyond the
+  origin's radius plus its accuracy), its latest observation is within
+  `maxContinuityGapMs` of replay time, the origin ended within
+  `commuteMaximumDurationMs`, and nothing after its last movement shows an
+  arrival (a Visit, a saved-place entry, or an accurate reading at a saved or
+  learned place). It is never a segment: replay stores it only under the
+  origin stay's `openTrip` metadata key (times, counts, metres, mode; no
+  coordinates), clearing every other stay's key, so it can never be logged,
+  reviewed or reported; `commute_segments` cannot hold it (its destination
+  and end are NOT NULL), hence no migration. Bootstrap returns it while its
+  latest observation is within the same limit, and the iPhone checks again
+  on the minute. Replaying the 15–22 Oct week as received every 5 minutes
+  against the Google answer key: shown at 80% of the moments Google calls
+  travel (precision) and at 73% of the travel moments with no finished trip
+  yet (recall), start within 0.3 min of Google's (median). Most misses are the
+  minutes after arrival before the stay forms, and journeys whose first
+  reading arrives late.
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

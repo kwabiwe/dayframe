@@ -68,6 +68,7 @@ import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeR
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
+import { freshOpenTrip } from "./today/TodayOpenTripLine";
 import { TodaySwitchSheet } from "./today/TodaySwitchSheet";
 import { StopFlightOverlay, type StopFlight } from "./today/StopFlightOverlay";
 import { useStopFlightExit } from "./today/useStopFlightExit";
@@ -3297,7 +3298,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 // commits the idle card comes in at once instead of waiting for the retained exit, and
                 // the stopped block never comes back after the ghost has gone (useStopFlightExit).
                 active={stopFlightExit.showIdle ? null : todayLivePresentation}
+                clockFormat={clockFormat}
                 liveHidden={stopFlightExit.liveHidden}
+                openTrip={freshOpenTrip(data?.openTrip, minuteNow)}
                 motionPaused={!isFocused}
                 activeTimerActionsStyle={activeTimerActionsStyle}
                 activeTimerDetailsStyle={activeTimerDetailsStyle}

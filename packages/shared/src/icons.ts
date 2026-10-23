@@ -123,7 +123,9 @@ export const DAYFRAME_APP_ICONS = {
   syncOffline: "cloud-off",
   syncSending: "refresh-cw",
   syncDone: "cloud-check",
-  syncAttention: "cloud-alert"
+  syncAttention: "cloud-alert",
+  // A journey in progress, "Travelling since…" (location v4 step 5).
+  openTrip: "route"
 } as const satisfies Record<string, DayframeGlyph>;
 
 const ACTIVITY_ICON_BY_KEY = new Map<string, (typeof DAYFRAME_ACTIVITY_ICONS)[number]>(

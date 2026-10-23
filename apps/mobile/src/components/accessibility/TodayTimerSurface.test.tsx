@@ -130,6 +130,26 @@ function flatStyle(style: unknown): Record<string, unknown> {
 }
 
 describe("TodayTimerSurface (Blocks)", () => {
+  it("adds one quiet Travelling since line under the card while a journey is in progress (location v4 step 5)", () => {
+    const openTrip = { startedAt: "2026-10-22T13:44:00.000Z", lastObservedAt: "2026-10-22T14:18:00.000Z", fromPlaceId: null, travelMode: null };
+    const { tree } = render(props({ active: running, runningActivityId: "work", openTrip }));
+    const slot = tree.root.findByProps({ testID: "today-timer-slot" });
+    const line = slot.findByProps({ testID: "today-open-trip-slot" });
+    // First paint never animates in; it leaves with the card fade.
+    expect(line.props.entering).toBeUndefined();
+    expect(line.props.exiting).toBeDefined();
+    expect(line.findByProps({ testID: "today-open-trip" }).props.accessibilityLabel).toMatch(/^Travelling since \d{2}:\d{2}\. Logs when you arrive\.$/);
+    act(() => tree.update(<TodayTimerSurface {...props({ active: running, runningActivityId: "work", openTrip: null })} />));
+    expect(tree.root.findAllByProps({ testID: "today-open-trip-slot" })).toHaveLength(0);
+    act(() => tree.unmount());
+    // Reduce Motion: no presence animation either way.
+    const reduced = render(props({ active: null, openTrip, reduceMotion: true }));
+    const reducedLine = reduced.tree.root.findByProps({ testID: "today-open-trip-slot" });
+    expect(reducedLine.props.entering).toBeUndefined();
+    expect(reducedLine.props.exiting).toBeUndefined();
+    act(() => reduced.tree.unmount());
+  });
+
   it("shows the prototype idle card: a coral Start a block pill, Add past time, and the mosaic", () => {
     const input = props();
     const { byLabel, text, tree } = render(input);

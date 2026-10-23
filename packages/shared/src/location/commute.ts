@@ -21,6 +21,7 @@ import type {
   CommuteQualification,
   CommuteSegment,
   CommuteStop,
+  OpenTrip,
   StaySegment,
   SavedPlaceForMatching
 } from "./types";
@@ -1207,6 +1208,104 @@ export function deriveCommutes(
     }
   }
   return commutes;
+}
+
+/**
+ * The journey in progress after the last stay (location v4 §9, "Travelling
+ * since…"): when no stay is open, the device left the last stay and, since its
+ * departure (found as for a finished journey: the latest sign of the origin,
+ * then the journey start guard), it was seen moving (a reading with credible
+ * accuracy at or above the movement threshold) and away (an accurate reading
+ * beyond the origin's radius plus its own accuracy), with its latest
+ * observation no older than `maxContinuityGapMs` (a moving phone keeps
+ * reporting; silence after movement is usually an arrival), and nothing since
+ * its last movement shows it arrived (a Visit, a saved-place entry, or an
+ * accurate reading at a saved or learned place). Core Motion only moves
+ * the start to its departure onset, as for a finished journey, and names the
+ * mode so far. Location evidence alone shows the journey.
+ */
+export function deriveOpenTrip(
+  stays: StaySegment[],
+  evidenceWithMotion: ClassifiedEvidence[],
+  config: LocationEngineConfig,
+  processingAt: string
+): OpenTrip | null {
+  if (stays.some((stay) => stay.status === "open")) return null;
+  const from = stays.at(-1);
+  if (!from?.stoppedAt) return null;
+  const processingMs = Date.parse(processingAt);
+  // No journey runs longer than a finished one could.
+  if (processingMs - Date.parse(from.stoppedAt) > config.commuteMaximumDurationMs) return null;
+  const motion = buildMotionTimeline(evidenceWithMotion, config, processingMs);
+  const evidence = motion ? evidenceWithMotion.filter((item) => !isMotionEvidence(item.evidence)) : evidenceWithMotion;
+  const occurredAtMs = evidence.map(({ evidence: item }) => Date.parse(item.occurredAt));
+  const originalStartedAtMs = Date.parse(locationOnlyStayEnd(from) ?? from.stoppedAt);
+  const snapshots = new Set([...snapshotCallbacks(evidence), ...evidence.filter((item) => item.evidence.kind === "geofence_state")]);
+  const after = evidence.filter((item, index) => occurredAtMs[index] > originalStartedAtMs && occurredAtMs[index] <= processingMs &&
+    evidencePoint(item) != null && !snapshots.has(item));
+  if (!after.length) return null;
+  const lastObservedMs = Date.parse(after.at(-1)!.evidence.occurredAt);
+  if (processingMs - lastObservedMs > config.maxContinuityGapMs) return null;
+  const endMs = lastObservedMs + 1;
+  const byId = new Map(evidence.map((item) => [item.evidence.clientEvidenceId, item]));
+  const fromEvidence = from.evidenceIds.flatMap((id) => {
+    const item = byId.get(id);
+    return item && Date.parse(item.evidence.occurredAt) <= originalStartedAtMs ? [item] : [];
+  }).sort((a, b) => Date.parse(a.evidence.occurredAt) - Date.parse(b.evidence.occurredAt));
+  const gapEvidence = evidence.filter((_item, index) => occurredAtMs[index] > originalStartedAtMs && occurredAtMs[index] < endMs);
+  const support = latestDepartureSupport(from, fromEvidence, gapEvidence, config, positionIndex(evidence, occurredAtMs, config),
+    snapshots, endMs, false);
+  let startedAtMs = support ? Date.parse(support.evidence.occurredAt) : originalStartedAtMs;
+  const none = new Set<string>();
+  startedAtMs = ownVisitCoverEndMs(from, evidence, occurredAtMs, none, snapshots, startedAtMs, endMs, config);
+  const nativeSpeed = nativeSpeedResolver(evidence);
+  startedAtMs = movementSupportedStartMs(evidence, occurredAtMs, nativeSpeed, none, snapshots, [], startedAtMs, endMs, config);
+  const route = after.filter((item) => Date.parse(item.evidence.occurredAt) > startedAtMs && !evidenceMatchesStay(item, from));
+  const centre = segmentPoint(from);
+  const radius = from.radiusMeters ?? config.unknownStayBaseRadiusMeters;
+  const moving = (item: ClassifiedEvidence) => {
+    const { kind, horizontalAccuracyMeters } = item.evidence;
+    if (kind !== "standard_location" && kind !== "significant_change" || item.evidence.isSimulated === true ||
+      horizontalAccuracyMeters == null || horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) return false;
+    const native = nativeSpeed(item);
+    if (native != null) return native >= config.movementSpeedThresholdMps;
+    const implied = item.impliedSpeedMetersPerSecond;
+    return accurateFix(item, config) && implied != null && Number.isFinite(implied) && implied >= config.movementSpeedThresholdMps;
+  };
+  const lastMoving = [...route].reverse().find(moving);
+  const away = centre != null && route.some((item) => accurateFix(item, config) && item.evidence.isSimulated !== true &&
+    distanceMeters(centre, evidencePoint(item)!) > radius + item.evidence.horizontalAccuracyMeters!);
+  if (!lastMoving || !away) return null;
+  const lastMovingMs = Date.parse(lastMoving.evidence.occurredAt);
+  // Arrived: after the last movement iOS reported a Visit arrival, the device
+  // entered a saved place, or an accurate still reading lies at a saved or
+  // learned place other than the origin.
+  const arrived = evidence.some((item, index) => {
+    if (occurredAtMs[index] <= lastMovingMs || occurredAtMs[index] > processingMs || snapshots.has(item) || item.evidence.isSimulated === true ||
+      evidenceMatchesStay(item, from)) return false;
+    const { kind } = item.evidence;
+    if (kind === "visit") return true;
+    if (kind === "geofence_enter") return item.evidence.savedPlaceId != null;
+    return accurateFix(item, config) && (item.match?.kind === "saved" || item.match?.kind === "learned");
+  });
+  if (arrived) return null;
+  const firstRouteMs = Date.parse(route[0].evidence.occurredAt);
+  const departedMs = motionDepartureMs(motion, startedAtMs, firstRouteMs, config);
+  const beganMs = Math.max(departedMs != null && departedMs < firstRouteMs ? departedMs : startedAtMs, Date.parse(from.stoppedAt));
+  const points = [...(centre ? [centre] : []), ...route.map((item) => evidencePoint(item)!)];
+  const travelMode = motionTravelMode(motion, beganMs, lastObservedMs, config);
+  return {
+    kind: "open_trip",
+    clientSegmentId: stableLocationId("open-trip", [from.clientSegmentId]),
+    fromStaySegmentId: from.clientSegmentId,
+    fromPlaceId: from.placeId ?? null,
+    startedAt: new Date(beganMs).toISOString(),
+    lastObservedAt: new Date(lastObservedMs).toISOString(),
+    routeSampleCount: route.length,
+    routeDistanceMeters: points.length >= 2 ? Math.round(routeDistance(points)) : null,
+    ...(travelMode ? { travelMode } : {}),
+    evidenceIds: route.map(({ evidence: item }) => item.clientEvidenceId)
+  };
 }
 
 /**

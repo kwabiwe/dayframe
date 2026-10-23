@@ -16,7 +16,8 @@ import {
   analyzeTimeIntervals,
   buildCategoryUsageRanks,
   buildHistoricalSuggestionCandidates,
-  buildRecentActivitySuggestions
+  buildRecentActivitySuggestions,
+  LOCATION_ENGINE_V2_CONFIG
 } from "@dayframe/shared";
 import {
   databaseReadinessError,
@@ -286,7 +287,49 @@ export type BootstrapData = {
   stats: DashboardStats;
   todaySeries: DashboardSeriesPoint[];
   weekSeries: DashboardSeriesPoint[];
+  /**
+   * The journey in progress ("Travelling since…", location v4 step 5), when replay saw one and its
+   * latest observation is recent. Never a block and never logged. Optional for older clients.
+   */
+  openTrip?: OpenTripRow | null;
 };
+
+export type OpenTripRow = {
+  startedAt: string;
+  lastObservedAt: string;
+  fromPlaceId: string | null;
+  travelMode: "walking" | "running" | "cycling" | "automotive" | null;
+};
+
+/** How long after its latest observation a stored journey still shows as in progress (the engine's continuity limit). */
+const OPEN_TRIP_FRESH_MS = LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs;
+
+/**
+ * The journey replay last saw in progress, from its origin stay's `openTrip` metadata. A journey
+ * never runs past `commuteMaximumDurationMs`, so only stays that ended within it are read
+ * (idx_stay_segments_user_time). Stale entries (no replay since the phone went quiet) are not shown.
+ */
+export async function getOpenTrip(session: RequestSession, capturedNow: string): Promise<OpenTripRow | null> {
+  const result = await query<{ startedAt: string; lastObservedAt: string; fromPlaceId: string | null; travelMode: string | null }>(
+    `select sg.metadata->'openTrip'->>'startedAt' as "startedAt",
+            sg.metadata->'openTrip'->>'lastObservedAt' as "lastObservedAt",
+            sg.place_id as "fromPlaceId",
+            sg.metadata->'openTrip'->>'travelMode' as "travelMode"
+       from stay_segments sg
+      where sg.workspace_id = $1 and sg.user_id = $2 and sg.status <> 'superseded'
+        and sg.stopped_at >= $3::timestamptz - make_interval(secs => $4::double precision / 1000)
+        and sg.metadata ? 'openTrip'
+      order by sg.metadata->'openTrip'->>'lastObservedAt' desc
+      limit 1`,
+    [session.workspaceId, session.userId, capturedNow, LOCATION_ENGINE_V2_CONFIG.commuteMaximumDurationMs]);
+  const row = result.rows[0];
+  if (!row || !row.startedAt || !row.lastObservedAt) return null;
+  if (Date.parse(capturedNow) - Date.parse(row.lastObservedAt) > OPEN_TRIP_FRESH_MS) return null;
+  const travelMode = row.travelMode === "walking" || row.travelMode === "running" || row.travelMode === "cycling" ||
+    row.travelMode === "automotive" ? row.travelMode : null;
+  return { startedAt: new Date(row.startedAt).toISOString(), lastObservedAt: new Date(row.lastObservedAt).toISOString(),
+    fromPlaceId: row.fromPlaceId, travelMode };
+}
 
 /**
  * Bootstrap's reads, at most `BOOTSTRAP_READ_CONCURRENCY` at a time. Fired all at once they took every
@@ -357,7 +400,8 @@ export async function getBootstrapData(
     categoryUsage,
     { taskSuggestions, taskSuggestionCandidates },
     stats,
-    reviewOutingStays
+    reviewOutingStays,
+    openTrip
   ] = await runBootstrapReads([
     () => getUser(session),
     () => getWorkspaces(session),
@@ -394,7 +438,8 @@ export async function getBootstrapData(
     () => getCategoryUsageRanks(session),
     () => getTaskSuggestionSets(session),
     () => getDashboardStats(session, dateRange, capturedNow),
-    () => getReviewOutingStays(session)
+    () => getReviewOutingStays(session),
+    () => getOpenTrip(session, capturedNow)
   ] as const);
 
   // Named patterns (PR 14): one read over every list's location blocks, then each list is tagged.
@@ -459,7 +504,8 @@ export async function getBootstrapData(
       ...(reviewOutingStays ? { reviewOutingStays } : { reviewOutingStaysOverflow: true })
     },
     todaySeries: buildHourlySeries(dayEntries, dateRange, new Date(capturedNow), timeZone),
-    weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow), timeZone)
+    weekSeries: buildWeekSeries(weekEntries, dateRange, new Date(capturedNow), timeZone),
+    openTrip
   };
 }
 

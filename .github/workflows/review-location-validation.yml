@@ -198,6 +198,11 @@ jobs:
         env:
           DAYFRAME_VENUE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/venue-place-ids.postgres.test.ts
+      - name: Open trip, Travelling since (location v4 step 5)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_OPEN_TRIP_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/location-open-trip.postgres.test.ts
       # Always, even when startup failed or was cancelled; -v also removes the image's data volume.
       - name: Remove disposable PostGIS
         if: always()

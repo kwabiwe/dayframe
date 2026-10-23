@@ -21,6 +21,7 @@ import {
   type CommuteSegment,
   type LocationEvidence,
   type LocationSegment,
+  type OpenTrip,
   type StaySegment
 } from "@dayframe/shared";
 import type pg from "pg";
@@ -253,6 +254,7 @@ export async function replayLocationEvidence(
     });
   const commuteIds = await persistCommutes(client, session, options.deviceId, resolvedCommutes, protectedSegmentIds, options.autoLogReconciliation);
   observeLocationTiming(options, "commute_persistence", "completed");
+  await persistOpenTrip(client, session, options.deviceId, output.openTrip ?? null, stayIds);
   observeLocationCount(options, "protectedSegments", protectedReplacement.count + protectedSegmentIds.size);
   observeLocationStage(options, "lineage");
   await replaceEvidenceLinks(
@@ -850,6 +852,35 @@ async function persistStays(
     for (const row of result.rows) ids.set(row.clientSegmentId, row.id);
   }
   return ids;
+}
+
+/**
+ * The journey in progress (location v4 step 5) lives only under its origin
+ * stay's `openTrip` metadata key: never a commute row, so nothing logs,
+ * reviews or reports it. Each replay clears every other stay's key and writes
+ * this one's, whether or not the origin is a decided stay (only that key
+ * changes). Times, counts, metres and the mode only; never coordinates.
+ */
+export async function persistOpenTrip(client: pg.PoolClient, session: RequestSession, deviceId: string,
+  openTrip: OpenTrip | null, stayIds: Map<string, string>) {
+  const originId = openTrip ? stayIds.get(openTrip.fromStaySegmentId) ?? null : null;
+  await client.query(
+    `update stay_segments set metadata = metadata - 'openTrip', updated_at = now()
+      where workspace_id = $1 and user_id = $2 and device_id = $3 and metadata ? 'openTrip'
+        and ($4::uuid is null or id <> $4::uuid)`,
+    [session.workspaceId, session.userId, deviceId, originId]);
+  if (!openTrip || !originId) return;
+  const stored = {
+    startedAt: openTrip.startedAt,
+    lastObservedAt: openTrip.lastObservedAt,
+    routeSampleCount: openTrip.routeSampleCount,
+    routeDistanceMeters: openTrip.routeDistanceMeters,
+    ...(openTrip.travelMode ? { travelMode: openTrip.travelMode } : {})
+  };
+  await client.query(
+    `update stay_segments set metadata = jsonb_set(metadata, '{openTrip}', $4::jsonb), updated_at = now()
+      where workspace_id = $1 and user_id = $2 and id = $3::uuid`,
+    [session.workspaceId, session.userId, originId, JSON.stringify(stored)]);
 }
 
 async function persistCommutes(

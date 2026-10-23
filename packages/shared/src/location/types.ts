@@ -302,12 +302,34 @@ export type LocationEngineInput = {
   processingAt: string;
 };
 
+/**
+ * A journey in progress (location v4 §9): the device left its last stay and is
+ * still on the move. It is never a segment and never logged; it ends when the
+ * next stay begins and the finished journey replaces it.
+ */
+export type OpenTrip = {
+  kind: "open_trip";
+  clientSegmentId: string;
+  fromStaySegmentId: string;
+  fromPlaceId: string | null;
+  startedAt: string;
+  /** The latest observation of the journey so far. */
+  lastObservedAt: string;
+  routeSampleCount: number;
+  /** Distance along the readings so far, from the origin; null with fewer than two. */
+  routeDistanceMeters: number | null;
+  travelMode?: MotionTravelMode;
+  evidenceIds: string[];
+};
+
 export type LocationEngineOutput = {
   nextState: LocationEngineState;
   acceptedEvidence: ClassifiedEvidence[];
   rejectedEvidence: RejectedEvidence[];
   segmentUpserts: LocationSegment[];
   finalisedSegments: LocationSegment[];
+  /** The journey in progress, when there is one. Never persisted as a segment and never logged. */
+  openTrip?: OpenTrip | null;
   diagnostics: LocationEngineDiagnostics;
 };
 
