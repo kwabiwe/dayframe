@@ -21,6 +21,7 @@ Measured on the owner's iPhone 17 with production data, unless a row says otherw
 | Background CPU per stored location sample | set from the first after-measurement of the location-write batch (#398, #399, #401) | to be counted once that window's evidence is uploaded |
 | Long-run footprint | ≤ 500 MB after about 3 hours of normal use | 422–431 MB after about 2.5–3 hours |
 | Looping motion (the live block's ring, rolling digits, anything that repeats) | no per-frame view-tree commits: React Native's native driver or Core Animation, never a Reanimated loop | Reanimated per-frame commits were 54–88 % of main-thread time before #392 |
+| Location energy (location v4 §10, B9) | all of Dayframe's location work under 2 % of battery a day on average, and under 20 minutes a day at best accuracy | from MetricKit's daily counts in Sync help › Location energy (7-day average) once TestFlight 129 has reported a week; checked against Settings › Battery over the same 7 days |
 | Per-sample and per-pass storage queries | index lookups only: no full table scans, no unbounded journal reads | retention went from about 37 ms to about 0.7 ms per sample (#398, Mac: one indexed delete and two indexed counts) |
 
 A budget is breached when a measurement made by the method below exceeds it. A PR that knowingly exceeds a budget needs an owner decision recorded in the tracker.
