@@ -59,8 +59,14 @@ describe("persistent block shell contract", () => {
     expect(timer).toContain('ariaLabelledBy="persistent-timer-category-label"');
     expect(categoryPicker).toContain("aria-labelledby={ariaLabelledBy}");
     expect(timer).toContain('aria-label="Nothing is recording. Elapsed time 00:00."');
-    expect(timer).toContain('aria-label={active ? "Stop recording" : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}');
-    expect(timer).toContain("disabled={Boolean(active) && isTimerBusy}");
+    expect(timer).toContain('aria-label={active ? (isStopPending ? "Stopping…" : "Stop recording") : parsedCommand?.durationSeconds ? `${goLabel} ending now` : "Start a block"}');
+    // Stop is never disabled by a save in flight; the runtime's gate makes it wait (stability audit WEB-UI-10).
+    const goButton = timer.slice(timer.indexOf('className={`df-cmd-go${active ? " is-stop" : ""}'));
+    const goButtonProps = goButton.slice(0, goButton.indexOf("onClick="));
+    expect(goButtonProps).not.toMatch(/disabled=/);
+    // Busy only while a Stop waits for a save (Codex r1 on #539), never because a save is running.
+    expect(goButtonProps).toContain("aria-busy={(Boolean(active) && isStopPending) || undefined}");
+    expect(goButtonProps).not.toContain("isTimerBusy");
     expect(inlineTags).toContain("selectedTagNames.map");
     expect(inlineTags).toContain("#${tagName}, remove tag");
     expect(compoundControl).toContain('className="inline-selected-tags"');

@@ -32,7 +32,13 @@ const server = {
   holdNext: null as "patch" | "start" | "bootstrap" | null,
   /** Tags the workspace knows besides the running block's. */
   tags: [] as string[],
-  release: null as (() => void) | null
+  release: null as (() => void) | null,
+  /** The page that sent the requests is gone: new requests fail and held responses are lost. */
+  dead: false,
+  /** A held PATCH, once released, never reaches the server (its request was cancelled). */
+  dropHeld: false,
+  /** A held PATCH had already reached the server: it lands even after the page closed. */
+  landsAfterClose: false
 };
 
 /** Whether a field the PATCH's edit was based on (`expectedDetails`) has changed since. */
@@ -56,6 +62,11 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/client-auth-fetch", () => ({
   clientFetch: vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
+    if (server.dead) throw new TypeError("Failed to fetch");
+    // As browsers do: a keepalive request over the 64 KiB budget is refused outright.
+    if (init?.keepalive && new TextEncoder().encode(String(init.body ?? "")).length > 65_536) {
+      throw new TypeError("Failed to fetch: keepalive body too large");
+    }
     const reply = (ok: boolean, body: unknown) => ({ ok, status: ok ? 200 : 500, json: async () => body });
     if (url === "/api/timer-state") {
       return reply(true, { activeEntryId: server.entry?.id ?? null, updatedAt: server.entry?.updatedAt ?? null });
@@ -65,8 +76,15 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(true, bootstrap(server.entry));
     }
     if (method === "PATCH" && url.startsWith("/api/time-entries/")) {
-      const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch> };
-      const { expectedDetails, ...sent } = body;
+      const body = JSON.parse(String(init?.body)) as Partial<Patch> & { expectedDetails?: Partial<Patch>; expectedUpdatedAt?: string };
+      const { expectedDetails, expectedUpdatedAt, ...sent } = body;
+      // As the route: a version must be an ISO date-time with an offset.
+      if (expectedUpdatedAt != null && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/.test(expectedUpdatedAt)) {
+        server.sent.push(body);
+        server.patchUrls.push(url);
+        server.patchInits.push(init ?? {});
+        return { ok: false, status: 400, json: async () => ({ error: "Invalid expectedUpdatedAt" }) };
+      }
       // Recorded as the details the PATCH asks the block to have: only the fields it sends change
       // (as on the server); the raw request is kept in `sent`.
       const before = server.entry;
@@ -78,14 +96,26 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       server.patchUrls.push(url);
       server.patchInits.push(init ?? {});
       // Only the running block can be patched (an optimistic id is unknown to the server).
-      if (url !== `/api/time-entries/${server.entry?.id}`) return reply(false, { error: "Not found" });
+      // The running block, or (as the server allows) the block a Stop just completed.
+      const target = () => url === `/api/time-entries/${server.entry?.id}` ? "entry" as const
+        : url === `/api/time-entries/${server.completed?.id}` ? "completed" as const : null;
+      if (!target()) return reply(false, { error: "Not found" });
+      const held = server.holdNext === "patch";
       await maybeHold("patch");
+      if (held && server.dropHeld) throw new TypeError("Failed to fetch");
+      // The page closed while this was held: only a keepalive request outlives it.
+      if (held && server.dead && !init?.keepalive && !server.landsAfterClose) throw new TypeError("Failed to fetch: page closed");
+      const which = target();
+      if (!which) return reply(false, { error: "Not found" });
+      const current = server[which]!;
       if (server.rejectPatches) return reply(false, { error: "Rejected" });
-      if (expectedDetails && detailsChanged(server.entry!, expectedDetails)) {
-        return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: server.entry }) };
+      // As the server: a version written since, or a detail changed since, is refused.
+      if ((expectedUpdatedAt && Date.parse(expectedUpdatedAt) !== Date.parse(current.updatedAt))
+        || (expectedDetails && detailsChanged(current, expectedDetails))) {
+        return { ok: false, status: 409, json: async () => ({ error: "Changed elsewhere", entry: current }) };
       }
-      const updatedAt = new Date(Date.parse(server.entry!.updatedAt) + 60_000).toISOString();
-      server.entry = { ...server.entry!, ...sent, updatedAt } as TimeEntryRow;
+      const updatedAt = new Date(Date.parse(current.updatedAt) + 60_000).toISOString();
+      server[which] = { ...current, ...sent, updatedAt } as TimeEntryRow;
       return reply(true, { updatedAt });
     }
     if (method === "POST" && url === "/api/time-entries") {
@@ -107,11 +137,16 @@ vi.mock("@/lib/client-auth-fetch", () => ({
       return reply(true, { timeEntryId: server.entry.id });
     }
     if (method === "POST" && url === "/api/events") {
+      if (server.dead) throw new TypeError("Failed to fetch");
       const body = JSON.parse(String(init?.body)) as { type?: string; rawPayload?: { targetEntryId?: string } };
       const target = body.rawPayload?.targetEntryId ?? "";
       server.stops.push(target);
       if (body.type !== "timer_stop" || !server.entry || target !== server.entry.id) return reply(false, { error: "Not running" });
-      server.completed = { ...server.entry, stoppedAt: new Date().toISOString() };
+      server.completed = {
+        ...server.entry,
+        stoppedAt: new Date().toISOString(),
+        updatedAt: new Date(Date.parse(server.entry.updatedAt) + 60_000).toISOString()
+      };
       server.entry = null;
       return reply(true, { timeEntryId: target });
     }
@@ -122,7 +157,7 @@ vi.mock("@/lib/client-auth-fetch", () => ({
 // These tests wait on the real 650 ms autosave debounce and deferred requests, several times each.
 vi.setConfig({ testTimeout: 20_000 });
 
-const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
+const { AppShellRuntimeProvider, STOP_WAIT_DEADLINE_MS, useAppShellRuntime } = await import("./AppShellRuntime");
 const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 beforeEach(() => {
@@ -139,6 +174,12 @@ beforeEach(() => {
   server.rejectStart = false;
   server.tags = [];
   server.rejectPatches = false;
+  server.dead = false;
+  server.dropHeld = false;
+  server.landsAfterClose = false;
+  initialPageData = null;
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -148,6 +189,9 @@ afterEach(() => {
 
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 const activitiesOpen = () => screen.queryByRole("listbox", { name: "Activities" }) !== null;
+
+/** The first page's data as the server component hands it over (null: as a later bootstrap). */
+let initialPageData: ((data: BootstrapData) => BootstrapData) | null = null;
 
 /** Loads `entry` as the shell does on a page load, then renders the bar. */
 async function renderShell(entry: TimeEntryRow | null) {
@@ -159,7 +203,10 @@ async function renderShell(entry: TimeEntryRow | null) {
     refresh = () => runtime.refresh({ force: true });
     stop = () => runtime.stopTimer();
     const { hydrate: load } = runtime;
-    useEffect(() => load(bootstrap(server.entry)), [load]);
+    useEffect(() => {
+      const page = bootstrap(server.entry);
+      load(initialPageData ? initialPageData(page) : page);
+    }, [load]);
     return runtime.shellData ? <PersistentTimerBar /> : null;
   }
   const { unmount } = render(<AppShellRuntimeProvider><Loader /></AppShellRuntimeProvider>);
@@ -301,7 +348,7 @@ describe("autosave and Enter while recording", () => {
     expect(input.value).toBe("Fix bug @wri");
     // Only the edited field is sent, with the value the edit was based on.
     await waitFor(() => expect(server.sent).toEqual([
-      { description: "Fix bug @wri", expectedDetails: { description: "Fix bug" } }
+      { description: "Fix bug @wri", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) }
     ]), { timeout: 2_000 });
   });
 
@@ -782,6 +829,499 @@ describe("Stop never starts a new block (production incident, 13 Oct 2026)", () 
   });
 });
 
+describe("Stop and leaving the page never lose a typed description (stability audit WEB-UI-10, WEB-UI-2)", () => {
+  const keepalive = () => server.patchInits.map((init) => init.keepalive === true);
+  // Any kept record, in either storage (the first version of this fix used localStorage).
+  const storedKeys = () => [window.sessionStorage, window.localStorage].flatMap((store) =>
+    Object.keys(store).filter((key) => key.startsWith("dayframe:pending-timer-details")).map((key) => ({ store, key })));
+  const stored = () => {
+    const [first] = storedKeys();
+    return first ? first.store.getItem(first.key) : null;
+  };
+  const stopButton = () => screen.getByRole("button", { name: /^(Stop recording|Stopping…)$/ }) as HTMLButtonElement;
+
+  it("Stop clicked while the autosave PATCH is in flight stops the block with every typed word", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    // Typed after the autosave left, and then Stop at once (inside the next debounce).
+    await user.keyboard(" later");
+    expect(stopButton().disabled).toBe(false);
+    await user.click(stopButton());
+    // The press is acknowledged while it waits: same slot, busy and named so.
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    expect(stopButton().getAttribute("aria-label")).toBe("Stopping…");
+    expect(stopButton().className).toContain("is-pending");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(descriptions()).toEqual(["Fix bug more", "Fix bug more later"]);
+    // The second PATCH was based on the first one's text, so it was not refused as stale.
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" }, expectedUpdatedAt: expect.any(String) });
+    expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
+    await wait(1_000);
+    // Exactly one Stop, no Start, no PATCH after it.
+    expect(server.stops).toEqual(["active"]);
+    expect(server.posts).toEqual([]);
+    expect(server.patches).toHaveLength(2);
+  });
+
+  it("a keyboard Stop (the runtime's stopTimer) during an in-flight autosave waits for it instead of being refused", async () => {
+    const { input, stop } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    let outcome: unknown;
+    const stopping = stop().then((value) => { outcome = value; });
+    await act(async () => { server.release?.(); });
+    await act(async () => { await stopping; });
+    expect(outcome).toEqual({ ok: true });
+    expect(server.stops).toEqual(["active"]);
+    expect(server.completed).toMatchObject({ description: "Fix bug more" });
+    // Nothing newer was typed, so the Stop sends no second PATCH.
+    expect(server.patches).toHaveLength(1);
+  });
+
+  it("behind an autosave that never returns, Stop goes ahead after its deadline and carries the text itself", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    // Pressing again while it waits joins the same Stop.
+    await user.click(stopButton());
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // Sent against the copy the hung save started from, with every edit since.
+    expect(server.sent[1]).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug" }, expectedUpdatedAt: expect.any(String) });
+    expect(server.completed).toMatchObject({ id: "active", description: "Fix bug more later" });
+    await screen.findByRole("button", { name: "Start a block" });
+    // The hung save finally lands: it is refused (the block moved on), the stopped block does not
+    // come back and nothing is shown for it.
+    await act(async () => { server.release?.(); });
+    await wait(800);
+    expect(screen.queryByRole("button", { name: /^(Stop recording|Stopping…)$/ })).toBeNull();
+    expect(screen.queryByText(/were not saved/)).toBeNull();
+    expect(server.stops).toEqual(["active"]);
+    expect(server.posts).toEqual([]);
+  });
+
+  it("a revert typed during a hung autosave is the stopped block's final text, even when that save lands after Stop", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    expect(input.value).toBe("Fix bug");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // The hung "Fix bug x" now commits on the stopped block…
+    await act(async () => { server.release?.(); });
+    // …and the revert is sent again over it.
+    await waitFor(() => expect(server.completed?.description).toBe("Fix bug"), { timeout: 2_000 });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug");
+    expect(screen.queryByText(/changed in another window/)).toBeNull();
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r4 #1: the first page's Date versions are sent as ISO, before any bootstrap replaces them", async () => {
+    initialPageData = (page) => {
+      const asDate = (row: TimeEntryRow) => ({ ...row, updatedAt: new Date(row.updatedAt) as unknown as string });
+      return {
+        ...page,
+        activeEntry: page.activeEntry ? asDate(page.activeEntry) : null,
+        entries: page.entries.map(asDate),
+        dayEntries: page.dayEntries.map(asDate),
+        weekEntries: page.weekEntries.map(asDate),
+        historyEntries: page.historyEntries.map(asDate)
+      };
+    };
+    server.holdNext = "bootstrap";
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"), { timeout: 2_000 });
+    expect(server.sent[0]).toMatchObject({ expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(input.value).toBe("Fix bug more");
+    // A dirty Stop at that version also goes through.
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(server.completed?.description).toBe("Fix bug more later");
+    server.release?.();
+  });
+
+  it("Codex r4 #2: behind an accepted Start's first details save (no version yet) Stop waits, and its text stays final", async () => {
+    const shell = await renderShell(null);
+    const user = userEvent.setup();
+    await user.click(shell.input);
+    await user.keyboard("Plan");
+    server.holdNext = "start";
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(server.release).not.toBeNull());
+    const releaseStart = server.release!;
+    server.release = null;
+    await user.keyboard(" x");
+    // The POST is accepted; the edits made meanwhile go to the real block and that save is held.
+    server.holdNext = "patch";
+    await act(async () => { releaseStart(); });
+    await waitFor(() => expect(server.patchUrls).toEqual(["/api/time-entries/started-1"]), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.click(stopButton());
+    // No deadline bypass past a save without a version.
+    await wait(STOP_WAIT_DEADLINE_MS + 800);
+    expect(server.stops).toEqual([]);
+    expect(stopButton().getAttribute("aria-busy")).toBe("true");
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["started-1"]), { timeout: 3_000 });
+    expect(server.completed?.description).toBe("Plan");
+    // Stop's own write carried the version that first save returned.
+    expect(server.sent.at(-1)).toMatchObject({ description: "Plan", expectedUpdatedAt: expect.any(String) });
+    await wait(500);
+    expect(server.completed?.description).toBe("Plan");
+  });
+
+  it("Codex r4 #3: a close-time save survives an unrelated change elsewhere (no version, field-level check only)", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    // Another device switches the activity; this tab has not refreshed.
+    server.entry = { ...server.entry!, categoryId: "write", categoryName: "Writing", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent[0]).not.toHaveProperty("expectedUpdatedAt");
+    await waitFor(() => expect(server.entry).toMatchObject({ description: "Fix bug more", categoryId: "write" }));
+  });
+
+  it("Codex r4 #3: a close-time save still refuses a description changed elsewhere", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await wait(300);
+    expect(server.entry?.description).toBe("Changed elsewhere");
+  });
+
+  const setVisibility = (state: "hidden" | "visible") => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+    try {
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    } finally {
+      visibility.mockRestore();
+    }
+  };
+
+  it("Codex r5: a save started by hiding the tab carries the version, so after returning Stop goes past it if it hangs", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    setVisibility("hidden");
+    expect(server.sent[0]).toMatchObject({ description: "Fix bug more", expectedUpdatedAt: "2026-08-17T05:00:00.000Z" });
+    expect(keepalive()).toEqual([true]);
+    setVisibility("visible");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: STOP_WAIT_DEADLINE_MS + 1_500 });
+    expect(server.completed?.description).toBe("Fix bug more");
+    // The hung save lands late and is refused by its version.
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug more");
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r5: Stop behind a version-less page-hide save the tab came back from is bounded, and its text stays final", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent[0]).not.toHaveProperty("expectedUpdatedAt");
+    // Restored from the back/forward cache: the save still hangs.
+    act(() => { window.dispatchEvent(new Event("pageshow")); });
+    await user.keyboard(" later");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: STOP_WAIT_DEADLINE_MS + 1_500 });
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug more later");
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r3 #1: a revert plus an activity change before Stop stays final when the hung save lands after Stop", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace} @wri");
+    await user.keyboard("{Enter}");
+    expect(input.value).toBe("Fix bug");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity: Writing" })).not.toBeNull());
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    await act(async () => { server.release?.(); });
+    await wait(800);
+    expect(server.completed).toMatchObject({ description: "Fix bug", categoryId: "write" });
+    expect(server.stops).toEqual(["active"]);
+  });
+
+  it("Codex r3 #2: a revert before Stop stays final even when the page closes before the hung save lands", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.landsAfterClose = true;
+    await user.keyboard("{End} x");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.click(stopButton());
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 6_000 });
+    // The tab closes; the hung save, already at the server, lands afterwards.
+    server.dead = true;
+    await act(async () => { server.release?.(); });
+    await wait(500);
+    expect(server.completed?.description).toBe("Fix bug");
+  });
+
+  it("a Stop queued behind an autosave that was refused (409) says the block kept the other change", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    await user.click(stopButton());
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    expect(server.completed).toMatchObject({ description: "Changed elsewhere" });
+    await screen.findByText("Stopped. This block was changed in another window or device, so it kept those details.");
+  });
+
+  it("a Stop queued behind an autosave that failed says its latest details were not saved", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.rejectPatches = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.click(stopButton());
+    await act(async () => { server.release?.(); });
+    await waitFor(() => expect(server.stops).toEqual(["active"]), { timeout: 2_000 });
+    await screen.findByText("Stopped. Its latest details could not be saved, so it kept its previous details.");
+  });
+
+  it("pagehide inside the autosave debounce sends the edit at once with keepalive", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    expect(server.patches).toEqual([]);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(server.sent).toEqual([{ description: "Fix bug more", expectedDetails: { description: "Fix bug" } }]);
+    expect(keepalive()).toEqual([true]);
+    await wait(1_000);
+    // The debounce does not send it a second time (that copy would be refused as stale), and the
+    // kept copy is cleared once the save is acknowledged.
+    expect(server.patches).toHaveLength(1);
+    expect(server.entry?.description).toBe("Fix bug more");
+    expect(input.value).toBe("Fix bug more");
+    expect(stored()).toBeNull();
+  });
+
+  it("the tab going hidden inside the debounce sends the edit with keepalive", async () => {
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    await user.keyboard("{End} more");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    } finally {
+      visibility.mockRestore();
+    }
+    expect(descriptions()).toEqual(["Fix bug more"]);
+    expect(keepalive()).toEqual([true]);
+    await wait(1_000);
+    expect(server.patches).toHaveLength(1);
+  });
+
+  /** The tab closes: nothing more leaves it; the next load is a fresh shell on the server's copy. */
+  async function reopen(unmount: () => void, options: { freshTab?: boolean } = {}) {
+    server.dead = true;
+    act(() => unmount());
+    await wait(800);
+    server.dead = false;
+    cleanup();
+    // A newly opened tab has none of the closed tab's sessionStorage.
+    if (options.freshTab) window.sessionStorage.clear();
+    return renderShell(server.entry);
+  }
+
+  it("pagehide while an autosave is in flight sends no successor; the next load restores and saves the newer text", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    // No PATCH checked against the save still in flight (it could be refused before that one lands).
+    expect(server.sent).toHaveLength(1);
+    expect(stored()).not.toBeNull();
+    // The earlier save lands after the page has gone.
+    await act(async () => { server.release?.(); });
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more later"));
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(server.sent.at(-1)).toEqual({ description: "Fix bug more later", expectedDetails: { description: "Fix bug more" }, expectedUpdatedAt: expect.any(String) });
+    expect(stored()).toBeNull();
+  });
+
+  it("closing during the only pending autosave over the keepalive budget keeps its text, and a reload saves it", async () => {
+    const long = "x".repeat(33_000);
+    const { input, unmount } = await renderShell(entry({ description: long }));
+    server.holdNext = "patch";
+    fireEvent.change(input, { target: { value: `${long} more` } });
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    expect(keepalive()).toEqual([false]);
+    // Nothing typed since the save left; the page closes and cancels it.
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(stored()).not.toBeNull();
+    server.dead = true;
+    await act(async () => { server.release?.(); });
+    expect(server.entry?.description).toBe(long);
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe(`${long} more`));
+    await waitFor(() => expect(server.entry?.description).toBe(`${long} more`), { timeout: 2_000 });
+    expect(stored()).toBeNull();
+  });
+
+  it("Codex r3 #3: the only pending autosave survives the tab closing, so a newly opened tab shows it", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    expect(keepalive()).toEqual([true]);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    server.dead = true;
+    await act(async () => { server.release?.(); });
+    const reopened = await reopen(unmount, { freshTab: true });
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more"));
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more"));
+  });
+
+  it("after sign-out or a workspace switch begins, a page exit keeps nothing", async () => {
+    const { beforeSessionChange } = await import("@/lib/session-change");
+    const { input } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(stored()).not.toBeNull();
+    await act(async () => { await beforeSessionChange(100); });
+    expect(storedKeys()).toEqual([]);
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(storedKeys()).toEqual([]);
+    await act(async () => { server.release?.(); });
+  });
+
+  it("a tab showing one block never clears the text kept for another", async () => {
+    const kept = {
+      entryId: "other",
+      draft: { categoryId: "focus", description: "Kept text", tagNames: [] },
+      bases: [{ categoryId: "focus", description: "Before", tagNames: [] }],
+      savedAt: Date.now()
+    };
+    // Kept for user "user", workspace "workspace", block "other".
+    window.sessionStorage.setItem("dayframe:pending-timer-details:user:workspace:other", JSON.stringify(kept));
+    // The same record where the first version of this fix kept it.
+    window.localStorage.setItem("dayframe:pending-timer-details", JSON.stringify(kept));
+    await renderShell(entry({ description: "Fix bug" }));
+    await wait(800);
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(storedKeys()).toHaveLength(2);
+  });
+
+  it("the restored text is also saved when the save in flight never reached the server", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    await user.keyboard(" later");
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await act(async () => { server.release?.(); });
+    expect(server.entry?.description).toBe("Fix bug");
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Fix bug more later"));
+    await waitFor(() => expect(server.entry?.description).toBe("Fix bug more later"), { timeout: 2_000 });
+    expect(stored()).toBeNull();
+  });
+
+  it("kept text overtaken by a change made elsewhere is dropped, never written over it", async () => {
+    const { input, unmount } = await renderShell(entry({ description: "Fix bug" }));
+    const user = userEvent.setup();
+    await user.click(input);
+    server.holdNext = "patch";
+    server.dropHeld = true;
+    await user.keyboard("{End} more");
+    await waitFor(() => expect(server.patches).toHaveLength(1), { timeout: 2_000 });
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    await act(async () => { server.release?.(); });
+    server.entry = { ...server.entry!, description: "Changed elsewhere", updatedAt: "2026-08-17T05:30:00.000Z" };
+    const reopened = await reopen(unmount);
+    await waitFor(() => expect(reopened.input.value).toBe("Changed elsewhere"));
+    await wait(1_000);
+    expect(server.entry?.description).toBe("Changed elsewhere");
+    expect(stored()).toBeNull();
+  });
+
+  it("a description over the keepalive budget autosaves as an ordinary request", async () => {
+    const long = "x".repeat(33_000);
+    const { input } = await renderShell(entry({ description: long }));
+    fireEvent.change(input, { target: { value: `${long}y` } });
+    await waitFor(() => expect(server.entry?.description).toBe(`${long}y`), { timeout: 2_000 });
+    expect(keepalive()).toEqual([false]);
+    expect(input.value).toBe(`${long}y`);
+  });
+
+  it("a close-time flush over the keepalive budget is sent without keepalive and the text is kept for the next load", async () => {
+    const long = "x".repeat(33_000);
+    const { input } = await renderShell(entry({ description: long }));
+    fireEvent.change(input, { target: { value: `${long}y` } });
+    act(() => { window.dispatchEvent(new Event("pagehide")); });
+    expect(keepalive()).toEqual([false]);
+    expect(JSON.parse(stored()!)).toMatchObject({ entryId: "active", draft: { description: `${long}y` } });
+  });
+});
+
 function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
   const entries = activeEntry ? [activeEntry] : [];
   return {
@@ -809,6 +1349,7 @@ function bootstrap(activeEntry: TimeEntryRow | null): BootstrapData {
       weekStart: "2026-08-17T00:00:00.000Z",
       weekEnd: "2026-08-24T00:00:00.000Z"
     },
+    user: { id: "user" },
     workspace: { id: "workspace" }
   } as unknown as BootstrapData;
 }

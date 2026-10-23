@@ -152,6 +152,12 @@ jobs:
         env:
           DAYFRAME_RUN_DB_INTEGRATION: "1"
         run: npm run test -w @dayframe/web -- src/lib/shortcut-timeline.postgres.integration.test.ts
+      - name: Offline iPhone timer queue replayed through the event routes
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_RUN_DB_INTEGRATION: "1"
+          DAYFRAME_VALIDATION_SCHEMA: ${{ matrix.schema }}
+        run: npm run test -w @dayframe/web -- src/app/api/events/offline-replay.postgres.integration.test.ts
       - name: Home and Work place roles
         if: ${{ !cancelled() }}
         env:
@@ -240,6 +246,7 @@ jobs:
           npm run check:ios-config
           bash scripts/validate-ios-shared-storage.sh
           bash scripts/validate-ios-diagnostics.sh
+          bash scripts/validate-ios-location-signals.sh
       # Pushes to main never restore the caches, so main always gets a clean build from nothing, and that
       # build seeds them. A pull request restores only caches made for its exact key: changed native code,
       # dependencies or Xcode find none and build clean too.
