@@ -1501,11 +1501,14 @@ export default function SettingsScreen() {
     });
   }
 
-  function confirmDiscardTimeEntryIssue(clientCommandId: string) {
+  function confirmDiscardTimeEntryIssue(clientCommandId: string, refusedStart = false) {
     void confirmForSession({
       eyebrow: "Sync help",
       title: "Discard this block change?",
-      message: "Your account already shows the earlier version. Only this change is removed from this iPhone.",
+      // A refused Start's block was never saved, so there is no earlier version (Codex r2 on #532).
+      message: refusedStart
+        ? "The block this was for was never saved. Only this change is removed from this iPhone."
+        : "Your account already shows the earlier version. Only this change is removed from this iPhone.",
       confirmLabel: "Discard",
       confirmHint: "This can't be undone.",
       onConfirm: () => {
@@ -1627,7 +1630,9 @@ export default function SettingsScreen() {
       const result = await clearFailedQueuedEvents();
       await refreshQueueLatest();
       setLastSyncResultAndCache(null);
-      setSyncHelpNote(`Cleared ${result.removedCount} ${result.removedCount === 1 ? "item" : "items"} from this iPhone.`);
+      setSyncHelpNote(`Cleared ${result.removedCount} ${result.removedCount === 1 ? "item" : "items"} from this iPhone.${
+        result.heldCount > 0 ? " Some couldn't be cleared yet. Try again in a moment." : ""
+      }`);
       await load({ silent: true });
     } catch (error) {
       setSyncHelpNote("Couldn't clear those items. Nothing was removed.");
@@ -2728,14 +2733,18 @@ export default function SettingsScreen() {
                   ))}
                   {timeEntrySyncIssues.map((issue, index) => (
                     <SettingsIssueRow
-                      detail={`From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
+                      detail={issue.refusedStart
+                        // Its block's Start was refused, so there is nothing to change and nothing to retry
+                        // (Codex r1 on #532): Discard only.
+                        ? `From ${formatQueueTime(issue.updatedAt, clockFormat)}. The block this was for was never saved, so there's nothing to change.`
+                        : `From ${formatQueueTime(issue.updatedAt, clockFormat)}. Dayframe couldn't save it, so your account keeps the earlier version.`}
                       divider={timerStopSyncIssues.length + index > 0}
                       key={issue.clientCommandId}
                       theme={theme}
                       title={issue.operation === "delete" ? "Couldn't delete a block" : "Couldn't save an edit"}
                     >
-                      <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />
-                      <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId)} theme={theme} />
+                      {issue.refusedStart ? null : <SettingsPillButton accessibilityLabel={`Try the ${issue.operation === "delete" ? "delete" : "edit"} again`} label="Try again" onPress={() => retryTimeEntryIssue(issue.clientCommandId)} theme={theme} />}
+                      <SettingsPillButton accessibilityLabel={`Discard this ${issue.operation === "delete" ? "delete" : "edit"}`} danger label="Discard" onPress={() => confirmDiscardTimeEntryIssue(issue.clientCommandId, issue.refusedStart === true)} theme={theme} />
                     </SettingsIssueRow>
                   ))}
                   {reviewSyncIssues.map((issue, index) => (

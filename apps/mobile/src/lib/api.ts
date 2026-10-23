@@ -422,6 +422,8 @@ export type QueuedEvent = Omit<ActivityEventInput, "occurredAt" | "workspaceId" 
   lastAttemptedAt?: string;
   nextRetryAt?: string;
   failureKind?: QueueFailureKind;
+  /** When the server first refused this queued Start; kept across Retries so it is announced once. */
+  refusedStartAt?: string;
 };
 
 export type QueueFailureKind = "network" | "server" | "permanent";
@@ -1006,11 +1008,14 @@ export async function removeQueuedEvent(localId: string) {
     const owner = await readActiveMobileAccount();
     if (!owner) return false;
     const all = await readAllQueue(owner);
-    const next = all.filter((item) =>
-      !queuedEventMatchesOwner(item, owner) || item.localId !== localId
-    );
-    if (next.length !== all.length) await writeAllQueue(next);
-    return next.length !== all.length;
+    const target = all.find((item) => queuedEventMatchesOwner(item, owner) && item.localId === localId);
+    if (!target) return false;
+    // A refused Start leaves only once what waits on it is settled (Codex r2 on #532).
+    if (isRefusedTimerStart(target) && !await settleRefusedTimerStart(refusedTimerStartOf(target, owner))) {
+      return false;
+    }
+    await writeAllQueue(all.filter((item) => item !== target));
+    return true;
   });
 }
 
@@ -1067,12 +1072,20 @@ export async function clearFailedQueuedEvents() {
   return withQueueMutation(async () => {
     const owner = await readActiveMobileAccount();
     if (!owner) {
-      return { removed: [], remaining: [], removedCount: 0, remainingCount: 0 };
+      return { removed: [], remaining: [], removedCount: 0, remainingCount: 0, heldCount: 0 };
     }
     const all = await readAllQueue(owner);
     const queue = all.filter((item) => queuedEventMatchesOwner(item, owner));
-    const remaining = queue.filter((item) => !isClearableFailedEvent(item));
-    const removed = queue.filter(isClearableFailedEvent);
+    // A refused Start leaves only once its Stops are removed and its Edits and Deletes settled; if
+    // that storage write fails it stays (and the next pass or Clear settles it), so its Edit can never
+    // be left waiting for a block that was never saved (Codex r2 on #532).
+    const held = new Set<QueuedEvent>();
+    for (const item of queue) {
+      if (!isClearableFailedEvent(item) || !isRefusedTimerStart(item)) continue;
+      if (!await settleRefusedTimerStart(refusedTimerStartOf(item, owner))) held.add(item);
+    }
+    const remaining = queue.filter((item) => !isClearableFailedEvent(item) || held.has(item));
+    const removed = queue.filter((item) => isClearableFailedEvent(item) && !held.has(item));
     await writeAllQueue([
       ...all.filter((item) => !queuedEventMatchesOwner(item, owner)),
       ...remaining
@@ -1081,7 +1094,8 @@ export async function clearFailedQueuedEvents() {
       removed,
       remaining,
       removedCount: removed.length,
-      remainingCount: remaining.length
+      remainingCount: remaining.length,
+      heldCount: held.size
     };
   });
 }
@@ -1259,6 +1273,7 @@ async function syncQueueItems(
   const remaining: QueuedEvent[] = [];
   const synced: string[] = [];
   const timerEntryIdCorrelations: TimerEntryIdCorrelation[] = [];
+  const refusedStarts: RefusedTimerStart[] = [];
   let firstError: QueueFailureReport | undefined;
   let stopped = false;
   const now = new Date();
@@ -1339,9 +1354,21 @@ async function syncQueueItems(
       if (!response.ok) {
         const failureKind = permanentStatusCodes.has(response.status) ? "permanent" : "server";
         const message = formatApiError((payload ?? {}) as ApiErrorPayload) ?? "Unable to sync queued event";
-        const failedItem = markQueueFailure(item, message, attemptedAt, failureKind, response.status);
+        // Only a Start refused for the first time is announced: Sync help's Retry of one already refused
+        // is refused again, and the person was already told (Codex r2 on #532). The refusal is kept on
+        // the item, so a transient failure between Retries (422, 500, 422) can't announce it twice
+        // (Codex r3 on #532).
+        const refusedStart = failureKind === "permanent" && item.type === "timer_start";
+        const firstRefusal = refusedStart && !item.refusedStartAt && !isPermanentlyFailedEvent(item);
+        const failedItem = {
+          ...markQueueFailure(item, message, attemptedAt, failureKind, response.status),
+          ...(refusedStart && !item.refusedStartAt ? { refusedStartAt: attemptedAt } : {})
+        };
         remaining.push(failedItem);
         firstError ??= queueFailureReport(failedItem, message, failureKind, response.status);
+        if (firstRefusal) {
+          refusedStarts.push({ localId: item.localId, message, owner });
+        }
         if (failureKind !== "permanent") {
           remaining.push(...queue.slice(index + 1));
           stopped = true;
@@ -1399,6 +1426,17 @@ async function syncQueueItems(
     remaining,
     synced
   });
+  // Every refused Start still in the queue is settled on every pass (idempotent), so a storage failure
+  // is retried; only the newly refused are announced (Codex r1 on #532).
+  const stillRefused = reconciledRemaining.filter((item) =>
+    isRefusedTimerStart(item) && queuedEventMatchesOwner(item, owner)
+  );
+  if (stillRefused.length || refusedStarts.length) {
+    await settleRefusedTimerStarts(
+      stillRefused.map((item) => refusedTimerStartOf(item, owner)),
+      new Set(refusedStarts.map((start) => start.localId))
+    );
+  }
   return queueSyncResult(
     synced,
     reconciledRemaining.filter((item) => queueEventMatchesScope(item, options.eventScope)),
@@ -1406,6 +1444,64 @@ async function syncQueueItems(
     stopped,
     timerEntryIdCorrelations
   );
+}
+
+export type RefusedTimerStart = { localId: string; message: string; owner: MobileAccountOwner };
+
+const refusedTimerStartListeners = new Set<(start: RefusedTimerStart) => void>();
+
+/** Told once when the server permanently refuses a queued Start (its block is never created). */
+export function subscribeRefusedTimerStarts(listener: (start: RefusedTimerStart) => void) {
+  refusedTimerStartListeners.add(listener);
+  return () => {
+    refusedTimerStartListeners.delete(listener);
+  };
+}
+
+/**
+ * A queued Start the server refused never gets a block, so what waits on it can never be delivered: its
+ * Stops are removed, its Edits and Deletes become sync issues the person can see and discard, and the
+ * Dashboard rolls the block back (stability audit 22 Oct 2026, iphone-timer-sync-3: the rollback had had
+ * no caller since 22 Aug, and one such Edit held the account's whole Edit/Delete outbox).
+ */
+async function settleRefusedTimerStarts(refused: readonly RefusedTimerStart[], newlyRefused: ReadonlySet<string>) {
+  for (const start of refused) {
+    // Storage failed: the Start stays queued, so the next pass (or a Clear) settles it again.
+    await settleRefusedTimerStart(start);
+    if (!newlyRefused.has(start.localId)) continue;
+    for (const listener of refusedTimerStartListeners) {
+      try {
+        listener(start);
+      } catch {
+        // A listener's failure never stops the others or the sync pass.
+      }
+    }
+  }
+}
+
+/** Removes a refused Start's Stops and settles its Edits and Deletes; false when storage failed. */
+async function settleRefusedTimerStart(start: RefusedTimerStart) {
+  try {
+    const [{ removePendingTimerStopsForTarget }, { refuseTimeEntryCommandsForOptimisticEntry }] = await Promise.all([
+      import("./timerStopOutbox"),
+      import("./timeEntryOutbox")
+    ]);
+    await removePendingTimerStopsForTarget(start.owner, { optimisticEntryId: start.localId });
+    // Also fences the block's ID, so an Edit or Delete written for it later is refused as it is
+    // written, even after Clear has removed the Start (Codex r3 on #532).
+    await refuseTimeEntryCommandsForOptimisticEntry(start.owner, start.localId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRefusedTimerStart(item: QueuedEvent) {
+  return item.type === "timer_start" && isPermanentlyFailedEvent(item);
+}
+
+function refusedTimerStartOf(item: QueuedEvent, owner: MobileAccountOwner): RefusedTimerStart {
+  return { localId: item.localId, message: item.lastError ?? "", owner };
 }
 
 function queueEventMatchesScope(
@@ -2475,7 +2571,8 @@ function reconcileActivityQueueDrain(input: {
           : { lastStatusCode: processed.lastStatusCode }),
         ...(processed.lastAttemptedAt ? { lastAttemptedAt: processed.lastAttemptedAt } : {}),
         ...(processed.nextRetryAt ? { nextRetryAt: processed.nextRetryAt } : {}),
-        ...(processed.failureKind ? { failureKind: processed.failureKind } : {})
+        ...(processed.failureKind ? { failureKind: processed.failureKind } : {}),
+        ...(processed.refusedStartAt ? { refusedStartAt: processed.refusedStartAt } : {})
       }];
     });
     await writeAllQueue(next);

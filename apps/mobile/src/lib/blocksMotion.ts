@@ -11,6 +11,7 @@ import {
   withSequence,
   withSpring,
   withTiming,
+  type LayoutAnimationsValues,
 } from "react-native-reanimated";
 import { useAppForeground } from "./appForeground";
 import { MOBILE_MOTION } from "./motion";
@@ -127,6 +128,48 @@ export function blocksToastExiting(reduceMotion: boolean, phase: ToastPhase) {
       animations: {
         opacity: withTiming(0, timing),
         transform: [{ translateY: withTiming(TOAST_MOTION.exitTo.translateY, timing) }, { scale: withTiming(TOAST_MOTION.exitTo.scale, timing) }],
+      },
+    };
+  };
+}
+
+/**
+ * The toast's own layout transition, for a content update while it stays mounted (a group delete's
+ * "Deleted 2 blocks" becoming one block's name, maybe one line taller): its frame moves to the new
+ * size in MOBILE_MOTION.layout from its anchored edge. It animates the frame only, never opacity or
+ * the transform, which stay the entrance's and the exit's.
+ *
+ * Reanimated runs one animation per view: a layout change during the entrance merges into it and
+ * replaces its completion, so the entrance's callback never reports `finished` (Codex r4 on #532).
+ * When this merged animation finishes Reanimated forgets the toast's values all the same, so this
+ * callback settles the phase too, and a later exit (timeout, Undo, replacement, unmount) starts from
+ * rest rather than from values that no longer exist. Interrupted (`finished` false: an exit took
+ * over), it leaves the phase alone, so the exit carries the live values as it does mid-entrance.
+ *
+ * Reduce Motion has no layout transition at all: the size settles at once and nothing can replace
+ * the entrance's own completion.
+ */
+export function blocksToastLayout(reduceMotion: boolean, phase: ToastPhase) {
+  if (reduceMotion) return undefined;
+  return (values: LayoutAnimationsValues) => {
+    "worklet";
+    const timing = { duration: MOBILE_MOTION.layout, reduceMotion: ReduceMotion.Never };
+    return {
+      initialValues: {
+        originX: values.currentOriginX,
+        originY: values.currentOriginY,
+        width: values.currentWidth,
+        height: values.currentHeight,
+      },
+      animations: {
+        originX: withTiming(values.targetOriginX, timing),
+        originY: withTiming(values.targetOriginY, timing),
+        width: withTiming(values.targetWidth, timing),
+        height: withTiming(values.targetHeight, timing),
+      },
+      callback: (finished: boolean) => {
+        "worklet";
+        if (finished) phase.value = "settled";
       },
     };
   };
