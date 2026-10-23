@@ -240,12 +240,42 @@ Temporal invariants:
   journey runs from the place before). The bootstrap read never depends on
   the origin's own fields, and reads and cleanup look only at stays begun
   within 14 days. A change in what Today shows counts in the reply's
-  `semanticChangeCount`, so the phone refreshes at once. Replaying the 15–22 Oct week as received every 5
-  minutes against the Google answer key: of the moments it shows, 80 % are
+  `semanticChangeCount`, so the phone refreshes at once. Replaying the 15–22
+  Oct week as received every 5 minutes against the Google answer key: of the moments it shows, 80 % are
   travel by Google (precision); of the travel moments with no finished trip
   yet, it shows at 73 % (recall); its start is within 0.3 min of Google's
   (median). Most misses are the minutes after arrival before the stay forms,
   and journeys whose first reading arrives late.
+- Trip legs, part 1 (location v4 step 6; `deriveTripLegs` in `legs.ts`,
+  `CommuteSegment.tripLegs`, also the open trip's legs so far). Each trip is
+  cut into legs of walk, run, cycle or drive from Core Motion labels (carried
+  drive and ride spells as for the trip's label) and the speed regime of
+  credible readings (`credibleSpeedResolver`: native speed from any genuine
+  copy, never a simulated one, else an accurate fix's implied speed; still
+  under `tripStillSpeedMps`, on foot up to `tripFootMaximumSpeedMps`, a
+  vehicle from `tripVehicleMinimumSpeedMps`, which outvotes walking or
+  stillness, as iOS reports both on smooth trains). Indeterminate time joins
+  the leg before it. Only seen time holds a mode (reported by Core Motion or
+  backed by speed): a carried label, indeterminate time and a pause absorbed
+  into a leg never count towards `tripLegMinimumMs`. Stillness of
+  `tripStopMinimumMs` (1 min) or more is a stop: it separates legs of
+  different modes and is no leg; between two legs of one mode it joins them
+  (a car at lights), and at the trip's ends it belongs to the first or last
+  leg, so legs always span the trip's own times. Legs under
+  `tripLegMinimumMs` (2 min) of seen time merge into the longer moving
+  neighbour across stops, shortest first (linked runs and a heap, O(n log n);
+  20,000 readings well under 2 s), except a walk of `tripChangeWalkMinimumMs`
+  (90 s) or more between two vehicle legs (a change). Confidence: sure when
+  Core Motion's own reports and speed agree over the leg, likely with one of
+  them, unsure with neither. Distance is along the leg's genuine accurate
+  fixes. Every journey replay can persist carries legs (`withTripLegs`: the
+  trip, the legs it replaced, and replay's rebuilt journeys), stored in its
+  metadata (`legs`, design §14; times, mode, confidence, metres). Scored
+  against the Google answer key (the harness takes each minute's mode from
+  its leg, clipped to its own trip): week 89 → 90, no day worse; fine mode
+  58 % → 66 %, walking minutes right 19 % → 77 %, car 87 % → 88 %; leg count
+  right 29/32, multi-leg trips split into the right number of legs 1/4 (rail,
+  Underground and bus come with step 7's bundled stations).
 - All local-day keys use the user's IANA zone, never UTC string slicing.
 
 ## Saved-place dwell and continuity

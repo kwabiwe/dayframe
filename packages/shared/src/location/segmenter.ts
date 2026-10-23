@@ -1,5 +1,6 @@
 import { LOCATION_ENGINE_V2_CONFIG, type LocationEngineConfig } from "./config";
 import { assembleTripsThroughStops, deriveCommutes, deriveOpenTrip } from "./commute";
+import { openTripWithLegs, withTripLegs } from "./legs";
 import { detectPhysicalStops, type PhysicalStop } from "./physicalStops";
 import { accuracyWeightedCentre, distanceMeters, midpointTimeIso, stableLocationId } from "./geo";
 import { indexPlacesByLatitude, matchLocationToPlaces, placesNearLatitude } from "./placeMatcher";
@@ -1959,10 +1960,10 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   }
   const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  const motionTimeline = acceptedWithMotion.length === accepted.length ? null
+    : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt));
   const stays = refineStayDeparturesWithMotion(coalesceCompatibleUnknownStays(rawStays, accepted, input),
-    acceptedWithMotion.length === accepted.length ? null
-      : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt)),
-    input.config, accepted, input.processingAt);
+    motionTimeline, input.config, accepted, input.processingAt);
   // A stay inherits an inferred boundary from every promoted stay it absorbed
   // or coalesced (whose evidence it contains), so commutes ending there stay
   // low-confidence whatever its own ID.
@@ -1978,12 +1979,15 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     savedPlaces: input.savedPlaces,
     learnedPlaces: input.acceptedLearnedPlaces
   });
-  const commutes = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
+  const assembled = assembleTripsThroughStops(legs, stays, acceptedWithMotion, input.config, input.processingAt, {
     inferredBoundaryStayIds,
     arrivalWitnesses: arrivalAnalysis.witnesses,
     savedPlaces: input.savedPlaces,
     learnedPlaces: input.acceptedLearnedPlaces
   });
+  // Every journey replay can persist carries its legs (location v4 step 6).
+  const commutes = withTripLegs(assembled, acceptedWithMotion, input.config, input.processingAt, motionTimeline);
+
   const segments = [...stays, ...commutes].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt) || a.kind.localeCompare(b.kind));
   const finalisedSegments = segments.filter((segment) => segment.status === "finalised");
   const processedEvidenceIds = [...new Set([
@@ -2014,7 +2018,8 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     rejectedEvidence,
     segmentUpserts: segments,
     finalisedSegments,
-    openTrip: activeStay ? null : deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
+    openTrip: activeStay ? null : openTripWithLegs(deriveOpenTrip(stays, acceptedWithMotion, input.config, input.processingAt, legs),
+      acceptedWithMotion, input.config, input.processingAt, motionTimeline),
     diagnostics: {
       inputCount: input.evidence.length,
       acceptedCount: acceptedWithMotion.length,

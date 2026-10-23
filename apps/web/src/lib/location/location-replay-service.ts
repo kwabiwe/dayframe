@@ -11,7 +11,9 @@ import {
 import {
   deriveCommutes,
   deriveOpenTrip,
+  openTripWithLegs,
   outingQualifies,
+  withTripLegs,
   isTimeAway,
   EMPTY_LOCATION_ENGINE_STATE,
   LOCATION_ENGINE_V2_CONFIG,
@@ -571,9 +573,10 @@ function rebuildLegWithinDecidedStops(
   const from = stayWithDecidedBounds(leg.fromStaySegmentId, decided, segments);
   const to = stayWithDecidedBounds(leg.toStaySegmentId, decided, segments);
   if (!from?.stoppedAt || !to) return [];
-  return deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
+  // A rebuilt journey gets legs over its new times (location v4 step 6).
+  return withTripLegs(deriveCommutes([from, to], acceptedEvidence, config, options.processingAt,
     { ...places, ...(outingLeg ? { outingLeg: (fromId: string, toId: string) => fromId === leg.fromStaySegmentId && toId === leg.toStaySegmentId } : {}) })
-    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId)
+    .filter((rebuilt) => rebuilt.clientSegmentId === leg.clientSegmentId), acceptedEvidence, config, options.processingAt)
     .map((rebuilt) => withinEngineEligibility(rebuilt, leg));
 }
 
@@ -905,7 +908,9 @@ export function openTripAgainstDecidedOrigin(
     ? { ...stay, stoppedAt: persistedStoppedAt, locationOnlyStoppedAt: undefined, stopLowerBoundAt: null, stopUpperBoundAt: null } : stay);
   const journeys = output.segmentUpserts.filter((segment): segment is CommuteSegment => segment.kind === "commute")
     .flatMap((journey) => [journey, ...(journey.legs ?? [])]);
-  const rebuilt = deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys);
+  // With its legs so far (location v4 step 6).
+  const rebuilt = openTripWithLegs(deriveOpenTrip(decided, output.acceptedEvidence, config, processingAt, journeys),
+    output.acceptedEvidence, config, processingAt);
   return rebuilt?.fromStaySegmentId === origin.clientSegmentId ? rebuilt : null;
 }
 
@@ -958,7 +963,9 @@ export async function persistOpenTrip(client: pg.PoolClient, session: RequestSes
       lastObservedAt: trip.lastObservedAt,
       routeSampleCount: trip.routeSampleCount,
       routeDistanceMeters: trip.routeDistanceMeters,
-      ...(trip.travelMode ? { travelMode: trip.travelMode } : {})
+      ...(trip.travelMode ? { travelMode: trip.travelMode } : {}),
+      // Legs so far (location v4 step 6): times, mode, confidence and metres only.
+      ...(trip.tripLegs?.length ? { legs: trip.tripLegs } : {})
     };
     await client.query(
       `update stay_segments set metadata = jsonb_set(metadata, '{openTrip}', $4::jsonb), updated_at = now()
@@ -1015,6 +1022,8 @@ async function persistCommutes(
         ...(segment.stops?.length ? { stops: segment.stops } : {}),
         // From Motion & Fitness: how it was travelled, and whether motion alone showed the movement.
         ...(segment.travelMode ? { travelMode: segment.travelMode } : {}),
+        // Legs (location v4 step 6, design §14 metadata.legs): times, mode, confidence and metres only.
+        ...(segment.tripLegs?.length ? { legs: segment.tripLegs } : {}),
         ...(segment.motionSupported ? { motionSupported: true } : {}),
         ...(segment.motionTimed ? { motionTimed: true } : {})
       })

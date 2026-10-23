@@ -107,3 +107,42 @@ describe("statistics", () => {
     expect(fixed(88.6, 0)).toBe("89");
   });
 });
+
+describe("scoring trip legs (location v4 step 6)", () => {
+  // The midday trip with legs: a 5-minute walk, then a bus read as a drive.
+  const withLegs = exampletonSegments.map((segment) => segment.startedAt === at("12:00") ? {
+    ...segment, legs: [
+      { startedAt: at("12:00"), stoppedAt: at("12:05"), mode: "walking" },
+      { startedAt: at("12:05"), stoppedAt: at("12:25"), mode: "automotive" },
+      // A leg reaching past its own trip only ever speaks for that trip's minutes.
+      { startedAt: at("12:20"), stoppedAt: at("16:00"), mode: "train" }
+    ]
+  } : segment);
+
+  it("takes each minute's mode from its leg, clipped to its own trip", () => {
+    const before = scoreRun(key, exampletonSegments, options).week;
+    const after = scoreRun(key, withLegs, options).week;
+    // Without legs the whole trip reads as walking: right for the walk only. With legs, the walk stays
+    // right and the bus becomes the right family (vehicle) but the wrong vehicle.
+    expect(after.modeFine).toBe(before.modeFine);
+    expect(after.modeCoarse).toBeGreaterThan(before.modeCoarse);
+    // The overreaching leg never touches the afternoon stay.
+    expect(after.covered).toBe(before.covered);
+  });
+
+  it("never lets a leg speak for another trip's minutes", () => {
+    // The midday trip's leg reaches back over the morning drive, which is scored first: the drive's own mode stands.
+    const leaking = exampletonSegments.map((segment) => segment.startedAt === at("12:00") ? {
+      ...segment, legs: [{ startedAt: at("08:01"), stoppedAt: at("12:25"), mode: "train" }]
+    } : segment);
+    const right = (segments: typeof exampletonSegments) => scoreRun(key, segments, options).week.byModeRight;
+    expect(right(leaking).get("car") ?? 0).toBe(right(exampletonSegments).get("car") ?? 0);
+    expect(right(exampletonSegments).get("car") ?? 0).toBeGreaterThan(0);
+  });
+
+  it("counts a multi-leg trip split into the right number of legs", () => {
+    const twoLegs = withLegs.map((segment) => segment.legs ? { ...segment, legs: segment.legs.slice(0, 2) } : segment);
+    expect(scoreRun(key, twoLegs, options).week.multiLegRight).toBe(1);
+    expect(scoreRun(key, exampletonSegments, options).week.multiLegRight).toBe(0);
+  });
+});

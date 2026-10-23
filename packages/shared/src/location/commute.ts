@@ -339,6 +339,46 @@ function latestDepartureSupport(stay: StaySegment, stayEvidence: ClassifiedEvide
   return latest;
 }
 
+/**
+ * A reading's speed when it is credible for judging movement: a genuine location reading within
+ * `commuteMaximumSpeedAccuracyMeters`, with native speed from any genuine copy of the observation, else
+ * (for an accurate fix) the speed implied by the previous genuine accurate fix on the same device. A
+ * simulated reading never lends its speed, as a copy or as a predecessor. Null otherwise.
+ */
+export function credibleSpeedResolver(evidence: ClassifiedEvidence[], config: LocationEngineConfig) {
+  const genuine = evidence.filter((other) => other.evidence.isSimulated !== true);
+  let nativeSpeed: ReturnType<typeof nativeSpeedResolver> | undefined;
+  let implied: Map<ClassifiedEvidence, number> | undefined;
+  const impliedSpeed = (item: ClassifiedEvidence) => {
+    if (!implied) {
+      implied = new Map();
+      const previous = new Map<string, { atMs: number; point: Point }>();
+      const fixes = genuine.filter((other) => accurateFix(other, config))
+        .map((other) => ({ item: other, atMs: Date.parse(other.evidence.occurredAt) }))
+        .filter(({ atMs }) => Number.isFinite(atMs)).sort((a, b) => a.atMs - b.atMs);
+      for (const { item: fix, atMs } of fixes) {
+        const point = evidencePoint(fix)!;
+        const before = previous.get(fix.evidence.deviceId);
+        if (before && atMs - before.atMs >= 1_000) {
+          const speed = distanceMeters(before.point, point) / ((atMs - before.atMs) / 1_000);
+          // As preprocessing rejects them: beyond 120 m/s is not a plausible movement.
+          if (Number.isFinite(speed) && speed <= 120) implied.set(fix, speed);
+        }
+        previous.set(fix.evidence.deviceId, { atMs, point });
+      }
+    }
+    return implied.get(item) ?? null;
+  };
+  return (item: ClassifiedEvidence) => {
+    const { kind, horizontalAccuracyMeters } = item.evidence;
+    if (kind !== "standard_location" && kind !== "significant_change" || item.evidence.isSimulated === true ||
+      horizontalAccuracyMeters == null || horizontalAccuracyMeters > config.commuteMaximumSpeedAccuracyMeters) return null;
+    const native = (nativeSpeed ??= nativeSpeedResolver(genuine))(item);
+    if (native != null) return native;
+    return accurateFix(item, config) ? impliedSpeed(item) : null;
+  };
+}
+
 // Native mirrors carry whole-second timestamps, so a copy can land in the next second.
 const MIRROR_WINDOW_MS = 5_000;
 // Readings away this much farther from the place than the first one after a

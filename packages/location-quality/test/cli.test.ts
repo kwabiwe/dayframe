@@ -63,6 +63,14 @@ describe("saved runs", () => {
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stoppedAt: "2026-99-99T99:99:99Z" }])).toThrow(/invalid stoppedAt/);
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stoppedAt: "2026-02-30T06:00:00Z" }])).toThrow(/invalid stoppedAt/);
     expect(() => sanitizeQualitySegments([{ ...exampletonSegments[0], stops: -1 }])).toThrow(/invalid stops/);
+    // Legs: allowlisted fields only, no inverted intervals; older saved runs have none.
+    const legged = sanitizeQualitySegments([{ ...exampletonSegments[1], legs: [{ startedAt: "2026-03-02T08:01:00Z",
+      stoppedAt: "2026-03-02T08:20:00Z", mode: "automotive", latitude: 51.5, name: "Somewhere" }] }]);
+    expect(legged[0].legs).toEqual([{ startedAt: "2026-03-02T08:01:00Z", stoppedAt: "2026-03-02T08:20:00Z", mode: "automotive" }]);
+    expect(() => sanitizeQualitySegments([{ ...exampletonSegments[1], legs: [{ startedAt: "2026-03-02T08:20:00Z",
+      stoppedAt: "2026-03-02T08:01:00Z", mode: "automotive" }] }])).toThrow(/invalid legs/);
+    expect(sanitizeQualitySegments([{ ...exampletonSegments[1], legs: [{ startedAt: "2026-03-02T08:01:00Z",
+      stoppedAt: "2026-03-02T08:20:00Z", mode: "hovercraft" }] }])[0].legs?.[0].mode).toBeNull();
     expect(() => sanitizeQualitySegments({})).toThrow(/JSON array/);
   });
 

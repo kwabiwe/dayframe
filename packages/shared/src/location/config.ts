@@ -11,6 +11,18 @@ export type LocationEngineConfig = {
   unknownStayBaseRadiusMeters: number;
   maxContinuityGapMs: number;
   segmentFinalisationLagMs: number;
+  /** Trip legs (location v4 step 6): below this a credible reading is still. */
+  tripStillSpeedMps: number;
+  /** Trip legs: the fastest a reading on foot moves. */
+  tripFootMaximumSpeedMps: number;
+  /** Trip legs: from this a reading is in a vehicle whatever Core Motion says. */
+  tripVehicleMinimumSpeedMps: number;
+  /** Trip legs: stillness this long inside a trip is a stop (a change or a wait) between legs. */
+  tripStopMinimumMs: number;
+  /** Trip legs: shorter legs merge into a neighbour, unless they are walks between two vehicle legs. */
+  tripLegMinimumMs: number;
+  /** Trip legs: a walk between two vehicle legs stays its own leg (a change) from this long. */
+  tripChangeWalkMinimumMs: number;
   savedPlaceMinimumDwellMs: number;
   savedPlaceExitReentryGraceMs: number;
   savedPlaceQuietGapMaxMs: number;
@@ -97,6 +109,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   unknownStayBaseRadiusMeters: 120,
   maxContinuityGapMs: 720_000,
   segmentFinalisationLagMs: 600_000,
+  tripStillSpeedMps: 0.5,
+  tripFootMaximumSpeedMps: 2.5,
+  tripVehicleMinimumSpeedMps: 8,
+  tripStopMinimumMs: 60_000,
+  tripLegMinimumMs: 120_000,
+  tripChangeWalkMinimumMs: 90_000,
   savedPlaceMinimumDwellMs: 300_000,
   savedPlaceExitReentryGraceMs: 300_000,
   savedPlaceQuietGapMaxMs: 1_800_000,

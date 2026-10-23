@@ -151,6 +151,20 @@ export type StaySegment = {
   supersedesSegmentId?: string | null;
 };
 
+/**
+ * One mode inside a trip (location v4 §4, §8): its own times, mode, confidence and distance along its
+ * accurate readings. Waits and changes between legs are not legs. Part 1 knows walk, run, cycle and
+ * drive; rail, Underground and bus come with the bundled stations (build step 7).
+ */
+export type TripLeg = {
+  startedAt: string;
+  stoppedAt: string;
+  mode: MotionTravelMode;
+  /** Sure: Core Motion and speed agree; likely: one of them; unsure: neither (a carried or inferred guess). */
+  confidence: "sure" | "likely" | "unsure";
+  distanceMeters: number | null;
+};
+
 export type CommuteSegment = {
   kind: "commute";
   clientSegmentId: string;
@@ -178,6 +192,8 @@ export type CommuteSegment = {
   stops?: CommuteStop[];
   /** How the journey was travelled, when Motion & Fitness activity shows one mode for most of its movement. */
   travelMode?: MotionTravelMode;
+  /** The trip's legs in time order (location v4 step 6); absent when nothing could tell them apart. */
+  tripLegs?: TripLeg[];
   /**
    * Set when Motion & Fitness activity, not GPS, showed the movement that qualified
    * this journey (a short drive or a drive during a GPS gap). Such journeys are Review-only.
@@ -319,6 +335,8 @@ export type OpenTrip = {
   /** Distance along the readings so far, from the origin; null with fewer than two. */
   routeDistanceMeters: number | null;
   travelMode?: MotionTravelMode;
+  /** The legs so far. */
+  tripLegs?: TripLeg[];
   evidenceIds: string[];
 };
 

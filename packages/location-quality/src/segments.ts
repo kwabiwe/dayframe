@@ -35,6 +35,8 @@ export type QualitySegment = {
   maxGapS: number | null;
   motionSupported: boolean;
   motionTimed: boolean;
+  /** The trip's legs (location v4 step 6): times and engine mode codes only. */
+  legs?: Array<{ startedAt: string; stoppedAt: string; mode: string | null }>;
 };
 
 export function toQualitySegments(segments: LocationSegment[], placeLabel: (id: string | null | undefined) => string): QualitySegment[] {
@@ -62,7 +64,10 @@ export function toQualitySegments(segments: LocationSegment[], placeLabel: (id: 
       routeSamples: (s.routeSampleCount as number | undefined) ?? null,
       maxGapS: (s.maximumObservationGapSeconds as number | undefined) ?? null,
       motionSupported: Boolean(s.motionSupported),
-      motionTimed: Boolean(s.motionTimed)
+      motionTimed: Boolean(s.motionTimed),
+      ...(Array.isArray(s.tripLegs) ? { legs: (s.tripLegs as Array<Record<string, unknown>>).map((leg) => ({
+        startedAt: leg.startedAt as string, stoppedAt: leg.stoppedAt as string, mode: (leg.mode as string | undefined) ?? null
+      })) } : {})
     };
   });
 }
@@ -132,6 +137,15 @@ export function sanitizeQualitySegments(value: unknown): QualitySegment[] {
     out.stops = item.stops;
     out.motionSupported = item.motionSupported === true;
     out.motionTimed = item.motionTimed === true;
+    // Older saved runs and trips without legs have none.
+    if (item.legs !== undefined && !Array.isArray(item.legs)) throw fail("legs");
+    if (Array.isArray(item.legs)) out.legs = item.legs.map((leg: unknown) => {
+      const value = leg as Record<string, unknown> | null;
+      if (!value || !instant(value.startedAt) || !instant(value.stoppedAt) ||
+        !(Date.parse(value.stoppedAt as string) > Date.parse(value.startedAt as string))) throw fail("legs");
+      return { startedAt: value.startedAt, stoppedAt: value.stoppedAt,
+        mode: typeof value.mode === "string" && ENGINE_CODES.mode.includes(value.mode) ? value.mode : null };
+    });
     return out as QualitySegment;
   });
 }
