@@ -1,6 +1,6 @@
 import { NativeModules, Platform } from "react-native";
 import { paletteColorFor } from "@dayframe/shared";
-import { enqueueEvents, type MobileBootstrap } from "./api";
+import { enqueueEvents, type MobileBootstrap, type QueuedEvent } from "./api";
 import {
   mobileAccountOwnersEqual,
   readActiveMobileAccount,
@@ -130,6 +130,32 @@ export async function drainNativeShortcutQueue(requestedOwner?: MobileAccountOwn
 
   await nativeShortcutQueue.removeShortcutEvents(transferredLocalIds);
   return { transferredCount, transferredLocalIds };
+}
+
+/**
+ * The Lock Screen Stops of this account still waiting in the native queue, read without moving them
+ * (Codex r1 on #578): the Dashboard shows their blocks stopped before the queue is transferred, which
+ * waits for a fetch that offline never succeeds. Only entry-scoped Stops that name their block.
+ */
+export async function readPendingNativeEntryStops(owner: MobileAccountOwner): Promise<QueuedEvent[]> {
+  if (Platform.OS !== "ios" || !nativeShortcutQueue?.pendingShortcutEvents) return [];
+  const events = parseNativeShortcutQueue(await nativeShortcutQueue.pendingShortcutEvents().catch(() => null));
+  return events.flatMap((event) =>
+    nativeEventBelongsToOwner(event, owner) &&
+      event.type === "timer_stop" &&
+      event.rawPayload.stopScope === "entry" &&
+      typeof event.rawPayload.targetEntryId === "string"
+      ? [{
+          ...owner,
+          localId: event.localId,
+          source: "shortcut" as const,
+          type: event.type,
+          occurredAt: event.occurredAt,
+          queuedAt: event.occurredAt.toISOString(),
+          rawPayload: event.rawPayload
+        }]
+      : []
+  );
 }
 
 function parseNativeShortcutQueue(value: unknown) {

@@ -55,6 +55,9 @@ describe("native Live Activity presentation contract", () => {
     // still runs, the Activity shows stopped (an update, which cannot end this process) only when the Stop
     // is queued, the Stop is delivered, and the Activity ends after delivery, delivered or queued.
     const order = [
+      // A repeat tap on an Activity already shown stopped does nothing: the first run delivers and ends
+      // it, and ending it here could end the process before that request finishes (Codex r1 on #578).
+      "guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {\n        return\n      }",
       "let pushToken = DayframeLiveActivityController.immediatePushToken(",
       "if queued {\n        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)",
       "delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(",
@@ -64,6 +67,17 @@ describe("native Live Activity presentation contract", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(stopCase).not.toMatch(/end\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
     const controller = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`, "utf8");
+    const isRunning = controller.slice(controller.indexOf("static func isRunning("), controller.indexOf("static func showStopped("));
+    expect(isRunning).toContain("$0.content.state.isRunning");
+    expect(isRunning).toContain("$0.id == activityId &&");
+    // The Dashboard shows a Lock Screen Stop still in the native queue as stopped: it is read with the
+    // durable work, and re-projected before the fetch that moves the queue (Codex r1 on #578).
+    const durableWork = readFileSync(`${mobileRoot}src/lib/durableLocalWork.ts`, "utf8");
+    expect(durableWork).toContain("readPendingNativeEntryStops(owner)");
+    const dashboard = readFileSync(`${mobileRoot}src/components/DayframeDashboard.tsx`, "utf8");
+    const reproject = dashboard.indexOf("const reprojected = projectDurableLocalWork(shown, await readDurableLocalWork(timerStopOwner(shown)));");
+    expect(reproject).toBeGreaterThan(-1);
+    expect(reproject).toBeLessThan(dashboard.indexOf("let serverBootstrap = await fetchBootstrap({ date });"));
     const showStopped = controller.slice(controller.indexOf("static func showStopped("), controller.indexOf("static func cleanupActivities("));
     expect(showStopped).toContain("$0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active");
     expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: Date()))");

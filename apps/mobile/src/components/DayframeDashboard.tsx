@@ -993,6 +993,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
+      // A Lock Screen Stop made while Dayframe was away shows before the fetch, which offline never
+      // lands (Codex r1 on #578): only when it stops the block shown running.
+      const shown = loadedBootstrap.current;
+      if (shown?.activeEntry) {
+        const reprojected = projectDurableLocalWork(shown, await readDurableLocalWork(timerStopOwner(shown)));
+        if (reprojected.activeEntry?.id !== shown.activeEntry.id && loadedBootstrap.current === shown) {
+          loadedBootstrap.current = reprojected;
+          publishDashboardData(reprojected);
+        }
+      }
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {

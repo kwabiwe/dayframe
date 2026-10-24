@@ -9,6 +9,7 @@ import {
   mobileAccountOwnersEqual,
   type MobileAccountOwner
 } from "./mobileAccount";
+import { isPermanentlyFailedQueuedEvent } from "./queuePermanence";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
 import {
@@ -126,9 +127,10 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       sequence: `2:${stop.queuedAt}:${stop.clientEventId}`,
       stop
     }));
-  // A Lock Screen Stop waiting in the queue (owner decision 24 Oct 2026, option A): its Live Activity
-  // has already ended, so the block shows stopped here too until the server answers. One the server
-  // refused for good is not projected, so the block shows running again, with its Activity.
+  // A Lock Screen Stop waiting in the queue, the app's or still the native one (owner decision 24 Oct
+  // 2026, option A): its Live Activity has already ended, so the block shows stopped here too until the
+  // server answers. One the server refused for good (the queue's own rule) is not projected, so the block
+  // shows running again, with its Activity.
   const queuedStops: ProjectionOperation[] = work.activityEvents
     .flatMap((event) => {
       const entryId = event.rawPayload?.targetEntryId;
@@ -136,7 +138,7 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
         event.type === "timer_stop" &&
         event.rawPayload?.stopScope === "entry" &&
         typeof entryId === "string" && entryId.length > 0 &&
-        event.failureKind !== "permanent"
+        !isPermanentlyFailedQueuedEvent(event)
         ? [{
             kind: "queued_stop" as const,
             at: event.occurredAt.toISOString(),

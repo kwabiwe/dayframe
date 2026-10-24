@@ -195,6 +195,19 @@ enum DayframeLiveActivityController {
     return true
   }
 
+  /// Whether the exact Activity is still shown running (not yet stopped by a Lock Screen Stop).
+  static func isRunning(activityId: String, entryId: String) -> Bool {
+    guard #available(iOS 16.2, *) else {
+      return false
+    }
+    return Activity<DayframeTimerAttributes>.activities.contains(where: {
+      $0.id == activityId &&
+        $0.attributes.entryId == entryId &&
+        $0.activityState == .active &&
+        $0.content.state.isRunning
+    })
+  }
+
   /// Shows the exact Activity as stopped (time frozen, no Stop control) without ending it. A Lock
   /// Screen Stop does this first: ending an Activity can end the intent's process before its request
   /// finishes (13 Aug 2026), an update does not (owner decision 24 Oct 2026, option A).

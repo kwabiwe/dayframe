@@ -170,6 +170,12 @@ describe("durable dashboard projection", () => {
     }));
     expect(refused.activeEntry).toEqual(running);
 
+    // The queue's own permanence rule: a refusal recorded only by its status counts too (Codex r1 on #578).
+    const refusedByStatus = projectDurableLocalWork(server, work({
+      activityEvents: [{ ...waiting, failureKind: "server", failedAt: "2026-08-22T10:26:00.000Z", lastStatusCode: 422 }]
+    }));
+    expect(refusedByStatus.activeEntry).toEqual(running);
+
     // Only an entry-scoped Stop with its block named, and only this account's.
     const unscoped = { ...waiting, rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" } };
     expect(projectDurableLocalWork(server, work({ activityEvents: [unscoped] })).activeEntry).toEqual(running);

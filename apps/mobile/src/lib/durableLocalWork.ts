@@ -7,6 +7,7 @@ import {
   projectDurableLocalWork,
   type DurableLocalWork
 } from "./durableLocalProjection";
+import { readPendingNativeEntryStops } from "./shortcuts";
 import type { MobileAccountOwner } from "./mobileAccount";
 import { readPendingTimeEntryCommands } from "./timeEntryOutbox";
 import {
@@ -17,12 +18,16 @@ import {
 export async function readDurableLocalWork(
   owner: MobileAccountOwner
 ): Promise<DurableLocalWork> {
-  const [activityEvents, timeEntryCommands, timerStops, correlations] = await Promise.all([
+  const [queued, nativeStops, timeEntryCommands, timerStops, correlations] = await Promise.all([
     readQueue(owner),
+    // Lock Screen Stops not yet moved into the app's queue (Codex r1 on #578).
+    readPendingNativeEntryStops(owner).catch(() => []),
     readPendingTimeEntryCommands(owner),
     readPendingTimerStops().then((stops) => pendingTimerStopsForOwner(stops, owner)),
     readTimerEntryIdCorrelations(owner)
   ]);
+  const queuedIds = new Set(queued.map((event) => event.localId));
+  const activityEvents = [...queued, ...nativeStops.filter((event) => !queuedIds.has(event.localId))];
   return { owner, activityEvents, timeEntryCommands, timerStops, correlations };
 }
 

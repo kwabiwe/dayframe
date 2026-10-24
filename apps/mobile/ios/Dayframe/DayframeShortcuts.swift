@@ -241,6 +241,12 @@ private enum DayframeShortcutPerformer {
       // The push token is the server-registered, activity-scoped capability, so this locked-screen path
       // never depends on a broad account bearer or App Group/Keychain availability. It is read while the
       // Activity still shows running (only a running Activity gives one), before the stopped update.
+      // An Activity that no longer shows running is being stopped by an earlier tap: that run delivers
+      // and ends it (Codex r1 on #578). Ending it here could end the process before that request
+      // finishes; the queued copy, if delivery fails, goes out with the app.
+      guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {
+        return
+      }
       let pushToken = DayframeLiveActivityController.immediatePushToken(
         activityId: activityId,
         entryId: entryId
