@@ -37,9 +37,10 @@ describe("Calendar in Blocks contract", () => {
     expect(timeline).toContain("...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height + calendarBlockVisualGapPx }))");
     expect(styles).not.toMatch(/\.calendar-review-block \{[^}]*width: 42%/);
     expect(raised).toBeGreaterThan(review);
-    // Trello (Calendar page improvements): the now line no longer crosses a block's text. Entry
-    // lanes start at z-index 2, so the line sits under all of them; its time shows in the axis pill.
-    expect(now).toBeLessThan(2);
+    // Calendar v3 (Codex r4 on #583): the now line is drawn above the blocks, as on the iPhone — under the
+    // translucent fills it showed through their titles at about 1.3:1. Only the block in hand rises above it.
+    expect(now).toBeGreaterThan(2);
+    expect(now).toBeLessThan(raised);
     expect(styles).toMatch(/\.calendar-now-pill \{[^}]*position: absolute;/);
     expect(timeline).toMatch(/className="calendar-now-pill"[\s\S]{0,500}?\{formatTime\(capturedNow, clock\)\}/);
     // The pill's clock time is the browser's, so it only renders after hydration, and it is clamped
