@@ -205,7 +205,8 @@ const eventLabels: Record<string, string> = {
   review_ignore: "Ignored review",
   review_rule: "Created rule",
   entry_update: "Edited entry",
-  entry_delete: "Deleted entry"
+  entry_delete: "Deleted entry",
+  timeline_correction: "Corrected timeline"
 };
 
 /**

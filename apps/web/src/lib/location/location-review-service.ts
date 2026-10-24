@@ -1528,7 +1528,8 @@ async function resultPattern(
       latitude: number | null; longitude: number | null }>(
       `select place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as "placeMatchKind",
               st_y(centre::geometry) as latitude, st_x(centre::geometry) as longitude
-       from stay_segments where id = $1 and workspace_id = $2 and user_id = $3 and continuity_status = 'manual'`,
+       from stay_segments where id = $1 and workspace_id = $2 and user_id = $3
+         and (continuity_status = 'manual' or metadata ? 'setByYou')`,
       [result.segmentId, session.workspaceId, session.userId]);
     if (!stored.rows[0]) return item.namePatternKey ? { key: item.namePatternKey, band } : null;
     key = persistedStayKey(stored.rows[0]);

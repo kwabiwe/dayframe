@@ -43,7 +43,8 @@ export function timelineLegs(value: unknown): TripLeg[] {
       confidence: leg.confidence as TripLeg["confidence"],
       ...(LEG_MODES.includes(leg.runnerUp as TripLegMode) ? { runnerUp: leg.runnerUp as TripLegMode } : {}),
       ...(leg.unobserved === true ? { unobserved: true as const } : {}),
-      distanceMeters: typeof leg.distanceMeters === "number" && Number.isFinite(leg.distanceMeters) ? Math.round(leg.distanceMeters) : null
+      distanceMeters: typeof leg.distanceMeters === "number" && Number.isFinite(leg.distanceMeters) ? Math.round(leg.distanceMeters) : null,
+      ...(leg.setByYou === true ? { setByYou: true as const } : {})
     }];
   });
 }
@@ -117,7 +118,8 @@ export async function getLocationTimeline(
   const tripsFrom = new Date(Date.parse(range.dayStart) - LOCATION_ENGINE_V2_CONFIG.commuteMaximumDurationMs).toISOString();
   const stayColumns = `s.client_segment_id as "id", s.id as "rowId", s.status, s.started_at as "startedAt", s.stopped_at as "stoppedAt",
               s.place_id as "placeId", s.learned_place_id as "learnedPlaceId", p.name as "placeName", p.role as "placeRole",
-              lp.name as "learnedName", s.metadata->>'placeMatchKind' as "matchKind", s.confidence`;
+              lp.name as "learnedName", s.metadata->>'placeMatchKind' as "matchKind", s.confidence,
+              coalesce((s.metadata->>'setByYou')::boolean, false) as "setByYou"`;
   const stayJoins = `from stay_segments s
          left join places p on p.id = s.place_id and p.workspace_id = s.workspace_id
          left join learned_places lp on lp.id = s.learned_place_id and lp.workspace_id = s.workspace_id`;
@@ -125,6 +127,7 @@ export async function getLocationTimeline(
     query<{
       id: string; rowId: string; status: string; startedAt: Date; stoppedAt: Date | null; placeId: string | null; learnedPlaceId: string | null;
       placeName: string | null; placeRole: string | null; learnedName: string | null; matchKind: string | null; confidence: string;
+      setByYou: boolean;
     }>(
       `select * from (
          select ${stayColumns} ${stayJoins}
@@ -168,7 +171,8 @@ export async function getLocationTimeline(
     matchKind: MATCH_KINDS.includes(row.matchKind as TimelinePlace["matchKind"]) ? row.matchKind as TimelinePlace["matchKind"]
       : row.placeId ? "saved" : row.learnedPlaceId ? "learned" : "unknown",
     confidence: row.confidence,
-    blockIds: blocksBySegment.get(row.id) ?? []
+    blockIds: blocksBySegment.get(row.id) ?? [],
+    ...(row.setByYou ? { setByYou: true as const } : {})
   }));
   const tripItems = trips.rows.map((row): TimelineTrip => {
     const stops = Array.isArray(row.metadata?.stops) ? row.metadata.stops as Array<Record<string, unknown>> : [];
@@ -186,7 +190,8 @@ export async function getLocationTimeline(
       distanceMeters: row.distance == null ? null : Math.round(row.distance),
       confidence: row.confidence,
       reason: typeof row.metadata?.qualificationReason === "string" ? row.metadata.qualificationReason : null,
-      blockIds: blocksBySegment.get(row.id) ?? []
+      blockIds: blocksBySegment.get(row.id) ?? [],
+      ...(row.metadata?.setByYou === true ? { setByYou: true as const } : {})
     };
   });
   const openTrip = await getTimelineOpenTrip(session, options.now, range.dayStart, range.dayEnd);

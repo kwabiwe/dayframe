@@ -56,6 +56,8 @@ async function moveEndpoints(
   const moves = segments.filter((segment): segment is CommuteSegment => segment.kind === "commute");
   const saved = new Map<string, MoveEndpoint>();
   const learned = new Map<string, MoveEndpoint>();
+  // Each end Stay's learned place, so a Move between two ends at one learned place is a round trip too.
+  const learnedOf = new Map<string, string>();
   const placeIds = [...new Set(moves.flatMap((segment) => [segment.fromPlaceId, segment.toPlaceId].filter((id): id is string => Boolean(id))))].sort();
   const stayDbIds = [...new Set(moves.flatMap((segment) => [
     segment.fromPlaceId ? undefined : stayIds.get(segment.fromStaySegmentId),
@@ -70,13 +72,16 @@ async function moveEndpoints(
   }
   for (const ids of chunks(stayDbIds)) {
     // A learned place linked to a saved place goes by the saved place's display name, as its Stay does.
-    const result = await client.query<{ id: string; name: string; role: string | null }>(`select ss.id, coalesce(${placeDisplayNameSql("p")}, lp.name) as name,
-      p.role
+    const result = await client.query<{ id: string; name: string; role: string | null; learnedPlaceId: string }>(`select ss.id,
+      coalesce(${placeDisplayNameSql("p")}, lp.name) as name, p.role, lp.id as "learnedPlaceId"
       from stay_segments ss
       join learned_places lp on lp.id = ss.learned_place_id and lp.workspace_id = ss.workspace_id and lp.user_id = ss.user_id
       left join places p on p.id = lp.place_id and p.workspace_id = lp.workspace_id and lp.status = 'accepted'
       where ss.workspace_id = $1 and ss.user_id = $2 and ss.id = any($3::uuid[])`, [session.workspaceId, session.userId, ids]);
-    for (const row of result.rows) learned.set(row.id, { name: row.name, role: role(row.role) });
+    for (const row of result.rows) {
+      learned.set(row.id, { name: row.name, role: role(row.role) });
+      learnedOf.set(row.id, row.learnedPlaceId);
+    }
   }
   const unknown: MoveEndpoint = { name: null, role: null };
   const end = (placeId: string | null | undefined, staySegmentId: string) => {
@@ -89,8 +94,11 @@ async function moveEndpoints(
     const to = end(segment.toPlaceId, segment.toStaySegmentId);
     // A corrected Move is a round trip only when its corrected ends are one place; the engine's
     // qualification still governs policy, never this name.
+    const fromLearned = segment.fromPlaceId ? undefined : learnedOf.get(stayIds.get(segment.fromStaySegmentId) ?? "");
+    const toLearned = segment.toPlaceId ? undefined : learnedOf.get(stayIds.get(segment.toStaySegmentId) ?? "");
     const sameEndpoint = correctedMoves.has(segment.clientSegmentId)
-      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId)
+      // One place at both ends, saved or learned (Codex r6 on #566).
+      ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId) || Boolean(fromLearned && fromLearned === toLearned)
       : isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
         Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
     return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,
@@ -169,13 +177,17 @@ export async function withCorrectedStayPlaces(
   const corrected = new Map<string, Pick<StaySegment, "placeId" | "learnedPlaceId" | "placeMatchKind">>();
   const categories = new Map<string, string | null>();
   const chosen = new Set<string>();
+  // Stays whose place the person set on their timeline (step 11): any end's place, learned ones included.
+  const placeSetIds = new Set<string>();
   for (const batch of chunks(ids)) {
     const result = await client.query<{ id: string; placeId: string | null; learnedPlaceId: string | null; kind: string | null;
-      hasCategory: boolean; categoryId: string | null; chosen: boolean | null }>(
+      hasCategory: boolean; categoryId: string | null; chosen: boolean | null; placeSet: boolean | null }>(
       `select id, place_id as "placeId", learned_place_id as "learnedPlaceId", metadata ->> 'placeMatchKind' as kind,
+              (metadata ->> 'placeSetByYou')::boolean as "placeSet",
               metadata ? 'correctedCategoryId' as "hasCategory", metadata ->> 'correctedCategoryId' as "categoryId",
               (metadata ->> 'correctedCategoryChosen')::boolean as chosen
-       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[]) and continuity_status = 'manual'`,
+       from stay_segments where workspace_id = $1 and user_id = $2 and id = any($3::uuid[])
+         and (continuity_status = 'manual' or metadata ? 'setByYou')`,
       [session.workspaceId, session.userId, batch]);
     for (const row of result.rows) {
       const placeMatchKind = row.kind === "saved" && row.placeId ? "saved" : row.kind === "learned" && row.learnedPlaceId ? "learned"
@@ -183,6 +195,7 @@ export async function withCorrectedStayPlaces(
       corrected.set(row.id, { placeId: row.placeId, learnedPlaceId: row.learnedPlaceId, placeMatchKind });
       if (row.hasCategory) categories.set(row.id, row.categoryId);
       if (row.hasCategory && row.chosen === true) chosen.add(row.id);
+      if (row.placeSet === true) placeSetIds.add(row.id);
     }
   }
   const correctedCategories = new Map<string, string | null>();
@@ -199,7 +212,9 @@ export async function withCorrectedStayPlaces(
         const from = savedPlaceOf(segment.fromStaySegmentId);
         const to = savedPlaceOf(segment.toStaySegmentId);
         // Named from corrected ends only when a correction really moved an end (a time-only correction keeps it).
-        if ((from && from.placeId !== (segment.fromPlaceId ?? null)) || (to && to.placeId !== (segment.toPlaceId ?? null))) {
+        // A trip from or to a place the person set is named from it, a learned place too (Codex r5 on #566).
+        const placeSet = placeSetIds.has(stayIds.get(segment.fromStaySegmentId) ?? "") || placeSetIds.has(stayIds.get(segment.toStaySegmentId) ?? "");
+        if (placeSet || (from && from.placeId !== (segment.fromPlaceId ?? null)) || (to && to.placeId !== (segment.toPlaceId ?? null))) {
           correctedMoves.add(segment.clientSegmentId);
         }
         return from || to
