@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DAYFRAME_APP_ICONS,
@@ -10,6 +10,7 @@ import {
   type ClockFormat,
   type LocationListRow,
   type LocationTimeline,
+  type TimelinePlace,
   type TripLeg
 } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
@@ -47,8 +48,13 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
   return open ? `since ${from}` : `${from}–${formatTime(new Date(endMs), clock)}`;
 }
 
-/** One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the journey in progress. */
-export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat; nowMs: number; row: LocationListRow }) {
+/**
+ * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
+ * journey in progress. A place not in a block can be corrected (location v4 step 13).
+ */
+export function LocationListRowView({ clock, nowMs, onCorrect, row }: {
+  clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void; row: LocationListRow;
+}) {
   if (row.kind === "open_trip") {
     return (
       <tr className="timeline-list-row timeline-location-row align-middle" data-location-row="open-trip">
@@ -75,6 +81,13 @@ export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat;
   const span = timeSpan(row.fromMs, row.spanEndMs, open, clock);
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
+  const correct = onCorrect && !place.blockIds.length ? (
+    <div className="timeline-list-actions">
+      <button aria-label={`Correct ${label}`} className="df-icon-action" data-tip="Correct" onClick={() => onCorrect(place, label)} type="button">
+        <DayframeIcon glyph="pencil" size={16} />
+      </button>
+    </div>
+  ) : null;
   if (row.faint) {
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
       : DAYFRAME_APP_ICONS.places;
@@ -95,7 +108,7 @@ export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat;
             {row.unloggedSeconds < 60 ? "logged" : place.role === "home" ? "not logged" : `${formatDuration(row.unloggedSeconds)} not logged`}
           </div>
         </td>
-        <td className="px-3 py-3" />
+        <td className="px-3 py-3">{correct}</td>
       </tr>
     );
   }
@@ -112,7 +125,7 @@ export function LocationListRowView({ clock, nowMs, row }: { clock: ClockFormat;
       </td>
       <td className="tabular px-3 py-3"><div className="timeline-list-time-content">{span}</div></td>
       <td className="tabular px-3 py-3 timeline-list-duration"><div className="timeline-list-duration-content">{formatDuration(length)}</div></td>
-      <td className="px-3 py-3" />
+      <td className="px-3 py-3">{correct}</td>
     </tr>
   );
 }
@@ -142,6 +155,7 @@ export function TripLegsToggle({ expanded, onToggle, title }: { expanded: boolea
       aria-expanded={expanded}
       aria-label={`${expanded ? "Hide" : "Show"} the legs of ${title}`}
       className="timeline-trip-legs-toggle"
+      data-tip={expanded ? "Hide legs" : "Show legs"}
       onClick={onToggle}
       type="button"
     >
@@ -156,7 +170,11 @@ export function TripLegsToggle({ expanded, onToggle, title }: { expanded: boolea
  * ease-out) so the rows below move with it rather than jump, and stays mounted until it has closed; a
  * click mid-way reverses it; with Reduce Motion it opens and closes at once.
  */
-export function TripLegRows({ clock, expanded, legs }: { clock: ClockFormat; expanded: boolean; legs: readonly TripLeg[] }) {
+export function TripLegRows({ clock, expanded, legs, onCorrectLeg }: {
+  clock: ClockFormat; expanded: boolean; legs: readonly TripLeg[];
+  /** A leg's mode can be set (location v4 step 13): each leg is a button. */
+  onCorrectLeg?: (index: number) => void;
+}) {
   const [mounted, setMounted] = useState(expanded);
   const [open, setOpen] = useState(expanded);
   // Mount as soon as it opens (adjusting state while rendering), then open once the closed state is styled.
@@ -177,17 +195,21 @@ export function TripLegRows({ clock, expanded, legs }: { clock: ClockFormat; exp
   return (
     <tr className="timeline-trip-legs-row">
       <td colSpan={4}>
-        <div className="timeline-trip-legs-wrap" data-open={open && expanded ? "true" : "false"}>
+        {/* Closing, its legs can't be pressed or focused while it animates away (Codex r2 on #567). */}
+        <div className="timeline-trip-legs-wrap" data-open={open && expanded ? "true" : "false"} inert={!expanded}>
         <div className="timeline-trip-legs-clip">
         <ol className="timeline-trip-legs" aria-label="Legs">
           {legs.map((leg, index) => (
             <li className={`timeline-trip-leg${leg.confidence === "unsure" ? " is-unsure" : ""}`} key={`${leg.startedAt}-${index}`}>
-              <span aria-hidden="true" className="timeline-trip-leg-mark"><DayframeIcon glyph={DAYFRAME_LEG_MODE_ICONS[leg.mode]} size={16} /></span>
-              <span className="timeline-trip-leg-text">
-                <b>{legModeLabel(leg)} · {formatDuration(Math.max(0, Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000)))}</b>
-                {legDetail(leg) ? <small>{legDetail(leg)}</small> : null}
-              </span>
-              <span className="tabular timeline-trip-leg-time">{formatTime(leg.startedAt, clock)}</span>
+              <LegButton label={`Change how you travelled: ${legModeLabel(leg)}, from ${formatTime(leg.startedAt, clock)}`}
+                onPress={onCorrectLeg ? () => onCorrectLeg(index) : undefined}>
+                <span aria-hidden="true" className="timeline-trip-leg-mark"><DayframeIcon glyph={DAYFRAME_LEG_MODE_ICONS[leg.mode]} size={16} /></span>
+                <span className="timeline-trip-leg-text">
+                  <b>{legModeLabel(leg)} · {formatDuration(Math.max(0, Math.round((Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt)) / 1000)))}</b>
+                  {legDetail(leg) ? <small>{legDetail(leg)}</small> : null}
+                </span>
+                <span className="tabular timeline-trip-leg-time">{formatTime(leg.startedAt, clock)}</span>
+              </LegButton>
             </li>
           ))}
         </ol>
@@ -196,6 +218,12 @@ export function TripLegRows({ clock, expanded, legs }: { clock: ClockFormat; exp
       </td>
     </tr>
   );
+}
+
+/** A leg's row: a button when its mode can be set, its contents alone otherwise. */
+function LegButton({ children, label, onPress }: { children: ReactNode; label: string; onPress?: () => void }) {
+  if (!onPress) return <>{children}</>;
+  return <button aria-label={label} className="timeline-trip-leg-button" onClick={onPress} type="button">{children}</button>;
 }
 
 /** How long the legs row takes to open or close; matches `.timeline-trip-legs-wrap` in globals.css. */
