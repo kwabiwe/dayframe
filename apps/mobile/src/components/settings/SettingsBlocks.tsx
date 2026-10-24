@@ -185,9 +185,21 @@ export function SettingsBlockRow({
       </Pressable>
     );
   }
+  // A read-only row shows its value too (staging QA 6.1, 24 Oct 2026: Sync help's "Places watched"
+  // showed its explanation but not "20 of 26").
   return (
-    <View style={[blockStyles.row, dividerStyle]} testID={testID}>
+    <View
+      accessibilityLabel={!control && value ? `${title}, ${value}${subtitle ? `, ${subtitle}` : ""}` : undefined}
+      accessible={!control && value ? true : undefined}
+      style={[blockStyles.row, dividerStyle]}
+      testID={testID}
+    >
       {text}
+      {value && !control ? (
+        <View style={blockStyles.rowValue}>
+          <Text {...mobileTextProps("metadata")} numberOfLines={1} style={{ color: theme.textMuted }} testID={testID ? `${testID}-value` : undefined}>{value}</Text>
+        </View>
+      ) : null}
       {control}
     </View>
   );
