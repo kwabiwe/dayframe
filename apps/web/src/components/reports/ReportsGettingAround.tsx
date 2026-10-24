@@ -49,13 +49,25 @@ export function ReportsGettingAround({ summary }: { summary: GettingAroundSummar
   );
 }
 
-/** "Not logged" under the total: time at places you haven't named, never part of activities or goals. */
-export function ReportsNotLogged({ seconds }: { seconds: number }) {
+/**
+ * "Not logged" under the total: time at places you haven't named, never part of activities or goals.
+ * "Check them" opens Calendar › List on the day of the latest counted place (Codex r1 on #569).
+ */
+export function ReportsNotLogged({ day, seconds }: { day: string | null; seconds: number }) {
   if (seconds < 60) return null;
+  const href = `/timeline?view=list&scope=day${day ? `&date=${day}` : ""}`;
   return (
     <p className="df-report-footnote df-report-not-logged">
       Not logged: <b className="df-tnum">{formatDuration(seconds)}</b> at places you haven&apos;t named.{" "}
-      <Link href="/timeline?view=list&scope=day">Check them</Link>. Not counted above or in goals.
+      <Link className="df-report-not-logged-check" href={href}>Check them</Link> Not counted above or in goals.
     </p>
   );
+}
+
+/** The viewer's calendar day of an instant ("2026-10-21"), for links into Calendar. */
+export function viewerDayKey(instant: string | null, timeZone: string) {
+  if (!instant) return null;
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }

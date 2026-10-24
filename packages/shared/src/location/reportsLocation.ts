@@ -85,6 +85,12 @@ export function gettingAroundSummary(blocks: readonly GettingAroundBlock[], rang
  */
 export function notLoggedPlaceSeconds(places: readonly Interval[], entries: readonly Interval[], range: { start: string; end: string },
   nowMs: number) {
+  return notLoggedPlaces(places, entries, range, nowMs).seconds;
+}
+
+/** As `notLoggedPlaceSeconds`, with when the latest counted place started (in the range), for "Check them". */
+export function notLoggedPlaces(places: readonly Interval[], entries: readonly Interval[], range: { start: string; end: string },
+  nowMs: number): { seconds: number; latestStartedAt: string | null } {
   const fromMs = Date.parse(range.start);
   const toMs = Date.parse(range.end);
   const blocks = entries.flatMap((entry) => {
@@ -92,6 +98,7 @@ export function notLoggedPlaceSeconds(places: readonly Interval[], entries: read
     return span ? [span] : [];
   }).sort((a, b) => a[0] - b[0]);
   let total = 0;
+  let latestMs: number | null = null;
   for (const place of places) {
     const span = clip(place, fromMs, toMs, nowMs);
     if (!span) continue;
@@ -103,7 +110,9 @@ export function notLoggedPlaceSeconds(places: readonly Interval[], entries: read
       cursor = Math.min(b, span[1]);
     }
     const uncovered = Math.round((span[1] - span[0] - covered) / 1000);
-    if (uncovered >= NOT_LOGGED_PLACE_MINIMUM_SECONDS) total += uncovered;
+    if (uncovered < NOT_LOGGED_PLACE_MINIMUM_SECONDS) continue;
+    total += uncovered;
+    if (latestMs === null || span[0] > latestMs) latestMs = span[0];
   }
-  return total;
+  return { seconds: total, latestStartedAt: latestMs === null ? null : new Date(latestMs).toISOString() };
 }

@@ -1,4 +1,4 @@
-import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaceSeconds, type GettingAroundSummary, type TripLeg } from "@dayframe/shared";
+import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaces, type GettingAroundSummary, type TripLeg } from "@dayframe/shared";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { query } from "@/lib/db";
 import { formatSourceLabel } from "@/lib/format";
@@ -87,6 +87,8 @@ export type ReportResult = {
   gettingAround: GettingAroundSummary | null;
   /** Time at places you haven't named, not in a block; not counted in the totals or goals (location v4 step 18). */
   notLoggedSeconds: number;
+  /** When the latest counted place started, for "Check them" (Codex r1 on #569). */
+  notLoggedLatestAt: string | null;
   entries: ReportEntryRow[];
   overlapCandidates: Array<{
     id: string;
@@ -150,10 +152,10 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const filterOptions = await getReportFilterOptions(session);
   const appliedFilters = sanitizeReportFilters(input.filters, filterOptions);
   const statement = buildReportDataQuery(session, input, appliedFilters, capturedNow);
-  const [result, sourcesInRange, notLoggedSeconds] = await Promise.all([
+  const [result, sourcesInRange, notLogged] = await Promise.all([
     query<ReportDataRow>(statement.text, statement.values),
     getReportSourcesInRange(session, input.range, capturedNow),
-    getNotLoggedSeconds(session, input.range, capturedNow)
+    getNotLogged(session, input.range, capturedNow)
   ]);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
@@ -249,7 +251,8 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     dailySeries,
     dailyByActivity: dailyActivitySeconds(analysisEntries, input.dayBoundaries, capturedNow),
     gettingAround: await getGettingAround(session, analysisEntries, input.range, capturedNow),
-    notLoggedSeconds,
+    notLoggedSeconds: notLogged.seconds,
+    notLoggedLatestAt: notLogged.latestStartedAt,
     entries: arrayValue(row.entries).map((entry) => {
       const entryAnalysis = analysisById.get(entry.id);
       return {
@@ -286,17 +289,22 @@ export async function getGettingAround(
 ) {
   const ids = entries.filter((entry) => entry.categoryId && entry.categoryId !== "uncategorized").map((entry) => entry.id);
   if (!ids.length) return null;
+  // One trip per block, chosen the same way every time (Codex r1 on #569): the trip overlapping the block
+  // most, then the latest updated, then by id, when several devices' trips share its client segment id.
   const result = await query<{ id: string; startedAt: Date; stoppedAt: Date | null; legs: unknown; travelMode: string | null }>(
-    `select te.id, te.started_at as "startedAt", te.stopped_at as "stoppedAt", cs.metadata -> 'legs' as legs,
+    `select distinct on (te.id) te.id, te.started_at as "startedAt", te.stopped_at as "stoppedAt", cs.metadata -> 'legs' as legs,
             cs.metadata ->> 'travelMode' as "travelMode"
        from time_entries te
        join categories c on c.id = te.category_id and c.workspace_id = te.workspace_id and c.starter_key in ('travel', 'commute')
        left join activity_events ae on ae.id = te.created_from_event_id and ae.workspace_id = te.workspace_id and ae.user_id = te.user_id
        left join commute_segments cs on cs.workspace_id = te.workspace_id and cs.user_id = te.user_id and cs.status <> 'superseded'
         and ae.raw_payload ? 'clientSegmentId' and cs.client_segment_id = ae.raw_payload ->> 'clientSegmentId'
-      where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])`,
-    [session.workspaceId, session.userId, ids]);
-  // One block per entry, however many trips might share its client segment id across devices.
+      where te.workspace_id = $1 and te.user_id = $2 and te.id = any($3::uuid[])
+      order by te.id,
+        greatest(0, extract(epoch from (least(coalesce(te.stopped_at, $4::timestamptz), cs.stopped_at) - greatest(te.started_at, cs.started_at)))) desc nulls last,
+        cs.updated_at desc nulls last, cs.id`,
+    [session.workspaceId, session.userId, ids, capturedNow]);
+  // One block per entry (the query already picked its trip).
   const blocks = new Map<string, Parameters<typeof gettingAroundSummary>[0][number]>();
   for (const row of result.rows) {
     if (blocks.has(row.id)) continue;
@@ -328,13 +336,27 @@ function reportLegs(value: unknown): TripLeg[] | null {
 
 /** Time at places you haven't named and haven't logged in the range (never filtered: it is outside the blocks). */
 export async function getNotLoggedSeconds(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
+  return (await getNotLogged(session, range, capturedNow)).seconds;
+}
+
+/**
+ * Not logged in a range, with when its latest counted place started. Stays are read as the timeline reads
+ * them (Codex r1 on #569): those starting in the 31 days before the range, and older ones still open or
+ * longer than 31 days.
+ */
+export async function getNotLogged(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
   const lookback = new Date(Date.parse(range.start) - 31 * 24 * 60 * 60_000).toISOString();
+  const unnamed = `from stay_segments
+        where workspace_id = $1 and user_id = $2 and status <> 'superseded' and status <> 'ignored'
+          and place_id is null and learned_place_id is null and client_segment_id is not null`;
   const [places, entries] = await Promise.all([
     query<{ startedAt: Date; stoppedAt: Date | null }>(
-      `select started_at as "startedAt", stopped_at as "stoppedAt" from stay_segments
-        where workspace_id = $1 and user_id = $2 and status <> 'superseded' and status <> 'ignored'
-          and place_id is null and learned_place_id is null and client_segment_id is not null
-          and started_at >= $5::timestamptz and started_at < $4::timestamptz and coalesce(stopped_at, $6::timestamptz) > $3::timestamptz`,
+      `select started_at as "startedAt", stopped_at as "stoppedAt" ${unnamed}
+          and started_at >= $5::timestamptz and started_at < $4::timestamptz and coalesce(stopped_at, $6::timestamptz) > $3::timestamptz
+       union all
+       select started_at as "startedAt", stopped_at as "stoppedAt" ${unnamed}
+          and (stopped_at is null or stopped_at - started_at > interval '31 days')
+          and started_at < $5::timestamptz and coalesce(stopped_at, $6::timestamptz) > $3::timestamptz`,
       [session.workspaceId, session.userId, range.start, range.end, lookback, capturedNow]),
     query<{ startedAt: Date; stoppedAt: Date | null }>(
       `select started_at as "startedAt", stopped_at as "stoppedAt" from time_entries
@@ -342,7 +364,7 @@ export async function getNotLoggedSeconds(session: RequestSession, range: { star
       [session.workspaceId, session.userId, range.start, range.end, capturedNow])
   ]);
   const iso = (value: Date | null) => value ? new Date(value).toISOString() : null;
-  return notLoggedPlaceSeconds(
+  return notLoggedPlaces(
     places.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
     entries.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
     range, Date.parse(capturedNow));

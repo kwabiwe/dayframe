@@ -13331,11 +13331,19 @@ dialog.ui-dialog.df-palette {
   color: var(--text-secondary);
 }
 
-.df-report-not-logged a {
+/* "Check them": a 44 px target inside the footnote's line (Codex r1 on #569); it wraps with the text. */
+.df-report-not-logged-check {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-block: -14px;
+  padding-inline: 4px;
   color: var(--text-primary);
   font-weight: 650;
   text-decoration: underline;
   text-underline-offset: 2px;
+  vertical-align: middle;
 }
 
 /* Reports › Getting around (location v4 step 18, mock-up #web-reports): time by leg mode, neutral shades. */
@@ -13351,7 +13359,7 @@ dialog.ui-dialog.df-palette {
   height: 10px;
   margin: 12px 0 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   background: var(--surface-muted);
 }
 
@@ -13391,14 +13399,14 @@ dialog.ui-dialog.df-palette {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--r-block);
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
 
 .df-getting-around-note {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--type-meta);
 }
 
 @media (max-width: 640px) {

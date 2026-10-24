@@ -94,7 +94,6 @@ function ReportsTabView({
   initialChoice = "week",
   isFocused,
   onRangeRequestApplied,
-  onCheckNotLogged,
   onScrubbingChange,
   nowMs,
   rangeRequest = null,
@@ -108,8 +107,6 @@ function ReportsTabView({
   isFocused: boolean;
   /** Reports applied `rangeRequest` (its token): the Dashboard drops the request. */
   onRangeRequestApplied?: (token: number) => void;
-  /** "Check them" under Not logged (location v4 step 18): opens Calendar, where the places are. */
-  onCheckNotLogged?: () => void;
   /** The donut is being scrubbed: the screen's scroll view turns scrolling off meanwhile. */
   onScrubbingChange?: (scrubbing: boolean) => void;
   nowMs: number;
@@ -759,7 +756,7 @@ function ReportsTabView({
         ) : null}
         {report && summary?.notLoggedSeconds ? (
           // Location v4 step 18: time at places you haven't named, outside the total and goals.
-          <ReportNotLogged onCheck={() => onCheckNotLogged?.()} seconds={summary.notLoggedSeconds} theme={theme} />
+          <ReportNotLogged seconds={summary.notLoggedSeconds} theme={theme} />
         ) : null}
         {report && choice === "week" && days.length === 7 ? (
           <ReportWeekColumns

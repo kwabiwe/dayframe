@@ -39,15 +39,14 @@ describe("iPhone Reports › Getting around and Not logged (location v4 step 18)
     expect(json).not.toMatch(/\bkm\b|miles|metres/);
   });
 
-  it("says Not logged with a 44-point way to check them, and hides under a minute", () => {
-    const onCheck = vi.fn();
+  it("says Not logged, outside the total and goals, and hides under a minute", () => {
     let tree!: ReturnType<typeof create>;
-    act(() => { tree = create(<ReportNotLogged onCheck={onCheck} seconds={3_720} theme={theme} />); });
-    expect(JSON.stringify(tree.toJSON())).toContain("Not counted above or in goals.");
-    const check = tree.root.findByProps({ accessibilityRole: "button" });
-    act(() => { check.props.onPress(); });
-    expect(onCheck).toHaveBeenCalled();
-    act(() => { tree = create(<ReportNotLogged onCheck={onCheck} seconds={30} theme={theme} />); });
+    act(() => { tree = create(<ReportNotLogged seconds={3_720} theme={theme} />); });
+    const json = JSON.stringify(tree.toJSON());
+    expect(json).toContain("Not counted above or in goals.");
+    // No "Check them" until the iPhone's Calendar shows those places (Codex r1 on #569).
+    expect(tree.root.findAll((node) => node.props.accessibilityRole === "button")).toHaveLength(0);
+    act(() => { tree = create(<ReportNotLogged seconds={30} theme={theme} />); });
     expect(tree.toJSON()).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gettingAroundSummary, notLoggedPlaceSeconds } from "../src/location/reportsLocation";
+import { gettingAroundSummary, notLoggedPlaceSeconds, notLoggedPlaces } from "../src/location/reportsLocation";
 
 // Location v4 step 18: synthetic times only.
 const at = (minutes: number) => new Date(Date.parse("2026-10-22T00:00:00.000Z") + minutes * 60_000).toISOString();
@@ -32,5 +32,12 @@ describe("Reports › Getting around and not logged (location v4 step 18)", () =
     const entries = [{ startedAt: at(600), stoppedAt: at(660) }, { startedAt: at(650), stoppedAt: at(690) }];
     // 30 min of the first, none of the 8-minute one, and the open one up to the end of the day (40 min).
     expect(notLoggedPlaceSeconds(places, entries, day, NOW)).toBe((30 + 40) * 60);
+  });
+
+  it("says when the latest counted place started, for Check them (Codex r1 on #569)", () => {
+    const places = [{ startedAt: at(600), stoppedAt: at(720) }, { startedAt: at(800), stoppedAt: at(808) }, { startedAt: at(-60), stoppedAt: at(120) }];
+    // The 8-minute place is not counted, so the latest counted one is the 10:00 place; one from before the range counts from its start.
+    expect(notLoggedPlaces(places, [], day, NOW)).toEqual({ seconds: (120 + 120) * 60, latestStartedAt: at(600) });
+    expect(notLoggedPlaces([], [], day, NOW)).toEqual({ seconds: 0, latestStartedAt: null });
   });
 });

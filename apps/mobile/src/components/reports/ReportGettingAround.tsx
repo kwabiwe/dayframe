@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import Reanimated from "react-native-reanimated";
 import { DAYFRAME_BLOCKS, DAYFRAME_LEG_MODE_ICONS, LEG_MODE_LABEL, type DayframeGlyph, type ReportSummary } from "@dayframe/shared";
 import { DayframeIcon } from "../icons/DayframeIcon";
@@ -58,20 +58,17 @@ export function ReportGettingAround({ reduceMotion, summary, theme }: { reduceMo
   );
 }
 
-/** "Not logged" under the total: time at places you haven't named, never part of activities or goals. */
-export function ReportNotLogged({ onCheck, seconds, theme }: { onCheck: () => void; seconds: number; theme: MobileTheme }) {
+/**
+ * "Not logged" under the total: time at places you haven't named, never part of activities or goals.
+ * No "Check them" yet: the iPhone's Calendar shows those places once its List ships (step 9; Codex r1 on #569).
+ */
+export function ReportNotLogged({ seconds, theme }: { seconds: number; theme: MobileTheme }) {
   if (seconds < 60) return null;
   return (
-    <View style={styles.notLogged} testID="reports-not-logged">
-      <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary, flexShrink: 1 }}>
-        Not logged: <Text style={{ color: theme.textPrimary, fontWeight: "700" }}>{compactDuration(seconds)}</Text> at places you haven't named.
-        Not counted above or in goals.
-      </Text>
-      <Pressable accessibilityHint="Opens Calendar's List, where they are" accessibilityRole="button" hitSlop={6} onPress={onCheck}
-        style={({ pressed }) => [styles.check, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
-        <Text {...mobileTextProps("control")} style={{ color: theme.textPrimary, fontWeight: "700" }}>Check them</Text>
-      </Pressable>
-    </View>
+    <Text {...mobileTextProps("metadata")} style={{ color: theme.textSecondary }} testID="reports-not-logged">
+      Not logged: <Text style={{ color: theme.textPrimary, fontWeight: "700" }}>{compactDuration(seconds)}</Text> at places you haven't named.
+      Not counted above or in goals.
+    </Text>
   );
 }
 
@@ -84,7 +81,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44 },
   icon: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   label: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: "600" },
-  note: { fontSize: 12 },
-  notLogged: { flexDirection: "row", alignItems: "center", gap: 10 },
-  check: { minHeight: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 14, justifyContent: "center" }
+  note: { fontSize: 12 }
 });
