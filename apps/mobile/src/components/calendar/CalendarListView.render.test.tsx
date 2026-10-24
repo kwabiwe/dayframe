@@ -227,6 +227,27 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onAnswerCheck).not.toHaveBeenCalled();
   });
 
+  it("marks Today's waiting request done when \"N to check\" moves on from it (Codex r12 on #582)", () => {
+    const onScrolledToFirstCheck = vi.fn();
+    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false, opens: false });
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", question("Log Unknown place?")], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheck: vi.fn(),
+      onScrolledToFirstCheck,
+      scrollToFirstCheck: 1
+    });
+    // Its row has not been measured yet (no native layout here): the request is still waiting.
+    expect(onScrolledToFirstCheck).not.toHaveBeenCalled();
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    expect(onScrolledToFirstCheck).toHaveBeenCalledOnce();
+  });
+
   it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
     const onOpenCheck = vi.fn();
     const { tree } = render({

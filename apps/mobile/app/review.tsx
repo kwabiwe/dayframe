@@ -2348,6 +2348,9 @@ export default function ReviewScreen() {
     // Saving any edit (a Review item or a legacy entry) saves a held card first.
     deckHold.flush();
     setEditSaving(true);
+    // The account the save began in: an outcome after another account's data arrived says nothing there
+    // (Codex r12 on #582).
+    let editOwner: string | null = null;
     try {
       if (editTarget.kind === "reviewItem") {
         if (!patch.startedAt || !patch.stoppedAt) {
@@ -2356,9 +2359,11 @@ export default function ReviewScreen() {
         }
         const currentData = dataRef.current;
         if (!currentData) return false;
+        editOwner = reviewDataOwnerKey(currentData);
+        // Already gone (decided elsewhere, refreshed away): said, as the later checks say it (Codex r12 on #582).
         if (!currentData.reviewItems.some(
           (candidate) => candidate.id === editTarget.item.id
-        )) return false;
+        )) throw new Error("This suggestion is no longer available.");
         // The same order as every answer (reviewAnswerClaims.ts, Codex r11 on #582): claim it, read the
         // outbox, check again, write; Calendar › List can neither save it meanwhile nor have saved it unseen.
         const editIds = [editTarget.item.id];
@@ -2430,6 +2435,7 @@ export default function ReviewScreen() {
       }
       return true;
     } catch (error) {
+      if (editOwner && (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== editOwner)) return false;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return false;

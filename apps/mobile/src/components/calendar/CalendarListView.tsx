@@ -205,6 +205,8 @@ export function CalendarListView({
     const next = checkRows[(index + 1) % checkRows.length];
     if (!next) return;
     setOpenCheckId(next.id);
+    // A Today request still waiting to land is done: this tap moves on from it (Codex r12 on #582).
+    if (pendingScroll.current === "first") onScrolledToFirstCheck?.();
     pendingScroll.current = next.key;
     tryScroll();
     const question = checkQuestions?.get(next.id);

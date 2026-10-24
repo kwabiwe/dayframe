@@ -84,6 +84,12 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(readAt).toBeGreaterThan(claimAt);
     expect(writeAt).toBeGreaterThan(readAt);
     expect(edit).toMatch(/\} finally \{\s*releaseReviewAnswer\(editIds\);/);
+    // Stale outcomes are silent in another account (the claim is still released in finally), and an item
+    // already gone says so with the editor's alert (Codex r12 on #582).
+    expect(edit).toContain("editOwner = reviewDataOwnerKey(currentData);");
+    expect(edit).toMatch(/\} catch \(error\) \{\s*if \(editOwner && \(!dataRef\.current \|\| reviewDataOwnerKey\(dataRef\.current\) !== editOwner\)\) return false;/);
+    expect(edit).toMatch(/\)\) throw new Error\("This suggestion is no longer available\."\);/);
+    expect(edit).not.toMatch(/candidate\.id === editTarget\.item\.id\s*\)\) return false;/);
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
