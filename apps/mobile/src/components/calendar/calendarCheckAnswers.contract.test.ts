@@ -67,6 +67,25 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
   });
 
+  it("lets an earlier held card's delayed save leave a newer held card's Undo alone (Codex r11 on #582)", () => {
+    const resolve = review.slice(review.indexOf("function resolveItem("), review.indexOf("function resolveItem(") + 2_000);
+    expect(resolve).toContain("if (!options.fromHold) deckHold.flush();");
+    expect(resolve).not.toMatch(/\n\s*deckHold\.flush\(\);/);
+    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, verified = false) => {"), review.indexOf("function resolveItem("));
+    expect(commit).toContain("outing ? { unlisted, affectedItems: [item, ...members], fromHold: true } : { unlisted, fromHold: true }");
+  });
+
+  it("saves the deck editor's change in the same claim → read → write order (Codex r11 on #582)", () => {
+    const edit = review.slice(review.indexOf("async function saveEdit("), review.indexOf("async function createTimerSheetTag("));
+    const claimAt = edit.indexOf("if (!claimReviewAnswer(editIds))");
+    const readAt = edit.indexOf("await reviewAnswerStillOpen(currentData, editIds)");
+    const writeAt = edit.indexOf("await enqueueReviewMutation({");
+    expect(claimAt).toBeGreaterThan(-1);
+    expect(readAt).toBeGreaterThan(claimAt);
+    expect(writeAt).toBeGreaterThan(readAt);
+    expect(edit).toMatch(/\} finally \{\s*releaseReviewAnswer\(editIds\);/);
+  });
+
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
     expect(dashboard).toContain("const { outings, folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");

@@ -1783,7 +1783,7 @@ export default function ReviewScreen() {
         `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
         settled,
         failed,
-        outing ? { unlisted, affectedItems: [item, ...members] } : { unlisted }
+        outing ? { unlisted, affectedItems: [item, ...members], fromHold: true } : { unlisted, fromHold: true }
       );
       // Not started (a change for this item is already saving, or the item has gone): the card is
       // not this visit's decision.
@@ -2185,14 +2185,18 @@ export default function ReviewScreen() {
     successAnnouncement: string,
     onCommitted?: () => void,
     onFailed?: () => void,
-    /** `affectedItems`: every card the change decides (an outing's Stay and Moves), the item first. */
-    options: { unlisted?: boolean; affectedItems?: MobileReviewItem[] } = {}
+    /**
+     * `affectedItems`: every card the change decides (an outing's Stay and Moves), the item first.
+     * `fromHold`: the decision a hold ended (its outbox read done); a newer held card keeps its whole
+     * Undo window (Codex r11 on #582).
+     */
+    options: { unlisted?: boolean; affectedItems?: MobileReviewItem[]; fromHold?: boolean } = {}
   ) {
     const affected = options.affectedItems ?? [item];
     const claimed = () => affected.some((candidate) => reviewMutations.current.has(candidate.id));
     if (claimed()) return false;
     // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
-    deckHold.flush();
+    if (!options.fromHold) deckHold.flush();
     // That flush may have saved this very item (a held bulk skip covering it): decided once.
     if (claimed()) return false;
     const loadedData = dataRef.current;
@@ -2355,21 +2359,34 @@ export default function ReviewScreen() {
         if (!currentData.reviewItems.some(
           (candidate) => candidate.id === editTarget.item.id
         )) return false;
-        await enqueueReviewMutation({
-          bootstrap: currentData,
-          item: editTarget.item,
-          clientMutationId: createReviewClientMutationId(),
-          mutation: {
-            action: "edit_and_confirm",
-            edit: {
-              categoryId: patch.categoryId ?? null,
-              description: patch.description?.trim() || undefined,
-              startedAt: patch.startedAt,
-              stoppedAt: patch.stoppedAt,
-              tags: patch.tagNames
-            }
+        // The same order as every answer (reviewAnswerClaims.ts, Codex r11 on #582): claim it, read the
+        // outbox, check again, write; Calendar › List can neither save it meanwhile nor have saved it unseen.
+        const editIds = [editTarget.item.id];
+        if (!claimReviewAnswer(editIds)) throw new Error("This suggestion is being saved already.");
+        try {
+          if (!(await reviewAnswerStillOpen(currentData, editIds))) throw new Error("This suggestion was already answered.");
+          const latest = dataRef.current;
+          if (!latest || !latest.reviewItems.some((candidate) => candidate.id === editTarget.item.id && isOpenReviewItem(candidate))) {
+            throw new Error("This suggestion is no longer available.");
           }
-        });
+          await enqueueReviewMutation({
+            bootstrap: latest,
+            item: editTarget.item,
+            clientMutationId: createReviewClientMutationId(),
+            mutation: {
+              action: "edit_and_confirm",
+              edit: {
+                categoryId: patch.categoryId ?? null,
+                description: patch.description?.trim() || undefined,
+                startedAt: patch.startedAt,
+                stoppedAt: patch.stoppedAt,
+                tags: patch.tagNames
+              }
+            }
+          });
+        } finally {
+          releaseReviewAnswer(editIds);
+        }
         const currentProjection = dataRef.current;
         if (currentProjection) {
           const projected = await projectReviewBootstrapFromStore(currentProjection)
