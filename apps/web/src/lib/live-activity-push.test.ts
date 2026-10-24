@@ -429,6 +429,31 @@ describe("Live Activity durable remote sync", () => {
     expect(outboxFailure?.params[2]).toBe("permanent_failure");
   });
 
+  it("keeps the token, and so the Lock Screen Stop, when APNs says the topic is another app's", async () => {
+    configureApns();
+    http2Mocks.status = 400;
+    http2Mocks.responseBody = JSON.stringify({ reason: "DeviceTokenNotForTopic" });
+    database.claimRows = [outboxRow()];
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await drainLiveActivityOutbox({ session });
+
+    expect(result).toMatchObject({ permanentFailures: 1, retryScheduled: 0, invalidatedTokens: 0 });
+    const tokenFailure = database.writes.find((write) =>
+      write.sql.includes("consecutive_failures = consecutive_failures + 1")
+    );
+    expect(tokenFailure?.params).toEqual(["token-row", 400, "DeviceTokenNotForTopic", false]);
+    const outboxFailure = database.writes.find((write) => write.sql.includes("set status = $3"));
+    expect(outboxFailure?.params[2]).toBe("permanent_failure");
+    expect(error).toHaveBeenCalledWith(
+      "Dayframe Live Activity APNs topic does not match the app: check APNS_BUNDLE_ID",
+      { environment: "production", event: expect.any(String) }
+    );
+    const serialized = JSON.stringify(error.mock.calls);
+    expect(serialized).not.toContain("c".repeat(64));
+    expect(serialized).not.toContain(process.env.APNS_BUNDLE_ID);
+  });
+
   it("invalidates expired tokens and never logs token or provider secrets", async () => {
     configureApns();
     http2Mocks.status = 410;
@@ -473,6 +498,8 @@ describe("Live Activity durable remote sync", () => {
     expect(classifyApnsFailure(500, "InternalServerError")).toBe("retry");
     expect(classifyApnsFailure(400, "BadTopic")).toBe("permanent");
     expect(classifyApnsFailure(410, "Unregistered")).toBe("invalid_token");
+    expect(classifyApnsFailure(400, "BadDeviceToken")).toBe("invalid_token");
+    expect(classifyApnsFailure(400, "DeviceTokenNotForTopic")).toBe("permanent");
     expect(parseRetryAfterMs("12", 0)).toBe(12_000);
     expect(retryDelayMs(2, "999999", 0)).toBe(60 * 60 * 1000);
   });
