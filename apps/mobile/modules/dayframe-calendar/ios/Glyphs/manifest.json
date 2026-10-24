@@ -19,24 +19,64 @@
       "tag@3x.png": "3ca400562ebc0d39d7bb117bf1833361fe6d2f711ebc4562adcf08a9f1bf2a41"
     }
   },
-  "zoom-in": {
-    "glyph": "plus",
+  "time": {
+    "glyph": "clock",
     "points": 24,
-    "svgSha256": "e07b322d73852efa142b643a7110e11d3836e79a9799c1f7344c3a5286875424",
+    "svgSha256": "c47c3b0d6f3199e9e8c16e8060e94e9d30c6d3aa95b7833d592c656f319eefca",
     "images": {
-      "zoom-in.png": "a1977e7400781b6cbfc89cee0cad5dcba8207580c4dc45339eac7e1d447e0af8",
-      "zoom-in@2x.png": "5b7230ec75419b034a277925cf077e28d7cf3bf08220208b2d006606b795fd98",
-      "zoom-in@3x.png": "295a70642735b4a1d4f9d163e9a09d01dd080707f9cb8cc8b88383c8f7e6a793"
+      "time.png": "eff8abc58d69e74fee88d7322e49e4e2ca3498c59105e8f9c909b914a50212bb",
+      "time@2x.png": "ebfd8c0f5ac795585e21c498fdbdd97a92e18e12d33e591c6ff111f0644f7d5c",
+      "time@3x.png": "6fca625e762ddbaf7aa190e5ccc7de40c9b2757e7ae573b35d67100baf62a521"
     }
   },
-  "zoom-out": {
-    "glyph": "minus",
+  "trip": {
+    "glyph": "route",
     "points": 24,
-    "svgSha256": "d87fffaa8313263d6a46f422c79f2d9ccaa003534209b4dd1c72f80a21d5a5d9",
+    "svgSha256": "87a291c8cbaf43ae04132f1568ee13487d2f78d08bf5ddb9c14a68fcf84deca0",
     "images": {
-      "zoom-out.png": "dec9e540dbaf7719eac90e2bff955f7af7c9a77837d32b841891d82d31f6cb34",
-      "zoom-out@2x.png": "ee4b08005b092a21e2a7b4085dd481693ce32de0070c0b8da4201d64e457886e",
-      "zoom-out@3x.png": "364318b8252ea4d1456afa084106f8a2f2bb110351e358651882ab6643110bbf"
+      "trip.png": "b47edaa407eb6db43d7d80c80eab72c34905c962bace1ae05682301991692b36",
+      "trip@2x.png": "4d718e1c05b87fbf6b8507ca6e91ce846d686fba0af8d9e985f2959bc8130d42",
+      "trip@3x.png": "73e1401e4feef417a9beeeab469dd7a61f190c1541d942f92f7af5e2862099f5"
+    }
+  },
+  "health": {
+    "glyph": "heart-pulse",
+    "points": 24,
+    "svgSha256": "b70d781af6c209bbc15f435c687ae3d6887ec045ee52d4bbc75bfb1dae4cbed7",
+    "images": {
+      "health.png": "deb495b83d787100720c701d14c189cfe00c54a116faad5e95b9e53ccbf676af",
+      "health@2x.png": "0bc333846b178c5619118ceb7a9c37ad0e861742456073c484cbab2405b4725f",
+      "health@3x.png": "253e5b842c05d9ad405c635d0d3c3fce61011f5f7f69e593951a6a25a605ebbe"
+    }
+  },
+  "view-day": {
+    "glyph": "calendar-days",
+    "points": 24,
+    "svgSha256": "3e2f462223a6401809f86cd575b43dafdb313fd52c1beaaf72e31addc8a0b414",
+    "images": {
+      "view-day.png": "c812230e881e8d668329395d53918f2a0170d8c37603e8c6a23ad21f979df7f0",
+      "view-day@2x.png": "2378f942ed2aea477c0d65d4cd0a8e054a60e314cac2d059b33cb4471f7abef1",
+      "view-day@3x.png": "520bcb4827864834da191d9d2e55ff04d7e97527eb9a9d7d2a897923cef34e4c"
+    }
+  },
+  "view-list": {
+    "glyph": "list",
+    "points": 24,
+    "svgSha256": "94f0dab51a43f819787cb7e436f9761b0db520a9d74454d8d4dc5f053ccfb8ae",
+    "images": {
+      "view-list.png": "e403be9416df3a9ad6dbcd6b7e1cee1c3b14cb123b55448cc9599fa2ba0984d5",
+      "view-list@2x.png": "16b639b742513cb1f47db045900e74a27adce8cdcebcdfa7da07b6fe4ebc195d",
+      "view-list@3x.png": "341b94e2d72a5b4e9cb87b17e9d0d428909e0e2adb0d61bb457ba496e0e72698"
+    }
+  },
+  "check": {
+    "glyph": "check",
+    "points": 24,
+    "svgSha256": "e6c57e24cda8b409bc46a5a9da480dd754646579048b0fb8c4c75c6657842c45",
+    "images": {
+      "check.png": "b54791b04e8672236a4a60516f80aafff757a32bdb908ae03c225ece010eee35",
+      "check@2x.png": "aac67b5628f34b880ad6a3dd6432955af17fa5342149bee343afb00116bdc3fc",
+      "check@3x.png": "aede183654a11d1b1c18cbc57249fdd3c199db206ac6960bfa6be694ccd248c8"
     }
   },
   "activity-baby": {

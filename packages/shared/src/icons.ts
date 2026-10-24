@@ -124,6 +124,11 @@ export const DAYFRAME_APP_ICONS = {
   syncSending: "refresh-cw",
   syncDone: "cloud-check",
   syncAttention: "cloud-alert",
+  // A block's time on its second line in Calendar (Calendar v3).
+  time: "clock",
+  // Calendar's view menu (Calendar v3): Day (the grid) and List.
+  calendarDay: "calendar-days",
+  calendarList: "list",
   // A journey in progress, "Travelling since…" (location v4 step 5).
   openTrip: "route",
   // A place you were at that has no name yet, and is not in a block (location v4 step 10).

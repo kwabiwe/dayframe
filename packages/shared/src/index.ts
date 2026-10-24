@@ -116,6 +116,9 @@ export {
   DAYFRAME_BLOCKS,
   activityControlColor,
   blockColorsFor,
+  calendarBlockInk,
+  calendarNestedBase,
+  CALENDAR_V3_TINT,
   contrastRatio,
   onBlockTextColor,
   type DayframeOnBlockColor

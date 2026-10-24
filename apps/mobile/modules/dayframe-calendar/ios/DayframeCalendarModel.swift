@@ -8,6 +8,8 @@ struct DayframeCalendarTheme: Equatable {
   let background: String
   let border: String
   let borderStrong: String
+  let danger: String
+  let dangerText: String
   let mode: String
   let onAccent: String
   let shadow: String
@@ -27,6 +29,8 @@ struct DayframeCalendarTheme: Equatable {
     background = record.background
     border = record.border
     borderStrong = record.borderStrong
+    danger = record.danger ?? (record.mode == "light" ? "#D94F4F" : "#FF6B6B")
+    dangerText = record.dangerText ?? (record.mode == "light" ? "#B42318" : "#FF6B6B")
     mode = record.mode
     onAccent = record.onAccent
     shadow = record.shadow
@@ -69,9 +73,12 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let color: String
   let columnGroup: String?
   let continuesIntoNextDay: Bool
+  let detailLines: [DayframeCalendarDetailLineRecord]
   let entryId: String
   let glyph: String?
+  let ink: String?
   let isActive: Bool
+  let isMoment: Bool
   let isReview: Bool
   let isUncategorized: Bool
   let laneCount: Int
@@ -107,9 +114,12 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     color = record.color
     columnGroup = record.columnGroup
     continuesIntoNextDay = record.continuesIntoNextDay
+    detailLines = record.detailLines ?? [DayframeCalendarDetailLineRecord(glyph: "time", text: record.meta)]
     entryId = record.entryId
     glyph = record.glyph
+    ink = record.ink
     isActive = record.isActive
+    isMoment = record.isMoment ?? false
     isReview = record.isReview
     isUncategorized = record.isUncategorized
     laneCount = max(1, record.laneCount)
@@ -141,6 +151,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
       startedAtMs: startedAtMs,
       stoppedAtMs: stoppedAtMs,
       columnGroup: columnGroup,
+      isMoment: isMoment,
       regionOffsetFraction: regionOffsetFraction,
       regionWidthFraction: regionWidthFraction,
       fallbackOffsetFraction: offsetFraction,
@@ -176,6 +187,7 @@ struct DayframeCalendarPresentation: Equatable {
   let emptyState: String
   let entries: [DayframeCalendarEntry]
   let framedLabel: String
+  let framedAccessibilityLabel: String
   let hapticsEnabled: Bool
   /// Calendar › Grid or List (location v4 step 9): in List the view draws only its header and week
   /// strip, and the app draws the List under it.
@@ -209,6 +221,7 @@ struct DayframeCalendarPresentation: Equatable {
     emptyState = record.emptyState
     entries = record.entries.map(DayframeCalendarEntry.init)
     framedLabel = record.framedLabel
+    framedAccessibilityLabel = record.framedAccessibilityLabel ?? record.framedLabel
     hapticsEnabled = record.hapticsEnabled
     isList = record.layout == "list"
     clockFormat = record.clockFormat == "12h" ? "12h" : "24h"
@@ -235,9 +248,34 @@ struct DayframeCalendarPresentation: Equatable {
 
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 
-  /// A day with a bracket keeps its rail left of every block (render and hit geometry alike).
-  var entryLeadingInset: Double {
-    brackets.isEmpty ? 0 : DayframeCalendarConstants.bracketRailWidth
+  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width.
+  var entryLeadingInset: Double { 0 }
+}
+
+/// A moment as the entries layer draws it and the coordinator hit-tests it (dense-day rules).
+struct DayframeCalendarMomentPlacement {
+  let entry: DayframeCalendarEntry
+  let top: Double
+  let frame: DayframeCalendarHitFrame
+}
+
+enum DayframeCalendarMomentLayout {
+  /// The day's moments with their ticks and targets, resolved together (DayframeCalendarMomentMath.hitFrames).
+  static func layout(presentation: DayframeCalendarPresentation, hourHeight: Double, hourLabelWidth: Double) -> [DayframeCalendarMomentPlacement] {
+    let placed = presentation.entries.compactMap { entry -> (DayframeCalendarEntry, Double)? in
+      guard entry.isMoment, let stoppedAtMs = entry.stoppedAtMs, let top = DayframeCalendarMomentMath.top(
+        startedAtMs: entry.startedAtMs,
+        stoppedAtMs: stoppedAtMs,
+        dayStartMs: presentation.dayStartMs,
+        dayEndMs: presentation.dayEndMs,
+        hourHeight: hourHeight
+      ) else {
+        return nil
+      }
+      return (entry, top)
+    }
+    let frames = DayframeCalendarMomentMath.hitFrames(tops: placed.map(\.1), hourLabelWidth: hourLabelWidth, timelineHeight: 24 * hourHeight)
+    return zip(placed, frames).map { DayframeCalendarMomentPlacement(entry: $0.0.0, top: $0.0.1, frame: $0.1) }
   }
 }
 

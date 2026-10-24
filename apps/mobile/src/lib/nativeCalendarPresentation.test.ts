@@ -4,7 +4,6 @@ import type { MobileBootstrap, MobileTimeEntry } from "./api";
 import type { MobileTheme } from "./mobileTheme";
 import {
   REVIEW_LANE_MAX_LANES,
-  REVIEW_LANE_WIDTH,
   buildNativeCalendarBridgeState,
   reviewTargetEnvelope,
   routeNativeCalendarOpenEvent,
@@ -74,8 +73,8 @@ describe("native Calendar presentation boundary", () => {
       isActive: true,
       stoppedAtMs: null
     });
-    // Location v4 C6: a running block's detail line ends "now"; its label prints the length so far.
-    expect(serialized.meta).toMatch(/–now$/);
+    // Dense-day rules: a running block's time and length line runs to "now" with the length so far.
+    expect(serialized.meta).toMatch(/^10:00–now · 2h$/);
     expect(serialized.lengthLabel).toMatch(/^\d+(h|m)/);
     expect(serialized.accessibilityLabel).toMatch(/ to now, /);
     expect(state.model.totalSeconds).toBe(2 * 60 * 60);
@@ -226,28 +225,32 @@ describe("native Calendar presentation boundary", () => {
       expect(state.model.entries).toHaveLength(2);
     });
 
-    it("keeps two overlapping Review items side by side", () => {
+    it("puts overlapping suggestions side by side in the blocks' own columns (dense-day rules)", () => {
       const state = build(now, bootstrap([], {
         reviewItems: [suggestion("a", 9, 0, 60), suggestion("b", 9, 15, 60)]
       }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
-      for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
+      const items = state.model.entries;
+      expect(items.map((item) => item.actionId)).toEqual(["a", "b"]);
+      for (const item of items) {
+        expect(item).toMatchObject({ columnGroup: "logged", isReview: true, regionOffsetFraction: 0, regionWidthFraction: 1 });
+        expect(item.widthFraction).toBeCloseTo(0.5);
+      }
+      expect(items[0].offsetFraction).not.toBeCloseTo(items[1].offsetFraction);
     });
 
     it("collapses three or more side by side into one 'N suggestions' block over the whole crowd", () => {
       const state = build(now, bootstrap([needsReview("entry-legacy", 9, 50)], {
         reviewItems: [suggestion("a", 9, 10, 60), suggestion("b", 9, 20, 60), suggestion("c", 9, 30, 15), suggestion("later", 13, 0, 30)]
       }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
+      const items = state.model.entries;
+      expect(items.map((item) => [item.title, item.actionKind, item.actionId])).toEqual([
         ["4 suggestions", "review", "a"],
         ["Suggestion later", "review", "later"]
       ]);
-      const crowd = lane[0];
+      const crowd = items[0];
       expect(crowd.startedAtMs).toBe(localTime(2026, 7, 10, 9, 0));
       expect(crowd.stoppedAtMs).toBe(localTime(2026, 7, 10, 10, 20));
-      expect(crowd.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
+      expect(crowd.widthFraction).toBeCloseTo(1);
       expect(crowd.isReview).toBe(true);
     });
 
@@ -255,51 +258,26 @@ describe("native Calendar presentation boundary", () => {
       const state = build(now, bootstrap([], {
         reviewItems: [suggestion("gym", 9, 0, 60), suggestion("workout", 9, 15, 30)]
       }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => [item.actionId, item.layoutMode])).toEqual([["gym", "lane"], ["workout", "lane"]]);
-      for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
-      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
+      const items = state.model.entries;
+      expect(items.map((item) => [item.actionId, item.layoutMode])).toEqual([["gym", "lane"], ["workout", "lane"]]);
+      for (const item of items) expect(item.widthFraction).toBeCloseTo(0.5);
+      expect(items[0].offsetFraction).not.toBeCloseTo(items[1].offsetFraction);
     });
 
-    it("two suggestions overlapping by under a minute still get their own lanes (Codex r3)", () => {
-      const short = (id: string) => ({ ...suggestion(id, 9, 0, 1), suggestedStoppedAt: iso(localTime(2026, 7, 10, 9, 0) + 30_000) });
-      const state = build(now, bootstrap([], { reviewItems: [short("a"), short("b")] }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => item.layoutMode)).toEqual(["lane", "lane"]);
-      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
-      for (const item of lane) expect(item.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH / 2);
-    });
-
-    it("adjacent short suggestions get their own lanes, since their 44-pt targets would overlap (Codex r7)", () => {
-      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 1, 1)] }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
-      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
-      // Drawn at their real times.
-      expect(lane[0].stoppedAtMs).toBe(localTime(2026, 7, 10, 9, 1));
-    });
-
-    it("reserves the target around iOS's minimum block on old and new builds, not the raw time (Codex r9; location v4 C6)", () => {
-      // 09:00–09:01 draws 4 points on an older build and one label line (up to 19.5 points: 24.375
-      // minutes) on a current one, so its 55-minute target centres between 09:02:30 and 09:12:11.25:
-      // the envelope is 08:35–09:39:41.25. The 09:53–09:58 envelope starts at 09:28. They overlap.
+    it("keeps the target envelope that forms crowds (Codex r9; location v4 C6)", () => {
+      // 09:00–09:01 draws 4 points on an older build and one label line on a current one, so its
+      // 55-minute envelope is 08:35–09:39:41.25. iOS itself lays suggestions out by what it draws.
       const seconds = (value: number) => value * 1000;
       expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 0), localTime(2026, 7, 10, 9, 1), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
         .toEqual({ start: localTime(2026, 7, 10, 8, 35), end: localTime(2026, 7, 10, 9, 39) + seconds(41.25) });
-      expect(reviewTargetEnvelope(localTime(2026, 7, 10, 9, 53), localTime(2026, 7, 10, 9, 58), localTime(2026, 7, 10, 0, 0), localTime(2026, 7, 11, 0, 0)))
-        .toEqual({ start: localTime(2026, 7, 10, 9, 28), end: localTime(2026, 7, 10, 10, 32) + seconds(41.25) });
-      const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 9, 53, 5)] }));
-      const lane = state.model.entries;
-      expect(lane.map((item) => item.actionId)).toEqual(["a", "b"]);
-      expect(lane[0].offsetFraction).not.toBeCloseTo(lane[1].offsetFraction);
     });
 
-    it("targets that do not overlap share a lane (09:00–09:01 and 10:05–10:10)", () => {
+    it("suggestions apart in time keep the whole width", () => {
       const state = build(now, bootstrap([], { reviewItems: [suggestion("a", 9, 0, 1), suggestion("b", 10, 5, 5)] }));
-      const lane = state.model.entries;
-      // a's envelope reaches 09:39:41; b (10:05–10:10) starts its envelope at 09:40 (location v4 C6).
-      expect(lane[0].offsetFraction).toBeCloseTo(lane[1].offsetFraction);
-      expect(lane[0].widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
+      for (const item of state.model.entries) {
+        expect(item.offsetFraction).toBe(0);
+        expect(item.widthFraction).toBe(1);
+      }
     });
 
     it("each crowd says its own time range and what it opens (Codex r2)", () => {
@@ -612,39 +590,60 @@ describe("native Calendar presentation boundary", () => {
       expectTapsResolve(state);
     }));
 
-    it("an overlapping pair beside the Review lane stays side by side inside the logged part", () => {
+    it("an overlapping pair and a suggestion share one set of columns (dense-day rules)", () => {
       const state = build(now, bootstrap([
         block("gym", at(6, 59), at(8, 4)),
         block("manual", at(7, 0), at(7, 5)),
         entry({ id: "suggestion", reviewStatus: "needs_review", startedAt: iso(at(7, 30)), stoppedAt: iso(at(7, 50)) })
       ]));
       const items = byId(state);
-      const loggedWidth = 1 - REVIEW_LANE_WIDTH;
       expect(items.get("gym")?.offsetFraction).toBeCloseTo(0);
-      expect(items.get("gym")?.widthFraction).toBeCloseTo(loggedWidth / 2);
-      expect(items.get("manual")?.offsetFraction).toBeCloseTo(loggedWidth / 2);
-      expect(items.get("manual")?.widthFraction).toBeCloseTo(loggedWidth / 2);
-      expect(items.get("suggestion")?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
-      expect(items.get("suggestion")?.overlapCount).toBe(0);
-      // The Gym block overlaps the suggestion, so it keeps its exact (semantic) target.
-      expect(items.get("gym")?.overlapCount).toBe(1);
-      expect(items.get("manual")?.overlapCount).toBe(0);
-      expectSideBySide(state, ["gym", "manual", "suggestion"]);
+      expect(items.get("gym")?.widthFraction).toBeCloseTo(0.5);
+      expect(items.get("manual")?.offsetFraction).toBeCloseTo(0.5);
+      // The suggestion takes the column Manual has finished with, beside Gym.
+      expect(items.get("suggestion")?.offsetFraction).toBeCloseTo(0.5);
+      expect(items.get("suggestion")?.widthFraction).toBeCloseTo(0.5);
+      expect(items.get("suggestion")?.regionWidthFraction).toBe(1);
+      expectSideBySide(state, ["gym", "manual"]);
+      expectSideBySide(state, ["gym", "suggestion"]);
     });
   });
 });
 
 describe("native Calendar Blocks presentation", () => {
-  it("titles the screen with the month and says how much was framed on the selected day", () => {
+  it("titles the screen with the month and puts one short framed line under the week strip (Calendar v3)", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt: iso(localTime(2026, 7, 10, 10, 20)) })]));
-    const weekday = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { weekday: "long" });
+    const fullDate = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" });
 
     expect(state.model.monthTitle).toBe(new Date(now).toLocaleDateString(undefined, { month: "long" }));
-    expect(state.model.framedLabel).toBe(`1h 20m framed on ${weekday}`);
+    // The week strip and the month already show the date: the line says only the time.
+    expect(state.model.framedLabel).toBe("1h 20m framed");
+    expect(state.model.framedAccessibilityLabel).toBe(`1 hour 20 minutes framed on ${fullDate}`);
+    // The selected day in the strip reads its full date; today says so.
+    const friday = state.model.weekDays.find((day) => day.isSelected);
+    expect(friday?.accessibilityLabel).toBe(`${fullDate}, today`);
+    expect(state.model.weekDays.find((day) => !day.isToday)?.accessibilityLabel).not.toContain("today");
 
+    // Hidden on an empty day, still said in full to VoiceOver.
     const empty = build(now, bootstrap([]));
-    expect(empty.model.framedLabel).toBe(`Nothing framed on ${weekday}`);
+    expect(empty.model.framedLabel).toBe("");
+    expect(empty.model.framedAccessibilityLabel).toBe(`Nothing framed on ${fullDate}`);
+  });
+
+  it("gives a block its icon lines: the place, a trip's route or Apple Health, the tags, then the times (Calendar v3)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const stoppedAt = iso(localTime(2026, 7, 10, 10, 20));
+    const lines = (overrides: Parameters<typeof entry>[0]) =>
+      build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt, ...overrides })])).model.entries[0]?.detailLines;
+    expect(lines({ placeName: "Exampleton Library", tags: [{ id: "t", name: "planning" } as never] })).toEqual([
+      { glyph: "place", text: "Exampleton Library" },
+      { glyph: "tag", text: "planning" },
+      { glyph: "time", text: "09:00–10:20" }
+    ]);
+    expect(lines({ placeName: "Exampleton Station", automaticMoveEventId: "move-1" })?.[0]).toEqual({ glyph: "trip", text: "Exampleton Station" });
+    expect(lines({ source: "health_workout", placeName: "Exampleton Park" })?.[0]).toEqual({ glyph: "health", text: "From Apple Health" });
+    expect(lines({})).toEqual([{ glyph: "time", text: "09:00–10:20" }]);
   });
 
   it("adds the year to the month title outside the current year", () => {
@@ -693,7 +692,7 @@ describe("native Calendar Blocks presentation", () => {
     expect(thursday?.bars).toEqual([]);
   });
 
-  it("serializes solid block colours with measured text and puts Review suggestions in their own right lane", () => {
+  it("serializes block colours and puts a Review suggestion beside the block it overlaps (dense-day rules)", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const theme = darkTheme();
     const data = bootstrap([
@@ -728,22 +727,19 @@ describe("native Calendar Blocks presentation", () => {
       offsetFraction: 0,
       textColor: blockColorsFor("blue", "dark").text,
       warningOverlapCount: 0,
-      // It shares time with a Review target, so it gives the Review lane its columns (Codex r10).
-      widthFraction: 1 - REVIEW_LANE_WIDTH
+      // Dense-day rules: it shares time with the suggestion, so the two sit side by side.
+      widthFraction: 0.5
     });
     expect(review).toMatchObject({
       color: blockColorsFor("amber", "dark").fill,
       textColor: theme.textPrimary,
       warningOverlapCount: 0
     });
-    // The logged block keeps its exact target (it overlaps); the Review item, alone in its lane
-    // beside it, gets its full 44-point target, and the logged block stays reachable to its left.
-    expect(work?.overlapCount).toBe(1);
-    expect(review?.overlapCount).toBe(0);
+    // Side by side, neither covers the other's target; no overlap warning for a suggestion.
     expect(work?.accessibilityLabel).not.toContain("Overlaps");
-    expect(review?.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
-    expect(review?.widthFraction).toBeCloseTo(REVIEW_LANE_WIDTH);
-    expect(review!.zIndex).toBeGreaterThan(work!.zIndex);
+    expect(review?.offsetFraction).toBeCloseTo(0.5);
+    expect(review?.widthFraction).toBeCloseTo(0.5);
+    expect(review?.regionWidthFraction).toBe(1);
   });
 
   it("gives nested Review suggestions full targets in their own lanes, and keeps logged overlaps (Codex r8)", () => {
@@ -771,55 +767,28 @@ describe("native Calendar Blocks presentation", () => {
     expect(byId.get("logged-a")?.accessibilityLabel).toContain("Overlaps 1 other entry.");
   });
 
-  describe("logged blocks beside the Review lane (Codex r10 on #317)", () => {
+  it("logged blocks and suggestions overlapping in time never share horizontal space (dense-day rules)", () => {
     const now = localTime(2026, 7, 10, 23, 0);
-    const logged = (id: string, startHour: number, startMinute: number, minutes: number) => entry({
+    const span = (id: string, startHour: number, startMinute: number, minutes: number, review = false) => entry({
       id,
+      ...(review ? { reviewStatus: "needs_review" } : {}),
       startedAt: iso(localTime(2026, 7, 10, startHour, startMinute)),
       stoppedAt: iso(localTime(2026, 7, 10, startHour, startMinute) + minutes * 60_000)
     });
-    const suggestion = (id: string, startHour: number, startMinute: number, minutes: number) => entry({
-      id,
-      reviewStatus: "needs_review",
-      startedAt: iso(localTime(2026, 7, 10, startHour, startMinute)),
-      stoppedAt: iso(localTime(2026, 7, 10, startHour, startMinute) + minutes * 60_000)
-    });
-    const expectApart = (state: ReturnType<typeof build>, loggedIds: string[], reviewId: string) => {
-      const byId = new Map(state.model.entries.map((candidate) => [candidate.entryId, candidate]));
-      const review = byId.get(reviewId)!;
-      expect(review.offsetFraction).toBeCloseTo(1 - REVIEW_LANE_WIDTH);
-      expect(review.overlapCount).toBe(0);
-      for (const id of loggedIds) {
-        const block = byId.get(id)!;
-        expect(block.offsetFraction + block.widthFraction).toBeLessThanOrEqual(1 - REVIEW_LANE_WIDTH + 1e-9);
+    const state = build(now, bootstrap([
+      span("a", 9, 0, 30), span("b", 9, 0, 30), span("s", 9, 10, 20, true), span("far", 14, 0, 30)
+    ]));
+    const items = state.model.entries.filter((candidate) => candidate.entryId !== "far");
+    for (const [index, left] of items.entries()) {
+      for (const right of items.slice(index + 1)) {
+        const apart = left.offsetFraction + left.widthFraction <= right.offsetFraction + 1e-9
+          || right.offsetFraction + right.widthFraction <= left.offsetFraction + 1e-9;
+        expect(apart, `${left.entryId} and ${right.entryId}`).toBe(true);
       }
-    };
-
-    it("three logged 09:00–09:30 lanes and a 09:10–09:11 suggestion never share a target", () => {
-      const state = build(now, bootstrap([
-        logged("a", 9, 0, 30), logged("b", 9, 0, 30), logged("c", 9, 0, 30), suggestion("s", 9, 10, 1)
-      ]));
-      expectApart(state, ["a", "b", "c"], "s");
-    });
-
-    it("three logged 09:10–09:11 blocks under a suggestion at the same time stay tappable", () => {
-      const state = build(now, bootstrap([
-        logged("a", 9, 10, 1), logged("b", 9, 10, 1), logged("c", 9, 10, 1), suggestion("s", 9, 10, 1)
-      ]));
-      expectApart(state, ["a", "b", "c"], "s");
-    });
-
-    it("a whole group of overlapping logged blocks moves together, and time away from suggestions keeps the full width", () => {
-      const state = build(now, bootstrap([
-        // a's target meets the suggestion's; b overlaps a, so it moves too.
-        logged("a", 9, 40, 30), logged("b", 10, 0, 60), suggestion("s", 9, 0, 20),
-        logged("far", 14, 0, 30)
-      ]));
-      expectApart(state, ["a", "b"], "s");
-      const far = state.model.entries.find((candidate) => candidate.entryId === "far")!;
-      expect(far.offsetFraction).toBe(0);
-      expect(far.widthFraction).toBe(1);
-    });
+    }
+    const far = state.model.entries.find((candidate) => candidate.entryId === "far")!;
+    expect(far.offsetFraction).toBe(0);
+    expect(far.widthFraction).toBe(1);
   });
 
   it("draws a crowd over its drawn (wall-clock) span across a clock change (Codex r11)", () => {
@@ -950,14 +919,13 @@ describe("native Calendar Blocks presentation", () => {
       const [year, month, day] = dayKey.split("-").map(Number);
       const dayStart = new Date(year, month - 1, day).getTime();
       const dayEnd = new Date(year, month - 1, day + 1).getTime();
-      for (const item of lane) expect(item.widthFraction).toBeGreaterThanOrEqual(REVIEW_LANE_WIDTH / REVIEW_LANE_MAX_LANES - 1e-9);
+      // Crowds keep at most REVIEW_LANE_MAX_LANES suggestions at once; all share the day's columns.
+      for (const item of lane) expect(item).toMatchObject({ columnGroup: "logged", isReview: true, regionOffsetFraction: 0, regionWidthFraction: 1 });
       for (const [index, a] of lane.entries()) {
-        for (const b of lane.slice(index + 1)) {
-          if (Math.abs(a.offsetFraction - b.offsetFraction) > 1e-9) continue;
-          const ea = reviewTargetEnvelope(a.startedAtMs, a.stoppedAtMs!, dayStart, dayEnd);
-          const eb = reviewTargetEnvelope(b.startedAtMs, b.stoppedAtMs!, dayStart, dayEnd);
-          expect(ea.end <= eb.start || eb.end <= ea.start, `${a.actionId} and ${b.actionId} share a lane`).toBe(true);
-        }
+        const meeting = lane.filter((b, other) => other !== index && b.startedAtMs < dayEnd && a.startedAtMs < dayEnd
+          && reviewTargetEnvelope(a.startedAtMs, a.stoppedAtMs!, dayStart, dayEnd).start < reviewTargetEnvelope(b.startedAtMs, b.stoppedAtMs!, dayStart, dayEnd).end
+          && reviewTargetEnvelope(b.startedAtMs, b.stoppedAtMs!, dayStart, dayEnd).start < reviewTargetEnvelope(a.startedAtMs, a.stoppedAtMs!, dayStart, dayEnd).end);
+        expect(meeting.length + 1, `${a.actionId} crowd`).toBeLessThanOrEqual(REVIEW_LANE_MAX_LANES);
       }
       return lane;
     };
