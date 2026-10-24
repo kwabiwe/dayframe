@@ -288,4 +288,28 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.data?.reviewItems.map((item) => item.id)).toEqual(["a"]);
     expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
   });
+
+  it("ignores a repeat answer to the same question, so Undo still saves nothing (Codex r4 on #582)", async () => {
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    act(() => { result.current.answer("a", false); });
+    expect(result.current.held).toMatchObject({ itemId: "a", logged: true });
+    act(() => { result.current.undo(); });
+    await act(async () => { vi.advanceTimersByTime(10_000); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("still saves a held answer when the List goes away, but says nothing afterwards (Codex r4 on #582)", async () => {
+    let fail!: (error: Error) => void;
+    store.enqueueReviewMutation.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const { result, tree } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    vi.mocked(Alert.alert).mockClear();
+    await act(async () => { tree.unmount(); });
+    expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+    await act(async () => { fail(new Error("disk full")); });
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+  });
 });

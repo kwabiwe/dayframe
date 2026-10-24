@@ -196,6 +196,16 @@ describe("CalendarListView (location v4 step 9)", () => {
     rerender({ checks });
     expect(questions()).toHaveLength(0);
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+    // An overnight "?" opened on one day, then the day before, which shows it too: it closes there (Codex r4 on #582).
+    const overnight = [{ id: "c-sleep", segmentId: null, startedAt: new Date(at(0) - 2 * 3_600_000).toISOString(), stoppedAt: iso(6) }];
+    rerender({ checks: overnight });
+    const sleepRow = () => tree.root.findAll((node) => typeof node.props.accessibilityLabel === "string"
+      && node.props.accessibilityLabel.startsWith("Check Sleep") && typeof node.props.onPress === "function");
+    act(() => { sleepRow()[0].props.onPress(); });
+    expect(questions()).toHaveLength(1);
+    rerender({ checks: overnight, dayStartMs: at(0) - 86_400_000, dayEndMs: at(0), timeline: null });
+    expect(sleepRow()).toHaveLength(1);
+    expect(questions()).toHaveLength(0);
   });
 
   it("offers a suggestion without a complete time on its own screen, never answers the outbox would refuse (Codex r3 on #582)", () => {

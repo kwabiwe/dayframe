@@ -73,6 +73,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   // The copy each held answer was made from, for an item a capped refresh leaves out (cleared per account).
   const known = useRef(new Map<string, MobileReviewItem>());
   const token = useRef(0);
+  // The List's own lifetime: a held answer is still saved when it goes away, but nothing is said or shown
+  // after it (Codex r4 on #582).
+  const alive = useRef(true);
+  const savingRef = useRef(saving);
 
   const isOpen = (item: MobileReviewItem) => isOpenReviewItem(item) && !decidedRef.current.has(item.id);
   // Listed (or brought back) and open, listed and decided (undefined), or left out of the list (the known copy).
@@ -109,9 +113,12 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       if (ownerRef.current !== owner) return;
       setSaving((now) => now && now.owner === owner ? { ...now, ids: new Set([...now.ids].filter((id) => !ids.includes(id))) } : now);
     };
+    // Said only while the List is here, for the account that answered.
+    const present = () => alive.current && ownerRef.current === owner;
     const notSaved = (error: unknown) => {
       unhide(heldIds);
       restore(owner, heldIds);
+      if (!present()) return;
       AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
       Alert.alert("Calendar", friendlyMobileErrorMessage(error, "Couldn’t save this answer on this iPhone."));
     };
@@ -127,7 +134,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     if (reviewDeckProposalSignature(item) !== decision.proposal || members === null || !hasSuggestedTimeWindow(item)) {
       unhide(heldIds);
       restore(owner, heldIds);
-      AccessibilityInfo.announceForAccessibility(`${decision.title} changed, so it was not saved. Check it again.`);
+      if (present()) AccessibilityInfo.announceForAccessibility(`${decision.title} changed, so it was not saved. Check it again.`);
       return;
     }
     const affected = [item, ...members];
@@ -182,8 +189,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     }).then(() => {
       settle(true);
       if (ownerRef.current !== owner) return;
-      AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`);
       void synchroniseReviewMutations().catch(() => undefined);
+      if (present()) AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`);
     }).catch((error) => {
       settle(false);
       if (ownerRef.current !== owner) return;
@@ -195,6 +202,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   useLayoutEffect(() => {
     dataRef.current = data;
     shownRef.current = shown;
+    savingRef.current = saving;
     // A remembered copy follows every newer read of its suggestion, so one paged out later is checked as it
     // was last seen, never as it was when answered (Codex r3 on #582).
     for (const item of data?.reviewItems ?? []) if (known.current.has(item.id)) known.current.set(item.id, item);
@@ -232,12 +240,14 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   }, [locallyDecidedIds]);
   // Backgrounding saves a held answer now; so does the Dashboard going away.
   useEffect(() => {
+    alive.current = true;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state !== "active") hold.flush();
     });
     return () => {
       subscription.remove();
       hold.flush();
+      alive.current = false;
     };
   }, [hold]);
 
@@ -245,6 +255,14 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   const answer = useCallback((itemId: string, logged: boolean) => {
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
     if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return;
+    // Already answered (held, or saving and not yet handed over): a repeat tap never saves the first answer
+    // early and so never takes its Undo away (Codex r4 on #582).
+    const current = hold.current();
+    const heldNow = current?.kind === "single"
+      ? [current.itemId, ...((current as HeldAnswer).outing?.members.map((member) => member.itemId) ?? [])]
+      : [];
+    const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
+    if (heldNow.includes(itemId) || savingNow.has(itemId)) return;
     // Every answer needs the suggestion's whole window (the outbox refuses one without): such a "?" offers
     // its own screen instead (Codex r3 on #582).
     if (!hasSuggestedTimeWindow(listed)) return;

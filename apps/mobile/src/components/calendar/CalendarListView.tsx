@@ -164,6 +164,13 @@ export function CalendarListView({
   useEffect(() => {
     if (scrollToFirstCheck) pendingScroll.current = "first";
   }, [scrollToFirstCheck]);
+  // A question belongs to the day it was opened on: another day closes it, even for a "?" both days show
+  // (overnight sleep), before any request for the new day opens one (Codex r4 on #582).
+  const [openDayStartMs, setOpenDayStartMs] = useState(dayStartMs);
+  if (openDayStartMs !== dayStartMs) {
+    setOpenDayStartMs(dayStartMs);
+    setOpenCheckId(null);
+  }
   // Today's chip also opens the first question, once its "?" is here, and VoiceOver hears it as when a "?"
   // is tapped (Codex r2 on #582).
   const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
