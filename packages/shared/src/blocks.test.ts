@@ -8,6 +8,9 @@ import {
   ACTIVITY_CONTROL_MINIMUM_CONTRAST,
   activityControlColor,
   blockColorsFor,
+  calendarBlockInk,
+  calendarNestedBase,
+  CALENDAR_V3_TINT,
   contrastRatio,
   onBlockTextColor,
   paletteKeyFor
@@ -198,4 +201,96 @@ function deltaE2000(first: string, second: string) {
   const sh = 1 + 0.015 * meanCp * t;
   const rt = -2 * Math.sqrt(meanCp ** 7 / (meanCp ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((meanH - 275) / 25) ** 2)) * rad);
   return Math.sqrt((dL / sl) ** 2 + (dC / sc) ** 2 + (dH / sh) ** 2 + rt * (dC / sc) * (dH / sh));
+}
+
+describe("calendarBlockInk (Calendar v3)", () => {
+  it("meets AA on the tint, the Reduce Transparency tint and a nested tint for every palette colour in both themes", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      for (const colour of DAYFRAME_PALETTE) {
+        const fill = mode === "dark" ? colour.darkHex : colour.lightHex;
+        for (const review of [false, true]) {
+          const ink = calendarBlockInk(fill, mode, { background: theme.background, surface: theme.surface, review });
+          const tint = review ? (mode === "dark" ? CALENDAR_V3_TINT.reviewDark : CALENDAR_V3_TINT.reviewLight) : (mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light);
+          const over = (base: string, amount: number) => mix(base, fill, amount);
+          for (const surface of [over(theme.background, tint), over(theme.surface, tint + CALENDAR_V3_TINT.reduceTransparencyBoost), mix(calendarNestedBase(over(theme.background, tint), theme.background), fill, tint)]) {
+            expect(contrastRatio(ink, surface), `${colour.key} ${mode}${review ? " review" : ""}`).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    }
+  });
+
+  it("meets AA when nested over a block of any other colour, three levels deep (Codex r6 on #580)", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      const tint = mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light;
+      const fills = [...DAYFRAME_PALETTE.map((colour) => (mode === "dark" ? colour.darkHex : colour.lightHex)), mode === "dark" ? "#323946" : "#EEF2F6"];
+      const onCanvas = fills.map((fill) => mix(theme.background, fill, tint));
+      const nestedOn = (under: string, fill: string) => mix(calendarNestedBase(under, theme.background), fill, tint);
+      const level2 = onCanvas.flatMap((under) => fills.map((fill) => nestedOn(under, fill)));
+      // A sample of the third level keeps the run short; the wash brings deeper levels closer to the canvas.
+      const level3 = level2.filter((_, index) => index % 7 === 0).flatMap((under) => fills.filter((_, index) => index % 5 === 0).map((fill) => nestedOn(under, fill)));
+      for (const fill of fills) {
+        const ink = calendarBlockInk(fill, mode, { background: theme.background, surface: theme.surface });
+        for (const under of [...onCanvas, ...level2, ...level3]) {
+          expect(contrastRatio(ink, nestedOn(under, fill)), `${fill} ${mode} over ${under}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  }, 60_000);
+
+  it("meets AA at any depth: four yellow-soft ancestors under a red child in Midnight, and deep chains of every colour (Codex r7 on #580)", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      const tint = mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light;
+      const fillOf = (key: string) => {
+        const colour = DAYFRAME_PALETTE.find((entry) => entry.key === key)!;
+        return mode === "dark" ? colour.darkHex : colour.lightHex;
+      };
+      const chain = (ancestors: string[]) => ancestors.reduce((under, fill) => mix(calendarNestedBase(under, theme.background), fill, tint), theme.background);
+      const red = fillOf("red");
+      const yellow = fillOf("yellow-soft");
+      const ink = calendarBlockInk(red, mode, { background: theme.background, surface: theme.surface });
+      for (let depth = 1; depth <= 8; depth += 1) {
+        const under = chain([yellow, ...Array.from({ length: depth - 1 }, () => yellow)]);
+        expect(contrastRatio(ink, mix(calendarNestedBase(under, theme.background), red, tint)), `${mode} depth ${depth}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // Deep chains of one colour, for every colour as both ancestor and child.
+      const fills = DAYFRAME_PALETTE.map((colour) => (mode === "dark" ? colour.darkHex : colour.lightHex));
+      for (const ancestor of fills) {
+        const under = chain(Array.from({ length: 6 }, () => ancestor));
+        for (const child of fills) {
+          const childInk = calendarBlockInk(child, mode, { background: theme.background, surface: theme.surface });
+          expect(contrastRatio(childInk, mix(calendarNestedBase(under, theme.background), child, tint)), `${child} over 6 × ${ancestor} ${mode}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
+  it("is cheap enough to run per block on every render", () => {
+    const started = performance.now();
+    for (let index = 0; index < 200; index += 1) {
+      calendarBlockInk(`#${(0x204060 + index * 4111).toString(16).padStart(6, "0").slice(-6)}`, index % 2 ? "dark" : "light", { background: "#F4F6F9", surface: "#FFFFFF" });
+    }
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("keeps the block's own hue: a darker shade in light mode, a lighter one in dark", () => {
+    const light = calendarBlockInk("#2D7CEB", "light", { background: "#F4F6F9", surface: "#FFFFFF" });
+    const dark = calendarBlockInk("#3B8BF6", "dark", { background: "#050914", surface: "#151B27" });
+    // Darker than the colour itself in light mode, lighter in dark, and still blue (blue the largest channel).
+    expect(contrastRatio(light, "#FFFFFF")).toBeGreaterThan(contrastRatio("#2D7CEB", "#FFFFFF"));
+    expect(contrastRatio(dark, "#000000")).toBeGreaterThan(contrastRatio("#3B8BF6", "#000000"));
+    for (const ink of [light, dark]) {
+      const [red, green, blue] = [1, 3, 5].map((offset) => Number.parseInt(ink.slice(offset, offset + 2), 16));
+      expect(blue).toBeGreaterThan(Math.max(red, green));
+    }
+  });
+});
+
+function mix(from: string, to: string, amount: number) {
+  const channels = (hex: string) => [0, 2, 4].map((offset) => Number.parseInt(hex.slice(1 + offset, 3 + offset), 16));
+  const [a, b] = [channels(from), channels(to)];
+  return `#${a.map((channel, index) => Math.round(channel + (b[index] - channel) * amount).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }

@@ -78,7 +78,7 @@ describe("native Calendar production contract", () => {
     expect(marker).toContain(".background(Capsule(style: .continuous).fill(red))");
     expect(marker).not.toContain("Circle()");
     // The hour label under the pill is hidden.
-    expect(rootView).toContain(".opacity(nowY.map { abs($0 - lineTop) < 12 } == true ? 0 : 1)");
+    expect(rootView).toContain(".opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)");
   });
 
   it("removes the React pinch, temporary transform, and outer-scroll ownership", () => {
@@ -385,7 +385,7 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
   const swiftConstant = (name: string) => Number(core.match(new RegExp(`public static let ${name} = ([0-9.]+)`))?.[1]);
 
   it("mirrors the shared dense-day label rule's numbers (owner, 24 Oct 2026)", async () => {
-    const { CALENDAR_BLOCK_LABEL, CALENDAR_DENSE_LABEL, CALENDAR_V3_OVERLAP } = await import("@dayframe/shared");
+    const { CALENDAR_BLOCK_LABEL, CALENDAR_DENSE_LABEL, CALENDAR_V3_OVERLAP, CALENDAR_V3_TINT } = await import("@dayframe/shared");
     expect(swiftConstant("labelLineMinimumHeight")).toBe(CALENDAR_DENSE_LABEL.minimumHeight);
     expect(swiftConstant("compactTextMaximumHeight")).toBe(CALENDAR_DENSE_LABEL.compactTextMaximumHeight);
     expect(swiftConstant("compactTextMaximumWidth")).toBe(CALENDAR_DENSE_LABEL.compactTextMaximumWidth);
@@ -396,6 +396,7 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(swiftConstant("overlapIndent")).toBe(CALENDAR_V3_OVERLAP.indent);
     expect(swiftConstant("overlapMinimumNestedWidth")).toBe(CALENDAR_V3_OVERLAP.minimumNestedWidth);
     expect(swiftConstant("blockCornerRadius")).toBe(CALENDAR_V3_OVERLAP.cornerRadius);
+    expect(swiftConstant("nestedCanvasWash")).toBe(CALENDAR_V3_TINT.nestedCanvasWash);
     expect(swiftConstant("maximumLabelTextScale")).toBe(CALENDAR_BLOCK_LABEL.iosMaximumTextScale);
     expect(swiftConstant("legStripMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.legStripMinimumHeight);
     expect(swiftConstant("columnTouchTolerance")).toBe(CALENDAR_BLOCK_LABEL.touchTolerance);

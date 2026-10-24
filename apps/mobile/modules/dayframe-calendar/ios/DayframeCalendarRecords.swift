@@ -47,6 +47,9 @@ struct DayframeCalendarEntryRecord: Codable {
   var entryId = ""
   /// The activity's registry glyph, drawn alone in a column under 34 points wide.
   var glyph: String?
+  /// Calendar v3: the measured block text colour (AA on every tint it can sit on). Absent from an older
+  /// bundle, which keeps Swift's own shade.
+  var ink: String?
   var isActive = false
   /// A finished block of a minute or less (dense-day rules): drawn as a tick at the gutter's edge,
   /// never as a block. Absent from an older bundle (a block, as before).

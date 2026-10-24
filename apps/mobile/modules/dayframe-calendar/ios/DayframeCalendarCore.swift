@@ -48,6 +48,9 @@ public enum DayframeCalendarConstants {
   public static let overlapIndent = 14.0
   /// A nested group is never narrower than this.
   public static let overlapMinimumNestedWidth = 40.0
+  /// A nested block lays this much of the canvas under its tint (CALENDAR_V3_TINT.nestedCanvasWash), so
+  /// the block underneath shows through without taking its text below AA.
+  public static let nestedCanvasWash = 0.6
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -1436,11 +1439,17 @@ public struct DayframeCalendarLaidOutEntry: Equatable {
   /// Another block is drawn inside this block's 44-point target in the same horizontal space, so the
   /// target stays the block's own height and a tap never lands on the wrong block.
   public let sharesTarget: Bool
+  /// Calendar v3: drawn on top of the block it starts inside (it lays the canvas wash under its tint).
+  public var nested = false
 }
 
 /// One layout for the day at one zoom and text size, used by drawing and by hit testing alike.
 public enum DayframeCalendarDayLayout {
   public static let reviewZIndexBase = 1_000
+  /// Calendar v3: each nesting depth draws above every column of the depth below it, for any crowd.
+  public static let depthZIndexStride = 1_000_000
+  /// Moments draw above every block.
+  public static let momentZIndex = 1_000_000_000
 
   /// One label line at the given Dynamic Type scale (capped like the metadata text): the mock-up's
   /// `MIN_H`, the gap below included, so columns form exactly where calendar-dense-mockup v2 forms
@@ -1489,6 +1498,8 @@ public enum DayframeCalendarDayLayout {
       }
     }
     var columns: [String: DayframeCalendarColumn] = [:]
+    // Nested blocks (Calendar v3) sit inside their parent's horizontal space, so their targets are shared.
+    var nested = Set<String>()
     if let laneWidth, laneWidth.isFinite, laneWidth > 0 {
       // Calendar v3: Apple's hybrid overlap in the lane's own points (the indent is in points), sent on
       // as fractions of the lane. Close starts share columns; a later start nests on top, indented.
@@ -1500,14 +1511,17 @@ public enum DayframeCalendarDayLayout {
           closeDistance: close
         )
         for placement in placements {
+          if placement.depth > 0 { nested.insert(placement.id) }
+          // The painted block keeps a 2-point gap on its right, so side-by-side blocks never touch.
+          let paintedWidth = max(0, placement.width - DayframeCalendarConstants.blockVisualGap)
           columns[placement.id] = DayframeCalendarColumn(
             id: placement.id,
             columnIndex: placement.columnIndex,
             columnCount: placement.columnCount,
             spanCount: 1,
             offsetFraction: placement.x / laneWidth,
-            widthFraction: placement.width / laneWidth,
-            zIndex: placement.depth * 100 + placement.columnIndex + 1
+            widthFraction: paintedWidth / laneWidth,
+            zIndex: min(placement.depth, 999) * depthZIndexStride + min(placement.columnIndex, depthZIndexStride - 2) + 1
           )
         }
       }
@@ -1558,8 +1572,10 @@ public enum DayframeCalendarDayLayout {
     }
     var out: [String: DayframeCalendarLaidOutEntry] = [:]
     for (index, item) in placed.enumerated() {
-      var sharesTarget = false
-      if item.block.height < 44 {
+      // A nested block lies wholly inside its parent's space (the parent's interval contains its target,
+      // which the top and bottom search below would not find), so it keeps its own height (Codex r5 on #580).
+      var sharesTarget = nested.contains(item.id)
+      if !sharesTarget, item.block.height < 44 {
         let target = targetExtent(top: item.block.top, height: item.block.height, timelineHeight: timelineHeight)
         let sharesSpace = { (other: Int) -> Bool in
           let candidate = placed[other]
@@ -1587,7 +1603,8 @@ public enum DayframeCalendarDayLayout {
         widthFraction: item.width,
         columnCount: item.count,
         zIndex: item.z,
-        sharesTarget: sharesTarget
+        sharesTarget: sharesTarget,
+        nested: nested.contains(item.id)
       )
     }
     return out

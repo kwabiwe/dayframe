@@ -492,7 +492,8 @@ private struct DayframeCalendarHourGrid: View {
         .foregroundStyle(Color(dayframeCSS: theme.textMuted))
         .frame(width: hourLabelWidth - 8, alignment: .trailing)
         .position(x: (hourLabelWidth - 8) / 2, y: labelTop)
-        .opacity(nowY.map { abs($0 - lineTop) < 12 } == true ? 0 : 1)
+        // Compared where the label is drawn (clamped inside the day at 00:00 and 24:00), not its line.
+        .opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)
         .accessibilityHidden(true)
 
       Rectangle()
@@ -597,6 +598,7 @@ private struct DayframeCalendarEntriesLayer: View {
               horizontal: horizontal,
               labelTextScale: labelTextScale,
               metrics: metrics,
+              nested: laidOut.nested,
               visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -650,7 +652,7 @@ private struct DayframeCalendarEntriesLayer: View {
         .contentShape(Rectangle())
         .position(x: CGFloat(frame.minX + frame.maxX) / 2, y: CGFloat(frame.minY + frame.maxY) / 2)
         .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
-        .zIndex(Double(DayframeCalendarDayLayout.reviewZIndexBase * 2))
+        .zIndex(Double(DayframeCalendarDayLayout.momentZIndex))
         .accessibilityLabel(moment.entry.accessibilityLabel)
         .accessibilityHint("Opens entry editor")
       }
@@ -670,6 +672,7 @@ private struct DayframeCalendarBlockView: View {
   let horizontal: DayframeCalendarHorizontalMetrics
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
+  let nested: Bool
   let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -689,10 +692,12 @@ private struct DayframeCalendarBlockView: View {
     let fill: Color = reduceTransparency
       ? Color(uiColor: blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint + 0.1))
       : Color(uiColor: blockColor).opacity(Double(tint))
-    // A darker shade of the hue in light mode, a lighter one in dark mode (AA on the tint).
+    // A darker shade of the hue in light mode, a lighter one in dark mode, measured by React to meet AA on
+    // every tint (calendarBlockInk); an older bundle's model falls back to the mock-up's own shade.
     let ink = entry.isReview
       ? Color(dayframeCSS: theme.textPrimary)
-      : Color(uiColor: blockColor.dayframeBlended(over: dark ? .white : .black, alpha: dark ? 0.62 : 0.52))
+      : entry.ink.map { Color(dayframeCSS: $0) }
+        ?? Color(uiColor: blockColor.dayframeBlended(over: dark ? .white : .black, alpha: dark ? 0.62 : 0.52))
     let label = DayframeCalendarDenseLabelMath.label(
       height: Double(visualHeight),
       width: horizontal.width,
@@ -702,6 +707,11 @@ private struct DayframeCalendarBlockView: View {
     // overlap dot; VoiceOver still says "Overlaps N other entries".
 
     ZStack(alignment: .topLeading) {
+      // A nested block lays a canvas wash under its tint: the block underneath still shows through, but
+      // never takes the text below AA (calendarBlockInk measures against these bases).
+      if nested && !reduceTransparency {
+        shape.fill(Color(dayframeCSS: theme.background).opacity(DayframeCalendarConstants.nestedCanvasWash))
+      }
       shape.fill(fill)
       if entry.isReview {
         DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))
@@ -784,7 +794,8 @@ private struct DayframeCalendarDenseText: View {
       cutFirstWord: true,
       measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
     )
-    let detailFont = UIFont.systemFont(ofSize: CGFloat(label.detailFontSize), weight: .medium)
+    // Measured as drawn: the icon lines use monospaced digits (Codex r7 on #580).
+    let detailFont = UIFont.monospacedDigitSystemFont(ofSize: CGFloat(label.detailFontSize), weight: .medium)
     let iconSize = CGFloat(11 * DayframeCalendarDayLayout.clampedTextScale(labelTextScale))
     // Colour only when nothing of the title fits: the icon lines go too. Each line wraps to the whole
     // lines left under the title (calendar-v3-mockup), cut after a whole word.
@@ -829,7 +840,7 @@ private struct DayframeCalendarDenseText: View {
             }
           }
         }
-        .foregroundStyle(ink.opacity(0.92))
+        .foregroundStyle(ink)
       }
     }
     .frame(width: CGFloat(max(0, width)), alignment: .leading)

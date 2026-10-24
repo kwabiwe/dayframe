@@ -76,6 +76,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let detailLines: [DayframeCalendarDetailLineRecord]
   let entryId: String
   let glyph: String?
+  let ink: String?
   let isActive: Bool
   let isMoment: Bool
   let isReview: Bool
@@ -116,6 +117,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     detailLines = record.detailLines ?? [DayframeCalendarDetailLineRecord(glyph: "time", text: record.meta)]
     entryId = record.entryId
     glyph = record.glyph
+    ink = record.ink
     isActive = record.isActive
     isMoment = record.isMoment ?? false
     isReview = record.isReview

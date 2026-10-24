@@ -1,4 +1,4 @@
-import { paletteColorFor, paletteKeyFor, type DayframePaletteKey } from "./palette";
+import { DAYFRAME_PALETTE, paletteColorFor, paletteKeyFor, type DayframePaletteKey } from "./palette";
 import type { DayframeThemeMode } from "./theme";
 
 // Dayframe Blocks tokens shared by web and iOS. See docs/brand-style-guide.md (Dayframe Blocks).
@@ -58,6 +58,136 @@ export function activityControlColor(value: unknown, mode: DayframeThemeMode, ba
     if (backgrounds.every((background) => contrastRatio(color, background) >= ACTIVITY_CONTROL_MINIMUM_CONTRAST)) return color;
   }
   return toward;
+}
+
+/**
+ * Calendar v3 (owner, 24 Oct 2026): blocks are a translucent tint of their activity colour, opaque over
+ * the surface (a little stronger) under Reduce Transparency. Suggestions are lighter.
+ */
+export const CALENDAR_V3_TINT = {
+  light: 0.18,
+  dark: 0.28,
+  reviewLight: 0.1,
+  reviewDark: 0.14,
+  reduceTransparencyBoost: 0.1,
+  /**
+   * A nested block (drawn on top of the block it starts inside) lays this much of the canvas under its
+   * tint, so the block underneath still shows through but can never take its text below AA.
+   */
+  nestedCanvasWash: 0.6
+} as const;
+
+/** The no-activity block fills (Calendar), parents a nested block can sit on besides the palette. */
+const CALENDAR_UNCATEGORIZED_FILLS = { light: "#EEF2F6", dark: "#323946" } as const;
+const calendarInkCache = new Map<string, string>();
+
+
+/**
+ * Calendar v3's block text: a darker shade of the block's own hue in light mode (a lighter one in dark),
+ * starting at the mock-up's 52 % / 62 % of the colour and deepened toward black (or lifted toward white)
+ * just until it measures at least 4.5:1 on every surface the block can be drawn on — its tint over the
+ * canvas, the opaque Reduce Transparency tint over the surface, and a nested block's tint over its
+ * parent's — so titles and icon lines meet AA for every palette colour.
+ */
+export function calendarBlockInk(fill: string, mode: DayframeThemeMode, { background, surface, review = false }: { background: string; surface: string; review?: boolean }) {
+  const key = `${fill}|${mode}|${background}|${surface}|${review}`;
+  const cached = calendarInkCache.get(key);
+  if (cached) return cached;
+  const tint = review
+    ? (mode === "dark" ? CALENDAR_V3_TINT.reviewDark : CALENDAR_V3_TINT.reviewLight)
+    : (mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light);
+  const colour = rgb(fill);
+  // Text is darker than every surface in light mode and lighter in dark, so only the extreme surface
+  // matters: the darkest (light) or lightest (dark) of the block's tint over the canvas, over the
+  // surface under Reduce Transparency, and over the extreme nested base at any depth (a conservative
+  // per-channel bound, calendarNestedExtreme), with a margin for the rendered rounding.
+  const pick = mode === "dark" ? Math.max : Math.min;
+  const worst = pick(
+    luminance(mixRgb(rgb(background), colour, tint)),
+    luminance(mixRgb(rgb(surface), colour, tint + CALENDAR_V3_TINT.reduceTransparencyBoost)),
+    luminance(mixChannels(calendarNestedExtreme(mode, background), colour, tint))
+  );
+  const toward = mode === "dark" ? "#FFFFFF" : "#000000";
+  const start = mode === "dark" ? 0.38 : 0.48;
+  let ink: string = toward;
+  for (let amount = start; amount < 1; amount += 0.02) {
+    const candidate = mixRgb(colour, rgb(toward), amount);
+    const [lighter, darker] = [luminance(candidate), worst].sort((a, b) => b - a);
+    if ((lighter + 0.05) / (darker + 0.05) >= DAYFRAME_BLOCKS.minimumTextContrast + CALENDAR_INK_MARGIN) {
+      ink = hex(candidate);
+      break;
+    }
+  }
+  calendarInkCache.set(key, ink);
+  return ink;
+}
+
+/** What a nested block's tint is drawn over: the canvas wash over the composited block underneath. */
+export function calendarNestedBase(underneath: string, background: string) {
+  return mixHex(underneath, background, CALENDAR_V3_TINT.nestedCanvasWash);
+}
+
+/** Rendered colours round to whole channels; measured ink keeps this much contrast in hand. */
+const CALENDAR_INK_MARGIN = 0.05;
+
+/**
+ * A conservative bound for every base a nested block's tint can sit on, at any depth: each channel
+ * of the base (the canvas wash over the composited block underneath) is the darkest (light mode) or
+ * lightest (dark mode) that channel can reach, taking that channel's extreme over every block colour
+ * at every level and iterating the wash and tint until it converges. Luminance rises with every
+ * channel, so no real chain of blocks, however deep or however coloured, is darker (lighter) than it.
+ */
+const calendarNestedExtremeCache = new Map<string, readonly [number, number, number]>();
+function calendarNestedExtreme(mode: DayframeThemeMode, background: string) {
+  const key = `${mode}|${background}`;
+  const cached = calendarNestedExtremeCache.get(key);
+  if (cached) return cached;
+  const canvas = rgb(background);
+  const tint = mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light;
+  const wash = CALENDAR_V3_TINT.nestedCanvasWash;
+  const fills = [...DAYFRAME_PALETTE.map((colour) => (mode === "dark" ? colour.darkHex : colour.lightHex)), CALENDAR_UNCATEGORIZED_FILLS[mode]].map(rgb);
+  const pick = mode === "dark" ? Math.max : Math.min;
+  const extremeFill = [0, 1, 2].map((index) => pick(...fills.map((fill) => fill[index])));
+  // The composited block underneath: the tint over the canvas, then over each deeper base.
+  let composite = [0, 1, 2].map((index) => canvas[index] + (extremeFill[index] - canvas[index]) * tint);
+  let base = [0, 1, 2].map((index) => composite[index] + (canvas[index] - composite[index]) * wash);
+  let extreme = base.slice();
+  for (let depth = 0; depth < 64; depth += 1) {
+    composite = [0, 1, 2].map((index) => base[index] + (extremeFill[index] - base[index]) * tint);
+    base = [0, 1, 2].map((index) => composite[index] + (canvas[index] - composite[index]) * wash);
+    extreme = extreme.map((value, index) => pick(value, base[index]));
+  }
+  const bound = [extreme[0], extreme[1], extreme[2]] as const;
+  calendarNestedExtremeCache.set(key, bound);
+  return bound;
+}
+
+type Rgb = readonly [number, number, number];
+
+function rgb(value: string): Rgb {
+  const clean = value.replace("#", "");
+  return [0, 2, 4].map((offset) => Number.parseInt(clean.slice(offset, offset + 2), 16)) as unknown as Rgb;
+}
+
+function mixRgb(from: Rgb, to: Rgb, amount: number): Rgb {
+  return [0, 1, 2].map((index) => Math.round(from[index] + (to[index] - from[index]) * amount)) as unknown as Rgb;
+}
+
+/** `mixRgb` without rounding, for the conservative bound. */
+function mixChannels(from: readonly [number, number, number], to: Rgb, amount: number): Rgb {
+  return [0, 1, 2].map((index) => from[index] + (to[index] - from[index]) * amount) as unknown as Rgb;
+}
+
+function hex(colour: Rgb) {
+  return `#${colour.map((channel) => channel.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
+function luminance(colour: Rgb) {
+  const [red, green, blue] = colour.map((value) => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
 }
 
 function mixHex(from: string, to: string, amount: number) {

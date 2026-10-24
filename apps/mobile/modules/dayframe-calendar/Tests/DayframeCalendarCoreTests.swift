@@ -1642,4 +1642,36 @@ final class DayframeCalendarCoreTests: XCTestCase {
       XCTAssertLessThanOrEqual(placement.x + placement.width, 60 + 0.001, placement.id)
     }
   }
+
+  // Codex r5 on #580: a short nested block keeps its own target (its parent contains it), side-by-side
+  // blocks keep a painted 2-point gap, and depth always outranks columns in drawing order.
+  func testHybridDayLayoutKeepsNestedTargetsGapsAndDepthOrder() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let dayStart = try milliseconds("2026-07-10T00:00:00Z")
+    let dayEnd = dayStart + 86_400_000
+    func layout(_ entries: [DayframeCalendarLayoutInput]) -> [String: DayframeCalendarLaidOutEntry] {
+      DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 72, laneWidth: 300, calendar: calendar)
+    }
+    let nestedShort = layout([try input("parent", "09:00", "12:00", group: "logged"), try input("child", "10:00", "10:02", group: "logged")])
+    XCTAssertTrue(nestedShort["child"]!.sharesTarget)
+    XCTAssertTrue(nestedShort["child"]!.nested)
+    XCTAssertFalse(nestedShort["parent"]!.nested)
+    XCTAssertGreaterThan(nestedShort["child"]!.zIndex, nestedShort["parent"]!.zIndex)
+
+    let pair = layout([try input("a", "09:00", "10:00", group: "logged"), try input("b", "09:00", "10:00", group: "logged")])
+    let left = pair.values.min { $0.offsetFraction < $1.offsetFraction }!
+    let right = pair.values.max { $0.offsetFraction < $1.offsetFraction }!
+    XCTAssertEqual((right.offsetFraction - (left.offsetFraction + left.widthFraction)) * 300, 2, accuracy: 0.001)
+
+    // 103 coincident blocks, then one nested in them: the nested one draws above every one of them.
+    var crowd = try (0..<103).map { try input("c\($0)", "09:00", "12:00", group: "logged") }
+    crowd.append(try input("late", "10:00", "11:00", group: "logged"))
+    let crowded = layout(crowd)
+    let late = crowded["late"]!
+    for (id, entry) in crowded where id != "late" {
+      XCTAssertLessThan(entry.zIndex, late.zIndex, id)
+    }
+    XCTAssertLessThan(late.zIndex, DayframeCalendarDayLayout.momentZIndex)
+  }
 }
