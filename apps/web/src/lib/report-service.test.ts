@@ -270,6 +270,12 @@ function mockOptionsAndReportData() {
       // Scoped by workspace ($1) and user ($2), like every report query.
       return { rows: values[1] === userAId ? [{ source: "manual_app" }] : [{ source: "health_sleep" }] };
     }
+    // Getting around and the not-logged line (location v4 step 18): scoped by workspace and user too.
+    if (statement.includes("from stay_segments") || statement.includes("starter_key in ('travel', 'commute')") ||
+      (statement.includes("from time_entries") && !statement.includes("with candidate_entries as"))) {
+      expect(values.slice(0, 2)).toEqual([expect.any(String), expect.stringMatching(/./)]);
+      return { rows: [] };
+    }
     if (!statement.includes("with candidate_entries as")) throw new Error(`Unexpected query: ${statement}`);
 
     const userPlaceholder = Number(statement.match(/te\.user_id = \$(\d+)/)?.[1]);

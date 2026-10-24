@@ -1,5 +1,6 @@
 import type { ReportSummary, ReportSummaryRequest } from "@dayframe/shared";
 import { query } from "./db";
+import { getGettingAround, getNotLoggedSeconds } from "./report-service";
 import type { RequestSession } from "./session";
 
 export function buildMobileReportSummaryQuery(
@@ -105,6 +106,18 @@ export async function getMobileReportSummary(
 ): Promise<ReportSummary> {
   const capturedNow = new Date().toISOString();
   const sql = buildMobileReportSummaryQuery(session, input, capturedNow);
-  const result = await query<{ summary: ReportSummary }>(sql.text, sql.values);
-  return result.rows[0].summary;
+  const range = { start: input.start, end: input.end };
+  const [result, entries, notLoggedSeconds] = await Promise.all([
+    query<{ summary: ReportSummary }>(sql.text, sql.values),
+    // The range's logged blocks, as the summary counts them, for Getting around (location v4 step 18).
+    query<{ id: string; categoryId: string | null }>(
+      `select id, category_id as "categoryId" from time_entries
+        where workspace_id = $1 and user_id = $2 and review_status in ('confirmed', 'accepted') and category_id is not null
+          and started_at < $4::timestamptz and coalesce(stopped_at, $5::timestamptz) > $3::timestamptz`,
+      [session.workspaceId, session.userId, input.start, input.end, capturedNow]),
+    getNotLoggedSeconds(session, range, capturedNow)
+  ]);
+  const gettingAround = await getGettingAround(session,
+    entries.rows.map((row) => ({ id: row.id, categoryId: row.categoryId ?? undefined })), range, capturedNow);
+  return { ...result.rows[0].summary, gettingAround, notLoggedSeconds };
 }

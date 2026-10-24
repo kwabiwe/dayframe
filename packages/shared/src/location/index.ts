@@ -2,6 +2,7 @@ export * from "./commute";
 export * from "./automaticPolicy";
 export * from "./config";
 export * from "./corrections";
+export * from "./reportsLocation";
 export * from "./evidenceDto";
 export * from "./geo";
 export * from "./legs";
