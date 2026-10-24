@@ -91,10 +91,10 @@ vi.mock("./config", () => ({
 vi.mock("./location/runtime", () => runtimeMocks);
 // These legacy classifier fixtures intentionally isolate the capture owner;
 // real account/task/SQLite admission is exercised in ownership.sqlite.test.ts.
-const captureState = vi.hoisted(() => ({ current: true }));
+const captureState = vi.hoisted(() => ({ current: true, savedPlaces: null as unknown[] | null }));
 vi.mock("./location/store", () => ({
   captureLocationOwnership: async () => ({ revision: 0, binding: {id:"capture-test", enabled:true, boundAt:"2020-01-01T00:00:00Z"},
-    context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:{some:()=>true}} }),
+    context: {userId:"user-geofence",workspaceId:"workspace-geofence",savedPlaces:captureState.savedPlaces ?? {some:()=>true}} }),
   updateLocationCaptureCatalogue: async () => true,
   getLocationRolloutMode: async () => "v1",
   hasLegacyLocationOwner: async () => true,
@@ -108,7 +108,10 @@ const {
   getLocationVisitDiagnostics,
   recordLocationLearningSample,
   recordGeofenceTransition,
+  REPICK_MIN_INTERVAL_MS,
+  __resetGeofenceRepickClockForTests,
   refreshGeofencesForPlaces,
+  refreshNearestGeofencesInLifecycleLane,
   setLocationLearningEnabled,
   startGeofences,
   locationAccessNeedsIosSettings,
@@ -759,6 +762,75 @@ describe("nearest-place geofences (location v3 PR 16b)", () => {
     expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
     expect(registered(1).map((region) => region.identifier)).toContain(`capture-test:${places[29].id}`);
     expect(registered(1).at(-1)).toMatchObject({ identifier: "capture-test:nearest-refresh", latitude: 10.03 });
+  });
+
+  it("re-picks on a wake only outside the refresh circle, at most once every 30 s unless it left the circle (freeze guard)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 9, 24, 9, 0));
+      __resetGeofenceRepickClockForTests();
+      const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
+      captureState.savedPlaces = places;
+      const { captureLocationOwnership } = await import("./location/store");
+      const fix = (latitude: number) => ({ latitude, longitude: 20, timestamp: Date.now() });
+      phoneAt(10.001);
+      await startGeofences(places);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(1);
+
+      // A Visit a few metres on, inside the circle: no re-registration.
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "visit_or_significant_change", [fix(10.0012)]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(1);
+
+      // Far up the grid: re-picks once.
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "visit_or_significant_change", [fix(10.03)]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+
+      // Another wake far away again within 30 s waits; leaving the circle never does.
+      vi.setSystemTime(Date.now() + 5_000);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update", [fix(10.06)]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "refresh_exit", [fix(10.06)]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(3);
+
+      // Once the interval has passed, an ordinary reading outside the circle (the grid's other side) re-picks again.
+      vi.setSystemTime(Date.now() + REPICK_MIN_INTERVAL_MS);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update", [fix(9.95)]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(4);
+    } finally {
+      captureState.savedPlaces = null;
+      vi.useRealTimers();
+    }
+  });
+
+  it("a reading skipped by the 30 s limit still moves the freshness floor, so an older one never moves the set back (Codex r1 on #581)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 9, 24, 9, 0));
+      __resetGeofenceRepickClockForTests();
+      const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
+      captureState.savedPlaces = places;
+      const { captureLocationOwnership } = await import("./location/store");
+      phoneAt(10.001);
+      await startGeofences(places);
+      const start = Date.now();
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "visit_or_significant_change",
+        [{ latitude: 10.03, longitude: 20, timestamp: start }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+      // At +5 s a reading on the grid's other side is held back by the limit…
+      vi.setSystemTime(start + 5_000);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update",
+        [{ latitude: 9.95, longitude: 20, timestamp: start + 5_000 }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+      // …and a delayed reading taken at +2 s, arriving after the limit, is older than it: no re-pick.
+      vi.setSystemTime(start + 5_000 + REPICK_MIN_INTERVAL_MS);
+      locationMocks.getLastKnownPositionAsync.mockResolvedValue(null);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update",
+        [{ latitude: 9.9, longitude: 20, timestamp: start + 2_000 }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.savedPlaces = null;
+      vi.useRealTimers();
+    }
   });
 
   it("Codex r1 #5: re-fits the refresh circle when an unwatched place moves closer", async () => {
