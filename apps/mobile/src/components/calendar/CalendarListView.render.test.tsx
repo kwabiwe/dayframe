@@ -52,7 +52,7 @@ function render(props: Partial<Parameters<typeof CalendarListView>[0]> = {}) {
   let tree!: ReturnType<typeof create>;
   const onOpenEntry = vi.fn();
   act(() => {
-    tree = create(<CalendarListView clockFormat="24h" dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+    tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
       loggedLabel="4h" nowMs={at(18)} onOpenEntry={onOpenEntry} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
       theme={theme} timeline={timeline} {...props} />);
   });
@@ -113,6 +113,33 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: travelling });
     const label = labels(tree).find((text) => text.startsWith("Travelling from"));
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
+  });
+
+  it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
+    const onOpenCheck = vi.fn();
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      onOpenCheck
+    });
+    // The place's suggestion sits on its row; Apple Health has a row of its own at its time.
+    expect(labels(tree)).toContain("Check Unknown place");
+    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
+    const chip = tree.root.findByProps({ accessibilityHint: "Opens the first one" });
+    expect(JSON.stringify(chip.props.children)).toContain("to check");
+    act(() => { chip.props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    act(() => { tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenLastCalledWith("c-unknown");
+  });
+
+  it("shows a day's checks even before its places are read", () => {
+    const { tree } = render({ timeline: null, checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }],
+      checkTitles: new Map([["c-sleep", "Sleep"]]), onOpenCheck: vi.fn() });
+    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
   });
 });
 

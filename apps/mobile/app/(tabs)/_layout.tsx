@@ -1,7 +1,7 @@
 import { useContext } from "react";
 import { Platform } from "react-native";
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { DayframeDashboardProvider } from "@/components/DayframeDashboard";
+import { DayframeDashboardProvider, useDashboardCheckCount } from "@/components/DayframeDashboard";
 import { ReportsSheetPortalContext } from "@/components/reports/ReportsSheetPortal";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { DAYFRAME_NATIVE_TABS, DAYFRAME_NATIVE_TAB_MINIMIZE_BEHAVIOR } from "@/lib/nativeTabs";
@@ -23,12 +23,23 @@ const PLAY_ORB_SLOT = playOrbSupported({
 });
 
 export default function DashboardTabsLayout() {
+  return (
+    <DayframeDashboardProvider>
+      <DashboardTabs />
+    </DayframeDashboardProvider>
+  );
+}
+
+/** The tabs, inside the Dashboard's provider so Calendar can carry its "to check" badge. */
+function DashboardTabs() {
   const { theme } = useMobileTheme();
   const reportsSheetPortal = useContext(ReportsSheetPortalContext);
   const timerRunning = usePlayOrbRunning();
+  // Things to check today and the 7 days before (location v4 step 14).
+  const checkCount = useDashboardCheckCount();
 
   return (
-    <DayframeDashboardProvider>
+    <>
       {/* Leave the bar material unconfigured so UITabBar owns Liquid Glass and its older-iOS fallback. */}
       <NativeTabs
         hidden={reportsSheetPortal?.isPresented ?? false}
@@ -59,6 +70,7 @@ export default function DashboardTabsLayout() {
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.calendar.route}>
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.calendar} renderingMode="template" />
           <NativeTabs.Trigger.Label>{DAYFRAME_NATIVE_TABS.calendar.label}</NativeTabs.Trigger.Label>
+          <NativeTabs.Trigger.Badge hidden={checkCount <= 0}>{checkCount > 99 ? "99+" : String(checkCount)}</NativeTabs.Trigger.Badge>
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name={DAYFRAME_NATIVE_TABS.reports.route}>
           <NativeTabs.Trigger.Icon src={DAYFRAME_TAB_ICON_IMAGES.reports} renderingMode="template" />
@@ -85,6 +97,6 @@ export default function DashboardTabsLayout() {
           <NativeTabs.Trigger.Label>{timerRunning ? "Stop recording" : "Start a block"}</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
       </NativeTabs>
-    </DayframeDashboardProvider>
+    </>
   );
 }

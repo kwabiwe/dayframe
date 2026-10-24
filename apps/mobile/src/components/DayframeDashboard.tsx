@@ -89,7 +89,7 @@ const PLAY_ORB_SUPPORTED = playOrbSupported({
 });
 import { LIVE_FLIGHT_NODE, STOP_FLIGHT, measureFlightNode, rowFlightNode, stopFlightOverlayReady } from "../lib/stopFlight";
 import { switchRecents, type SwitchRecent } from "../lib/todaySwitch";
-import { TodayReviewNudge } from "./today/TodayReviewNudge";
+import { TodayChecksChip } from "./today/TodayChecksChip";
 import { TodayBlockRows } from "./today/TodayBlockRows";
 import { BlocksToast, useBlocksNotice } from "./blocks/BlocksToast";
 import { useTripOptOut } from "../lib/useTripOptOut";
@@ -110,6 +110,7 @@ import { buildEarlierThisWeek, EARLIER_DAYS, earlierDayReviewCounts } from "@/li
 import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
+import type { ListCheck } from "@dayframe/shared";
 import {
   ActivityNameTakenError,
   AuthRequiredError,
@@ -339,6 +340,8 @@ const LIVE_TIME_PATHNAMES = new Set([`/${DAYFRAME_NATIVE_TABS.reports.route}`]);
 
 type DashboardContextValue = {
   renderTab: (tab: DayframeDashboardTab, isFocused: boolean) => ReactNode;
+  /** Things to check today and the 7 days before: the Calendar tab's badge (location v4 step 14). */
+  checkCount: number;
 };
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
@@ -371,6 +374,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
   // A layout the person picked here wins over the stored one, however late that read lands (Codex r1 on #570).
   const calendarLayoutChosen = useRef(false);
+  // The evening reminder's tap lands in an effect set up once: it reads the current opener.
+  const openTodayChecksRef = useRef<() => void>(() => undefined);
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
   // A rejected change badges the avatar, which then opens Settings › Sync help.
   const syncAttentionCount = useSyncAttentionCount();
@@ -1531,7 +1536,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       installReviewNudgeForegroundHandler(isCurrentAccount);
       unsubscribe = subscribeReviewNudgeOpens((accountKey) => {
         void isCurrentAccount(accountKey).then((current) => {
-          if (!cancelled && current) router.push("/review");
+          // "N things to check" opens Calendar › List on today, at the first "?" (location v4 step 14).
+          if (!cancelled && current) openTodayChecksRef.current();
         }).catch(() => undefined);
       });
     }).catch(() => undefined);
@@ -1878,6 +1884,38 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
+  // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
+  // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
+  const calendarChecks = useMemo(() => {
+    const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);
+    const folded = foldedOutingMemberIds(open);
+    const items = open.filter((item) => !folded.has(item.id) && item.suggestedStartedAt);
+    return {
+      checks: items.map((item): ListCheck => ({
+        id: item.id,
+        segmentId: typeof item.rawPayload?.clientSegmentId === "string" ? item.rawPayload.clientSegmentId : null,
+        startedAt: item.suggestedStartedAt,
+        stoppedAt: item.suggestedStoppedAt
+      })),
+      titles: new Map(items.map((item) => [item.id, item.title] as const))
+    };
+  }, [calendarData?.reviewItems]);
+  const checkCounts = useMemo(() => {
+    const todayStart = dateFromKey(todayKey).getTime();
+    const weekStart = addDaysToDate(dateFromKey(todayKey), -7).getTime();
+    const overlaps = (check: ListCheck, from: number, to: number) => {
+      const start = Date.parse(check.startedAt ?? "");
+      const end = check.stoppedAt ? Date.parse(check.stoppedAt) : start;
+      return start < to && end > from;
+    };
+    return {
+      week: calendarChecks.checks.filter((check) => overlaps(check, weekStart, now)).length,
+      today: calendarChecks.checks.filter((check) => overlaps(check, todayStart, addDaysToDate(dateFromKey(todayKey), 1).getTime())).length
+    };
+  }, [calendarChecks, now, todayKey]);
+  // Today's chip opens Calendar › List on today and scrolls it to the first "?".
+  const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
   // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
   const earlierDayReviewCountMap = useMemo(
@@ -2568,6 +2606,16 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return dayKey;
     });
   }, []);
+  // Today's chip and the evening reminder open Calendar › List on today, scrolled to the first "?".
+  const openTodayChecks = useCallback(() => {
+    changeCalendarLayout("list");
+    selectCalendarDay(formatDateKey(new Date()));
+    setCalendarCheckScroll((current) => current + 1);
+    router.navigate("/(tabs)/calendar");
+  }, [changeCalendarLayout, selectCalendarDay]);
+  useEffect(() => {
+    openTodayChecksRef.current = openTodayChecks;
+  }, [openTodayChecks]);
 
   // One stable handler for Today's rows and ribbon, so the per-second header render does not
   // re-render the memoised ribbon. The latest editors are read through the ref.
@@ -3361,15 +3409,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               </Reanimated.View>
               {/* Moves with the timer card and mosaic above it (Reanimated owns Today motion). */}
               <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
-                <TodayReviewNudge
-                  fallback={todayReviewFallback}
-                  // Opens the Review segment that has moments: Today when it has any, else Earlier.
-                  onOpenReview={(segment) => segment
-                    ? router.push({ pathname: "/review", params: { segment } })
-                    : router.push("/review")}
-                  reduceMotion={reduceMotion}
-                  theme={theme}
-                />
+                {/* Location v4 step 14: the Review card is now one quiet chip, opening Calendar › List at the first "?". */}
+                <TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks} reduceMotion={reduceMotion} theme={theme} />
               </Reanimated.View>
             </Animated.View>
           )}
@@ -3481,12 +3522,18 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  checks={calendarChecks.checks}
+                  checkTitles={calendarChecks.titles}
                   clockFormat={clockFormat}
+                  dayEndMs={nativeCalendarModel.dayEndMs}
                   dayStartMs={nativeCalendarModel.dayStartMs}
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
                   nowMs={minuteNow}
+                  // A "?" opens its suggestion in Review until the List answers in place (step 14, part 3b).
+                  onOpenCheck={(reviewItemId) => router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
+                  scrollToFirstCheck={calendarCheckScroll}
                   onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
                   reduceMotion={reduceMotion}
                   refreshing={isFocused && refreshing}
@@ -3554,7 +3601,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }
 
   return (
-    <DashboardContext.Provider value={{ renderTab: renderDashboardTab }}>
+    <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week }}>
       {children}
       {pendingDeletion?.phase === "active" ? (
         // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
@@ -3699,6 +3746,11 @@ async function refreshLocationServices(bootstrap: MobileBootstrap) {
   } catch (error) {
     await recordLocationStoreError(error);
   }
+}
+
+/** The Calendar tab's badge: things to check today and the 7 days before (location v4 step 14). */
+export function useDashboardCheckCount() {
+  return useContext(DashboardContext)?.checkCount ?? 0;
 }
 
 export function DayframeDashboardScreen({ tab }: { tab: DayframeDashboardTab }) {

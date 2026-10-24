@@ -11,11 +11,13 @@ const nudge = source("./TodayReviewNudge.tsx");
 const review = source("../../../app/review.tsx");
 
 describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
-  it("opens the Review segment the nudge names through the route parameter", () => {
-    expect(nudge).toContain("onPress={() => onOpenReview(copy.segment)}");
-    expect(dashboard).toMatch(/onOpenReview=\{\(segment\) => segment\s*\? router\.push\(\{ pathname: "\/review", params: \{ segment \} \}\)\s*: router\.push\("\/review"\)\}/);
-    // Its colours stay those of today's awaiting moments.
-    expect(nudge).toContain(".filter((activity) => activity.awaitingDecision)");
+  it("opens Calendar's List at the first thing to check from Today's chip, in place of the Review nudge (location v4 step 14)", () => {
+    expect(dashboard).toContain("<TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks}");
+    expect(dashboard).not.toContain("<TodayReviewNudge");
+    expect(dashboard).toContain('router.navigate("/(tabs)/calendar");');
+    expect(dashboard).toContain("setCalendarCheckScroll((current) => current + 1);");
+    // The evening reminder opens the same place.
+    expect(dashboard).toContain("if (!cancelled && current) openTodayChecksRef.current();");
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {

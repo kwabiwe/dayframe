@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 import {
@@ -14,6 +14,7 @@ import {
   tripsByBlockId,
   type ClockFormat,
   type DayframeGlyph,
+  type ListCheck,
   type LocationListRow,
   type LocationTimeline,
   type TripLeg
@@ -41,26 +42,40 @@ type ListItem =
   | { kind: "location"; key: string; atMs: number; row: LocationListRow };
 
 export function CalendarListView({
+  checks = [],
+  checkTitles,
   clockFormat,
+  dayEndMs,
   dayStartMs,
   entries,
   loggedLabel,
   nowMs,
+  onOpenCheck,
   onOpenEntry,
+  scrollToFirstCheck,
   onRefresh,
   reduceMotion,
   refreshing,
   theme,
   timeline
 }: {
+  /** Open suggestions ("?"), each on the row it is about (location v4 step 14, iPhone part 3a). */
+  checks?: readonly ListCheck[];
+  /** Each suggestion's title, for its own row. */
+  checkTitles?: ReadonlyMap<string, string>;
   clockFormat: ClockFormat;
+  dayEndMs: number;
   /** The shown day's start: the line reads its date ("Thu 22 Oct"), as the mock-up's day line does. */
   dayStartMs: number;
   entries: readonly NativeCalendarPresentationEntry[];
   /** The day's logged time ("7h 3m"). */
   loggedLabel: string;
   nowMs: number;
+  /** Opens a suggestion to answer it (Review, focused on it, until the List answers in place). */
+  onOpenCheck?: (reviewItemId: string) => void;
   onOpenEntry: (entry: NativeCalendarPresentationEntry) => void;
+  /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?". */
+  scrollToFirstCheck?: number;
   onRefresh: () => void;
   reduceMotion: boolean;
   refreshing: boolean;
@@ -77,13 +92,31 @@ export function CalendarListView({
       startedAt: new Date(entry.startedAtMs).toISOString(),
       stoppedAt: entry.stoppedAtMs == null ? null : new Date(entry.stoppedAtMs).toISOString()
     }));
-    const rows = locationListRows(timeline, intervals, { nowMs, showAll });
+    // Without the day's places (not read yet, or the read failed), its checks still show on rows of their own.
+    const day = timeline ?? (checks.length ? emptyTimeline(dayStartMs, dayEndMs) : null);
+    const rows = locationListRows(day, intervals, { nowMs, showAll, checks });
     // Oldest first, as the mock-up's day reads.
     return [
       ...blocks.map((entry): ListItem => ({ kind: "block", key: `block-${entry.entryId}`, atMs: entry.startedAtMs, entry })),
       ...rows.map((row): ListItem => ({ kind: "location", key: row.key, atMs: row.atMs, row }))
     ].sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
-  }, [blocks, nowMs, showAll, timeline]);
+  }, [blocks, checks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
+  // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row.
+  const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
+  const checkKeys = items.flatMap((item) => item.kind === "location" && checkIdOf(item.row) ? [item.key] : []);
+  const firstCheckId = items.flatMap((item) => item.kind === "location" ? [checkIdOf(item.row)].filter(Boolean) as string[] : [])[0];
+  // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
+  const scroller = useRef<ScrollView>(null);
+  const cardY = useRef(0);
+  const rowY = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (!scrollToFirstCheck || !checkKeys.length) return;
+    const y = rowY.current.get(checkKeys[0]);
+    if (y === undefined) return;
+    scroller.current?.scrollTo({ y: Math.max(0, cardY.current + y - 24), animated: !reduceMotion });
+    // Only when the chip asks again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollToFirstCheck]);
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
   const toggleLegs = (id: string) => setOpenLegs((current) => {
     const next = new Set(current);
@@ -95,6 +128,7 @@ export function CalendarListView({
   return (
     <ScrollView
       contentContainerStyle={styles.content}
+      ref={scroller}
       refreshControl={<RefreshControl colors={[theme.accent]} onRefresh={onRefresh} refreshing={refreshing} tintColor={theme.accent} />}
       style={{ backgroundColor: theme.background }}
       testID="calendar-list"
@@ -104,8 +138,16 @@ export function CalendarListView({
           {formatLocaleDate(new Date(dayStartMs), { weekday: "short", day: "numeric", month: "short" })}
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.dayMeta, { color: theme.textSecondary }]}>{loggedLabel} logged</Text>
+        {checkKeys.length && firstCheckId && onOpenCheck ? (
+          <Pressable accessibilityHint="Opens the first one" accessibilityRole="button" hitSlop={6} onPress={() => onOpenCheck(firstCheckId)}
+            style={({ pressed }) => [styles.checksChip, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
+            <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={14} />
+            <Text {...mobileTextProps("control")} style={[styles.checksChipText, { color: theme.warningText }]}>{checkKeys.length} to check</Text>
+          </Pressable>
+        ) : null}
       </View>
-      <Animated.View layout={localLayoutTransition(reduceMotion)} style={[styles.card, { backgroundColor: theme.surface }]}>
+      <Animated.View layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { cardY.current = event.nativeEvent.layout.y; }}
+        style={[styles.card, { backgroundColor: theme.surface }]}>
         {items.length === 0 ? (
           <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>Nothing framed yet.</Text>
         ) : items.map((item, index) => {
@@ -127,8 +169,9 @@ export function CalendarListView({
           }
           return (
             <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} key={item.key}
-              layout={localLayoutTransition(reduceMotion)} style={divider}>
-              <LocationRow row={item.row} theme={theme} time={time} />
+              layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { rowY.current.set(item.key, event.nativeEvent.layout.y); }}
+              style={divider}>
+              <LocationRow checkTitles={checkTitles} onOpenCheck={onOpenCheck} row={item.row} theme={theme} time={time} />
             </Animated.View>
           );
         })}
@@ -221,7 +264,27 @@ function LegRows({ legs, theme, time }: { legs: readonly TripLeg[]; theme: Mobil
   );
 }
 
-function LocationRow({ row, theme, time }: { row: LocationListRow; theme: MobileTheme; time: (ms: number) => string }) {
+function LocationRow({ checkTitles, onOpenCheck, row, theme, time }: {
+  checkTitles?: ReadonlyMap<string, string>; onOpenCheck?: (reviewItemId: string) => void; row: LocationListRow; theme: MobileTheme;
+  time: (ms: number) => string;
+}) {
+  if (row.kind === "check") {
+    // A suggestion on a row of its own: Apple Health, a trip not in a block yet, or any other.
+    const title = checkTitles?.get(row.checkId) ?? "Something to check";
+    const span = row.startedAt ? `${time(Date.parse(row.startedAt))}${row.stoppedAt ? `–${time(Date.parse(row.stoppedAt))}` : ""}` : "";
+    return (
+      <Pressable accessibilityHint="Opens it to answer" accessibilityLabel={[`Check ${title}`, span, row.trip ? modesLabel(row.trip.legs, row.trip.route) : null].filter(Boolean).join(". ")}
+        accessibilityRole="button" disabled={!onOpenCheck} onPress={() => onOpenCheck?.(row.checkId)}
+        style={({ pressed }) => [styles.rowMain, { opacity: pressed ? 0.7 : 1 }]}>
+        <CheckMark theme={theme} />
+        <View style={styles.text}>
+          <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
+          {span ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{span}</Text> : null}
+          {row.trip?.legs.length ? <ModesLine legs={row.trip.legs} route={row.trip.route} theme={theme} /> : null}
+        </View>
+      </Pressable>
+    );
+  }
   if (row.kind === "open_trip") {
     return (
       <View accessible accessibilityLabel={[`Travelling from ${row.fromName ?? "Unknown place"} since ${time(Date.parse(row.startedAt))}`,
@@ -257,21 +320,45 @@ function LocationRow({ row, theme, time }: { row: LocationListRow; theme: Mobile
     );
   }
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
+  const notInBlock = row.unloggedSeconds >= 60 ? `${formatDuration(row.unloggedSeconds)} not in a block` : null;
+  const checkId = row.checkIds[0];
+  const checkTitle = checkId ? checkTitles?.get(checkId) ?? label : null;
   return (
-    <View accessible accessibilityLabel={`${label}, ${formatDuration(row.unloggedSeconds)} not in a block, ${span}`} style={styles.rowMain}>
-      <View style={[styles.mark, styles.unknownMark, { backgroundColor: theme.surfaceMuted, borderColor: theme.warning }]}>
-        <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={18} />
+    <View style={styles.row}>
+      <View accessible accessibilityLabel={[label, notInBlock, span].filter(Boolean).join(", ")} style={styles.rowMain}>
+        <View style={[styles.mark, styles.unknownMark, { backgroundColor: theme.surfaceMuted, borderColor: theme.warning }]}>
+          <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={18} />
+        </View>
+        <View style={styles.text}>
+          <Text {...mobileTextProps("itemTitle")} style={[styles.title, { color: theme.textPrimary }]}>{label}</Text>
+          {notInBlock ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{notInBlock}</Text> : null}
+          <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{span}</Text>
+        </View>
+        <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textSecondary }]}>{formatDuration(length)}</Text>
       </View>
-      <View style={styles.text}>
-        <Text {...mobileTextProps("itemTitle")} style={[styles.title, { color: theme.textPrimary }]}>{label}</Text>
-        <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>
-          {formatDuration(row.unloggedSeconds)} not in a block
-        </Text>
-        <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{span}</Text>
-      </View>
-      <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textSecondary }]}>{formatDuration(length)}</Text>
+      {checkId && onOpenCheck ? (
+        // Its "?": the place's suggestion, answered from here (location v4 step 14).
+        <Pressable accessibilityHint="Opens it to answer" accessibilityLabel={`Check ${checkTitle}`} accessibilityRole="button" hitSlop={4}
+          onPress={() => onOpenCheck(checkId)} style={({ pressed }) => [styles.checkButton, { opacity: pressed ? 0.7 : 1 }]}>
+          <CheckMark small theme={theme} />
+        </Pressable>
+      ) : null}
     </View>
   );
+}
+
+/** The hatched "?" mark of something to check. */
+function CheckMark({ small = false, theme }: { small?: boolean; theme: MobileTheme }) {
+  return (
+    <View style={[small ? styles.checkMarkSmall : styles.mark, styles.unknownMark, { backgroundColor: theme.surfaceMuted, borderColor: theme.warning }]}>
+      <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={small ? 16 : 18} />
+    </View>
+  );
+}
+
+/** A day with no places: its checks still sit at their times. */
+function emptyTimeline(dayStartMs: number, dayEndMs: number): LocationTimeline {
+  return { date: "", timeZone: "", dayStart: new Date(dayStartMs).toISOString(), dayEnd: new Date(dayEndMs).toISOString(), gaps: [], openTrip: null, items: [] };
 }
 
 const styles = StyleSheet.create({
@@ -297,5 +384,9 @@ const styles = StyleSheet.create({
   leg: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, minHeight: 44 },
   legTitle: { fontSize: 15, fontWeight: "700" },
   toggle: { alignSelf: "center", minHeight: 44, borderRadius: 999, paddingHorizontal: 18, justifyContent: "center" },
-  toggleText: { fontSize: 14, fontWeight: "700" }
+  toggleText: { fontSize: 14, fontWeight: "700" },
+  checksChip: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 12 },
+  checksChipText: { fontSize: 13, fontWeight: "700" },
+  checkButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", marginRight: 6 },
+  checkMarkSmall: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center" }
 });
