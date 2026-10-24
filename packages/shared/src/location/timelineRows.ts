@@ -29,6 +29,18 @@ export const UNLOGGED_PLACE_MINIMUM_SECONDS = 600;
  */
 export type ListCheck = { id: string; segmentId: string | null; startedAt: string | null; stoppedAt: string | null };
 
+/**
+ * Whether a check with its own times falls in a window: the rule a check's own row uses for its day, shared
+ * with every count of checks (location v4 step 14), so a count always matches what the List shows. A check
+ * without a start has no row of its own (it can only sit on its place's row) and falls in no window.
+ */
+export function listCheckOverlaps(check: Pick<ListCheck, "startedAt" | "stoppedAt">, fromMs: number, toMs: number) {
+  const atMs = check.startedAt ? Date.parse(check.startedAt) : NaN;
+  if (!Number.isFinite(atMs)) return false;
+  const endMs = check.stoppedAt ? Date.parse(check.stoppedAt) : atMs + 1;
+  return atMs < toMs && endMs > fromMs;
+}
+
 export type LocationListRow =
   | { kind: "place"; key: string; atMs: number; place: TimelinePlace; fromMs: number; spanEndMs: number; unloggedSeconds: number; faint: boolean;
       /** Open suggestions about this place, each a "?" on its row. */
@@ -99,7 +111,7 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     const startedAt = trip?.startedAt ?? check.startedAt;
     const atMs = startedAt ? Date.parse(startedAt) : NaN;
     // Only checks on this day.
-    if (!Number.isFinite(atMs) || atMs >= dayEndMs || (check.stoppedAt ? Date.parse(check.stoppedAt) : atMs + 1) <= dayStartMs) continue;
+    if (!listCheckOverlaps({ startedAt, stoppedAt: check.stoppedAt }, dayStartMs, dayEndMs)) continue;
     rows.push({ kind: "check", key: `check-${check.id}`, atMs, checkId: check.id, startedAt, stoppedAt: trip?.stoppedAt ?? check.stoppedAt, trip });
   }
   if (timeline.openTrip) {

@@ -6,14 +6,24 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-vi.mock("react-native", () => ({
+const scrollTo = vi.hoisted(() => vi.fn());
+vi.mock("react-native", async () => {
+  // @ts-expect-error Renderer peer lives at the repository root.
+  const React = await import("../../../../../node_modules/react/index.js");
+  // A ScrollView whose ref can scroll, to see the jump to the first "?" (step 14).
+  const ScrollView = React.forwardRef((props: Record<string, unknown>, ref: unknown) => {
+    React.useImperativeHandle(ref, () => ({ scrollTo }));
+    return React.createElement("ScrollView", props);
+  });
+  return {
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
   Pressable: "Pressable",
   RefreshControl: "RefreshControl",
-  ScrollView: "ScrollView",
+  ScrollView,
   Text: "Text",
   View: "View",
-}));
+  };
+});
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
 vi.mock("../../lib/motion", () => ({
   localLayoutTransition: () => undefined, localPresenceEntering: () => undefined, localPresenceExiting: () => undefined
@@ -52,7 +62,7 @@ function render(props: Partial<Parameters<typeof CalendarListView>[0]> = {}) {
   let tree!: ReturnType<typeof create>;
   const onOpenEntry = vi.fn();
   act(() => {
-    tree = create(<CalendarListView clockFormat="24h" dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+    tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
       loggedLabel="4h" nowMs={at(18)} onOpenEntry={onOpenEntry} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
       theme={theme} timeline={timeline} {...props} />);
   });
@@ -113,6 +123,94 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: travelling });
     const label = labels(tree).find((text) => text.startsWith("Travelling from"));
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
+  });
+
+  it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
+    const onOpenCheck = vi.fn();
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      onOpenCheck
+    });
+    // The place's suggestion sits on its row; Apple Health has a row of its own at its time.
+    expect(labels(tree)).toContain("Check Unknown place");
+    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
+    const chip = tree.root.findByProps({ accessibilityHint: "Opens the first one" });
+    expect(JSON.stringify(chip.props.children)).toContain("to check");
+    act(() => { chip.props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    act(() => { tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenLastCalledWith("c-unknown");
+  });
+
+  it("shows a day's checks even before its places are read", () => {
+    const { tree } = render({ timeline: null, checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }],
+      checkTitles: new Map([["c-sleep", "Sleep"]]), onOpenCheck: vi.fn() });
+    expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
+  });
+
+  describe("the jump to the first \"?\" (Codex r1–r3 on #573)", () => {
+    // Each row view measures where it is now; frames run at once.
+    const positions = new Map<string, number>();
+    const mount = (props: Partial<Parameters<typeof CalendarListView>[0]>) => {
+      let tree!: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]}
+          loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+          theme={theme} timeline={timeline} {...props} />, {
+          // As Fabric: measureLayout needs a native component ref, and does nothing for a numeric tag.
+          createNodeMock: () => ({
+            measureLayout: (relativeTo: unknown, done: (x: number, y: number) => void) => {
+              if (typeof relativeTo !== "object" || relativeTo === null) return;
+              done(0, positions.get("first") ?? -1);
+            }
+          })
+        });
+      });
+      return tree;
+    };
+    const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+    const base = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn() };
+    vi.stubGlobal("requestAnimationFrame", (callback: (time: number) => void) => { callback(0); return 0; });
+
+    it("lands on the row where it is now, once per request, then reports it", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      const onScrolled = vi.fn();
+      const tree = mount({ ...base, onScrolledToFirstCheck: onScrolled, scrollToFirstCheck: 1 });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 376, animated: true });
+      expect(onScrolled).toHaveBeenCalledTimes(1);
+      // Later renders do not jump again.
+      act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[]} loggedLabel="4h" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion refreshing={false} theme={theme} timeline={timeline} {...base}
+        onScrolledToFirstCheck={onScrolled} scrollToFirstCheck={1} />); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+    });
+
+    it("measures a surviving row that moved on a day change where it is now, not where it was", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      const tree = mount(base);
+      expect(scrollTo).not.toHaveBeenCalled();
+      // The day changes: earlier blocks go, the row survives and moves up; the chip asks.
+      positions.set("first", 150);
+      act(() => { tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24) + 1} dayStartMs={at(0) + 1} entries={[]} loggedLabel="4h"
+        nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion refreshing={false} theme={theme} timeline={timeline} {...base}
+        onScrolledToFirstCheck={vi.fn()} scrollToFirstCheck={1} />); });
+      expect(scrollTo).toHaveBeenCalledTimes(1);
+      expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 126, animated: false });
+    });
+
+    it("does not jump when shown again with the request cleared", () => {
+      scrollTo.mockClear();
+      positions.set("first", 400);
+      mount({ ...base, scrollToFirstCheck: 0 });
+      expect(scrollTo).not.toHaveBeenCalled();
+    });
   });
 });
 
