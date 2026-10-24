@@ -124,10 +124,13 @@ export function CalendarListView({
     scroller.current?.scrollTo({ y: Math.max(0, cardY.current + y - 24), animated: !reduceMotion });
     onScrolledToFirstCheck?.();
   };
-  // Another day's rows are not this day's.
+  // Positions only for rows still listed (Codex r2 on #573): a row that survives a day change keeps its
+  // position, which its own layout callback updates whenever it moves.
+  const itemKeys = items.map((item) => item.key).join("|");
   useEffect(() => {
-    rowY.current = new Map();
-  }, [dayStartMs]);
+    const listed = new Set(itemKeys.split("|"));
+    for (const key of [...rowY.current.keys()]) if (!listed.has(key)) rowY.current.delete(key);
+  }, [itemKeys]);
   useEffect(() => {
     if (scrollToFirstCheck) pendingScroll.current = true;
   }, [scrollToFirstCheck]);

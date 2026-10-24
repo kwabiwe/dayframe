@@ -176,5 +176,33 @@ describe("CalendarListView (location v4 step 9)", () => {
     layout(row, 300);
     expect(scrollTo).toHaveBeenCalledTimes(1);
   });
+
+  it("still jumps when the List changes day and the first \"?\" row survives unmoved, and not again on a later remount (Codex r2 on #573)", () => {
+    scrollTo.mockClear();
+    const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+    const base = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: vi.fn() };
+    const { tree } = render(base);
+    const animated = () => tree.root.findAll((node) => node.type === ("AnimatedView" as never) && typeof node.props.onLayout === "function");
+    const layout = (node: { props: { onLayout?: (event: unknown) => void } }, y: number) =>
+      act(() => { node.props.onLayout?.({ nativeEvent: { layout: { y } } }); });
+    const [card, ...rows] = animated();
+    layout(card, 100);
+    for (const row of rows) layout(row, 300);
+    expect(scrollTo).not.toHaveBeenCalled();
+    // Today's chip asks while the List moves to another day whose first "?" is the same, unmoved row.
+    act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24) + 1} dayStartMs={at(0) + 1} entries={[]} loggedLabel="4h" nowMs={at(18)}
+        onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false} theme={theme} timeline={timeline}
+        {...base} scrollToFirstCheck={1} />);
+    });
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(base.onScrolledToFirstCheck).toHaveBeenCalledTimes(1);
+    // A List shown later with the request cleared does not jump.
+    const later = render({ ...base, scrollToFirstCheck: 0 });
+    const [laterCard, ...laterRows] = later.tree.root.findAll((node) => node.type === ("AnimatedView" as never) && typeof node.props.onLayout === "function");
+    layout(laterCard, 100);
+    for (const row of laterRows) layout(row, 300);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+  });
 });
 

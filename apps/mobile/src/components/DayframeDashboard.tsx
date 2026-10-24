@@ -111,6 +111,7 @@ import { buildTodayGoalFrame } from "@/lib/todayGoalFrame";
 import { buildTodayWhereWent } from "@/lib/todayWhereWent";
 import type { ReportsRangeRequest } from "@/components/reports/ReportsTab";
 import { listCheckOverlaps, type ListCheck } from "@dayframe/shared";
+import { latestCheckDay } from "@/lib/calendarChecks";
 import {
   ActivityNameTakenError,
   AuthRequiredError,
@@ -2632,14 +2633,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const openTodayChecks = useCallback(() => openChecksOn(formatDateKey(new Date())), [openChecksOn]);
   // The evening reminder counts every open suggestion, so it opens the latest day that has one, never an
   // empty today (Codex r1 on #573); with none loaded here, Review, which lists them all.
-  const latestCheckDayKey = useMemo(() => {
-    const nowMs = Date.now();
-    const starts = calendarChecks.checks.flatMap((check) => {
-      const start = check.startedAt ? Date.parse(check.startedAt) : NaN;
-      return Number.isFinite(start) ? [Math.min(start, nowMs)] : [];
-    });
-    return starts.length ? formatDateKey(new Date(Math.max(...starts))) : null;
-  }, [calendarChecks]);
+  const latestCheckDayKey = useMemo(
+    () => latestCheckDay(calendarChecks.checks, new Date(now), { dayKey: formatDateKey }),
+    [calendarChecks, now]
+  );
   useEffect(() => {
     openTodayChecksRef.current = () => latestCheckDayKey ? openChecksOn(latestCheckDayKey) : router.push("/review");
   }, [latestCheckDayKey, openChecksOn]);
