@@ -47,7 +47,8 @@ import {
   type TimelineInlineTimeEdge
 } from "@/lib/timeline-inline-edit";
 import type { DateRange } from "@/lib/time-entry-overlap";
-import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline } from "@dayframe/shared";
+import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
+import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import {
   LocationListRowView,
   ShowEveryPlaceToggle,
@@ -212,6 +213,8 @@ function TimelineInlineTimeControl({
   );
 }
 
+const NO_CORRECTION_PLACES: readonly CorrectionPlace[] = [];
+
 export function EntriesTable({
   entries,
   categories,
@@ -223,7 +226,8 @@ export function EntriesTable({
   scrollContainerRef,
   displayRange,
   capturedNow = new Date(),
-  locationTimeline = null
+  locationTimeline = null,
+  places = NO_CORRECTION_PLACES
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -237,6 +241,8 @@ export function EntriesTable({
   capturedNow?: Date;
   /** The shown day's location timeline (location v4 step 10); null for a week, or until it loads. */
   locationTimeline?: LocationTimeline | null;
+  /** Saved places a location row can be corrected to (location v4 step 13). */
+  places?: readonly CorrectionPlace[];
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -269,6 +275,10 @@ export function EntriesTable({
   const listEntries = localTimeReady ? entries : NO_LIST_ENTRIES;
   const [showEveryPlace, setShowEveryPlace] = useState(false);
   const [expandedTrips, setExpandedTrips] = useState<Set<string>>(() => new Set());
+  const [correction, setCorrection] = useState<LocationCorrectionTarget | null>(null);
+  const correctPlace = (place: TimelinePlace, label: string) => setCorrection({ kind: "place", place, label });
+  const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
+    setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   const locationRows = useMemo(
@@ -840,7 +850,7 @@ export function EntriesTable({
                     </tr>
                   ) : null}
                   {locationRowsByGroup.before[index].map((row) => (
-                    <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+                    <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
                   ))}
                 <tr
                   className={[
@@ -969,7 +979,8 @@ export function EntriesTable({
                   </td>
                 </tr>
                 {!isGrouped && tripByBlock.get(entry.id)
-                  ? <TripLegRows clock={clock} expanded={expandedTrips.has(entry.id)} legs={tripByBlock.get(entry.id)!.legs} />
+                  ? <TripLegRows clock={clock} expanded={expandedTrips.has(entry.id)} legs={tripByBlock.get(entry.id)!.legs}
+                      onCorrectLeg={correctLeg(tripByBlock.get(entry.id)!.id, tripByBlock.get(entry.id)!.legs)} />
                   : null}
                 {isExpanded ? group.entries.map((occurrence) => {
                   const occurrenceInterval = timelineEntryDisplayInterval(occurrence, displayRange, capturedNow);
@@ -978,7 +989,7 @@ export function EntriesTable({
                   return (
                     <Fragment key={occurrence.id}>
                     {(locationRowsByGroup.byOccurrence.get(occurrence.id) ?? []).map((row) => (
-                      <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+                      <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
                     ))}
                     <tr
                       className={`timeline-occurrence-row motion-row timeline-list-row align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
@@ -1061,7 +1072,8 @@ export function EntriesTable({
                       </td>
                     </tr>
                     {occurrenceTrip
-                      ? <TripLegRows clock={clock} expanded={expandedTrips.has(occurrence.id)} legs={occurrenceTrip.legs} />
+                      ? <TripLegRows clock={clock} expanded={expandedTrips.has(occurrence.id)} legs={occurrenceTrip.legs}
+                          onCorrectLeg={correctLeg(occurrenceTrip.id, occurrenceTrip.legs)} />
                       : null}
                     </Fragment>
                   );
@@ -1070,7 +1082,7 @@ export function EntriesTable({
               );
             })}
             {locationRowsByGroup.after.map((row) => (
-              <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} row={row} />
+              <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
             ))}
             {groupByDay && grouped.length
               ? continuedDays
@@ -1083,6 +1095,10 @@ export function EntriesTable({
           <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
         ) : null}
       </div>
+      {correction ? (
+        <LocationCorrectionDialog clock={clock} onClose={() => setCorrection(null)}
+          onCorrected={async () => { await onChanged?.(); }} places={places} target={correction} />
+      ) : null}
       {editingEntry ? (
         <TimeEntryQuickEditorModal
           capturedNow={capturedNow}

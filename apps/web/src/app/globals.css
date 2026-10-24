@@ -13991,6 +13991,178 @@ dialog.ui-dialog.df-palette {
   color: var(--surface);
 }
 
+/* A leg whose mode can be set is one button laid out as the leg (location v4 step 13). */
+.timeline-trip-leg-button {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Correcting the location timeline (location v4 step 13): the dialog's sections. */
+.location-correction {
+  display: grid;
+  gap: 10px;
+}
+
+.location-correction-label {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.location-correction-options {
+  display: grid;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-correction-option:first-child {
+  border-top: 0;
+}
+
+.location-correction-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.location-correction-option small,
+.location-correction-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.location-correction-option[data-checked="true"] {
+  background: var(--foreground);
+  color: var(--surface);
+}
+
+/* The radio itself is visually hidden: the whole row shows the choice, and keeps the radio's keyboard. */
+.location-correction-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.location-correction-option:has(.location-correction-radio:focus-visible) {
+  /* The shared neutral focus ring, inside the row. */
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.location-correction-option[data-checked="true"] small {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.location-correction-hint {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.location-correction-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.location-correction-time {
+  display: grid;
+  gap: 4px;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.location-correction-time input {
+  min-height: 44px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.location-correction-modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.location-correction-mode {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 64px;
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 4px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-mode[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--surface);
+}
+
+.location-correction-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .location-correction-modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .timeline-trip-legs-wrap {
     transition: none;
