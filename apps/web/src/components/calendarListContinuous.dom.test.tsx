@@ -353,6 +353,13 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     expect(headingTop(14)).toBe(0);
   });
 
+  it("waits for the nearest earlier day when every shown day is later than the selected one (Codex r4 on #584)", () => {
+    // Selected the 14th; only the 15th–18th are shown at first.
+    const { rerender } = render(list(days(15, 18)));
+    rerender(list([...days(15, 18), ...days(5, 11)]));
+    expect(headingTop(11)).toBe(0);
+  });
+
   it("stops at the person's own scrolling, and when no earlier week can come", () => {
     const first = render(list(days(14, 20)));
     fireEvent.wheel(document.querySelector(".timeline-list-scroll")!);

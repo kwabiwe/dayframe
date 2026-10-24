@@ -472,7 +472,12 @@ export function EntriesTable({
     const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
     if (!headings.length) return;
     const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
-    if (!target || target === headings[0]) {
+    if (!target) {
+      // Every shown day is later than the selected one: rest at the bottom, where earlier weeks load,
+      // and keep waiting for the nearest earlier day while one can still come (Codex r4 on #584).
+      root.scrollTop = root.scrollHeight;
+      if (!focusCanGrow) focusDoneRef.current = focusRequest;
+    } else if (target === headings[0]) {
       root.scrollTop = 0;
       focusDoneRef.current = focusRequest;
     } else {
