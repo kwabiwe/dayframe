@@ -395,6 +395,32 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     expect(headingTop(14)).toBe(0);
   });
 
+  it("keeps the right day's copy of a place spanning midnight in place when its row remounts (Codex r7 on #584)", () => {
+    const place = { kind: "place" as const, id: "overnight-place", status: "finalised" as const, startedAt: new Date(2026, 9, 13, 22).toISOString(),
+      stoppedAt: new Date(2026, 9, 14, 2).toISOString(), placeId: null, learnedPlaceId: null, name: null, role: null, matchKind: "unknown" as const,
+      confidence: "medium" as const, blockIds: [] };
+    const dayOf = (date: number): LocationTimeline => ({ date: `2026-10-${date}`, timeZone: "", dayStart: new Date(2026, 9, date).toISOString(),
+      dayEnd: new Date(2026, 9, date + 1).toISOString(), gaps: [], items: [place], openTrip: null });
+    const view = (renamed: boolean) => (
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay
+        continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20", loading: null, onLoad: vi.fn(),
+          reachedEarliest: false, reachedLatest: true }}
+        entries={days(10, 20).map((row) => row.id === "d13" && renamed ? { ...row, description: "Renamed in place" } : row)}
+        locationTimelines={[dayOf(13), dayOf(14)]}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    const { rerender } = render(view(false));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    const older = () => document.querySelector<HTMLElement>(`tr[data-row-key="place-overnight-place@${new Date(2026, 9, 13).getTime()}"]`)!;
+    expect(document.querySelectorAll('tr[data-location-row="overnight-place"]')).toHaveLength(2);
+    root.scrollTop += older().getBoundingClientRect().top;
+    rerender(view(false));
+    expect(older().getBoundingClientRect().top).toBe(0);
+    // The 13th's block is renamed: its group remounts, and with it the place row drawn in that group.
+    rerender(view(true));
+    expect(older().getBoundingClientRect().top).toBe(0);
+  });
+
   it("stops at the person's own scrolling, and when no earlier week can come", () => {
     const first = render(list(days(14, 20)));
     fireEvent.wheel(document.querySelector(".timeline-list-scroll")!);

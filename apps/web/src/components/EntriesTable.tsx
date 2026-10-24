@@ -1556,6 +1556,8 @@ function listRowSelector(row: Element) {
   const element = row as HTMLElement;
   const quoted = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;
   if (element.dataset.dayStartMs) return `tr[data-day-start-ms=${quoted(element.dataset.dayStartMs)}]`;
+  // A place spanning midnight is a row on each day with the same place id: its row key carries the day (Codex r7 on #584).
+  if (element.dataset.rowKey) return `tr[data-row-key=${quoted(element.dataset.rowKey)}]`;
   if (element.id) return `tr[id=${quoted(element.id)}]`;
   if (element.dataset.timelineGroupKey) return `tr[data-timeline-group-key=${quoted(element.dataset.timelineGroupKey)}]`;
   if (element.dataset.locationRow) return `tr[data-location-row=${quoted(element.dataset.locationRow)}]`;

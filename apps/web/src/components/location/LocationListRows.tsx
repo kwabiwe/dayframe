@@ -228,7 +228,8 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
       : DAYFRAME_APP_ICONS.places;
     return (
-      <tr className="timeline-list-row timeline-location-row is-faint align-middle" data-location-row={place.id}>
+      <tr className="timeline-list-row timeline-location-row is-faint align-middle" data-location-row={place.id}
+        data-row-key={row.key}>
         <td className="px-3 py-3">
           <div className="timeline-task-cell is-single">
             <span aria-hidden="true" className="timeline-location-mark is-faint"><DayframeIcon glyph={glyph} size={16} /></span>
@@ -249,7 +250,8 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
     );
   }
   return (
-    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={place.id}>
+    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={place.id}
+      data-row-key={row.key}>
       <td className="px-3 py-3">
         <div className="timeline-task-cell is-single">
           <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>
