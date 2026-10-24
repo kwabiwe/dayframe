@@ -38,6 +38,13 @@ export type CalendarListWeeks = {
 
 const NO_ENTRIES: readonly TimeEntryRow[] = [];
 
+/** Empty weeks in a row at the far end of the earlier weeks (newest first). */
+function trailingEmptyWeeks(earlier: readonly WeekPage[]) {
+  let run = 0;
+  for (let index = earlier.length - 1; index >= 0 && !earlier[index].entries.length; index -= 1) run += 1;
+  return run;
+}
+
 /**
  * Calendar › List's continuous days (owner, 24 Oct 2026): the List shows the selected week (from the
  * shell's own data, which keeps it fresh) and loads whole weeks before and after it as it scrolls,
@@ -120,11 +127,17 @@ export function useCalendarListWeeks({
   }, [owner]);
 
   const replaceWeek = useCallback((forGeneration: number, startKey: string) => (entries: TimeEntryRow[]) => {
-    setStored((current) => current && current.generation === forGeneration ? {
-      ...current,
-      earlier: current.earlier.map((page) => page.startKey === startKey ? { ...page, entries } : page),
-      later: current.later.map((page) => page.startKey === startKey ? { ...page, entries } : page)
-    } : current);
+    setStored((current) => {
+      if (!current || current.generation !== forGeneration) return current;
+      const earlier = current.earlier.map((page) => page.startKey === startKey ? { ...page, entries } : page);
+      return {
+        ...current,
+        earlier,
+        later: current.later.map((page) => page.startKey === startKey ? { ...page, entries } : page),
+        // The way back ends only after that many empty weeks in a row, counted again with each copy.
+        emptyEarlierRun: trailingEmptyWeeks(earlier)
+      };
+    });
   }, []);
 
   const load = useCallback((direction: ListWeeksDirection) => {
@@ -152,7 +165,7 @@ export function useCalendarListWeeks({
           : { generation, earlier: [], later: [], emptyEarlierRun: 0 };
         if ([...base.earlier, ...base.later].some((week) => week.startKey === startKey)) return base;
         return direction === "earlier"
-          ? { ...base, earlier: [...base.earlier, page], emptyEarlierRun: entries.length ? 0 : base.emptyEarlierRun + 1 }
+          ? { ...base, earlier: [...base.earlier, page], emptyEarlierRun: trailingEmptyWeeks([...base.earlier, page]) }
           : { ...base, later: [...base.later, page] };
       });
     }).then(() => {

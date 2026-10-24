@@ -96,7 +96,8 @@ export function DatePickerPopover({
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
-  const effectiveOpen = open && !disabled;
+  // Disabled, or not used here (`unavailable`): a panel already open closes and takes no date (Codex r2 on #584).
+  const effectiveOpen = open && !disabled && !unavailable;
   const generatedPanelId = useId();
   const panelId = controlledPanelId ?? generatedPanelId;
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -141,10 +142,10 @@ export function DatePickerPopover({
   }
 
   useEffect(() => {
-    if (!disabled || !open) return undefined;
+    if ((!disabled && !unavailable) || !open) return undefined;
     const timeout = window.setTimeout(() => updateOpen(false), 0);
     return () => window.clearTimeout(timeout);
-  }, [disabled, open, updateOpen]);
+  }, [disabled, open, unavailable, updateOpen]);
 
   useEffect(() => {
     if (!effectiveOpen) return undefined;
@@ -221,7 +222,7 @@ export function DatePickerPopover({
   }, [effectiveOpen, phone]);
 
   function choose(date: string) {
-    if (disabled || !date) return;
+    if (disabled || unavailable || !date) return;
     onChange(date);
     updateOpen(false);
     (anchorRef?.current ?? triggerRef.current)?.focus();

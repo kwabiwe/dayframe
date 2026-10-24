@@ -82,6 +82,10 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
     expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
     expect(timeline).toContain('aria-label={isList ? "Today, not used in List" : undefined}');
+    // Today is always shown in List, greyed and inert, even for the current period (Codex r2 on #584).
+    expect(timeline).toContain("{showsToday && !isList ? null : (");
+    // Location days belong to the owner and the selected week (Codex r2 on #584).
+    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`);");
     // Alt+← / → (the shell's period shortcut) does nothing in List either (Codex r1 on #584).
     expect(source("./AppShell.tsx")).toContain('if (pathname !== "/timeline" || timelineState.view === "list") return;');
   });

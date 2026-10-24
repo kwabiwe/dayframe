@@ -378,8 +378,12 @@ export function EntriesTable({
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
   }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
+  // A trip read on two days (it spans midnight): the newest day's copy wins, the day the List reads
+  // again with each refresh (Codex r2 on #584).
   const tripByBlock = useMemo(
-    () => new Map(dayTimelines.flatMap((timeline) => [...tripsByBlockId(timeline)])),
+    () => new Map([...dayTimelines]
+      .sort((a, b) => Date.parse(a.dayStart) - Date.parse(b.dayStart))
+      .flatMap((timeline) => [...tripsByBlockId(timeline)])),
     [dayTimelines]
   );
   // Continuous days: a sentinel at each end loads the next week as it nears the view.

@@ -19,6 +19,7 @@ const { useCalendarListWeeks, LIST_EMPTY_WEEKS_BEFORE_END } = await import("./us
 const { useLocationTimelines, LOCATION_TIMELINE_CONCURRENCY } = await import("./location/LocationListRows");
 const { EntriesTable } = await import("./EntriesTable");
 const { SegmentedControl } = await import("./ui/Primitives");
+const { DatePickerPopover } = await import("./DatePickerPopover");
 
 // Calendar › List's continuous days (owner, 24 Oct 2026). Synthetic Exampleton data only.
 const entry = (id: string, start: Date, minutes = 30): TimeEntryRow => ({
@@ -131,6 +132,24 @@ describe("useCalendarListWeeks (continuous days)", () => {
     await act(async () => newer(weekPayload("w1", [entry("newest", new Date(2026, 9, 14, 9))])));
     await act(async () => older(weekPayload("w1", [entry("stale", new Date(2026, 9, 14, 9))])));
     expect(result.current.entries.map((row) => row.id)).toEqual(["newest"]);
+  });
+
+  it("counts the empty weeks again when a refresh fills one, so the way back opens again (Codex r2 on #584)", async () => {
+    const anchor = monday(2026, 10, 19);
+    clientFetch.mockResolvedValue(weekPayload("w1", []));
+    const { result, rerender } = renderHook(({ token }) => useCalendarListWeeks({ anchorWeekStart: anchor, currentWeekStart: anchor, enabled: true, owner: "w1:u1", refreshToken: token }),
+      { initialProps: { token: 0 } });
+    for (let week = 0; week < LIST_EMPTY_WEEKS_BEFORE_END; week += 1) {
+      act(() => result.current.load("earlier"));
+      await waitFor(() => expect(result.current.loading).toBeNull());
+    }
+    expect(result.current.reachedEarliest).toBe(true);
+    // A block moved into the oldest loaded week: its re-read is no longer empty.
+    clientFetch.mockImplementation((url: string) => Promise.resolve(weekPayload("w1",
+      url.endsWith("2026-08-24") ? [entry("moved", new Date(2026, 7, 25, 9))] : [])));
+    rerender({ token: 1 });
+    await waitFor(() => expect(result.current.entries.map((row) => row.id)).toEqual(["moved"]));
+    expect(result.current.reachedEarliest).toBe(false);
   });
 
   it("shows a failed week as an error to try again", async () => {
@@ -247,6 +266,30 @@ describe("Calendar › List days (Codex r1 on #584)", () => {
   });
 });
 
+describe("Calendar › List trips across midnight (Codex r2 on #584)", () => {
+  afterEach(cleanup);
+
+  it("shows the newest day's copy of a trip read on two days", async () => {
+    const trip = (mode: "walking" | "train") => ({
+      kind: "trip" as const, id: "night-trip", status: "finalised" as const, startedAt: new Date(2026, 9, 21, 23, 30).toISOString(),
+      stoppedAt: new Date(2026, 9, 22, 0, 30).toISOString(), fromId: "a", toId: "b", mode: "automotive" as const, stopIds: [], distanceMeters: 9_000,
+      confidence: "medium" as const, reason: null, blockIds: ["night"],
+      legs: [{ startedAt: new Date(2026, 9, 21, 23, 30).toISOString(), stoppedAt: new Date(2026, 9, 22, 0, 30).toISOString(), mode, confidence: "sure" as const, distanceMeters: 9_000 }]
+    });
+    const timeline = (day: number, mode: "walking" | "train"): LocationTimeline => ({
+      date: "", timeZone: "", dayStart: new Date(2026, 9, day).toISOString(), dayEnd: new Date(2026, 9, day + 1).toISOString(), gaps: [], items: [trip(mode)], openTrip: null
+    });
+    render(
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay
+        entries={[entry("night", new Date(2026, 9, 21, 23, 30), 60)]}
+        locationTimelines={[timeline(22, "train"), timeline(21, "walking")]}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    expect((await screen.findByLabelText(/Legs: Train/)).textContent).toBeTruthy();
+    expect(screen.queryByLabelText(/Legs: Walk/)).toBeNull();
+  });
+});
+
 describe("Calendar › List continuous edges", () => {
   afterEach(cleanup);
 
@@ -292,6 +335,24 @@ describe("Calendar › List continuous edges", () => {
     expect(screen.getByText("No earlier blocks.")).toBeTruthy();
     expect(observed).toHaveLength(0);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("DatePickerPopover unavailable (Codex r2 on #584)", () => {
+  afterEach(cleanup);
+
+  it("closes a panel already open and takes no date once it doesn't apply", async () => {
+    const onChange = vi.fn();
+    const props = { label: "Thu, 1 Oct 2026", onChange, onOpenChange: vi.fn(), open: true, today: "2026-10-24", value: "2026-10-01" };
+    const { rerender } = render(<DatePickerPopover {...props} />);
+    expect(screen.queryByRole("dialog")).not.toBeNull();
+    rerender(<DatePickerPopover {...props} unavailable="Not used in List" />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(props.onOpenChange).toHaveBeenCalledWith(false));
+    const trigger = screen.getByRole("button", { name: "Thu, 1 Oct 2026, not used in list" });
+    expect(trigger.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(trigger);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 

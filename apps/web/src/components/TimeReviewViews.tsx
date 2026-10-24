@@ -406,8 +406,10 @@ export function TimeReviewViews({
   });
   const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
   const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
+  // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
+  // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
-    data, listRefreshToken, listOwner);
+    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`);
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -538,7 +540,7 @@ export function TimeReviewViews({
           >
             <ChevronRight size={18} />
           </IconButton>
-          {showsToday ? null : (
+          {showsToday && !isList ? null : (
             <button
               aria-disabled={isList || undefined}
               aria-label={isList ? "Today, not used in List" : undefined}
@@ -546,7 +548,7 @@ export function TimeReviewViews({
               data-tip={isList ? "Not used in List" : undefined}
               disabled={isDateLoading}
               onClick={() => {
-                if (!isList) void navigate({ date: todayKey });
+                if (!isList && todayKey) void navigate({ date: todayKey });
               }}
               type="button"
             >
