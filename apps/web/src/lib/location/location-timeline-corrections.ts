@@ -104,7 +104,7 @@ async function lockSegment(client: pg.PoolClient, session: RequestSession, table
       for update`,
     [session.workspaceId, session.userId, itemId]);
   const row = result.rows[0];
-  if (!row) throw new TimelineCorrectionError("That item is no longer on your timeline.", 404);
+  if (!row) throw new TimelineCorrectionError("That place or trip is no longer in your day.", 404);
   return row;
 }
 
