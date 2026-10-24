@@ -218,6 +218,13 @@ export type DashboardStats = {
   /** Review cards (an outing once, PRD D19); `reviewCount` stays every open suggestion for older iPhones. */
   reviewCardCount: number;
   /**
+   * Things to check (location v4 step 14): open cards, counted as `reviewCardCount`, with times overlapping
+   * midnight seven days before this bootstrap's day up to now, for the Calendar badge; and those overlapping
+   * this day, as Calendar › List shows them, for Today's "N to check today". Older servers leave them out.
+   */
+  checkCount?: number;
+  dayCheckCount?: number;
+  /**
    * Each open Move folded into its outing's open Stay card (member → Stay review id), so a client moves
    * `reviewCardCount` exactly for local decisions; left out beyond `OUTING_STAYS_LIMIT` Moves.
    */
@@ -234,6 +241,8 @@ export type DashboardDateRange = {
   dayEnd: string;
   weekStart: string;
   weekEnd: string;
+  /** Midnight seven days before the selected day, in the viewer's zone: where the Calendar badge's checks start. */
+  checksStart?: string;
 };
 
 export type DashboardSeriesPoint = {
@@ -1466,7 +1475,26 @@ async function getDashboardStats(
          from review_items ri
          left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
          where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
-           and not ${foldedOutingMemberSql("ri", "ae")}) as "reviewCardCount"
+           and not ${foldedOutingMemberSql("ri", "ae")}) as "reviewCardCount",
+        -- Things to check (location v4 step 14): the same cards, counted as the List shows them — a suggestion
+        -- with times, overlapping the window (Codex r1 on #572): from midnight seven days before this
+        -- bootstrap's day ($8, the viewer's midnight) up to now, and this day.
+        (select count(*)::int
+         from review_items ri
+         left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+         where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
+           and ri.suggested_started_at is not null
+           and ri.suggested_started_at < $7::timestamptz
+           and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $8::timestamptz
+           and not ${foldedOutingMemberSql("ri", "ae")}) as "checkCount",
+        (select count(*)::int
+         from review_items ri
+         left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
+         where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
+           and ri.suggested_started_at is not null
+           and ri.suggested_started_at < $3::timestamptz
+           and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $2::timestamptz
+           and not ${foldedOutingMemberSql("ri", "ae")}) as "dayCheckCount"
      from time_entries
       where workspace_id = $1
         and user_id = $6
@@ -1479,7 +1507,8 @@ async function getDashboardStats(
       dateRange.weekStart,
       dateRange.weekEnd,
       session.userId,
-      capturedNow
+      capturedNow,
+      dateRange.checksStart ?? new Date(Date.parse(dateRange.dayStart) - 7 * 24 * 60 * 60_000).toISOString()
     ]
   );
   return result.rows[0] ?? {
@@ -1490,7 +1519,9 @@ async function getDashboardStats(
     todayAdditionalOverlapSeconds: 0,
     weekAdditionalOverlapSeconds: 0,
     reviewCount: 0,
-    reviewCardCount: 0
+    reviewCardCount: 0,
+    checkCount: 0,
+    dayCheckCount: 0
   };
 }
 
@@ -1511,7 +1542,8 @@ export function buildDashboardDateRange(input?: string | Date | null, timeZone?:
     dayStart: selected.toISOString(),
     dayEnd: dayEnd.toISOString(),
     weekStart: weekStart.toISOString(),
-    weekEnd: weekEnd.toISOString()
+    weekEnd: weekEnd.toISOString(),
+    checksStart: addDays(selected, -7).toISOString()
   };
 }
 
@@ -1537,7 +1569,9 @@ function buildZonedDashboardDateRange(input: string | Date | null | undefined, t
     dayStart: zonedStartOfDay(selectedDate, timeZone).toISOString(),
     dayEnd: zonedStartOfDay(addDaysToDateKey(selectedDate, 1), timeZone).toISOString(),
     weekStart: zonedStartOfDay(weekKey, timeZone).toISOString(),
-    weekEnd: zonedStartOfDay(addDaysToDateKey(weekKey, 7), timeZone).toISOString()
+    weekEnd: zonedStartOfDay(addDaysToDateKey(weekKey, 7), timeZone).toISOString(),
+    // The viewer's own midnight, across a clock change (Codex r2 on #572).
+    checksStart: zonedStartOfDay(addDaysToDateKey(selectedDate, -7), timeZone).toISOString()
   };
 }
 

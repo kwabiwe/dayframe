@@ -52,10 +52,12 @@ describe("accessible names (WUI-034, WUI-044)", () => {
 });
 
 describe("touch targets (WUI-035)", () => {
-  it("makes Today's Review now and This week rows 44 px on touch and up to 860 px, and the range controls up to 860 px", () => {
+  it("makes Today's This week rows 44 px on touch and up to 860 px, and the range controls up to 860 px", () => {
     const coarse = styles.slice(styles.lastIndexOf("/* Touch screens: every segment"));
-    expect(coarse).toMatch(/\.df-pill-action,\s*\.df-mw-row \{\s*min-height: 44px;/);
-    expect(styles).toMatch(/@media \(max-width: 860px\) \{\s*\.df-pill-action,\s*\.df-mw-row,\s*\.df-range-nav,\s*\.df-range-trigger \{\s*min-height: 44px;/);
+    expect(coarse).toMatch(/\.df-logas input,\s*\.df-mw-row \{\s*min-height: 44px;/);
+    expect(styles).toMatch(/@media \(max-width: 860px\) \{\s*\.df-mw-row,\s*\.df-range-nav,\s*\.df-range-trigger \{\s*min-height: 44px;/);
+    // Today's "N to check today" chip (location v4 step 14) is a 44 px target everywhere.
+    expect(styles).toMatch(/\.timeline-checks-chip \{[^}]*min-height: 44px;/);
     // Size guards use any-pointer (a touch screen with a mouse too); hover-only controls and
     // wording stay on the primary pointer.
     expect(styles).toMatch(/@media \(max-width: 560px\), \(any-pointer: coarse\) \{\s*\.df-flist \{/);

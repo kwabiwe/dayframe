@@ -92,6 +92,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const activeSection = activeShellSection(pathname);
   // Review cards: an outing counts once (PRD D19, PR 12c).
   const reviewCount = data?.stats.reviewCardCount ?? 0;
+  // Things to check today and the 7 days before (location v4 step 14); older servers send none.
+  const checkCount = data?.stats.checkCount ?? 0;
   const resolvedTheme = useSyncExternalStore(subscribeToThemeChoice, getResolvedThemeChoice, () => "light" as const);
   const paletteCommands = useMemo(
     () => basePaletteCommands({ activities: data?.categories ?? [], theme: resolvedTheme }),
@@ -263,7 +265,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
           <DayframeBrand decorative size="md" />
           {isStaging ? <span className="dayframe-environment-badge">Staging</span> : null}
         </Link>
-        <ShellSidebarNav activeId={activeSection?.id ?? null} reviewCount={reviewCount} />
+        <ShellSidebarNav activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
         <div className="df-side-foot">
           <div className="df-side-row">
             <ThemeToggleButton />
@@ -334,7 +336,7 @@ function AppShellContent({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      <ShellTabBar activeId={activeSection?.id ?? null} reviewCount={reviewCount} />
+      <ShellTabBar activeId={activeSection?.id ?? null} checkCount={checkCount} reviewCount={reviewCount} />
 
       {overlay === "profile" && data ? (
         <ProfileWorkspacePopover

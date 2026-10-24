@@ -1,7 +1,8 @@
 "use client";
 
-import { formatClockHour } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, formatClockHour } from "@dayframe/shared";
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { resolveActivityIcon, withGoalExclusions } from "@dayframe/shared";
@@ -30,7 +31,6 @@ import {
   isUnsavedEntryId,
   localDayEnd,
   localDayStart,
-  pendingReviewSeconds,
   pendingReviewSpans,
   previousDays,
   RIBBON_GAP_PX,
@@ -160,6 +160,10 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     else rowRefs.current.delete(id);
   }, []);
   const [openPatterns, setOpenPatterns] = useState<ReadonlySet<string>>(() => new Set());
+  // Today's things to check (location v4 step 14), and the last count shown, so the chip keeps its words while it closes.
+  const liveCheckCount = data.stats.dayCheckCount ?? 0;
+  const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);
+  if (liveCheckCount > 0 && liveCheckCount !== shownCheckCount) setShownCheckCount(liveCheckCount);
   const togglePattern = useCallback((key: string) => {
     setOpenPatterns((current) => {
       const next = new Set(current);
@@ -213,11 +217,23 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
   const pending = pendingReviewSpans(data.reviewItems, dayStart, dayEnd, nowMs);
   const week = previousDays(entries, nowMs);
   // Review cards: an outing counts once (PRD D19, PR 12c).
-  const reviewCount = data.stats.reviewCardCount;
+  // Things to check today (location v4 step 14); an older server sends none, so nothing shows.
+  const dayCheckCount = data.stats.dayCheckCount ?? 0;
 
   return (
     <div className="df-today">
       <h1 className="sr-only">Today</h1>
+      {/* Location v4 step 14: the Review card is now one quiet chip, opening Calendar › List at the first "?". */}
+      <div aria-hidden={dayCheckCount > 0 ? undefined : true} className="df-today-checks" data-open={dayCheckCount > 0}
+        inert={dayCheckCount > 0 ? undefined : true}>
+        <div>
+          <Link className="timeline-checks-chip" href="/timeline?view=list&scope=day&check=first">
+            <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
+            {shownCheckCount} to check today
+            <ChevronRight aria-hidden="true" size={14} />
+          </Link>
+        </div>
+      </div>
       <section className="df-card df-today-hero" aria-labelledby="df-today-total">
         <div className="df-today-hero-top">
           <div>
@@ -266,33 +282,6 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
           </>
         ) : (
           <p className="df-muted">Nothing tracked yet.</p>
-        )}
-      </section>
-
-      <section className="df-card df-today-review" aria-labelledby="df-today-review-title">
-        <div className="df-card-head">
-          <h2 id="df-today-review-title">Review</h2>
-          <span className="df-faint">From Location and Apple Health</span>
-        </div>
-        {reviewCount > 0 ? (
-          <div className="df-review-teaser">
-            <div className="df-review-stack" aria-hidden="true">
-              {data.reviewItems.slice(0, 3).map((item) => (
-                <span
-                  className={item.suggestedCategoryId ? "df-block" : "df-review-stack-none"}
-                  key={item.id}
-                  style={item.suggestedCategoryId ? blockStyle(item.categoryColor, item.categoryName ?? "") : undefined}
-                />
-              ))}
-            </div>
-            <div>
-              <b>{reviewCount} {reviewCount === 1 ? "moment" : "moments"} waiting</b>
-              <p>{reviewTeaserDetail(pendingReviewSeconds(data.reviewItems))}</p>
-              <Link className="df-pill-action" href="/review">Review now</Link>
-            </div>
-          </div>
-        ) : (
-          <p className="df-muted">All caught up. New suggestions from Location and Apple Health appear here.</p>
         )}
       </section>
 
@@ -473,7 +462,6 @@ function TodayFrame() {
       <h1 className="sr-only">Today</h1>
       <section className="df-card df-today-hero df-today-placeholder" />
       <section className="df-card df-today-went df-today-placeholder" />
-      <section className="df-card df-today-review df-today-placeholder" />
       <section className="df-card df-today-week df-today-placeholder" />
       <section className="df-card df-today-blocks df-today-placeholder" />
     </div>
@@ -939,12 +927,6 @@ function TodayBlockRow({
       </span>
     </li>
   );
-}
-
-function reviewTeaserDetail(seconds: number) {
-  return seconds > 0
-    ? `${formatDuration(seconds)} Dayframe noticed but didn't log.`
-    : "Dayframe noticed something it didn't log.";
 }
 
 function formatHeroDate(ms: number) {

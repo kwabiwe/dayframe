@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@dayframe/shared";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
+const search = vi.hoisted(() => ({ params: "" }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
-  useSearchParams: () => new URLSearchParams()
+  useSearchParams: () => new URLSearchParams(search.params)
 }));
 vi.mock("@/components/AppShellRuntime", () => ({
   useAppShellRuntime: () => ({ clearTimerError: vi.fn(), isTimerBusy: false, startEntryAgain: vi.fn(), updateActiveEntryFromCalendar: vi.fn() })
@@ -308,6 +309,29 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(screen.queryByRole("button", { name: "Check Unknown place" })).toBeNull();
     expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
+  });
+
+  it("opens the first question from Today's link, focuses it, and keeps it open when the day's places arrive (Codex r1 on #572)", async () => {
+    search.params = "check=first";
+    try {
+      const office = reviewItems[0];
+      const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
+      // The location read has not arrived: the suggestion sits on a row of its own.
+      const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={[office]} />);
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Where were you/ })).toBeTruthy());
+      await waitFor(() => expect((document.activeElement as HTMLElement | null)?.dataset.checkKey).toBeTruthy());
+      // The places arrive: the question moves onto the place's row and stays open.
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
+      expect(screen.getByRole("group", { name: /^Where were you/ })).toBeTruthy();
+      // Focus moves with it to the place row's "?" (Codex r2 on #572).
+      await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Check Office"));
+      // Closing it is final for this visit: it does not open again.
+      fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
+      rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
+      expect(screen.queryByRole("group", { name: /^Where were you/ })).toBeNull();
+    } finally {
+      search.params = "";
+    }
   });
 });
 

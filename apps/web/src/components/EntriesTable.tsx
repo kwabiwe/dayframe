@@ -297,6 +297,8 @@ export function EntriesTable({
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
   const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  // The open question, by its suggestion: it stays open when its row is replaced, as when the day's places
+  // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   const locationRows = useMemo(
@@ -312,23 +314,25 @@ export function EntriesTable({
     return id ? listChecks.itemsById.get(id) : undefined;
   };
   const checkRows = locationRows.filter((row) => checkOf(row));
-  /** "N to check": the next "?" down the List opens, and comes into view. */
+  /** "N to check": the next "?" down the List opens, and comes into view. Returns its suggestion's id. */
   const nextCheck = () => {
-    if (!checkRows.length) return;
-    const at = checkRows.findIndex((row) => row.key === focusedCheck);
+    if (!checkRows.length) return null;
+    const at = checkRows.findIndex((row) => checkOf(row)?.id === focusedCheck);
     const next = checkRows[(at + 1) % checkRows.length];
-    applyTimelineRegroup(() => setFocusedCheck(next.key));
+    const nextId = checkOf(next)!.id;
+    applyTimelineRegroup(() => setFocusedCheck(nextId));
     const anchor = next.kind === "place" ? next.place.id : next.key;
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
       .find((element) => element.dataset.locationRow === anchor)
       ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+    return nextId;
   };
   /** A location row, its "?" and, while open, its question. */
   const renderLocationRow = (row: LocationListRow) => {
     const item = checkOf(row);
-    const expanded = Boolean(item) && focusedCheck === row.key;
+    const expanded = Boolean(item) && focusedCheck === item?.id;
     // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
-    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === row.key ? null : row.key)) }
+    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id)) }
       : undefined;
     const label = row.kind === "place" ? row.place.name ?? "Unknown place" : "";
     return (
@@ -357,8 +361,10 @@ export function EntriesTable({
    * its key, else the chip, else the List itself (Codex r1/r2 on #568). Undefined: nothing to move.
    */
   const pendingFocus = useRef<string | null | undefined>(undefined);
-  // Undo or a refused save brings a "?" back: its toggle takes focus once the row is listed again.
+  // Undo or a refused save brings a "?" back, or the Today link opens one: its toggle takes focus once its
+  // row is listed (again).
   const pendingRestore = useRef<string | null>(null);
+  const focusedToggleItem = useRef<string | null>(null);
   const focusCheck = (key: string | null) => {
     pendingRestore.current = null;
     pendingFocus.current = key;
@@ -377,12 +383,36 @@ export function EntriesTable({
       pendingFocus.current = restoredRow.key;
     }
     const key = pendingFocus.current;
-    if (key === undefined) return;
+    if (key === undefined) {
+      // A "?" that held focus was replaced by its suggestion's new row (the day's places arrived): focus follows it.
+      const lost = !document.activeElement || document.activeElement === document.body;
+      const itemId = focusedToggleItem.current;
+      const moved = lost && itemId ? checkRows.find((row) => checkOf(row)?.id === itemId) : undefined;
+      if (moved) [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === moved.key)?.focus();
+      return;
+    }
     const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
     // Wait while the "?" it moves to has not rendered yet.
     if (key && !row && checkRows.some((other) => other.key === key)) return;
     pendingFocus.current = undefined;
     (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+  });
+  // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
+  // (location v4 step 14), once per visit.
+  const openFirstCheck = searchParams.get("check") === "first";
+  const openedFromLink = useRef(false);
+  useEffect(() => {
+    if (!openFirstCheck || openedFromLink.current || !checkRows.length) return;
+    const frame = requestAnimationFrame(() => {
+      openedFromLink.current = true;
+      // Its "?" takes focus once the opened row is listed (Codex r1 on #572).
+      const opened = nextCheck();
+      if (opened) {
+        pendingFocus.current = undefined;
+        pendingRestore.current = opened;
+      }
+    });
+    return () => cancelAnimationFrame(frame);
   });
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
@@ -885,6 +915,12 @@ export function EntriesTable({
       <div
         aria-busy={localTimeReady ? undefined : true}
         className="timeline-list-scroll"
+        onFocus={(event) => {
+          // Which suggestion's "?" holds focus, so it keeps it when its row is replaced (Codex r2 on #572).
+          const key = (event.target as HTMLElement).dataset.checkKey;
+          const row = key ? checkRows.find((other) => other.key === key) : undefined;
+          focusedToggleItem.current = row ? checkOf(row)?.id ?? null : null;
+        }}
         onScroll={onScroll}
         // Focus can land on the List itself when no "?" or chip is left to take it.
         tabIndex={-1}
