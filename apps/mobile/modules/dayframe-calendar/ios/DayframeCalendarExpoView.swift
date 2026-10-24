@@ -10,6 +10,8 @@ final class DayframeCalendarExpoView: ExpoView {
   let onRequestCreateEntry = EventDispatcher()
   let onRequestRefresh = EventDispatcher()
   let onSelectDay = EventDispatcher()
+  let onChangeLayout = EventDispatcher()
+  let onHeaderHeight = EventDispatcher()
 
   private let model = DayframeCalendarViewModel()
   private var hostingController: UIHostingController<DayframeCalendarRootView>?
@@ -29,7 +31,9 @@ final class DayframeCalendarExpoView: ExpoView {
         ])
       },
       requestRefresh: { [weak self] in self?.onRequestRefresh([:]) },
-      selectDay: { [weak self] dayKey in self?.onSelectDay(["dayKey": dayKey]) }
+      selectDay: { [weak self] dayKey in self?.onSelectDay(["dayKey": dayKey]) },
+      changeLayout: { [weak self] layout in self?.onChangeLayout(["layout": layout]) },
+      reportHeaderHeight: { [weak self] height in self?.onHeaderHeight(["height": height]) }
     )
     let controller = UIHostingController(
       rootView: DayframeCalendarRootView(model: model, actions: actions)

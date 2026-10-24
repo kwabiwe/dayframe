@@ -16,6 +16,7 @@ import {
   type HealthAutoLogMappings,
   type HealthImportPreferences,
   type LocationDisplayAddress,
+  type LocationTimeline,
   type LocationRolloutMode,
   type LocationReviewAction,
   type LocationReviewEvidenceDto,
@@ -2510,6 +2511,23 @@ export async function fetchArchivedPlaces(): Promise<MobileArchivedPlace[]> {
  * last 30 days for each active saved place. Times and counts only; a failure only means the rows
  * show no visit line.
  */
+/**
+ * The day's location timeline for Calendar › List (location v4 step 9, `GET /api/timeline`): places, trips
+ * with their legs, the journey in progress and the gaps, cut in the phone's own zone. Never coordinates.
+ */
+export async function fetchLocationTimeline(date: string, options: { signal?: AbortSignal } = {}): Promise<LocationTimeline> {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/timeline?date=${encodeURIComponent(date)}&tz=${encodeURIComponent(zone)}`, {
+    headers: await authHeaders(),
+    signal: options.signal
+  });
+  if (response.status === 401) throw new AuthRequiredError();
+  if (!response.ok) throw await apiResponseError(response, "Unable to load the day's places");
+  const result = await readApiJson<LocationTimeline>(response, "Unable to load the day's places");
+  if (!result.ok) throw new Error(result.message);
+  return result.payload;
+}
+
 export async function fetchPlaceVisits(): Promise<PlaceVisitStats[]> {
   const response = await mobileFetch(`${DAYFRAME_API_BASE}/api/places/visits`, {
     headers: await authHeaders()

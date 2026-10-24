@@ -1,6 +1,8 @@
-import { Redirect } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
+import type { LocationTimeline } from "@dayframe/shared";
+import { CalendarListView } from "@/components/calendar/CalendarListView";
 import { useMemo, useState } from "react";
-import { View } from "react-native";
+import { LogBox, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
@@ -8,9 +10,10 @@ import { useClockFormat } from "@/lib/clockFormat";
 import { useMobileTheme } from "@/lib/mobileTheme";
 import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation";
 
-// Development-only harness for Calendar titles at every zoom (location v4 C6): the native Calendar
-// drawing the mock-ups' synthetic Exampleton Thursday (screens #ios-grid and #ios-grid-default), so
-// the build can be compared with them side by side. No account, network or mutation.
+// Development-only harness for Calendar titles at every zoom (location v4 C6) and Calendar › List
+// (step 9): the native Calendar and the List drawing the mock-ups' synthetic Exampleton Thursday
+// (screens #ios-grid, #ios-grid-default and #ios-list), so the build can be compared with them side by
+// side. `?layout=list` opens in List. No account, network or mutation.
 const DAY = "2026-10-22";
 const at = (hh: number, mm: number) => new Date(2026, 9, 22, hh, mm).toISOString();
 const categories = [
@@ -54,7 +57,35 @@ const entries = [
   block("b5", "around", null, [14, 40], [16, 26])
 ];
 
+// The List's places and trips for the same Thursday: Home, the school run's trip, an unknown place.
+const iso = (hh: number, mm: number) => at(hh, mm);
+const timeline: LocationTimeline = {
+  date: DAY, timeZone: "Europe/London", dayStart: new Date(2026, 9, 22).toISOString(), dayEnd: new Date(2026, 9, 23).toISOString(),
+  gaps: [], openTrip: null,
+  items: [
+    { kind: "place", id: "qa-home", status: "finalised", startedAt: new Date(2026, 9, 21, 22).toISOString(), stoppedAt: iso(8, 36),
+      placeId: "p-home", learnedPlaceId: null, name: "Home", role: "home", matchKind: "saved", confidence: "high", blockIds: [] },
+    { kind: "trip", id: "qa-trip-1", status: "finalised", startedAt: iso(8, 47), stoppedAt: iso(10, 39), fromId: "qa-school", toId: "qa-office",
+      mode: "train", stopIds: [], distanceMeters: 21_000, confidence: "high", reason: null, blockIds: ["b2"], legs: [
+        { startedAt: iso(8, 47), stoppedAt: iso(9, 2), mode: "walking", confidence: "sure", distanceMeters: 1_100 },
+        { startedAt: iso(9, 10), stoppedAt: iso(10, 20), mode: "train", confidence: "likely", distanceMeters: 19_000 },
+        { startedAt: iso(10, 24), stoppedAt: iso(10, 39), mode: "underground", confidence: "unsure", runnerUp: "train", distanceMeters: 900 }] },
+    { kind: "place", id: "qa-school", status: "finalised", startedAt: iso(8, 36), stoppedAt: iso(8, 47), placeId: "p-school", learnedPlaceId: null,
+      name: "Exampleton Primary", role: null, matchKind: "saved", confidence: "high", blockIds: ["b1"] },
+    { kind: "place", id: "qa-office", status: "finalised", startedAt: iso(10, 39), stoppedAt: iso(14, 40), placeId: "p-office", learnedPlaceId: null,
+      name: "Office", role: "work", matchKind: "saved", confidence: "high", blockIds: ["b3", "b4"] },
+    { kind: "place", id: "qa-unknown", status: "finalised", startedAt: iso(16, 26), stoppedAt: iso(17, 0), placeId: null, learnedPlaceId: null,
+      name: null, role: null, matchKind: "unknown", confidence: "medium", blockIds: [] }
+  ]
+};
+
+// Screenshots of the harness carry no development toasts.
+if (__DEV__) LogBox.ignoreAllLogs(true);
+
 export default function CalendarQaRoute() {
+  const params = useLocalSearchParams<{ layout?: string }>();
+  const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
+  const [headerHeight, setHeaderHeight] = useState<number | null>(null);
   const { theme } = useMobileTheme();
   const clockFormat = useClockFormat();
   const [now] = useState(() => new Date(2026, 9, 22, 17, 5).getTime());
@@ -69,11 +100,24 @@ export default function CalendarQaRoute() {
     theme,
     transitionDirection: 1
   }).model, [clockFormat, now, theme]);
+  const shown = useMemo(() => ({ ...model, layout }), [layout, model]);
   if (!__DEV__) return <Redirect href="/" />;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} testID="calendar-qa">
       <View style={{ flex: 1 }}>
-        <DayframeCalendarView model={model} style={{ flex: 1 }} />
+        <DayframeCalendarView
+          model={shown}
+          onChangeLayout={(event) => setLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
+          onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
+          style={layout === "list" && headerHeight ? { height: headerHeight } : { flex: 1 }}
+        />
+        {layout === "list" ? (
+          <View style={{ flex: 1 }}>
+            <CalendarListView clockFormat={clockFormat} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+              nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
+              timeline={timeline} />
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );

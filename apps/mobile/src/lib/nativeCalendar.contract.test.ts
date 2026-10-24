@@ -398,4 +398,20 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(manifest).toHaveProperty("activity-circle-dot");
     expect(rootView).toContain('DayframeCalendarGlyph(name: "activity-\\(glyph)", size: 12)');
   });
+
+  it("switches Grid · List in the header and, in List, sizes itself to its header (location v4 step 9)", () => {
+    const rootView = readFileSync(`${moduleRoot}ios/DayframeCalendarRootView.swift`, "utf8");
+    const moduleSource = readFileSync(`${moduleRoot}ios/DayframeCalendarModule.swift`, "utf8");
+    const dashboard = readFileSync(dashboardPath, "utf8");
+    expect(rootView).toContain('.matchedGeometryEffect(id: "selected-layout", in: layoutSelection)');
+    expect(rootView).toContain("actions.changeLayout(layout)");
+    expect(rootView).toContain("actions.reportHeaderHeight(");
+    expect(rootView).toContain("if !presentation.isList {");
+    expect(rootView).toContain("presentation.reduceMotion ? nil : .easeOut(duration: 0.2)");
+    expect(moduleSource).toContain('"onChangeLayout"');
+    expect(moduleSource).toContain('"onHeaderHeight"');
+    expect(dashboard).toContain("<CalendarListView");
+    expect(dashboard).toContain("AsyncStorage.setItem(CALENDAR_LAYOUT_KEY, layout)");
+  });
 });
+

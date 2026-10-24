@@ -8,10 +8,14 @@ export type DayframeCalendarChangeDayEvent = { days: number };
 export type DayframeCalendarChangeWeekEvent = { weeks: number };
 export type DayframeCalendarEntryEvent = { entryId: string };
 export type DayframeCalendarReviewEvent = { reviewItemId: string };
+export type DayframeCalendarChangeLayoutEvent = { layout: "grid" | "list" };
+export type DayframeCalendarHeaderHeightEvent = { height: number };
 export type DayframeCalendarCreateEntryEvent = { dayKey: string; startMinute: number };
 
 export type DayframeCalendarViewProps = ViewProps & {
   model: NativeCalendarPresentation;
+  onChangeLayout?: (event: NativeSyntheticEvent<DayframeCalendarChangeLayoutEvent>) => void;
+  onHeaderHeight?: (event: NativeSyntheticEvent<DayframeCalendarHeaderHeightEvent>) => void;
   onChangeDay?: (event: NativeSyntheticEvent<DayframeCalendarChangeDayEvent>) => void;
   onChangeWeek?: (event: NativeSyntheticEvent<DayframeCalendarChangeWeekEvent>) => void;
   onOpenActiveTimer?: (event: NativeSyntheticEvent<DayframeCalendarEntryEvent>) => void;

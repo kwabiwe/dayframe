@@ -49,6 +49,9 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { LocationTimeline } from "@dayframe/shared";
+import { CalendarListView } from "./calendar/CalendarListView";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
@@ -115,6 +118,7 @@ import {
   createTag,
   enqueueEvent,
   fetchBootstrap,
+  fetchLocationTimeline,
   fetchTimerState,
   isQueuedTimerMutationEvent,
   login,
@@ -294,6 +298,8 @@ type RejectedOptimisticStart = {
   /** False when the block was never on screen (a refused queued Start nobody could see). */
   alert?: boolean;
 };
+
+const CALENDAR_LAYOUT_KEY = "dayframe.calendar.layout";
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
@@ -360,6 +366,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarEditDismissRequestId, setCalendarEditDismissRequestId] = useState<number | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
+  // Calendar › Grid or List (location v4 step 9), remembered on this phone.
+  const [calendarLayout, setCalendarLayout] = useState<"grid" | "list">("grid");
+  const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
+  const [calendarTimeline, setCalendarTimeline] = useState<LocationTimeline | null>(null);
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
   // A rejected change badges the avatar, which then opens Settings › Sync help.
   const syncAttentionCount = useSyncAttentionCount();
@@ -1907,13 +1917,34 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Stable objects, so DayframeCalendarView re-serialises only when the model or refresh state changes.
   const nativeCalendarModel = useMemo(
-    () => ({ ...nativeCalendarBridge.model, refreshing: false }),
-    [nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false }),
+    [calendarLayout, nativeCalendarBridge.model]
   );
   const nativeCalendarModelRefreshing = useMemo(
-    () => ({ ...nativeCalendarBridge.model, refreshing: true }),
-    [nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true }),
+    [calendarLayout, nativeCalendarBridge.model]
   );
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(CALENDAR_LAYOUT_KEY).then((stored) => {
+      if (!cancelled && stored === "list") setCalendarLayout("list");
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+  const changeCalendarLayout = useCallback((layout: "grid" | "list") => {
+    setCalendarLayout(layout);
+    void AsyncStorage.setItem(CALENDAR_LAYOUT_KEY, layout).catch(() => undefined);
+  }, []);
+  // The List's places and trips: the selected day's timeline, read again after each refresh. A failed
+  // read leaves the blocks on their own.
+  useEffect(() => {
+    if (calendarLayout !== "list" || authState !== "authenticated") return;
+    const controller = new AbortController();
+    fetchLocationTimeline(selectedDayKey, { signal: controller.signal })
+      .then((timeline) => setCalendarTimeline(timeline))
+      .catch(() => { if (!controller.signal.aborted) setCalendarTimeline(null); });
+    return () => controller.abort();
+  }, [authState, calendarData, calendarLayout, selectedDayKey]);
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
@@ -3417,6 +3448,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Animated.View>
             <DayframeCalendarView
               model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
+              onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
+              onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
               onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
@@ -3434,8 +3467,28 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 });
               }}
               onSelectDay={(event) => selectCalendarDay(event.nativeEvent.dayKey)}
-              style={styles.nativeCalendarView}
+              // In List the native view is only its header and week strip, at the height it reports.
+              style={calendarLayout === "list" && calendarHeaderHeight
+                ? [styles.nativeCalendarView, { flex: 0, height: calendarHeaderHeight }]
+                : styles.nativeCalendarView}
             />
+            {calendarLayout === "list" ? (
+              <View style={{ flex: 1 }}>
+                <CalendarListView
+                  clockFormat={clockFormat}
+                  dayStartMs={nativeCalendarModel.dayStartMs}
+                  entries={nativeCalendarModel.entries}
+                  loggedLabel={nativeCalendarModel.loggedLabel}
+                  nowMs={minuteNow}
+                  onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
+                  onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
+                  reduceMotion={reduceMotion}
+                  refreshing={isFocused && refreshing}
+                  theme={theme}
+                  timeline={calendarTimeline?.date === selectedDayKey ? calendarTimeline : null}
+                />
+              </View>
+            ) : null}
           </View>
         </SafeAreaView>
       );
