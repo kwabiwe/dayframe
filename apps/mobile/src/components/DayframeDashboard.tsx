@@ -1929,7 +1929,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
   // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
-  const checkAnswers = useCalendarCheckAnswers({ data: calendarData, locallyDecidedIds });
+  const checkAnswers = useCalendarCheckAnswers({ data: calendarData, locallyDecidedIds, ownerKey: scopedOwnerKey ?? null });
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
@@ -1967,6 +1967,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarChecks, todayKey]);
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
+  // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
+  const calendarCheckRequests = useRef(0);
   // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
   // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
   const earlierDayReviewCountMap = useMemo(
@@ -2662,7 +2664,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     changeCalendarLayout("list");
     selectCalendarDay(dayKey);
     // A new request each time (a used one was cleared to 0).
-    setCalendarCheckScroll((current) => current + 1);
+    calendarCheckRequests.current += 1;
+    setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
   const openTodayChecks = useCallback(() => openChecksOn(formatDateKey(new Date())), [openChecksOn]);
@@ -3682,7 +3685,20 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           testID="today-delete-toast"
           theme={theme}
         />
-      ) : checkAnswers.held ? (
+      ) : todayNotice.notice && authState === "authenticated" ? (
+        <BlocksToast
+          key={`notice-${todayNotice.notice.token}`}
+          accessibilityLabel={todayNotice.notice.accessibilityLabel}
+          detail={todayNotice.notice.detail}
+          message={todayNotice.notice.message}
+          reduceMotion={reduceMotion}
+          style={styles.todayToast}
+          swatchColor={todayNotice.notice.swatchColor}
+          testID="today-notice-toast"
+          theme={theme}
+        />
+      ) : null}
+      {checkAnswers.held ? (
         // An answer in Calendar › List, held for Undo (step 14 part 3b): the hold owns the 4.8 s window and
         // its token re-mounts the toast, so a second answer replaces it (the first is saved).
         <BlocksToast
@@ -3696,20 +3712,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             playHaptic("undoRestore");
           }}
           reduceMotion={reduceMotion}
-          style={styles.todayToast}
+          // Its own toast, above a delete's or a notice when both show, so the answer's Undo is never hidden
+          // while its window runs (Codex r1 on #582).
+          style={pendingDeletion?.phase === "active" || (todayNotice.notice && authState === "authenticated") ? [styles.todayToast, { bottom: 164 }] : styles.todayToast}
           testID="calendar-check-toast"
-          theme={theme}
-        />
-      ) : todayNotice.notice && authState === "authenticated" ? (
-        <BlocksToast
-          key={`notice-${todayNotice.notice.token}`}
-          accessibilityLabel={todayNotice.notice.accessibilityLabel}
-          detail={todayNotice.notice.detail}
-          message={todayNotice.notice.message}
-          reduceMotion={reduceMotion}
-          style={styles.todayToast}
-          swatchColor={todayNotice.notice.swatchColor}
-          testID="today-notice-toast"
           theme={theme}
         />
       ) : null}

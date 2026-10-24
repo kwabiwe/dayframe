@@ -27,6 +27,7 @@ vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error:
 vi.mock("expo-secure-store", () => ({}));
 
 import { useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
 const at = (hour: number, minute = 0) => new Date(2026, 9, 22, hour, minute).toISOString();
@@ -38,15 +39,21 @@ const suggestion = (id: string, overrides: Partial<MobileReviewItem> = {}): Mobi
 const bootstrap = (reviewItems: MobileReviewItem[]) => ({ reviewItems } as unknown as MobileBootstrap);
 
 type Hook = ReturnType<typeof useCalendarCheckAnswers>;
+const NONE: ReadonlySet<string> = new Set();
 function mount(data: MobileBootstrap) {
   const result: { current: Hook } = { current: null as unknown as Hook };
-  function Harness({ value }: { value: MobileBootstrap }) {
-    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: new Set() });
+  let props = { value: data, decided: NONE, owner: "owner-a" as string | null };
+  function Harness({ value, decided, owner }: typeof props) {
+    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner });
     return null;
   }
   let tree!: ReturnType<typeof create>;
-  act(() => { tree = create(<Harness value={data} />); });
-  return { result, rerender: (next: MobileBootstrap) => act(() => { tree.update(<Harness value={next} />); }), tree };
+  act(() => { tree = create(<Harness {...props} />); });
+  const update = (next: Partial<typeof props>) => act(() => {
+    props = { ...props, ...next };
+    tree.update(<Harness {...props} />);
+  });
+  return { result, rerender: (next: MobileBootstrap) => update({ value: next }), update, tree };
 }
 
 describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () => {
@@ -125,5 +132,49 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       mutation: { action: "ignore_outing", memberReviewItemIds: ["there", "back"] },
       affectedItems: [items[1], items[0], items[2]]
     });
+  });
+
+  it("drops a held answer unsaved when the account changes, and shows nothing of it there (Codex r1 on #582)", async () => {
+    const { result, update } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    update({ owner: "owner-b" });
+    expect(result.current.held).toBeNull();
+    expect(result.current.hiddenIds.size).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(10_000); appState.listener?.("background"); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("saves from the copy it showed when a capped refresh only pages the suggestion out (Codex r1 on #582)", async () => {
+    const item = suggestion("a");
+    const { result, rerender } = mount(bootstrap([item, suggestion("b", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) })]));
+    act(() => { result.current.answer("a", true); });
+    rerender(bootstrap([suggestion("b", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) })]));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+    const input = store.enqueueReviewMutation.mock.calls[0][0] as { item: MobileReviewItem; bootstrap: MobileBootstrap };
+    expect(input.item).toEqual(item);
+    expect(input.bootstrap.reviewItems.map((candidate) => candidate.id).sort()).toEqual(["a", "b"]);
+  });
+
+  it("hands a saved answer over at the outbox record's next read, even when that record does not hide it (Codex r1 on #582)", async () => {
+    const { result, update } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", false); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(result.current.hiddenIds.has("a")).toBe(true);
+    // The next read of the outbox's record (a new set) does not hide it: a rejected answer restored. It shows again.
+    update({ decided: new Set() });
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+  });
+
+  it("never saves a suggestion the Review deck is already saving, and needs a whole window to log (Codex r1 on #582)", async () => {
+    const { result } = mount(bootstrap([suggestion("a"), suggestion("b", { suggestedStartedAt: null, suggestedStoppedAt: null })]));
+    claimReviewAnswer(["a"]);
+    act(() => { result.current.answer("a", true); });
+    expect(result.current.held).toBeNull();
+    releaseReviewAnswer(["a"]);
+    act(() => { result.current.answer("b", true); });
+    expect(result.current.held).toBeNull();
+    act(() => { result.current.answer("b", false); });
+    expect(result.current.held).toMatchObject({ itemId: "b", logged: false });
   });
 });

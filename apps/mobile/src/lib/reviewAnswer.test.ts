@@ -76,8 +76,9 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
   });
 
   it("asks without times when the suggestion has none", () => {
+    // Without a whole window it can be skipped (or opened) but not logged here.
     expect(reviewAnswerQuestion(item({ suggestedStartedAt: null, suggestedStoppedAt: null }), "24h")).toMatchObject({
-      question: "Log Exampleton Library?", skipLabel: "Skip", more: false
+      question: "Log Exampleton Library?", logLabel: null, skipLabel: "Skip", more: false
     });
   });
 });

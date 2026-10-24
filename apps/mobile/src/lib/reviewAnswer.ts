@@ -28,7 +28,8 @@ export function reviewAnswerMutation(
 export type ReviewAnswerQuestion = {
   question: string;
   detail: string | null;
-  logLabel: string;
+  /** Null when the suggestion has no complete window: it can be skipped, or opened, but not logged here. */
+  logLabel: string | null;
   skipLabel: string;
   /** A place can be picked or named on the suggestion's own screen ("More…"). */
   more: boolean;
@@ -38,6 +39,16 @@ export function reviewAnswerQuestion(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
   options: { outing?: boolean } = {}
+): ReviewAnswerQuestion {
+  const question = reviewAnswerWords(item, clockFormat, options);
+  // Logging needs the whole window, as on the suggestion's deck card (Codex r1 on #582).
+  return hasSuggestedTimeWindow(item) ? question : { ...question, logLabel: null };
+}
+
+function reviewAnswerWords(
+  item: MobileReviewItem,
+  clockFormat: ClockFormat,
+  options: { outing?: boolean }
 ): ReviewAnswerQuestion {
   const window = hasSuggestedTimeWindow(item)
     ? `${formatClockTime(new Date(item.suggestedStartedAt!), clockFormat)}–${formatClockTime(new Date(item.suggestedStoppedAt!), clockFormat)}`

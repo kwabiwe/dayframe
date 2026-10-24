@@ -15,7 +15,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).toContain("<TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks}");
     expect(dashboard).not.toContain("<TodayReviewNudge");
     expect(dashboard).toContain('router.navigate("/(tabs)/calendar");');
-    expect(dashboard).toContain("setCalendarCheckScroll((current) => current + 1);");
+    // A monotonic request id, so every tap reopens the first question (Codex r1 on #582).
+    expect(dashboard).toContain("calendarCheckRequests.current += 1;");
+    expect(dashboard).toContain("setCalendarCheckScroll(calendarCheckRequests.current);");
     // Counts use the List's own rule, and leave suggestions decided on this phone at once (Codex r1 on #573).
     expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
     expect(dashboard).toContain("listCheckOverlaps(check, weekStart, tomorrowStart)");

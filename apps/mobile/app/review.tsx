@@ -141,6 +141,7 @@ import {
   heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
 import { reviewAnswerMutation } from "@/lib/reviewAnswer";
+import { claimReviewAnswer, releaseReviewAnswer } from "@/lib/reviewAnswerClaims";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -2128,9 +2129,12 @@ export default function ReviewScreen() {
     const unlistedItems = affected.filter((candidate) => !loadedData.reviewItems.some((loaded) => loaded.id === candidate.id));
     const currentData = unlistedItems.length ? { ...loadedData, reviewItems: [...loadedData.reviewItems, ...unlistedItems] } : loadedData;
 
+    // One claim across every surface that answers (Calendar › List too, step 14 part 3b).
+    if (!claimReviewAnswer(affected.map((candidate) => candidate.id))) return false;
     for (const candidate of affected) reviewMutations.current.set(candidate.id, 1);
     const release = () => {
       for (const candidate of affected) reviewMutations.current.delete(candidate.id);
+      releaseReviewAnswer(affected.map((candidate) => candidate.id));
     };
     const clientMutationId = createReviewClientMutationId();
     void enqueueReviewMutation({

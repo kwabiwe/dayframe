@@ -462,10 +462,12 @@ function CheckQuestion({ onAnswer, onMore, question, theme }: {
       <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
       {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
       <View style={styles.answers}>
-        <Pressable accessibilityRole="button" onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
-          style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
-          <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.surface }]}>{question.logLabel}</Text>
-        </Pressable>
+        {question.logLabel ? (
+          <Pressable accessibilityRole="button" onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.surface }]}>{question.logLabel}</Text>
+          </Pressable>
+        ) : null}
         <Pressable accessibilityRole="button" onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
           style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
           <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
