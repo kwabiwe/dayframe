@@ -16,6 +16,7 @@ vi.mock("react-native", async () => {
     return React.createElement("ScrollView", props);
   });
   return {
+  AccessibilityInfo: { announceForAccessibility: vi.fn() },
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
   Pressable: "Pressable",
   RefreshControl: "RefreshControl",
@@ -123,6 +124,128 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: travelling });
     const label = labels(tree).find((text) => text.startsWith("Travelling from"));
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
+  });
+
+  it("answers a \"?\" where it sits: its question opens under the row, and the chip walks the questions (step 14 part 3b)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenCheck = vi.fn();
+    const question = (text: string, more = false) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more, opens: false });
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", question("Log Unknown place, 12:00–13:00?", true)], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck,
+      onOpenCheck
+    });
+    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
+    expect(questions()).toHaveLength(0);
+    // The place's "?" opens its question under its row, with More… for picking another place.
+    const placeCheck = tree.root.findByProps({ accessibilityLabel: "Check Unknown place" });
+    expect(placeCheck.props.accessibilityState).toEqual({ expanded: false });
+    act(() => { placeCheck.props.onPress(); });
+    expect(questions()).toHaveLength(1);
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place, 12:00–13:00?");
+    expect(tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.accessibilityState).toEqual({ expanded: true });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-more" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
+    // Answering closes the question and hands the answer to the caller (it holds it for Undo).
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-log" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-unknown", true);
+    expect(questions()).toHaveLength(0);
+    // "N to check" opens the next question, from the top, and scrolls to it; a second tap moves on.
+    const chip = tree.root.findByProps({ accessibilityHint: "Opens the next one" });
+    act(() => { chip.props.onPress(); });
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log your sleep?");
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenLastCalledWith("c-unknown", false);
+    // Without answers here a "?" still opens the suggestion, as before.
+    expect(onOpenCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
+    const { AccessibilityInfo } = await import("react-native");
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false, opens: false });
+    const checks = [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }];
+    const props = {
+      checks,
+      checkTitles: new Map([["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheck: vi.fn()
+    };
+    const { tree } = render({ ...props, scrollToFirstCheck: 1 });
+    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
+    // Today's chip opened it: VoiceOver hears the question, as when its "?" is tapped.
+    expect(questions()).toHaveLength(1);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Log your sleep?");
+    const rerender = (next: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} scrollToFirstCheck={1} {...next} />);
+    });
+    // Its row leaves (another day, a refresh) and comes back: the question stays closed until asked again.
+    rerender({ checks: [] });
+    expect(questions()).toHaveLength(0);
+    rerender({ checks });
+    expect(questions()).toHaveLength(0);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+    // An overnight "?" opened on one day, then the day before, which shows it too: it closes there (Codex r4 on #582).
+    const overnight = [{ id: "c-sleep", segmentId: null, startedAt: new Date(at(0) - 2 * 3_600_000).toISOString(), stoppedAt: iso(6) }];
+    rerender({ checks: overnight });
+    const sleepRow = () => tree.root.findAll((node) => typeof node.props.accessibilityLabel === "string"
+      && node.props.accessibilityLabel.startsWith("Check Sleep") && typeof node.props.onPress === "function");
+    act(() => { sleepRow()[0].props.onPress(); });
+    expect(questions()).toHaveLength(1);
+    rerender({ checks: overnight, dayStartMs: at(0) - 86_400_000, dayEndMs: at(0), timeline: null });
+    expect(sleepRow()).toHaveLength(1);
+    expect(questions()).toHaveLength(0);
+  });
+
+  it("offers a suggestion without a complete time on its own screen, never answers the outbox would refuse (Codex r3 on #582)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenCheck = vi.fn();
+    const { tree } = render({
+      checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: null }],
+      checkTitles: new Map([["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", { question: "Log your sleep?", detail: "It has no complete time yet, so it can't be answered here.",
+        logLabel: null, skipLabel: null, more: false, opens: true }]]),
+      onAnswerCheck,
+      onOpenCheck
+    });
+    act(() => { tree.root.find((node) => typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Check Sleep") && typeof node.props.onPress === "function").props.onPress(); });
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-log")).toHaveLength(0);
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-skip")).toHaveLength(0);
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-open" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-sleep");
+    expect(onAnswerCheck).not.toHaveBeenCalled();
+  });
+
+  it("marks Today's waiting request done when \"N to check\" moves on from it (Codex r12 on #582)", () => {
+    const onScrolledToFirstCheck = vi.fn();
+    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false, opens: false });
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", question("Log Unknown place?")], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheck: vi.fn(),
+      onScrolledToFirstCheck,
+      scrollToFirstCheck: 1
+    });
+    // Its row has not been measured yet (no native layout here): the request is still waiting.
+    expect(onScrolledToFirstCheck).not.toHaveBeenCalled();
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    expect(onScrolledToFirstCheck).toHaveBeenCalledOnce();
   });
 
   it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {

@@ -111,12 +111,18 @@ export type ReviewBulkSkipOutcome = {
 export async function runReviewBulkSkip<T>(
   entries: readonly ReviewBulkSkipEntry[],
   {
+    decided = new Set(),
     enqueue,
     isSaving,
     openItem,
     ownerMatches,
     signature
   }: {
+    /**
+     * Moments this phone has already decided, read from the outbox under the batch's claims before it
+     * runs (Calendar › List answering one meanwhile): resolved, never skipped again (Codex r7 on #582).
+     */
+    decided?: ReadonlySet<string>;
     enqueue: (item: T) => Promise<void>;
     isSaving: (itemId: string) => boolean;
     openItem: (itemId: string) => T | undefined;
@@ -131,7 +137,7 @@ export async function runReviewBulkSkip<T>(
       outcome.abandoned.push(...entries.slice(index));
       break;
     }
-    const item = openItem(entry.itemId);
+    const item = decided.has(entry.itemId) ? undefined : openItem(entry.itemId);
     if (!item) {
       outcome.resolved.push(entry);
       continue;

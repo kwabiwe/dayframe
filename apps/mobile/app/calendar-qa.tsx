@@ -155,9 +155,15 @@ const QA_CHECKS = [
   { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) }
 ];
 const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"]]);
+// Their questions (step 14 part 3b), as reviewAnswerQuestion words them; answers here do nothing.
+const QA_CHECK_QUESTIONS = new Map([
+  ["qa-check-unknown", { question: "Log Unknown place, 16:26–17:00?", detail: null, logLabel: "Log it", skipLabel: "Not now", more: true, opens: false }],
+  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
+]);
 
 export default function CalendarQaRoute() {
-  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string }>();
+  // `?check=1` opens the List at its first "?" with its question showing, as Today's chip does.
+  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string }>();
   const [cycleStep, setCycleStep] = useState(0);
   useEffect(() => {
     if (params.cycle !== "1") return;
@@ -220,7 +226,8 @@ export default function CalendarQaRoute() {
         />
         {layout === "list" ? (
           <View style={{ flex: 1 }}>
-            <CalendarListView checks={QA_CHECKS} checkTitles={QA_CHECK_TITLES} onOpenCheck={() => undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+            <CalendarListView checkQuestions={QA_CHECK_QUESTIONS} checks={QA_CHECKS} checkTitles={QA_CHECK_TITLES}
+              onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={timeline} />
           </View>

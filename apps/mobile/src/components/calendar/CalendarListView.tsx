@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 import {
   DAYFRAME_APP_ICONS,
@@ -21,6 +21,7 @@ import {
 } from "@dayframe/shared";
 import { DayframeIcon } from "../icons/DayframeIcon";
 import type { NativeCalendarPresentationEntry } from "../../lib/nativeCalendarPresentation";
+import type { ReviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
@@ -30,11 +31,16 @@ import { localLayoutTransition, localPresenceEntering, localPresenceExiting } fr
  * Calendar › List on the iPhone (location v4 step 9, mock-up #ios-list, placement A): the day's blocks
  * in time order, with location only where it adds something — a place you weren't in a block at for
  * ten minutes (one row), the journey in progress, and a trip block's route and legs (opening into leg
- * rows). "Show Home and every place" adds Home and logged places as faint rows. Read-only: the "?"
- * questions and corrections come with later steps. Rows come from the shared rules the web List uses.
+ * rows). "Show Home and every place" adds Home and logged places as faint rows. Rows come from the shared
+ * rules the web List uses.
  *
- * Motion: a trip's legs and the faint rows enter and leave with the app's local presence (fade), and
- * the rows below move with its layout transition (220 ms); with Reduce Motion they appear at once.
+ * Step 14 part 3b: a "?" is answered where it sits. Tapping its row (or a place's "?") opens its question
+ * under the row, with the deck's one-tap answers; "N to check" opens the next one and scrolls to it. The
+ * answer itself (held for Undo, then saved) belongs to the caller (useCalendarCheckAnswers).
+ *
+ * Motion: a trip's legs, a question and the faint rows enter and leave with the app's local presence
+ * (fade), and the rows below move with its layout transition (220 ms); an answered "?" leaves the same
+ * way and Undo brings it back the same way; with Reduce Motion they appear and go at once.
  */
 
 type ListItem =
@@ -42,6 +48,7 @@ type ListItem =
   | { kind: "location"; key: string; atMs: number; row: LocationListRow };
 
 export function CalendarListView({
+  checkQuestions,
   checks = [],
   checkTitles,
   clockFormat,
@@ -50,6 +57,7 @@ export function CalendarListView({
   entries,
   loggedLabel,
   nowMs,
+  onAnswerCheck,
   onOpenCheck,
   onOpenEntry,
   onScrolledToFirstCheck,
@@ -72,8 +80,15 @@ export function CalendarListView({
   /** The day's logged time ("7h 3m"). */
   loggedLabel: string;
   nowMs: number;
-  /** Opens a suggestion to answer it (Review, focused on it, until the List answers in place). */
+  /**
+   * Opens a suggestion on its own screen: "More…" (pick or name another place), or the whole answer when
+   * the List has no `onAnswerCheck`.
+   */
   onOpenCheck?: (reviewItemId: string) => void;
+  /** Answers a "?" in place: "Log it" (true) or "Skip" (false), with the deck's effects and Undo. */
+  onAnswerCheck?: (reviewItemId: string, logged: boolean) => void;
+  /** Each suggestion's question and answers (reviewAnswerQuestion). */
+  checkQuestions?: ReadonlyMap<string, ReviewAnswerQuestion>;
   onOpenEntry: (entry: NativeCalendarPresentationEntry) => void;
   /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?". */
   scrollToFirstCheck?: number;
@@ -86,6 +101,8 @@ export function CalendarListView({
   timeline: LocationTimeline | null;
 }) {
   const [showAll, setShowAll] = useState(false);
+  // The one question open under its row, if any.
+  const [openCheckId, setOpenCheckId] = useState<string | null>(null);
   const [openLegs, setOpenLegs] = useState<ReadonlySet<string>>(() => new Set());
   // The day's blocks (Review suggestions stay on the Grid and Review for now).
   const blocks = useMemo(() => entries.filter((entry) => !entry.isReview), [entries]);
@@ -106,35 +123,99 @@ export function CalendarListView({
   }, [blocks, checks, dayEndMs, dayStartMs, nowMs, showAll, timeline]);
   // The day's "?", in time order: a place row's first suggestion, or a suggestion's own row.
   const checkIdOf = (row: LocationListRow) => row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
-  const checkKeys = items.flatMap((item) => item.kind === "location" && checkIdOf(item.row) ? [item.key] : []);
-  const firstCheckId = items.flatMap((item) => item.kind === "location" ? [checkIdOf(item.row)].filter(Boolean) as string[] : [])[0];
+  const checkRows = items.flatMap((item) => {
+    const id = item.kind === "location" ? checkIdOf(item.row) : undefined;
+    return id ? [{ key: item.key, id }] : [];
+  });
+  const checkKeys = checkRows.map((row) => row.key);
+  const firstCheckId = checkRows[0]?.id;
+  // A question whose "?" has left (answered, decided elsewhere, another day) closes, and stays closed: coming
+  // back to the day or the row coming back does not reopen it (Codex r2 on #582).
+  const shownOpenCheckId = openCheckId && checkRows.some((row) => row.id === openCheckId) ? openCheckId : null;
+  if (openCheckId && !shownOpenCheckId) setOpenCheckId(null);
   // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
-  // A request stays pending until this day's first "?" has laid out, then is used once (Codex r1 on #573):
-  // a List mounting fresh from Grid, a day change or places arriving later all still land on it.
+  // A request stays pending until its "?" has laid out, then is used once (Codex r1 on #573): a List
+  // mounting fresh from Grid, a day change or places arriving later all still land on it. "N to check"
+  // asks for the next "?" the same way (step 14 part 3b).
   const scroller = useRef<ScrollView>(null);
   // Each row's view, measured against the scroll content when the jump happens, so the position is the
   // row's current one, never a remembered one (Codex r3 on #573).
   const rowViews = useRef(new Map<string, View>());
   const content = useRef<View>(null);
-  const pendingScroll = useRef(false);
+  // "first" (Today's request) or the key of the row to show.
+  const pendingScroll = useRef<string | null>(null);
   const firstCheckKey = checkKeys[0];
   const tryScroll = () => {
-    if (!pendingScroll.current || !firstCheckKey) return;
+    const pending = pendingScroll.current;
+    const target = pending === "first" ? firstCheckKey : pending;
+    if (!pending || !target) return;
     // After the frame commits, so a row that just moved is measured where it is now.
     requestAnimationFrame(() => {
-      const row = rowViews.current.get(firstCheckKey);
-      if (!pendingScroll.current || !row || !content.current) return;
+      const row = rowViews.current.get(target);
+      if (pendingScroll.current !== pending || !row || !content.current) return;
       row.measureLayout(content.current, (_x, y) => {
-        if (!pendingScroll.current) return;
-        pendingScroll.current = false;
+        if (pendingScroll.current !== pending) return;
+        pendingScroll.current = null;
         scroller.current?.scrollTo({ y: Math.max(0, y - 24), animated: !reduceMotion });
-        onScrolledToFirstCheck?.();
+        if (pending === "first") onScrolledToFirstCheck?.();
       }, () => undefined);
     });
   };
   useEffect(() => {
-    if (scrollToFirstCheck) pendingScroll.current = true;
+    if (scrollToFirstCheck) pendingScroll.current = "first";
   }, [scrollToFirstCheck]);
+  // A question belongs to the day it was opened on: another day closes it, even for a "?" both days show
+  // (overnight sleep), before any request for the new day opens one (Codex r4 on #582).
+  const [openDayStartMs, setOpenDayStartMs] = useState(dayStartMs);
+  if (openDayStartMs !== dayStartMs) {
+    setOpenDayStartMs(dayStartMs);
+    setOpenCheckId(null);
+  }
+  // Today's chip also opens the first question, once its "?" is here, and VoiceOver hears it as when a "?"
+  // is tapped (Codex r2 on #582).
+  const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
+  if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckId && onAnswerCheck) {
+    setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckId });
+    setOpenCheckId(firstCheckId);
+  }
+  const openedFirstQuestion = openFirstRequest.id ? checkQuestions?.get(openFirstRequest.id)?.question : undefined;
+  useEffect(() => {
+    if (openedFirstQuestion) AccessibilityInfo.announceForAccessibility(openedFirstQuestion);
+    // Once per request: the question's words are read when the chip opened it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFirstRequest.request]);
+  // A "?" opens (or closes) its question; with no answers here it opens the suggestion instead.
+  const toggleCheck = (id: string) => {
+    if (!onAnswerCheck) {
+      onOpenCheck?.(id);
+      return;
+    }
+    const opening = shownOpenCheckId !== id;
+    setOpenCheckId(opening ? id : null);
+    const question = checkQuestions?.get(id);
+    if (opening && question) AccessibilityInfo.announceForAccessibility(question.question);
+  };
+  // "N to check": the next "?" after the open one (or the first), opened and scrolled to.
+  const openNextCheck = () => {
+    if (!onAnswerCheck) {
+      if (firstCheckId) onOpenCheck?.(firstCheckId);
+      return;
+    }
+    const index = checkRows.findIndex((row) => row.id === shownOpenCheckId);
+    const next = checkRows[(index + 1) % checkRows.length];
+    if (!next) return;
+    setOpenCheckId(next.id);
+    // A Today request still waiting to land is done: this tap moves on from it (Codex r12 on #582).
+    if (pendingScroll.current === "first") onScrolledToFirstCheck?.();
+    pendingScroll.current = next.key;
+    tryScroll();
+    const question = checkQuestions?.get(next.id);
+    if (question) AccessibilityInfo.announceForAccessibility(question.question);
+  };
+  const answerCheck = (id: string, logged: boolean) => {
+    setOpenCheckId(null);
+    onAnswerCheck?.(id, logged);
+  };
   useEffect(() => {
     tryScroll();
   });
@@ -161,8 +242,8 @@ export function CalendarListView({
           {formatLocaleDate(new Date(dayStartMs), { weekday: "short", day: "numeric", month: "short" })}
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.dayMeta, { color: theme.textSecondary }]}>{loggedLabel} logged</Text>
-        {checkKeys.length && firstCheckId && onOpenCheck ? (
-          <Pressable accessibilityHint="Opens the first one" accessibilityRole="button" hitSlop={6} onPress={() => onOpenCheck(firstCheckId)}
+        {checkKeys.length && firstCheckId && (onAnswerCheck || onOpenCheck) ? (
+          <Pressable accessibilityHint={onAnswerCheck ? "Opens the next one" : "Opens the first one"} accessibilityRole="button" hitSlop={6} onPress={openNextCheck}
             style={({ pressed }) => [styles.checksChip, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
             <DayframeIcon color={theme.warningText} glyph={DAYFRAME_APP_ICONS.placeUnknown} size={14} />
             <Text {...mobileTextProps("control")} style={[styles.checksChipText, { color: theme.warningText }]}>{checkKeys.length} to check</Text>
@@ -195,7 +276,18 @@ export function CalendarListView({
               layout={localLayoutTransition(reduceMotion)} onLayout={() => tryScroll()}
               ref={(view: View | null) => { if (view) rowViews.current.set(item.key, view); else rowViews.current.delete(item.key); }}
               style={divider}>
-              <LocationRow checkTitles={checkTitles} onOpenCheck={onOpenCheck} row={item.row} theme={theme} time={time} />
+              <LocationRow answering={Boolean(onAnswerCheck)} checkTitles={checkTitles} onToggleCheck={onAnswerCheck || onOpenCheck ? toggleCheck : undefined}
+                openCheckId={shownOpenCheckId} row={item.row} theme={theme} time={time} />
+              {(() => {
+                const id = checkIdOf(item.row);
+                const question = id && id === shownOpenCheckId ? checkQuestions?.get(id) : undefined;
+                return id && question ? (
+                  <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
+                    <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)} onMore={question.more && onOpenCheck ? () => onOpenCheck(id) : undefined}
+                      onOpen={question.opens && onOpenCheck ? () => onOpenCheck(id) : undefined} question={question} theme={theme} />
+                  </Animated.View>
+                ) : null;
+              })()}
             </Animated.View>
           );
         })}
@@ -289,17 +381,20 @@ function LegRows({ legs, theme, time }: { legs: readonly TripLeg[]; theme: Mobil
   );
 }
 
-function LocationRow({ checkTitles, onOpenCheck, row, theme, time }: {
-  checkTitles?: ReadonlyMap<string, string>; onOpenCheck?: (reviewItemId: string) => void; row: LocationListRow; theme: MobileTheme;
-  time: (ms: number) => string;
+function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, theme, time }: {
+  /** The "?" opens its question here (step 14 part 3b); otherwise it opens the suggestion. */
+  answering: boolean; checkTitles?: ReadonlyMap<string, string>; onToggleCheck?: (reviewItemId: string) => void;
+  openCheckId: string | null; row: LocationListRow; theme: MobileTheme; time: (ms: number) => string;
 }) {
+  const hint = (id: string) => answering ? (openCheckId === id ? "Hides the question" : "Shows the question") : "Opens it to answer";
   if (row.kind === "check") {
     // A suggestion on a row of its own: Apple Health, a trip not in a block yet, or any other.
     const title = checkTitles?.get(row.checkId) ?? "Something to check";
     const span = row.startedAt ? `${time(Date.parse(row.startedAt))}${row.stoppedAt ? `–${time(Date.parse(row.stoppedAt))}` : ""}` : "";
     return (
-      <Pressable accessibilityHint="Opens it to answer" accessibilityLabel={[`Check ${title}`, span, row.trip ? modesLabel(row.trip.legs, row.trip.route) : null].filter(Boolean).join(". ")}
-        accessibilityRole="button" disabled={!onOpenCheck} onPress={() => onOpenCheck?.(row.checkId)}
+      <Pressable accessibilityHint={hint(row.checkId)} accessibilityLabel={[`Check ${title}`, span, row.trip ? modesLabel(row.trip.legs, row.trip.route) : null].filter(Boolean).join(". ")}
+        accessibilityRole="button" accessibilityState={answering ? { expanded: openCheckId === row.checkId } : undefined}
+        disabled={!onToggleCheck} onPress={() => onToggleCheck?.(row.checkId)}
         style={({ pressed }) => [styles.rowMain, { opacity: pressed ? 0.7 : 1 }]}>
         <CheckMark theme={theme} />
         <View style={styles.text}>
@@ -361,13 +456,56 @@ function LocationRow({ checkTitles, onOpenCheck, row, theme, time }: {
         </View>
         <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textSecondary }]}>{formatDuration(length)}</Text>
       </View>
-      {checkId && onOpenCheck ? (
+      {checkId && onToggleCheck ? (
         // Its "?": the place's suggestion, answered from here (location v4 step 14).
-        <Pressable accessibilityHint="Opens it to answer" accessibilityLabel={`Check ${checkTitle}`} accessibilityRole="button" hitSlop={4}
-          onPress={() => onOpenCheck(checkId)} style={({ pressed }) => [styles.checkButton, { opacity: pressed ? 0.7 : 1 }]}>
+        <Pressable accessibilityHint={hint(checkId)} accessibilityLabel={`Check ${checkTitle}`} accessibilityRole="button"
+          accessibilityState={answering ? { expanded: openCheckId === checkId } : undefined} hitSlop={4}
+          onPress={() => onToggleCheck(checkId)} style={({ pressed }) => [styles.checkButton, { opacity: pressed ? 0.7 : 1 }]}>
           <CheckMark small theme={theme} />
         </Pressable>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * A "?"'s question under its row (mock-up #ios-list): what it asks, why, and one-tap answers in 44-point
+ * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen). A
+ * suggestion without a complete time cannot be answered here: it says so and offers "Open it" instead.
+ */
+function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
+  onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
+}) {
+  return (
+    <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="calendar-list-question">
+      <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
+      {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
+      <View style={styles.answers}>
+        {question.logLabel ? (
+          <Pressable accessibilityRole="button" onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.surface }]}>{question.logLabel}</Text>
+          </Pressable>
+        ) : null}
+        {question.skipLabel ? (
+          <Pressable accessibilityRole="button" onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
+          </Pressable>
+        ) : null}
+        {question.opens && onOpen ? (
+          <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" onPress={onOpen} testID="calendar-list-answer-open"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
+          </Pressable>
+        ) : null}
+        {onMore ? (
+          <Pressable accessibilityHint="Pick or name another place" accessibilityRole="button" onPress={onMore} testID="calendar-list-answer-more"
+            style={({ pressed }) => [styles.answer, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textSecondary }]}>More…</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -414,5 +552,10 @@ const styles = StyleSheet.create({
   checksChip: { marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 12 },
   checksChipText: { fontSize: 13, fontWeight: "700" },
   checkButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", marginRight: 6 },
-  checkMarkSmall: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center" }
+  checkMarkSmall: { width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center" },
+  question: { marginHorizontal: 14, marginBottom: 12, marginLeft: 62, borderRadius: 14, padding: 12, gap: 4 },
+  questionTitle: { fontSize: 15, fontWeight: "700" },
+  answers: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  answer: { minHeight: 44, borderRadius: DAYFRAME_BLOCKS.radius.pill, paddingHorizontal: 16, justifyContent: "center" },
+  answerText: { fontSize: 14, fontWeight: "700" }
 });

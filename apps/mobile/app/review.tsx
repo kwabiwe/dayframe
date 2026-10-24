@@ -138,8 +138,10 @@ import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
 import { DAYFRAME_APP_ICONS, formatClockTime, outingKeyOf, reviewCardCount, type ClockFormat } from "@dayframe/shared";
 import {
-  heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings
+  heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
+import { reviewAnswerMutation } from "@/lib/reviewAnswer";
+import { claimReviewAnswer, releaseReviewAnswer, reviewAnswersDecided, reviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -311,7 +313,7 @@ export default function ReviewScreen() {
   logAsDraftsRef.current = logAsDrafts;
   const logAsNames = useRef(new Map<string, string>());
   const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
-  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld) => void>(() => undefined);
+  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld, verified?: boolean) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
     onChange: setHeldDeckDecision,
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
@@ -1587,10 +1589,11 @@ export default function ReviewScreen() {
       forgetBulkDecisions(held.items.map((entry) => entry.key));
       return;
     }
-    // The batch claims its items, so no single decision can start for them while it saves.
+    // The batch claims its items, so no single decision can start for them while it saves, here or in
+    // Calendar › List (the shared claims, Codex r5 on #582).
     const claim = -held.token;
-    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId));
-    const busy = held.items.filter((entry) => reviewMutations.current.has(entry.itemId));
+    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId) && claimReviewAnswer([entry.itemId]));
+    const busy = held.items.filter((entry) => !claimed.includes(entry));
     for (const entry of claimed) reviewMutations.current.set(entry.itemId, claim);
     setDeckKeysCommitting(claimed.map((entry) => entry.key), true);
     // An item a capped refresh paged out is still open: it is saved from the copy the deck showed.
@@ -1601,8 +1604,24 @@ export default function ReviewScreen() {
       return known && isOpenReviewItem(known) ? known : undefined;
     };
     void (async () => {
+      // Holding the claims, read the outbox for these moments first (Codex r7 on #582): one Calendar ›
+      // List decided meanwhile is resolved, never skipped again from the copy the deck remembered. An
+      // outbox that cannot be read leaves every moment unsaved and still here, as a failed write would.
+      const loaded = dataRef.current;
+      const rememberedItems = claimed.flatMap((entry) => {
+        const remembered = !loaded?.reviewItems.some((candidate) => candidate.id === entry.itemId) ? knownDeckItem(entry.itemId) : undefined;
+        return remembered ? [remembered] : [];
+      });
+      const decided = loaded
+        ? await reviewAnswersDecided(
+          rememberedItems.length ? { ...loaded, reviewItems: [...loaded.reviewItems, ...rememberedItems] } : loaded,
+          claimed.map((entry) => entry.itemId)
+        ).catch((error: unknown) => ({ error }))
+        : { error: new Error("Review data is not loaded.") };
+      const readFailed = "error" in decided;
       const outcome = await runReviewBulkSkip<MobileReviewItem>(claimed, {
         enqueue: async (item) => {
+          if (readFailed) throw decided.error;
           const current = dataRef.current;
           if (!current) throw new Error("Review data is not loaded.");
           const bootstrap = current.reviewItems.some((candidate) => candidate.id === item.id)
@@ -1619,6 +1638,7 @@ export default function ReviewScreen() {
           const current = reviewMutations.current.get(itemId);
           return current !== undefined && current !== claim;
         },
+        decided: readFailed ? new Set() : decided,
         openItem,
         ownerMatches,
         signature: reviewDeckProposalSignature
@@ -1637,6 +1657,7 @@ export default function ReviewScreen() {
       for (const entry of claimed) {
         if (reviewMutations.current.get(entry.itemId) === claim) reviewMutations.current.delete(entry.itemId);
       }
+      releaseReviewAnswer(claimed.map((entry) => entry.itemId));
       setDeckKeysCommitting(claimed.map((entry) => entry.key), false);
       const notSaved = [...busy, ...outcome.changed, ...outcome.failed];
       forgetBulkDecisions([...notSaved, ...outcome.resolved, ...outcome.abandoned].map((entry) => entry.key));
@@ -1675,7 +1696,9 @@ export default function ReviewScreen() {
     })();
   }
 
-  commitHeldDeckDecisionRef.current = (held) => {
+  // `verified`: the outbox has been read for this decision, under its claim; this second pass validates
+  // everything again, as it is now, and saves.
+  commitHeldDeckDecisionRef.current = (held, verified = false) => {
     if (held.kind === "batch") {
       commitHeldBulkSkip(held);
       return;
@@ -1707,6 +1730,8 @@ export default function ReviewScreen() {
       return known && isOpenReviewItem(known) ? known : undefined;
     };
     if (!item) {
+      // (After the outbox read the card may already be marked as committing.)
+      if (verified) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       // Resolved elsewhere while held: this visit did not decide it (its Moves show on their own).
       restoreMembers();
@@ -1721,6 +1746,7 @@ export default function ReviewScreen() {
       // A refresh changed the suggestion while the decision was held: the user decided about
       // something else, so nothing is saved and the card comes back as it is now.
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      if (verified) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       restorePagedOutDeckItem(held.itemId);
       restoreMembers();
@@ -1746,28 +1772,72 @@ export default function ReviewScreen() {
       restoreMembers();
       undoCount();
     };
-    let started: boolean;
     const edit = held.logged ? deckLogAsEdit(item) : null;
-    if (held.outing && members.length) {
-      // One outbox row for the whole outing, sent on the Stay's card; its Moves are hidden with it.
-      started = resolveItem(
+    // One outbox row for the whole outing, sent on the Stay's card; its Moves are hidden with it. The
+    // mutation is the one rule Calendar › List answers with too (reviewAnswer.ts, step 14 part 3b).
+    const outing = Boolean(held.outing && members.length);
+    const start = () => {
+      const started = resolveItem(
         item,
-        reviewDeckOutingMutation(members.map((member) => member.id), held.logged, edit),
+        reviewAnswerMutation(item, held.logged, { edit, outingMemberIds: outing ? members.map((member) => member.id) : undefined }),
         `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
         settled,
         failed,
-        { unlisted, affectedItems: [item, ...members] }
+        outing ? { unlisted, affectedItems: [item, ...members], fromHold: true } : { unlisted, fromHold: true }
       );
-    } else if (edit) {
-      started = resolveItem(item, { action: "edit_and_confirm", edit }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
-    } else if (held.logged) {
-      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
-    } else {
-      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
+      // Not started (a change for this item is already saving, or the item has gone): the card is
+      // not this visit's decision.
+      if (!started) failed();
+    };
+    // Claim, read the outbox, check again, save (reviewAnswerClaims.ts, Codex r2 and r6 on #582): holding
+    // the shared claim, the deck reads whether this phone has decided these moments meanwhile (Calendar ›
+    // List answering the same suggestion), then lets it go and validates, claims and saves in one turn.
+    if (verified) {
+      start();
+      return;
     }
-    // Not started (a change for this item is already saving, or the item has gone): the card is
-    // not this visit's decision.
-    if (!started) failed();
+    const loadedData = dataRef.current;
+    if (!loadedData) {
+      failed();
+      return;
+    }
+    const affected = outing ? [item, ...members] : [item];
+    const ids = affected.map((candidate) => candidate.id);
+    if (!claimReviewAnswer(ids)) {
+      // Being saved on the other surface now: not this visit's decision.
+      failed();
+      return;
+    }
+    const remembered = affected.filter((candidate) => !loadedData.reviewItems.some((loaded) => loaded.id === candidate.id));
+    const owner = reviewDataOwnerKey(loadedData);
+    void reviewAnswerStillOpen(
+      remembered.length ? { ...loadedData, reviewItems: [...loadedData.reviewItems, ...remembered] } : loadedData,
+      ids
+    ).then((open) => ({ open }), (error: unknown) => ({ error })).then((outcome) => {
+      releaseReviewAnswer(ids);
+      // Another account now (Codex r3 on #582): nothing of this one is saved, counted or said there.
+      if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {
+        settled();
+        return;
+      }
+      if ("error" in outcome) {
+        // The outbox could not be read: not saved, and the card is still here, as after a failed save.
+        failed();
+        AccessibilityInfo.announceForAccessibility("The Review choice wasn’t saved. The moment is still here.");
+        Alert.alert("Review", friendlyMobileErrorMessage(outcome.error, "Couldn’t save this Review choice on this iPhone."));
+        return;
+      }
+      if (!outcome.open) {
+        // Decided elsewhere meanwhile: not this visit's decision, and nothing more is saved.
+        settled();
+        restoreMembers();
+        undoCount();
+        return;
+      }
+      // Checked against the suggestion as it is now (a refresh during the read may have changed it), and
+      // claimed again by resolveItem in this same turn.
+      commitHeldDeckDecisionRef.current(held, true);
+    });
   };
 
   // A committing card whose item has left the open list and has no save still in flight no longer
@@ -2115,14 +2185,18 @@ export default function ReviewScreen() {
     successAnnouncement: string,
     onCommitted?: () => void,
     onFailed?: () => void,
-    /** `affectedItems`: every card the change decides (an outing's Stay and Moves), the item first. */
-    options: { unlisted?: boolean; affectedItems?: MobileReviewItem[] } = {}
+    /**
+     * `affectedItems`: every card the change decides (an outing's Stay and Moves), the item first.
+     * `fromHold`: the decision a hold ended (its outbox read done); a newer held card keeps its whole
+     * Undo window (Codex r11 on #582).
+     */
+    options: { unlisted?: boolean; affectedItems?: MobileReviewItem[]; fromHold?: boolean } = {}
   ) {
     const affected = options.affectedItems ?? [item];
     const claimed = () => affected.some((candidate) => reviewMutations.current.has(candidate.id));
     if (claimed()) return false;
     // Any other decision (More › Dismiss, an edit) saves a held card first, as a throw does.
-    deckHold.flush();
+    if (!options.fromHold) deckHold.flush();
     // That flush may have saved this very item (a held bulk skip covering it): decided once.
     if (claimed()) return false;
     const loadedData = dataRef.current;
@@ -2134,9 +2208,12 @@ export default function ReviewScreen() {
     const unlistedItems = affected.filter((candidate) => !loadedData.reviewItems.some((loaded) => loaded.id === candidate.id));
     const currentData = unlistedItems.length ? { ...loadedData, reviewItems: [...loadedData.reviewItems, ...unlistedItems] } : loadedData;
 
+    // One claim across every surface that answers (Calendar › List too, step 14 part 3b).
+    if (!claimReviewAnswer(affected.map((candidate) => candidate.id))) return false;
     for (const candidate of affected) reviewMutations.current.set(candidate.id, 1);
     const release = () => {
       for (const candidate of affected) reviewMutations.current.delete(candidate.id);
+      releaseReviewAnswer(affected.map((candidate) => candidate.id));
     };
     const clientMutationId = createReviewClientMutationId();
     void enqueueReviewMutation({
@@ -2271,6 +2348,9 @@ export default function ReviewScreen() {
     // Saving any edit (a Review item or a legacy entry) saves a held card first.
     deckHold.flush();
     setEditSaving(true);
+    // The account the save began in: an outcome after another account's data arrived says nothing there
+    // (Codex r12 on #582).
+    let editOwner: string | null = null;
     try {
       if (editTarget.kind === "reviewItem") {
         if (!patch.startedAt || !patch.stoppedAt) {
@@ -2279,24 +2359,39 @@ export default function ReviewScreen() {
         }
         const currentData = dataRef.current;
         if (!currentData) return false;
+        editOwner = reviewDataOwnerKey(currentData);
+        // Already gone (decided elsewhere, refreshed away): said, as the later checks say it (Codex r12 on #582).
         if (!currentData.reviewItems.some(
           (candidate) => candidate.id === editTarget.item.id
-        )) return false;
-        await enqueueReviewMutation({
-          bootstrap: currentData,
-          item: editTarget.item,
-          clientMutationId: createReviewClientMutationId(),
-          mutation: {
-            action: "edit_and_confirm",
-            edit: {
-              categoryId: patch.categoryId ?? null,
-              description: patch.description?.trim() || undefined,
-              startedAt: patch.startedAt,
-              stoppedAt: patch.stoppedAt,
-              tags: patch.tagNames
-            }
+        )) throw new Error("This suggestion is no longer available.");
+        // The same order as every answer (reviewAnswerClaims.ts, Codex r11 on #582): claim it, read the
+        // outbox, check again, write; Calendar › List can neither save it meanwhile nor have saved it unseen.
+        const editIds = [editTarget.item.id];
+        if (!claimReviewAnswer(editIds)) throw new Error("This suggestion is being saved already.");
+        try {
+          if (!(await reviewAnswerStillOpen(currentData, editIds))) throw new Error("This suggestion was already answered.");
+          const latest = dataRef.current;
+          if (!latest || !latest.reviewItems.some((candidate) => candidate.id === editTarget.item.id && isOpenReviewItem(candidate))) {
+            throw new Error("This suggestion is no longer available.");
           }
-        });
+          await enqueueReviewMutation({
+            bootstrap: latest,
+            item: editTarget.item,
+            clientMutationId: createReviewClientMutationId(),
+            mutation: {
+              action: "edit_and_confirm",
+              edit: {
+                categoryId: patch.categoryId ?? null,
+                description: patch.description?.trim() || undefined,
+                startedAt: patch.startedAt,
+                stoppedAt: patch.stoppedAt,
+                tags: patch.tagNames
+              }
+            }
+          });
+        } finally {
+          releaseReviewAnswer(editIds);
+        }
         const currentProjection = dataRef.current;
         if (currentProjection) {
           const projected = await projectReviewBootstrapFromStore(currentProjection)
@@ -2340,6 +2435,7 @@ export default function ReviewScreen() {
       }
       return true;
     } catch (error) {
+      if (editOwner && (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== editOwner)) return false;
       if (error instanceof AuthRequiredError) {
         router.replace("/");
         return false;

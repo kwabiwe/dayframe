@@ -8,6 +8,7 @@ function source(relativePath: string) {
 
 const deck = source("./ReviewDeck.tsx");
 const screen = source("../../../app/review.tsx");
+const answer = source("../../lib/reviewAnswer.ts");
 const theme = source("../../lib/mobileTheme.ts");
 
 function styleBlock(name: string) {
@@ -44,12 +45,12 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     // An outing's Moves stay out with its Stay's card (PRD D19, PR 12b).
     expect(screen).toContain("const committingKeys = [held.key, ...memberKeys];");
     expect(screen).toContain("setDeckKeysCommitting(committingKeys, true);");
-    expect(screen).toMatch(/started = resolveItem\(item, \{ action: "edit_and_confirm", edit \}, [^\n]*settled, failed, \{ unlisted \}\);/);
-    expect(screen).toMatch(/started = resolveItem\([^\n]*ignore_once[^\n]*settled, failed, \{ unlisted \}\);/);
+    // One save for every choice, from the shared rule (reviewAnswer.ts, location v4 step 14 part 3b).
+    expect(screen).toMatch(/const started = resolveItem\(\s*item,\s*reviewAnswerMutation\(item, held\.logged, \{ edit, outingMemberIds: [^\n]*\),[\s\S]*?settled,\s*failed,\s*outing \? \{ unlisted, affectedItems: \[item, \.\.\.members\], fromHold: true \} : \{ unlisted, fromHold: true \}\s*\);/);
+    expect(answer).toContain('if (edit) return { action: "edit_and_confirm", edit };');
     expect(screen).toContain("if (!started) failed();");
     expect(screen).toContain("const claimed = () => affected.some((candidate) => reviewMutations.current.has(candidate.id));");
     expect(screen).toContain("if (claimed()) return false;");
-    expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');
   });
 
   it("folds an outing's Moves into its Stay's card and decides them together (PRD D19, PR 12b)", () => {
@@ -58,7 +59,7 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     // A Today ribbon focus on a folded Move leads with its outing's card.
     expect(screen).toContain('const focusTarget = focusedAnchor ? reviewFocusKey("review", focusedAnchor) : highlightedFocusKey;');
     // One outbox row on the Stay's card hides every part; Undo and a failed save bring every part back.
-    expect(screen).toContain("{ unlisted, affectedItems: [item, ...members] }");
+    expect(screen).toContain("{ unlisted, affectedItems: [item, ...members], fromHold: true }");
     expect(screen).toContain("for (const member of held.outing?.members ?? []) restorePagedOutDeckItem(member.itemId);");
     expect(screen).toMatch(/const failed = \(\) => \{[\s\S]*?restoreMembers\(\);[\s\S]*?undoCount\(\);/);
     expect(deck).toContain('testID="review-deck-outing"');
@@ -135,7 +136,8 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
 
   it("retires a cut-short flight on the save outcome and flushes a held card on any decision (r3 3, 4)", () => {
     expect(screen).toMatch(/const settled = \(\) => \{\s*setDeckKeysCommitting\(committingKeys, false\);[\s\S]*?setFlyingDeckKey/);
-    expect(screen).toMatch(/if \(claimed\(\)\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
+    // (Not when the decision is the one a hold ended: a newer held card keeps its Undo, Codex r11 on #582.)
+    expect(screen).toMatch(/if \(claimed\(\)\) return false;\s*\/\/[^\n]*\n\s*if \(!options\.fromHold\) deckHold\.flush\(\);/);
     expect(screen).toMatch(/if \(!editTarget\) return false;\s*\/\/[^\n]*\n\s*deckHold\.flush\(\);/);
   });
 
@@ -187,7 +189,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
     expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
     expect(screen).toMatch(/function deckLogAsEdit\(item: MobileReviewItem\) \{\s*return reviewLogAsEdit\(\{/);
-    expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
+    expect(answer).toContain('if (edit) return { action: "edit_and_confirm", edit };');
     // The field is uncontrolled and its touches never start a throw.
     expect(deck).toContain("defaultValue={card.logAsName}");
     expect(deck).toContain(".requireExternalGestureToFail(logAsFieldGesture)");
@@ -248,7 +250,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     expect(screen).toContain("return knownDeckItems.get(itemId, dataRef.current);");
     expect(screen).not.toMatch(/knownDeckItems\.current/);
     // A single decision whose flush saved the same item through a batch stops there.
-    expect(screen).toMatch(/deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(claimed\(\)\) return false;/);
+    expect(screen).toMatch(/if \(!options\.fromHold\) deckHold\.flush\(\);\s*\/\/ That flush may have saved this very item[^\n]*\n\s*if \(claimed\(\)\) return false;/);
     // The longer menu stays inside the screen with a visible Cancel.
     expect(menu).toContain("maxHeight: windowHeight - insets.top");
     expect(menu).toContain(">Cancel</Text>");
