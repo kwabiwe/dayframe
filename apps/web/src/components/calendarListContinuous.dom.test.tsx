@@ -210,9 +210,11 @@ describe("useLocationTimelines refreshes and teardown (Codex r1 on #584)", () =>
 
   it("keeps its days in read order, a day read again moving last (Codex r5 on #584)", async () => {
     clientFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => day(decodeURIComponent(url.split("date=")[1])) }));
-    const { result, rerender } = renderHook(({ stale }) => useLocationTimelines(["2026-10-22", "2026-10-21"], [], "data", stale, "w1:u1"),
+    // Read first: the 21st, then the 22nd.
+    const { result, rerender } = renderHook(({ stale }) => useLocationTimelines(["2026-10-21", "2026-10-22"], [], "data", stale, "w1:u1"),
       { initialProps: { stale: 0 } });
     await waitFor(() => expect(result.current.size).toBe(2));
+    expect([...result.current.keys()]).toEqual(["2026-10-21", "2026-10-22"]);
     clientFetch.mockImplementation((url: string) => {
       const date = decodeURIComponent(url.split("date=")[1]);
       // The 21st answers at once; the 22nd later.
@@ -374,6 +376,23 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     const { rerender } = render(list(days(15, 18)));
     rerender(list([...days(15, 18), ...days(5, 11)]));
     expect(headingTop(11)).toBe(0);
+  });
+
+  it("keeps what is in view in place when a block moves between two shown days above it (Codex r6 on #584)", () => {
+    // 20 → 10, one block a day, and a second on the 14th; selected the 20th (the top).
+    const second = entry("x14", new Date(2026, 9, 14, 15));
+    const view = (moved: boolean) => list([...days(15, 20), ...(moved ? [entry("x14", new Date(2026, 9, 15, 15))] : []),
+      ...(moved ? [] : [second]), ...days(10, 14)].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)),
+    { focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20" });
+    const { rerender } = render(view(false));
+    const root = document.querySelector(".timeline-list-scroll")!;
+    // The person scrolls the 14th's heading to the top; the List notes it on its next render.
+    root.scrollTop += headingTop(14);
+    rerender(view(false));
+    expect(headingTop(14)).toBe(0);
+    // The second block moves to the 15th: a row more above, a row fewer below, the same height.
+    rerender(view(true));
+    expect(headingTop(14)).toBe(0);
   });
 
   it("stops at the person's own scrolling, and when no earlier week can come", () => {

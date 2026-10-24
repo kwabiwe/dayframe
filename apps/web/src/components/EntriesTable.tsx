@@ -418,10 +418,12 @@ export function EntriesTable({
   const focusPending = () => focusRequest !== null && focusDoneRef.current !== focusRequest;
   // What is in view stays in place when rows are added above it (a later week, a day's places arriving):
   // the first row in view keeps its position, in every browser (the List turns native anchoring off).
-  // Found by a binary search over the rows (they are in top order), and reconciled only when the List's
-  // height changed, so neither scrolling nor a running block's tick rescans the loaded history.
+  // Found by a binary search over the rows (they are in top order) and reconciled after every render: a
+  // change can move rows above it without changing the List's height (a block moving between two shown
+  // days, Codex r6 on #584), and one anchor measurement is cheap, so nothing rescans the loaded history.
   // `contentTop`: the row's offset within the List's content, so a shift is measured apart from scrolling.
-  const scrollAnchorRef = useRef<{ element: Element; contentTop: number; scrollHeight: number } | null>(null);
+  // `selector` finds the same row again when React remounts it (a day heading is keyed by its newest block).
+  const scrollAnchorRef = useRef<{ element: Element; selector: string | null; contentTop: number } | null>(null);
   const recordScrollAnchor = () => {
     const root = listScrollRef.current;
     if (!root || !continuous) return;
@@ -436,7 +438,7 @@ export function EntriesTable({
     }
     const element = rows[low];
     scrollAnchorRef.current = element
-      ? { element, contentTop: element.getBoundingClientRect().top - rootTop + root.scrollTop, scrollHeight: root.scrollHeight }
+      ? { element, selector: listRowSelector(element), contentTop: element.getBoundingClientRect().top - rootTop + root.scrollTop }
       : null;
   };
   const anchorFrameRef = useRef<number | null>(null);
@@ -449,10 +451,12 @@ export function EntriesTable({
     if (!root || !continuous) return;
     // The selected day is still being brought to the top: that, not the anchor, decides the position.
     if (focusPending()) return;
-    if (anchor && root.scrollHeight === anchor.scrollHeight && anchor.element.isConnected) return;
     // Also at the very top: a later week loading there must not pull the List up to today.
-    if (anchor && anchor.element.isConnected) {
-      const moved = anchor.element.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - anchor.contentTop;
+    const element = anchor
+      ? anchor.element.isConnected ? anchor.element : anchor.selector ? root.querySelector(anchor.selector) : null
+      : null;
+    if (anchor && element) {
+      const moved = element.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - anchor.contentTop;
       if (Math.abs(moved) >= 1) root.scrollTop += moved;
     }
     recordScrollAnchor();
@@ -1545,6 +1549,17 @@ export function listDayTotals(
     }
   }
   return totals;
+}
+
+/** A selector that finds a List row again after React remounts it, or null for a row without an identity. */
+function listRowSelector(row: Element) {
+  const element = row as HTMLElement;
+  const quoted = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;
+  if (element.dataset.dayStartMs) return `tr[data-day-start-ms=${quoted(element.dataset.dayStartMs)}]`;
+  if (element.id) return `tr[id=${quoted(element.id)}]`;
+  if (element.dataset.timelineGroupKey) return `tr[data-timeline-group-key=${quoted(element.dataset.timelineGroupKey)}]`;
+  if (element.dataset.locationRow) return `tr[data-location-row=${quoted(element.dataset.locationRow)}]`;
+  return null;
 }
 
 /** A shown day's location row, placed by its time within the day it was read for. */
