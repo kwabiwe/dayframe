@@ -7,6 +7,7 @@ function source(relativePath: string) {
 }
 
 const reviewSource = source("../../app/review.tsx");
+const answerSource = source("../lib/reviewAnswer.ts");
 const evidenceSource = source("../../app/review/[id].tsx");
 const evidenceEditorSource = source("./location/LocationReviewCorrectionEditor.tsx");
 const evidenceMapSource = source("./location/LocationEvidenceMap.tsx");
@@ -24,7 +25,9 @@ describe("mobile Review action contracts", () => {
     // Step 5b: the buttons throw the card; the held decision is saved with the same mutations.
     expect(reviewSource).toMatch(/onLog=\{[\s\S]*?requestDeckThrow\(1\)/);
     expect(reviewSource).toContain("onSkip={() => requestDeckThrow(-1)}");
-    expect(reviewSource).toMatch(/commitHeldDeckDecisionRef\.current = [\s\S]*?\{ action: "confirm" \} : \{ action: "accept" \}[\s\S]*?\{ action: "ignore_once_location" \} : \{ action: "ignore_once" \}/);
+    // The mutations live in the one rule Calendar › List answers with too (location v4 step 14, part 3b).
+    expect(reviewSource).toMatch(/commitHeldDeckDecisionRef\.current = [\s\S]*?reviewAnswerMutation\(item, held\.logged, /);
+    expect(answerSource).toMatch(/\{ action: "confirm" \} : \{ action: "accept" \}[\s\S]*?\{ action: "ignore_once_location" \} : \{ action: "ignore_once" \}/);
     expect(reviewSource).toMatch(/hasV2LocationEvidence\(topDeckSource\.item\)[\s\S]*?pathname: "\/review\/\[id\]"/);
     expect(deckSource).toContain('accessibilityLabel="Edit before logging"');
     expect(helperSource).toContain("Confirm commute");

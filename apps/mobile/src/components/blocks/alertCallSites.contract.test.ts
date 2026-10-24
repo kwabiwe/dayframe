@@ -25,6 +25,7 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
   ],
   "app/review.tsx": [
     '"Review"', // bulk skip: some moments not saved on this iPhone
+    '"Review"', // a held card's outbox check could not be read: not saved (Codex r3 on #582)
     '"Review"', // a Review change was not saved on this iPhone
     '"Edit"', // follow-up: validation inside the open entry sheet (a toast would sit under its modal)
     '"Edit"' // save failed
@@ -47,6 +48,9 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Apple Health"', // follow-up: sleep permission guidance
     '"Apple Health"', // permission request failed
     '"Couldn\'t sign out"'
+  ],
+  "src/components/calendar/useCalendarCheckAnswers.ts": [
+    '"Calendar"' // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
   ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',

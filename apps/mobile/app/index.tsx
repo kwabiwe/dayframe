@@ -7,6 +7,7 @@ const todayTabHref = "/(tabs)/today" as Href;
 const QA_ROUTES: Record<string, Href> = {
   "calendar-qa": "/calendar-qa" as Href,
   "calendar-qa-list": "/calendar-qa?layout=list" as Href,
+  "calendar-qa-question": "/calendar-qa?layout=list&check=1" as Href,
   "calendar-qa-dense": "/calendar-qa?day=dense" as Href,
   "calendar-qa-dense-cycle": "/calendar-qa?day=dense&cycle=1" as Href
 };

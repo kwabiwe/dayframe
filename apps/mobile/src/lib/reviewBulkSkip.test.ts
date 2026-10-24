@@ -4,7 +4,8 @@ import {
   reviewBulkSkipCandidates,
   reviewBulkSkipConfirmation,
   reviewBulkSkipOwnerMatches,
-  reviewBulkSkipToast
+  reviewBulkSkipToast,
+  runReviewBulkSkip
 } from "./reviewBulkSkip";
 
 const now = Date.parse("2026-10-08T12:00:00.000Z");
@@ -98,5 +99,25 @@ describe("reviewBulkSkipOwnerMatches", () => {
     expect(reviewBulkSkipOwnerMatches(owner, { workspace: { id: "w2" }, user: { id: "u1" } })).toBe(false);
     expect(reviewBulkSkipOwnerMatches(owner, { workspace: { id: "w1" }, user: { id: "u2" } })).toBe(false);
     expect(reviewBulkSkipOwnerMatches(owner, null)).toBe(false);
+  });
+});
+
+describe("runReviewBulkSkip beside Calendar › List (Codex r7 on #582)", () => {
+  it("resolves a moment the outbox shows decided meanwhile, never skipping it again from a remembered copy", async () => {
+    // Calendar › List logged "a" while "Skip all" was held; the deck still remembers its open copy.
+    const entries = [{ key: "review:a", itemId: "a", proposal: "p-a" }, { key: "review:b", itemId: "b", proposal: "p-b" }];
+    const written: string[] = [];
+    const outcome = await runReviewBulkSkip<{ id: string; proposal: string }>(entries, {
+      decided: new Set(["a"]),
+      enqueue: async (item) => { written.push(item.id); },
+      isSaving: () => false,
+      openItem: (itemId) => ({ id: itemId, proposal: `p-${itemId}` }),
+      ownerMatches: () => true,
+      signature: (item) => item.proposal
+    });
+    expect(written).toEqual(["b"]);
+    expect(outcome.resolved.map((entry) => entry.itemId)).toEqual(["a"]);
+    expect(outcome.saved.map((entry) => entry.itemId)).toEqual(["b"]);
+    expect(outcome.failed).toEqual([]);
   });
 });

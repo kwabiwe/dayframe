@@ -15,7 +15,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).toContain("<TodayChecksChip count={checkCounts.today} onOpen={openTodayChecks}");
     expect(dashboard).not.toContain("<TodayReviewNudge");
     expect(dashboard).toContain('router.navigate("/(tabs)/calendar");');
-    expect(dashboard).toContain("setCalendarCheckScroll((current) => current + 1);");
+    // A monotonic request id, so every tap reopens the first question (Codex r1 on #582).
+    expect(dashboard).toContain("calendarCheckRequests.current += 1;");
+    expect(dashboard).toContain("setCalendarCheckScroll(calendarCheckRequests.current);");
     // Counts use the List's own rule, and leave suggestions decided on this phone at once (Codex r1 on #573).
     expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
     expect(dashboard).toContain("listCheckOverlaps(check, weekStart, tomorrowStart)");
@@ -26,8 +28,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    expect(dashboard).toContain("const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
-    // An outing counts once on its day (PRD D19, PR 12c).
+    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
+    // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582).
+    expect(dashboard).toContain("const { folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");
     expect(dashboard).toContain("reviewCounts={earlierDayReviewCountMap}");
   });

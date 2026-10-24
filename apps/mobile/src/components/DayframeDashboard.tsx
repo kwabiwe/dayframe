@@ -42,7 +42,6 @@ import {
   timerStateChanged,
   timerStatePollDelay,
   formatClockTime,
-  foldedOutingMemberIds,
   reviewCardCount,
   type ClockFormat,
   type RecentActivitySuggestion,
@@ -67,7 +66,7 @@ import { layoutQuickStartMosaic, rankQuickStartActivities, weeklySecondsByActivi
 import { TodayReviewPresentationProvider } from "./today/TodayReviewPresentationContext";
 import { currentTimeZone, localDayKey, reviewOwner, windowScopeFor } from "./today/useTodayReviewPresentation";
 import { bootstrapReviewListMayBeIncomplete, calendarReviewItems, newestCachedReviewWindow, scopedOpenReviewItems } from "@/lib/calendarScopedReview";
-import { readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
+import { getReviewItemSyncStates, readReviewPresentationSnapshot, readSuppressedReviewItemIds, subscribeReviewSync } from "@/lib/reviewSyncStore";
 import { AccountAvatarButton } from "./today/AccountAvatarButton";
 import { TodayGoalFrame } from "./today/TodayGoalFrame";
 import { formatLiveClock } from "./today/todayBlocksLayout";
@@ -247,6 +246,8 @@ import {
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
 import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
+import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -1894,15 +1895,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [reviewListAtCap, scopedOwnerKey, scopedDayKey]);
   // Suggestions decided on this phone (held, queued or saved, not yet in a refreshed bootstrap), for this
   // account only: the List's "?", the Calendar badge and Today's chip leave them at once.
-  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string> } | null>(null);
+  // With them, the suggestions with a waiting or rejected change of their own, which never fold into an
+  // outing (the deck's eligibility, Codex r2 on #582).
+  const [locallyDecided, setLocallyDecided] = useState<{ owner: string; ids: ReadonlySet<string>; syncStateIds: ReadonlySet<string> } | null>(null);
   useEffect(() => {
     if (!scopedOwner || !scopedOwnerKey) return;
     let current = true;
     let sequence = 0;
     const read = () => {
       const mine = ++sequence;
-      readSuppressedReviewItemIds(scopedOwner)
-        .then((ids) => { if (current && mine === sequence) setLocallyDecided({ owner: scopedOwnerKey, ids: new Set(ids) }); })
+      Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])
+        .then(([ids, states]) => {
+          if (current && mine === sequence) setLocallyDecided({ owner: scopedOwnerKey, ids: new Set(ids), syncStateIds: new Set(states.keys()) });
+        })
         .catch(() => undefined);
     };
     read();
@@ -1918,19 +1923,40 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     () => locallyDecided && locallyDecided.owner === scopedOwnerKey ? locallyDecided.ids : new Set(),
     [locallyDecided, scopedOwnerKey]
   );
+  const reviewSyncStateIds = useMemo<ReadonlySet<string>>(
+    () => locallyDecided && locallyDecided.owner === scopedOwnerKey ? locallyDecided.syncStateIds : new Set(),
+    [locallyDecided, scopedOwnerKey]
+  );
   const calendarData = useMemo(
     () => data && reviewListAtCap
       ? { ...data, reviewItems: calendarReviewItems(data.reviewItems ?? [], scopedReviewItems, true) }
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
+  // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
+  const checkAnswers = useCalendarCheckAnswers({
+    data: calendarData,
+    locallyDecidedIds,
+    // The backend, workspace and user. A build without a backend identity has none: its List offers no answers
+    // (Codex r8 and r9 on #582).
+    ownerKey: scopedOwnerKey ?? null,
+    syncStateIds: reviewSyncStateIds
+  });
+  // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
+  // refresh paged out, until the next read replaces it (Codex r2 on #582).
+  const shownCalendarData = checkAnswers.data;
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
   const calendarChecks = useMemo(() => {
-    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573).
-    const open = (calendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id));
-    const folded = foldedOutingMemberIds(open);
+    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
+    // answers held for Undo or saving (part 3b).
+    const open = (shownCalendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
+      && !checkAnswers.hiddenIds.has(item.id));
+    // An outing is folded, asked once on its stay, counted and saved by one map: the deck's grouping and
+    // eligibility (Codex r2 on #582).
+    const { outings, folded } = calendarCheckOutings(open, reviewSyncStateIds);
     // A suggestion without a start still sits on its place's row; it has no row, or count, of its own.
     const items = open.filter((item) => !folded.has(item.id) && (item.suggestedStartedAt || typeof item.rawPayload?.clientSegmentId === "string"));
     return {
@@ -1940,9 +1966,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         startedAt: item.suggestedStartedAt,
         stoppedAt: item.suggestedStoppedAt
       })),
-      titles: new Map(items.map((item) => [item.id, item.title] as const))
+      titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, {
+        outing: outings.has(item.id),
+        pendingChange: reviewSyncStateIds.has(item.id)
+      })] as const))
     };
-  }, [calendarData?.reviewItems, locallyDecidedIds]);
+  }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, clockFormat, locallyDecidedIds, reviewSyncStateIds]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
   const checkCounts = useMemo(() => {
@@ -1956,21 +1986,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   }, [calendarChecks, todayKey]);
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
+  // Every request a new number, even after a used one was cleared to 0, so the List knows it is new (Codex r1 on #582).
+  const calendarCheckRequests = useRef(0);
   // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
   // items the Calendar draws (the bootstrap's list, plus Today's scoped window when it is capped).
   const earlierDayReviewCountMap = useMemo(
     () => {
       // An outing's Moves are part of its card (PRD D19, PR 12c): a day counts the card once.
-      const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);
-      const folded = foldedOutingMemberIds(open);
+      // The same outings the deck and Calendar › List fold (Codex r2 on #582).
+      const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);
+      const { folded } = calendarCheckOutings(open, reviewSyncStateIds);
       return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));
     },
-    [calendarData?.reviewItems, earlierDays]
+    [shownCalendarData?.reviewItems, earlierDays, reviewSyncStateIds]
   );
   const nativeCalendarBridge = useMemo(
     () => buildNativeCalendarBridgeState({
       clockFormat,
-      data: calendarData,
+      data: shownCalendarData,
       hapticsEnabled,
       // Whole minutes are all the Calendar shows; a per-second model made SwiftUI republish every second.
       now: minuteNow,
@@ -1983,7 +2016,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     }),
     [
       calendarTransitionDirection,
-      calendarData,
+      shownCalendarData,
       clockFormat,
       hapticsEnabled,
       minuteNow,
@@ -2651,7 +2684,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     changeCalendarLayout("list");
     selectCalendarDay(dayKey);
     // A new request each time (a used one was cleared to 0).
-    setCalendarCheckScroll((current) => current + 1);
+    calendarCheckRequests.current += 1;
+    setCalendarCheckScroll(calendarCheckRequests.current);
     router.navigate("/(tabs)/calendar");
   }, [changeCalendarLayout, selectCalendarDay]);
   const openTodayChecks = useCallback(() => openChecksOn(formatDateKey(new Date())), [openChecksOn]);
@@ -3570,6 +3604,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  checkQuestions={calendarChecks.questions}
                   checks={calendarChecks.checks}
                   checkTitles={calendarChecks.titles}
                   clockFormat={clockFormat}
@@ -3578,8 +3613,15 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
                   nowMs={minuteNow}
-                  // A "?" opens its suggestion in Review until the List answers in place (step 14, part 3b).
-                  onOpenCheck={(reviewItemId) => router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })}
+                  // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
+                  // Without a backend identity the outbox's record is not read here, so an answer could never
+                  // hand over: there a "?" opens the suggestion instead (Codex r9 on #582).
+                  onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}
+                  // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
+                  onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(
+                    shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
+                    reviewItemId
+                  ) as never)}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}
@@ -3652,36 +3694,58 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   return (
     <DashboardContext.Provider value={{ renderTab: renderDashboardTab, checkCount: checkCounts.week }}>
       {children}
-      {pendingDeletion?.phase === "active" ? (
-        // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
-        // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
-        <BlocksToast
-          key={`deleted-${pendingDeletion.token}`}
-          actionAccessibilityLabel={undoDeleteAccessibilityLabel(pendingDeletion.entries)}
-          actionLabel="Undo"
-          actionTestID="today-delete-undo"
-          message={deletedToastMessage(pendingDeletion.entries)}
-          onAction={undoDeletion}
-          reduceMotion={reduceMotion}
-          secondary={tripOptOut ? { ...tripOptOut, testID: "today-delete-trip-opt-out" } : null}
-          style={styles.todayToast}
-          swatchColor={pendingDeletion.entries.length === 1 ? toastSwatchColor(pendingDeletion.entries[0], theme.mode) : null}
-          testID="today-delete-toast"
-          theme={theme}
-        />
-      ) : todayNotice.notice && authState === "authenticated" ? (
-        <BlocksToast
-          key={`notice-${todayNotice.notice.token}`}
-          accessibilityLabel={todayNotice.notice.accessibilityLabel}
-          detail={todayNotice.notice.detail}
-          message={todayNotice.notice.message}
-          reduceMotion={reduceMotion}
-          style={styles.todayToast}
-          swatchColor={todayNotice.notice.swatchColor}
-          testID="today-notice-toast"
-          theme={theme}
-        />
-      ) : null}
+      {/* Today's toast place, one column anchored above the tab bar (Codex r2 on #582): an answer in Calendar ›
+          List sits above a delete's or a notice, each as tall as it measures (a trip opt-out row, wrapped
+          text), so neither covers the other. Always mounted, so a toast leaving plays its exit; the one left
+          moves to its new place with its own layout transition (at once under Reduce Motion). */}
+      <View pointerEvents="box-none" style={[styles.todayToast, styles.todayToastStack]} testID="today-toast-stack">
+        {checkAnswers.held ? (
+          // An answer in Calendar › List, held for Undo (step 14 part 3b): the hold owns the 4.8 s window and
+          // its token re-mounts the toast, so a second answer replaces it (the first is saved).
+          <BlocksToast
+            key={`check-${checkAnswers.held.token}`}
+            actionAccessibilityLabel={`Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
+            actionLabel="Undo"
+            actionTestID="calendar-check-undo"
+            message={`${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
+            onAction={() => {
+              checkAnswers.undo();
+              playHaptic("undoRestore");
+            }}
+            reduceMotion={reduceMotion}
+            testID="calendar-check-toast"
+            theme={theme}
+          />
+        ) : null}
+        {pendingDeletion?.phase === "active" ? (
+          // The shared Blocks toast (UIA-003): "Deleted Deep work" with its swatch and a neutral
+          // 44-point Undo. The deletion coordinator owns the 5 s window; the token re-mounts it.
+          <BlocksToast
+            key={`deleted-${pendingDeletion.token}`}
+            actionAccessibilityLabel={undoDeleteAccessibilityLabel(pendingDeletion.entries)}
+            actionLabel="Undo"
+            actionTestID="today-delete-undo"
+            message={deletedToastMessage(pendingDeletion.entries)}
+            onAction={undoDeletion}
+            reduceMotion={reduceMotion}
+            secondary={tripOptOut ? { ...tripOptOut, testID: "today-delete-trip-opt-out" } : null}
+            swatchColor={pendingDeletion.entries.length === 1 ? toastSwatchColor(pendingDeletion.entries[0], theme.mode) : null}
+            testID="today-delete-toast"
+            theme={theme}
+          />
+        ) : todayNotice.notice && authState === "authenticated" ? (
+          <BlocksToast
+            key={`notice-${todayNotice.notice.token}`}
+            accessibilityLabel={todayNotice.notice.accessibilityLabel}
+            detail={todayNotice.notice.detail}
+            message={todayNotice.notice.message}
+            reduceMotion={reduceMotion}
+            swatchColor={todayNotice.notice.swatchColor}
+            testID="today-notice-toast"
+            theme={theme}
+          />
+        ) : null}
+      </View>
       <PlayOrb
         activities={bloomActivityList}
         hidden={!playOrbAvailable || (reportsSheetPortal?.isPresented ?? false)}
