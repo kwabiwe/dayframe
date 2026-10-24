@@ -12,7 +12,7 @@ vi.mock("react-native", async () => {
   const React = await import("../../../../../node_modules/react/index.js");
   // A ScrollView whose ref can scroll, to see the jump to the first "?" (step 14).
   const ScrollView = React.forwardRef((props: Record<string, unknown>, ref: unknown) => {
-    React.useImperativeHandle(ref, () => ({ scrollTo, getInnerViewNode: () => "content" }));
+    React.useImperativeHandle(ref, () => ({ scrollTo }));
     return React.createElement("ScrollView", props);
   });
   return {
@@ -161,8 +161,12 @@ describe("CalendarListView (location v4 step 9)", () => {
         tree = create(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("work", "Work", 9, 12)]}
           loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
           theme={theme} timeline={timeline} {...props} />, {
+          // As Fabric: measureLayout needs a native component ref, and does nothing for a numeric tag.
           createNodeMock: () => ({
-            measureLayout: (_content: unknown, done: (x: number, y: number) => void) => done(0, positions.get("first") ?? -1)
+            measureLayout: (relativeTo: unknown, done: (x: number, y: number) => void) => {
+              if (typeof relativeTo !== "object" || relativeTo === null) return;
+              done(0, positions.get("first") ?? -1);
+            }
           })
         });
       });

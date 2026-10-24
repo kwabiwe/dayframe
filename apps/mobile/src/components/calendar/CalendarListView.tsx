@@ -115,6 +115,7 @@ export function CalendarListView({
   // Each row's view, measured against the scroll content when the jump happens, so the position is the
   // row's current one, never a remembered one (Codex r3 on #573).
   const rowViews = useRef(new Map<string, View>());
+  const content = useRef<View>(null);
   const pendingScroll = useRef(false);
   const firstCheckKey = checkKeys[0];
   const tryScroll = () => {
@@ -122,9 +123,8 @@ export function CalendarListView({
     // After the frame commits, so a row that just moved is measured where it is now.
     requestAnimationFrame(() => {
       const row = rowViews.current.get(firstCheckKey);
-      const content = scroller.current?.getInnerViewNode?.();
-      if (!pendingScroll.current || !row || !content) return;
-      row.measureLayout(content, (_x, y) => {
+      if (!pendingScroll.current || !row || !content.current) return;
+      row.measureLayout(content.current, (_x, y) => {
         if (!pendingScroll.current) return;
         pendingScroll.current = false;
         scroller.current?.scrollTo({ y: Math.max(0, y - 24), animated: !reduceMotion });
@@ -154,6 +154,8 @@ export function CalendarListView({
       style={{ backgroundColor: theme.background }}
       testID="calendar-list"
     >
+      {/* The content's own view: rows are measured against it (a native ref, as Fabric needs; Codex r4 on #573). */}
+      <View collapsable={false} ref={content} style={styles.contentInner}>
       <View style={styles.dayLine}>
         <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" style={[styles.dayTitle, { color: theme.textPrimary }]}>
           {formatLocaleDate(new Date(dayStartMs), { weekday: "short", day: "numeric", month: "short" })}
@@ -206,6 +208,7 @@ export function CalendarListView({
           </Text>
         </Pressable>
       ) : null}
+      </View>
     </ScrollView>
   );
 }
@@ -384,7 +387,8 @@ function emptyTimeline(dayStartMs: number, dayEndMs: number): LocationTimeline {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 16, paddingBottom: 140, gap: 12 },
+  content: { paddingHorizontal: 16, paddingBottom: 140 },
+  contentInner: { gap: 12 },
   dayLine: { flexDirection: "row", alignItems: "baseline", gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   dayTitle: { fontSize: 20, fontWeight: "800" },
   dayMeta: { fontSize: 13, fontWeight: "600" },
