@@ -91,9 +91,13 @@ const END_EXPIRY_SECONDS = 24 * 60 * 60;
 const MAX_RETRY_AFTER_MS = 60 * 60 * 1000;
 const INVALID_TOKEN_REASONS = new Set([
   "BadDeviceToken",
-  "DeviceTokenNotForTopic",
   "Unregistered"
 ]);
+// The token is fine; this server's APNS_BUNDLE_ID names another app. Invalidating the token on an
+// `update` would also revoke the running Activity's Lock Screen Stop, which authenticates with it (staging, 21–24 Oct 2026: every staging token
+// was invalidated on its first push, so every Live Activity Stop was refused with 401 and the Activity
+// stayed until the app was opened).
+const TOPIC_MISMATCH_REASON = "DeviceTokenNotForTopic";
 let cachedApnsAuthorization: {
   fingerprint: string;
   createdAt: number;
@@ -522,6 +526,12 @@ async function deliverOutboxRow(
 
   const reason = safeApnsReason(parseApnsBody(response.body).reason, response.status);
   const disposition = classifyApnsFailure(response.status, reason);
+  if (reason === TOPIC_MISMATCH_REASON) {
+    console.error("Dayframe Live Activity APNs topic does not match the app: check APNS_BUNDLE_ID", {
+      environment: row.environment,
+      event: row.event
+    });
+  }
   const failure = failureFor(row, response.status, reason, disposition);
   await recordOutboxFailure(row, failure, response.retryAfter, response.apnsId ?? apnsId);
   if (disposition === "retry" && row.attemptCount + 1 >= MAX_DELIVERY_ATTEMPTS) {
@@ -542,7 +552,10 @@ async function recordOutboxFailure(
   const nextStatus = failure.disposition === "retry" && row.attemptCount + 1 < MAX_DELIVERY_ATTEMPTS
     ? "pending"
     : "permanent_failure";
-  const invalidate = failure.disposition === "invalid_token";
+  // A topic mismatch keeps the token only while its Activity runs, so its Lock Screen Stop still works;
+  // an `end` means the block has stopped, and nothing would ever retire the token again (Codex r1 on #574).
+  const invalidate = failure.disposition === "invalid_token" ||
+    (failure.reason === TOPIC_MISMATCH_REASON && row.event === "end");
 
   await Promise.all([
     query(
