@@ -12,6 +12,12 @@ describe("Calendar in Blocks contract", () => {
     expect(styles).not.toMatch(/calendar-entry-title-line|calendar-entry-length|calendar-entry-glyph/);
   });
 
+  it("keeps a colour-only title in layout so it can be measured again (Codex r3 on #579)", () => {
+    const rule = styles.match(/\.calendar-entry-title:has\(\.calendar-entry-words\.is-none-fit\) \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toContain("visibility: hidden");
+    expect(rule).not.toContain("display: none");
+  });
+
   it("lays Review suggestions out in the entries' own columns, below a hovered, selected or resizing entry; the now line runs behind every block", () => {
     const zOf = (selector: RegExp) => Number(styles.match(selector)?.[1]);
     const review = zOf(/\.calendar-review-block \{[^}]*z-index: (\d+);/);

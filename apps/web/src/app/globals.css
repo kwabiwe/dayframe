@@ -2119,8 +2119,13 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   visibility: hidden;
 }
 
-/* No whole word fits: colour only, the "?" and the time line included (the name still carries it all). */
-.calendar-entry-title:has(.calendar-entry-words.is-none-fit),
+/* No whole word fits: colour only, the "?" and the time line included (the name still carries it all).
+   The title is only made invisible, never taken out of layout, so its width can be measured again when
+   the block widens (Codex r3 on #579). */
+.calendar-entry-title:has(.calendar-entry-words.is-none-fit) {
+  visibility: hidden;
+}
+
 .calendar-entry-title:has(.calendar-entry-words.is-none-fit) + .calendar-entry-detail-line {
   display: none;
 }

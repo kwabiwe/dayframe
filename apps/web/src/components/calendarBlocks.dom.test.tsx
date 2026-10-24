@@ -131,6 +131,7 @@ describe("Calendar in Blocks", () => {
 
   it("leaves out a word wider than its title, and every word after it, ending after a whole word (Codex r1 on #579)", () => {
     const observed: Array<() => void> = [];
+    let titleWidth = 60;
     vi.stubGlobal("ResizeObserver", class {
       constructor(private readonly callback: () => void) { observed.push(() => this.callback()); }
       observe() { observed.at(-1)?.(); }
@@ -140,7 +141,7 @@ describe("Calendar in Blocks", () => {
       return this.textContent === "Supercalifragilistic" ? 120 : 30;
     });
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function width(this: HTMLElement) {
-      return this.classList.contains("calendar-entry-title") ? 60 : 0;
+      return this.classList.contains("calendar-entry-title") ? titleWidth : 0;
     });
     renderCalendar([
       entry({ id: "cut", description: "Plan Supercalifragilistic review", startedAt: local(9), stoppedAt: local(10) }),
@@ -154,6 +155,14 @@ describe("Calendar in Blocks", () => {
     // …and the title, its "?" and the time line give way to colour only (CSS keys on this class).
     expect(document.querySelector('[data-entry-id="none"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(true);
     expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(false);
+    // Stable across repeated measurements (the colour-only title keeps its width), and it comes back when the block widens.
+    act(() => { observed.forEach((measure) => measure()); observed.forEach((measure) => measure()); });
+    expect(shown("none")).toEqual([]);
+    expect(shown("cut")).toEqual(["Plan", "\u2026"]);
+    titleWidth = 200;
+    act(() => observed.forEach((measure) => measure()));
+    expect(shown("none")).toEqual(["Supercalifragilistic"]);
+    expect(shown("cut")).toEqual(["Plan", "Supercalifragilistic", "review"]);
     expect(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!.getAttribute("aria-label")).toContain("Supercalifragilistic");
     vi.unstubAllGlobals();
   });
