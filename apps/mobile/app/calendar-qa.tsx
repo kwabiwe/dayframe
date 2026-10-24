@@ -79,6 +79,13 @@ const timeline: LocationTimeline = {
   ]
 };
 
+// Things to check (step 14): the unknown place's question, and Apple Health's sleep.
+const QA_CHECKS = [
+  { id: "qa-check-unknown", segmentId: "qa-unknown", startedAt: iso(16, 26), stoppedAt: iso(17, 0) },
+  { id: "qa-check-sleep", segmentId: null, startedAt: new Date(2026, 9, 21, 23, 10).toISOString(), stoppedAt: iso(6, 50) }
+];
+const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"]]);
+
 export default function CalendarQaRoute() {
   const params = useLocalSearchParams<{ layout?: string }>();
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
@@ -116,7 +123,7 @@ export default function CalendarQaRoute() {
         />
         {layout === "list" ? (
           <View style={{ flex: 1 }}>
-            <CalendarListView clockFormat={clockFormat} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
+            <CalendarListView checks={QA_CHECKS} checkTitles={QA_CHECK_TITLES} onOpenCheck={() => undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
               timeline={timeline} />
           </View>

@@ -54,7 +54,7 @@ describe("Today Blocks feedback", () => {
     expect(dashboard).toMatch(/useLayoutEffect\(\(\) => \{\s*const toValue = hasLiveActiveTimer \? 1 : 0;[\s\S]*?if \(reduceMotion \|\| hasLiveActiveTimer\) \{\s*activeTimerExpansion\.setValue\(toValue\);/);
   });
 
-  it("moves the Review nudge with the card and mosaic above it", () => {
-    expect(dashboard).toMatch(/<Reanimated\.View layout=\{localLayoutTransition\(reduceMotion\)\}>\s*<TodayReviewNudge/);
+  it("moves Today's checks chip with the card and mosaic above it (location v4 step 14)", () => {
+    expect(dashboard).toMatch(/<Reanimated\.View layout=\{localLayoutTransition\(reduceMotion\)\}>[\s\S]{0,200}<TodayChecksChip /);
   });
 });

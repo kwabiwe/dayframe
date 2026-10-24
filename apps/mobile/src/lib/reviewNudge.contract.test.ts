@@ -48,7 +48,7 @@ describe("evening Review reminder contract (Blocks 8-0)", () => {
   });
 
   it("never puts places in the reminder", () => {
-    expect(nudge).toMatch(/suggestions? (is|are) ready to review\./);
+    expect(nudge).toMatch(/things? to check\./);
     expect(nudge).not.toMatch(/placeName|place\.name|latitude|longitude/);
   });
 
