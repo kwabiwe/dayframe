@@ -81,7 +81,7 @@ function calendarElement(entries: TimeEntryRow[], reviewItems: ReviewItemRow[], 
 }
 
 describe("Calendar in Blocks", () => {
-  it("draws categorised blocks tinted with their colour bar, keeps the neutral hatch for no activity and marks the running one (dense-day rules)", () => {
+  it("draws categorised blocks tinted with their colour bar, keeps the neutral hatch for no activity and marks the running one (Calendar v3)", () => {
     renderCalendar([
       entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) }),
       entry({ id: "b", startedAt: local(10), stoppedAt: local(10, 30) }),
@@ -91,7 +91,8 @@ describe("Calendar in Blocks", () => {
     expect(block("a").classList.contains("df-block")).toBe(false);
     expect(block("a").style.getPropertyValue("--block")).toContain("light-dark(");
     expect(block("a").style.getPropertyValue("--calendar-block-accent")).toBe("var(--block)");
-    expect(block("a").style.color).toBe("var(--text-primary)");
+    // Calendar v3: the text colour is the block's own hue, shaded in CSS (no inline primary text).
+    expect(block("a").style.color).toBe("");
     expect(block("b").classList.contains("is-uncategorized")).toBe(true);
     expect(block("b").classList.contains("df-block")).toBe(false);
     expect(block("c").classList.contains("is-running")).toBe(true);
@@ -110,7 +111,7 @@ describe("Calendar in Blocks", () => {
     expect(link.querySelector(".calendar-review-content .calendar-entry-title")).not.toBeNull();
   });
 
-  it("never clamps more title lines than the drawn block holds, with the detail line and resize padding (Codex r1 on #579)", () => {
+  it("never clamps more title and icon lines than the drawn block holds, with the resize padding (Codex r1 on #579; Calendar v3)", () => {
     const entries = [30, 32, 33, 34, 35, 36, 37, 40, 45, 60, 95].map((minutes, index) => entry({
       id: `m${minutes}`, description: "A long block title that wraps", startedAt: local(index + 1), stoppedAt: local(index + 1, minutes)
     }));
@@ -118,18 +119,21 @@ describe("Calendar in Blocks", () => {
     for (const { id } of entries) {
       const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!;
       const height = Number.parseFloat(block.style.height);
+      // The top padding stays (2 px, 6 px under a resize handle); the last line may use the bottom padding.
       const resizeTop = block.classList.contains("can-direct-resize") ? 4 : 0;
-      const room = height - 4 - resizeTop;
+      const room = height - 2 - resizeTop;
       const lines = Number(block.style.getPropertyValue("--title-lines"));
+      const details = Number(block.style.getPropertyValue("--detail-lines"));
       const detailless = Number(block.style.getPropertyValue("--title-lines-detailless"));
-      if (block.classList.contains("has-detail-room")) expect(lines * 16 + 15).toBeLessThanOrEqual(room);
-      if (!block.classList.contains("is-dense-compact")) expect(detailless * 16).toBeLessThanOrEqual(Math.max(16, room));
+      expect(lines).toBeGreaterThanOrEqual(1);
+      if (block.classList.contains("has-detail-room")) expect(lines * 17 + details * 15).toBeLessThanOrEqual(room);
+      if (!block.classList.contains("is-dense-compact")) expect(detailless * 17).toBeLessThanOrEqual(Math.max(17, room));
       const compactLines = Number(block.style.getPropertyValue("--title-lines-compact"));
-      expect(compactLines * 13).toBeLessThanOrEqual(Math.max(13, height - 2 - (resizeTop ? 5 : 0)));
+      expect(compactLines * 14).toBeLessThanOrEqual(Math.max(14, height - 1 - (resizeTop ? 5 : 0)));
     }
   });
 
-  it("leaves out a word wider than its title, and every word after it, ending after a whole word (Codex r1 on #579)", () => {
+  it("leaves out a word wider than its title, and every word after it, ending after a whole word; with none, cuts the first (Codex r1 on #579; Calendar v3)", () => {
     const observed: Array<() => void> = [];
     let titleWidth = 60;
     vi.stubGlobal("ResizeObserver", class {
@@ -150,11 +154,13 @@ describe("Calendar in Blocks", () => {
     const shown = (id: string) => [...document.querySelectorAll<HTMLElement>(`[data-entry-id="${id}"] .calendar-entry-word:not(.is-beyond)`)]
       .map((word) => word.textContent);
     expect(shown("cut")).toEqual(["Plan", "\u2026"]);
-    // No whole word fits: colour only, the name still says it all.
+    // No whole word fits: the first word is cut with an ellipsis by CSS ("Quart…", owner OK), and no
+    // whole word shows; the name still says it all.
     expect(shown("none")).toEqual([]);
-    // …and the title, its "?" and the time line give way to colour only (CSS keys on this class).
-    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(true);
-    expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(false);
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-word-cut')?.textContent).toBe("Supercalifragilistic");
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-words')!.classList.contains("is-cut-first")).toBe(true);
+    expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-words')!.classList.contains("is-cut-first")).toBe(false);
+    expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-word-cut')).toBeNull();
     // Stable across repeated measurements (the colour-only title keeps its width), and it comes back when the block widens.
     act(() => { observed.forEach((measure) => measure()); observed.forEach((measure) => measure()); });
     expect(shown("none")).toEqual([]);

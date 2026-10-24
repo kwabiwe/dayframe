@@ -1,7 +1,9 @@
 import {
   calendarBlockLabelTier,
   CALENDAR_DENSE_LABEL,
+  CALENDAR_V3_OVERLAP,
   layoutCalendarBlockColumns,
+  layoutCalendarHybrid,
   type ClockFormat
 } from "@dayframe/shared";
 import { timeEntryCategoryLabel } from "@/lib/display";
@@ -46,6 +48,11 @@ export type TimeBlockLane = {
   offsetFraction: number;
   widthFraction: number;
   zIndex: number;
+  /**
+   * Calendar v3: where the block sits in the measured lane, in px from its left edge, and how many
+   * blocks it is nested inside (drawn on top of them, indented). Absent before the lane is measured.
+   */
+  px?: { x: number; width: number; depth: number };
 };
 
 export function calendarBlockVisualGeometry({
@@ -98,6 +105,53 @@ export function calendarBlockLaneInsets({
       : `calc(${railPx ? `${railPx}px + ` : ""}${share(before)} + ${innerInset}px)`,
     right: after === 0 ? calendarBlockOuterInsetPx : `calc(${share(after)} + ${innerInset}px)`
   };
+}
+
+/**
+ * Calendar v3 (owner, 24 Oct 2026): Apple's hybrid overlap in a lane `laneWidth` px wide
+ * (`layoutCalendarHybrid`, the iPhone's rule). Starts within 20 minutes — or within one label line —
+ * share equal columns; later starts nest 14 px in, on top. Each lane carries its px placement.
+ */
+export function layoutTimeBlockHybrid(
+  blocks: ReadonlyArray<{ key: string; top: number; height: number }>,
+  { laneWidth, pixelsPerHour }: { laneWidth: number; pixelsPerHour: number }
+) {
+  const lanes = new Map<string, TimeBlockLane>();
+  const closeDistance = Math.max((CALENDAR_V3_OVERLAP.closeMinutes / 60) * pixelsPerHour, minimumTimeBlockHeight());
+  for (const placement of layoutCalendarHybrid(
+    blocks.map((block) => ({ id: block.key, top: block.top, bottom: block.top + block.height })),
+    { laneWidth, closeDistance, gap: calendarBlockLaneGapPx }
+  )) {
+    lanes.set(placement.id, {
+      laneCount: placement.columnCount,
+      laneIndex: placement.columnIndex,
+      mode: placement.columnCount > 1 || placement.depth > 0 ? "lane" : "full",
+      offsetFraction: laneWidth > 0 ? placement.x / laneWidth : 0,
+      widthFraction: laneWidth > 0 ? placement.width / laneWidth : 1,
+      // Deeper blocks are drawn above the ones they start inside; hover, selection and resizing (14)
+      // still lift any block above them all.
+      zIndex: Math.min(placement.depth, 5) * 2 + (placement.columnCount > 1 ? 1 : 0),
+      px: { x: placement.x, width: placement.width, depth: placement.depth }
+    });
+  }
+  return lanes;
+}
+
+/**
+ * A lane's horizontal style. With a measured placement (Calendar v3) it is exact px: the lane starts
+ * right of any bracket rail and the 8 px outer inset, and every block gives up the 2 px gap on its right.
+ */
+export function calendarBlockLanePxInsets(px: NonNullable<TimeBlockLane["px"]>, railPx = 0) {
+  return {
+    left: calendarBlockOuterInsetPx + railPx + px.x,
+    width: Math.max(1, px.width - calendarBlockLaneGapPx),
+    right: "auto" as const
+  };
+}
+
+/** The width blocks are laid out across in a day column this wide (right of the rail and the insets). */
+export function calendarLaneWidth(dayBodyWidth: number, railPx = 0) {
+  return Math.max(0, dayBodyWidth - railPx - calendarBlockOuterInsetPx * 2 + calendarBlockLaneGapPx);
 }
 
 export function canShowTimeBlockInlineAction({
@@ -198,6 +252,36 @@ export function calendarBlockDurationLabel(
   return formatDuration(Math.max(0, Math.floor(
     (new Date(stoppedAt).getTime() - new Date(entry.startedAt).getTime()) / 1_000
   )));
+}
+
+/** Calendar v3: a block's times alone, "09:00–10:20" ("+1" past midnight; a running block ends "now"). */
+export function calendarBlockTimes(entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">, capturedNow: Date, clock: ClockFormat) {
+  const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
+  const dayOffset = localDayOffset(entry.startedAt, stoppedAt);
+  const finish = entry.stoppedAt ? `${formatTime(stoppedAt, clock)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
+  return `${formatTime(entry.startedAt, clock)}–${finish}`;
+}
+
+export type CalendarDetailLine = { glyph: "map-pin" | "route" | "heart-pulse" | "tag" | "clock"; text: string };
+
+/**
+ * Calendar v3 (owner, 24 Oct 2026): the icon lines under a block's title, shown while they fit, as on
+ * the iPhone: the place (a pin, or a route for a trip a Move logged) or Apple Health, the tags, then
+ * the times.
+ */
+export function calendarBlockDetailLines(
+  entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt" | "tagNames"> & {
+    placeName?: string | null; source?: string | null; automaticMoveEventId?: string | null;
+  },
+  capturedNow: Date,
+  clock: ClockFormat
+): CalendarDetailLine[] {
+  const lines: CalendarDetailLine[] = [];
+  if ((entry.source ?? "").startsWith("health")) lines.push({ glyph: "heart-pulse", text: "From Apple Health" });
+  else if (entry.placeName) lines.push({ glyph: entry.automaticMoveEventId ? "route" : "map-pin", text: entry.placeName });
+  if (entry.tagNames.length) lines.push({ glyph: "tag", text: entry.tagNames.join(" · ") });
+  lines.push({ glyph: "clock", text: calendarBlockTimes(entry, capturedNow, clock) });
+  return lines;
 }
 
 /** The time and length line (dense-day rules): "07:05–07:40 · 35m"; a running block ends "now". */

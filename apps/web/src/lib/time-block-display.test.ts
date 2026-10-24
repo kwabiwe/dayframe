@@ -3,6 +3,10 @@ import {
   calendarBlockLaneInsets,
   calendarBracketRailPx,
   calendarBlockDetailLine,
+  calendarBlockDetailLines,
+  calendarBlockLanePxInsets,
+  calendarLaneWidth,
+  layoutTimeBlockHybrid,
   calendarBlockDurationLabel,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
@@ -189,5 +193,36 @@ describe("time block display helpers", () => {
 
   it("requires deliberate resize movement", () => {
     expect(resizeDragThresholdPx).toBeGreaterThanOrEqual(4);
+  });
+
+  it("gives a block its icon lines: the place, a trip's route or Apple Health, the tags, then the times (Calendar v3)", () => {
+    const now = new Date("2026-10-24T15:00:00Z");
+    const base = { startedAt: "2026-10-24T08:00:00Z", stoppedAt: "2026-10-24T09:20:00Z", tagNames: [] as string[] };
+    expect(calendarBlockDetailLines({ ...base, placeName: "Exampleton Library", tagNames: ["planning"] }, now, "24h").map((line) => line.glyph))
+      .toEqual(["map-pin", "tag", "clock"]);
+    expect(calendarBlockDetailLines({ ...base, placeName: "Exampleton Station", automaticMoveEventId: "move" }, now, "24h")[0].glyph).toBe("route");
+    expect(calendarBlockDetailLines({ ...base, placeName: "Exampleton Park", source: "health_workout" }, now, "24h")[0])
+      .toEqual({ glyph: "heart-pulse", text: "From Apple Health" });
+    const times = calendarBlockDetailLines(base, now, "24h");
+    expect(times).toHaveLength(1);
+    expect(times[0].text).toMatch(/^\d\d:\d\d–\d\d:\d\d$/);
+    expect(calendarBlockDetailLines({ ...base, stoppedAt: null }, now, "24h")[0].text).toMatch(/–now$/);
+  });
+
+  it("lays blocks out with Apple's hybrid overlap in px across the measured lane (Calendar v3)", () => {
+    const laneWidth = calendarLaneWidth(500);
+    expect(laneWidth).toBe(500 - 16 + 2);
+    const lanes = layoutTimeBlockHybrid([
+      { key: "long", top: 0, height: 300 },
+      { key: "close", top: 10, height: 40 },
+      { key: "nested", top: 160, height: 40 }
+    ], { laneWidth, pixelsPerHour: 64 });
+    // Starts 10 px apart (under 20 minutes at 64 px an hour) sit side by side; a later start nests 14 px in.
+    expect(lanes.get("long")).toMatchObject({ laneCount: 2, laneIndex: 0, px: { x: 0, depth: 0 } });
+    expect(lanes.get("close")).toMatchObject({ laneCount: 2, laneIndex: 1 });
+    expect(lanes.get("nested")?.px).toMatchObject({ x: 14, depth: 1 });
+    expect(lanes.get("nested")!.zIndex).toBeGreaterThan(lanes.get("long")!.zIndex);
+    // Drawn in px: right of the 8 px inset (and any rail), giving up the 2 px gap on the right.
+    expect(calendarBlockLanePxInsets({ x: 14, width: 100, depth: 1 }, 12)).toEqual({ left: 8 + 12 + 14, width: 98, right: "auto" });
   });
 });

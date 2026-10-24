@@ -279,7 +279,7 @@ describe("Calendar click-to-create DOM interactions", () => {
     }
   });
 
-  it("titles every block, wrapping by whole lines, with the time and length line only with room (dense-day rules, 24 Oct 2026)", () => {
+  it("titles every block, wrapping by whole lines, with icon lines only with room (Calendar v3, 24 Oct 2026)", () => {
     const content = {
       categoryColor: "#64748b",
       categoryId: "work",
@@ -326,15 +326,20 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(tiny.style.height).toBe("18px");
     expect(medium.dataset.calendarSemanticHeight).toBe("32");
     expect(full.dataset.calendarSemanticHeight).toBe("64");
-    // Compact type under 34 px; the time and length line only from 34 px with a line to spare (and 120 px wide, in CSS).
+    // Compact type under 34 px; icon lines only from 34 px with a line to spare (and 120 px wide, in CSS).
     expect(tiny.className).toContain("is-dense-compact");
     expect(medium.className).toContain("is-dense-compact");
     expect(full.className).not.toContain("is-dense-compact");
     expect(full.className).toContain("has-detail-room");
     expect(tiny.className).not.toContain("has-detail-room");
-    expect(full.querySelector(".calendar-entry-detail-line")?.textContent).toMatch(/^.+–.+ · 1h$/);
-    // The title's whole lines: 62 px drawn holds two 16 px lines over the 15 px detail line.
-    expect(full.style.getPropertyValue("--title-lines")).toBe("2");
+    // Icon lines: the tags, then the times.
+    const details = [...full.querySelectorAll(".calendar-entry-detail")].map((line) => line.textContent);
+    expect(details).toHaveLength(2);
+    expect(details[0]).toBe("Planning · Review · Deep work");
+    expect(details[1]).toMatch(/^.+–.+$/);
+    // 62 px drawn (60 under the top padding): one 17 px title line keeps room for both 15 px icon lines.
+    expect(full.style.getPropertyValue("--title-lines")).toBe("1");
+    expect(full.style.getPropertyValue("--detail-lines")).toBe("2");
   });
 });
 

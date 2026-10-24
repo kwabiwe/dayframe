@@ -367,13 +367,14 @@ Use the shared palette, `chartTrack`, stable segment ordering and exact value la
 
 ### Calendar (v3, owner 24 October 2026)
 
-Calendar follows Apple Calendar's structure in Dayframe's palette (`calendar-v3-mockup`; iPhone native Calendar, the web Calendar follows in its own change).
+Calendar follows Apple Calendar's structure in Dayframe's palette (`calendar-v3-mockup`; the iPhone's native Calendar and the web Calendar alike, with the web differences noted below).
 
 - **Blocks:** a translucent tint of the activity colour (18 % on Daylight, 28 % on Midnight; suggestions 10 % / 14 %), so hour lines and any block underneath show through; opaque over the surface only under Reduce Transparency. A solid 3 pt bar in the full activity colour down the leading edge, 5 pt corners, no outline. Text is a darker shade of the same hue on Daylight and a lighter one on Midnight, meeting AA on its tint. Blocks never touch: 2 pt between neighbours side by side and below.
 - **Overlap (Apple's hybrid):** blocks whose starts are within 20 minutes (or within the first one's title line) sit side by side in equal columns; a block that starts clearly inside a longer one nests, indented 14 pt from that block's left edge and drawn on top of it. Shared constants: `CALENDAR_V3_OVERLAP`.
 - **Text:** the title always wins, in bold: compact 11.5 pt under 34 pt tall or 90 pt wide, otherwise 14 pt. When not even its first word fits, it is cut with an ellipsis ("Quart…"); a column under 22 pt shows colour only. With room in a block at least 120 pt wide, icon lines follow: the place (pin), a trip (route) or Apple Health, the tags, then the times (clock). A suggestion is hatched with a dashed bar and a "?" before its title.
 - **Now:** a red line exactly on the minute (the danger red: `dangerText` on Daylight, `danger` on Midnight) with the time in a red pill in the hour gutter, in place of the hour label it would cover.
 - **Chrome:** the month as the title and one round 44 pt view button that opens the system menu with exactly two choices, Day and List (no Multi Day). One secondary line under the week strip, "8h 41m framed", hidden on an empty day; VoiceOver reads it with the full date. No − / +: pinch to zoom, and VoiceOver's adjustable action on the timeline.
+- **Web:** the same blocks, overlap (laid out in px across the measured day column, so the 14 px indent is exact), text, icon lines (registry `DayframeIcon` glyphs) and now line (`--calendar-now`, the danger red, under the blocks). The framed line sits under the week strip in the page head (a link to the day's report). The Calendar / List switch is one round 44 px button opening a two-item menu (Calendar and List: the web keeps "Calendar" because its Day / Week scope sits beside it; no Multi Day). The web keeps its − / + zoom buttons: it has no pinch, and they are the single-pointer way to zoom.
 
 ### Motion
 
