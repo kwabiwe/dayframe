@@ -81,16 +81,17 @@ function calendarElement(entries: TimeEntryRow[], reviewItems: ReviewItemRow[], 
 }
 
 describe("Calendar in Blocks", () => {
-  it("draws categorised blocks solid, keeps the neutral hatch for no activity and marks the running one", () => {
+  it("draws categorised blocks tinted with their colour bar, keeps the neutral hatch for no activity and marks the running one (dense-day rules)", () => {
     renderCalendar([
       entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) }),
       entry({ id: "b", startedAt: local(10), stoppedAt: local(10, 30) }),
       entry({ id: "c", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(11), stoppedAt: null })
     ]);
     const block = (id: string) => document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!;
-    expect(block("a").classList.contains("df-block")).toBe(true);
+    expect(block("a").classList.contains("df-block")).toBe(false);
     expect(block("a").style.getPropertyValue("--block")).toContain("light-dark(");
-    expect(block("a").style.color).toBe("var(--on-block)");
+    expect(block("a").style.getPropertyValue("--calendar-block-accent")).toBe("var(--block)");
+    expect(block("a").style.color).toBe("var(--text-primary)");
     expect(block("b").classList.contains("is-uncategorized")).toBe(true);
     expect(block("b").classList.contains("df-block")).toBe(false);
     expect(block("c").classList.contains("is-running")).toBe(true);
@@ -231,9 +232,10 @@ describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
     expect(bracket.style.height).toBe("85px");
     expect(bracket.textContent).toBe("School run");
     expect(bracket.querySelector("button, a, [tabindex]")).toBeNull();
-    // The parts stay three separate blocks; the whole day moves right of the bracket's rail.
+    // The parts stay three separate blocks; the whole day moves right of the bracket's rail, which in Day view
+    // is wide enough for the name written level (dense-day rules).
     expect(document.querySelectorAll(".calendar-time-block")).toHaveLength(4);
-    for (const id of ["there", "stay", "back", "work"]) expect(left(id)).toBe("20px");
+    for (const id of ["there", "stay", "back", "work"]) expect(left(id)).toBe("52px");
   });
 
   it("names each part's place in the trip once, on its own block", () => {
@@ -269,9 +271,9 @@ describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
     renderCalendar([entry({ id: "long", startedAt: local(7, 30), stoppedAt: local(8, 30) }), ...trip()]);
     expect(document.querySelectorAll(".df-cal-bracket")).toHaveLength(1);
     // The first lane starts right of the rail; the second shares what is left of the column.
-    expect(left("long")).toBe("20px");
-    expect(left("there")).toContain("(100% - 12px)");
-    expect(left("there")).toContain("12.5px");
+    expect(left("long")).toBe("52px");
+    expect(left("there")).toContain("(100% - 44px)");
+    expect(left("there")).toContain("45px");
   });
 
   it("draws no bracket for a trip across midnight, on either day", () => {

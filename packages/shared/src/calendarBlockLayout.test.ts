@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CALENDAR_BLOCK_LABEL,
   calendarBlockLabelTier,
+  calendarDenseLabel,
   calendarDrawnExtent,
   layoutCalendarBlockColumns,
   type CalendarDrawnBlock
@@ -127,4 +128,42 @@ describe("calendar block label tiers", () => {
     expect(calendarDrawnExtent(100, 40, 16)).toEqual({ top: 100, bottom: 140 });
     expect(calendarDrawnExtent(100, Number.NaN, 15)).toEqual({ top: 100, bottom: 115 });
   });
+
+  describe("dense-day rules (owner, 24 Oct 2026; mock-up calendar-dense v2)", () => {
+    it("keeps every block in its own column for its whole height, and widens it right only into columns free for all of it", () => {
+      // A long block meets a short one early (two columns); a later block beside the long one is free on its right.
+      const layout = byId(layoutCalendarBlockColumns([
+        { id: "short", top: 0, bottom: 18 },
+        { id: "long", top: 10, bottom: 200 },
+        { id: "later", top: 60, bottom: 80 }
+      ], { expandRight: true }));
+      expect(layout.short).toMatchObject({ columnIndex: 0, columnCount: 2, spanCount: 1, widthFraction: 0.5 });
+      expect(layout.long).toMatchObject({ columnIndex: 1, columnCount: 2, spanCount: 1, widthFraction: 0.5 });
+      // "later" takes the freed first column; the long block holds the second for its whole height.
+      expect(layout.later).toMatchObject({ columnIndex: 0, spanCount: 1 });
+      // Three columns, where a block in the first column can widen over a free third one.
+      const three = byId(layoutCalendarBlockColumns([
+        { id: "a", top: 0, bottom: 100 },
+        { id: "b", top: 5, bottom: 30 },
+        { id: "c", top: 10, bottom: 20 },
+        { id: "d", top: 40, bottom: 60 }
+      ], { expandRight: true }));
+      expect(three.d).toMatchObject({ columnIndex: 1, columnCount: 3, spanCount: 2, offsetFraction: 1 / 3, widthFraction: 2 / 3 });
+      expect(three.a).toMatchObject({ spanCount: 1 });
+      // Without the option, nothing widens.
+      expect(byId(layoutCalendarBlockColumns([{ id: "a", top: 0, bottom: 100 }, { id: "d", top: 40, bottom: 60 }, { id: "c", top: 10, bottom: 20 }])).d)
+        .toMatchObject({ spanCount: 1 });
+    });
+
+    it("lets the title win: compact type, whole lines, the time only with room, a colour-only sliver", () => {
+      const lines = { lineHeight: 16, compactLineHeight: 13, detailLineHeight: 15 };
+      expect(calendarDenseLabel({ height: 18, width: 200, ...lines })).toEqual({ sliver: false, compact: true, detail: false, titleLines: 1 });
+      expect(calendarDenseLabel({ height: 60, width: 80, ...lines })).toEqual({ sliver: false, compact: true, detail: false, titleLines: 4 });
+      expect(calendarDenseLabel({ height: 60, width: 130, ...lines })).toEqual({ sliver: false, compact: false, detail: true, titleLines: 2 });
+      expect(calendarDenseLabel({ height: 34, width: 130, ...lines })).toEqual({ sliver: false, compact: false, detail: true, titleLines: 1 });
+      expect(calendarDenseLabel({ height: 60, width: 110, ...lines })).toMatchObject({ detail: false, titleLines: 3 });
+      expect(calendarDenseLabel({ height: 60, width: 20, ...lines })).toEqual({ sliver: true, compact: true, detail: false, titleLines: 0 });
+    });
+  });
 });
+

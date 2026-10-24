@@ -6,20 +6,20 @@ const styles = readFileSync(fileURLToPath(new URL("../app/globals.css", import.m
 const timeline = readFileSync(fileURLToPath(new URL("./TimeReviewViews.tsx", import.meta.url)), "utf8");
 
 describe("Calendar in Blocks contract", () => {
-  it("draws every line and control on a solid block in its on-block colour", () => {
-    expect(styles).toMatch(/\.calendar-time-block\.df-block \.calendar-entry-primary,[\s\S]*?\.calendar-time-block\.df-block \.calendar-start-again \{[^}]*color: var\(--on-block\);/);
-    // Location v4 C6: the title, length and detail lines inherit the on-block colour (no separate
-    // metadata colours); the length and detail line are at 85 % opacity.
-    expect(styles).toMatch(/\.calendar-entry-length,\s*\.calendar-entry-detail-line \{[^}]*opacity: 0\.85;/);
-    expect(styles).not.toMatch(/\.calendar-entry-title-line \{[^}]*color:/);
+  it("draws primary text on a tinted block, with the time and length line in secondary text (dense-day rules, 24 Oct 2026)", () => {
+    expect(timeline).toContain('color: "var(--text-primary)"');
+    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*color: var\(--text-secondary\);/);
+    expect(styles).not.toMatch(/calendar-entry-title-line|calendar-entry-length|calendar-entry-glyph/);
   });
 
-  it("layers Review suggestions above entries' lanes but below a hovered, selected or resizing entry; the now line runs behind every block", () => {
+  it("lays Review suggestions out in the entries' own columns, below a hovered, selected or resizing entry; the now line runs behind every block", () => {
     const zOf = (selector: RegExp) => Number(styles.match(selector)?.[1]);
     const review = zOf(/\.calendar-review-block \{[^}]*z-index: (\d+);/);
     const raised = zOf(/\.calendar-time-block\.is-resizing,[\s\S]*?\{\s*z-index: (\d+) !important;/);
     const now = zOf(/\.calendar-now-line \{[^}]*z-index: (\d+);/);
-    expect(review).toBeGreaterThan(10);
+    // Dense-day rules (24 Oct 2026): no lane of their own; the same columns as blocks.
+    expect(timeline).toContain("...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height }))");
+    expect(styles).not.toMatch(/\.calendar-review-block \{[^}]*width: 42%/);
     expect(raised).toBeGreaterThan(review);
     // Trello (Calendar page improvements): the now line no longer crosses a block's text. Entry
     // lanes start at z-index 2, so the line sits under all of them; its time shows in the axis pill.

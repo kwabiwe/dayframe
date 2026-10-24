@@ -33,6 +33,42 @@ export const CALENDAR_BLOCK_LABEL = {
   touchTolerance: 0.5
 } as const;
 
+/**
+ * Dense-day Calendar (owner, 24 Oct 2026; mock-up calendar-dense v2), replacing accepted difference #2:
+ * the title always wins over the length, as in iOS Calendar.
+ *
+ * - every block is drawn at least one label line tall (18), and blocks whose drawn shapes would collide
+ *   share the cluster's width in columns for their whole height, widening right into columns free for
+ *   their whole height (`layoutCalendarBlockColumns(..., { expandRight: true })`); nothing is drawn on top;
+ * - the title wraps to the lines that fit, then ends with an ellipsis after a whole word;
+ * - compact type under 34 tall or 90 wide; the time and length only from 120 wide with a line to spare;
+ * - a column under 22 wide shows its colour only (its title on tap and to assistive tech).
+ */
+export const CALENDAR_DENSE_LABEL = {
+  /** The drawn minimum: one label line. */
+  minimumHeight: 18,
+  /** Under this drawn height, compact type. */
+  compactTextMaximumHeight: 34,
+  /** Under this width, compact type. */
+  compactTextMaximumWidth: 90,
+  /** From this width (and with a line to spare under the title), the time and length line. */
+  detailMinimumWidth: 120,
+  /** Under this width, the colour only. */
+  sliverMaximumWidth: 22
+} as const;
+
+/** What a block of this drawn height and width shows in the dense-day rules. */
+export function calendarDenseLabel({ height, width, lineHeight, compactLineHeight, detailLineHeight }: {
+  height: number; width: number; lineHeight: number; compactLineHeight: number; detailLineHeight: number;
+}) {
+  const sliver = width < CALENDAR_DENSE_LABEL.sliverMaximumWidth;
+  const compact = height < CALENDAR_DENSE_LABEL.compactTextMaximumHeight || width < CALENDAR_DENSE_LABEL.compactTextMaximumWidth;
+  const line = compact ? compactLineHeight : lineHeight;
+  const detail = !sliver && !compact && width >= CALENDAR_DENSE_LABEL.detailMinimumWidth && height >= line + detailLineHeight;
+  const titleLines = sliver ? 0 : Math.max(1, Math.floor((height - (detail ? detailLineHeight : 0)) / line));
+  return { sliver, compact, detail, titleLines };
+}
+
 export type CalendarDrawnBlock = {
   id: string;
   /** Where the block is drawn, in the renderer's own units (px or pt), minimum height included. */
@@ -45,6 +81,8 @@ export type CalendarBlockColumn = {
   clusterId: string;
   columnIndex: number;
   columnCount: number;
+  /** Columns it spans: 1, or more when it widens right into free columns. */
+  spanCount: number;
   offsetFraction: number;
   widthFraction: number;
   zIndex: number;
@@ -63,7 +101,10 @@ export function calendarDrawnExtent(top: number, timeHeight: number, minimumHeig
  * in a cluster is 1 / columns wide; a block that collides with nothing keeps the full width.
  * O(n log n): one sort, then two heaps (columns in use by bottom, freed columns by index).
  */
-export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBlock>): CalendarBlockColumn[] {
+export function layoutCalendarBlockColumns(
+  blocks: ReadonlyArray<CalendarDrawnBlock>,
+  options: { expandRight?: boolean } = {}
+): CalendarBlockColumn[] {
   const tolerance = CALENDAR_BLOCK_LABEL.touchTolerance;
   const seen = new Set<string>();
   const items = blocks
@@ -76,7 +117,7 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
     .sort((left, right) => left.top - right.top || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 
   const out: CalendarBlockColumn[] = [];
-  let cluster: Array<{ id: string; columnIndex: number }> = [];
+  let cluster: Array<{ id: string; columnIndex: number; top: number; bottom: number }> = [];
   let clusterBottom = -Infinity;
   let columnCount = 0;
   // Columns in use, lowest bottom first, and freed columns, leftmost first.
@@ -86,13 +127,20 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
     if (cluster.length === 0) return;
     const clusterId = cluster.map((member) => member.id).join(":");
     for (const member of cluster) {
+      // Dense-day rules: widen right while the next column is free for this block's whole drawn height.
+      let spanCount = 1;
+      if (options.expandRight) {
+        while (member.columnIndex + spanCount < columnCount && !cluster.some((other) => other.columnIndex === member.columnIndex + spanCount &&
+          other.top < member.bottom - tolerance && other.bottom > member.top + tolerance)) spanCount += 1;
+      }
       out.push({
         id: member.id,
         clusterId,
         columnIndex: member.columnIndex,
         columnCount,
+        spanCount,
         offsetFraction: member.columnIndex / columnCount,
-        widthFraction: 1 / columnCount,
+        widthFraction: spanCount / columnCount,
         zIndex: columnCount > 1 ? member.columnIndex + 1 : 0
       });
     }
@@ -110,7 +158,7 @@ export function layoutCalendarBlockColumns(blocks: ReadonlyArray<CalendarDrawnBl
     while (busy.size > 0 && busy.peek()!.bottom <= item.top + tolerance) free.push(busy.pop()!.column);
     const columnIndex = free.size > 0 ? free.pop()! : columnCount++;
     busy.push({ bottom: item.bottom, column: columnIndex });
-    cluster.push({ id: item.id, columnIndex });
+    cluster.push({ id: item.id, columnIndex, top: item.top, bottom: item.bottom });
     clusterBottom = Math.max(clusterBottom, item.bottom);
   }
   flush();

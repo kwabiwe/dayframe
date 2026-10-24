@@ -258,19 +258,28 @@ describe("Calendar click-to-create DOM interactions", () => {
     expect(onDismiss).toHaveBeenCalledWith({ restoreFocus: true });
   });
 
-  it("keeps a short block full width when its drawn edge only touches the next block (Codex r2 on #545)", () => {
+  it("keeps a short block full width when its drawn edge only touches the next block, and sides it when its label reaches in (Codex r2 on #545; dense-day rules)", () => {
     const content = { categoryColor: "#64748b", categoryId: "work", categoryName: "Work", tagNames: [] };
-    renderCalendar([
+    const view = renderCalendar([
       entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T09:04:00.000Z", { ...content, id: "coffee", description: "Coffee" }),
-      entryAt("2026-08-02T09:15:00.000Z", "2026-08-02T10:00:00.000Z", { ...content, id: "work", description: "Work" })
+      entryAt("2026-08-02T09:20:00.000Z", "2026-08-02T10:00:00.000Z", { ...content, id: "work", description: "Work" })
     ]);
-    // Coffee is drawn 16 px (to 09:15 at 64 px an hour); its semantic 17 px would reach 1 px into Work.
+    // Coffee is drawn 18 px at 64 px an hour (to 09:17, with its 2 px gap to 09:18.75); Work starts at 09:20.
     for (const id of ["coffee", "work"]) {
       expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("full");
     }
+    view.unmount();
+    renderCalendar([
+      entryAt("2026-08-02T09:00:00.000Z", "2026-08-02T09:04:00.000Z", { ...content, id: "coffee", description: "Coffee" }),
+      entryAt("2026-08-02T09:10:00.000Z", "2026-08-02T10:00:00.000Z", { ...content, id: "work", description: "Work" })
+    ]);
+    // Its label line would reach into Work: they sit side by side, nothing drawn on top.
+    for (const id of ["coffee", "work"]) {
+      expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("lane");
+    }
   });
 
-  it("titles every block with its real length and adds the detail line from 34 px (location v4 C6)", () => {
+  it("titles every block, wrapping by whole lines, with the time and length line only with room (dense-day rules, 24 Oct 2026)", () => {
     const content = {
       categoryColor: "#64748b",
       categoryId: "work",
@@ -295,17 +304,14 @@ describe("Calendar click-to-create DOM interactions", () => {
       })
     ]);
 
-    for (const [id, title, length] of [
-      ["tiny-entry", "Coffee", "4m"],
-      ["medium-entry", "Medium block", "30m"],
-      ["full-entry", "Full block", "1h"]
+    for (const [id, title] of [
+      ["tiny-entry", "Coffee"],
+      ["medium-entry", "Medium block"],
+      ["full-entry", "Full block"]
     ] as const) {
       const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`) as HTMLElement;
-      const line = block.querySelector<HTMLElement>(".calendar-entry-title-line") as HTMLElement;
-      expect(line.querySelector(".calendar-entry-title")?.textContent).toBe(title);
-      expect(line.querySelector(".calendar-entry-length")?.textContent).toBe(length);
-      expect(line.textContent).toBe(`${title} ${length}`);
-      expect(block.querySelector(".calendar-entry-glyph svg")).not.toBeNull();
+      // The title alone wins its line; no length beside it.
+      expect(block.querySelector(".calendar-entry-title")?.textContent).toBe(title);
       // Activity, tags and times stay in the block's name for screen readers and the tooltip.
       expect(block.querySelector(".calendar-entry-primary")?.getAttribute("aria-label")).toContain(`${title} · Work · #Planning +2.`);
     }
@@ -313,15 +319,20 @@ describe("Calendar click-to-create DOM interactions", () => {
     const tiny = document.querySelector<HTMLElement>('[data-entry-id="tiny-entry"]') as HTMLElement;
     const medium = document.querySelector<HTMLElement>('[data-entry-id="medium-entry"]') as HTMLElement;
     const full = document.querySelector<HTMLElement>('[data-entry-id="full-entry"]') as HTMLElement;
-    // A 4-minute block is drawn one 16 px label line tall at 64 px an hour (17 px with its gap).
-    expect(tiny.dataset.calendarSemanticHeight).toBe("17");
-    expect(tiny.style.height).toBe("16px");
+    // A 4-minute block is drawn one 18 px label line tall at 64 px an hour (20 px with its gap).
+    expect(tiny.dataset.calendarSemanticHeight).toBe("20");
+    expect(tiny.style.height).toBe("18px");
     expect(medium.dataset.calendarSemanticHeight).toBe("32");
     expect(full.dataset.calendarSemanticHeight).toBe("64");
-    expect(tiny.className).toContain("is-tiny");
-    expect(tiny.querySelector(".calendar-entry-detail-line")).toBeNull();
-    expect(medium.querySelector(".calendar-entry-detail-line")).toBeNull();
-    expect(full.querySelector(".calendar-entry-detail-line")?.textContent).toMatch(/^Work · .+–.+$/);
+    // Compact type under 34 px; the time and length line only from 34 px with a line to spare (and 120 px wide, in CSS).
+    expect(tiny.className).toContain("is-dense-compact");
+    expect(medium.className).toContain("is-dense-compact");
+    expect(full.className).not.toContain("is-dense-compact");
+    expect(full.className).toContain("has-detail-room");
+    expect(tiny.className).not.toContain("has-detail-room");
+    expect(full.querySelector(".calendar-entry-detail-line")?.textContent).toMatch(/^.+–.+ · 1h$/);
+    // The title's whole lines: 62 px drawn holds two 16 px lines over the 15 px detail line.
+    expect(full.style.getPropertyValue("--title-lines")).toBe("2");
   });
 });
 
@@ -610,12 +621,12 @@ describe("Calendar drag-to-create and 5-minute resize (W13)", () => {
       fireEvent.pointerDown(dayBody, pointer(41, y(9 * 60 + 2)));
       fireEvent.pointerMove(dayBody, pointer(41, y(9 * 60 + 47)));
     });
-    expect(document.querySelector<HTMLElement>("[data-calendar-create-ghost]")?.style.left).toBe("20px");
+    expect(document.querySelector<HTMLElement>("[data-calendar-create-ghost]")?.style.left).toBe("52px");
     await act(async () => {
       fireEvent.pointerUp(dayBody, pointer(41, y(9 * 60 + 47)));
     });
     await screen.findByTestId("calendar-compact-editor");
-    expect(document.querySelector<HTMLElement>("[data-calendar-draft]")?.style.left).toBe("20px");
+    expect(document.querySelector<HTMLElement>("[data-calendar-draft]")?.style.left).toBe("52px");
   });
 
   it("leaves the ghost at the stylesheet's inset on a day without a bracket", async () => {

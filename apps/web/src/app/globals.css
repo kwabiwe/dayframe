@@ -30,6 +30,8 @@
   --surface-strong: var(--surface-raised);
   --surface-inset: #f7f8fb;
   --surface-muted: #eef1f6;
+  --calendar-dense-tint: 20%;
+  --calendar-dense-review-tint: 12%;
   --border: #dde2ea;
   --border-strong: #bcc5d2;
   --control-border: #7d8797;
@@ -133,6 +135,8 @@
     --surface-strong: var(--surface-raised);
     --surface-inset: #101622;
     --surface-muted: #202838;
+    --calendar-dense-tint: 30%;
+    --calendar-dense-review-tint: 16%;
     --border: #2a3345;
     --border-strong: #3b465b;
     --control-border: #64718a;
@@ -233,6 +237,8 @@
   --surface-strong: var(--surface-raised);
   --surface-inset: #101622;
   --surface-muted: #202838;
+  --calendar-dense-tint: 30%;
+  --calendar-dense-review-tint: 16%;
   --border: #2a3345;
   --border-strong: #3b465b;
   --control-border: #64718a;
@@ -1981,14 +1987,18 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   }
 }
 
+/* Dense-day rules (owner, 24 Oct 2026; mock-up calendar-dense v2): a tinted fill and a 3 px colour bar,
+   no outline; blocks share columns and are never drawn on top of one another. */
 .calendar-time-block {
   --calendar-block-radius: 6px;
+  --calendar-block-fill: color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-tint), var(--surface));
+  --calendar-block-selected-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface));
   container-name: calendar-time-block;
   container-type: inline-size;
   display: block;
   box-sizing: border-box;
-  overflow: visible;
-  border: 1px solid var(--calendar-block-border);
+  overflow: hidden;
+  border: 0;
   border-radius: var(--calendar-block-radius);
   background-color: var(--calendar-block-fill);
   box-shadow: none;
@@ -2011,9 +2021,19 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   border-top-right-radius: 0;
 }
 
-.calendar-time-block.is-running {
-  border-style: dashed;
+.calendar-time-block::before,
+.calendar-review-block::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 2;
+  width: 3px;
+  background: var(--calendar-block-accent);
+  content: "";
+  pointer-events: none;
 }
+
 
 .calendar-time-block.is-running.is-continuation-from-previous {
   border-top-style: none;
@@ -2051,7 +2071,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   border: 0;
   border-radius: inherit;
   background: transparent;
-  padding: 3px 6px 0;
+  padding: 2px 6px 2px 8px;
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -2068,53 +2088,85 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   outline-offset: 1px;
 }
 
-/* Calendar titles at every zoom (location v4 C6, mock-ups #web-grid): every block is at least one
-   16 px label line tall and prints its title and real length ("Coffee 4m"); from 34 px a detail line
-   ("Deep work · 10:45–12:30"); a column under 34 px wide shows the activity icon only. Text takes
-   the block's own colour (on-block on activity fills). */
-.calendar-entry-title-line,
-.calendar-entry-detail-line {
-  display: block;
-  width: 100%;
-  min-width: 0;
+/* Dense-day text: the title always wins. It wraps to the whole lines its block holds (counted from the drawn
+   height into --title-lines*), then ends with an ellipsis after a whole word; the time and length line only
+   from 120 px wide with a line to spare; compact type under 34 px tall or 90 px wide; colour only under 22. */
+.calendar-entry-title {
+  display: -webkit-box;
   overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--title-lines-detailless, 1);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 16px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: auto;
+}
+
+/* Whole words only: a word never splits across the clamp's ellipsis (one wider than its column is cut at the edge). */
+.calendar-entry-word {
+  display: inline-block;
+}
+
+.calendar-entry-detail-line {
+  display: none;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The title truncates; the length always shows. Two lines (3 + 16 + 13 px) fit a 34 px block's
-   32 px inside its border. */
-.calendar-entry-title-line {
-  display: flex;
-  gap: 4px;
-  font-size: 12.5px;
-  font-weight: 700;
-  line-height: 16px;
+@container calendar-time-block (min-width: 120px) {
+  .calendar-time-block.has-detail-room .calendar-entry-title,
+  .calendar-review-block.has-detail-room .calendar-entry-title {
+    -webkit-line-clamp: var(--title-lines, 1);
+  }
+
+  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
+  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
+    display: block;
+  }
 }
 
-.calendar-entry-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.calendar-time-block.is-dense-compact .calendar-entry-primary,
+.calendar-review-block.is-dense-compact {
+  padding: 1px 4px 1px 7px;
 }
 
-.calendar-entry-length {
-  flex: none;
-}
-
-.calendar-entry-length,
-.calendar-entry-detail-line {
-  font-weight: 600;
-  opacity: 0.85;
-}
-
-.calendar-entry-detail-line {
+.calendar-time-block.is-dense-compact .calendar-entry-title,
+.calendar-review-block.is-dense-compact .calendar-entry-title {
+  -webkit-line-clamp: var(--title-lines-compact, 1);
   font-size: 11px;
   line-height: 13px;
 }
 
-.calendar-entry-glyph {
-  display: none;
+@container calendar-time-block (max-width: 89.98px) {
+  .calendar-entry-primary {
+    padding: 1px 4px 1px 7px;
+  }
+
+  .calendar-entry-title {
+    -webkit-line-clamp: var(--title-lines-compact, 1);
+    font-size: 11px;
+    line-height: 13px;
+  }
+
+  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
+  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
+    display: none;
+  }
+}
+
+@container calendar-time-block (max-width: 21.98px) {
+  .calendar-entry-title,
+  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
+  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
+    display: none;
+  }
 }
 
 .calendar-start-again {
@@ -2176,32 +2228,6 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   }
 }
 
-/* Under 72 px the length takes at most half the line, scaled down so it always fits whole, and the
-   title truncates in the rest (Codex r3/r4 on #545); under 34 px the activity icon alone (below). */
-@container calendar-time-block (max-width: 71.98px) {
-  .calendar-entry-length {
-    font-size: min(1em, calc((50cqw - 8px) / (var(--calendar-length-chars, 3) * 0.82)));
-  }
-}
-
-@container calendar-time-block (max-width: 33.98px) {
-  .calendar-entry-primary {
-    padding: 0;
-  }
-
-  .calendar-entry-title-line,
-  .calendar-entry-detail-line {
-    display: none;
-  }
-
-  .calendar-entry-glyph {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-  }
-}
-
 .calendar-time-block.is-resizing .calendar-start-again {
   display: none;
 }
@@ -2259,15 +2285,6 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   opacity: 1;
 }
 
-.calendar-time-block.is-tiny .calendar-entry-primary {
-  align-content: center;
-  padding-top: 0;
-}
-
-.calendar-time-block.is-tiny .calendar-entry-title-line {
-  font-size: 11px;
-  line-height: 15px;
-}
 
 /* A block tall enough for direct resize keeps its title clear of the top handle. */
 .calendar-time-block.can-direct-resize .calendar-entry-primary {
@@ -9185,38 +9202,11 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
 }
 
-/* Trello 213: Calendar blocks are flat fills — no inner highlight or shade. Adjacent blocks stay
-   apart through the visual gap in calendarBlockVisualGeometry, not an inner stroke. */
-.calendar-time-block.df-block {
-  --calendar-block-radius: 8px;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-/* Everything drawn on a solid block uses its measured on-block colour; metadata at 80 %. */
-.calendar-time-block.df-block .calendar-entry-primary,
-.calendar-time-block.df-block .calendar-start-again {
-  color: var(--on-block);
-}
-
-.calendar-time-block.df-block:hover:not(.is-selected):not(.is-resizing) {
-  filter: brightness(1.06);
-}
-
-.calendar-time-block.df-block.is-selected {
-  outline: 2px solid var(--text-primary);
-  outline-offset: 1px;
-}
-
-.calendar-time-block.df-block.is-running {
-  border-style: solid;
-}
-
-.calendar-time-block.df-block.is-running::after {
+.calendar-time-block.is-running::after {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--on-block) 45%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--calendar-block-accent) 55%, transparent);
   content: "";
   pointer-events: none;
   animation: df-live-breathe 2.4s ease-in-out infinite;
@@ -9310,60 +9300,103 @@ dialog.ui-dialog.df-palette {
   content: "";
 }
 
+/* Day view (dense-day rules): the name written level beside the bracket, whole words only, as many lines as
+   the bracket is tall; never rotated, never cut mid-word. Week view keeps the bare bracket. */
+.df-cal-bracket.is-day {
+  width: 42px;
+}
+
 .df-cal-bracket-label {
   position: absolute;
   top: 0;
-  bottom: 0;
   left: 0;
-  width: 11px;
+  width: 34px;
   overflow: hidden;
   color: var(--text-secondary);
-  font-size: var(--type-label);
+  font-size: 10px;
   font-weight: 650;
-  line-height: 11px;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  writing-mode: vertical-rl;
+  line-height: 12px;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: auto;
 }
 
 /*
  * Layers in a day column: entries (lane z-index 2 + lane), then Review suggestions in their lane,
  * then the now line; a hovered, selected or resizing entry rises above the suggestions.
  */
+/* Suggestions: hatched blocks with a dashed colour bar and a "?", in the grid's own columns (no lane). */
 .calendar-review-block {
   position: absolute;
-  z-index: 12;
-  right: 4px;
+  z-index: 2;
   display: block;
-  width: 42%;
+  box-sizing: border-box;
   min-width: 0;
   overflow: hidden;
-  border-radius: 8px;
-  padding: 4px 6px;
+  border-radius: 6px;
+  padding: 2px 6px 2px 8px;
   background:
-    repeating-linear-gradient(135deg, color-mix(in oklab, var(--block, var(--text-muted)) 40%, transparent) 0 6px, transparent 6px 12px),
-    color-mix(in oklab, var(--block, var(--text-muted)) 16%, var(--surface));
-  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--block, var(--text-muted)) 70%, transparent);
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 16%, transparent) 0 2px, transparent 2px 7px),
+    color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-review-tint), var(--surface));
   color: var(--text-primary);
-  font-size: 11px;
   text-decoration: none;
+  container-name: calendar-time-block;
+  container-type: inline-size;
 }
 
-.calendar-review-block.df-block {
-  color: var(--text-primary);
+.calendar-review-block::before {
+  background: repeating-linear-gradient(180deg, var(--calendar-block-accent) 0 4px, transparent 4px 7px);
 }
 
-.calendar-review-block b {
-  display: block;
-  overflow: hidden;
+.calendar-review-mark {
+  margin-right: 3px;
+  color: var(--warning-text);
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+/* A finished block of a minute or less: a short line with a dot at the column's left edge, inside the
+   8 px every block keeps clear, so it never crosses a block; its title on hover, tap and to assistive tech. */
+.calendar-moment {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  width: 7px;
+  height: 12px;
+  margin-top: -6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.calendar-moment::before {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 7px;
+  height: 2px;
+  background: var(--calendar-block-accent);
+  content: "";
+}
+
+.calendar-moment::after {
+  position: absolute;
+  top: 3px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--calendar-block-accent);
+  content: "";
+}
+
+.calendar-moment:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .calendar-time-block.df-block.is-running::after {
+  .calendar-time-block.is-running::after {
     animation: none;
     opacity: 0.6;
   }
