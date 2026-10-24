@@ -24,15 +24,22 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(theme).toMatch(/todayToastStack: \{\s*flexDirection: "column",\s*justifyContent: "flex-end",\s*gap: 8\s*\}/);
   });
 
-  it("saves a card's remembered copy only while this phone has not decided it, by the List's own rule", () => {
-    expect(review).toContain("void rememberedReviewAnswerStillOpen(");
-    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, checkedRemembered = new Set()) => {"), review.indexOf("function resolveItem("));
+  it("saves a held card only after claiming it and reading the outbox, by the List's own order", () => {
+    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, verified = false) => {"), review.indexOf("function resolveItem("));
+    // Claim, read the outbox, check again, save (Codex r6 on #582): the claim is taken before the read and
+    // let go only when it ends, and the verified pass saves through resolveItem in the same turn.
+    const claimAt = commit.indexOf("if (!claimReviewAnswer(ids)) {");
+    const readAt = commit.indexOf("void reviewAnswerStillOpen(");
+    expect(claimAt).toBeGreaterThan(-1);
+    expect(readAt).toBeGreaterThan(claimAt);
+    expect(commit).toMatch(/\.then\(\(outcome\) => \{\s*releaseReviewAnswer\(ids\);/);
     // Fenced to the account it began in, a failed read is a failed save, decided meanwhile saves nothing,
     // and otherwise everything is validated again as it is now (Codex r3 on #582).
     expect(commit).toContain("if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {");
     expect(commit).toMatch(/if \("error" in outcome\) \{[^}]*failed\(\);/);
     expect(commit).toMatch(/if \(!outcome\.open\) \{[^}]*settled\(\);\s*restoreMembers\(\);\s*undoCount\(\);/);
-    expect(commit).toContain("commitHeldDeckDecisionRef.current(held, new Set([...checkedRemembered, ...remembered.map((candidate) => candidate.id)]));");
+    expect(commit).toContain("commitHeldDeckDecisionRef.current(held, true);");
+    expect(commit).toMatch(/if \(verified\) \{\s*start\(\);\s*return;\s*\}/);
   });
 
   it("claims a held bulk skip's moments for both surfaces while it saves, and lets them go after (Codex r5 on #582)", () => {

@@ -6,7 +6,7 @@ import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation } from "../../lib/reviewAnswer";
-import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, rememberedReviewAnswerStillOpen } from "../../lib/reviewAnswerClaims";
+import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswerStillOpen } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
@@ -39,7 +39,8 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
  * As the deck does: a suggestion that changed (`reviewDeckProposalSignature`), whose outing changed
  * (`heldOutingStillSame`) or that was decided elsewhere while held is not saved; one a capped refresh only
  * left out of the loaded list is saved from the copy the List showed, once this phone is known not to have
- * decided it meanwhile (`rememberedReviewAnswerStillOpen`); nothing the deck is already saving is saved
+ * decided it meanwhile; every save claims its suggestions, reads the outbox for them and checks again before
+ * it is written (`reviewAnswerStillOpen`), so nothing the deck is saving or has saved is saved
  * again (`reviewAnswerClaims`); and Undo, or a save that fails or is refused, brings back a copy the loaded
  * list no longer has (outing included) until the next read replaces it (`data`). Everything belongs to the
  * account that answered: switching account drops a held answer unsaved and silences any late result. While
@@ -104,9 +105,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     });
   };
 
-  // `checked`: remembered copies the outbox has already been read for. Everything is validated again after
-  // that read, against the suggestion as it is now (Codex r3 on #582).
-  const save = (decision: HeldAnswer, checked: ReadonlySet<string> = new Set()) => {
+  // Claim, read the outbox, check again, save (Codex r6 on #582): the shared claim is held across the read,
+  // so no save on another surface can start, or finish unseen, in between. After the read, the claim is let
+  // go and the answer is validated, claimed and saved again in the same turn (`verified`), against the
+  // suggestion as it is now (Codex r3).
+  const save = (decision: HeldAnswer, verified = false) => {
     if (decision.owner !== ownerRef.current) return; // Another account now: never saved there.
     const owner = decision.owner;
     const heldIds = [decision.itemId, ...(decision.outing?.members.map((member) => member.itemId) ?? [])];
@@ -157,23 +160,24 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     setSaving((now) => now?.owner === owner
       ? { ...now, ids: new Set([...now.ids, ...ids]) }
       : { owner, ids: new Set(ids), awaiting: new Set() });
-    const unchecked = remembered.filter((candidate) => !checked.has(candidate.id)).map((candidate) => candidate.id);
-    if (unchecked.length) {
-      void rememberedReviewAnswerStillOpen(current, unchecked).then((open) => {
+    // Being saved on the deck now: that decision comes first.
+    if (!claimReviewAnswer(ids)) {
+      unhide(heldIds);
+      return;
+    }
+    if (!verified) {
+      void reviewAnswerStillOpen(current, ids).then((open) => {
+        releaseReviewAnswer(ids);
         if (ownerRef.current !== owner) return;
         // Decided meanwhile on this phone (the deck): not this answer's to save.
         if (!open) unhide(heldIds);
-        else saveRef.current(decision, new Set([...checked, ...unchecked]));
+        else saveRef.current(decision, true);
       }, (error: unknown) => {
+        releaseReviewAnswer(ids);
         if (ownerRef.current !== owner) return;
         // The outbox could not be read: not saved, and the answer is still here, as after a failed save.
         notSaved(error);
       });
-      return;
-    }
-    // Being saved on the deck now: that decision comes first.
-    if (!claimReviewAnswer(ids)) {
-      unhide(heldIds);
       return;
     }
     const settle = (ok: boolean) => {

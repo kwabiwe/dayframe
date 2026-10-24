@@ -199,9 +199,11 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.reviewItemsDecidedLocally).toHaveBeenCalledWith(expect.anything(), ["a"]);
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
     expect(result.current.hiddenIds.has("a")).toBe(false);
-    // A listed suggestion needs no outbox read: it is saved as before.
+    // A listed suggestion is read for too (Codex r6 on #582), and saved while undecided.
+    store.reviewItemsDecidedLocally.mockImplementation(async () => false);
     act(() => { result.current.answer("b", true); });
     await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.reviewItemsDecidedLocally).toHaveBeenLastCalledWith(expect.anything(), ["b"]);
     expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
   });
 
@@ -333,5 +335,34 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
       { action: "ignore_once" },
       { action: "confirm_outing", memberReviewItemIds: ["back"] }
     ]);
+  });
+
+  it("holds the shared claim across a delayed outbox read, so the deck can neither start nor finish a save inside it (Codex r6 on #582)", async () => {
+    let finishRead!: (decided: boolean) => void;
+    store.reviewItemsDecidedLocally.mockImplementation(() => new Promise<boolean>((resolve) => { finishRead = resolve; }));
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", false); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    // The List's read is in flight: the deck's claim for the same suggestion is refused.
+    expect(store.reviewItemsDecidedLocally).toHaveBeenCalledOnce();
+    expect(claimReviewAnswer(["a"])).toBe(false);
+    await act(async () => { finishRead(false); });
+    expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+    // Released once its own write is in the outbox.
+    expect(claimReviewAnswer(["a"])).toBe(true);
+    releaseReviewAnswer(["a"]);
+
+    // The other way round: the deck holds its claim while it saves; the List leaves the answer to it and
+    // reads nothing. Once the deck's write is in, the List's next read says it is decided.
+    store.enqueueReviewMutation.mockClear();
+    store.reviewItemsDecidedLocally.mockReset();
+    const other = mount(bootstrap([suggestion("b")]));
+    act(() => { other.result.current.answer("b", false); });
+    claimReviewAnswer(["b"]);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.reviewItemsDecidedLocally).not.toHaveBeenCalled();
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(other.result.current.hiddenIds.has("b")).toBe(false);
+    releaseReviewAnswer(["b"]);
   });
 });

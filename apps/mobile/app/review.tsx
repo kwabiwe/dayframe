@@ -141,7 +141,7 @@ import {
   heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
 import { reviewAnswerMutation } from "@/lib/reviewAnswer";
-import { claimReviewAnswer, releaseReviewAnswer, rememberedReviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
+import { claimReviewAnswer, releaseReviewAnswer, reviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -313,7 +313,7 @@ export default function ReviewScreen() {
   logAsDraftsRef.current = logAsDrafts;
   const logAsNames = useRef(new Map<string, string>());
   const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
-  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld, checkedRemembered?: ReadonlySet<string>) => void>(() => undefined);
+  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld, verified?: boolean) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
     onChange: setHeldDeckDecision,
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
@@ -1679,9 +1679,9 @@ export default function ReviewScreen() {
     })();
   }
 
-  // `checkedRemembered`: remembered copies the outbox has already been read for (a second pass after that
-  // read validates everything again, as it is now).
-  commitHeldDeckDecisionRef.current = (held, checkedRemembered = new Set()) => {
+  // `verified`: the outbox has been read for this decision, under its claim; this second pass validates
+  // everything again, as it is now, and saves.
+  commitHeldDeckDecisionRef.current = (held, verified = false) => {
     if (held.kind === "batch") {
       commitHeldBulkSkip(held);
       return;
@@ -1714,7 +1714,7 @@ export default function ReviewScreen() {
     };
     if (!item) {
       // (After the outbox read the card may already be marked as committing.)
-      if (checkedRemembered.size) setDeckKeysCommitting([held.key, ...memberKeys], false);
+      if (verified) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       // Resolved elsewhere while held: this visit did not decide it (its Moves show on their own).
       restoreMembers();
@@ -1729,7 +1729,7 @@ export default function ReviewScreen() {
       // A refresh changed the suggestion while the decision was held: the user decided about
       // something else, so nothing is saved and the card comes back as it is now.
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
-      if (checkedRemembered.size) setDeckKeysCommitting([held.key, ...memberKeys], false);
+      if (verified) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       restorePagedOutDeckItem(held.itemId);
       restoreMembers();
@@ -1772,20 +1772,32 @@ export default function ReviewScreen() {
       // not this visit's decision.
       if (!started) failed();
     };
-    // Copies the deck remembered for cards a refresh left out are saved only while this phone has not
-    // decided them meanwhile (Calendar › List answering the same suggestion; reviewAnswerClaims.ts).
-    const loadedData = dataRef.current;
-    const remembered = (outing ? [item, ...members] : [item])
-      .filter((candidate) => !loadedData?.reviewItems.some((loaded) => loaded.id === candidate.id));
-    if (!loadedData || remembered.every((candidate) => checkedRemembered.has(candidate.id))) {
+    // Claim, read the outbox, check again, save (reviewAnswerClaims.ts, Codex r2 and r6 on #582): holding
+    // the shared claim, the deck reads whether this phone has decided these moments meanwhile (Calendar ›
+    // List answering the same suggestion), then lets it go and validates, claims and saves in one turn.
+    if (verified) {
       start();
       return;
     }
+    const loadedData = dataRef.current;
+    if (!loadedData) {
+      failed();
+      return;
+    }
+    const affected = outing ? [item, ...members] : [item];
+    const ids = affected.map((candidate) => candidate.id);
+    if (!claimReviewAnswer(ids)) {
+      // Being saved on the other surface now: not this visit's decision.
+      failed();
+      return;
+    }
+    const remembered = affected.filter((candidate) => !loadedData.reviewItems.some((loaded) => loaded.id === candidate.id));
     const owner = reviewDataOwnerKey(loadedData);
-    void rememberedReviewAnswerStillOpen(
-      { ...loadedData, reviewItems: [...loadedData.reviewItems, ...remembered] },
-      remembered.map((candidate) => candidate.id)
+    void reviewAnswerStillOpen(
+      remembered.length ? { ...loadedData, reviewItems: [...loadedData.reviewItems, ...remembered] } : loadedData,
+      ids
     ).then((open) => ({ open }), (error: unknown) => ({ error })).then((outcome) => {
+      releaseReviewAnswer(ids);
       // Another account now (Codex r3 on #582): nothing of this one is saved, counted or said there.
       if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {
         settled();
@@ -1805,8 +1817,9 @@ export default function ReviewScreen() {
         undoCount();
         return;
       }
-      // Checked against the suggestion as it is now: a refresh during the read may have changed it.
-      commitHeldDeckDecisionRef.current(held, new Set([...checkedRemembered, ...remembered.map((candidate) => candidate.id)]));
+      // Checked against the suggestion as it is now (a refresh during the read may have changed it), and
+      // claimed again by resolveItem in this same turn.
+      commitHeldDeckDecisionRef.current(held, true);
     });
   };
 

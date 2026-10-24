@@ -1,9 +1,9 @@
 // One claim per suggestion while its answer is being saved, across every surface that answers (the Review
 // deck and Calendar › List, location v4 step 14 part 3b): a suggestion one of them is saving is never also
-// saved by the other, so the outbox never gets two decisions for it. A claim covers the save itself; an
-// answer held for Undo on one surface while the other decides the same suggestion is caught when it is
-// saved: a listed suggestion has left its surface's open list, and a copy remembered for one a refresh left
-// out is saved only when this phone has not decided it meanwhile (`rememberedReviewAnswerStillOpen`).
+// saved by the other, so the outbox never gets two decisions for it. A held answer is saved in one order on
+// both surfaces: claim its suggestions, read the outbox for them (`reviewAnswerStillOpen`), check again and
+// write, so a save on the other surface can neither start during the read nor finish unseen before it (a
+// surface lets its claim go only once its own write is in the outbox) (Codex r6 on #582).
 import type { MobileBootstrap } from "./api";
 import { reviewItemsDecidedLocally } from "./reviewSyncStore";
 
@@ -25,10 +25,10 @@ export function isReviewAnswerClaimed(id: string) {
 }
 
 /**
- * The one check both surfaces make before saving remembered copies (`ids`, those a refresh left out of
- * `bootstrap`): true while this phone has decided none of them (Codex r2 on #582).
+ * The one check both surfaces make, holding the claim, before saving an answer for `ids` (`bootstrap` with
+ * any remembered copies added): true while this phone has decided none of them (Codex r2 and r6 on #582).
  */
-export async function rememberedReviewAnswerStillOpen(bootstrap: MobileBootstrap, ids: readonly string[]) {
+export async function reviewAnswerStillOpen(bootstrap: MobileBootstrap, ids: readonly string[]) {
   if (!ids.length) return true;
   return !(await reviewItemsDecidedLocally(bootstrap, ids));
 }
