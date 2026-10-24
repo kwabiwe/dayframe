@@ -13963,6 +13963,11 @@ dialog.ui-dialog.df-palette {
 
 /* On a phone the List's table scrolls sideways: the question stays in view, as wide as the screen. */
 @media (max-width: 760px) {
+  /* No row indent: the panel starts at the screen's edge even before the table scrolls (Codex r5 on #568). */
+  .timeline-check-row > td {
+    padding-left: 0;
+  }
+
   .timeline-check-question {
     position: sticky;
     left: 0;
