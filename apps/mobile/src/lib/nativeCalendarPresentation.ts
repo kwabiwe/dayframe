@@ -2,6 +2,7 @@ import { formatLocaleDate } from "./localeDateFormat";
 import {
   analyzeTimeIntervals,
   blockColorsFor,
+  calendarBlockInk,
   CALENDAR_BLOCK_LABEL,
   calendarBlockContinuationEdges,
   formatClockTime,
@@ -108,6 +109,12 @@ export type NativeCalendarPresentationEntry = {
   tagText: string | null;
   /** Measured on-block text colour for the solid fill (deep ink or white); theme text for Review. */
   textColor: string;
+  /**
+   * Calendar v3: the block's text, a darker (light) or lighter (dark) shade of its own hue measured to
+   * meet AA on its tint, its Reduce Transparency tint and a nested tint (`calendarBlockInk`); theme text
+   * for a suggestion.
+   */
+  ink?: string;
   textDensity: TimeIntervalLayout["textDensity"];
   title: string;
   /** Overlaps among logged blocks only: the warning dot and the VoiceOver note. */
@@ -520,6 +527,7 @@ function serializeCalendarEntry(
   // keeps theme text, as on Today's ribbon.
   const color = reviewNeeded && isUncategorized ? theme.textMuted : blockColors.fill;
   const textColor = reviewNeeded ? theme.textPrimary : blockColors.text;
+  const ink = reviewNeeded ? theme.textPrimary : calendarInk(color, theme);
   const tagText = entry.tags?.map((tag) => tag.name).join(" · ")
     || entry.tagNames?.join(" · ")
     || null;
@@ -542,6 +550,7 @@ function serializeCalendarEntry(
     // Dense-day rules: a finished block of a minute or less is a moment, drawn as a tick.
     isMoment: !reviewNeeded && stoppedAtMs !== null && Number.isFinite(stoppedAtMs) && stoppedAtMs - startedAtMs <= 60_000,
     isReview: reviewNeeded,
+    ink,
     isUncategorized,
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
@@ -848,6 +857,13 @@ function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
  * The time and length line (dense-day rules), shown only where a block has room: "07:05–07:40 · 35m",
  * "+1" on a finish the next day, "now" for a running block.
  */
+/** `calendarBlockInk` for a block colour, or theme text for a colour that is not #RRGGBB. */
+function calendarInk(color: string, theme: MobileTheme) {
+  return /^#[0-9a-f]{6}$/i.test(color)
+    ? calendarBlockInk(color, theme.mode, { background: theme.background, surface: theme.surface })
+    : theme.textPrimary;
+}
+
 function calendarDetailLines(entry: NativeCalendarEntry, tagText: string | null, now: number, clockFormat: ClockFormat) {
   const lines: NativeCalendarDetailLine[] = [];
   if ((entry.source ?? "").startsWith("health")) lines.push({ glyph: "health", text: "From Apple Health" });

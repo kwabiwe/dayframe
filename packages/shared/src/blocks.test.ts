@@ -8,6 +8,8 @@ import {
   ACTIVITY_CONTROL_MINIMUM_CONTRAST,
   activityControlColor,
   blockColorsFor,
+  calendarBlockInk,
+  CALENDAR_V3_TINT,
   contrastRatio,
   onBlockTextColor,
   paletteKeyFor
@@ -198,4 +200,41 @@ function deltaE2000(first: string, second: string) {
   const sh = 1 + 0.015 * meanCp * t;
   const rt = -2 * Math.sqrt(meanCp ** 7 / (meanCp ** 7 + 25 ** 7)) * Math.sin(60 * Math.exp(-(((meanH - 275) / 25) ** 2)) * rad);
   return Math.sqrt((dL / sl) ** 2 + (dC / sc) ** 2 + (dH / sh) ** 2 + rt * (dC / sc) * (dH / sh));
+}
+
+describe("calendarBlockInk (Calendar v3)", () => {
+  it("meets AA on the tint, the Reduce Transparency tint and a nested tint for every palette colour in both themes", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      for (const colour of DAYFRAME_PALETTE) {
+        const fill = mode === "dark" ? colour.darkHex : colour.lightHex;
+        for (const review of [false, true]) {
+          const ink = calendarBlockInk(fill, mode, { background: theme.background, surface: theme.surface, review });
+          const tint = review ? (mode === "dark" ? CALENDAR_V3_TINT.reviewDark : CALENDAR_V3_TINT.reviewLight) : (mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light);
+          const over = (base: string, amount: number) => mix(base, fill, amount);
+          for (const surface of [over(theme.background, tint), over(theme.surface, tint + CALENDAR_V3_TINT.reduceTransparencyBoost), over(over(theme.background, tint), tint)]) {
+            expect(contrastRatio(ink, surface), `${colour.key} ${mode}${review ? " review" : ""}`).toBeGreaterThanOrEqual(4.5);
+          }
+        }
+      }
+    }
+  });
+
+  it("keeps the block's own hue: a darker shade in light mode, a lighter one in dark", () => {
+    const light = calendarBlockInk("#2D7CEB", "light", { background: "#F4F6F9", surface: "#FFFFFF" });
+    const dark = calendarBlockInk("#3B8BF6", "dark", { background: "#050914", surface: "#151B27" });
+    // Darker than the colour itself in light mode, lighter in dark, and still blue (blue the largest channel).
+    expect(contrastRatio(light, "#FFFFFF")).toBeGreaterThan(contrastRatio("#2D7CEB", "#FFFFFF"));
+    expect(contrastRatio(dark, "#000000")).toBeGreaterThan(contrastRatio("#3B8BF6", "#000000"));
+    for (const ink of [light, dark]) {
+      const [red, green, blue] = [1, 3, 5].map((offset) => Number.parseInt(ink.slice(offset, offset + 2), 16));
+      expect(blue).toBeGreaterThan(Math.max(red, green));
+    }
+  });
+});
+
+function mix(from: string, to: string, amount: number) {
+  const channels = (hex: string) => [0, 2, 4].map((offset) => Number.parseInt(hex.slice(1 + offset, 3 + offset), 16));
+  const [a, b] = [channels(from), channels(to)];
+  return `#${a.map((channel, index) => Math.round(channel + (b[index] - channel) * amount).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
 }

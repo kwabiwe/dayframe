@@ -78,7 +78,7 @@ describe("native Calendar production contract", () => {
     expect(marker).toContain(".background(Capsule(style: .continuous).fill(red))");
     expect(marker).not.toContain("Circle()");
     // The hour label under the pill is hidden.
-    expect(rootView).toContain(".opacity(nowY.map { abs($0 - lineTop) < 12 } == true ? 0 : 1)");
+    expect(rootView).toContain(".opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)");
   });
 
   it("removes the React pinch, temporary transform, and outer-scroll ownership", () => {

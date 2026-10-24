@@ -60,6 +60,44 @@ export function activityControlColor(value: unknown, mode: DayframeThemeMode, ba
   return toward;
 }
 
+/**
+ * Calendar v3 (owner, 24 Oct 2026): blocks are a translucent tint of their activity colour, opaque over
+ * the surface (a little stronger) under Reduce Transparency. Suggestions are lighter.
+ */
+export const CALENDAR_V3_TINT = {
+  light: 0.18,
+  dark: 0.28,
+  reviewLight: 0.1,
+  reviewDark: 0.14,
+  reduceTransparencyBoost: 0.1
+} as const;
+
+/**
+ * Calendar v3's block text: a darker shade of the block's own hue in light mode (a lighter one in dark),
+ * starting at the mock-up's 52 % / 62 % of the colour and deepened toward black (or lifted toward white)
+ * just until it measures at least 4.5:1 on every surface the block can be drawn on — its tint over the
+ * canvas, the opaque Reduce Transparency tint over the surface, and a nested block's tint over its
+ * parent's — so titles and icon lines meet AA for every palette colour.
+ */
+export function calendarBlockInk(fill: string, mode: DayframeThemeMode, { background, surface, review = false }: { background: string; surface: string; review?: boolean }) {
+  const tint = review
+    ? (mode === "dark" ? CALENDAR_V3_TINT.reviewDark : CALENDAR_V3_TINT.reviewLight)
+    : (mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light);
+  const overCanvas = mixHex(background, fill, tint);
+  const backgrounds = [
+    overCanvas,
+    mixHex(surface, fill, tint + CALENDAR_V3_TINT.reduceTransparencyBoost),
+    mixHex(overCanvas, fill, tint)
+  ];
+  const toward = mode === "dark" ? "#FFFFFF" : "#000000";
+  const start = mode === "dark" ? 0.38 : 0.48;
+  for (let amount = start; amount < 1; amount += 0.02) {
+    const color = mixHex(fill, toward, amount);
+    if (backgrounds.every((candidate) => contrastRatio(color, candidate) >= DAYFRAME_BLOCKS.minimumTextContrast)) return color;
+  }
+  return toward;
+}
+
 function mixHex(from: string, to: string, amount: number) {
   const channels = (hex: string) => [0, 2, 4].map((offset) => Number.parseInt(hex.replace("#", "").slice(offset, offset + 2), 16));
   const [a, b] = [channels(from), channels(to)];

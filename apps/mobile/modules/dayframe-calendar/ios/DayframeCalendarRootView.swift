@@ -492,7 +492,8 @@ private struct DayframeCalendarHourGrid: View {
         .foregroundStyle(Color(dayframeCSS: theme.textMuted))
         .frame(width: hourLabelWidth - 8, alignment: .trailing)
         .position(x: (hourLabelWidth - 8) / 2, y: labelTop)
-        .opacity(nowY.map { abs($0 - lineTop) < 12 } == true ? 0 : 1)
+        // Compared where the label is drawn (clamped inside the day at 00:00 and 24:00), not its line.
+        .opacity(nowY.map { abs($0 - labelTop) < 12 } == true ? 0 : 1)
         .accessibilityHidden(true)
 
       Rectangle()
@@ -650,7 +651,7 @@ private struct DayframeCalendarEntriesLayer: View {
         .contentShape(Rectangle())
         .position(x: CGFloat(frame.minX + frame.maxX) / 2, y: CGFloat(frame.minY + frame.maxY) / 2)
         .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
-        .zIndex(Double(DayframeCalendarDayLayout.reviewZIndexBase * 2))
+        .zIndex(Double(DayframeCalendarDayLayout.momentZIndex))
         .accessibilityLabel(moment.entry.accessibilityLabel)
         .accessibilityHint("Opens entry editor")
       }
@@ -689,10 +690,12 @@ private struct DayframeCalendarBlockView: View {
     let fill: Color = reduceTransparency
       ? Color(uiColor: blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint + 0.1))
       : Color(uiColor: blockColor).opacity(Double(tint))
-    // A darker shade of the hue in light mode, a lighter one in dark mode (AA on the tint).
+    // A darker shade of the hue in light mode, a lighter one in dark mode, measured by React to meet AA on
+    // every tint (calendarBlockInk); an older bundle's model falls back to the mock-up's own shade.
     let ink = entry.isReview
       ? Color(dayframeCSS: theme.textPrimary)
-      : Color(uiColor: blockColor.dayframeBlended(over: dark ? .white : .black, alpha: dark ? 0.62 : 0.52))
+      : entry.ink.map { Color(dayframeCSS: $0) }
+        ?? Color(uiColor: blockColor.dayframeBlended(over: dark ? .white : .black, alpha: dark ? 0.62 : 0.52))
     let label = DayframeCalendarDenseLabelMath.label(
       height: Double(visualHeight),
       width: horizontal.width,
@@ -829,7 +832,7 @@ private struct DayframeCalendarDenseText: View {
             }
           }
         }
-        .foregroundStyle(ink.opacity(0.92))
+        .foregroundStyle(ink)
       }
     }
     .frame(width: CGFloat(max(0, width)), alignment: .leading)
