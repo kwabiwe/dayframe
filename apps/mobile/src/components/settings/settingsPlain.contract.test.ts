@@ -19,7 +19,8 @@ describe("Settings in plain language (audit A8a)", () => {
     for (const engineering of ["The server didn't accept", "not accepted", "Check again", "quarantine diagnostics", "replayed", "queued events", "Retry sends"]) {
       expect(settings).not.toContain(engineering);
     }
-    expect(settings).toContain('foot="Try again resends it. Discard keeps your account as it is."');
+    // The footer names the buttons on screen (staging QA 24 Oct 2026: "Clear" rows, "Discard" footer).
+    expect(settings).toContain("foot={needsAttentionFoot({");
     expect(settings).toContain('message: "Only this change is removed. Anything still sending is kept."');
     expect(settings).not.toMatch(/label="Retry"/);
   });
