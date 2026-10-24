@@ -1920,16 +1920,17 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       titles: new Map(items.map((item) => [item.id, item.title] as const))
     };
   }, [calendarData?.reviewItems, locallyDecidedIds]);
-  // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573).
+  // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
+  // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
   const checkCounts = useMemo(() => {
     const todayStart = dateFromKey(todayKey).getTime();
     const weekStart = addDaysToDate(dateFromKey(todayKey), -7).getTime();
     const tomorrowStart = addDaysToDate(dateFromKey(todayKey), 1).getTime();
     return {
-      week: calendarChecks.checks.filter((check) => listCheckOverlaps(check, weekStart, now)).length,
+      week: calendarChecks.checks.filter((check) => listCheckOverlaps(check, weekStart, tomorrowStart)).length,
       today: calendarChecks.checks.filter((check) => listCheckOverlaps(check, todayStart, tomorrowStart)).length
     };
-  }, [calendarChecks, now, todayKey]);
+  }, [calendarChecks, todayKey]);
   // Today's chip opens Calendar › List on today and scrolls it to the first "?".
   const [calendarCheckScroll, setCalendarCheckScroll] = useState(0);
   // Quick win (b): the hatched count chip on Earlier this week rows, from the same open Review
