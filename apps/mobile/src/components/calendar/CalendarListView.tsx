@@ -24,6 +24,7 @@ import type { NativeCalendarPresentationEntry } from "../../lib/nativeCalendarPr
 import type { ReviewAnswerQuestion } from "../../lib/reviewAnswer";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import { mobileTextProps } from "../../lib/mobileTypography";
+import { ROW_BLOCK, rowBlockHeight } from "../../lib/todayBlockRows";
 import { formatLocaleDate } from "../../lib/localeDateFormat";
 import { localLayoutTransition, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 
@@ -261,8 +262,8 @@ export function CalendarListView({
             const open = openLegs.has(item.entry.entryId);
             return (
               <Animated.View key={item.key} layout={localLayoutTransition(reduceMotion)} style={divider}>
-                <BlockRow entry={item.entry} legsOpen={open} onOpen={() => onOpenEntry(item.entry)}
-                  onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} />
+                <BlockRow entry={item.entry} legsOpen={open} nowMs={nowMs} onOpen={() => onOpenEntry(item.entry)}
+                  onToggleLegs={trip ? () => toggleLegs(item.entry.entryId) : undefined} route={trip?.route} legs={trip?.legs} theme={theme} time={time} />
                 {trip && open ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
                     <LegRows legs={trip.legs} theme={theme} time={time} />
@@ -305,24 +306,55 @@ export function CalendarListView({
   );
 }
 
-function BlockRow({ entry, legs, legsOpen, onOpen, onToggleLegs, route, theme }: {
-  entry: NativeCalendarPresentationEntry; legs?: readonly TripLeg[]; legsOpen: boolean; onOpen: () => void;
-  onToggleLegs?: () => void; route?: string; theme: MobileTheme;
+/** A second line's glyph (Calendar v3): the registry's pin, route, Health and tag. */
+const DETAIL_GLYPHS: Record<string, DayframeGlyph> = {
+  place: DAYFRAME_APP_ICONS.places,
+  trip: DAYFRAME_APP_ICONS.openTrip,
+  health: DAYFRAME_APP_ICONS.sourceHealth,
+  tag: DAYFRAME_APP_ICONS.tag
+};
+
+/**
+ * A block's row (Calendar v3, owner choice A, 24 Oct 2026): Apple's List layout with Today's block-shaped
+ * activity mark (34 wide, its height following the length as on Today's rows, the activity's icon; a
+ * suggestion's mark is the "?"), the bold title, a second line with its pin / route / Health / tag icon
+ * when it has one, and the start over the end on the right. Never Apple's thin colour bar (#341).
+ */
+function BlockRow({ entry, legs, legsOpen, nowMs, onOpen, onToggleLegs, route, theme, time }: {
+  entry: NativeCalendarPresentationEntry; legs?: readonly TripLeg[]; legsOpen: boolean; nowMs: number; onOpen: () => void;
+  onToggleLegs?: () => void; route?: string; theme: MobileTheme; time: (ms: number) => string;
 }) {
+  const end = entry.stoppedAtMs ?? nowMs;
+  const markHeight = rowBlockHeight(Math.max(0, (end - entry.startedAtMs) / 1000));
+  const detail = (entry.detailLines ?? []).find((line) => line.glyph !== "time" && line.text);
   return (
     <View style={styles.row}>
       <Pressable accessibilityHint="Opens the block" accessibilityLabel={[entry.accessibilityLabel, legs?.length ? modesLabel(legs, route) : null].filter(Boolean).join(". ")}
         accessibilityRole="button" onPress={onOpen}
-        style={({ pressed }) => [styles.rowMain, { opacity: pressed ? 0.7 : 1 }]}>
-        <View style={[styles.mark, { backgroundColor: entry.color }]}>
-          <DayframeIcon color={entry.textColor} glyph={entry.glyph as DayframeGlyph} size={18} />
-        </View>
+        style={({ pressed }) => [styles.rowMain, styles.blockRow, { opacity: pressed ? 0.7 : 1 }]}>
+        {entry.isReview ? (
+          <View style={[styles.blockMark, { height: markHeight, backgroundColor: theme.surfaceMuted }]}>
+            <Text style={[styles.reviewMark, { color: theme.warningText }]}>?</Text>
+          </View>
+        ) : (
+          <View style={[styles.blockMark, { height: markHeight, backgroundColor: entry.color }]}>
+            <DayframeIcon color={entry.textColor} glyph={entry.glyph as DayframeGlyph} size={16} />
+          </View>
+        )}
         <View style={styles.text}>
           <Text {...mobileTextProps("itemTitle")} numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{entry.title}</Text>
-          <Text {...mobileTextProps("metadata")} numberOfLines={2} style={[styles.meta, { color: theme.textSecondary }]}>{entry.meta}</Text>
+          {detail ? (
+            <View style={styles.detail}>
+              <DayframeIcon color={theme.textSecondary} glyph={DETAIL_GLYPHS[detail.glyph] ?? DAYFRAME_APP_ICONS.places} size={12} />
+              <Text {...mobileTextProps("metadata")} numberOfLines={1} style={[styles.meta, styles.detailText, { color: theme.textSecondary }]}>{detail.text}</Text>
+            </View>
+          ) : null}
           {legs?.length ? <ModesLine legs={legs} route={route} theme={theme} /> : null}
         </View>
-        <Text {...mobileTextProps("numeric")} style={[styles.length, { color: theme.textPrimary }]}>{entry.lengthLabel}</Text>
+        <View style={styles.times}>
+          <Text {...mobileTextProps("numeric")} style={[styles.time, { color: theme.textPrimary }]}>{time(entry.startedAtMs)}</Text>
+          <Text {...mobileTextProps("numeric")} style={[styles.time, { color: theme.textSecondary }]}>{entry.stoppedAtMs == null ? "now" : time(entry.stoppedAtMs)}</Text>
+        </View>
       </Pressable>
       {onToggleLegs ? (
         <Pressable accessibilityLabel={`${legsOpen ? "Hide" : "Show"} the legs of ${entry.title}`} accessibilityRole="button"
@@ -536,6 +568,14 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 14, paddingVertical: 12, minHeight: 56 },
   faint: { opacity: 0.85, minHeight: 48, paddingVertical: 8 },
   mark: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  // Calendar v3 rows (owner choice A): Today's block mark, top-aligned beside the text.
+  blockRow: { alignItems: "flex-start" },
+  blockMark: { width: ROW_BLOCK.width, borderRadius: DAYFRAME_BLOCKS.radius.chip, alignItems: "center", justifyContent: "center" },
+  reviewMark: { fontSize: 16, fontWeight: "800" },
+  detail: { flexDirection: "row", alignItems: "center", gap: 4 },
+  detailText: { flexShrink: 1 },
+  times: { alignItems: "flex-end", gap: 2 },
+  time: { fontSize: 14, fontWeight: "600", fontVariant: ["tabular-nums"] },
   unknownMark: { borderWidth: 1.5 },
   text: { flex: 1, gap: 2 },
   title: { fontSize: 16, fontWeight: "700" },

@@ -9,7 +9,8 @@ const QA_ROUTES: Record<string, Href> = {
   "calendar-qa-list": "/calendar-qa?layout=list" as Href,
   "calendar-qa-question": "/calendar-qa?layout=list&check=1" as Href,
   "calendar-qa-dense": "/calendar-qa?day=dense" as Href,
-  "calendar-qa-dense-cycle": "/calendar-qa?day=dense&cycle=1" as Href
+  "calendar-qa-dense-cycle": "/calendar-qa?day=dense&cycle=1" as Href,
+  "calendar-qa-dense-list": "/calendar-qa?day=dense&layout=list" as Href
 };
 const qaRoute = __DEV__ ? QA_ROUTES[process.env.EXPO_PUBLIC_DAYFRAME_QA_ROUTE ?? ""] ?? null : null;
 

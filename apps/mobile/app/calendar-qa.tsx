@@ -14,7 +14,7 @@ import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation
 // (step 9): the native Calendar and the List drawing the mock-ups' synthetic Exampleton Thursday
 // (screens #ios-grid, #ios-grid-default and #ios-list), so the build can be compared with them side by
 // side. `?layout=list` opens in List; `?day=dense` draws calendar-v3-mockup's synthetic Friday
-// (Calendar v3, 24 Oct 2026); `&at=HH` opens it at that hour, and `&cycle=1` steps through the mock-up's
+// (Calendar v3, 24 Oct 2026; `&layout=list` shows its List rows); `&at=HH` opens it at that hour, and `&cycle=1` steps through the mock-up's
 // windows (the header, 08:45, 10:30, 17:15, 20:00), 8 seconds each, for Simulator screenshots without
 // taps. No account, network or mutation.
 const DAY = "2026-10-22";
@@ -195,7 +195,7 @@ export default function CalendarQaRoute() {
   }).model, [clockFormat, dense, now, theme]);
   const shown = useMemo(() => ({ ...model, layout }), [layout, model]);
   if (!__DEV__) return <Redirect href="/" />;
-  if (dense) {
+  if (dense && layout !== "list") {
     // The whole day at the default 72 points an hour, opened at `at` (the header when absent), so
     // Simulator screenshots of the mock-up's windows need no scrolling (the native view's own scroll
     // has nothing left to move).
@@ -226,10 +226,10 @@ export default function CalendarQaRoute() {
         />
         {layout === "list" ? (
           <View style={{ flex: 1 }}>
-            <CalendarListView checkQuestions={QA_CHECK_QUESTIONS} checks={QA_CHECKS} checkTitles={QA_CHECK_TITLES}
+            <CalendarListView checkQuestions={dense ? undefined : QA_CHECK_QUESTIONS} checks={dense ? undefined : QA_CHECKS} checkTitles={dense ? undefined : QA_CHECK_TITLES}
               onAnswerCheck={() => undefined} onOpenCheck={() => undefined} scrollToFirstCheck={params.check ? 1 : undefined} clockFormat={clockFormat} dayEndMs={model.dayEndMs} dayStartMs={model.dayStartMs} entries={model.entries} loggedLabel={model.loggedLabel}
               nowMs={now} onOpenEntry={() => undefined} onRefresh={() => undefined} reduceMotion={false} refreshing={false} theme={theme}
-              timeline={timeline} />
+              timeline={dense ? null : timeline} />
           </View>
         ) : null}
       </View>

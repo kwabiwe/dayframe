@@ -1,6 +1,6 @@
 import { act, create } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
-import type { LocationTimeline } from "@dayframe/shared";
+import { formatClockTime, type LocationTimeline } from "@dayframe/shared";
 
 vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
@@ -88,6 +88,28 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(text).not.toContain("\"Home\"");
     act(() => { tree.root.findByProps({ accessibilityLabel: "Work" }).props.onPress(); });
     expect(onOpenEntry).toHaveBeenCalledWith(expect.objectContaining({ entryId: "work" }));
+  });
+
+  it("draws a block row as Calendar v3's List: Today's block mark by length, the bold title, a pin line, start over end (owner choice A)", () => {
+    const work = { ...(block("work", "Work", 9, 12) as object), detailLines: [{ glyph: "place", text: "Exampleton Library" }, { glyph: "time", text: "09:00–12:00" }] } as never;
+    const short = { ...(block("short", "Coffee", 13, 13) as object), stoppedAtMs: at(13, 20), detailLines: [{ glyph: "time", text: "13:00–13:20" }] } as never;
+    const { tree } = render({ entries: [work, short] });
+    const marks = tree.root.findAll((node) => node.type === ("View" as never) && node.props.style?.[0]?.width === 34);
+    // Today's rows: 18 + 22 an hour, between 24 and 56 (3 h → 56, 20 min → 25).
+    expect(marks.map((mark) => mark.props.style[1].height)).toEqual([56, 25]);
+    expect(marks.map((mark) => mark.props.style[1].backgroundColor)).toEqual(["#0AF", "#0AF"]);
+    const text = textOf(tree);
+    expect(text).toContain("Exampleton Library");
+    expect(text).toContain("icon:map-pin");
+    // Start over end on the right; no times line under the title (the time is on the right).
+    const clock = (ms: number) => formatClockTime(new Date(ms), "24h");
+    expect(text).toContain(`"${clock(at(9))}"`);
+    expect(text).toContain(`"${clock(at(12))}"`);
+    expect(text.indexOf(`"${clock(at(9))}"`)).toBeLessThan(text.indexOf(`"${clock(at(12))}"`));
+    expect(text).not.toContain("09:00–12:00");
+    // No second line when there is nothing but the time.
+    const coffeeRow = tree.root.findByProps({ accessibilityLabel: "Coffee" });
+    expect(JSON.stringify(coffeeRow.props.children)).not.toContain("icon:map-pin");
   });
 
   it("shows a trip block's route and modes, and opens its legs", () => {
