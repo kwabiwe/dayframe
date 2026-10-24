@@ -1,4 +1,5 @@
 import { DAYFRAME_BACKEND_ID } from "./backendIdentity";
+import { isPermanentlyFailedQueuedEvent, permanentStatusCodes } from "./queuePermanence";
 import type { HealthCaptureOwner } from "./healthSyncStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { subscribeMobileSignedOut } from "./mobileSessionTransition";
@@ -2672,7 +2673,6 @@ export function isNetworkTimerError(error: unknown) {
   );
 }
 
-const permanentStatusCodes = new Set([400, 413, 422]);
 
 function migrateQueuedEvent(
   item: StoredQueuedEvent,
@@ -2866,10 +2866,7 @@ function hasQueueFailure(item: QueuedEvent) {
 }
 
 function isPermanentlyFailedEvent(item: QueuedEvent) {
-  return (
-    item.failureKind === "permanent" ||
-    Boolean(item.failedAt && item.lastStatusCode && permanentStatusCodes.has(item.lastStatusCode))
-  );
+  return isPermanentlyFailedQueuedEvent(item);
 }
 
 /**

@@ -231,34 +231,76 @@ private enum DayframeShortcutPerformer {
       let activityIds = DayframeLiveActivityController.activityIds(startedBefore: event.occurredAt)
       _ = await DayframeLiveActivityController.stop(activityIds: activityIds)
     case .stopLiveActivity(let activityId, let entryId, let apiBase, _):
-      // The event and local dismissal share the immutable identity archived in
-      // the exact Live Activity view. The push token is the server-registered,
-      // activity-scoped capability, so this locked-screen path never depends
-      // on a broad account bearer or App Group/Keychain availability.
-      guard let pushToken = DayframeLiveActivityController.immediatePushToken(
-        activityId: activityId,
-        entryId: entryId
-      ) else {
-        DayframeShortcutDeliveryDiagnosticStore.record(.capabilityUnavailable)
+      // Optimistic, like the app's own Stop (owner decision 24 Oct 2026, option A; staging QA 9.2): once
+      // the Stop is durably queued the exact Activity shows stopped at once, the Stop is delivered, and the
+      // Activity ends whether or not delivery worked; the app delivers a queued Stop later, and if the
+      // server refuses it for good the block keeps running there, so the app shows it running again
+      // (with its Activity) and Sync help offers Try again or Clear. The update comes before delivery and
+      // the end after it: ending an Activity can end this process before its request finishes (13 Aug).
+      // Without a queued copy nothing is durable, so the Activity changes only once the server confirms.
+      // The push token is the server-registered, activity-scoped capability, so this locked-screen path
+      // never depends on a broad account bearer or App Group/Keychain availability. It is read while the
+      // Activity still shows running (only a running Activity gives one), before the stopped update.
+      // One run per Activity owns delivery and the end: the claim is taken synchronously, before any
+      // suspension, so a repeat tap, however close, returns at once (Codex r1 and r4 on #578). An
+      // Activity that no longer shows running is being, or has been, stopped by an earlier tap. Ending
+      // it from a second run could end the process before the owner's request finishes; the queued
+      // copy, if delivery fails, goes out with the app.
+      let claim = "\(activityId)|\(entryId)"
+      guard DayframeLiveActivityStopClaims.claim(claim) else {
         return
       }
-      let delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(
-        event,
-        apiBase: apiBase,
+      defer { DayframeLiveActivityStopClaims.release(claim) }
+      guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {
+        return
+      }
+      let pushToken = DayframeLiveActivityController.immediatePushToken(
         activityId: activityId,
-        entryId: entryId,
-        pushToken: pushToken
+        entryId: entryId
       )
-      if delivered {
+      if queued {
+        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)
+      }
+      var delivered = false
+      if let pushToken {
+        delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(
+          event,
+          apiBase: apiBase,
+          activityId: activityId,
+          entryId: entryId,
+          pushToken: pushToken
+        )
+      } else {
+        DayframeShortcutDeliveryDiagnosticStore.record(.capabilityUnavailable)
+      }
+      if delivered, queued {
+        _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
+      }
+      if delivered || queued {
         _ = await DayframeLiveActivityController.stop(
           activityId: activityId,
           entryId: entryId
         )
-        if queued {
-          _ = DayframeNativeShortcutQueue.remove(localIds: [event.localId])
-        }
       }
     }
+  }
+}
+
+/// Lock Screen Stops in progress in this process, by Activity and block (Codex r4 on #578).
+private enum DayframeLiveActivityStopClaims {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var claimed = Set<String>()
+
+  static func claim(_ key: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return claimed.insert(key).inserted
+  }
+
+  static func release(_ key: String) {
+    lock.lock()
+    claimed.remove(key)
+    lock.unlock()
   }
 }
 

@@ -9,6 +9,7 @@ import {
   mobileAccountOwnersEqual,
   type MobileAccountOwner
 } from "./mobileAccount";
+import { isPermanentlyFailedQueuedEvent } from "./queuePermanence";
 import type { PendingTimeEntryCommand } from "./timeEntryOutbox";
 import type { PendingTimerStop } from "./timerStopOutbox";
 import {
@@ -30,7 +31,8 @@ type ProjectionOperation =
   | { kind: "start"; at: string; sequence: string; event: QueuedEvent }
   | { kind: "edit"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "delete"; at: string; sequence: string; command: PendingTimeEntryCommand }
-  | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop };
+  | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop }
+  | { kind: "queued_stop"; at: string; sequence: string; entryId: string };
 
 export function projectDurableLocalWork(
   serverBootstrap: MobileBootstrap,
@@ -57,6 +59,16 @@ export function projectDurableLocalWork(
           : null
       );
       if (target) projected = projectTargetedStop(projected, target, operation.stop.occurredAt);
+      continue;
+    }
+
+    if (operation.kind === "queued_stop") {
+      // Only a block still running, or one that ended after the tap (a later Start ended it there): a
+      // block stopped elsewhere before the tap keeps its end, as the server keeps it (superseded).
+      const target = mobileTimeEntryById(projected, operation.entryId);
+      if (target && (!target.stoppedAt || Date.parse(target.stoppedAt) > Date.parse(operation.at))) {
+        projected = projectTargetedStop(projected, operation.entryId, operation.at);
+      }
       continue;
     }
 
@@ -120,9 +132,31 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       sequence: `2:${stop.queuedAt}:${stop.clientEventId}`,
       stop
     }));
-  return [...starts, ...commands, ...stops].sort((left, right) =>
+  // A Lock Screen Stop waiting in the queue, the app's or still the native one (owner decision 24 Oct
+  // 2026, option A): its Live Activity has already ended, so the block shows stopped here too until the
+  // server answers. One the server refused for good (the queue's own rule) is not projected, so the block
+  // shows running again, with its Activity.
+  const queuedStops: ProjectionOperation[] = work.activityEvents
+    .flatMap((event) => mobileAccountOwnersEqual(event, work.owner) && isWaitingLockScreenStop(event)
+      ? [{
+          kind: "queued_stop" as const,
+          at: event.occurredAt.toISOString(),
+          sequence: `2:${event.queuedAt}:${event.localId}`,
+          entryId: event.rawPayload!.targetEntryId as string
+        }]
+      : []);
+  return [...starts, ...commands, ...stops, ...queuedStops].sort((left, right) =>
     Date.parse(left.at) - Date.parse(right.at) || left.sequence.localeCompare(right.sequence)
   );
+}
+
+/** A Lock Screen Stop still waiting to reach the server: entry-scoped, its block named, not refused. */
+export function isWaitingLockScreenStop(event: QueuedEvent) {
+  const entryId = event.rawPayload?.targetEntryId;
+  return event.type === "timer_stop" &&
+    event.rawPayload?.stopScope === "entry" &&
+    typeof entryId === "string" && entryId.length > 0 &&
+    !isPermanentlyFailedQueuedEvent(event);
 }
 
 function queuedStartEntry(

@@ -195,6 +195,38 @@ enum DayframeLiveActivityController {
     return true
   }
 
+  /// Whether the exact Activity is still shown running (not yet stopped by a Lock Screen Stop).
+  static func isRunning(activityId: String, entryId: String) -> Bool {
+    guard #available(iOS 16.2, *) else {
+      return false
+    }
+    return Activity<DayframeTimerAttributes>.activities.contains(where: {
+      $0.id == activityId &&
+        $0.attributes.entryId == entryId &&
+        $0.activityState == .active &&
+        $0.content.state.isRunning
+    })
+  }
+
+  /// Shows the exact Activity as stopped (time frozen, no Stop control) without ending it. A Lock
+  /// Screen Stop does this first: ending an Activity can end the intent's process before its request
+  /// finishes (13 Aug 2026), an update does not (owner decision 24 Oct 2026, option A).
+  static func showStopped(activityId: String, entryId: String) async {
+    guard #available(iOS 16.2, *) else {
+      return
+    }
+    guard
+      let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active
+      })
+    else {
+      return
+    }
+    // No stale date: a stale Activity is no longer `.active`, and the app's cleanup ends only active
+    // ones, so one left here by an intent that died before ending it would escape (Codex r2 on #578).
+    await activity.update(ActivityContent(state: stoppedState(activity), staleDate: nil))
+  }
+
   static func cleanupActivities(activityIds: [String]) async -> Bool {
     await stop(activityIds: activityIds)
   }
@@ -257,19 +289,26 @@ enum DayframeLiveActivityController {
     _ activity: Activity<DayframeTimerAttributes>,
     dismissalPolicy: ActivityUIDismissalPolicy
   ) async {
-    let state = DayframeTimerAttributes.ContentState(
-      title: activity.content.state.title,
-      categoryName: activity.content.state.categoryName,
-      categoryColor: activity.content.state.categoryColor,
-      startedAt: activity.content.state.startedAt,
-      elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
+    await activity.end(
+      ActivityContent(state: stoppedState(activity), staleDate: Date()),
+      dismissalPolicy: dismissalPolicy
+    )
+  }
+
+  /// The Activity's content, stopped now: time frozen, no Stop control. An Activity already shown as
+  /// stopped keeps its frozen time.
+  @available(iOS 16.2, *)
+  private static func stoppedState(_ activity: Activity<DayframeTimerAttributes>) -> DayframeTimerAttributes.ContentState {
+    let current = activity.content.state
+    return DayframeTimerAttributes.ContentState(
+      title: current.title,
+      categoryName: current.categoryName,
+      categoryColor: current.categoryColor,
+      startedAt: current.startedAt,
+      elapsedSeconds: current.isRunning ? elapsedSeconds(from: current.startedAt) : current.elapsedSeconds,
       isRunning: false,
       canStop: false,
-      categoryColorLight: activity.content.state.categoryColorLight
-    )
-    await activity.end(
-      ActivityContent(state: state, staleDate: Date()),
-      dismissalPolicy: dismissalPolicy
+      categoryColorLight: current.categoryColorLight
     )
   }
 

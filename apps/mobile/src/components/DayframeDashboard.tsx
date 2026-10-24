@@ -171,7 +171,8 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
-import { readDurableLocalWork } from "@/lib/durableLocalWork";
+import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
+import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
@@ -959,7 +960,29 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  // A Lock Screen Stop made while Dayframe was away, shown before any refresh lands (Codex r1–r3 on #578).
+  const waitingLockScreenStops = useRef<(() => Promise<void>) | null>(null);
+  waitingLockScreenStops.current ??= createWaitingLockScreenStopsApplier({
+    shown: () => latestData.current,
+    ownerOf: (bootstrap) => timerStopOwner(bootstrap),
+    readStops: readQueuedAndNativeStops,
+    revision: () => dashboardMutationRevision.current,
+    publishAsMutation: (next) => {
+      dashboardMutationRevision.current += 1;
+      publishDashboardData(next);
+    }
+  });
+  const applyWaitingLockScreenStops = useCallback(() => waitingLockScreenStops.current!(), []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void applyWaitingLockScreenStops();
+    });
+    return () => subscription.remove();
+  }, [applyWaitingLockScreenStops]);
+
   const load = useCallback(async (options?: DashboardLoadOptions) => {
+    await applyWaitingLockScreenStops();
     if (
       connectivityCurrent.current.isOffline &&
       latestData.current !== null &&
@@ -1087,7 +1110,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void loadRef.current({ silent: true });
       }
     }
-  }, [transitionToSignedOut]);
+  }, [applyWaitingLockScreenStops, transitionToSignedOut]);
   loadRef.current = load;
 
   const refreshTodayPresentation = useCallback(() => {

@@ -56,6 +56,7 @@ const {
   clearShortcutCatalog,
   drainNativeShortcutQueue,
   getNativeShortcutPendingCount,
+  readPendingNativeEntryStops,
   syncShortcutCatalog
 } = await import("./shortcuts");
 const OWNER = { userId: "user-1", workspaceId: "workspace-1" };
@@ -110,6 +111,38 @@ describe("native Shortcut bridge", () => {
         { color: "#16D2A6", id: "category-1", lightColor: "#0FBF95", name: "Focus" }
       ]
     });
+  });
+
+  it("reads this account's Lock Screen Stops still in the native queue without moving them (Codex r1 on #578)", async () => {
+    const stop = {
+      localId: "ios-live-activity-stop-1",
+      type: "timer_stop",
+      occurredAt: "2026-10-24T09:00:00.000Z",
+      rawPayload: { origin: "ios_live_activity", stopScope: "entry", targetActivityId: "activity-1", targetEntryId: "entry-1" },
+      userId: OWNER.userId,
+      workspaceId: OWNER.workspaceId
+    };
+    mocks.pendingShortcutEvents.mockResolvedValue([
+      stop,
+      { ...stop, localId: "other-account", userId: "user-2" },
+      { ...stop, localId: "legacy-unscoped", userId: undefined, workspaceId: undefined },
+      { ...stop, localId: "running-at", rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" } },
+      { ...stop, localId: "start", type: "shortcut_action" }
+    ]);
+
+    const stops = await readPendingNativeEntryStops(OWNER);
+
+    expect(stops).toEqual([{
+      ...OWNER,
+      localId: "ios-live-activity-stop-1",
+      source: "shortcut",
+      type: "timer_stop",
+      occurredAt: new Date("2026-10-24T09:00:00.000Z"),
+      queuedAt: "2026-10-24T09:00:00.000Z",
+      rawPayload: stop.rawPayload
+    }]);
+    expect(mocks.removeShortcutEvents).not.toHaveBeenCalled();
+    expect(mocks.enqueueEvent).not.toHaveBeenCalled();
   });
 
   it("moves native pending Shortcut events into the normal offline queue", async () => {
