@@ -156,6 +156,29 @@ describe("durable dashboard projection", () => {
     expect(projected.activeEntry?.stoppedAt).toBeNull();
   });
 
+  it("shows a Lock Screen Stop waiting in the queue as stopped, and a refused one as running (option A, 24 Oct)", () => {
+    const running = entry("live-activity-target");
+    const server = bootstrap({ activeEntry: running, entries: [running] });
+    const waiting = lockScreenStop(running.id);
+
+    const projected = projectDurableLocalWork(server, work({ activityEvents: [waiting] }));
+    expect(projected.activeEntry).toBeNull();
+    expect(projected.entries[0]?.stoppedAt).toBe("2026-08-22T10:25:00.000Z");
+
+    const refused = projectDurableLocalWork(server, work({
+      activityEvents: [{ ...waiting, failureKind: "permanent", failedAt: "2026-08-22T10:26:00.000Z", lastStatusCode: 422 }]
+    }));
+    expect(refused.activeEntry).toEqual(running);
+
+    // Only an entry-scoped Stop with its block named, and only this account's.
+    const unscoped = { ...waiting, rawPayload: { origin: "ios_app_shortcut", stopScope: "running_at" } };
+    expect(projectDurableLocalWork(server, work({ activityEvents: [unscoped] })).activeEntry).toEqual(running);
+    const otherAccount = { ...waiting, userId: "someone-else" };
+    expect(projectDurableLocalWork(server, work({ activityEvents: [otherAccount] })).activeEntry).toEqual(running);
+    // A Stop for a block the snapshot no longer has changes nothing.
+    expect(projectDurableLocalWork(server, work({ activityEvents: [lockScreenStop("gone")] }))).toEqual(server);
+  });
+
   it("shows a block's own waiting Stop over a snapshot where the next Start ended it later (iphone-timer-sync-2)", () => {
     // Offline Start A 10:00, Stop A 10:25, Start B 12:00: the queue delivered both Starts, so the server
     // ended A at 12:00 until A's own Stop arrives and pulls it back (#531).
@@ -222,6 +245,18 @@ function queuedStart(): QueuedEvent {
     categoryId: "category-a",
     description: "Initial description",
     rawPayload: { tagNames: ["Offline"] }
+  };
+}
+
+function lockScreenStop(targetEntryId: string): QueuedEvent {
+  return {
+    ...OWNER,
+    source: "shortcut",
+    type: "timer_stop",
+    occurredAt: new Date("2026-08-22T10:25:00.000Z"),
+    localId: "ios-live-activity-stop-1",
+    queuedAt: "2026-08-22T10:25:01.000Z",
+    rawPayload: { origin: "ios_live_activity", stopScope: "entry", targetActivityId: "activity-1", targetEntryId }
   };
 }
 

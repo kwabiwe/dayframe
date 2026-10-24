@@ -195,6 +195,23 @@ enum DayframeLiveActivityController {
     return true
   }
 
+  /// Shows the exact Activity as stopped (time frozen, no Stop control) without ending it. A Lock
+  /// Screen Stop does this first: ending an Activity can end the intent's process before its request
+  /// finishes (13 Aug 2026), an update does not (owner decision 24 Oct 2026, option A).
+  static func showStopped(activityId: String, entryId: String) async {
+    guard #available(iOS 16.2, *) else {
+      return
+    }
+    guard
+      let activity = Activity<DayframeTimerAttributes>.activities.first(where: {
+        $0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active
+      })
+    else {
+      return
+    }
+    await activity.update(ActivityContent(state: stoppedState(activity), staleDate: Date()))
+  }
+
   static func cleanupActivities(activityIds: [String]) async -> Bool {
     await stop(activityIds: activityIds)
   }
@@ -257,19 +274,26 @@ enum DayframeLiveActivityController {
     _ activity: Activity<DayframeTimerAttributes>,
     dismissalPolicy: ActivityUIDismissalPolicy
   ) async {
-    let state = DayframeTimerAttributes.ContentState(
-      title: activity.content.state.title,
-      categoryName: activity.content.state.categoryName,
-      categoryColor: activity.content.state.categoryColor,
-      startedAt: activity.content.state.startedAt,
-      elapsedSeconds: elapsedSeconds(from: activity.content.state.startedAt),
+    await activity.end(
+      ActivityContent(state: stoppedState(activity), staleDate: Date()),
+      dismissalPolicy: dismissalPolicy
+    )
+  }
+
+  /// The Activity's content, stopped now: time frozen, no Stop control. An Activity already shown as
+  /// stopped keeps its frozen time.
+  @available(iOS 16.2, *)
+  private static func stoppedState(_ activity: Activity<DayframeTimerAttributes>) -> DayframeTimerAttributes.ContentState {
+    let current = activity.content.state
+    return DayframeTimerAttributes.ContentState(
+      title: current.title,
+      categoryName: current.categoryName,
+      categoryColor: current.categoryColor,
+      startedAt: current.startedAt,
+      elapsedSeconds: current.isRunning ? elapsedSeconds(from: current.startedAt) : current.elapsedSeconds,
       isRunning: false,
       canStop: false,
-      categoryColorLight: activity.content.state.categoryColorLight
-    )
-    await activity.end(
-      ActivityContent(state: state, staleDate: Date()),
-      dismissalPolicy: dismissalPolicy
+      categoryColorLight: current.categoryColorLight
     )
   }
 

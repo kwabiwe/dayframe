@@ -51,9 +51,23 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).toContain("localId = clientEventId");
     expect(stopCase).toContain("DayframeLiveActivityController.immediatePushToken(");
     expect(stopCase).toContain("DayframeShortcutDirectEventClient.submitLiveActivityStop(");
-    expect(stopCase).toMatch(
-      /if delivered \{\s+_ = await DayframeLiveActivityController\.stop\(\s+activityId: activityId,\s+entryId: entryId\s+\)/
-    );
+    // Optimistic once durable (owner decision 24 Oct 2026, option A): the token is read while the Activity
+    // still runs, the Activity shows stopped (an update, which cannot end this process) only when the Stop
+    // is queued, the Stop is delivered, and the Activity ends after delivery, delivered or queued.
+    const order = [
+      "let pushToken = DayframeLiveActivityController.immediatePushToken(",
+      "if queued {\n        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)",
+      "delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(",
+      "if delivered || queued {\n        _ = await DayframeLiveActivityController.stop("
+    ].map((line) => stopCase.indexOf(line));
+    expect(order.every((index) => index >= 0), String(order)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(stopCase).not.toMatch(/end\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
+    const controller = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`, "utf8");
+    const showStopped = controller.slice(controller.indexOf("static func showStopped("), controller.indexOf("static func cleanupActivities("));
+    expect(showStopped).toContain("$0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active");
+    expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: Date()))");
+    expect(showStopped).not.toContain(".end(");
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
     expect(shortcuts).not.toContain("DayframeLiveActivityController.stopLegacyActivities()");
@@ -75,7 +89,7 @@ describe("native Live Activity presentation contract", () => {
     );
     expect(scopedSubmit).not.toContain('forHTTPHeaderField: "Authorization"');
     expect(scopedSubmit).toContain("pushToken.lowercased()");
-    expect(stopCase).toContain("if delivered {");
+    expect(stopCase).toContain("if delivered, queued {");
     // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
     // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(

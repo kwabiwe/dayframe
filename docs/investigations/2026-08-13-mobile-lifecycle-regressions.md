@@ -84,3 +84,8 @@ Still required before merge/release:
 - physical-iPhone foreground recovery of an existing location backlog, Live Activity Stop/recreation, external sheet dismissal, short/long Calendar resume, Reduce Motion, and Dynamic Type checks.
 
 No production sync was triggered and no device data was mutated during diagnosis.
+
+## Update 24 Oct 2026: Lock Screen Stop is optimistic once durable
+
+Staging QA 9.2 found the Live Activity unchanged after a Lock Screen Stop until the app was opened. The cause was hosted (staging's `APNS_BUNDLE_ID` named the production app, so APNs `DeviceTokenNotForTopic` invalidated every staging token and the Stop route answered 401; fixed by the setting and #574), but it exposed the contract above: any failed delivery left a running-looking Activity. The owner chose option A: the Activity ends straight away, like the app's own Stop. The intent now reads the activity's push token while it still runs, then, when the Stop is durably queued, updates the exact Activity to stopped (an update cannot end the intent's process; an end can, which is why the end still comes after the bounded delivery attempt), delivers, and ends the Activity whether or not delivery worked. Without a queued copy (no App Group) it changes the Activity only after server confirmation, as before. The app projects a retryable queued entry-scoped Stop over the Dashboard as stopped, so opening Dayframe before delivery does not bring the block or its Activity back; a Stop the server refuses for good is not projected, so server truth (still running) returns the block and foreground reconciliation recreates its Activity, and Sync help › Couldn't be sent offers Try again or Clear.
+

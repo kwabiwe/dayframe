@@ -30,7 +30,8 @@ type ProjectionOperation =
   | { kind: "start"; at: string; sequence: string; event: QueuedEvent }
   | { kind: "edit"; at: string; sequence: string; command: PendingTimeEntryCommand }
   | { kind: "delete"; at: string; sequence: string; command: PendingTimeEntryCommand }
-  | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop };
+  | { kind: "stop"; at: string; sequence: string; stop: PendingTimerStop }
+  | { kind: "queued_stop"; at: string; sequence: string; entryId: string };
 
 export function projectDurableLocalWork(
   serverBootstrap: MobileBootstrap,
@@ -57,6 +58,11 @@ export function projectDurableLocalWork(
           : null
       );
       if (target) projected = projectTargetedStop(projected, target, operation.stop.occurredAt);
+      continue;
+    }
+
+    if (operation.kind === "queued_stop") {
+      projected = projectTargetedStop(projected, operation.entryId, operation.at);
       continue;
     }
 
@@ -120,7 +126,26 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
       sequence: `2:${stop.queuedAt}:${stop.clientEventId}`,
       stop
     }));
-  return [...starts, ...commands, ...stops].sort((left, right) =>
+  // A Lock Screen Stop waiting in the queue (owner decision 24 Oct 2026, option A): its Live Activity
+  // has already ended, so the block shows stopped here too until the server answers. One the server
+  // refused for good is not projected, so the block shows running again, with its Activity.
+  const queuedStops: ProjectionOperation[] = work.activityEvents
+    .flatMap((event) => {
+      const entryId = event.rawPayload?.targetEntryId;
+      return mobileAccountOwnersEqual(event, work.owner) &&
+        event.type === "timer_stop" &&
+        event.rawPayload?.stopScope === "entry" &&
+        typeof entryId === "string" && entryId.length > 0 &&
+        event.failureKind !== "permanent"
+        ? [{
+            kind: "queued_stop" as const,
+            at: event.occurredAt.toISOString(),
+            sequence: `2:${event.queuedAt}:${event.localId}`,
+            entryId
+          }]
+        : [];
+    });
+  return [...starts, ...commands, ...stops, ...queuedStops].sort((left, right) =>
     Date.parse(left.at) - Date.parse(right.at) || left.sequence.localeCompare(right.sequence)
   );
 }
