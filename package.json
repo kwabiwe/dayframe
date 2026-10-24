@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "node scripts/apply-native-patches.mjs",
     "dev:web": "npm run dev -w @dayframe/web",
     "dev:mobile": "npm run start -w @dayframe/mobile",
     "ios": "npm run ios -w @dayframe/mobile",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.0.0",
+    "patch-package": "^8.0.1",
     "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "vitest": "^4.0.15"
