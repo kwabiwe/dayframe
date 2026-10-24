@@ -47,13 +47,14 @@ describe("Calendar readability and restart contract", () => {
 
   it("keeps tiny blocks readable while isolating the portalled compact editor", () => {
     expect(timeline).toContain("layoutTimeBlockLanes");
+    expect(timeline).toContain("layoutTimeBlockHybrid(laneBlocks, { laneWidth, pixelsPerHour: rowHeight })");
     expect(timeline).not.toContain("<CalendarEntryDetails");
     expect(timeline).not.toContain("createPortal(");
     expect(timeline).toContain("<CalendarEntryCompactEditor");
     expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
     expect(timeline).toContain('className="calendar-entry-title"');
-    expect(timeline).toContain('className="calendar-entry-detail-line tabular"');
+    expect(timeline).toContain('className="calendar-entry-details"');
     // Dense-day rules: a finished block of a minute or less is a short line, never a block.
     expect(timeline).toContain('className={`calendar-moment${selected ? " is-selected" : ""}`}');
   });
@@ -75,11 +76,11 @@ describe("Calendar readability and restart contract", () => {
     expect(styles).not.toContain(".calendar-time-block:focus-within .calendar-start-again");
   });
 
-  it("keeps one compact radius, no outline, a colour bar and fill-led selection (dense-day rules)", () => {
+  it("keeps one compact radius, no outline, a colour bar and fill-led selection (Calendar v3)", () => {
     const blockRule = styles.match(/\.calendar-time-block \{([^}]*--calendar-block-radius:[^}]*)\}/)?.[1] ?? "";
     const selectedRule = styles.match(/\.calendar-time-block\.is-selected \{([^}]*)\}/)?.[1] ?? "";
 
-    expect(blockRule).toContain("--calendar-block-radius: 6px");
+    expect(blockRule).toContain("--calendar-block-radius: 5px");
     expect(blockRule).toContain("border: 0;");
     expect(styles).toMatch(/\.calendar-time-block::before,\s*\.calendar-review-block::before \{[^}]*width: 3px;[^}]*background: var\(--calendar-block-accent\);/s);
     expect(blockRule).toContain("border-radius: var(--calendar-block-radius)");

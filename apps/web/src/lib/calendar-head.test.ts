@@ -33,7 +33,9 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
 
   it("names the month and says how much was framed on the chosen day", () => {
     expect(model.month).toBe("October");
-    expect(model.framedLine).toBe("9h 47m framed on Tuesday");
+    // Calendar v3: one short line under the strip; the full date is for assistive tech.
+    expect(model.framedLine).toBe("9h 47m framed");
+    expect(model.framedLabel).toMatch(/^9 hours 47 minutes framed on Tuesday \d+ October$/);
     expect(model.weekTotal).toBe("106h 14m this week");
   });
 
@@ -74,7 +76,8 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(beforeHydration.days.every((d) => d.bars.length === 0)).toBe(true);
     expect(beforeHydration.days[0].accessibleName).toBe("Monday 5 October");
     // Totals depend on where the browser's days start, so the server render shows a dash.
-    expect(beforeHydration.framedLine).toBe("– framed on Sunday");
+    expect(beforeHydration.framedLine).toBe("– framed");
+    expect(beforeHydration.framedLabel).toMatch(/^Framed on Sunday \d+ October$/);
     expect(beforeHydration.weekTotal).toBe("– in the week of 5 Oct");
   });
 
@@ -91,5 +94,33 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     });
     expect(beforeHydration.days.filter((d) => d.isToday).map((d) => d.dateNumber)).toEqual([11]);
     expect(beforeHydration.weekTotal).toBe("– this week");
+  });
+
+  it("hides the framed line on an empty day, still saying so with the date (Calendar v3)", () => {
+    const empty = calendarHeadModel({
+      dayLoggedSeconds: 0,
+      entries: [] as never,
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(7),
+      weekDays: [5, 6, 7, 8, 9, 10, 11].map(day),
+      weekLoggedSeconds: 0
+    });
+    expect(empty.framedLine).toBe("");
+    expect(empty.framedLabel).toBe("Nothing framed on Wednesday 7 October");
+  });
+
+  it("shows a day with under a minute framed, and says the shown figure (Codex r1 on #583)", () => {
+    const head = (seconds: number) => calendarHeadModel({
+      dayLoggedSeconds: seconds,
+      entries: [] as never,
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(7),
+      weekDays: [5, 6, 7, 8, 9, 10, 11].map(day),
+      weekLoggedSeconds: seconds
+    });
+    expect(head(20).framedLine).toBe("<1m framed");
+    expect(head(20).framedLabel).toBe("under a minute framed on Wednesday 7 October");
+    expect(head(119).framedLine).toBe("1m framed");
+    expect(head(119).framedLabel).toBe("1 minute framed on Wednesday 7 October");
   });
 });

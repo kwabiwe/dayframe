@@ -22,7 +22,7 @@ import { DatePickerPopover } from "@/components/DatePickerPopover";
 import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/TimeEntryQuickEditor";
 import { TagMetadata } from "@/components/TagMetadata";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
+import { timeEntryTitle } from "@/lib/display";
 import type { CategoryRow, ReviewItemRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { prefersReducedMotion } from "@/lib/blocks-motion";
 import {
@@ -52,6 +52,7 @@ import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/com
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
+import { blockRowHeight } from "@/lib/today-view";
 import {
   LocationListRowView,
   ShowEveryPlaceToggle,
@@ -1015,17 +1016,15 @@ export function EntriesTable({
                           {group.entries.length}
                         </button>
                       ) : null}
-                      <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry} />
+                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). */}
+                      <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
+                        seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}
                         </span>
-                        {/* Today's row anatomy (WUI-028): the title, then "activity · #tags". */}
-                        <span className="timeline-task-secondary-line">
-                          <span className="timeline-task-meta">{timeEntryCategoryLabel(entry)}</span>
-                          {entry.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
-                          <TagMetadata compact tagNames={entry.tagNames} />
-                        </span>
+                        {/* Calendar v3 (owner choice A): the place (pin, or a trip's route) or the tags, with its icon. */}
+                        <ListSecondaryLine entry={entry} />
                         {!isGrouped && tripByBlock.get(entry.id) ? (
                           <TripModesLine legs={tripByBlock.get(entry.id)!.legs} route={tripByBlock.get(entry.id)!.route} />
                         ) : null}
@@ -1045,7 +1044,6 @@ export function EntriesTable({
                               : `Overlap · ${formatDuration(overlapById.get(entry.id)?.overlapSeconds ?? 0)}`}
                           </span>
                         ) : null}
-                        {entry.placeName ? <small className="mt-1 block font-normal text-[var(--muted)]">{entry.placeName}</small> : null}
                       </span>
                     </div>
                   </td>
@@ -1134,16 +1132,13 @@ export function EntriesTable({
                     >
                       <td className="px-3 py-3">
                         <div className="timeline-task-cell timeline-occurrence-task">
-                          <ListBlockMark category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence} />
+                          <ListBlockMark category={occurrence.categoryId ? categoriesById.get(occurrence.categoryId) ?? null : null} entry={occurrence}
+                            seconds={intervalSeconds(occurrenceInterval, capturedNow)} />
                           <span className="timeline-task-details">
                             <span className="timeline-task-primary-line">
                               {renderInlineDescription(occurrence)}
                             </span>
-                            <span className="timeline-task-secondary-line">
-                              <span className="timeline-task-meta">{timeEntryCategoryLabel(occurrence)}</span>
-                              {occurrence.tagNames.length ? <span aria-hidden="true" className="timeline-task-dot">·</span> : null}
-                              <TagMetadata compact tagNames={occurrence.tagNames} />
-                            </span>
+                            <ListSecondaryLine entry={occurrence} />
                             {occurrenceTrip ? <TripModesLine legs={occurrenceTrip.legs} route={occurrenceTrip.route} /> : null}
                             {renderInlineStatus(occurrence)}
                             {(overlapById.get(occurrence.id)?.overlapCount ?? 0) > 0 ? (
@@ -1345,18 +1340,50 @@ function ContinuedDayRows({ day }: { day: { label: string; seconds: number } }) 
   );
 }
 
-/** The activity block with its icon (as on Today's rows); no activity is a neutral block. */
-function ListBlockMark({ category, entry }: { category: CategoryRow | null; entry: TimeEntryRow }) {
+/**
+ * The activity block with its icon, Today's row mark (Calendar v3, owner choice A: block markers everywhere,
+ * never a thin colour bar): 36 px wide, its height following the block's length (`blockRowHeight`), X3
+ * corners; no activity is a neutral block.
+ */
+function ListBlockMark({ category, entry, seconds }: { category: CategoryRow | null; entry: TimeEntryRow; seconds: number }) {
   const glyph = resolveActivityIcon({ icon: category?.icon ?? null, name: entry.categoryName }).glyph;
   return (
     <span
       aria-hidden="true"
       className={`timeline-task-block${entry.categoryId ? " df-block" : ""}`}
-      style={entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : undefined}
+      style={{
+        ...(entry.categoryId ? blockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
+        height: blockRowHeight(seconds * 1000)
+      }}
     >
-      <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={14} />
+      <DayframeIcon glyph={entry.categoryId ? glyph : "tag"} size={16} />
     </span>
   );
+}
+
+/**
+ * A List row's second line (Calendar v3, owner choice A; Apple's layout): the place with a pin (a trip's
+ * route for a block a Move logged), else the tags with a tag; neither, no second line (the block mark's
+ * colour and icon carry the activity, and the row's name says it).
+ */
+function ListSecondaryLine({ entry }: { entry: TimeEntryRow }) {
+  if (entry.placeName) {
+    return (
+      <span className="timeline-task-secondary-line">
+        <DayframeIcon glyph={entry.automaticMoveEventId ? "route" : "map-pin"} size={12} />
+        <span className="timeline-task-meta">{entry.placeName}</span>
+      </span>
+    );
+  }
+  if (entry.tagNames.length) {
+    return (
+      <span className="timeline-task-secondary-line">
+        <DayframeIcon glyph="tag" size={12} />
+        <TagMetadata compact tagNames={entry.tagNames} />
+      </span>
+    );
+  }
+  return null;
 }
 
 function intervalSeconds(
