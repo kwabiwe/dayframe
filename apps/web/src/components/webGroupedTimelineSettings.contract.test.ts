@@ -25,7 +25,10 @@ describe("grouped Timeline and Settings follow-up contracts", () => {
     expect(entries).not.toContain(">Activity<");
     expect(entries).toContain("<ListBlockMark");
     expect(entries).toContain("{timeEntryTitle(entry)}");
-    expect(entries).toContain("{timeEntryCategoryLabel(entry)}");
+    // Calendar v3 (owner choice A): the second line is the place (pin or route) or the tags; the block mark
+    // carries the activity.
+    expect(entries).toContain("<ListSecondaryLine entry={entry} />");
+    expect(entries).not.toContain("{timeEntryCategoryLabel(entry)}");
     expect(entries).not.toContain("ChevronDown");
     expect(entries).toContain('colSpan={4}');
     // Actions are direct icon buttons now, as on Today: Start again, Edit (the latest occurrence for a
