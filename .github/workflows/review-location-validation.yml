@@ -213,6 +213,11 @@ jobs:
         env:
           DAYFRAME_TIMELINE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: npm run test -w @dayframe/web -- src/lib/location/location-timeline.postgres.test.ts
+      - name: Timeline corrections (location v4 step 11)
+        if: ${{ !cancelled() }}
+        env:
+          DAYFRAME_CORRECTIONS_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: npm run test -w @dayframe/web -- src/lib/location/location-timeline-corrections.postgres.test.ts
       - name: Reports location lines (location v4 step 18)
         if: ${{ !cancelled() }}
         env:

@@ -975,3 +975,25 @@ create index if not exists idx_activity_events_client_segment
 create index if not exists idx_activity_events_segment
   on activity_events(workspace_id, user_id, (raw_payload ->> 'segmentId'))
   where raw_payload ? 'segmentId';
+
+-- Keep the clean base fixture aligned with 022_location_timeline_corrections.sql (timeline corrections).
+create table if not exists location_timeline_corrections (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  subject text not null check (subject in ('place', 'trip', 'leg')),
+  kind text not null check (kind in ('place', 'times', 'merge', 'split', 'delete', 'leg_mode', 'leg_boundary', 'leg_split', 'leg_merge')),
+  span_started_at timestamptz not null,
+  span_stopped_at timestamptz not null check (span_stopped_at > span_started_at),
+  target jsonb not null default '{}'::jsonb check (
+    jsonb_typeof(target) = 'object'
+    and not (target ?| array['latitude', 'longitude', 'lat', 'lng', 'centre', 'center', 'coordinates'])
+  ),
+  created_from_event_id uuid references activity_events(id) on delete set null,
+  created_at timestamptz not null default now(),
+  replaced_at timestamptz,
+  replaced_by_id uuid references location_timeline_corrections(id) on delete set null
+);
+create index if not exists idx_location_timeline_corrections_span
+  on location_timeline_corrections(workspace_id, user_id, span_started_at, span_stopped_at)
+  where replaced_at is null;

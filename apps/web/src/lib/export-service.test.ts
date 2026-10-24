@@ -44,4 +44,16 @@ describe("time-entry exports", () => {
     expect(sql).toContain("action in ('time_entry.end_set', 'time_entry.edited')");
     expect(call?.[1]).toEqual([session.workspaceId, session.userId]);
   });
+  it("puts every dataset under its own name, timeline corrections included (location v4 step 11)", async () => {
+    // Each query answers with a row naming the table it read.
+    mocks.query.mockImplementation(async (sql: string) => {
+      const table = /from (\w+)/.exec(sql)?.[1] ?? "unknown";
+      return { rows: [{ table }] };
+    });
+    const exported = await buildWorkspaceExport(session);
+    expect(exported.locationTimelineCorrections).toEqual([{ table: "location_timeline_corrections" }]);
+    expect(exported.commuteSegments).toEqual([{ table: "commute_segments" }]);
+    expect(exported.placeMatchFeedback).toEqual([{ table: "place_match_feedback" }]);
+    expect(exported.importRuns).toEqual([{ table: "import_runs" }]);
+  });
 });
