@@ -1016,8 +1016,9 @@ export function EntriesTable({
                           {group.entries.length}
                         </button>
                       ) : null}
+                      {/* A grouped row's mark follows the length it shows (the group's total; Codex r2 on #583). */}
                       <ListBlockMark category={entry.categoryId ? categoriesById.get(entry.categoryId) ?? null : null} entry={entry}
-                        seconds={intervalSeconds(displayInterval, capturedNow)} />
+                        seconds={isGrouped ? group.totalSeconds : intervalSeconds(displayInterval, capturedNow)} />
                       <span className="timeline-task-details">
                         <span className="timeline-task-primary-line">
                           {renderInlineDescription(entry, groupEditTarget)}

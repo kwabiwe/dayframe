@@ -9,8 +9,10 @@ describe("Calendar in Blocks contract", () => {
   it("draws text in a darker or lighter shade of the block's own hue, with icon lines under the title (Calendar v3, 24 Oct 2026)", () => {
     expect(timeline).not.toContain('color: "var(--text-primary)"');
     expect(styles).toMatch(/\.calendar-time-block \{[^}]*color: color-mix\(in oklab, var\(--calendar-block-accent\) var\(--calendar-ink\), var\(--calendar-ink-mix\)\);/);
-    expect(styles).toMatch(/--calendar-ink: 52%;\s*--calendar-ink-mix: #000000;/);
-    expect(styles).toMatch(/--calendar-ink: 62%;\s*--calendar-ink-mix: #ffffff;/);
+    expect(styles).toMatch(/--calendar-ink: 52%;\s*--calendar-ink-strong: 40%;\s*--calendar-ink-mix: #000000;/);
+    expect(styles).toMatch(/--calendar-ink: 62%;\s*--calendar-ink-strong: 48%;\s*--calendar-ink-mix: #ffffff;/);
+    // Selected and Reduce Transparency fills are stronger, so their text takes the stronger shade (Codex r2 on #583).
+    expect(styles).toMatch(/\.calendar-time-block\.is-selected \{\s*--calendar-ink: var\(--calendar-ink-strong\);/);
     expect(timeline).toContain("<CalendarDetailLines lines={calendarBlockDetailLines(displayEntry, capturedNow, clock)} />");
     expect(styles).toMatch(/\.calendar-entry-details \{[^}]*max-height: calc\(var\(--detail-lines, 0\) \* 15px\);/);
     expect(styles).not.toMatch(/calendar-entry-title-line|calendar-entry-length|calendar-entry-glyph|calendar-entry-detail-line/);
@@ -42,8 +44,9 @@ describe("Calendar in Blocks contract", () => {
     // inside the axis at midnight and at the day's end.
     expect(timeline).toContain("localTimeReady && visibleDays.some(isToday)");
     expect(timeline).toContain("Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT,");
-    // Sticky day headings stay above everything in the columns.
-    expect(raised).toBeLessThan(40);
+    // Sticky day headings stay above everything in the columns: each column isolates its own stacking, so
+    // no block's z-index (nested depths included, Calendar v3) competes with them.
+    expect(styles).toMatch(/\.calendar-day-body \{\s*z-index: 0;\s*isolation: isolate;/);
   });
 
   it("keeps Calendar's clock moving while nothing runs, so the now line advances", () => {

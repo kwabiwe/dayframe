@@ -797,15 +797,21 @@ export function CalendarReview({
   // column as measured (every shown day's column is as wide as the first). Before it is measured the
   // blocks keep the side-by-side columns.
   const [dayBodyWidth, setDayBodyWidth] = useState(0);
+  // The shown days' bodies are keyed by date, so a new period mounts new ones: observe the current first
+  // body again whenever the days change, and ignore a detached body's zero width (Codex r2 on #583).
+  const observedDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
   useEffect(() => {
     const body = calendarScroller?.querySelector<HTMLElement>("[data-calendar-day-body]");
     if (!body || typeof ResizeObserver === "undefined") return;
-    const measure = () => setDayBodyWidth(Math.round(body.clientWidth));
+    const measure = () => {
+      if (!body.isConnected || body.clientWidth <= 0) return;
+      setDayBodyWidth(Math.round(body.clientWidth));
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(body);
     return () => observer.disconnect();
-  }, [calendarScroller, visibleDays.length]);
+  }, [calendarScroller, observedDaysKey]);
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];

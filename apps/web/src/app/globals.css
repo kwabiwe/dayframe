@@ -35,6 +35,7 @@
   --calendar-dense-tint: 18%;
   --calendar-dense-review-tint: 10%;
   --calendar-ink: 52%;
+  --calendar-ink-strong: 40%;
   --calendar-ink-mix: #000000;
   --calendar-now: var(--danger-text);
   --calendar-now-ink: #ffffff;
@@ -144,6 +145,7 @@
     --calendar-dense-tint: 28%;
     --calendar-dense-review-tint: 14%;
     --calendar-ink: 62%;
+    --calendar-ink-strong: 48%;
     --calendar-ink-mix: #ffffff;
     --calendar-now: var(--danger);
     --calendar-now-ink: var(--background);
@@ -250,6 +252,7 @@
   --calendar-dense-tint: 28%;
   --calendar-dense-review-tint: 14%;
   --calendar-ink: 62%;
+  --calendar-ink-strong: 48%;
   --calendar-ink-mix: #ffffff;
   --calendar-now: var(--danger);
   --calendar-now-ink: var(--background);
@@ -2066,18 +2069,13 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   --calendar-block-selected-fill: color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface)) 88%, transparent);
 }
 
-/* Reduce Transparency: opaque over the surface, a little stronger; suggestions too, hatch and bar kept. */
+/* Reduce Transparency: opaque over the surface, a little stronger, with the stronger ink (suggestions: below). */
 @media (prefers-reduced-transparency: reduce) {
   .calendar-time-block,
   .calendar-time-block[data-depth] {
+    --calendar-ink: var(--calendar-ink-strong);
     --calendar-block-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface));
     --calendar-block-selected-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 20%), var(--surface));
-  }
-
-  .calendar-review-block {
-    background:
-      repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 22%, transparent) 0 2px, transparent 2px 7px),
-      color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-review-tint) + 10%), var(--surface));
   }
 }
 
@@ -2120,7 +2118,10 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
+/* A selected block's fill is 10 % stronger, so its text is a step further from the hue (darker on Daylight,
+   lighter on Midnight) to keep AA (Codex r2 on #583). */
 .calendar-time-block.is-selected {
+  --calendar-ink: var(--calendar-ink-strong);
   z-index: 5;
   background-color: var(--calendar-block-selected-fill);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 11%, transparent);
@@ -2226,7 +2227,6 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   font-size: 12px;
   font-weight: 500;
   line-height: 15px;
-  opacity: 0.92;
 }
 
 .calendar-entry-detail > svg {
@@ -9345,13 +9345,13 @@ dialog.ui-dialog.df-palette {
   }
 }
 
-/* Above every nested depth (Calendar v3 lanes: 2 + up to 33), so the block in hand is always on top, and
-   below the sticky day headings (40). */
+/* Above every nested depth (Calendar v3 lanes grow 2 per depth, uncapped), so the block in hand is always on
+   top; the day column isolates its stacking (.calendar-day-body), so the sticky day headings stay above it. */
 .calendar-time-block:hover,
 .calendar-time-block.is-selected,
 .calendar-time-block.is-resizing,
 .calendar-time-block:has(:focus-visible) {
-  z-index: 36 !important;
+  z-index: 100000 !important;
 }
 
 /* Calendar v3 (owner, 24 Oct 2026; Apple): a red line exactly on the minute across the day, with the time
@@ -9465,6 +9465,16 @@ dialog.ui-dialog.df-palette {
 
 .calendar-review-block::before {
   background: repeating-linear-gradient(180deg, var(--calendar-block-accent) 0 4px, transparent 4px 7px);
+}
+
+/* Reduce Transparency: suggestions are opaque too, hatch and dashed bar kept (after the rule above, which it
+   overrides; Codex r2 on #583). */
+@media (prefers-reduced-transparency: reduce) {
+  .calendar-review-block {
+    background:
+      repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 22%, transparent) 0 2px, transparent 2px 7px),
+      color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-review-tint) + 10%), var(--surface));
+  }
 }
 
 .calendar-review-content {

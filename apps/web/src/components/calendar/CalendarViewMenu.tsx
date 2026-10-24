@@ -78,9 +78,13 @@ export function CalendarViewMenu({
   // Where the portalled menu sits on wider screens: under the trigger, flush with its right edge.
   useLayoutEffect(() => {
     if (menu === "closed") return;
+    // Clamped on both sides, so the menu never leaves the viewport (Codex r2 on #583).
     const place = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
-      if (rect) setAnchor({ top: rect.bottom + 6, right: Math.max(12, window.innerWidth - rect.right) });
+      if (!rect) return;
+      const width = menuRef.current?.offsetWidth || 220;
+      const right = Math.min(Math.max(12, window.innerWidth - rect.right), Math.max(12, window.innerWidth - width - 12));
+      setAnchor({ top: rect.bottom + 6, right });
     };
     place();
     window.addEventListener("resize", place);

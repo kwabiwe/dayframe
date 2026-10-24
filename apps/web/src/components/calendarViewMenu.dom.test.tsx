@@ -37,4 +37,19 @@ describe("Calendar view menu (Calendar v3, owner 24 Oct 2026)", () => {
     expect(document.activeElement).toBe(trigger);
     vi.unstubAllGlobals();
   });
+
+  it("keeps the anchored menu inside the viewport on both sides (Codex r2 on #583)", () => {
+    vi.stubGlobal("innerWidth", 600);
+    render(<CalendarViewMenu onChange={() => undefined} value="calendar" />);
+    const trigger = screen.getByRole("button", { name: "Calendar view: Calendar. Change view" });
+    // A trigger near the left edge: a 220 px menu flush with its right edge would start at −152 px.
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ top: 100, bottom: 144, left: 24, right: 68, width: 44, height: 44, x: 24, y: 100, toJSON: () => ({}) });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole("menu");
+    const right = Number.parseFloat(menu.style.getPropertyValue("--df-cal-view-right"));
+    const width = menu.offsetWidth || 220;
+    expect(600 - right - width).toBeGreaterThanOrEqual(12);
+    expect(right).toBeGreaterThanOrEqual(12);
+    vi.unstubAllGlobals();
+  });
 });

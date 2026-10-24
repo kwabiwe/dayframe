@@ -226,19 +226,19 @@ describe("time block display helpers", () => {
     expect(calendarBlockLanePxInsets({ x: 14, width: 100, depth: 1 }, 12)).toEqual({ left: 8 + 12 + 14, width: 98, right: "auto" });
   });
 
-  it("keeps every nested block above the one it starts inside, below the block in hand (Codex r1 on #583)", () => {
-    // A staircase of shared-column groups, each nesting inside the last.
-    const blocks = Array.from({ length: 12 }, (_, depth) => [
+  it("keeps every nested block above the one it starts inside at any depth (Codex r1/r2 on #583)", () => {
+    // A staircase of shared-column groups, each nesting inside the last, past any cap.
+    const blocks = Array.from({ length: 24 }, (_, depth) => [
       { key: `d${depth}a`, top: depth * 40, height: 1000 },
       { key: `d${depth}b`, top: depth * 40 + 2, height: 1000 }
     ]).flat();
     const lanes = layoutTimeBlockHybrid(blocks, { laneWidth: 2000, pixelsPerHour: 64 });
-    for (let depth = 1; depth < 12; depth += 1) {
+    for (let depth = 1; depth < 24; depth += 1) {
       const parent = lanes.get(`d${depth - 1}b`)!;
       const child = lanes.get(`d${depth}a`)!;
       expect(child.px?.depth).toBeGreaterThan(parent.px!.depth);
-      expect(child.zIndex).toBeGreaterThanOrEqual(parent.zIndex);
-      expect(2 + child.zIndex).toBeLessThan(36);
+      // Strictly above, whatever order the entries are rendered in.
+      expect(child.zIndex).toBeGreaterThan(parent.zIndex);
     }
   });
 });
