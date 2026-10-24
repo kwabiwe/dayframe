@@ -171,7 +171,7 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
-import { readDurableLocalWork } from "@/lib/durableLocalWork";
+import { isWaitingLockScreenStop, readDurableLocalWork } from "@/lib/durableLocalWork";
 import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
@@ -959,7 +959,40 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
+  /**
+   * Shows a Lock Screen Stop made while Dayframe was away (its Live Activity has already ended; owner
+   * option A) on the Dashboard as it is now, before any fetch: offline, the fetch never comes (Codex r1
+   * and r2 on #578). Only the waiting entry-scoped Stops are applied, each only to its own block, and
+   * nothing is published if the Dashboard changed meanwhile.
+   */
+  const applyWaitingLockScreenStops = useCallback(async () => {
+    const shown = latestData.current;
+    if (!shown?.activeEntry) return;
+    const revision = dashboardMutationRevision.current;
+    const work = await readDurableLocalWork(timerStopOwner(shown)).catch(() => null);
+    const stops = work?.activityEvents.filter(isWaitingLockScreenStop) ?? [];
+    if (!work || !stops.length) return;
+    if (latestData.current !== shown || dashboardMutationRevision.current !== revision) return;
+    const next = projectDurableLocalWork(shown, {
+      owner: work.owner,
+      activityEvents: stops,
+      timeEntryCommands: [],
+      timerStops: [],
+      correlations: new Map()
+    });
+    if (next.activeEntry?.id === shown.activeEntry.id) return;
+    publishDashboardData(next);
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void applyWaitingLockScreenStops();
+    });
+    return () => subscription.remove();
+  }, [applyWaitingLockScreenStops]);
+
   const load = useCallback(async (options?: DashboardLoadOptions) => {
+    await applyWaitingLockScreenStops();
     if (
       connectivityCurrent.current.isOffline &&
       latestData.current !== null &&
@@ -993,16 +1026,6 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       const date = formatDateKey(new Date());
       await readPendingTimerStops();
       await hydrateTimerEntryIdCorrelations();
-      // A Lock Screen Stop made while Dayframe was away shows before the fetch, which offline never
-      // lands (Codex r1 on #578): only when it stops the block shown running.
-      const shown = loadedBootstrap.current;
-      if (shown?.activeEntry) {
-        const reprojected = projectDurableLocalWork(shown, await readDurableLocalWork(timerStopOwner(shown)));
-        if (reprojected.activeEntry?.id !== shown.activeEntry.id && loadedBootstrap.current === shown) {
-          loadedBootstrap.current = reprojected;
-          publishDashboardData(reprojected);
-        }
-      }
       let serverBootstrap = await fetchBootstrap({ date });
       const nativeDrain = await drainNativeShortcutQueue();
       for (const localId of nativeDrain.transferredLocalIds) {
@@ -1097,7 +1120,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         void loadRef.current({ silent: true });
       }
     }
-  }, [transitionToSignedOut]);
+  }, [applyWaitingLockScreenStops, transitionToSignedOut]);
   loadRef.current = load;
 
   const refreshTodayPresentation = useCallback(() => {

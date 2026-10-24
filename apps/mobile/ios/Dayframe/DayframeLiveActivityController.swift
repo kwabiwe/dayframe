@@ -222,7 +222,9 @@ enum DayframeLiveActivityController {
     else {
       return
     }
-    await activity.update(ActivityContent(state: stoppedState(activity), staleDate: Date()))
+    // No stale date: a stale Activity is no longer `.active`, and the app's cleanup ends only active
+    // ones, so one left here by an intent that died before ending it would escape (Codex r2 on #578).
+    await activity.update(ActivityContent(state: stoppedState(activity), staleDate: nil))
   }
 
   static func cleanupActivities(activityIds: [String]) async -> Bool {

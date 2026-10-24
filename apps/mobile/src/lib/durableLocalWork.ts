@@ -43,3 +43,5 @@ export async function projectBootstrapWithDurableLocalWork(
     await readDurableLocalWork(owner)
   );
 }
+
+export { isWaitingLockScreenStop } from "./durableLocalProjection";

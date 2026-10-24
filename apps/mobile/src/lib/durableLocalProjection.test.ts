@@ -181,6 +181,19 @@ describe("durable dashboard projection", () => {
     expect(projectDurableLocalWork(server, work({ activityEvents: [unscoped] })).activeEntry).toEqual(running);
     const otherAccount = { ...waiting, userId: "someone-else" };
     expect(projectDurableLocalWork(server, work({ activityEvents: [otherAccount] })).activeEntry).toEqual(running);
+    // A waiting Stop for an older block never hides the block running now (Codex r2 on #578).
+    const older = { ...entry("older-block"), stoppedAt: "2026-08-22T10:20:00.000Z" };
+    const newer = entry("newer-block");
+    const current = bootstrap({ activeEntry: newer, entries: [newer, older] });
+    const withOldStop = projectDurableLocalWork(current, work({ activityEvents: [lockScreenStop(older.id)] }));
+    expect(withOldStop.activeEntry).toEqual(newer);
+    // That older block, stopped elsewhere before the tap, keeps its own end.
+    expect(withOldStop.entries.find((item) => item.id === older.id)?.stoppedAt).toBe("2026-08-22T10:20:00.000Z");
+    // One a later Start ended after the tap shows the tap's end.
+    const endedLater = { ...entry("ended-later"), stoppedAt: "2026-08-22T11:00:00.000Z" };
+    const laterProjected = projectDurableLocalWork(bootstrap({ activeEntry: newer, entries: [newer, endedLater] }),
+      work({ activityEvents: [lockScreenStop(endedLater.id)] }));
+    expect(laterProjected.entries.find((item) => item.id === endedLater.id)?.stoppedAt).toBe("2026-08-22T10:25:00.000Z");
     // A Stop for a block the snapshot no longer has changes nothing.
     expect(projectDurableLocalWork(server, work({ activityEvents: [lockScreenStop("gone")] }))).toEqual(server);
   });

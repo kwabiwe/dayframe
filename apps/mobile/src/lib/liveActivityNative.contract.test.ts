@@ -75,12 +75,19 @@ describe("native Live Activity presentation contract", () => {
     const durableWork = readFileSync(`${mobileRoot}src/lib/durableLocalWork.ts`, "utf8");
     expect(durableWork).toContain("readPendingNativeEntryStops(owner)");
     const dashboard = readFileSync(`${mobileRoot}src/components/DayframeDashboard.tsx`, "utf8");
-    const reproject = dashboard.indexOf("const reprojected = projectDurableLocalWork(shown, await readDurableLocalWork(timerStopOwner(shown)));");
-    expect(reproject).toBeGreaterThan(-1);
-    expect(reproject).toBeLessThan(dashboard.indexOf("let serverBootstrap = await fetchBootstrap({ date });"));
+    const load = dashboard.slice(dashboard.indexOf("const load = useCallback(async (options?: DashboardLoadOptions) => {"));
+    // Before the offline return, and on every return to the front (Codex r2 on #578).
+    expect(load.indexOf("await applyWaitingLockScreenStops();")).toBeLessThan(load.indexOf("connectivityCurrent.current.isOffline &&"));
+    expect(dashboard).toContain('if (state === "active") void applyWaitingLockScreenStops();');
+    const apply = dashboard.slice(dashboard.indexOf("const applyWaitingLockScreenStops = useCallback("), dashboard.indexOf("const load = useCallback("));
+    // The Dashboard as shown now, only the waiting Stops, fenced against changes while reading.
+    expect(apply).toContain("const shown = latestData.current;");
+    expect(apply).toContain("work?.activityEvents.filter(isWaitingLockScreenStop)");
+    expect(apply).toContain("if (latestData.current !== shown || dashboardMutationRevision.current !== revision) return;");
+    expect(apply).not.toContain("loadedBootstrap");
     const showStopped = controller.slice(controller.indexOf("static func showStopped("), controller.indexOf("static func cleanupActivities("));
     expect(showStopped).toContain("$0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active");
-    expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: Date()))");
+    expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: nil))");
     expect(showStopped).not.toContain(".end(");
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");

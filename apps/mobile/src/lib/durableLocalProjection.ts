@@ -63,7 +63,12 @@ export function projectDurableLocalWork(
     }
 
     if (operation.kind === "queued_stop") {
-      projected = projectTargetedStop(projected, operation.entryId, operation.at);
+      // Only a block still running, or one that ended after the tap (a later Start ended it there): a
+      // block stopped elsewhere before the tap keeps its end, as the server keeps it (superseded).
+      const target = mobileTimeEntryById(projected, operation.entryId);
+      if (target && (!target.stoppedAt || Date.parse(target.stoppedAt) > Date.parse(operation.at))) {
+        projected = projectTargetedStop(projected, operation.entryId, operation.at);
+      }
       continue;
     }
 
@@ -132,24 +137,26 @@ function projectionOperations(work: DurableLocalWork): ProjectionOperation[] {
   // server answers. One the server refused for good (the queue's own rule) is not projected, so the block
   // shows running again, with its Activity.
   const queuedStops: ProjectionOperation[] = work.activityEvents
-    .flatMap((event) => {
-      const entryId = event.rawPayload?.targetEntryId;
-      return mobileAccountOwnersEqual(event, work.owner) &&
-        event.type === "timer_stop" &&
-        event.rawPayload?.stopScope === "entry" &&
-        typeof entryId === "string" && entryId.length > 0 &&
-        !isPermanentlyFailedQueuedEvent(event)
-        ? [{
-            kind: "queued_stop" as const,
-            at: event.occurredAt.toISOString(),
-            sequence: `2:${event.queuedAt}:${event.localId}`,
-            entryId
-          }]
-        : [];
-    });
+    .flatMap((event) => mobileAccountOwnersEqual(event, work.owner) && isWaitingLockScreenStop(event)
+      ? [{
+          kind: "queued_stop" as const,
+          at: event.occurredAt.toISOString(),
+          sequence: `2:${event.queuedAt}:${event.localId}`,
+          entryId: event.rawPayload!.targetEntryId as string
+        }]
+      : []);
   return [...starts, ...commands, ...stops, ...queuedStops].sort((left, right) =>
     Date.parse(left.at) - Date.parse(right.at) || left.sequence.localeCompare(right.sequence)
   );
+}
+
+/** A Lock Screen Stop still waiting to reach the server: entry-scoped, its block named, not refused. */
+export function isWaitingLockScreenStop(event: QueuedEvent) {
+  const entryId = event.rawPayload?.targetEntryId;
+  return event.type === "timer_stop" &&
+    event.rawPayload?.stopScope === "entry" &&
+    typeof entryId === "string" && entryId.length > 0 &&
+    !isPermanentlyFailedQueuedEvent(event);
 }
 
 function queuedStartEntry(
