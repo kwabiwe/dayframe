@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ReportsGettingAround, ReportsNotLogged, viewerDayKey } from "./ReportsGettingAround";
+import { ReportsGettingAround, ReportsNotLogged } from "./ReportsGettingAround";
 
 // Location v4 step 18 (mock-up #web-reports): times only, never distances or places.
 describe("Reports › Getting around and Not logged (location v4 step 18)", () => {
@@ -33,16 +33,11 @@ describe("Reports › Getting around and Not logged (location v4 step 18)", () =
     const html = renderToStaticMarkup(<ReportsNotLogged day="2026-10-21" seconds={3_720} />);
     expect(html).toContain("Not logged:");
     expect(html).toContain("at places you haven&#x27;t named");
-    // The day of the latest counted place, not today (Codex r1 on #569).
+    // The day the List shows the place, not today (Codex r1 on #569).
     expect(html).toContain('href="/timeline?view=list&amp;scope=day&amp;date=2026-10-21"');
     expect(html).toContain('class="df-report-not-logged-check"');
     expect(html).toContain("Not counted above or in goals.");
     expect(renderToStaticMarkup(<ReportsNotLogged day={null} seconds={30} />)).toBe("");
   });
 
-  it("finds the viewer's day of an instant, across midnight in their zone", () => {
-    expect(viewerDayKey("2026-10-20T23:30:00.000Z", "Europe/London")).toBe("2026-10-21");
-    expect(viewerDayKey("2026-10-20T23:30:00.000Z", "UTC")).toBe("2026-10-20");
-    expect(viewerDayKey(null, "UTC")).toBeNull();
-  });
 });

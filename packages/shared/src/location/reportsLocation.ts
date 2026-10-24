@@ -88,31 +88,46 @@ export function notLoggedPlaceSeconds(places: readonly Interval[], entries: read
   return notLoggedPlaces(places, entries, range, nowMs).seconds;
 }
 
-/** As `notLoggedPlaceSeconds`, with when the latest counted place started (in the range), for "Check them". */
+/**
+ * As `notLoggedPlaceSeconds`, with the latest of the report's `days` on which Calendar › List shows a
+ * counted place as not logged (10+ minutes of its uncovered time inside that day), for "Check them"
+ * (Codex r1/r2 on #569). Without days, or when no single day reaches the threshold, the day holding
+ * the latest uncovered time.
+ */
 export function notLoggedPlaces(places: readonly Interval[], entries: readonly Interval[], range: { start: string; end: string },
-  nowMs: number): { seconds: number; latestStartedAt: string | null } {
+  nowMs: number, days: ReadonlyArray<{ key: string; start: string; end: string }> = []): { seconds: number; latestDay: string | null } {
   const fromMs = Date.parse(range.start);
   const toMs = Date.parse(range.end);
   const blocks = entries.flatMap((entry) => {
     const span = clip(entry, fromMs, toMs, nowMs);
     return span ? [span] : [];
   }).sort((a, b) => a[0] - b[0]);
+  const spans = days.map((day) => ({ key: day.key, start: Date.parse(day.start), end: Date.parse(day.end) }));
+  const dayOf = (ms: number) => spans.find((day) => ms >= day.start && ms < day.end) ?? null;
   let total = 0;
-  let latestMs: number | null = null;
+  let latest: { key: string; start: number } | null = null;
+  let latestPieceEnd: number | null = null;
   for (const place of places) {
     const span = clip(place, fromMs, toMs, nowMs);
     if (!span) continue;
-    let covered = 0;
+    // The place's uncovered pieces, between the blocks that overlap it.
+    const pieces: Array<[number, number]> = [];
     let cursor = span[0];
     for (const [a, b] of blocks) {
       if (b <= cursor || a >= span[1]) continue;
-      covered += Math.min(b, span[1]) - Math.max(a, cursor);
-      cursor = Math.min(b, span[1]);
+      if (a > cursor) pieces.push([cursor, Math.min(a, span[1])]);
+      cursor = Math.max(cursor, Math.min(b, span[1]));
     }
-    const uncovered = Math.round((span[1] - span[0] - covered) / 1000);
+    if (cursor < span[1]) pieces.push([cursor, span[1]]);
+    const uncovered = Math.round(pieces.reduce((sum, [a, b]) => sum + b - a, 0) / 1000);
     if (uncovered < NOT_LOGGED_PLACE_MINIMUM_SECONDS) continue;
     total += uncovered;
-    if (latestMs === null || span[0] > latestMs) latestMs = span[0];
+    latestPieceEnd = Math.max(latestPieceEnd ?? 0, pieces[pieces.length - 1][1]);
+    for (const day of spans) {
+      const inDay = pieces.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, day.end) - Math.max(a, day.start)), 0) / 1000;
+      if (inDay >= NOT_LOGGED_PLACE_MINIMUM_SECONDS && (!latest || day.start > latest.start)) latest = day;
+    }
   }
-  return { seconds: total, latestStartedAt: latestMs === null ? null : new Date(latestMs).toISOString() };
+  const fallback = latestPieceEnd === null ? null : dayOf(latestPieceEnd - 1)?.key ?? null;
+  return { seconds: total, latestDay: latest?.key ?? fallback };
 }

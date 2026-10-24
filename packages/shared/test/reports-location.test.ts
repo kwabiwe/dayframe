@@ -34,10 +34,20 @@ describe("Reports › Getting around and not logged (location v4 step 18)", () =
     expect(notLoggedPlaceSeconds(places, entries, day, NOW)).toBe((30 + 40) * 60);
   });
 
-  it("says when the latest counted place started, for Check them (Codex r1 on #569)", () => {
-    const places = [{ startedAt: at(600), stoppedAt: at(720) }, { startedAt: at(800), stoppedAt: at(808) }, { startedAt: at(-60), stoppedAt: at(120) }];
-    // The 8-minute place is not counted, so the latest counted one is the 10:00 place; one from before the range counts from its start.
-    expect(notLoggedPlaces(places, [], day, NOW)).toEqual({ seconds: (120 + 120) * 60, latestStartedAt: at(600) });
-    expect(notLoggedPlaces([], [], day, NOW)).toEqual({ seconds: 0, latestStartedAt: null });
+  it("names the latest day whose List shows a counted place, not the day it started (Codex r1/r2 on #569)", () => {
+    const days = [
+      { key: "2026-10-21", start: at(-1_440), end: at(0) },
+      { key: "2026-10-22", start: at(0), end: at(1_440) }
+    ];
+    const twoDays = { start: at(-1_440), end: at(1_440) };
+    // 23:45–00:30 with a block over its first 15 minutes: its 30 counted minutes are all on the 22nd.
+    expect(notLoggedPlaces([{ startedAt: at(-15), stoppedAt: at(30) }], [{ startedAt: at(-15), stoppedAt: at(0) }], twoDays, NOW, days))
+      .toEqual({ seconds: 30 * 60, latestDay: "2026-10-22" });
+    // A place on the 21st only, and an 8-minute one on the 22nd that is never counted.
+    expect(notLoggedPlaces([{ startedAt: at(-300), stoppedAt: at(-200) }, { startedAt: at(800), stoppedAt: at(808) }], [], twoDays, NOW, days))
+      .toEqual({ seconds: 100 * 60, latestDay: "2026-10-21" });
+    // 23:55–00:08: counted (13 minutes) but under ten minutes on each day, so the day of its latest time.
+    expect(notLoggedPlaces([{ startedAt: at(-5), stoppedAt: at(8) }], [], twoDays, NOW, days)).toEqual({ seconds: 13 * 60, latestDay: "2026-10-22" });
+    expect(notLoggedPlaces([], [], twoDays, NOW, days)).toEqual({ seconds: 0, latestDay: null });
   });
 });

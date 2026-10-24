@@ -87,8 +87,8 @@ export type ReportResult = {
   gettingAround: GettingAroundSummary | null;
   /** Time at places you haven't named, not in a block; not counted in the totals or goals (location v4 step 18). */
   notLoggedSeconds: number;
-  /** When the latest counted place started, for "Check them" (Codex r1 on #569). */
-  notLoggedLatestAt: string | null;
+  /** The latest report day whose Calendar › List shows a counted place, for "Check them" (Codex r1/r2 on #569). */
+  notLoggedDay: string | null;
   entries: ReportEntryRow[];
   overlapCandidates: Array<{
     id: string;
@@ -155,7 +155,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
   const [result, sourcesInRange, notLogged] = await Promise.all([
     query<ReportDataRow>(statement.text, statement.values),
     getReportSourcesInRange(session, input.range, capturedNow),
-    getNotLogged(session, input.range, capturedNow)
+    getNotLogged(session, input.range, capturedNow, input.dayBoundaries)
   ]);
   const row = result.rows[0] ?? emptyReportData(input);
   const totalSeconds = numberValue(row.totalSeconds);
@@ -252,7 +252,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
     dailyByActivity: dailyActivitySeconds(analysisEntries, input.dayBoundaries, capturedNow),
     gettingAround: await getGettingAround(session, analysisEntries, input.range, capturedNow),
     notLoggedSeconds: notLogged.seconds,
-    notLoggedLatestAt: notLogged.latestStartedAt,
+    notLoggedDay: notLogged.latestDay,
     entries: arrayValue(row.entries).map((entry) => {
       const entryAnalysis = analysisById.get(entry.id);
       return {
@@ -340,11 +340,12 @@ export async function getNotLoggedSeconds(session: RequestSession, range: { star
 }
 
 /**
- * Not logged in a range, with when its latest counted place started. Stays are read as the timeline reads
+ * Not logged in a range, with the latest of `days` on which Calendar › List shows a counted place. Stays are read as the timeline reads
  * them (Codex r1 on #569): those starting in the 31 days before the range, and older ones still open or
  * longer than 31 days.
  */
-export async function getNotLogged(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
+export async function getNotLogged(session: RequestSession, range: { start: string; end: string }, capturedNow: string,
+  days: ReadonlyArray<{ key: string; start: string; end: string }> = []) {
   const lookback = new Date(Date.parse(range.start) - 31 * 24 * 60 * 60_000).toISOString();
   const unnamed = `from stay_segments
         where workspace_id = $1 and user_id = $2 and status <> 'superseded' and status <> 'ignored'
@@ -367,7 +368,7 @@ export async function getNotLogged(session: RequestSession, range: { start: stri
   return notLoggedPlaces(
     places.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
     entries.rows.map((row) => ({ startedAt: iso(row.startedAt)!, stoppedAt: iso(row.stoppedAt) })),
-    range, Date.parse(capturedNow));
+    range, Date.parse(capturedNow), days);
 }
 
 export async function getReportExportRows(session: RequestSession, input: ReportQueryInput) {
