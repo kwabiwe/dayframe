@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { couldntBeSentDetail, deviceSyncAttentionStatus, placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "./settingsSyncDiagnostics";
+import { couldntBeSentDetail, deviceSyncAttentionStatus, needsAttentionFoot, placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "./settingsSyncDiagnostics";
 
 describe("Settings sync diagnostics summary", () => {
   it("reports block Stop and time-entry attention together", () => {
@@ -126,5 +126,16 @@ describe("Sync help: couldn't be sent", () => {
     expect(mixed).not.toMatch(/can't be cleared/);
     // Parked items get no scheduled wake, so the copy promises no cadence.
     expect(mixed).not.toMatch(/every|hours/);
+  });
+});
+
+describe("Sync help's Needs attention footer (staging QA 24 Oct 2026)", () => {
+  it("names only the buttons on screen", () => {
+    expect(needsAttentionFoot({ tryAgain: true, discard: false, clear: true })).toBe("Try again resends it. Clear keeps your account as it is.");
+    expect(needsAttentionFoot({ tryAgain: true, discard: true, clear: false })).toBe("Try again resends it. Discard keeps your account as it is.");
+    expect(needsAttentionFoot({ tryAgain: true, discard: true, clear: true })).toBe("Try again resends it. Discard or Clear keeps your account as it is.");
+    expect(needsAttentionFoot({ tryAgain: false, discard: false, clear: true })).toBe("Clear keeps your account as it is.");
+    expect(needsAttentionFoot({ tryAgain: true, discard: false, clear: false })).toBe("Try again resends it.");
+    expect(needsAttentionFoot({ tryAgain: false, discard: false, clear: false })).toBeNull();
   });
 });
