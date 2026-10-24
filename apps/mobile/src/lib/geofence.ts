@@ -781,7 +781,11 @@ async function repickNearestGeofencesUnsafe(captured: LocationCaptureSnapshot, t
     }
     // And at most one such re-pick every REPICK_MIN_INTERVAL_MS: iOS re-registers regions on the main
     // thread, so a burst of wakes never re-registers in a burst. Leaving the circle always re-picks.
-    if (Date.now() - lastRepickAt < REPICK_MIN_INTERVAL_MS) return 0;
+    if (Date.now() - lastRepickAt < REPICK_MIN_INTERVAL_MS) {
+      // The reading still moves the freshness floor, so an older one arriving later cannot move the set back.
+      await noteSelectionPosition(capture, position.timestamp);
+      return 0;
+    }
   }
   lastRepickAt = Date.now();
   return registerGeofenceSelectionUnsafe(monitorablePlaces, capture, position);

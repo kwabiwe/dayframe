@@ -802,6 +802,37 @@ describe("nearest-place geofences (location v3 PR 16b)", () => {
     }
   });
 
+  it("a reading skipped by the 30 s limit still moves the freshness floor, so an older one never moves the set back (Codex r1 on #581)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 9, 24, 9, 0));
+      __resetGeofenceRepickClockForTests();
+      const places = Array.from({ length: 30 }, (_, index) => nearbyPlace(index + 1));
+      captureState.savedPlaces = places;
+      const { captureLocationOwnership } = await import("./location/store");
+      phoneAt(10.001);
+      await startGeofences(places);
+      const start = Date.now();
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "visit_or_significant_change",
+        [{ latitude: 10.03, longitude: 20, timestamp: start }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+      // At +5 s a reading on the grid's other side is held back by the limit…
+      vi.setSystemTime(start + 5_000);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update",
+        [{ latitude: 9.95, longitude: 20, timestamp: start + 5_000 }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+      // …and a delayed reading taken at +2 s, arriving after the limit, is older than it: no re-pick.
+      vi.setSystemTime(start + 5_000 + REPICK_MIN_INTERVAL_MS);
+      locationMocks.getLastKnownPositionAsync.mockResolvedValue(null);
+      await refreshNearestGeofencesInLifecycleLane(captureLocationOwnership(), "location_update",
+        [{ latitude: 9.9, longitude: 20, timestamp: start + 2_000 }]);
+      expect(locationMocks.startGeofencingAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      captureState.savedPlaces = null;
+      vi.useRealTimers();
+    }
+  });
+
   it("Codex r1 #5: re-fits the refresh circle when an unwatched place moves closer", async () => {
     // 19 places within about 420 m of the phone, 6 more a long way off: a 20 km circle.
     const near = Array.from({ length: 19 }, (_, index) => nearbyPlace(index + 1, { latitude: 10 + (index + 1) * 0.0002 }));

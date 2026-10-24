@@ -1,8 +1,17 @@
 diff --git a/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m b/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
-index 7e6482e..34c6c10 100644
+index 7e6482e..bb5509d 100644
 --- a/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
 +++ b/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
-@@ -31,15 +31,17 @@ - (NSString *)taskType
+@@ -14,6 +14,8 @@ @interface EXGeofencingTaskConsumer ()
+ @property (nonatomic, strong) CLLocationManager *locationManager;
+ @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *regionStates;
+ @property (nonatomic, assign) BOOL backgroundOnly;
++// Dayframe patch: the regions this consumer asked iOS to monitor, as requested (identifier → region).
++@property (nonatomic, strong) NSMutableDictionary<NSString *, CLCircularRegion *> *registeredRegions;
+ 
+ @end
+ 
+@@ -31,15 +33,17 @@ - (NSString *)taskType
    return @"geofencing";
  }
  
@@ -23,15 +32,27 @@ index 7e6482e..34c6c10 100644
  }
  
  - (void)didUnregister
-@@ -58,41 +60,73 @@ - (void)reset
+@@ -51,55 +55,150 @@ - (void)didUnregister
+ 
+ - (void)reset
+ {
+-  [self stopMonitoringAllRegions];
+   [EXUtilities performSynchronouslyOnMainThread:^{
++    [self stopOwnedRegions];
++    self->_registeredRegions = nil;
+     self->_locationManager = nil;
+     self->_task = nil;
    }];
  }
  
 -- (void)startMonitoringRegionsForTask:(id<EXTaskInterface>)task
-+// Dayframe patch: one manager for the consumer's life. Regions iOS already monitors with the same centre,
-+// radius and notify flags are left alone (no stop, start or state query); others are stopped and the new
-+// or changed ones started. A fresh consumer (an app launch) still asks every wanted region's state once, as
-+// before, so the task learns where the phone is; later updates ask only the regions they started.
++// Dayframe patch: one manager for the consumer's life, and its own record of what it registered, so a
++// re-registration never depends on iOS's asynchronous `monitoredRegions` snapshot. Only regions whose
++// requested centre, radius or notify flags changed are stopped and started (and their state asked);
++// unchanged ones are left alone. A fresh consumer (an app launch) still asks every wanted region's state
++// once, as before, so the task learns where the phone is. Regions this consumer owned before (persisted
++// per task, so an earlier binding's are removed after a relaunch) and no longer wants are stopped; regions
++// it never owned are never touched.
 +- (void)updateMonitoredRegionsForTask:(id<EXTaskInterface>)task
  {
    [EXUtilities performSynchronouslyOnMainThread:^{
@@ -48,6 +69,7 @@ index 7e6482e..34c6c10 100644
 +      locationManager.pausesLocationUpdatesAutomatically = NO;
 +      self->_locationManager = locationManager;
 +      self->_regionStates = [NSMutableDictionary new];
++      self->_registeredRegions = [NSMutableDictionary new];
 +    }
      self->_task = task;
 -    self->_locationManager = locationManager;
@@ -76,15 +98,35 @@ index 7e6482e..34c6c10 100644
 -      region.notifyOnEntry = notifyOnEntry;
 -      region.notifyOnExit = notifyOnExit;
 +    NSMutableSet<NSString *> *kept = [NSMutableSet new];
-+    for (CLRegion *existing in [locationManager.monitoredRegions copy]) {
-+      CLCircularRegion *wantedRegion = wanted[existing.identifier];
-+      if (wantedRegion && [existing isKindOfClass:[CLCircularRegion class]]
-+          && [self.class region:(CLCircularRegion *)existing matches:wantedRegion]) {
-+        [kept addObject:existing.identifier];
-+        continue;
++    if (fresh) {
++      // After a launch the record is empty: what iOS kept monitoring stands in for it, but only regions this
++      // consumer owns (the persisted list; a first run after the patch treats every circular region as its
++      // own, as the unpatched consumer did). iOS may have clamped a radius, so compare with that in mind.
++      NSSet<NSString *> *owned = [self persistedOwnedIdentifiers];
++      for (CLRegion *existing in [locationManager.monitoredRegions copy]) {
++        if (![existing isKindOfClass:[CLCircularRegion class]]) continue;
++        if (owned != nil && ![owned containsObject:existing.identifier] && wanted[existing.identifier] == nil) continue;
++        CLCircularRegion *wantedRegion = wanted[existing.identifier];
++        if (wantedRegion && [self region:(CLCircularRegion *)existing matches:wantedRegion]) {
++          [kept addObject:existing.identifier];
++          self->_registeredRegions[existing.identifier] = wantedRegion;
++          continue;
++        }
++        [locationManager stopMonitoringForRegion:existing];
++        [self->_regionStates removeObjectForKey:existing.identifier];
 +      }
-+      [locationManager stopMonitoringForRegion:existing];
-+      [self->_regionStates removeObjectForKey:existing.identifier];
++    } else {
++      for (NSString *identifier in [self->_registeredRegions allKeys]) {
++        CLCircularRegion *registered = self->_registeredRegions[identifier];
++        CLCircularRegion *wantedRegion = wanted[identifier];
++        if (wantedRegion && [self.class requested:registered sameAs:wantedRegion]) {
++          [kept addObject:identifier];
++          continue;
++        }
++        [locationManager stopMonitoringForRegion:registered];
++        [self->_registeredRegions removeObjectForKey:identifier];
++        [self->_regionStates removeObjectForKey:identifier];
++      }
 +    }
  
 -      [regionStates setObject:@(CLRegionStateUnknown) forKey:identifier];
@@ -97,22 +139,91 @@ index 7e6482e..34c6c10 100644
 +        }
 +        continue;
 +      }
++      self->_registeredRegions[identifier] = region;
 +      [self->_regionStates setObject:@(CLRegionStateUnknown) forKey:identifier];
        [locationManager startMonitoringForRegion:region];
        [locationManager requestStateForRegion:region];
      }
++    [self persistOwnedIdentifiers:[NSSet setWithArray:[self->_registeredRegions allKeys]]];
    }];
  }
  
-++ (BOOL)region:(CLCircularRegion *)existing matches:(CLCircularRegion *)wanted
+-- (void)stopMonitoringAllRegions
++// Two requests for the same region (as asked, before iOS clamps anything).
+++ (BOOL)requested:(CLCircularRegion *)left sameAs:(CLCircularRegion *)right
+ {
+-  [EXUtilities performSynchronouslyOnMainThread:^{
+-    for (CLRegion *region in self->_locationManager.monitoredRegions) {
+-      [self->_locationManager stopMonitoringForRegion:region];
+-    }
+-  }];
++  return fabs(left.center.latitude - right.center.latitude) < 1e-7
++    && fabs(left.center.longitude - right.center.longitude) < 1e-7
++    && fabs(left.radius - right.radius) < 0.01
++    && left.notifyOnEntry == right.notifyOnEntry
++    && left.notifyOnExit == right.notifyOnExit;
++}
++
++// A region iOS monitors against a request: its radius as iOS would clamp the requested one.
++- (BOOL)region:(CLCircularRegion *)existing matches:(CLCircularRegion *)wanted
 +{
++  CLLocationDistance maximum = self->_locationManager.maximumRegionMonitoringDistance;
++  CLLocationDistance effective = maximum > 0 ? MIN(wanted.radius, maximum) : wanted.radius;
 +  return fabs(existing.center.latitude - wanted.center.latitude) < 1e-7
 +    && fabs(existing.center.longitude - wanted.center.longitude) < 1e-7
-+    && fabs(existing.radius - wanted.radius) < 0.01
++    && (fabs(existing.radius - wanted.radius) < 0.01 || fabs(existing.radius - effective) < 0.01)
 +    && existing.notifyOnEntry == wanted.notifyOnEntry
 +    && existing.notifyOnExit == wanted.notifyOnExit;
 +}
 +
- - (void)stopMonitoringAllRegions
++- (void)stopOwnedRegions
++{
++  NSMutableSet<NSString *> *owned = [NSMutableSet setWithArray:[self->_registeredRegions allKeys] ?: @[]];
++  NSSet<NSString *> *persisted = [self persistedOwnedIdentifiers];
++  if (persisted) [owned unionSet:persisted];
++  for (CLRegion *region in [self->_locationManager.monitoredRegions copy]) {
++    if ([owned containsObject:region.identifier]) [self->_locationManager stopMonitoringForRegion:region];
++  }
++  for (CLCircularRegion *region in [self->_registeredRegions allValues]) {
++    [self->_locationManager stopMonitoringForRegion:region];
++  }
++  [self persistOwnedIdentifiers:[NSSet set]];
++}
++
++- (NSString *)ownedIdentifiersKey
++{
++  NSString *name = self->_task.name ?: @"";
++  return [@"dayframe.expo-location.geofencing.owned." stringByAppendingString:name];
++}
++
++// nil when nothing was ever recorded for this task (the first run after the patch).
++- (nullable NSSet<NSString *> *)persistedOwnedIdentifiers
++{
++  NSArray *stored = [[NSUserDefaults standardUserDefaults] arrayForKey:[self ownedIdentifiersKey]];
++  return stored ? [NSSet setWithArray:stored] : nil;
++}
++
++- (void)persistOwnedIdentifiers:(NSSet<NSString *> *)identifiers
++{
++  [[NSUserDefaults standardUserDefaults] setObject:[identifiers allObjects] forKey:[self ownedIdentifiersKey]];
+ }
+ 
+ - (void)executeTaskWithRegion:(nonnull CLRegion *)region eventType:(EXGeofencingEventType)eventType
+@@ -146,10 +245,14 @@ - (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *
+ - (void)locationManager:(CLLocationManager *)manager monitoringDidFailForRegion:(CLRegion *)region withError:(NSError *)error
  {
-   [EXUtilities performSynchronouslyOnMainThread:^{
+   if (error && error.domain == kCLErrorDomain) {
+-    // This error might happen when the device is not able to find out the location. Try to restart monitoring this region.
++    // Dayframe patch: restart only a region this consumer still wants, as it registered it; a late failure
++    // for a region it has since removed (another account's, a moved place) is not brought back.
++    CLCircularRegion *registered = region.identifier ? _registeredRegions[region.identifier] : nil;
+     [_locationManager stopMonitoringForRegion:region];
+-    [_locationManager startMonitoringForRegion:region];
+-    [_locationManager requestStateForRegion:region];
++    if (registered == nil) return;
++    // This error might happen when the device is not able to find out the location. Try to restart monitoring this region.
++    [_locationManager startMonitoringForRegion:registered];
++    [_locationManager requestStateForRegion:registered];
+   }
+ }
+ 
