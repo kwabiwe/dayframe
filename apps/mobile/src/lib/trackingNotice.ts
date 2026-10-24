@@ -3,7 +3,8 @@
 // posts one calm local notification from `applicationWillTerminate` ("Dayframe isn't tracking
 // locations — open it to resume"), at most once a day. JS keeps the native module "armed" flag
 // current: this device's switch is on, notifications are allowed, and the signed-in account's
-// location tracking is on with Always access. Native re-checks Always and the daily limit itself.
+// location tracking is on with Always access. Native checks only this flag and the daily limit: it
+// reads nothing from CoreLocation while iOS ends the app (0x8BADF00D, staging iPhone, 23 Oct 2026).
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { ReviewNudgePermission } from "./reviewNudgeNative";
 
