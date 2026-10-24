@@ -52,8 +52,11 @@ function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockForm
  * One location row of the List: a place (unlogged, or faint with "Show Home and every place") or the
  * journey in progress. A place not in a block can be corrected (location v4 step 13).
  */
-export function LocationListRowView({ clock, nowMs, onCorrect, row }: {
-  clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void; row: LocationListRow;
+export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
+  /** The row's "?" (location v4 step 14): whether its question is open, and the toggle. */
+  check?: { expanded: boolean; onToggle: () => void };
+  clock: ClockFormat; nowMs: number; onCorrect?: (place: TimelinePlace, label: string) => void;
+  row: Exclude<LocationListRow, { kind: "check" }>;
 }) {
   if (row.kind === "open_trip") {
     return (
@@ -81,11 +84,14 @@ export function LocationListRowView({ clock, nowMs, onCorrect, row }: {
   const span = timeSpan(row.fromMs, row.spanEndMs, open, clock);
   const label = place.name ?? (place.matchKind === "ambiguous" ? "Unclear place" : "Unknown place");
   const length = Math.max(0, Math.round((row.spanEndMs - row.fromMs) / 1000));
-  const correct = onCorrect && !place.blockIds.length ? (
+  const correct = (onCorrect && !place.blockIds.length) || (check && row.checkIds.length) ? (
     <div className="timeline-list-actions">
-      <button aria-label={`Correct ${label}`} className="df-icon-action" data-tip="Correct" onClick={() => onCorrect(place, label)} type="button">
-        <DayframeIcon glyph="pencil" size={16} />
-      </button>
+      {check && row.checkIds.length ? <CheckToggle checkKey={row.key} expanded={check.expanded} label={label} onToggle={check.onToggle} /> : null}
+      {onCorrect && !place.blockIds.length ? (
+        <button aria-label={`Correct ${label}`} className="df-icon-action" data-tip="Correct" onClick={() => onCorrect(place, label)} type="button">
+          <DayframeIcon glyph="pencil" size={16} />
+        </button>
+      ) : null}
     </div>
   ) : null;
   if (row.faint) {
@@ -127,6 +133,17 @@ export function LocationListRowView({ clock, nowMs, onCorrect, row }: {
       <td className="tabular px-3 py-3 timeline-list-duration"><div className="timeline-list-duration-content">{formatDuration(length)}</div></td>
       <td className="px-3 py-3">{correct}</td>
     </tr>
+  );
+}
+
+/** A row's "?": opens its question under the row. */
+export function CheckToggle({ checkKey, expanded, label, onToggle }: { checkKey: string; expanded: boolean; label: string; onToggle: () => void }) {
+  return (
+    <button aria-expanded={expanded} aria-label={`Check ${label}`} className="df-icon-action timeline-check-toggle" data-check-key={checkKey}
+      data-tip="Check"
+      onClick={onToggle} type="button">
+      <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
+    </button>
   );
 }
 

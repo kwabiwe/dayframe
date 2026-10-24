@@ -16,8 +16,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Minus } from "lucide-react";
 import { analyzeTimeIntervals, resolveActivityIcon, type ClockFormat, type TimeIntervalAnalysisEntry } from "@dayframe/shared";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
-import { ErrorBanner } from "@/components/blocks/ErrorBanner";
-import { blockStyle } from "@/lib/block-style";
 import { useAppShellRuntime } from "@/components/AppShellRuntime";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { DatePickerPopover } from "@/components/DatePickerPopover";
@@ -25,7 +23,8 @@ import { saveTimeEntryQuickEdit, TimeEntryQuickEditorModal } from "@/components/
 import { TagMetadata } from "@/components/TagMetadata";
 import { clientFetch } from "@/lib/client-auth-fetch";
 import { timeEntryCategoryLabel, timeEntryTitle } from "@/lib/display";
-import type { CategoryRow, TagRow, TimeEntryRow } from "@/lib/queries";
+import type { CategoryRow, ReviewItemRow, TagRow, TimeEntryRow } from "@/lib/queries";
+import { prefersReducedMotion } from "@/lib/blocks-motion";
 import {
   dateTimeLocal,
   formatDate,
@@ -49,6 +48,10 @@ import {
 import type { DateRange } from "@/lib/time-entry-overlap";
 import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListRow, type LocationTimeline, type TimelinePlace, type TripLeg } from "@dayframe/shared";
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
+import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
+import { BlocksToast } from "@/components/blocks/BlocksToast";
+import { ErrorBanner } from "@/components/blocks/ErrorBanner";
+import { blockStyle } from "@/lib/block-style";
 import {
   LocationListRowView,
   ShowEveryPlaceToggle,
@@ -107,7 +110,8 @@ async function saveGroupedTimeEntryDescription(entryIds: string[], description: 
 
 function applyTimelineRegroup(update: () => void) {
   const documentWithTransitions = document as ViewTransitionDocument;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !documentWithTransitions.startViewTransition) {
+  if (typeof window.matchMedia !== "function" || window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+    !documentWithTransitions.startViewTransition) {
     update();
     return;
   }
@@ -214,6 +218,12 @@ function TimelineInlineTimeControl({
 }
 
 const NO_CORRECTION_PLACES: readonly CorrectionPlace[] = [];
+const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
+
+/** A day with nothing from location: its checks are then rows of their own. */
+function emptyDayTimeline(day: DateRange): LocationTimeline {
+  return { date: "", timeZone: "", dayStart: day.start.toISOString(), dayEnd: day.end.toISOString(), items: [], openTrip: null, gaps: [] };
+}
 
 export function EntriesTable({
   entries,
@@ -227,7 +237,9 @@ export function EntriesTable({
   displayRange,
   capturedNow = new Date(),
   locationTimeline = null,
-  places = NO_CORRECTION_PLACES
+  places = NO_CORRECTION_PLACES,
+  reviewItems = NO_REVIEW_ITEMS,
+  checksDay = null
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -243,6 +255,10 @@ export function EntriesTable({
   locationTimeline?: LocationTimeline | null;
   /** Saved places a location row can be corrected to (location v4 step 13). */
   places?: readonly CorrectionPlace[];
+  /** Open suggestions, each a "?" on the day's row it is about (location v4 step 14). */
+  reviewItems?: readonly ReviewItemRow[];
+  /** The shown day in day scope, so its checks show without the location read; null otherwise. */
+  checksDay?: DateRange | null;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -280,12 +296,94 @@ export function EntriesTable({
   const correctLeg = (tripId: string, legs: readonly TripLeg[]) => (index: number) =>
     setCorrection({ kind: "leg", tripId, leg: legs[index], index, count: legs.length });
   const nowMs = capturedNow.getTime();
+  const listChecks = useListChecks({ applyTransition: applyTimelineRegroup, categories, refresh: async () => { await onChanged?.(); }, reviewItems });
+  const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
   const locationRows = useMemo(
-    () => (localTimeReady ? locationListRows(locationTimeline, entries, { nowMs, showAll: showEveryPlace }) : []),
-    [entries, localTimeReady, locationTimeline, nowMs, showEveryPlace]
+    // Without the location read (it failed, or hasn't arrived), the day's checks still show on rows of their own (Codex r1 on #568).
+    () => (localTimeReady ? locationListRows(locationTimeline ?? (checksDay ? emptyDayTimeline(checksDay) : null), entries,
+      { nowMs, showAll: showEveryPlace, checks: listChecks.checks }) : []),
+    [checksDay, entries, listChecks.checks, localTimeReady, locationTimeline, nowMs, showEveryPlace]
   );
   const tripByBlock = useMemo(() => tripsByBlockId(locationTimeline), [locationTimeline]);
+  /** The open suggestion a location row's "?" is about, if any. */
+  const checkOf = (row: LocationListRow) => {
+    const id = row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
+    return id ? listChecks.itemsById.get(id) : undefined;
+  };
+  const checkRows = locationRows.filter((row) => checkOf(row));
+  /** "N to check": the next "?" down the List opens, and comes into view. */
+  const nextCheck = () => {
+    if (!checkRows.length) return;
+    const at = checkRows.findIndex((row) => row.key === focusedCheck);
+    const next = checkRows[(at + 1) % checkRows.length];
+    applyTimelineRegroup(() => setFocusedCheck(next.key));
+    const anchor = next.kind === "place" ? next.place.id : next.key;
+    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>("[data-location-row]")]
+      .find((element) => element.dataset.locationRow === anchor)
+      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
+  };
+  /** A location row, its "?" and, while open, its question. */
+  const renderLocationRow = (row: LocationListRow) => {
+    const item = checkOf(row);
+    const expanded = Boolean(item) && focusedCheck === row.key;
+    // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
+    const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === row.key ? null : row.key)) }
+      : undefined;
+    const label = row.kind === "place" ? row.place.name ?? "Unknown place" : "";
+    return (
+      <Fragment key={row.key}>
+        {row.kind === "check"
+          ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
+          : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
+        {item && expanded ? (
+          <CheckQuestionRow clock={clock} item={item} outing={listChecks.outings.get(item.id)}
+            onAnswer={(kind) => {
+              // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
+              const following = checkRows.slice(checkRows.findIndex((other) => other.key === row.key) + 1).find((other) => other.key !== row.key);
+              applyTimelineRegroup(() => {
+                listChecks.answer(item.id, kind);
+                setFocusedCheck(null);
+              });
+              focusCheck(following?.key ?? null);
+            }}
+            onPickPlace={row.kind === "place" && !row.place.blockIds.length ? () => correctPlace(row.place, label) : undefined} />
+        ) : null}
+      </Fragment>
+    );
+  };
+  /**
+   * Where focus goes once the List has committed the change (a transition commits later): a row's "?" by
+   * its key, else the chip, else the List itself (Codex r1/r2 on #568). Undefined: nothing to move.
+   */
+  const pendingFocus = useRef<string | null | undefined>(undefined);
+  // Undo or a refused save brings a "?" back: its toggle takes focus once the row is listed again.
+  const pendingRestore = useRef<string | null>(null);
+  const focusCheck = (key: string | null) => {
+    pendingRestore.current = null;
+    pendingFocus.current = key;
+  };
+  const restoredItemId = listChecks.state.restored?.itemId ?? null;
+  const restoredSequence = listChecks.state.restored?.sequence ?? 0;
+  useEffect(() => {
+    if (restoredSequence && restoredItemId) pendingRestore.current = restoredItemId;
+  }, [restoredItemId, restoredSequence]);
+  useEffect(() => {
+    if (pendingRestore.current) {
+      const restoredId = pendingRestore.current;
+      const restoredRow = locationRows.find((row) => (row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : null) === restoredId);
+      if (!restoredRow) return;
+      pendingRestore.current = null;
+      pendingFocus.current = restoredRow.key;
+    }
+    const key = pendingFocus.current;
+    if (key === undefined) return;
+    const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
+    // Wait while the "?" it moves to has not rendered yet.
+    if (key && !row && checkRows.some((other) => other.key === key)) return;
+    pendingFocus.current = undefined;
+    (row ?? document.querySelector<HTMLElement>(".timeline-checks-chip") ?? listScrollRef.current)?.focus();
+  });
   const toggleTripLegs = (entryId: string) => setExpandedTrips((current) => {
     const next = new Set(current);
     if (next.has(entryId)) next.delete(entryId);
@@ -788,11 +886,14 @@ export function EntriesTable({
         aria-busy={localTimeReady ? undefined : true}
         className="timeline-list-scroll"
         onScroll={onScroll}
+        // Focus can land on the List itself when no "?" or chip is left to take it.
+        tabIndex={-1}
         ref={(element) => {
           listScrollRef.current = element;
           scrollContainerRef(element);
         }}
       >
+        {localTimeReady ? <ChecksChip count={checkRows.length} onNext={nextCheck} /> : null}
         <table className="timeline-list-table" data-clock={clock}>
           {/* Column names stay for screen readers; the rows read as Blocks rows (as on Today). */}
           {/* Column widths live here: the header row is visually hidden, so it can't size the columns. */}
@@ -850,7 +951,7 @@ export function EntriesTable({
                     </tr>
                   ) : null}
                   {locationRowsByGroup.before[index].map((row) => (
-                    <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
+                    renderLocationRow(row)
                   ))}
                 <tr
                   className={[
@@ -989,7 +1090,7 @@ export function EntriesTable({
                   return (
                     <Fragment key={occurrence.id}>
                     {(locationRowsByGroup.byOccurrence.get(occurrence.id) ?? []).map((row) => (
-                      <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
+                      renderLocationRow(row)
                     ))}
                     <tr
                       className={`timeline-occurrence-row motion-row timeline-list-row align-middle${highlighted ? " timeline-entry-highlight" : ""}`}
@@ -1082,7 +1183,7 @@ export function EntriesTable({
               );
             })}
             {locationRowsByGroup.after.map((row) => (
-              <LocationListRowView clock={clock} key={row.key} nowMs={nowMs} onCorrect={correctPlace} row={row} />
+              renderLocationRow(row)
             ))}
             {groupByDay && grouped.length
               ? continuedDays
@@ -1093,6 +1194,12 @@ export function EntriesTable({
         </table>
         {localTimeReady && hasLocationPlaces(locationTimeline) ? (
           <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
+        ) : null}
+        {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
+        {listChecks.state.notice ? (
+          <BlocksToast actionLabel="Undo" exiting={listChecks.state.notice.isExiting} key={listChecks.state.notice.token}
+            message={listChecks.state.notice.label} onAction={listChecks.undo}
+            swatchStyle={listChecks.state.notice.color ? blockStyle(listChecks.state.notice.color, listChecks.state.notice.colorName) : undefined} />
         ) : null}
       </div>
       {correction ? (

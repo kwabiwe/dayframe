@@ -65,4 +65,16 @@ describe("Calendar › List location rows (location v4 steps 9–10)", () => {
     expect(legDetail(trip.legs[1])).toBe("13 km · no GPS underground, guessed from the gap");
     expect(legDetail({ ...trip.legs[0], confidence: "likely" })).toBe("0.7 km · likely");
   });
+  it("puts each check on its place row (which then shows), else on a row of its own on its day (location v4 step 14)", () => {
+    const day = timeline([place("home", -120, 470, { placeId: "p-home", name: "Home", role: "home", matchKind: "saved" }), trip, place("unknown", 520, 760)]);
+    const rows = locationListRows(day, [{ startedAt: at(520), stoppedAt: at(760) }], { nowMs: ms(800), showAll: false, checks: [
+      { id: "c-home", segmentId: "home", startedAt: at(0), stoppedAt: at(470) },
+      { id: "c-trip", segmentId: "trip-1", startedAt: at(470), stoppedAt: at(520) },
+      { id: "c-sleep", segmentId: null, startedAt: at(60), stoppedAt: at(400) },
+      { id: "c-yesterday", segmentId: null, startedAt: at(-600), stoppedAt: at(-500) }
+    ] });
+    expect(rows.map((row) => row.key)).toEqual(["check-c-trip", "check-c-sleep", "place-home"]);
+    expect(rows.find((row) => row.key === "place-home")).toMatchObject({ faint: false, checkIds: ["c-home"] });
+    expect(rows.find((row) => row.key === "check-c-trip")).toMatchObject({ trip: { id: "trip-1", route: "Home → Unknown place" } });
+  });
 });

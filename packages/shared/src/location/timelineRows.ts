@@ -23,9 +23,20 @@ export const LEG_MODE_LABEL: Record<TripLegMode, string> = {
 /** A place shows as not logged from this long outside your blocks. */
 export const UNLOGGED_PLACE_MINIMUM_SECONDS = 600;
 
+/**
+ * Something to check (location v4 step 14): an open suggestion, placed on the day's row it is about. Its
+ * segment is the timeline item it names (`clientSegmentId`), or none (Apple Health, and anything else).
+ */
+export type ListCheck = { id: string; segmentId: string | null; startedAt: string | null; stoppedAt: string | null };
+
 export type LocationListRow =
-  | { kind: "place"; key: string; atMs: number; place: TimelinePlace; fromMs: number; spanEndMs: number; unloggedSeconds: number; faint: boolean }
-  | { kind: "open_trip"; key: string; atMs: number; startedAt: string; fromName: string | null; legs: TripLeg[]; mode: string | null };
+  | { kind: "place"; key: string; atMs: number; place: TimelinePlace; fromMs: number; spanEndMs: number; unloggedSeconds: number; faint: boolean;
+      /** Open suggestions about this place, each a "?" on its row. */
+      checkIds: string[] }
+  | { kind: "open_trip"; key: string; atMs: number; startedAt: string; fromName: string | null; legs: TripLeg[]; mode: string | null }
+  /** A "?" with no place row: a trip not yet in a block (with its route and legs), Apple Health, or anything else. */
+  | { kind: "check"; key: string; atMs: number; checkId: string; startedAt: string | null; stoppedAt: string | null;
+      trip: (TimelineTrip & { route: string }) | null };
 
 type Interval = { startedAt: string; stoppedAt: string | null };
 
@@ -48,8 +59,15 @@ export function uncoveredSeconds(fromMs: number, toMs: number, intervals: readon
  * for ten minutes or more always show; Home, saved and learned places, and places you logged, show
  * faint only with `showAll`. Superseded and ignored items never show.
  */
-export function locationListRows(timeline: LocationTimeline | null, entries: readonly Interval[], options: { nowMs: number; showAll: boolean }) {
+export function locationListRows(timeline: LocationTimeline | null, entries: readonly Interval[],
+  options: { nowMs: number; showAll: boolean; checks?: readonly ListCheck[] }) {
   if (!timeline) return [];
+  // A check about a place shows on its row (which then always shows); any other check is a row of its own.
+  const placeIds = new Set(timeline.items.flatMap((item) => item.kind === "place" ? [item.id] : []));
+  const checksByPlace = new Map<string, string[]>();
+  for (const check of options.checks ?? []) {
+    if (check.segmentId && placeIds.has(check.segmentId)) checksByPlace.set(check.segmentId, [...checksByPlace.get(check.segmentId) ?? [], check.id]);
+  }
   const dayStartMs = Date.parse(timeline.dayStart);
   const dayEndMs = Date.parse(timeline.dayEnd);
   const names = new Map(timeline.items.flatMap((item) => item.kind === "place" ? [[item.id, item.name] as const] : []));
@@ -63,11 +81,26 @@ export function locationListRows(timeline: LocationTimeline | null, entries: rea
     const known = item.matchKind === "saved" || item.matchKind === "learned";
     // A place you are still at counts up to now.
     const unlogged = unloggedSeconds >= UNLOGGED_PLACE_MINIMUM_SECONDS;
-    if (!known && unlogged) {
-      rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds, faint: false });
+    const checkIds = checksByPlace.get(item.id) ?? [];
+    if ((!known && unlogged) || checkIds.length) {
+      rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
+        faint: false, checkIds });
     } else if (options.showAll) {
-      rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds, faint: true });
+      rows.push({ kind: "place", key: `place-${item.id}`, atMs: Date.parse(item.startedAt), place: item, fromMs, spanEndMs, unloggedSeconds,
+        faint: true, checkIds });
     }
+  }
+  // Every other check is a row of its own at its time, with its trip's route and legs when it is about one.
+  const trips = new Map(timeline.items.flatMap((item) => item.kind === "trip"
+    ? [[item.id, { ...item, route: `${names.get(item.fromId) ?? "Unknown place"} → ${names.get(item.toId) ?? "Unknown place"}` }] as const] : []));
+  for (const check of options.checks ?? []) {
+    if (check.segmentId && placeIds.has(check.segmentId)) continue;
+    const trip = check.segmentId ? trips.get(check.segmentId) ?? null : null;
+    const startedAt = trip?.startedAt ?? check.startedAt;
+    const atMs = startedAt ? Date.parse(startedAt) : NaN;
+    // Only checks on this day.
+    if (!Number.isFinite(atMs) || atMs >= dayEndMs || (check.stoppedAt ? Date.parse(check.stoppedAt) : atMs + 1) <= dayStartMs) continue;
+    rows.push({ kind: "check", key: `check-${check.id}`, atMs, checkId: check.id, startedAt, stoppedAt: trip?.stoppedAt ?? check.stoppedAt, trip });
   }
   if (timeline.openTrip) {
     rows.push({ kind: "open_trip", key: "open-trip", atMs: Date.parse(timeline.openTrip.startedAt), startedAt: timeline.openTrip.startedAt,
