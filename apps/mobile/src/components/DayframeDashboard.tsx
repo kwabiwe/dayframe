@@ -246,7 +246,10 @@ import {
   type NativeCalendarActionKind,
   type NativeCalendarEntry
 } from "@/lib/nativeCalendarPresentation";
-import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
+import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
+import { reviewDeckOutings } from "@/lib/reviewDeckOutings";
+import { useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -1924,15 +1927,22 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       : data,
     [data, reviewListAtCap, scopedReviewItems]
   );
+  // Answers in Calendar › List (location v4 step 14, iPhone part 3b): the deck's "Log it" and "Skip", held
+  // for Undo and then saved with the deck's own mutation; held and saving answers leave the List at once.
+  const checkAnswers = useCalendarCheckAnswers({ data: calendarData, locallyDecidedIds });
   // Things to check (location v4 step 14, iPhone part 3a): the open suggestions the Calendar draws, an
   // outing once on its stay, as "?" in Calendar › List; the Calendar tab's badge counts today and the 7 days
   // before, and Today's chip counts today, from the same list, so a decision here moves them at once.
   const calendarChecks = useMemo(() => {
-    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573).
-    const open = (calendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id));
+    // Suggestions decided on this phone and not yet synced leave at once (Codex r1 on #573), and so do
+    // answers held for Undo or saving (part 3b).
+    const open = (calendarData?.reviewItems ?? []).filter((item) => isOpenReviewItem(item) && !locallyDecidedIds.has(item.id)
+      && !checkAnswers.hiddenIds.has(item.id));
     const folded = foldedOutingMemberIds(open);
     // A suggestion without a start still sits on its place's row; it has no row, or count, of its own.
     const items = open.filter((item) => !folded.has(item.id) && (item.suggestedStartedAt || typeof item.rawPayload?.clientSegmentId === "string"));
+    // An outing is asked once, on its stay (the deck's grouping, which its answer saves with).
+    const { outings } = reviewDeckOutings(open, (item) => isLocationReviewItem(item) && hasSuggestedTimeWindow(item));
     return {
       checks: items.map((item): ListCheck => ({
         id: item.id,
@@ -1940,9 +1950,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         startedAt: item.suggestedStartedAt,
         stoppedAt: item.suggestedStoppedAt
       })),
-      titles: new Map(items.map((item) => [item.id, item.title] as const))
+      titles: new Map(items.map((item) => [item.id, item.title] as const)),
+      questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, { outing: outings.has(item.id) })] as const))
     };
-  }, [calendarData?.reviewItems, locallyDecidedIds]);
+  }, [calendarData?.reviewItems, checkAnswers.hiddenIds, clockFormat, locallyDecidedIds]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
   // both windows run to the end of today, so later today counts as the List shows it (Codex r5 on #573).
   const checkCounts = useMemo(() => {
@@ -3570,6 +3581,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 style={{ flex: 1 }}
               >
                 <CalendarListView
+                  checkQuestions={calendarChecks.questions}
                   checks={calendarChecks.checks}
                   checkTitles={calendarChecks.titles}
                   clockFormat={clockFormat}
@@ -3578,8 +3590,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   entries={nativeCalendarModel.entries}
                   loggedLabel={nativeCalendarModel.loggedLabel}
                   nowMs={minuteNow}
-                  // A "?" opens its suggestion in Review until the List answers in place (step 14, part 3b).
-                  onOpenCheck={(reviewItemId) => router.push({ pathname: "/review", params: { focusReviewId: reviewItemId } })}
+                  // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
+                  onAnswerCheck={checkAnswers.answer}
+                  onOpenCheck={(reviewItemId) => router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}
@@ -3667,6 +3680,24 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
           style={styles.todayToast}
           swatchColor={pendingDeletion.entries.length === 1 ? toastSwatchColor(pendingDeletion.entries[0], theme.mode) : null}
           testID="today-delete-toast"
+          theme={theme}
+        />
+      ) : checkAnswers.held ? (
+        // An answer in Calendar › List, held for Undo (step 14 part 3b): the hold owns the 4.8 s window and
+        // its token re-mounts the toast, so a second answer replaces it (the first is saved).
+        <BlocksToast
+          key={`check-${checkAnswers.held.token}`}
+          actionAccessibilityLabel={`Undo ${checkAnswers.held.logged ? "logging" : "skipping"} ${checkAnswers.held.title}`}
+          actionLabel="Undo"
+          actionTestID="calendar-check-undo"
+          message={`${checkAnswers.held.logged ? "Logged" : "Skipped"} ${checkAnswers.held.title}`}
+          onAction={() => {
+            checkAnswers.undo();
+            playHaptic("undoRestore");
+          }}
+          reduceMotion={reduceMotion}
+          style={styles.todayToast}
+          testID="calendar-check-toast"
           theme={theme}
         />
       ) : todayNotice.notice && authState === "authenticated" ? (

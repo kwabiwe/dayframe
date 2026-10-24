@@ -8,6 +8,7 @@ function source(relativePath: string) {
 
 const deck = source("./ReviewDeck.tsx");
 const screen = source("../../../app/review.tsx");
+const answer = source("../../lib/reviewAnswer.ts");
 const theme = source("../../lib/mobileTheme.ts");
 
 function styleBlock(name: string) {
@@ -44,12 +45,12 @@ describe("Review deck motion contract (Blocks parity step 5b)", () => {
     // An outing's Moves stay out with its Stay's card (PRD D19, PR 12b).
     expect(screen).toContain("const committingKeys = [held.key, ...memberKeys];");
     expect(screen).toContain("setDeckKeysCommitting(committingKeys, true);");
-    expect(screen).toMatch(/started = resolveItem\(item, \{ action: "edit_and_confirm", edit \}, [^\n]*settled, failed, \{ unlisted \}\);/);
-    expect(screen).toMatch(/started = resolveItem\([^\n]*ignore_once[^\n]*settled, failed, \{ unlisted \}\);/);
+    // One save for every choice, from the shared rule (reviewAnswer.ts, location v4 step 14 part 3b).
+    expect(screen).toMatch(/const started = resolveItem\(\s*item,\s*reviewAnswerMutation\(item, held\.logged, \{ edit, outingMemberIds: [^\n]*\),[\s\S]*?settled,\s*failed,\s*outing \? \{ unlisted, affectedItems: \[item, \.\.\.members\] \} : \{ unlisted \}\s*\);/);
+    expect(answer).toContain('if (edit) return { action: "edit_and_confirm", edit };');
     expect(screen).toContain("if (!started) failed();");
     expect(screen).toContain("const claimed = () => affected.some((candidate) => reviewMutations.current.has(candidate.id));");
     expect(screen).toContain("if (claimed()) return false;");
-    expect(screen).toContain('Waiting to sync.", settled, failed, { unlisted })');
   });
 
   it("folds an outing's Moves into its Stay's card and decides them together (PRD D19, PR 12b)", () => {
@@ -187,7 +188,7 @@ describe("Review deck live Log as (Blocks parity step 5c-1)", () => {
     // The edit is decided when the hold ends, from what really changed (src/lib/reviewLogAs.ts).
     expect(screen).toContain("const edit = held.logged ? deckLogAsEdit(item) : null;");
     expect(screen).toMatch(/function deckLogAsEdit\(item: MobileReviewItem\) \{\s*return reviewLogAsEdit\(\{/);
-    expect(screen).toContain('resolveItem(item, { action: "edit_and_confirm", edit }');
+    expect(answer).toContain('if (edit) return { action: "edit_and_confirm", edit };');
     // The field is uncontrolled and its touches never start a throw.
     expect(deck).toContain("defaultValue={card.logAsName}");
     expect(deck).toContain(".requireExternalGestureToFail(logAsFieldGesture)");

@@ -48,6 +48,9 @@ const ALLOWED_ALERTS: Record<string, string[]> = {
     '"Apple Health"', // permission request failed
     '"Couldn\'t sign out"'
   ],
+  "src/components/calendar/useCalendarCheckAnswers.ts": [
+    '"Calendar"' // an answer to a "?" was not saved on this iPhone (location v4 step 14 part 3b)
+  ],
   "src/components/DayframeDashboard.tsx": [
     '"Unable to refresh Dayframe"',
     '"Unable to add time"',

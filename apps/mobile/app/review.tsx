@@ -138,8 +138,9 @@ import { DayframeIcon } from "@/components/icons/DayframeIcon";
 import { SettingsStatusDot } from "@/components/settings/SettingsBlocks";
 import { DAYFRAME_APP_ICONS, formatClockTime, outingKeyOf, reviewCardCount, type ClockFormat } from "@dayframe/shared";
 import {
-  heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutingMutation, reviewDeckOutings
+  heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
+import { reviewAnswerMutation } from "@/lib/reviewAnswer";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -1746,25 +1747,18 @@ export default function ReviewScreen() {
       restoreMembers();
       undoCount();
     };
-    let started: boolean;
     const edit = held.logged ? deckLogAsEdit(item) : null;
-    if (held.outing && members.length) {
-      // One outbox row for the whole outing, sent on the Stay's card; its Moves are hidden with it.
-      started = resolveItem(
-        item,
-        reviewDeckOutingMutation(members.map((member) => member.id), held.logged, edit),
-        `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
-        settled,
-        failed,
-        { unlisted, affectedItems: [item, ...members] }
-      );
-    } else if (edit) {
-      started = resolveItem(item, { action: "edit_and_confirm", edit }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
-    } else if (held.logged) {
-      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "confirm" } : { action: "accept" }, "Logged. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
-    } else {
-      started = resolveItem(item, hasV2LocationEvidence(item) ? { action: "ignore_once_location" } : { action: "ignore_once" }, "Skipped. Saved on this iPhone. Waiting to sync.", settled, failed, { unlisted });
-    }
+    // One outbox row for the whole outing, sent on the Stay's card; its Moves are hidden with it. The
+    // mutation is the one rule Calendar › List answers with too (reviewAnswer.ts, step 14 part 3b).
+    const outing = Boolean(held.outing && members.length);
+    const started = resolveItem(
+      item,
+      reviewAnswerMutation(item, held.logged, { edit, outingMemberIds: outing ? members.map((member) => member.id) : undefined }),
+      `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
+      settled,
+      failed,
+      outing ? { unlisted, affectedItems: [item, ...members] } : { unlisted }
+    );
     // Not started (a change for this item is already saving, or the item has gone): the card is
     // not this visit's decision.
     if (!started) failed();

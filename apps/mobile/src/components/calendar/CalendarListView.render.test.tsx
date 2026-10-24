@@ -16,6 +16,7 @@ vi.mock("react-native", async () => {
     return React.createElement("ScrollView", props);
   });
   return {
+  AccessibilityInfo: { announceForAccessibility: vi.fn() },
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
   Pressable: "Pressable",
   RefreshControl: "RefreshControl",
@@ -123,6 +124,48 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: travelling });
     const label = labels(tree).find((text) => text.startsWith("Travelling from"));
     expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
+  });
+
+  it("answers a \"?\" where it sits: its question opens under the row, and the chip walks the questions (step 14 part 3b)", () => {
+    const onAnswerCheck = vi.fn();
+    const onOpenCheck = vi.fn();
+    const question = (text: string, more = false) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more });
+    const { tree } = render({
+      checks: [
+        { id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) },
+        { id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }
+      ],
+      checkTitles: new Map([["c-unknown", "Unknown place"], ["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-unknown", question("Log Unknown place, 12:00–13:00?", true)], ["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck,
+      onOpenCheck
+    });
+    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
+    expect(questions()).toHaveLength(0);
+    // The place's "?" opens its question under its row, with More… for picking another place.
+    const placeCheck = tree.root.findByProps({ accessibilityLabel: "Check Unknown place" });
+    expect(placeCheck.props.accessibilityState).toEqual({ expanded: false });
+    act(() => { placeCheck.props.onPress(); });
+    expect(questions()).toHaveLength(1);
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place, 12:00–13:00?");
+    expect(tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.accessibilityState).toEqual({ expanded: true });
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-more" }).props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
+    // Answering closes the question and hands the answer to the caller (it holds it for Undo).
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-log" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenCalledWith("c-unknown", true);
+    expect(questions()).toHaveLength(0);
+    // "N to check" opens the next question, from the top, and scrolls to it; a second tap moves on.
+    const chip = tree.root.findByProps({ accessibilityHint: "Opens the next one" });
+    act(() => { chip.props.onPress(); });
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log your sleep?");
+    expect(tree.root.findAll((node) => node.props.testID === "calendar-list-answer-more")).toHaveLength(0);
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place");
+    act(() => { tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.onPress(); });
+    expect(onAnswerCheck).toHaveBeenLastCalledWith("c-unknown", false);
+    // Without answers here a "?" still opens the suggestion, as before.
+    expect(onOpenCheck).toHaveBeenCalledTimes(1);
   });
 
   it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
