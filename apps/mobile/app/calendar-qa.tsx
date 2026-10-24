@@ -2,7 +2,7 @@ import { Redirect, useLocalSearchParams } from "expo-router";
 import type { LocationTimeline } from "@dayframe/shared";
 import { CalendarListView } from "@/components/calendar/CalendarListView";
 import { useEffect, useMemo, useState } from "react";
-import { LogBox, View } from "react-native";
+import { LogBox, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
 import type { MobileBootstrap, MobileTimeEntry } from "@/lib/api";
@@ -13,7 +13,10 @@ import { buildNativeCalendarBridgeState } from "@/lib/nativeCalendarPresentation
 // Development-only harness for Calendar titles at every zoom (location v4 C6) and Calendar › List
 // (step 9): the native Calendar and the List drawing the mock-ups' synthetic Exampleton Thursday
 // (screens #ios-grid, #ios-grid-default and #ios-list), so the build can be compared with them side by
-// side. `?layout=list` opens in List. No account, network or mutation.
+// side. `?layout=list` opens in List; `?day=dense` draws calendar-v3-mockup's synthetic Friday
+// (Calendar v3, 24 Oct 2026); `&at=HH` opens it at that hour, and `&cycle=1` steps through the mock-up's
+// windows (the header, 08:45, 10:30, 17:15, 20:00), 8 seconds each, for Simulator screenshots without
+// taps. No account, network or mutation.
 const DAY = "2026-10-22";
 const at = (hh: number, mm: number) => new Date(2026, 9, 22, hh, mm).toISOString();
 const categories = [
@@ -21,7 +24,11 @@ const categories = [
   { id: "around", name: "Getting around", color: "orange", isPinned: false },
   { id: "deep", name: "Deep work", color: "blue", isPinned: false },
   { id: "meeting", name: "Meeting", color: "violet", isPinned: false },
-  { id: "social", name: "Social", color: "sky", isPinned: false }
+  { id: "social", name: "Social", color: "sky", isPinned: false },
+  { id: "health", name: "Health", color: "lime", isPinned: false },
+  { id: "personal", name: "Personal", color: "teal", isPinned: false },
+  { id: "admin", name: "Admin", color: "steel", isPinned: false },
+  { id: "errand", name: "Errands", color: "amber", isPinned: false }
 ];
 const block = (id: string, category: string, description: string | null, start: [number, number], end: [number, number]): MobileTimeEntry => {
   const startedAt = at(...start);
@@ -56,6 +63,69 @@ const entries = [
   block("b4", "meeting", "Team sync", [13, 30], [14, 40]),
   block("b5", "around", null, [14, 40], [16, 26])
 ];
+
+// calendar-v3-mockup's synthetic Friday (Calendar v3, owner 24 Oct 2026): [start, end, title, colour, extra].
+// Suggestions are needs-review blocks; 0–1 minute blocks are moments. Synthetic places only.
+const DENSE_DAY = "2026-10-23";
+const denseAt = (hhmm: string) => {
+  const [hh, mm, ss = 0] = hhmm.split(":").map(Number);
+  return new Date(2026, 9, 23, hh, mm, ss).toISOString();
+};
+type DenseExtra = { review?: boolean; place?: string; trip?: string; tag?: string; health?: boolean; pattern?: boolean };
+const DENSE: Array<[string, string, string, string, DenseExtra?]> = [
+  ["01:00", "09:00", "On call overnight", "amber"],
+  ["05:00", "06:30", "Gym", "lime", { place: "Peak Gym, Exampleton" }],
+  ["06:30", "07:00", "Walk", "lime"],
+  ["07:00", "08:00", "Meal prep", "teal"],
+  ["08:15", "08:40", "School run", "orange", { trip: "Home → Exampleton Primary", pattern: true }],
+  ["08:40", "08:41", "Take vitamins", "lime"],
+  ["09:00", "10:20", "Quarterly plan", "blue"],
+  ["09:00", "09:45", "Three-way sync", "violet", { tag: "planning" }],
+  ["09:00", "09:05", "Inbox", "steel"],
+  ["09:02", "09:06", "Reply to Sam", "teal"],
+  ["09:05", "09:10", "Coffee", "sky"],
+  ["10:30", "10:45", "House viewing — 12 Example Road", "amber"],
+  ["10:55", "10:56", "Check the build", "teal"],
+  ["11:00", "13:30", "Birthday party", "amber", { place: "4 Sample Street, ZZ1 1ZZ" }],
+  ["11:00", "11:20", "Unknown place", "graphite", { review: true }],
+  ["13:20", "13:40", "Pick up parcel", "blue"],
+  ["15:00", "15:15", "Call with Alex", "violet"],
+  ["17:30", "17:45", "Call someone", "blue"],
+  ["18:00", "19:00", "Games night", "sky"],
+  ["18:45", "19:05", "Bedtime routine", "rose"],
+  ["19:15", "19:30", "Prep for next day", "blue"],
+  ["20:00", "23:55", "Evening shift", "amber"],
+  ["20:00", "20:40", "Stretch", "lime", { health: true }],
+  ["20:00", "20:20", "Journal", "graphite", { review: true }],
+  ["22:00", "22:45", "F1 qualifying", "rose", { place: "Exampleton Arena" }]
+];
+const QA_CYCLE_HOURS: Array<number | null> = [null, 8.75, 10.5, 17.25, 20];
+const denseCategories = [...new Set(DENSE.map(([, , , color]) => color))].map((color) => ({ id: `colour-${color}`, name: color, color, isPinned: false }));
+const denseEntries: MobileTimeEntry[] = DENSE.map(([start, end, title, color, extra = {}], index) => {
+  const startedAt = denseAt(start);
+  const stoppedAt = denseAt(end);
+  return {
+    id: `dense-${index}`,
+    projectId: null,
+    projectName: null,
+    projectColor: null,
+    clientName: null,
+    categoryId: `colour-${color}`,
+    categoryName: title,
+    categoryColor: color,
+    placeName: extra.place ?? extra.trip ?? null,
+    automaticMoveEventId: extra.trip ? `qa-move-${index}` : null,
+    source: extra.health ? "health_workout" : extra.review ? "location_learning" : "manual_app",
+    confidence: extra.review ? "medium" : "high",
+    reviewStatus: extra.review ? "needs_review" : "confirmed",
+    description: title,
+    startedAt,
+    stoppedAt,
+    durationSeconds: (Date.parse(stoppedAt) - Date.parse(startedAt)) / 1000,
+    tagNames: extra.tag ? [extra.tag] : [],
+    locationGroup: extra.pattern ? { key: "qa-school-run", name: "School run", parts: 1 } : null
+  };
+});
 
 // The List's places and trips for the same Thursday: Home, the school run's trip, an unknown place.
 const iso = (hh: number, mm: number) => at(hh, mm);
@@ -93,7 +163,14 @@ const QA_CHECK_QUESTIONS = new Map([
 
 export default function CalendarQaRoute() {
   // `?check=1` opens the List at its first "?" with its question showing, as Today's chip does.
-  const params = useLocalSearchParams<{ layout?: string; check?: string }>();
+  const params = useLocalSearchParams<{ layout?: string; day?: string; at?: string; cycle?: string; check?: string }>();
+  const [cycleStep, setCycleStep] = useState(0);
+  useEffect(() => {
+    if (params.cycle !== "1") return;
+    const timer = setInterval(() => setCycleStep((step) => (step + 1) % QA_CYCLE_HOURS.length), 8_000);
+    return () => clearInterval(timer);
+  }, [params.cycle]);
+  const dense = params.day === "dense";
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
   // Screenshots of the harness carry no development toasts; only while it is open (Codex r1 on #570).
@@ -104,20 +181,40 @@ export default function CalendarQaRoute() {
   }, []);
   const { theme } = useMobileTheme();
   const clockFormat = useClockFormat();
-  const [now] = useState(() => new Date(2026, 9, 22, 17, 5).getTime());
+  const [now] = useState(() => dense ? new Date(2026, 9, 23, 16, 20).getTime() : new Date(2026, 9, 22, 17, 5).getTime());
   const model = useMemo(() => buildNativeCalendarBridgeState({
     clockFormat,
-    data: { categories, entries, dayEntries: entries, reviewItems: [] } as unknown as MobileBootstrap,
+    data: { categories: dense ? denseCategories : categories, entries: dense ? denseEntries : entries, dayEntries: dense ? denseEntries : entries, reviewItems: [] } as unknown as MobileBootstrap,
     now,
     reduceMotion: false,
     reduceTransparency: false,
     refreshing: false,
-    selectedDayKey: DAY,
+    selectedDayKey: dense ? DENSE_DAY : DAY,
     theme,
     transitionDirection: 1
-  }).model, [clockFormat, now, theme]);
+  }).model, [clockFormat, dense, now, theme]);
   const shown = useMemo(() => ({ ...model, layout }), [layout, model]);
   if (!__DEV__) return <Redirect href="/" />;
+  if (dense) {
+    // The whole day at the default 72 points an hour, opened at `at` (the header when absent), so
+    // Simulator screenshots of the mock-up's windows need no scrolling (the native view's own scroll
+    // has nothing left to move).
+    const header = headerHeight ?? 260;
+    const opensAt = params.cycle === "1" ? QA_CYCLE_HOURS[cycleStep] : params.at ? Number(params.at) : null;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} testID="calendar-qa">
+        <ScrollView key={cycleStep} contentOffset={{ x: 0, y: opensAt !== null && Number.isFinite(opensAt) ? header + opensAt * 72 - 12 : 0 }}>
+          <DayframeCalendarView
+            model={model}
+            onChangeLayout={() => undefined}
+            onHeaderHeight={(event) => setHeaderHeight(Math.ceil(event.nativeEvent.height))}
+            // The native view also keeps the top safe area inside it: room for it, so 23:59 is drawn too.
+            style={{ height: header + 24 * 72 + 80 }}
+          />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} testID="calendar-qa">
       <View style={{ flex: 1 }}>
