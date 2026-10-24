@@ -224,7 +224,7 @@ import {
   retryTimerStopSyncIssue,
   subscribeTimerStopOutbox
 } from "@/lib/timerStopOutbox";
-import { couldntBeSentDetail, placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
+import { couldntBeSentDetail, needsAttentionFoot, placesWatchedSummary, splitReviewSyncIssues, syncHelpStatus } from "@/lib/settingsSyncDiagnostics";
 import { quickStartDiagnosticsSummary, readQuickStartDiagnostics } from "@/lib/quickStartDiagnostics";
 import { DAYFRAME_API_BASE } from "@/lib/config";
 import { createLatestRead, locationAccessAction, locationAccessLabels, locationSuggestionsSwitchHint } from "@/lib/locationAccessAction";
@@ -2737,7 +2737,17 @@ export default function SettingsScreen() {
 
               {liveSyncStatus.issueCount > 0 ? (
                 <SettingsBlockGroup
-                  foot="Try again resends it. Discard keeps your account as it is."
+                  foot={needsAttentionFoot({
+                    tryAgain: timerStopSyncIssues.length > 0 ||
+                      timeEntrySyncIssues.some((issue) => !issue.refusedStart) ||
+                      reviewSyncIssues.length > 0 ||
+                      queueDiagnostics.permanentFailedCount > 0,
+                    discard: timerStopSyncIssues.length + timeEntrySyncIssues.length > 0 ||
+                      reviewSyncIssues.some((issue) => issue.resolutionStatus !== "resolution_unknown"),
+                    clear: queueDiagnostics.permanentFailedCount > 0 ||
+                      (timeEntrySyncDiagnostics?.quarantinedCount ?? 0) > 0 ||
+                      (timeEntrySyncDiagnostics?.deviceQuarantinedCount ?? 0) > 0
+                  }) ?? undefined}
                   theme={theme}
                   title="Needs attention"
                 >
