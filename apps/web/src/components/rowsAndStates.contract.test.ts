@@ -85,7 +85,9 @@ function mixOklab(a: number[], b: number[], p: number) {
 describe("rows (WUI-028, WUI-029)", () => {
   it("draws List rows as Today's: transparent with hairlines, a 36 px X3 block, two lines, quiet actions", () => {
     const entries = source("components/EntriesTable.tsx");
-    // Grouped rows and their expanded occurrences share the anatomy (Codex r1 on #495).
+    // Grouped rows and their expanded occurrences share the anatomy (Codex r1 on #495), one second line
+    // component (Calendar v3, owner choice A: the place with a pin or route, else the tags, else none).
+    expect(entries.match(/<ListSecondaryLine entry=\{(entry|occurrence)\} \/>/g)).toHaveLength(2);
     expect(entries.match(/className="timeline-task-secondary-line"/g)).toHaveLength(2);
     // Secondary text passes 4.5:1 on Midnight and Daylight cards and their hover fill.
     const subline = "color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary))";

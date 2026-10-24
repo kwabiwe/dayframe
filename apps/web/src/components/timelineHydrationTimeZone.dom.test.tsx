@@ -128,7 +128,9 @@ describe("/timeline renders browser-local times after hydration (UTC server, Lon
     expect(html).not.toContain("calendar-now-line");
     expect(html).not.toMatch(/\b(23|00):(30|45)\b/);
     expect(html).toContain('data-calendar-day-key="2026-10-12"');
-    expect(html).toContain("– framed on Monday");
+    // Calendar v3: the framed line under the strip, its date for assistive tech.
+    expect(html).toContain("– framed");
+    expect(html).toContain('aria-label="Framed on Monday 12 October"');
 
     expect(recoverable).toEqual([]);
     const monday = container.querySelector('[data-calendar-day-key="2026-10-12"]')!;

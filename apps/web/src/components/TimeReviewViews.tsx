@@ -30,8 +30,9 @@ import {
   formatTime
 } from "@/lib/format";
 import {
+  calendarBlockDetailLines,
   calendarBlockLaneInsets,
-  calendarBlockTimesAndLength,
+  calendarBlockLanePxInsets,
   calendarBracketDayRailPx,
   calendarBracketRailPx,
   calendarBlockPrimaryParts,
@@ -41,6 +42,8 @@ import {
   calendarBlockVisualGeometry,
   canShowTimeBlockInlineAction,
   getTimeBlockDensity,
+  calendarLaneWidth,
+  layoutTimeBlockHybrid,
   layoutTimeBlockLanes,
   minimumTimeBlockHeight,
   resizeDragThresholdPx,
@@ -72,6 +75,7 @@ import {
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
 import { calendarHeadModel } from "@/lib/calendar-head";
 import { CalendarHead } from "@/components/calendar/CalendarHead";
+import { CalendarViewMenu } from "@/components/calendar/CalendarViewMenu";
 import type {
   CalendarEntryCompactCreatePlan,
   CalendarEntryCompactSavePlan
@@ -108,11 +112,6 @@ const NOW_PILL_HALF_HEIGHT = 10;
 const CALENDAR_FUTURE_CREATE_NOTICE = "Blocks can't start in the future";
 const CALENDAR_CREATE_NOTICE_MS = 3_000;
 const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
-
-const viewItems: Array<{ id: TimelineView; label: string; icon: ReactNode }> = [
-  { id: "calendar", label: "Calendar", icon: <DayframeIcon glyph="calendar-days" size={16}/> },
-  { id: "list", label: "List", icon: <DayframeIcon glyph="list" size={16}/> }
-];
 
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
   { id: "day", label: "Day" },
@@ -558,17 +557,8 @@ export function TimeReviewViews({
         </div>
 
         <div className="timeline-range-controls">
-          <SegmentedControl
-            ariaLabel="Calendar view"
-            onChange={updateView}
-            options={viewItems.map((item) => ({
-              value: item.id,
-              label: item.label,
-              icon: item.icon,
-              disabled: isDateLoading
-            }))}
-            value={state.view}
-          />
+          {/* Calendar v3: one round button opening Calendar and List (no Multi Day). */}
+          <CalendarViewMenu disabled={isDateLoading} onChange={updateView} value={state.view} />
           <SegmentedControl
             ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}
             className={isList ? "is-unused-in-list" : undefined}
@@ -868,6 +858,25 @@ export function CalendarReview({
     }
     return { byDay, members, parts };
   }, [gridEntries, visibleDays]);
+  // Calendar v3: the hybrid overlap indents nested blocks 14 px, so it lays out in px across the day
+  // column as measured (every shown day's column is as wide as the first). Before it is measured the
+  // blocks keep the side-by-side columns.
+  const [dayBodyWidth, setDayBodyWidth] = useState(0);
+  // The shown days' bodies are keyed by date, so a new period mounts new ones: observe the current first
+  // body again whenever the days change, and ignore a detached body's zero width (Codex r2 on #583).
+  const observedDaysKey = visibleDays.map(formatCalendarDateKey).join("|");
+  useEffect(() => {
+    const body = calendarScroller?.querySelector<HTMLElement>("[data-calendar-day-body]");
+    if (!body || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      if (!body.isConnected || body.clientWidth <= 0) return;
+      setDayBodyWidth(Math.round(body.clientWidth));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [calendarScroller, observedDaysKey]);
   const zoom = calendarZooms[zoomLevel];
   const calendarHours = calendarHourModes[calendarHoursMode];
   const zoomKeys = Object.keys(calendarZooms) as CalendarZoom[];
@@ -1440,6 +1449,11 @@ export function CalendarReview({
     if (createDragRef.current?.pointerId === event.pointerId) abortCalendarCreateDrag();
   }
 
+  // Today's now line, on the minute (the line, the pill and the hidden hour label share it).
+  const nowTop = localTimeReady && visibleDays.some(isToday)
+    ? Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight)
+    : null;
+
   return (
     <section className="timeline-calendar-workspace">
       {/* Phones: the narrow time gutter has no room for the corner's zoom, so it floats over the
@@ -1534,13 +1548,13 @@ export function CalendarReview({
           })}
 
           <div className="calendar-time-axis" style={{ height: calendarHeight }}>
-            {localTimeReady && visibleDays.some(isToday) ? (
+            {nowTop !== null ? (
               <span
                 aria-hidden="true"
                 className="calendar-now-pill"
                 // Clamped so the pill stays inside the axis at midnight and at the day's end; the
                 // line keeps the exact time.
-                style={{ top: Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT, Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight))) }}
+                style={{ top: Math.min(calendarHeight - NOW_PILL_HALF_HEIGHT, Math.max(NOW_PILL_HALF_HEIGHT, nowTop)) }}
               >
                 {formatTime(capturedNow, clock)}
               </span>
@@ -1556,7 +1570,9 @@ export function CalendarReview({
                   style={{ top: mark.top }}
                 />
                 <span
-                  className="tabular absolute left-0 right-0 px-2 pt-1 text-xs text-[var(--muted)]"
+                  className={`tabular absolute left-0 right-0 px-2 pt-1 text-xs text-[var(--muted)]${
+                    // Calendar v3: the now pill takes the place of the hour label it would cover.
+                    nowTop !== null && Math.abs(nowTop - mark.top) < 12 ? " calendar-axis-label-under-now" : ""}`}
                   style={{ top: mark.labelTop }}
                 >
                   {mark.label}
@@ -1616,7 +1632,7 @@ export function CalendarReview({
                 <span
                   aria-hidden="true"
                   className="calendar-now-line"
-                  style={{ top: Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight) }}
+                  style={{ top: nowTop ?? 0 }}
                 />
               ) : null}
               {dayBrackets.map((bracket) => {
@@ -1767,15 +1783,21 @@ export function CalendarReview({
                 // Columns over everything drawn plus its 2 px gap below, so blocks whose drawn extents only
                 // touch stay full width (location v4 C6, Codex r2 on #545) and every pair keeps the whole
                 // gap (Codex r2 on #579); nothing is ever drawn on top of another.
-                const lanes = layoutTimeBlockLanes([
+                const laneBlocks = [
                   ...blocks.map((block) => ({
                     key: block.blockKey,
                     top: block.blockPositionStyle.top,
                     height: block.blockPositionStyle.height + calendarBlockVisualGapPx
                   })),
                   ...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height + calendarBlockVisualGapPx }))
-                ]);
-                const fullLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 } satisfies TimeBlockLane;
+                ];
+                // Calendar v3 (owner, 24 Oct 2026): Apple's hybrid overlap once the column is measured —
+                // close starts side by side, later starts nested 14 px in and drawn on top.
+                const laneWidth = calendarLaneWidth(dayBodyWidth, railPx);
+                const lanes = laneWidth > 0
+                  ? layoutTimeBlockHybrid(laneBlocks, { laneWidth, pixelsPerHour: rowHeight })
+                  : layoutTimeBlockLanes(laneBlocks);
+                const fullLane: TimeBlockLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 };
 
                 const momentLines = moments.map((entry) => {
                   // The day's own clipped start (a moment across midnight sits at the top of its second day).
@@ -1806,12 +1828,13 @@ export function CalendarReview({
                 const suggestionBlocks = suggestions.map(({ item, key, top, height }) => {
                   const range = `${formatTime(new Date(item.fromMs), clock)} to ${formatTime(new Date(item.toMs), clock)}`;
                   const lane = lanes.get(key) ?? fullLane;
-                  const label = denseBlockLabel(height);
+                  const label = denseBlockLabel(height, false, 0);
                   return (
                     <Link
                       aria-label={`${item.title}, needs review, ${range}. Open Review.`}
                       className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
                       data-calendar-block-key={key}
+                      data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
                       href={`/review#review-${item.id}`}
                       key={key}
                       tabIndex={visibleSelectedTarget ? -1 : undefined}
@@ -1845,9 +1868,6 @@ export function CalendarReview({
                       {/* Padding inside the query container, so its width thresholds match a block's. */}
                       <span className="calendar-review-content">
                         <span className="calendar-entry-title"><span className="calendar-review-mark" aria-hidden="true">?</span><CalendarTitleWords text={item.title} /></span>
-                        <span className="calendar-entry-detail-line tabular" aria-hidden="true">
-                          {calendarBlockTimesAndLength({ startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() }, capturedNow, clock)}
-                        </span>
                       </span>
                     </Link>
                   );
@@ -1866,7 +1886,8 @@ export function CalendarReview({
                   } = block;
                   const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
                   const lane = lanes.get(blockKey) ?? fullLane;
-                  const label = denseBlockLabel(blockPositionStyle.height, density.canDirectResize);
+                  const label = denseBlockLabel(blockPositionStyle.height, density.canDirectResize,
+                    calendarBlockDetailLines(entry, capturedNow, clock).length);
                   const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
@@ -1905,16 +1926,17 @@ export function CalendarReview({
                         ...blockPositionStyle,
                         ...calendarBlockLaneStyle(lane, railPx),
                         ...label.vars,
-                        // Dense-day rules (owner, 24 Oct 2026): a tinted fill and a 3 px colour bar, primary text.
+                        // Calendar v3 (owner, 24 Oct 2026): a translucent tint and a 3 px colour bar; the text a
+                        // darker (Daylight) or lighter (Midnight) shade of the block's own hue (CSS).
                         ...(entry.categoryId ? activityBlockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
-                        "--calendar-block-accent": entry.categoryId ? "var(--block)" : accent,
-                        color: "var(--text-primary)"
+                        "--calendar-block-accent": entry.categoryId ? "var(--block)" : accent
                       } as CSSProperties}
                       data-entry-id={entry.id}
                       data-calendar-block-key={blockKey}
                       data-calendar-semantic-height={block.semanticBlockPositionStyle.height}
                       data-calendar-semantic-top={block.semanticBlockPositionStyle.top}
                       data-overlap-layout={lane.mode}
+                      data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
                     >
                       <button
                         type="button"
@@ -1950,7 +1972,8 @@ export function CalendarReview({
                       >
                         {/* The title always wins: it wraps to the lines that fit, ending after a whole word. */}
                         <span className="calendar-entry-title"><CalendarTitleWords text={calendarBlockPrimaryParts(displayEntry).description} /></span>
-                        <span className="calendar-entry-detail-line tabular">{calendarBlockTimesAndLength(displayEntry, capturedNow, clock)}</span>
+                        {/* Calendar v3: icon lines under the title while they fit (place, trip or Health, tags, times). */}
+                        <CalendarDetailLines lines={calendarBlockDetailLines(displayEntry, capturedNow, clock)} />
                       </button>
                       {showInlineAction ? (
                         <button
@@ -2118,36 +2141,58 @@ export function CalendarReview({
  * Every block's one label line (location v4 C6): its title and its real length, "Coffee 4m",
  * whatever its drawn height. The full description, activity, tags and times are in its name.
  */
-/** Line heights of the dense-day label (CSS keeps the same: 16 px title, 13 px compact, 15 px detail). */
-const CALENDAR_DENSE_LINES = { lineHeight: 16, compactLineHeight: 13, detailLineHeight: 15 } as const;
+/** Line heights of the Calendar v3 label (CSS keeps the same: 17 px title, 14 px compact, 15 px icon lines). */
+const CALENDAR_DENSE_LINES = { lineHeight: 17, compactLineHeight: 14, detailLineHeight: 15 } as const;
 /**
- * The label's vertical padding as CSS draws it: 2 px top and bottom (1 px in compact type), and a
- * 6 px top on a block tall enough for direct resize, which keeps its title clear of the handle.
+ * The label's top padding as CSS draws it: 2 px (1 px in compact type), and 6 px on a block tall enough
+ * for direct resize, which keeps its title clear of the handle. The last line may use the bottom padding
+ * (calendar-v3-mockup's room).
  */
-const CALENDAR_DENSE_PADDING = { regular: 4, compact: 2, resizeTop: 6, regularTop: 2, compactTop: 1 } as const;
+const CALENDAR_DENSE_PADDING = { regular: 2, compact: 1, resizeTop: 6, regularTop: 2, compactTop: 1 } as const;
 
 /**
- * A block's label from its drawn height (dense-day rules): compact type under 34 px; the time and
- * length line only with a title line to spare; and the whole title lines each type holds, counted
- * from the same content height CSS lays out (Codex r1 on #579). Width rules stay in CSS.
+ * A block's label from its drawn height (Calendar v3): compact type under 34 px; with room (and, by CSS,
+ * from 120 px wide) icon lines under the title — the title keeps room for as many of `detailCount` as fit
+ * under one title line and takes every whole line left; the icon lines then fill what remains. Counted
+ * from the same content height CSS lays out. Width rules stay in CSS.
  */
-function denseBlockLabel(height: number, canDirectResize = false) {
+function denseBlockLabel(height: number, canDirectResize = false, detailCount = 0) {
   const { lineHeight, compactLineHeight, detailLineHeight } = CALENDAR_DENSE_LINES;
   const { compact } = calendarDenseLabel({ height, width: Number.POSITIVE_INFINITY, ...CALENDAR_DENSE_LINES });
   const room = Math.max(0, height - CALENDAR_DENSE_PADDING.regular -
     (canDirectResize ? CALENDAR_DENSE_PADDING.resizeTop - CALENDAR_DENSE_PADDING.regularTop : 0));
   const compactRoom = Math.max(0, height - CALENDAR_DENSE_PADDING.compact -
     (canDirectResize ? CALENDAR_DENSE_PADDING.resizeTop - CALENDAR_DENSE_PADDING.compactTop : 0));
-  const detail = !compact && room >= lineHeight + detailLineHeight;
+  const available = compact ? 0 : Math.max(0, Math.floor((room - lineHeight) / detailLineHeight));
+  const titleLines = Math.max(1, Math.floor((room - Math.min(available, detailCount) * detailLineHeight) / lineHeight));
+  const detailLines = available > 0 ? Math.max(0, Math.floor((room - titleLines * lineHeight) / detailLineHeight)) : 0;
   return {
     compact,
-    detail,
+    detail: detailLines > 0 && detailCount > 0,
     vars: {
-      "--title-lines": String(Math.max(1, Math.floor((room - (detail ? detailLineHeight : 0)) / lineHeight))),
+      "--title-lines": String(titleLines),
+      "--detail-lines": String(detailLines),
       "--title-lines-detailless": String(Math.max(1, Math.floor(room / lineHeight))),
       "--title-lines-compact": String(Math.max(1, Math.floor(compactRoom / compactLineHeight)))
     } as CSSProperties
   };
+}
+
+/**
+ * Calendar v3: the icon lines under a block's title (registry glyphs). They share `--detail-lines` whole
+ * lines: each wraps after whole words and the ones that no longer fit are cut off (CSS).
+ */
+function CalendarDetailLines({ lines }: { lines: ReturnType<typeof calendarBlockDetailLines> }) {
+  return (
+    <span aria-hidden="true" className="calendar-entry-details">
+      {lines.map((line) => (
+        <span className={`calendar-entry-detail${line.glyph === "clock" ? " tabular" : ""}`} key={line.glyph}>
+          <DayframeIcon glyph={line.glyph} size={11} />
+          <span className="calendar-entry-detail-text">{line.text}</span>
+        </span>
+      ))}
+    </span>
+  );
 }
 
 /**
@@ -2183,13 +2228,16 @@ function CalendarTitleWords({ text }: { text: string }) {
   }, [words]);
   const shown = Math.min(fitCount, words.length);
   return (
-    // No whole word fits: colour only (CSS hides the title, its "?" and the time line too).
-    <span className={`calendar-entry-words${shown === 0 && words.length > 0 ? " is-none-fit" : ""}`} ref={wordsRef}>
+    // Calendar v3 (owner OK, 24 Oct 2026): when not even the first word fits, it is cut with "…" as
+    // Apple does ("Quart…"), by CSS; a column under 22 px is colour only.
+    <span className={`calendar-entry-words${shown === 0 && words.length > 0 ? " is-cut-first" : ""}`} ref={wordsRef}>
       {words.map((word, index) => (
         <Fragment key={index}>
           {index > 0 && index < shown ? " " : null}
           {/* Words past the cut stay measurable (out of flow, unseen) for when the title widens. */}
           <span className={`calendar-entry-word${index >= shown ? " is-beyond" : ""}`}>{word}</span>
+          {/* The first word, cut to the title's width with an ellipsis, when no whole word fits. */}
+          {index === 0 && shown === 0 ? <span className="calendar-entry-word-cut">{word}</span> : null}
         </Fragment>
       ))}
       {shown > 0 && shown < words.length ? <span className="calendar-entry-word">{"\u2026"}</span> : null}
@@ -2267,10 +2315,11 @@ function calendarBlockKey(entryId: string, day: Date) {
 function calendarBlockLaneStyle({
   offsetFraction,
   widthFraction,
-  zIndex
+  zIndex,
+  px
 }: TimeBlockLane, railPx = 0): CSSProperties {
   return {
-    ...calendarBlockLaneInsets({ offsetFraction, widthFraction }, railPx),
+    ...(px ? calendarBlockLanePxInsets(px, railPx) : calendarBlockLaneInsets({ offsetFraction, widthFraction }, railPx)),
     zIndex: 2 + zIndex
   };
 }

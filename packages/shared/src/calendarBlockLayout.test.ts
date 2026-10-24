@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CALENDAR_BLOCK_LABEL,
+  CALENDAR_V3_OVERLAP,
+  layoutCalendarHybrid,
   calendarBlockLabelTier,
   calendarDenseLabel,
   calendarDrawnExtent,
@@ -179,5 +181,70 @@ describe("wholeWordsThatFit (dense-day rules)", () => {
   it("cuts nothing before layout", () => {
     expect(wholeWordsThatFit([60, 20], 0)).toBe(2);
     expect(wholeWordsThatFit([], 40)).toBe(0);
+  });
+});
+
+// Calendar v3: the same cases as the iPhone's DayframeCalendarCoreTests (calendar-v3-mockup's synthetic Friday).
+describe("layoutCalendarHybrid (Calendar v3, Apple's hybrid overlap)", () => {
+  const hourHeight = 72;
+  const laneWidth = 324;
+  const block = (id: string, start: string, end: string) => {
+    const minutes = (text: string) => { const [h, m] = text.split(":").map(Number); return h * 60 + m; };
+    const top = (minutes(start) / 60) * hourHeight;
+    return { id, top, bottom: Math.max((minutes(end) / 60) * hourHeight, top + 18) };
+  };
+  const day = [
+    block("overnight", "01:00", "09:00"), block("gym", "05:00", "06:30"), block("walk", "06:30", "07:00"),
+    block("prep", "07:00", "08:00"), block("plan", "09:00", "10:20"), block("sync", "09:00", "09:45"),
+    block("inbox", "09:00", "09:05"), block("reply", "09:02", "09:06"), block("coffee", "09:05", "09:10"),
+    block("party", "11:00", "13:30"), block("unknown", "11:00", "11:20"), block("parcel", "13:20", "13:40"),
+    block("games", "18:00", "19:00"), block("bedtime", "18:45", "19:05"), block("shift", "20:00", "23:55"),
+    block("stretch", "20:00", "20:40"), block("journal", "20:00", "20:20"), block("f1", "22:00", "22:45")
+  ];
+
+  it("puts close starts side by side and nests later starts 14 px in, on top", () => {
+    const placed = new Map(layoutCalendarHybrid(day, { laneWidth, closeDistance: (CALENDAR_V3_OVERLAP.closeMinutes / 60) * hourHeight }).map((p) => [p.id, p]));
+    expect(placed.get("overnight")).toMatchObject({ x: 0, width: laneWidth, depth: 0 });
+    for (const id of ["gym", "walk", "prep"]) expect(placed.get(id)).toMatchObject({ depth: 1, x: 14, width: laneWidth - 14 });
+    const nine = ["plan", "sync", "inbox", "reply", "coffee"].map((id) => placed.get(id)!);
+    expect(nine.map((p) => p.columnCount)).toEqual([5, 5, 5, 5, 5]);
+    expect(nine.map((p) => p.columnIndex)).toEqual([0, 1, 2, 3, 4]);
+    expect(nine.map((p) => p.depth)).toEqual([0, 0, 0, 0, 0]);
+    expect(placed.get("unknown")?.columnIndex).toBe(1);
+    expect(placed.get("parcel")).toMatchObject({ depth: 1, x: placed.get("party")!.x + 14 });
+    expect(placed.get("bedtime")).toMatchObject({ depth: 1, x: 14 });
+    expect(placed.get("f1")?.depth).toBe(1);
+    expect(placed.get("f1")!.x + placed.get("f1")!.width).toBeCloseTo(laneWidth);
+    expect(placed.get("shift")?.columnCount).toBe(3);
+  });
+
+  it("stops a nested group short of a block still running to its right, and never past the lane", () => {
+    const placed = new Map(layoutCalendarHybrid([
+      { id: "a", top: 0, bottom: 200 }, { id: "b", top: 0, bottom: 200 }, { id: "nested", top: 100, bottom: 150 }
+    ], { laneWidth: 300, closeDistance: 24 }).map((p) => [p.id, p]));
+    expect(placed.get("a")?.width).toBe(150);
+    // Tied starts: the first placed is the parent; 2 short of b.
+    expect(placed.get("nested")).toMatchObject({ depth: 1, x: 14 });
+    expect(placed.get("nested")!.x + placed.get("nested")!.width).toBeCloseTo(148);
+    const edge = layoutCalendarHybrid([
+      { id: "wide", top: 0, bottom: 300 }, { id: "one", top: 50, bottom: 300 },
+      { id: "two", top: 100, bottom: 300 }, { id: "three", top: 150, bottom: 300 }
+    ], { laneWidth: 60, closeDistance: 24 });
+    for (const placement of edge) {
+      expect(placement.width).toBeGreaterThanOrEqual(Math.min(40, 60 - placement.x) - 0.001);
+      expect(placement.x + placement.width).toBeLessThanOrEqual(60 + 0.001);
+    }
+  });
+
+  it("lays out 500-block crowds and staircases quickly, inside the lane", () => {
+    const crowd = Array.from({ length: 500 }, (_, index) => ({ id: `c${index}`, top: 9 * 48, bottom: 9 * 48 + 18 }));
+    const staircase = Array.from({ length: 500 }, (_, index) => ({ id: `s${index}`, top: (index * 170 / 3600) * 48, bottom: 23.8 * 48 }));
+    for (const blocks of [crowd, staircase]) {
+      const started = performance.now();
+      const placed = layoutCalendarHybrid(blocks, { laneWidth: 300, closeDistance: 18 });
+      expect(performance.now() - started).toBeLessThan(250);
+      expect(placed).toHaveLength(500);
+      for (const placement of placed) expect(placement.x + placement.width).toBeLessThanOrEqual(300 + 1e-9);
+    }
   });
 });

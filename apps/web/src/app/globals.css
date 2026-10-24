@@ -30,8 +30,15 @@
   --surface-strong: var(--surface-raised);
   --surface-inset: #f7f8fb;
   --surface-muted: #eef1f6;
-  --calendar-dense-tint: 20%;
-  --calendar-dense-review-tint: 12%;
+  /* Calendar v3 (owner, 24 Oct 2026): translucent tints, text in a darker shade of the block's hue, and
+     the now line in the danger red with AA text on its pill. */
+  --calendar-dense-tint: 18%;
+  --calendar-dense-review-tint: 10%;
+  --calendar-ink: 52%;
+  --calendar-ink-strong: 40%;
+  --calendar-ink-mix: #000000;
+  --calendar-now: var(--danger-text);
+  --calendar-now-ink: #ffffff;
   --border: #dde2ea;
   --border-strong: #bcc5d2;
   --control-border: #7d8797;
@@ -135,8 +142,13 @@
     --surface-strong: var(--surface-raised);
     --surface-inset: #101622;
     --surface-muted: #202838;
-    --calendar-dense-tint: 30%;
-    --calendar-dense-review-tint: 16%;
+    --calendar-dense-tint: 28%;
+    --calendar-dense-review-tint: 14%;
+    --calendar-ink: 62%;
+    --calendar-ink-strong: 40%;
+    --calendar-ink-mix: #ffffff;
+    --calendar-now: var(--danger);
+    --calendar-now-ink: var(--background);
     --border: #2a3345;
     --border-strong: #3b465b;
     --control-border: #64718a;
@@ -237,8 +249,13 @@
   --surface-strong: var(--surface-raised);
   --surface-inset: #101622;
   --surface-muted: #202838;
-  --calendar-dense-tint: 30%;
-  --calendar-dense-review-tint: 16%;
+  --calendar-dense-tint: 28%;
+  --calendar-dense-review-tint: 14%;
+  --calendar-ink: 62%;
+  --calendar-ink-strong: 40%;
+  --calendar-ink-mix: #ffffff;
+  --calendar-now: var(--danger);
+  --calendar-now-ink: var(--background);
   --border: #2a3345;
   --border-strong: #3b465b;
   --control-border: #64718a;
@@ -1169,6 +1186,50 @@ textarea.ui-control {
   justify-content: center;
 }
 
+/* Calendar v3 List rows (owner choice A; Apple's layout): the start over the end, right-aligned, in tabular
+   figures, the end in secondary text. Each time stays its own 24 px inline edit (WCAG 2.5.8). */
+.timeline-list-table .timeline-list-time-content {
+  justify-content: flex-end;
+}
+
+.timeline-list-table .timeline-inline-time,
+.timeline-list-table .timeline-inline-time.is-running,
+.timeline-list-table .timeline-inline-time[data-clock="12h"],
+.timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
+  height: auto;
+  min-height: 0;
+  grid-template-columns: max-content;
+  grid-auto-rows: 24px;
+  justify-items: end;
+  padding: 2px 8px;
+}
+
+.timeline-list-table .timeline-inline-time-separator {
+  display: none;
+}
+
+.timeline-list-table .timeline-inline-time-control,
+.timeline-list-table .timeline-inline-time-input {
+  height: 24px;
+  min-height: 24px;
+  text-align: right;
+}
+
+/* The secondary text nudged toward primary, as the row's second line: AA on the card and the hover fill
+   (plain textSecondary is 4.39:1 on Daylight's surfaceMuted; Codex r5 on #583). */
+.timeline-list-table .timeline-inline-time > :last-child {
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
+}
+
+/* A running row's "Running" sits in the end's 24 px line like a finished end time (Codex r3 on #583). */
+.timeline-list-table .timeline-inline-running {
+  display: inline-flex;
+  height: 24px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 /* The later shared picker grid must not give triggerless inline wrappers a box. */
 .swiss-timeline-surface .timeline-inline-time-control > .timeline-inline-date-picker {
   display: contents;
@@ -2008,12 +2069,14 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   }
 }
 
-/* Dense-day rules (owner, 24 Oct 2026; mock-up calendar-dense v2): a tinted fill and a 3 px colour bar,
-   no outline; blocks share columns and are never drawn on top of one another. */
+/* Calendar v3 (owner, 24 Oct 2026; calendar-v3-mockup): a translucent tint, so hour lines and a block
+   underneath show through, a 3 px colour bar and 5 px corners, no outline; text in a darker (Daylight) or
+   lighter (Midnight) shade of the block's own hue. Close starts sit side by side; later starts nest on top. */
 .calendar-time-block {
-  --calendar-block-radius: 6px;
-  --calendar-block-fill: color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-tint), var(--surface));
-  --calendar-block-selected-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface));
+  --calendar-block-radius: 5px;
+  --calendar-block-fill: color-mix(in srgb, var(--calendar-block-accent) var(--calendar-dense-tint), transparent);
+  --calendar-block-selected-fill: color-mix(in srgb, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), transparent);
+  color: color-mix(in oklab, var(--calendar-block-accent) var(--calendar-ink), var(--calendar-ink-mix));
   container-name: calendar-time-block;
   container-type: inline-size;
   display: block;
@@ -2028,6 +2091,25 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
     background-color 140ms ease,
     border-color 140ms ease,
     box-shadow 140ms ease;
+}
+
+/* A nested block (drawn on top of the one it starts inside) is its own tint over the surface, 88 % opaque:
+   the block underneath still shows faintly, but tints never stack, so its text keeps the single block's
+   contrast (Codex r1 on #583: two stacked Midnight tints fell to 3.6:1). */
+.calendar-time-block[data-depth] {
+  --calendar-block-fill: color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-tint), var(--surface)) 88%, transparent);
+  --calendar-block-selected-fill: color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface)) 88%, transparent);
+}
+
+/* Reduce Transparency: opaque over the surface, a little stronger, with the stronger ink (suggestions: below). */
+@media (prefers-reduced-transparency: reduce) {
+  .calendar-time-block,
+  .calendar-time-block[data-depth] {
+    --calendar-ink: var(--calendar-ink-strong);
+    --calendar-block-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface));
+    /* +16 % (not +20 %): a light-soft fill would otherwise outshine its own text on Midnight (Codex r3 on #583). */
+    --calendar-block-selected-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 16%), var(--surface));
+  }
 }
 
 .calendar-time-block.is-continuation-to-next {
@@ -2069,7 +2151,10 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
+/* A selected block's fill is 10 % stronger, so its text is a step further from the hue (darker on Daylight,
+   lighter on Midnight) to keep AA (Codex r2 on #583). */
 .calendar-time-block.is-selected {
+  --calendar-ink: var(--calendar-ink-strong);
   z-index: 5;
   background-color: var(--calendar-block-selected-fill);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--foreground) 11%, transparent);
@@ -2109,17 +2194,17 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   outline-offset: 1px;
 }
 
-/* Dense-day text: the title always wins. It wraps to the whole lines its block holds (counted from the drawn
-   height into --title-lines*), then ends with an ellipsis after a whole word; the time and length line only
-   from 120 px wide with a line to spare; compact type under 34 px tall or 90 px wide; colour only under 22. */
+/* Calendar v3 text: the title always wins, in bold. It wraps to the whole lines its block holds (counted from
+   the drawn height into --title-lines*), then ends with an ellipsis after a whole word; icon lines only from
+   120 px wide with room; compact type under 34 px tall or 90 px wide; colour only under 22. */
 .calendar-entry-title {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: var(--title-lines-detailless, 1);
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 17px;
   overflow-wrap: normal;
   word-break: normal;
   hyphens: auto;
@@ -2133,6 +2218,8 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
 .calendar-entry-word {
   display: inline-block;
+  /* A word never wraps inside itself (at a hyphen), so its measured width is its whole width. */
+  white-space: nowrap;
 }
 
 .calendar-entry-word.is-beyond {
@@ -2140,37 +2227,61 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   visibility: hidden;
 }
 
-/* No whole word fits: colour only, the "?" and the time line included (the name still carries it all).
-   The title is only made invisible, never taken out of layout, so its width can be measured again when
-   the block widens (Codex r3 on #579). */
-.calendar-entry-title:has(.calendar-entry-words.is-none-fit) {
-  visibility: hidden;
+/* Calendar v3 (owner OK): no whole word fits, so the first word is cut with an ellipsis, as Apple does
+   ("Quart…"); the "?" stays before it. The title stays in layout, so it is measured again when it widens. */
+.calendar-entry-title:has(.calendar-entry-words.is-cut-first) {
+  display: flex;
+  white-space: nowrap;
 }
 
-.calendar-entry-title:has(.calendar-entry-words.is-none-fit) + .calendar-entry-detail-line {
-  display: none;
-}
-
-.calendar-entry-detail-line {
-  display: none;
+.calendar-entry-word-cut {
+  min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.calendar-entry-title:has(.calendar-entry-words.is-cut-first) ~ .calendar-entry-details {
+  display: none;
+}
+
+/* Icon lines (Calendar v3): place or trip or Apple Health, tags, times, each with its registry glyph. They
+   share --detail-lines whole lines; each wraps after whole words, and lines past the room are cut off. */
+.calendar-entry-details {
+  display: none;
+  max-height: calc(var(--detail-lines, 0) * 15px);
+  overflow: hidden;
+}
+
+.calendar-entry-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 15px;
+}
+
+.calendar-entry-detail > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.calendar-entry-detail-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--detail-lines, 1);
+}
+
 @container calendar-time-block (min-width: 120px) {
-  .calendar-time-block.has-detail-room .calendar-entry-title,
-  .calendar-review-block.has-detail-room .calendar-entry-title {
+  .calendar-time-block.has-detail-room .calendar-entry-title {
     -webkit-line-clamp: var(--title-lines, 1);
   }
 
-  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
-  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
-    display: block;
+  .calendar-time-block.has-detail-room .calendar-entry-details {
+    display: grid;
   }
 }
 
@@ -2182,8 +2293,8 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 .calendar-time-block.is-dense-compact .calendar-entry-title,
 .calendar-review-block.is-dense-compact .calendar-entry-title {
   -webkit-line-clamp: var(--title-lines-compact, 1);
-  font-size: 11px;
-  line-height: 13px;
+  font-size: 11.5px;
+  line-height: 14px;
 }
 
 @container calendar-time-block (max-width: 89.98px) {
@@ -2194,20 +2305,19 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
   .calendar-entry-title {
     -webkit-line-clamp: var(--title-lines-compact, 1);
-    font-size: 11px;
-    line-height: 13px;
+    font-size: 11.5px;
+    line-height: 14px;
   }
 
-  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
-  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
+  .calendar-time-block.has-detail-room .calendar-entry-details {
     display: none;
   }
 }
 
 @container calendar-time-block (max-width: 21.98px) {
   .calendar-entry-title,
-  .calendar-time-block.has-detail-room .calendar-entry-detail-line,
-  .calendar-review-block.has-detail-room .calendar-entry-detail-line {
+  .calendar-entry-title:has(.calendar-entry-words.is-cut-first),
+  .calendar-time-block.has-detail-room .calendar-entry-details {
     display: none;
   }
 }
@@ -5369,9 +5479,11 @@ dialog.ui-dialog.df-range-custom {
     align-items: stretch;
   }
 
+  /* Calendar v3: the round view button and the Day / Week scope share one row. */
   .timeline-range-controls .ui-segmented-control {
-    flex: 1 1 100%;
-    width: 100%;
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
   }
 
   .timeline-list-day-heading > td {
@@ -9307,35 +9419,32 @@ dialog.ui-dialog.df-palette {
   }
 }
 
+/* Above every nested depth (Calendar v3 lanes grow 2 per depth, uncapped), so the block in hand is always on
+   top; the day column isolates its stacking (.calendar-day-body), so the sticky day headings stay above it. */
 .calendar-time-block:hover,
 .calendar-time-block.is-selected,
 .calendar-time-block.is-resizing,
 .calendar-time-block:has(:focus-visible) {
-  z-index: 14 !important;
+  z-index: 100000 !important;
 }
 
-/* The now line runs behind the blocks (Trello: it crossed the running block's text); its dot
-   stays at the left edge and the time shows in a pill in the time column. */
+/* Calendar v3 (owner, 24 Oct 2026; Apple): a red line exactly on the minute across the day, with the time
+   in a red pill in the time column in place of the hour label it covers. Drawn above the blocks, as on the
+   iPhone: under translucent blocks it showed through their titles at about 1.3:1 (Codex r4 on #583); a solid
+   2 px line over a title costs less than a tinted stripe through it. The block in hand still rises above it. */
 .calendar-now-line {
   position: absolute;
-  z-index: 1;
+  z-index: 99999;
   right: 0;
   left: 0;
   height: 2px;
   margin-top: -1px;
-  background: var(--accent);
+  background: var(--calendar-now);
   pointer-events: none;
 }
 
-.calendar-now-line::before {
-  position: absolute;
-  top: -4px;
-  left: -5px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  content: "";
+.calendar-axis-label-under-now {
+  visibility: hidden;
 }
 
 /*
@@ -9417,12 +9526,12 @@ dialog.ui-dialog.df-palette {
   box-sizing: border-box;
   min-width: 0;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 5px;
   /* No padding here: the query container measures its own content box (see .calendar-review-content). */
   padding: 0;
   background:
-    repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 16%, transparent) 0 2px, transparent 2px 7px),
-    color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-review-tint), var(--surface));
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 14%, transparent) 0 2px, transparent 2px 7px),
+    color-mix(in srgb, var(--calendar-block-accent) var(--calendar-dense-review-tint), transparent);
   color: var(--text-primary);
   text-decoration: none;
   container-name: calendar-time-block;
@@ -9431,6 +9540,25 @@ dialog.ui-dialog.df-palette {
 
 .calendar-review-block::before {
   background: repeating-linear-gradient(180deg, var(--calendar-block-accent) 0 4px, transparent 4px 7px);
+}
+
+/* A nested suggestion is its own tint over the surface, 88 % opaque, as a nested block is: tints never stack
+   (Codex r3 on #583). */
+.calendar-review-block[data-depth] {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 14%, transparent) 0 2px, transparent 2px 7px),
+    color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-review-tint), var(--surface)) 88%, transparent);
+}
+
+/* Reduce Transparency: suggestions are opaque too, hatch and dashed bar kept (after the rule above, which it
+   overrides; Codex r2 on #583). */
+@media (prefers-reduced-transparency: reduce) {
+  .calendar-review-block,
+  .calendar-review-block[data-depth] {
+    background:
+      repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 22%, transparent) 0 2px, transparent 2px 7px),
+      color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-review-tint) + 10%), var(--surface));
+  }
 }
 
 .calendar-review-content {
@@ -9445,6 +9573,16 @@ dialog.ui-dialog.df-palette {
   margin-right: 3px;
   color: var(--warning-text);
   font-weight: 700;
+}
+
+/* Reduce Transparency's stronger hatch would put the "?" under 3:1 on some fills: it sits on a small surface
+   chip there, where the warning text is AA by design (Codex r5 on #583). */
+@media (prefers-reduced-transparency: reduce) {
+  .calendar-review-mark {
+    border-radius: 3px;
+    padding: 0 2px;
+    background: var(--surface);
+  }
 }
 
 /* A finished block of a minute or less: a short line with a dot at the column's left edge, inside the
@@ -12061,10 +12199,10 @@ dialog.ui-dialog.df-palette {
   height: 20px;
   transform: translateY(-50%);
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--calendar-now);
   padding: 2px 7px;
   line-height: 16px;
-  color: var(--on-accent);
+  color: var(--calendar-now-ink);
   font-size: 11px;
   font-weight: 750;
   font-variant-numeric: tabular-nums;
@@ -12088,6 +12226,25 @@ dialog.ui-dialog.df-palette {
 
 .df-cal-framed:hover {
   text-decoration: underline;
+}
+
+/* Calendar v3: the chosen day's framed time, one short secondary line under the week strip. */
+.df-cal-framed-line {
+  flex-basis: 100%;
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.df-cal-framed-line .df-cal-framed {
+  min-height: 32px;
+}
+
+@media (any-pointer: coarse) {
+  .df-cal-framed-line .df-cal-framed {
+    min-height: 44px;
+  }
 }
 
 .df-cal-week {
@@ -12187,7 +12344,7 @@ dialog.ui-dialog.df-palette {
 @media (max-width: 760px) {
   .df-cal-head {
     display: grid;
-    grid-template-areas: "title total" "framed framed" "days days";
+    grid-template-areas: "title total" "days days" "framed framed";
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
     gap: 0 12px;
@@ -12204,13 +12361,10 @@ dialog.ui-dialog.df-palette {
     grid-area: title;
   }
 
-  .df-cal-head > div:first-child > p {
+  .df-cal-framed-line {
     grid-area: framed;
-  }
-
-  .df-cal-head p {
-    margin-top: -8px;
-    font-size: 13px;
+    margin: 0;
+    text-align: center;
   }
 
   .df-cal-week {
@@ -13001,6 +13155,12 @@ dialog.ui-dialog.df-palette {
   white-space: nowrap;
 }
 
+/* Calendar v3: the second line's pin, route or tag icon. */
+.timeline-task-secondary-line > svg {
+  flex: none;
+  align-self: center;
+}
+
 .timeline-task-secondary-line .timeline-task-meta,
 .timeline-task-secondary-line .tag-metadata {
   display: inline-flex;
@@ -13296,6 +13456,64 @@ dialog.ui-dialog.df-palette {
 
 .df-range-menu-wrap {
   position: relative;
+}
+
+/* Calendar v3: the view switch is one round 44 px button (the current view's icon) opening the menu,
+   anchored to its right edge on wider screens (a bottom sheet on phones, as the range menu). */
+.df-cal-view-trigger {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.df-cal-view-trigger:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.df-cal-view-trigger:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.df-cal-view-trigger:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.df-range-menu.df-cal-view-menu {
+  position: fixed;
+  z-index: 70;
+  top: var(--df-cal-view-top, 120px);
+  right: var(--df-cal-view-right, 12px);
+  left: auto;
+}
+
+/* The sheet's Close is for phones only (an anchored menu closes on Escape or a click outside). */
+@media (min-width: 560.02px) {
+  .df-cal-view-menu .df-range-menu-close {
+    display: none;
+  }
+}
+
+/* Phones: the shared bottom sheet (as the range menu's, below). */
+@media (max-width: 560px) {
+  .df-range-menu.df-cal-view-menu {
+    top: auto;
+    right: 12px;
+    left: 12px;
+  }
+}
+
+.df-cal-view-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* The Reports range menu on the shared floating surface (web UI audit WUI-023): the #391 surface

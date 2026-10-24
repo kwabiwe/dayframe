@@ -71,6 +71,134 @@ export const CALENDAR_V3_OVERLAP = {
   cornerRadius: 5
 } as const;
 
+export type CalendarHybridBlock = {
+  id: string;
+  /** Where the block is drawn, in the renderer's own units (px or pt), minimum height included. */
+  top: number;
+  bottom: number;
+};
+
+export type CalendarHybridPlacement = {
+  id: string;
+  /** From the lane's left edge, and the width, before the visual gap (the same units as the lane). */
+  x: number;
+  width: number;
+  /** 0 on the lane, +1 for each block it nests inside. */
+  depth: number;
+  columnIndex: number;
+  columnCount: number;
+};
+
+/**
+ * Calendar v3: Apple Calendar's hybrid overlap (calendar-v3-mockup `layout`), the same rule as the
+ * iPhone's `DayframeCalendarHybridMath` (Swift). Blocks are taken by top, longer first, then id. A block
+ * whose start is within `closeDistance` of the first start of a group still running joins that group,
+ * whose members share equal columns (spreading right while free). Any other block that starts while
+ * blocks are running nests: a group of its own, `CALENDAR_V3_OVERLAP.indent` in from the left edge of
+ * the latest-starting running block (the deepest when tied, then the first placed), drawn on top of
+ * it, reaching right until a block already placed to the parent's right, at its depth or shallower,
+ * is still running beside its first block (stopping `gap` short), never narrower than
+ * `minimumNestedWidth` and never past the lane.
+ */
+export function layoutCalendarHybrid(
+  blocks: ReadonlyArray<CalendarHybridBlock>,
+  { laneWidth, closeDistance, gap = 2 }: { laneWidth: number; closeDistance: number; gap?: number }
+): CalendarHybridPlacement[] {
+  const tolerance = CALENDAR_BLOCK_LABEL.touchTolerance;
+  const width = Math.max(0, Number.isFinite(laneWidth) ? laneWidth : 0);
+  const close = Math.max(0, Number.isFinite(closeDistance) ? closeDistance : 0);
+  const seen = new Set<string>();
+  const items = blocks
+    .filter((block) => {
+      if (!block.id || seen.has(block.id) || !Number.isFinite(block.top) || !Number.isFinite(block.bottom)) return false;
+      seen.add(block.id);
+      return true;
+    })
+    .map((block) => ({ id: block.id, top: block.top, bottom: Math.max(block.top, block.bottom) }))
+    .sort((left, right) => left.top - right.top
+      || (right.bottom - right.top) - (left.bottom - left.top)
+      || compareCodeUnits(left.id, right.id));
+
+  type Group = { firstTop: number; firstBottom: number; parent: number | null; depth: number; members: number[]; columns: number[][] };
+  const groups: Group[] = [];
+  const groupOf: number[] = [];
+  const column: number[] = [];
+  let running: number[] = [];
+  items.forEach((item, index) => {
+    running = running.filter((other) => items[other].bottom > item.top + tolerance);
+    const joinable = running.map((other) => groupOf[other]).filter((group) => item.top - groups[group].firstTop < close);
+    let group: number;
+    if (joinable.length) {
+      group = Math.min(...joinable);
+    } else {
+      let parent: number | null = null;
+      for (const candidate of running) {
+        if (parent === null) { parent = candidate; continue; }
+        const later = items[candidate].top > items[parent].top;
+        const deeper = items[candidate].top === items[parent].top && groups[groupOf[candidate]].depth > groups[groupOf[parent]].depth;
+        if (later || deeper) parent = candidate;
+      }
+      groups.push({
+        firstTop: item.top,
+        firstBottom: item.bottom,
+        parent,
+        depth: parent === null ? 0 : groups[groupOf[parent]].depth + 1,
+        members: [],
+        columns: []
+      });
+      group = groups.length - 1;
+    }
+    groups[group].members.push(index);
+    const free = groups[group].columns.findIndex((lane) => items[lane[lane.length - 1]].bottom <= item.top + tolerance);
+    if (free >= 0) {
+      groups[group].columns[free].push(index);
+      column.push(free);
+    } else {
+      groups[group].columns.push([index]);
+      column.push(groups[group].columns.length - 1);
+    }
+    groupOf.push(group);
+    running.push(index);
+  });
+
+  const x = new Array<number>(items.length).fill(0);
+  const resolved = new Array<boolean>(items.length).fill(false);
+  const out: CalendarHybridPlacement[] = [];
+  groups.forEach((group, groupIndex) => {
+    let left = 0;
+    let right = width;
+    if (group.parent !== null) {
+      const parent = group.parent;
+      left = x[parent] + CALENDAR_V3_OVERLAP.indent;
+      const parentDepth = groups[groupOf[parent]].depth;
+      items.forEach((other, index) => {
+        if (resolved[index] && index !== parent && groupOf[index] !== groupIndex
+          && other.top < group.firstBottom && other.bottom > group.firstTop
+          && x[index] > x[parent] && groups[groupOf[index]].depth <= parentDepth) {
+          right = Math.min(right, x[index] - gap);
+        }
+      });
+      left = Math.min(left, Math.max(0, width - CALENDAR_V3_OVERLAP.minimumNestedWidth));
+      right = Math.min(width, Math.max(left + CALENDAR_V3_OVERLAP.minimumNestedWidth, right));
+    }
+    const count = Math.max(1, group.columns.length);
+    const columnWidth = (right - left) / count;
+    for (const member of group.members) {
+      let span = 1;
+      while (column[member] + span < count && !group.columns[column[member] + span].some((other) =>
+        items[other].top < items[member].bottom - tolerance && items[other].bottom > items[member].top + tolerance)) span += 1;
+      x[member] = left + column[member] * columnWidth;
+      resolved[member] = true;
+      out.push({ id: items[member].id, x: x[member], width: columnWidth * span, depth: group.depth, columnIndex: column[member], columnCount: count });
+    }
+  });
+  return out;
+}
+
+function compareCodeUnits(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /** What a block of this drawn height and width shows in the dense-day rules. */
 export function calendarDenseLabel({ height, width, lineHeight, compactLineHeight, detailLineHeight }: {
   height: number; width: number; lineHeight: number; compactLineHeight: number; detailLineHeight: number;

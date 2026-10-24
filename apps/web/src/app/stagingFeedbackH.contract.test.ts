@@ -84,9 +84,10 @@ describe("command timer Description (H3, Trello 213)", () => {
   });
 });
 
-describe("flat Calendar blocks (H4, Trello 213; dense-day rules, 24 Oct 2026)", () => {
-  it("draws a tinted fill and a colour bar with no outline, inner highlight or shade", () => {
-    const block = css.match(/\/\* Dense-day rules[^*]*\*\/\s*\.calendar-time-block \{([^}]*)\}/)?.[1] ?? "";
+describe("flat Calendar blocks (H4, Trello 213; Calendar v3, 24 Oct 2026)", () => {
+  it("draws a translucent tint and a colour bar with no outline, inner highlight or shade", () => {
+    const block = css.match(/\/\* Calendar v3 \(owner, 24 Oct 2026; calendar-v3-mockup\)[^*]*\*\/\s*\.calendar-time-block \{([^}]*)\}/)?.[1] ?? "";
+    expect(block).toContain("--calendar-block-fill: color-mix(in srgb, var(--calendar-block-accent) var(--calendar-dense-tint), transparent);");
     expect(block).toContain("box-shadow: none;");
     expect(block).toContain("border: 0;");
     expect(block).toContain("background-color: var(--calendar-block-fill);");

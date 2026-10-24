@@ -479,6 +479,12 @@ Block pull-to-refresh:
 - Reduce Motion: no entrance or exit animation; open and close are immediate.
 - Evidence: `reportRangeControls.dom.test.tsx` (focus, arrows/Home/End/Escape, real Tab/Shift+Tab with user-event and the inert closing menu, mid-exit reopen, Reduce Motion, Cancel and Apply focus return across the remount) and `reports.contract.test.ts` (Reduce Motion CSS, phone sheet over the tab bar).
 
+## Web Calendar view menu (Calendar v3, owner 24 Oct 2026)
+
+- Trigger: the round 44 px view button in the Calendar toolbar (the current view's icon). Single owner: `CalendarViewMenu`'s `menu` state, the Reports range menu's contract reused (same CSS and keyframes): opacity 0 → 1 over 120ms; at ≤560 px a bottom sheet over the phone tab bar (z-index 70) with a visible 44 px close control, rising 8 px; exit fades over 120ms while `inert`, then unmounts on `animationend` with a timer fallback; reopening mid-exit returns to `open`; Reduce Motion opens and closes at once.
+- The menu is portalled to `<body>` (the Calendar surface isolates its stacking, so a sheet inside it would sit under the tab bar) and placed under the trigger's right edge on wider screens, following it on scroll and resize. Choosing an item closes the menu, returns focus to the trigger and switches the view; Escape and Tab close it and return focus to the trigger; an outside click closes it.
+- Evidence: `calendarViewMenu.dom.test.tsx` (two items, check, arrows, Escape focus return, Reduce Motion) and the browser check at 375 px and 1280 px.
+
 ## Web sign-in card (audit W14, UIA-317)
 
 - Trigger: Forgot password? and Back to Log in, Log in ↔ Create account, Opening Dayframe, an error or notice line, the reset email's sent reply, and on the reset page the form giving way to "Password changed" or "link expired".

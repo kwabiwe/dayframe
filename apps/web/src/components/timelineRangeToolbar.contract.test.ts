@@ -75,7 +75,9 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).not.toContain("dayAnalysis.timeCoveredSeconds");
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Calendar period and view controls"');
-    expect(timeline).toContain('ariaLabel="Calendar view"');
+    // Calendar v3: one round view button opening Calendar and List (no Multi Day).
+    expect(timeline).toContain("<CalendarViewMenu disabled={isDateLoading} onChange={updateView} value={state.view} />");
+    expect(timeline).not.toContain('ariaLabel="Calendar view"');
     // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
     expect(timeline).toContain('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}');
     expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
@@ -147,7 +149,8 @@ describe("Calendar range and toolbar contract", () => {
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-range-navigation \{[^}]*grid-template-columns: var\(--web-icon-button-size\) max-content var\(--web-icon-button-size\);/s);
     expect(styles).toMatch(/\.swiss-timeline-surface \.timeline-date-picker \{[^}]*min-width: 120px;[^}]*justify-self: stretch;/s);
     expect(styles).toMatch(/@media \(max-width: 760px\)[\s\S]*\.swiss-timeline-surface \.timeline-range-toolbar \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
-    expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{[^}]*width: 100%;/);
+    // Calendar v3: the view button and the Day / Week scope share the phone row.
+    expect(styles).toMatch(/\.timeline-range-controls \.ui-segmented-control \{\s*flex: 1 1 0;[^}]*min-width: 0;/);
   });
 
   it("uses one outer Timeline surface and direct per-view scrollers without duplicate titles", () => {

@@ -107,13 +107,13 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).not.toContain("dayframe-date-time");
   });
 
-  it("lets the title win at every size, compact and narrow, whole words only (dense-day rules, 24 Oct 2026)", () => {
-    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 13\.5px;[^}]*font-weight: 600;[^}]*line-height: 16px;[^}]*word-break: normal;/s);
-    expect(styles).toMatch(/\.calendar-time-block\.is-dense-compact \.calendar-entry-title,[\s\S]*?\{[^}]*font-size: 11px;[^}]*line-height: 13px;/s);
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 89\.98px\)[\s\S]*?font-size: 11px;/s);
-    expect(styles).toMatch(/@container calendar-time-block \(min-width: 120px\)[\s\S]*?\.calendar-entry-detail-line \{\s*display: block;/s);
+  it("lets the title win at every size, compact and narrow, whole words only (Calendar v3, 24 Oct 2026)", () => {
+    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 14px;[^}]*font-weight: 700;[^}]*line-height: 17px;[^}]*word-break: normal;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.is-dense-compact \.calendar-entry-title,[\s\S]*?\{[^}]*font-size: 11\.5px;[^}]*line-height: 14px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 89\.98px\)[\s\S]*?font-size: 11\.5px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(min-width: 120px\)[\s\S]*?\.calendar-entry-details \{\s*display: grid;/s);
     expect(styles).toMatch(/@container calendar-time-block \(max-width: 21\.98px\)[\s\S]*?display: none;/s);
-    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*font-size: 12px;[^}]*line-height: 15px;/s);
+    expect(styles).toMatch(/\.calendar-entry-detail \{[^}]*font-size: 12px;[^}]*line-height: 15px;/s);
     // The title sits below the 6 px top resize handle.
     expect(styles).toMatch(/\.swiss-resize-handle\.top \{[^}]*height:\s*6px;/s);
     expect(styles).toMatch(/\.calendar-time-block\.can-direct-resize \.calendar-entry-primary \{[^}]*padding-top:\s*6px;/s);
