@@ -290,6 +290,84 @@ describe("Calendar › List trips across midnight (Codex r2 on #584)", () => {
   });
 });
 
+describe("Calendar › List selected day (Codex r3 on #584)", () => {
+  // jsdom has no layout: each List row is 100 px tall, the List 500 px, and the browser clamps scrollTop
+  // to what lies below, as a real browser does.
+  const ROW = 100;
+  const VIEW = 500;
+  const scrollTops = new WeakMap<Element, number>();
+  const listOf = (element: Element) => element.closest(".timeline-list-scroll");
+  const rowsOf = (root: Element) => [...root.querySelectorAll("tbody > tr")];
+  let restore: () => void = () => undefined;
+  beforeEach(() => {
+    const rowRect = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
+    const top = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop");
+    const height = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    const client = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight");
+    const rect = (y: number, h: number) => ({ top: y, bottom: y + h, left: 0, right: 800, width: 800, height: h, x: 0, y, toJSON: () => ({}) }) as DOMRect;
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
+      if (this.classList.contains("timeline-list-scroll")) return rect(0, VIEW);
+      const root = listOf(this);
+      if (root && this.tagName === "TR" && this.parentElement?.tagName === "TBODY") return rect(rowsOf(root).indexOf(this) * ROW - (scrollTops.get(root) ?? 0), ROW);
+      return rect(0, 0);
+    } });
+    Object.defineProperty(Element.prototype, "scrollHeight", { configurable: true, get(this: Element) {
+      return this.classList.contains("timeline-list-scroll") ? rowsOf(this).length * ROW : 0;
+    } });
+    Object.defineProperty(Element.prototype, "clientHeight", { configurable: true, get(this: Element) {
+      return this.classList.contains("timeline-list-scroll") ? VIEW : 0;
+    } });
+    Object.defineProperty(Element.prototype, "scrollTop", { configurable: true,
+      get(this: Element) { return scrollTops.get(this) ?? 0; },
+      set(this: Element, value: number) { scrollTops.set(this, Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight))); } });
+    restore = () => {
+      for (const [target, name, descriptor] of [[HTMLElement.prototype, "getBoundingClientRect", rowRect], [Element.prototype, "scrollTop", top],
+        [Element.prototype, "scrollHeight", height], [Element.prototype, "clientHeight", client]] as const) {
+        if (descriptor) Object.defineProperty(target, name, descriptor);
+        else delete (target as unknown as Record<string, unknown>)[name];
+      }
+    };
+  });
+  afterEach(() => {
+    restore();
+    cleanup();
+  });
+
+  const days = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => entry(`d${to - index}`, new Date(2026, 9, to - index, 9)));
+  const list = (entries: TimeEntryRow[], extra: Partial<Parameters<typeof EntriesTable>[0]["continuous"] & object> = {}) => (
+    <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay entries={entries}
+      continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 14).getTime(), focusRequest: "2026-10-14", loading: null, onLoad: vi.fn(),
+        reachedEarliest: false, reachedLatest: true, ...extra }}
+      onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+  );
+  const headingTop = (day: number) => {
+    const heading = document.querySelector<HTMLElement>(`tr[data-day-start-ms="${new Date(2026, 9, day).getTime()}"]`)!;
+    return heading.getBoundingClientRect().top;
+  };
+
+  it("keeps bringing the selected day to the top as earlier weeks give it room", () => {
+    // 20 → 14 newest first, two rows a day: the 14th's heading is the last but one row, so the browser clamps.
+    const { rerender } = render(list(days(14, 20)));
+    expect(headingTop(14)).toBeGreaterThan(0);
+    rerender(list(days(7, 20)));
+    expect(headingTop(14)).toBe(0);
+  });
+
+  it("stops at the person's own scrolling, and when no earlier week can come", () => {
+    const first = render(list(days(14, 20)));
+    fireEvent.wheel(document.querySelector(".timeline-list-scroll")!);
+    first.rerender(list(days(7, 20)));
+    expect(headingTop(14)).toBeGreaterThan(0);
+    first.unmount();
+
+    const { rerender } = render(list(days(14, 20), { reachedEarliest: true }));
+    const clamped = headingTop(14);
+    rerender(list(days(13, 20), { reachedEarliest: true }));
+    // Done when it couldn't grow: the anchor now holds what was in view.
+    expect(headingTop(14)).toBe(clamped);
+  });
+});
+
 describe("Calendar › List continuous edges", () => {
   afterEach(cleanup);
 

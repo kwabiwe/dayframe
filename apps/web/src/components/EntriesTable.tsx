@@ -409,6 +409,12 @@ export function EntriesTable({
     if (loadsLater && laterSentinelRef.current) observer.observe(laterSentinelRef.current);
     return () => observer.disconnect();
   }, [continuousError, continuousLoading, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
+  // The selected day's positioning request (see below); while it is pending, anchoring waits.
+  const focusDoneRef = useRef<string | null>(null);
+  const focusRequest = continuous?.focusRequest ?? null;
+  const focusDayStartMs = continuous?.focusDayStartMs ?? null;
+  const focusCanGrow = Boolean(continuous && !continuous.reachedEarliest);
+  const focusPending = () => focusRequest !== null && focusDoneRef.current !== focusRequest;
   // What is in view stays in place when rows are added above it (a later week, a day's places arriving):
   // the first row in view keeps its position, in every browser (the List turns native anchoring off).
   // Found by a binary search over the rows (they are in top order), and reconciled only when the List's
@@ -440,6 +446,8 @@ export function EntriesTable({
     const root = listScrollRef.current;
     const anchor = scrollAnchorRef.current;
     if (!root || !continuous) return;
+    // The selected day is still being brought to the top: that, not the anchor, decides the position.
+    if (focusPending()) return;
     if (anchor && root.scrollHeight === anchor.scrollHeight && anchor.element.isConnected) return;
     // Also at the very top: a later week loading there must not pull the List up to today.
     if (anchor && anchor.element.isConnected) {
@@ -449,21 +457,28 @@ export function EntriesTable({
     recordScrollAnchor();
   });
   // The selected day's heading (or the nearest earlier one: the List is newest first) at the top, once
-  // per request, as soon as its rows are drawn.
-  const focusDoneRef = useRef<string | null>(null);
-  const focusRequest = continuous?.focusRequest ?? null;
-  const focusDayStartMs = continuous?.focusDayStartMs ?? null;
+  // per request. The request stays pending until the heading really reaches the top: while too little of
+  // the List lies below it the browser clamps the scroll, so it is tried again as earlier weeks arrive.
+  // It ends when it lands, when no earlier week can come, or at the person's own scrolling (wheel, touch,
+  // a key or the scrollbar), which always wins (Codex r3 on #584).
+  const endFocusOnUserScroll = () => {
+    if (!focusPending()) return;
+    focusDoneRef.current = focusRequest;
+    recordScrollAnchor();
+  };
   useLayoutEffect(() => {
     const root = listScrollRef.current;
     if (!root || focusRequest === null || focusDayStartMs === null || focusDoneRef.current === focusRequest || !localTimeReady) return;
     const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
     if (!headings.length) return;
     const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
-    focusDoneRef.current = focusRequest;
     if (!target || target === headings[0]) {
       root.scrollTop = 0;
+      focusDoneRef.current = focusRequest;
     } else {
       root.scrollTop += target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      const off = target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      if (Math.abs(off) < 1 || !focusCanGrow) focusDoneRef.current = focusRequest;
     }
     recordScrollAnchor();
   });
@@ -1100,6 +1115,10 @@ export function EntriesTable({
           focusedToggleItem.current = row ? checkOf(row)?.id ?? null : null;
         }}
         data-continuous={continuous ? "true" : undefined}
+        onKeyDown={endFocusOnUserScroll}
+        onPointerDown={endFocusOnUserScroll}
+        onTouchStart={endFocusOnUserScroll}
+        onWheel={endFocusOnUserScroll}
         onScroll={(event) => {
           if (continuous && anchorFrameRef.current === null) {
             anchorFrameRef.current = requestAnimationFrame(() => {
