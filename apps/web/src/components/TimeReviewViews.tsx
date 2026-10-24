@@ -633,7 +633,8 @@ export function TimeReviewViews({
             displayRange={listRange}
             onDeleteEntries={requestTimelineDelete}
             groupByDay
-            locationTimelines={listDays.flatMap((day) => listTimelines.get(day) ?? [])}
+            // In read order (oldest read first): a trip read on two days shows its freshest copy.
+            locationTimelines={[...listTimelines.values()].filter((timeline) => listDays.includes(timeline.date))}
             places={correctionPlaces}
             reviewItems={data.reviewItems}
             checksDays={listDays.map(timelineDayRange)}

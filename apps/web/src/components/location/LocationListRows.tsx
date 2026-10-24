@@ -77,6 +77,8 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
       queueRef.current = createTimelineQueue(forGeneration, (date, timeline) => {
         setLoaded((current) => {
           const days = new Map(current.generation === forGeneration ? current.days : []);
+          // Kept in read order (oldest read first), so a trip read on two days takes its freshest copy.
+          days.delete(date);
           days.set(date, timeline);
           return { generation: forGeneration, days };
         });

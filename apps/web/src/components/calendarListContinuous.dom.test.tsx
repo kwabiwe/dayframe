@@ -208,6 +208,21 @@ describe("useLocationTimelines refreshes and teardown (Codex r1 on #584)", () =>
     expect(result.current.get("2026-10-19")?.timeZone).toBe("new");
   });
 
+  it("keeps its days in read order, a day read again moving last (Codex r5 on #584)", async () => {
+    clientFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => day(decodeURIComponent(url.split("date=")[1])) }));
+    const { result, rerender } = renderHook(({ stale }) => useLocationTimelines(["2026-10-22", "2026-10-21"], [], "data", stale, "w1:u1"),
+      { initialProps: { stale: 0 } });
+    await waitFor(() => expect(result.current.size).toBe(2));
+    clientFetch.mockImplementation((url: string) => {
+      const date = decodeURIComponent(url.split("date=")[1]);
+      // The 21st answers at once; the 22nd later.
+      return date === "2026-10-21" ? Promise.resolve({ ok: true, json: async () => day(date, "fresh") }) : new Promise(() => undefined);
+    });
+    rerender({ stale: 1 });
+    await waitFor(() => expect(result.current.get("2026-10-21")?.timeZone).toBe("fresh"));
+    expect([...result.current.keys()]).toEqual(["2026-10-22", "2026-10-21"]);
+  });
+
   it("aborts its reads and starts no more after unmounting", async () => {
     const answers: Array<(value: unknown) => void> = [];
     const signals: AbortSignal[] = [];
@@ -269,7 +284,7 @@ describe("Calendar › List days (Codex r1 on #584)", () => {
 describe("Calendar › List trips across midnight (Codex r2 on #584)", () => {
   afterEach(cleanup);
 
-  it("shows the newest day's copy of a trip read on two days", async () => {
+  it("shows the freshest copy of a trip read on two days, also when it is the earlier day's (Codex r5 on #584)", async () => {
     const trip = (mode: "walking" | "train") => ({
       kind: "trip" as const, id: "night-trip", status: "finalised" as const, startedAt: new Date(2026, 9, 21, 23, 30).toISOString(),
       stoppedAt: new Date(2026, 9, 22, 0, 30).toISOString(), fromId: "a", toId: "b", mode: "automotive" as const, stopIds: [], distanceMeters: 9_000,
@@ -282,7 +297,8 @@ describe("Calendar › List trips across midnight (Codex r2 on #584)", () => {
     render(
       <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay
         entries={[entry("night", new Date(2026, 9, 21, 23, 30), 60)]}
-        locationTimelines={[timeline(22, "train"), timeline(21, "walking")]}
+        // Read order: the 22nd's cached copy first, then the selected 21st refreshed.
+        locationTimelines={[timeline(22, "walking"), timeline(21, "train")]}
         onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
     );
     expect((await screen.findByLabelText(/Legs: Train/)).textContent).toBeTruthy();

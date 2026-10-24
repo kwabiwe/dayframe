@@ -281,7 +281,10 @@ export function EntriesTable({
   reviewItems?: readonly ReviewItemRow[];
   /** The shown day in day scope, so its checks show without the location read; null otherwise. */
   checksDay?: DateRange | null;
-  /** Calendar › List's continuous days: every shown day's location timeline, in place of `locationTimeline`. */
+  /**
+   * Calendar › List's continuous days: every shown day's location timeline, in place of
+   * `locationTimeline`, in read order (oldest read first), so a trip read on two days shows its freshest copy.
+   */
   locationTimelines?: readonly LocationTimeline[];
   /** Every shown day, so each day's checks show without its location read, in place of `checksDay`. */
   checksDays?: readonly DateRange[];
@@ -378,12 +381,10 @@ export function EntriesTable({
     }
     return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
   }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
-  // A trip read on two days (it spans midnight): the newest day's copy wins, the day the List reads
-  // again with each refresh (Codex r2 on #584).
+  // A trip read on two days (it spans midnight): the freshest copy wins. `locationTimelines` come in
+  // read order (oldest read first), so the last one read is last here (Codex r2, r5 on #584).
   const tripByBlock = useMemo(
-    () => new Map([...dayTimelines]
-      .sort((a, b) => Date.parse(a.dayStart) - Date.parse(b.dayStart))
-      .flatMap((timeline) => [...tripsByBlockId(timeline)])),
+    () => new Map(dayTimelines.flatMap((timeline) => [...tripsByBlockId(timeline)])),
     [dayTimelines]
   );
   // Continuous days: a sentinel at each end loads the next week as it nears the view.
