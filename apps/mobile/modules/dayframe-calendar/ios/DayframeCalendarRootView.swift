@@ -794,7 +794,8 @@ private struct DayframeCalendarDenseText: View {
       cutFirstWord: true,
       measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
     )
-    let detailFont = UIFont.systemFont(ofSize: CGFloat(label.detailFontSize), weight: .medium)
+    // Measured as drawn: the icon lines use monospaced digits (Codex r7 on #580).
+    let detailFont = UIFont.monospacedDigitSystemFont(ofSize: CGFloat(label.detailFontSize), weight: .medium)
     let iconSize = CGFloat(11 * DayframeCalendarDayLayout.clampedTextScale(labelTextScale))
     // Colour only when nothing of the title fits: the icon lines go too. Each line wraps to the whole
     // lines left under the title (calendar-v3-mockup), cut after a whole word.

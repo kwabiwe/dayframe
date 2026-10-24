@@ -240,6 +240,34 @@ describe("calendarBlockInk (Calendar v3)", () => {
     }
   }, 60_000);
 
+  it("meets AA at any depth: four yellow-soft ancestors under a red child in Midnight, and deep chains of every colour (Codex r7 on #580)", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      const tint = mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light;
+      const fillOf = (key: string) => {
+        const colour = DAYFRAME_PALETTE.find((entry) => entry.key === key)!;
+        return mode === "dark" ? colour.darkHex : colour.lightHex;
+      };
+      const chain = (ancestors: string[]) => ancestors.reduce((under, fill) => mix(calendarNestedBase(under, theme.background), fill, tint), theme.background);
+      const red = fillOf("red");
+      const yellow = fillOf("yellow-soft");
+      const ink = calendarBlockInk(red, mode, { background: theme.background, surface: theme.surface });
+      for (let depth = 1; depth <= 8; depth += 1) {
+        const under = chain([yellow, ...Array.from({ length: depth - 1 }, () => yellow)]);
+        expect(contrastRatio(ink, mix(calendarNestedBase(under, theme.background), red, tint)), `${mode} depth ${depth}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // Deep chains of one colour, for every colour as both ancestor and child.
+      const fills = DAYFRAME_PALETTE.map((colour) => (mode === "dark" ? colour.darkHex : colour.lightHex));
+      for (const ancestor of fills) {
+        const under = chain(Array.from({ length: 6 }, () => ancestor));
+        for (const child of fills) {
+          const childInk = calendarBlockInk(child, mode, { background: theme.background, surface: theme.surface });
+          expect(contrastRatio(childInk, mix(calendarNestedBase(under, theme.background), child, tint)), `${child} over 6 × ${ancestor} ${mode}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+
   it("is cheap enough to run per block on every render", () => {
     const started = performance.now();
     for (let index = 0; index < 200; index += 1) {
