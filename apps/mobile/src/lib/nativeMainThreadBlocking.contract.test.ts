@@ -71,13 +71,16 @@ function occurrences(code: string, pattern: RegExp) {
 }
 
 // Throwaway managers make a synchronous locationd round trip on whichever thread builds them. Only
-// the listed once-per-process function may build one, exactly once; each entry needs a reason.
-const throwawayManagerAllowlist: Record<string, { function: string; reason: string }> = {
-  "modules/dayframe-tracking-notice/ios/DayframeTrackingNoticeService.swift": {
-    function: "applicationWillTerminate",
-    reason: "once, as the process exits; never a refresh path"
-  }
-};
+// the listed once-per-process function may build one, exactly once; each entry needs a reason. The
+// termination path is never one (staging iPhone, 23 Oct 2026: `applicationWillTerminate` built one at
+// a serious thermal state, locationd did not answer within iOS's 5 s and the app was killed 0x8BADF00D).
+const throwawayManagerAllowlist: Record<string, { function: string; reason: string }> = {};
+
+/** Swift files that handle `applicationWillTerminate`, and the services they hand it to. */
+const terminationPaths = [
+  "modules/dayframe-tracking-notice/ios/DayframeTrackingNoticeAppDelegateSubscriber.swift",
+  "modules/dayframe-tracking-notice/ios/DayframeTrackingNoticeService.swift"
+];
 
 describe("native main-thread blocking guard", () => {
   it("builds one long-lived CLLocationManager; no throwaway managers on refresh paths", () => {
@@ -91,6 +94,19 @@ describe("native main-thread blocking guard", () => {
       const source = read(path);
       expect(occurrences(codeOnly(source), /\bCLLocationManager\(\)/), path).toBe(1);
       expect(occurrences(functionBody(source, allowed.function), /\bCLLocationManager\(\)/), path).toBe(1);
+    }
+  });
+
+  it("never waits on locationd while iOS ends the process", () => {
+    const handlers = sources.filter(({ code }) => /func applicationWillTerminate\(/.test(code)).map(({ path }) => path);
+    // A new termination handler must be listed (and so checked) here.
+    expect(handlers.filter((path) => !terminationPaths.includes(path))).toEqual([]);
+    for (const path of terminationPaths) {
+      const code = codeOnly(read(path));
+      expect(code, path).not.toMatch(/\bimport CoreLocation\b|\bCLLocationManager\b|\bauthorizationStatus\b/);
+    }
+    for (const path of handlers) {
+      expect(functionBody(read(path), "applicationWillTerminate"), path).not.toMatch(/\bCLLocationManager\b|\bauthorizationStatus\b/);
     }
   });
 

@@ -77,7 +77,7 @@ When changing place roles, role labels or any read path that shows a saved place
 
 ## Tracking-stopped notice (iPhone)
 
-- Run `npx vitest run src/lib/trackingNotice.test.ts` in `apps/mobile` (arming inputs, default on, app-state recompute, sign-out disarm, failed read) and `swift test` in `apps/mobile/modules/dayframe-tracking-notice` (Always access, 24-hour limit, clock moved back).
+- Run `npx vitest run src/lib/trackingNotice.test.ts` in `apps/mobile` (arming inputs, default on, app-state recompute, sign-out disarm, failed read) and `swift test` in `apps/mobile/modules/dayframe-tracking-notice` (armed flag, 24-hour limit, clock moved back; Always access is JS's arming input, never read natively at termination).
 - Native module change: `pod install` (Xcode 26.6, `LANG=en_US.UTF-8`) and a full Debug Simulator build. The Simulator cannot prove the notice: termination behaviour needs a physical iPhone.
 - Physical iPhone (signed staging build, then TestFlight), record `PASS`, `FAIL` or `NOT RUN` for each:
   1. With location suggestions on, Location set to Always and notifications allowed, open Dayframe, then close it from the app switcher. One notification reads "Dayframe isn't tracking locations — open it to resume", with no sound.
