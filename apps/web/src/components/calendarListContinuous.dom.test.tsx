@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocationTimeline } from "@/lib/location/location-timeline-service";
-import type { TimeEntryRow } from "@/lib/queries";
+import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -419,6 +419,39 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     // The 13th's block is renamed: its group remounts, and with it the place row drawn in that group.
     rerender(view(true));
     expect(older().getBoundingClientRect().top).toBe(0);
+  });
+
+  it("keeps an open question in place when its day's places replace its own row (Codex r8 on #584)", () => {
+    const iso = (hour: number) => new Date(2026, 9, 14, hour).toISOString();
+    const cafe = { kind: "place" as const, id: "seg-cafe", status: "finalised" as const, startedAt: iso(10), stoppedAt: iso(11), placeId: null,
+      learnedPlaceId: null, name: null, role: null, matchKind: "unknown" as const, confidence: "medium" as const, blockIds: [] };
+    const library = { ...cafe, id: "seg-library", startedAt: iso(13), stoppedAt: iso(14) };
+    const question: ReviewItemRow = {
+      id: "q-cafe", type: "suggestion", title: "Exampleton cafe", eventSource: "location_learning", eventType: "unknown_stay", projectName: null,
+      categoryName: null, categoryColor: null, placeName: null, suggestedProjectId: null, suggestedCategoryId: null, suggestedPlaceId: null,
+      suggestedStartedAt: iso(10), suggestedStoppedAt: iso(11), confidence: "medium", status: "open", notes: null,
+      rawPayload: { clientSegmentId: "seg-cafe" }, createdAt: iso(12)
+    };
+    const fourteenth = { start: new Date(2026, 9, 14), end: new Date(2026, 9, 15) };
+    const view = (timelines: LocationTimeline[]) => (
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay checksDays={[fourteenth]} locationTimelines={timelines}
+        continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20", loading: null, onLoad: vi.fn(),
+          reachedEarliest: false, reachedLatest: true }}
+        entries={days(10, 20)} reviewItems={[question]} onChanged={vi.fn(async () => undefined)}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    // Before the 14th's places arrive, the suggestion is a "?" row of its own; open its question.
+    const { rerender } = render(view([]));
+    fireEvent.click(screen.getByRole("button", { name: "Check Exampleton cafe" }));
+    const open = () => document.querySelector<HTMLElement>('tr[data-question-for="q-cafe"]')!;
+    const root = document.querySelector(".timeline-list-scroll")!;
+    root.scrollTop += open().getBoundingClientRect().top;
+    rerender(view([]));
+    expect(open().getBoundingClientRect().top).toBe(0);
+    // The places arrive: the "?" moves onto the cafe's place row, and another place shows above it.
+    rerender(view([{ date: "2026-10-14", timeZone: "", dayStart: fourteenth.start.toISOString(), dayEnd: fourteenth.end.toISOString(), gaps: [],
+      items: [cafe, library], openTrip: null }]));
+    expect(open().getBoundingClientRect().top).toBe(0);
   });
 
   it("stops at the person's own scrolling, and when no earlier week can come", () => {

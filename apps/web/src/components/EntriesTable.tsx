@@ -1551,6 +1551,10 @@ function listRowSelector(row: Element) {
   const element = row as HTMLElement;
   const quoted = (value: string) => `"${value.replace(/["\\]/g, "\\$&")}"`;
   if (element.dataset.dayStartMs) return `tr[data-day-start-ms=${quoted(element.dataset.dayStartMs)}]`;
+  // An open question, and a "?" row, by their suggestion: both survive a day's places replacing the
+  // suggestion's own row with a place row's "?" (Codex r8 on #584).
+  if (element.dataset.questionFor) return `tr[data-question-for=${quoted(element.dataset.questionFor)}]`;
+  if (element.dataset.suggestionId) return `tr[data-suggestion-id=${quoted(element.dataset.suggestionId)}]`;
   // A place spanning midnight is a row on each day with the same place id: its row key carries the day (Codex r7 on #584).
   if (element.dataset.rowKey) return `tr[data-row-key=${quoted(element.dataset.rowKey)}]`;
   if (element.id) return `tr[id=${quoted(element.id)}]`;
