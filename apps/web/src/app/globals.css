@@ -752,6 +752,27 @@ textarea.ui-control {
   cursor: not-allowed;
 }
 
+/* A control that doesn't apply here (Calendar › List's period controls): shown, greyed and inert, but
+   still focusable so its reason ("Not used in List") is read and shown as its tooltip. */
+.ui-segmented-control button[aria-disabled="true"],
+.timeline-range-navigation[aria-disabled="true"] .ui-icon-button,
+.timeline-range-navigation[aria-disabled="true"] button[aria-disabled="true"],
+.timeline-range-navigation[aria-disabled="true"] button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ui-segmented-control button[aria-disabled="true"][aria-pressed="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+
+.timeline-range-navigation[aria-disabled="true"] .ui-icon-button:hover,
+.ui-segmented-control button[aria-disabled="true"]:hover {
+  background: transparent;
+}
+
 .ui-disclosure {
   border-radius: 16px;
   background: var(--surface-inset);
@@ -5333,6 +5354,47 @@ dialog.ui-dialog.df-range-custom {
 
 .timeline-list-scroll {
   overflow: auto;
+}
+
+/* Continuous days (owner, 24 Oct 2026): the List keeps what is in view in place itself, the same in
+   every browser, so native scroll anchoring is off. */
+.timeline-list-scroll[data-continuous="true"] {
+  overflow-anchor: none;
+}
+
+.timeline-list-edge {
+  position: sticky;
+  left: 0;
+  max-width: 100%;
+}
+
+.timeline-list-sentinel {
+  height: 1px;
+}
+
+.timeline-list-edge-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-meta);
+}
+
+.timeline-list-edge-status:not(:empty) {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+.timeline-list-edge-retry {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .timeline-list-table {

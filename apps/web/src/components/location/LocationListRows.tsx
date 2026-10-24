@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DAYFRAME_APP_ICONS,
@@ -41,6 +41,146 @@ export function useLocationTimeline(date: string | null, refreshKey: unknown, ow
   }, [date, owner, refreshKey]);
   return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
+
+/** Location reads in flight at once while the List loads its days. */
+export const LOCATION_TIMELINE_CONCURRENCY = 3;
+
+/**
+ * Calendar › List's continuous days (owner, 24 Oct 2026): each shown day's location timeline, read at
+ * most LOCATION_TIMELINE_CONCURRENCY at a time. A day is read once; `liveDates` (the selected day and
+ * today) again whenever `liveKey` changes (the runtime's bootstrap refresh), and every day again when
+ * `staleKey` changes (an edit or a correction). A day asked for again while its read is out is read
+ * once more when that read lands, so no refresh is lost.
+ *
+ * Days belong to one owner lifetime (workspace and user): every owner change starts a new generation,
+ * dropping the days read and aborting the reads in flight, so even an A → B → A round trip never shows
+ * A's earlier days. Unmounting aborts every read and stops the queue. A failed read keeps the day's last
+ * copy; a day without one shows blocks (and its checks) only, as before.
+ */
+export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
+  owner: string, enabled = true): ReadonlyMap<string, LocationTimeline> {
+  // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
+  const [scope, setScope] = useState({ owner, generation: 0 });
+  let generation = scope.generation;
+  if (scope.owner !== owner) {
+    generation = scope.generation + 1;
+    setScope({ owner, generation });
+  }
+  const [loaded, setLoaded] = useState<{ generation: number; days: ReadonlyMap<string, LocationTimeline> }>({ generation: 0, days: new Map() });
+  const queueRef = useRef<TimelineQueue | null>(null);
+  const datesKey = dates.join(",");
+  const liveDatesKey = liveDates.join(",");
+
+  const queueFor = (forGeneration: number) => {
+    if (queueRef.current?.generation !== forGeneration) {
+      queueRef.current?.dispose();
+      queueRef.current = createTimelineQueue(forGeneration, (date, timeline) => {
+        setLoaded((current) => {
+          const days = new Map(current.generation === forGeneration ? current.days : []);
+          // Kept in read order (oldest read first), so a trip read on two days takes its freshest copy.
+          days.delete(date);
+          days.set(date, timeline);
+          return { generation: forGeneration, days };
+        });
+      });
+    }
+    return queueRef.current;
+  };
+
+  // Not shown (Calendar instead of List): the queue stops and its reads are aborted; the days read stay,
+  // and a return reads the shown days again (Codex r9 on #584).
+  useEffect(() => {
+    if (enabled) return;
+    queueRef.current?.dispose();
+    queueRef.current = null;
+  }, [enabled]);
+  // Any day not asked for yet is due.
+  useEffect(() => {
+    if (!enabled) return;
+    const queue = queueFor(generation);
+    queue.want(datesKey ? datesKey.split(",") : [], false);
+  }, [datesKey, enabled, generation]);
+  // The selected day and today again with each bootstrap refresh.
+  useEffect(() => {
+    if (!enabled) return;
+    queueFor(generation).want(liveDatesKey ? liveDatesKey.split(",") : [], true);
+  }, [enabled, liveDatesKey, liveKey, generation]);
+  // Every day again after an edit.
+  const lastStaleRef = useRef(staleKey);
+  useEffect(() => {
+    if (lastStaleRef.current === staleKey) return;
+    lastStaleRef.current = staleKey;
+    if (!enabled) return;
+    const queue = queueFor(generation);
+    queue.want([...queue.asked], true);
+  }, [enabled, generation, staleKey]);
+  // Leaving: every read is aborted and the queue stops.
+  useEffect(() => () => {
+    queueRef.current?.dispose();
+    queueRef.current = null;
+  }, []);
+
+  return loaded.generation === generation ? loaded.days : EMPTY_TIMELINES;
+}
+
+type TimelineQueue = {
+  generation: number;
+  /** Days ever asked for in this lifetime. */
+  asked: Set<string>;
+  /** Asks for days: unread ones always; with `again`, read ones too (after a read in flight lands). */
+  want: (dates: readonly string[], again: boolean) => void;
+  dispose: () => void;
+};
+
+function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void): TimelineQueue {
+  const due = new Set<string>();
+  const inFlight = new Map<string, AbortController>();
+  const againAfterFlight = new Set<string>();
+  const asked = new Set<string>();
+  let disposed = false;
+  const drain = () => {
+    while (!disposed && inFlight.size < LOCATION_TIMELINE_CONCURRENCY && due.size) {
+      const date = due.values().next().value as string;
+      due.delete(date);
+      const controller = new AbortController();
+      inFlight.set(date, controller);
+      asked.add(date);
+      clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
+        .catch(() => null)
+        .then((next) => {
+          if (disposed) return;
+          inFlight.delete(date);
+          if (next && next.date === date) onRead(date, next);
+          if (againAfterFlight.delete(date)) due.add(date);
+          drain();
+        });
+    }
+  };
+  return {
+    generation,
+    asked,
+    want(dates, again) {
+      if (disposed) return;
+      for (const date of dates) {
+        if (inFlight.has(date)) {
+          if (again) againAfterFlight.add(date);
+        } else if (again ? asked.has(date) : !asked.has(date)) {
+          due.add(date);
+        }
+      }
+      drain();
+    },
+    dispose() {
+      disposed = true;
+      for (const controller of inFlight.values()) controller.abort();
+      inFlight.clear();
+      due.clear();
+    }
+  };
+}
+
+const EMPTY_TIMELINES: ReadonlyMap<string, LocationTimeline> = new Map();
 
 /** A place's span on the shown day: from where the day clips it, to its end (or "since" while you are there). */
 function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockFormat) {
@@ -98,7 +238,8 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
     const glyph = place.role === "home" ? DAYFRAME_APP_ICONS.placeHome : place.role === "work" ? DAYFRAME_APP_ICONS.placeWork
       : DAYFRAME_APP_ICONS.places;
     return (
-      <tr className="timeline-list-row timeline-location-row is-faint align-middle" data-location-row={place.id}>
+      <tr className="timeline-list-row timeline-location-row is-faint align-middle" data-location-row={place.id}
+        data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
         <td className="px-3 py-3">
           <div className="timeline-task-cell is-single">
             <span aria-hidden="true" className="timeline-location-mark is-faint"><DayframeIcon glyph={glyph} size={16} /></span>
@@ -119,7 +260,8 @@ export function LocationListRowView({ check, clock, nowMs, onCorrect, row }: {
     );
   }
   return (
-    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={place.id}>
+    <tr className="timeline-list-row timeline-location-row align-middle" data-location-row={place.id}
+      data-row-key={row.key} data-suggestion-id={row.checkIds[0] || undefined}>
       <td className="px-3 py-3">
         <div className="timeline-task-cell is-single">
           <span aria-hidden="true" className="timeline-location-mark is-unknown"><DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} /></span>

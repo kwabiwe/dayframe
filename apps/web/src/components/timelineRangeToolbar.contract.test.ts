@@ -78,7 +78,20 @@ describe("Calendar range and toolbar contract", () => {
     // Calendar v3: one round view button opening Calendar and List (no Multi Day).
     expect(timeline).toContain("<CalendarViewMenu disabled={isDateLoading} onChange={updateView} value={state.view} />");
     expect(timeline).not.toContain('ariaLabel="Calendar view"');
-    expect(timeline).toContain('ariaLabel="Calendar scope"');
+    // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
+    expect(timeline).toContain('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}');
+    expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
+    expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
+    expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
+    expect(timeline).toContain('aria-label={isList ? "Today, not used in List" : undefined}');
+    // Today is always shown in List, greyed and inert, even for the current period (Codex r2 on #584).
+    expect(timeline).toContain("{showsToday && !isList ? null : (");
+    // Location days belong to the owner and the selected week (Codex r2 on #584).
+    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);");
+    // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).
+    expect(timeline).toContain("locationTimelines={[...listTimelines.values()].filter((timeline) => listDays.includes(timeline.date))}");
+    // Alt+← / → (the shell's period shortcut) does nothing in List either (Codex r1 on #584).
+    expect(source("./AppShell.tsx")).toContain('if (pathname !== "/timeline" || timelineState.view === "list") return;');
   });
 
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
@@ -100,7 +113,7 @@ describe("Calendar range and toolbar contract", () => {
   it("keeps date navigation on Timeline only (Today is always today) and makes its shortcuts scope-aware", () => {
     expect(shell).toContain('const showDateNavigation = pathname === "/timeline"');
     expect(shell).not.toContain("DateContextRow");
-    expect(shell).toContain('if (pathname !== "/timeline") return;');
+    expect(shell).toContain('if (pathname !== "/timeline" || timelineState.view === "list") return;');
     expect(shell).toContain('shiftTimelineState(timelineState, direction)');
     expect(shell.match(/window\.addEventListener\("keydown"/g)).toHaveLength(1);
   });

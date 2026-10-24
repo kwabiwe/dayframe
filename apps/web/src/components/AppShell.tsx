@@ -170,7 +170,8 @@ function AppShellContent({ children }: { children: ReactNode }) {
   const pageMainRef = useRef<HTMLElement | null>(null);
   const contentUnderBand = useBandScrolled(timerBandRef, pageMainRef, pathname);
   const navigatePeriod = useCallback(async (direction: "previous" | "next") => {
-    if (pathname !== "/timeline") return;
+    // In Calendar › List the period doesn't apply (continuous days), as its greyed controls say.
+    if (pathname !== "/timeline" || timelineState.view === "list") return;
     const nextState = shiftTimelineState(timelineState, direction);
     const originSearch = searchParams.toString();
     const outcome = await loadDate(nextState.date);

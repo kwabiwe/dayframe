@@ -155,7 +155,11 @@ export function SegmentedControl<T extends string>({
   ariaLabel: string;
   className?: string;
   onChange: (value: T) => void;
-  options: Array<{ value: T; label: string; icon?: ReactNode; disabled?: boolean }>;
+  /**
+   * `unavailable`: why the option doesn't apply here ("Not used in List"). It stays visible and
+   * focusable, greyed and inert (aria-disabled), with the reason as its tooltip and in its name.
+   */
+  options: Array<{ value: T; label: string; icon?: ReactNode; disabled?: boolean; unavailable?: string }>;
   value: T;
 }) {
   return (
@@ -167,8 +171,13 @@ export function SegmentedControl<T extends string>({
             key={option.value}
             type="button"
             aria-pressed={selected}
+            aria-disabled={option.unavailable ? true : undefined}
+            aria-label={option.unavailable ? `${option.label}, ${option.unavailable.toLowerCase()}` : undefined}
+            data-tip={option.unavailable}
             disabled={option.disabled}
-            onClick={() => onChange(option.value)}
+            onClick={() => {
+              if (!option.unavailable) onChange(option.value);
+            }}
           >
             {option.icon}
             <span>{option.label}</span>

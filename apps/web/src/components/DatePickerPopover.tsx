@@ -61,6 +61,7 @@ export function DatePickerPopover({
   panelLabel = "Choose date",
   portal = false,
   showTrigger = true,
+  unavailable,
   today,
   triggerClassName = "",
   value
@@ -84,13 +85,19 @@ export function DatePickerPopover({
   panelLabel?: string;
   portal?: boolean;
   showTrigger?: boolean;
+  /**
+   * Why the date doesn't apply here ("Not used in List"): the trigger stays visible and focusable, greyed
+   * and inert (aria-disabled), with the reason as its tooltip and in its name.
+   */
+  unavailable?: string;
   today: string;
   triggerClassName?: string;
   value: string;
 }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
-  const effectiveOpen = open && !disabled;
+  // Disabled, or not used here (`unavailable`): a panel already open closes and takes no date (Codex r2 on #584).
+  const effectiveOpen = open && !disabled && !unavailable;
   const generatedPanelId = useId();
   const panelId = controlledPanelId ?? generatedPanelId;
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -135,10 +142,10 @@ export function DatePickerPopover({
   }
 
   useEffect(() => {
-    if (!disabled || !open) return undefined;
+    if ((!disabled && !unavailable) || !open) return undefined;
     const timeout = window.setTimeout(() => updateOpen(false), 0);
     return () => window.clearTimeout(timeout);
-  }, [disabled, open, updateOpen]);
+  }, [disabled, open, unavailable, updateOpen]);
 
   useEffect(() => {
     if (!effectiveOpen) return undefined;
@@ -215,7 +222,7 @@ export function DatePickerPopover({
   }, [effectiveOpen, phone]);
 
   function choose(date: string) {
-    if (disabled || !date) return;
+    if (disabled || unavailable || !date) return;
     onChange(date);
     updateOpen(false);
     (anchorRef?.current ?? triggerRef.current)?.focus();
@@ -330,13 +337,17 @@ export function DatePickerPopover({
     <div className={`timeline-date-picker${className ? ` ${className}` : ""}`} ref={rootRef}>
       {showTrigger ? (
         <button
-          aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
+          aria-disabled={unavailable ? true : undefined}
+          aria-label={unavailable ? `${label}, ${unavailable.toLowerCase()}` : ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
           aria-controls={panelId}
           aria-expanded={effectiveOpen}
           aria-haspopup="dialog"
           className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
           disabled={disabled}
-          onClick={() => updateOpen(!open)}
+          data-tip={unavailable}
+          onClick={() => {
+            if (!unavailable) updateOpen(!open);
+          }}
           ref={triggerRef}
           title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
           type="button"
