@@ -151,8 +151,27 @@ describe("Calendar in Blocks", () => {
     expect(shown("cut")).toEqual(["Plan", "\u2026"]);
     // No whole word fits: colour only, the name still says it all.
     expect(shown("none")).toEqual([]);
+    // …and the title, its "?" and the time line give way to colour only (CSS keys on this class).
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(true);
+    expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(false);
     expect(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!.getAttribute("aria-label")).toContain("Supercalifragilistic");
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the whole 2 px gap: a short block's label reaching within it puts the two side by side (Codex r2 on #579)", () => {
+    renderCalendar([
+      entry({ id: "coffee", description: "Coffee", startedAt: local(9), stoppedAt: local(9, 4) }),
+      entry({ id: "work", description: "Work", startedAt: local(9, 18), stoppedAt: local(10) })
+    ]);
+    // Coffee is drawn 18 px from 09:00 (to 09:16.9 at 64 px an hour); its gap reaches 09:18.75, past Work's start.
+    for (const id of ["coffee", "work"]) {
+      expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("lane");
+    }
+  });
+
+  it("gives a moment a 44 px tall hit area across the clear strip left of the blocks (Codex r2 on #579)", () => {
+    renderCalendar([entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() })]);
+    expect(document.querySelector<HTMLElement>(".calendar-moment")!.style.getPropertyValue("--calendar-moment-room")).toBe("8px");
   });
 
   it("draws a moment across midnight at the top of its second day (Codex r1 on #579)", () => {

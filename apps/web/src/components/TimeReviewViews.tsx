@@ -37,6 +37,7 @@ import {
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
+  calendarBlockVisualGapPx,
   calendarBlockVisualGeometry,
   canShowTimeBlockInlineAction,
   getTimeBlockDensity,
@@ -1698,15 +1699,16 @@ export function CalendarReview({
                     const visual = calendarBlockVisualGeometry({ top: geometry.top, height: geometry.height, continuesIntoNextDay: geometry.continuesIntoNextDay });
                     return [{ item, key: `review:${item.id}`, top: visual.top, height: visual.height }];
                   });
-                // Columns over everything drawn (after the visual gap), so blocks whose drawn edges only touch
-                // stay full width (location v4 C6, Codex r2 on #545); nothing is ever drawn on top of another.
+                // Columns over everything drawn plus its 2 px gap below, so blocks whose drawn extents only
+                // touch stay full width (location v4 C6, Codex r2 on #545) and every pair keeps the whole
+                // gap (Codex r2 on #579); nothing is ever drawn on top of another.
                 const lanes = layoutTimeBlockLanes([
                   ...blocks.map((block) => ({
                     key: block.blockKey,
                     top: block.blockPositionStyle.top,
-                    height: block.blockPositionStyle.height
+                    height: block.blockPositionStyle.height + calendarBlockVisualGapPx
                   })),
-                  ...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height }))
+                  ...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height + calendarBlockVisualGapPx }))
                 ]);
                 const fullLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 } satisfies TimeBlockLane;
 
@@ -1728,7 +1730,9 @@ export function CalendarReview({
                       key={`moment:${blockKey}`}
                       onClick={(event) => selectCalendarEntry({ anchor: event.currentTarget, blockKey, entryId: entry.id, focusOnOpen: event.detail === 0 })}
                       onPointerDown={(event) => event.stopPropagation()}
-                      style={{ top, "--calendar-block-accent": timeEntryAccentColor(entry) } as CSSProperties}
+                      // The hit area fills the clear strip left of the blocks (the rail and its 8 px inset), so it
+                      // never covers a block while staying easy to reach (Codex r2 on #579).
+                      style={{ top, "--calendar-block-accent": timeEntryAccentColor(entry), "--calendar-moment-room": `${railPx + 8}px` } as CSSProperties}
                       type="button"
                     />
                   );
@@ -2104,7 +2108,8 @@ function CalendarTitleWords({ text }: { text: string }) {
   }, [words]);
   const shown = Math.min(fitCount, words.length);
   return (
-    <span className="calendar-entry-words" ref={wordsRef}>
+    // No whole word fits: colour only (CSS hides the title, its "?" and the time line too).
+    <span className={`calendar-entry-words${shown === 0 && words.length > 0 ? " is-none-fit" : ""}`} ref={wordsRef}>
       {words.map((word, index) => (
         <Fragment key={index}>
           {index > 0 && index < shown ? " " : null}

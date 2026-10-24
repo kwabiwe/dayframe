@@ -2119,6 +2119,12 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   visibility: hidden;
 }
 
+/* No whole word fits: colour only, the "?" and the time line included (the name still carries it all). */
+.calendar-entry-title:has(.calendar-entry-words.is-none-fit),
+.calendar-entry-title:has(.calendar-entry-words.is-none-fit) + .calendar-entry-detail-line {
+  display: none;
+}
+
 .calendar-entry-detail-line {
   display: none;
   overflow: hidden;
@@ -2156,7 +2162,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
 @container calendar-time-block (max-width: 89.98px) {
   .calendar-entry-primary,
-  .calendar-review-content {
+  .calendar-review-block .calendar-review-content {
     padding: 1px 4px 1px 7px;
   }
 
@@ -9380,9 +9386,10 @@ dialog.ui-dialog.df-palette {
   position: absolute;
   z-index: 3;
   left: 0;
-  width: 7px;
-  height: 12px;
-  margin-top: -6px;
+  /* The drawing stays a 7 px line; the hit area is 44 px tall across the clear strip left of the blocks. */
+  width: var(--calendar-moment-room, 8px);
+  height: 44px;
+  margin-top: -22px;
   border: 0;
   padding: 0;
   background: transparent;
@@ -9391,7 +9398,7 @@ dialog.ui-dialog.df-palette {
 
 .calendar-moment::before {
   position: absolute;
-  top: 5px;
+  top: 21px;
   left: 0;
   width: 7px;
   height: 2px;
@@ -9401,7 +9408,7 @@ dialog.ui-dialog.df-palette {
 
 .calendar-moment::after {
   position: absolute;
-  top: 3px;
+  top: 19px;
   left: -2px;
   width: 6px;
   height: 6px;

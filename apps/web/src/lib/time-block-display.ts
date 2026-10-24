@@ -7,7 +7,7 @@ import {
 import { timeEntryCategoryLabel } from "@/lib/display";
 import { dateTimeLocal, formatDuration, formatTime } from "@/lib/format";
 
-const calendarBlockVisualGapPx = 2;
+export const calendarBlockVisualGapPx = 2;
 const calendarBlockLaneGapPx = 2;
 const calendarBlockOuterInsetPx = 8;
 

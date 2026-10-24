@@ -18,7 +18,7 @@ describe("Calendar in Blocks contract", () => {
     const raised = zOf(/\.calendar-time-block\.is-resizing,[\s\S]*?\{\s*z-index: (\d+) !important;/);
     const now = zOf(/\.calendar-now-line \{[^}]*z-index: (\d+);/);
     // Dense-day rules (24 Oct 2026): no lane of their own; the same columns as blocks.
-    expect(timeline).toContain("...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height }))");
+    expect(timeline).toContain("...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height + calendarBlockVisualGapPx }))");
     expect(styles).not.toMatch(/\.calendar-review-block \{[^}]*width: 42%/);
     expect(raised).toBeGreaterThan(review);
     // Trello (Calendar page improvements): the now line no longer crosses a block's text. Entry
