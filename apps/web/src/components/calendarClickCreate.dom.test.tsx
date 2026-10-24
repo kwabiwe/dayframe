@@ -312,6 +312,8 @@ describe("Calendar click-to-create DOM interactions", () => {
       const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`) as HTMLElement;
       // The title alone wins its line; no length beside it.
       expect(block.querySelector(".calendar-entry-title")?.textContent).toBe(title);
+      // Unbreakable words, so a clamped line ends after a whole word.
+      expect([...block.querySelectorAll(".calendar-entry-title .calendar-entry-word")].map((word) => word.textContent)).toEqual(title.split(" "));
       // Activity, tags and times stay in the block's name for screen readers and the tooltip.
       expect(block.querySelector(".calendar-entry-primary")?.getAttribute("aria-label")).toContain(`${title} · Work · #Planning +2.`);
     }
