@@ -584,6 +584,14 @@ type GeofencePlaceInput = {
 
 type GeofenceRepickTrigger = "refresh_exit" | "location_update" | "visit_or_significant_change";
 
+/** The shortest gap between two re-picks not caused by leaving the refresh circle (this process). */
+export const REPICK_MIN_INTERVAL_MS = 30_000;
+let lastRepickAt = Number.NEGATIVE_INFINITY;
+/** Tests only: forget the last re-pick. */
+export function __resetGeofenceRepickClockForTests() {
+  lastRepickAt = Number.NEGATIVE_INFINITY;
+}
+
 async function startGeofencesUnsafe(places: GeofencePlaceInput[], capture: LocationCaptureSnapshot) {
   if (!isLocationCaptureSnapshotCurrent(capture) || !await getLocationLearningEnabled() || !isLocationCaptureSnapshotCurrent(capture)) return 0;
   const monitorablePlaces = places
@@ -759,18 +767,23 @@ async function repickNearestGeofencesUnsafe(captured: LocationCaptureSnapshot, t
   const position = freshestGeofenceFix([...fixes, lastKnown].filter((fix) => fix && fix.timestamp >= floor));
   // Without a recent position the watched set stays as it is.
   if (!position) return 0;
-  if (trigger === "location_update") {
+  if (trigger !== "refresh_exit") {
     const stored = parseJson<DayframeRegion[]>(await readLocationCache(GEOFENCE_REGISTRATION_KEY, capture), []);
     const refresh = Array.isArray(stored)
       ? stored.find((region) => region?.identifier === refreshRegionIdentifier(capture.binding!.id))
       : undefined;
     if (!isLocationCaptureSnapshotCurrent(capture)) return 0;
-    // An ordinary reading re-picks only once it is outside the refresh circle.
+    // An ordinary reading, a Visit or a significant change re-picks only once it is outside the refresh
+    // circle: inside it the nearest places are the ones already watched (freeze guard, 24 Oct 2026).
     if (refresh && insideRefreshCircle(position, refreshCircleOf(refresh))) {
       await noteSelectionPosition(capture, position.timestamp);
       return 0;
     }
+    // And at most one such re-pick every REPICK_MIN_INTERVAL_MS: iOS re-registers regions on the main
+    // thread, so a burst of wakes never re-registers in a burst. Leaving the circle always re-picks.
+    if (Date.now() - lastRepickAt < REPICK_MIN_INTERVAL_MS) return 0;
   }
+  lastRepickAt = Date.now();
   return registerGeofenceSelectionUnsafe(monitorablePlaces, capture, position);
 }
 

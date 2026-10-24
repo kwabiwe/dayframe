@@ -125,6 +125,18 @@ if (signedAppArgumentIndex >= 0) {
   if (existsSync(signedApp)) verifySignedProducts(signedApp);
 }
 
+// The expo-location geofencing patch (patches/, applied by scripts/apply-native-patches.mjs on install):
+// it must match the installed version and be in the file the iOS build compiles.
+const expoLocation = resolve(repositoryRoot, "node_modules/expo-location");
+if (existsSync(expoLocation)) {
+  const { version } = JSON.parse(readFileSync(resolve(expoLocation, "package.json"), "utf8"));
+  expect(existsSync(resolve(repositoryRoot, `patches/expo-location+${version}.patch`)),
+    `patches/ has no expo-location+${version}.patch: update the geofencing patch for this expo-location version (docs/architecture.md).`);
+  const consumer = readFileSync(resolve(expoLocation, "ios/TaskConsumers/EXGeofencingTaskConsumer.m"), "utf8");
+  expect(consumer.includes("Dayframe patch (location v4, 24 Oct 2026)") && consumer.includes("updateMonitoredRegionsForTask"),
+    "expo-location's EXGeofencingTaskConsumer.m is not patched: run npm install (postinstall applies patches/).");
+}
+
 if (failures.length) {
   console.error("iOS build configuration check failed:");
   for (const failure of failures) console.error(`- ${failure}`);

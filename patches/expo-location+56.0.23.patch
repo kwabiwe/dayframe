@@ -1,0 +1,118 @@
+diff --git a/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m b/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
+index 7e6482e..34c6c10 100644
+--- a/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
++++ b/node_modules/expo-location/ios/TaskConsumers/EXGeofencingTaskConsumer.m
+@@ -31,15 +31,17 @@ - (NSString *)taskType
+   return @"geofencing";
+ }
+ 
++// Dayframe patch (location v4, 24 Oct 2026): every re-registration used to stop every region, make a new
++// CLLocationManager and start and query every region again, synchronously on the main thread, where each
++// call is a round trip to locationd. It now keeps one manager and touches only the regions that changed.
+ - (void)setOptions:(nonnull NSDictionary *)options
+ {
+-  [self stopMonitoringAllRegions];
+-  [self startMonitoringRegionsForTask:self->_task];
++  [self updateMonitoredRegionsForTask:self->_task];
+ }
+ 
+ - (void)didRegisterTask:(id<EXTaskInterface>)task
+ {
+-  [self startMonitoringRegionsForTask:task];
++  [self updateMonitoredRegionsForTask:task];
+ }
+ 
+ - (void)didUnregister
+@@ -58,41 +60,73 @@ - (void)reset
+   }];
+ }
+ 
+-- (void)startMonitoringRegionsForTask:(id<EXTaskInterface>)task
++// Dayframe patch: one manager for the consumer's life. Regions iOS already monitors with the same centre,
++// radius and notify flags are left alone (no stop, start or state query); others are stopped and the new
++// or changed ones started. A fresh consumer (an app launch) still asks every wanted region's state once, as
++// before, so the task learns where the phone is; later updates ask only the regions they started.
++- (void)updateMonitoredRegionsForTask:(id<EXTaskInterface>)task
+ {
+   [EXUtilities performSynchronouslyOnMainThread:^{
+-    CLLocationManager *locationManager = [CLLocationManager new];
+-    NSMutableDictionary *regionStates = [NSMutableDictionary new];
+-    NSDictionary *options = [task options];
+-    NSArray *regions = options[@"regions"];
+-
++    BOOL fresh = self->_locationManager == nil;
++    if (fresh) {
++      CLLocationManager *locationManager = [CLLocationManager new];
++      locationManager.delegate = self;
++      locationManager.allowsBackgroundLocationUpdates = YES;
++      locationManager.pausesLocationUpdatesAutomatically = NO;
++      self->_locationManager = locationManager;
++      self->_regionStates = [NSMutableDictionary new];
++    }
+     self->_task = task;
+-    self->_locationManager = locationManager;
+-    self->_regionStates = regionStates;
++    CLLocationManager *locationManager = self->_locationManager;
+ 
+-    locationManager.delegate = self;
+-    locationManager.allowsBackgroundLocationUpdates = YES;
+-    locationManager.pausesLocationUpdatesAutomatically = NO;
+-
+-    for (NSDictionary *regionDict in regions) {
++    NSMutableDictionary<NSString *, CLCircularRegion *> *wanted = [NSMutableDictionary new];
++    for (NSDictionary *regionDict in [task options][@"regions"]) {
+       NSString *identifier = regionDict[@"identifier"] ?: [[NSUUID UUID] UUIDString];
+       CLLocationDistance radius = [regionDict[@"radius"] doubleValue];
+       CLLocationCoordinate2D center = [self.class coordinateFromDictionary:regionDict];
+-      BOOL notifyOnEntry = [self.class boolValueFrom:regionDict[@"notifyOnEntry"] defaultValue:YES];
+-      BOOL notifyOnExit = [self.class boolValueFrom:regionDict[@"notifyOnExit"] defaultValue:YES];
+-
+       CLCircularRegion *region = [[CLCircularRegion alloc] initWithCenter:center radius:radius identifier:identifier];
++      region.notifyOnEntry = [self.class boolValueFrom:regionDict[@"notifyOnEntry"] defaultValue:YES];
++      region.notifyOnExit = [self.class boolValueFrom:regionDict[@"notifyOnExit"] defaultValue:YES];
++      wanted[identifier] = region;
++    }
+ 
+-      region.notifyOnEntry = notifyOnEntry;
+-      region.notifyOnExit = notifyOnExit;
++    NSMutableSet<NSString *> *kept = [NSMutableSet new];
++    for (CLRegion *existing in [locationManager.monitoredRegions copy]) {
++      CLCircularRegion *wantedRegion = wanted[existing.identifier];
++      if (wantedRegion && [existing isKindOfClass:[CLCircularRegion class]]
++          && [self.class region:(CLCircularRegion *)existing matches:wantedRegion]) {
++        [kept addObject:existing.identifier];
++        continue;
++      }
++      [locationManager stopMonitoringForRegion:existing];
++      [self->_regionStates removeObjectForKey:existing.identifier];
++    }
+ 
+-      [regionStates setObject:@(CLRegionStateUnknown) forKey:identifier];
++    for (NSString *identifier in wanted) {
++      CLCircularRegion *region = wanted[identifier];
++      if ([kept containsObject:identifier]) {
++        if (fresh) {
++          [self->_regionStates setObject:@(CLRegionStateUnknown) forKey:identifier];
++          [locationManager requestStateForRegion:region];
++        }
++        continue;
++      }
++      [self->_regionStates setObject:@(CLRegionStateUnknown) forKey:identifier];
+       [locationManager startMonitoringForRegion:region];
+       [locationManager requestStateForRegion:region];
+     }
+   }];
+ }
+ 
+++ (BOOL)region:(CLCircularRegion *)existing matches:(CLCircularRegion *)wanted
++{
++  return fabs(existing.center.latitude - wanted.center.latitude) < 1e-7
++    && fabs(existing.center.longitude - wanted.center.longitude) < 1e-7
++    && fabs(existing.radius - wanted.radius) < 0.01
++    && existing.notifyOnEntry == wanted.notifyOnEntry
++    && existing.notifyOnExit == wanted.notifyOnExit;
++}
++
+ - (void)stopMonitoringAllRegions
+ {
+   [EXUtilities performSynchronouslyOnMainThread:^{
