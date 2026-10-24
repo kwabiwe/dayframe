@@ -124,9 +124,10 @@ describe("native Calendar production contract", () => {
 
     expect(records).toContain("var tagText: String?");
     expect(model).toContain("tagText = record.tagText");
-    expect(rootView).toContain('[("place", entry.placeText), ("tag", entry.tagText)]');
-    // Location v4 C6: place and tag lines stay, under the detail line, on blocks with room for them.
-    expect(rootView).toContain("DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))");
+    // Dense-day rules: the title wins; place and tags leave the block face and stay in its
+    // VoiceOver label, which React writes.
+    expect(rootView).not.toContain("entry.tagText");
+    expect(rootView).not.toContain("entry.placeText");
     expect(rootView).toContain("theme.textSecondary");
     expect(rootView).not.toContain("URLSession");
   });
@@ -164,7 +165,8 @@ describe("native Calendar production contract", () => {
     expect(model).toContain("brackets = (record.brackets ?? []).map(DayframeCalendarBracket.init)");
     // Drawn in the entries layer (the day's transition, zoom and scroll) with the blocks' own maths.
     expect(entriesLayer).toContain("ForEach(presentation.brackets)");
-    expect(entriesLayer).toContain("DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)");
+    // Dense-day rules: the rail at the hour gutter's edge, the name level in the gutter.
+    expect(entriesLayer).toContain("DayframeCalendarBracketView(height: height, name: bracket.name, nameWidth: max(0, hourLabelWidth - 6), theme: presentation.theme)");
     // Its bounds are its parts as drawn, part by part, never the trip measured as one block.
     expect(entriesLayer).toContain("DayframeCalendarBracketMath.span(");
     expect(entriesLayer).toContain("bracket.memberIds.contains($0.entryId)");
@@ -199,7 +201,7 @@ describe("native Calendar production contract", () => {
     const swiftSources = [core, rootView].join("\n");
 
     expect(core).toContain("public static let blockCornerRadius = 10.0");
-    expect(core).toContain("public static let blockVisualGap = 1.0");
+    expect(core).toContain("public static let blockVisualGap = 2.0");
     expect(core).toContain("public enum DayframeCalendarBlockVisualMath");
     expect(core).toContain("public enum DayframeCalendarVerticalMath");
     expect(core).toContain("semanticHeight: Double");
@@ -210,17 +212,21 @@ describe("native Calendar production contract", () => {
     expect(rootView).toContain("y: CGFloat(vertical.hitCenterY)");
     expect(rootView).toContain("semanticHeight: metrics.height");
     expect(rootView).not.toContain(".frame(width: width, height: hitHeight)");
-    expect(rootView).toContain("shape.fill(Color(uiColor: blockColor))");
-    // Measured on-block text stays opaque (4.5:1 is measured for the solid colour, not a blend).
-    expect(rootView).not.toMatch(/foregroundStyle\(textColor\.opacity/);
-    expect(rootView).toContain("if entry.warningOverlapCount > 0 && horizontal.width >= 22 {");
-    // Review text never sits directly on the hatch.
-    expect(rootView).toMatch(/if entry\.isReview \{\n\s+RoundedRectangle\(cornerRadius: 6, style: \.continuous\)\n\s+\.fill\(Color\(dayframeCSS: theme\.surface\)\)/);
-    expect(rootView).toContain("Color(dayframeCSS: entry.textColor)");
-    expect(rootView).toContain("DayframeCalendarLiveRing(color: textColor, reduceMotion: reduceMotion, shape: shape)");
+    // Dense-day rules: a tinted fill over the surface with a 3-point colour bar (dashed for a
+    // suggestion), no outline, and theme text, never measured on-block text.
+    expect(rootView).toContain("let fill = blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint)");
+    expect(rootView).toContain("shape.fill(Color(uiColor: fill))");
+    expect(rootView).toContain("DayframeCalendarColourBar(color: Color(uiColor: blockColor), dashed: entry.isReview)");
+    expect(rootView).not.toContain("strokeBorder(Color(uiColor: blockColor)");
+    expect(rootView).not.toContain("entry.textColor");
+    expect(rootView).toContain(".foregroundStyle(Color(dayframeCSS: theme.textPrimary))");
+    expect(rootView).toContain("let showsWarning = entry.warningOverlapCount > 0 && horizontal.width >= 22");
+    expect(rootView).toContain("DayframeCalendarLiveRing(color: Color(uiColor: blockColor), reduceMotion: reduceMotion, shape: shape)");
     expect(rootView).toContain(".opacity(reduceMotion ? 0.6 : bright ? 1 : 0.35)");
-    expect(rootView).toContain("DayframeCalendarHatch(color: Color(uiColor: blockColor))");
-    expect(rootView).toContain('entry.isReview ? "\\(entry.title) · review" : entry.title');
+    expect(rootView).toContain("DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))");
+    // A suggestion's "?" in the warning text colour, ahead of its title.
+    expect(rootView).toContain('let mark = isReview ? "? " : ""');
+    expect(rootView).toContain("theme.warningText");
     expect(swiftSources).not.toContain("min(13");
     expect(swiftSources).not.toContain("rect.height / 2), height: min(13");
     expect(swiftSources).not.toContain("onLongPressGesture");
@@ -362,19 +368,22 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
   const model = readFileSync(`${moduleRoot}ios/DayframeCalendarModel.swift`, "utf8");
   const swiftConstant = (name: string) => Number(core.match(new RegExp(`public static let ${name} = ([0-9.]+)`))?.[1]);
 
-  it("mirrors the shared label rule's numbers", async () => {
-    const { CALENDAR_BLOCK_LABEL } = await import("@dayframe/shared");
-    expect(swiftConstant("labelLineMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.iosMinimumHeight);
+  it("mirrors the shared dense-day label rule's numbers (owner, 24 Oct 2026)", async () => {
+    const { CALENDAR_BLOCK_LABEL, CALENDAR_DENSE_LABEL } = await import("@dayframe/shared");
+    expect(swiftConstant("labelLineMinimumHeight")).toBe(CALENDAR_DENSE_LABEL.minimumHeight);
+    expect(swiftConstant("compactTextMaximumHeight")).toBe(CALENDAR_DENSE_LABEL.compactTextMaximumHeight);
+    expect(swiftConstant("compactTextMaximumWidth")).toBe(CALENDAR_DENSE_LABEL.compactTextMaximumWidth);
+    expect(swiftConstant("detailMinimumWidth")).toBe(CALENDAR_DENSE_LABEL.detailMinimumWidth);
+    expect(swiftConstant("sliverMaximumWidth")).toBe(CALENDAR_DENSE_LABEL.sliverMaximumWidth);
     expect(swiftConstant("maximumLabelTextScale")).toBe(CALENDAR_BLOCK_LABEL.iosMaximumTextScale);
-    expect(swiftConstant("twoLineMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.twoLineMinimumHeight);
     expect(swiftConstant("legStripMinimumHeight")).toBe(CALENDAR_BLOCK_LABEL.legStripMinimumHeight);
-    expect(swiftConstant("iconOnlyMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.iconOnlyMaximumWidth);
-    expect(swiftConstant("compactLengthMaximumWidth")).toBe(CALENDAR_BLOCK_LABEL.compactLengthMaximumWidth);
-    // The length is bounded by its share of the column and scales down; it never forces its width.
-    expect(rootView).toContain(".frame(maxWidth: CGFloat(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: horizontal.width)), alignment: .leading)");
-    expect(rootView).not.toMatch(/Text\(length\)[\s\S]{0,200}\.fixedSize\(\)/);
-    expect(swiftConstant("compactTextMaximumHeight")).toBe(CALENDAR_BLOCK_LABEL.compactTextMaximumHeight);
     expect(swiftConstant("columnTouchTolerance")).toBe(CALENDAR_BLOCK_LABEL.touchTolerance);
+    // The title wins: no length beside it, and words are never split (DayframeCalendarTitleFit).
+    expect(rootView).not.toContain("entry.lengthLabel");
+    expect(rootView).toContain("DayframeCalendarTitleFit.lines(");
+    expect(core).toContain("public enum DayframeCalendarTitleFit");
+    // Columns spread right where the next is free; suggestions share them.
+    expect(core).toContain("DayframeCalendarColumnMath.layout(members, expandRight: true)");
     // The old 4-point minimum and "no title under 24 points" rules are gone.
     expect(core).not.toContain("minimumVisibleBlockHeight");
     expect(core).not.toContain("titleMinimumHeight");
@@ -391,12 +400,13 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(model).toMatch(/func updateHourHeight[\s\S]*?transaction\.disablesAnimations = true/);
   });
 
-  it("ships a glyph for every activity icon, for columns too narrow for words", () => {
+  it("still ships a glyph for every activity icon; a column too narrow for words is colour only", () => {
     const manifest = JSON.parse(readFileSync(`${moduleRoot}ios/Glyphs/manifest.json`, "utf8")) as Record<string, unknown>;
     const icons = readFileSync(fileURLToPath(new URL("../../../../packages/shared/src/icons.ts", import.meta.url)), "utf8");
     for (const [, glyph] of icons.matchAll(/glyph: "([a-z0-9-]+)"/g)) expect(manifest).toHaveProperty(`activity-${glyph}`);
     expect(manifest).toHaveProperty("activity-circle-dot");
-    expect(rootView).toContain('DayframeCalendarGlyph(name: "activity-\\(glyph)", size: 12)');
+    expect(rootView).not.toContain('DayframeCalendarGlyph(name: "activity-');
+    expect(rootView).toContain("if !label.sliver {");
   });
 
   it("switches Grid · List in the header and, in List, sizes itself to its header (location v4 step 9)", () => {

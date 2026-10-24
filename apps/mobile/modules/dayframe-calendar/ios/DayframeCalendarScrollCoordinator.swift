@@ -527,7 +527,20 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
           leadingInset: presentation.entryLeadingInset
         )?.hitFrame
       }
-      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames) else {
+      // Moments' 44-point targets too (dense-day rules), as the entries layer places them.
+      let momentFrames = presentation.entries.compactMap { entry -> DayframeCalendarHitFrame? in
+        guard entry.isMoment, let stoppedAtMs = entry.stoppedAtMs, let top = DayframeCalendarMomentMath.top(
+          startedAtMs: entry.startedAtMs,
+          stoppedAtMs: stoppedAtMs,
+          dayStartMs: presentation.dayStartMs,
+          dayEndMs: presentation.dayEndMs,
+          hourHeight: hourHeight
+        ) else {
+          return nil
+        }
+        return DayframeCalendarMomentMath.hitFrame(top: top, hourLabelWidth: layout.hourLabelWidth, timelineHeight: 24 * hourHeight)
+      }
+      guard !DayframeCalendarLongPressMath.pointHitsEntry(point: point, frames: hitFrames + momentFrames) else {
         return nil
       }
 

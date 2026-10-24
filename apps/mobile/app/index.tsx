@@ -6,7 +6,8 @@ const todayTabHref = "/(tabs)/today" as Href;
 // opens that QA harness straight away, so Simulator screenshots need no deep-link prompt.
 const QA_ROUTES: Record<string, Href> = {
   "calendar-qa": "/calendar-qa" as Href,
-  "calendar-qa-list": "/calendar-qa?layout=list" as Href
+  "calendar-qa-list": "/calendar-qa?layout=list" as Href,
+  "calendar-qa-dense": "/calendar-qa?day=dense" as Href
 };
 const qaRoute = __DEV__ ? QA_ROUTES[process.env.EXPO_PUBLIC_DAYFRAME_QA_ROUTE ?? ""] ?? null : null;
 

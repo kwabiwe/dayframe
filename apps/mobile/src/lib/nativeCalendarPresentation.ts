@@ -58,8 +58,8 @@ export type NativeCalendarPresentationEntry = {
   accessibilityLabel: string;
   color: string;
   /**
-   * Location v4 C6: iOS puts each group's blocks in side-by-side columns over their drawn extents,
-   * recomputed at every zoom step; logged blocks and Review suggestions are separate groups.
+   * Location v4 C6 and the dense-day rules: iOS puts logged blocks and Review suggestions together in
+   * side-by-side columns over their drawn extents, recomputed at every zoom step.
    */
   columnGroup: "logged" | "review";
   continuesIntoNextDay: boolean;
@@ -67,6 +67,8 @@ export type NativeCalendarPresentationEntry = {
   /** The activity's registry glyph, drawn alone in a column under 34 points wide. */
   glyph: string;
   isActive: boolean;
+  /** A finished block of a minute or less (dense-day rules): a tick at the gutter's edge, not a block. */
+  isMoment: boolean;
   isReview: boolean;
   isUncategorized: boolean;
   laneCount: number;
@@ -74,7 +76,7 @@ export type NativeCalendarPresentationEntry = {
   layoutMode: TimeIntervalLayout["mode"];
   /** The whole entry's length after the title: "11m", "1h 45m" (a running block's so far). */
   lengthLabel: string;
-  /** The detail line from 34 points: "Deep work · 10:45–12:30". */
+  /** The time and length line, shown only with room (dense-day rules): "10:45–12:30 · 1h 45m". */
   meta: string;
   offsetFraction: number;
   /**
@@ -87,7 +89,7 @@ export type NativeCalendarPresentationEntry = {
   overlapCount: number;
   overlapSeconds: number;
   placeText: string | null;
-  /** The part of the day column the group draws in: left of the Review lane, or the lane. */
+  /** The part of the day column the group draws in: the whole column under the dense-day rules. */
   regionOffsetFraction: number;
   regionWidthFraction: number;
   startedAtMs: number;
@@ -178,9 +180,10 @@ export type NativeCalendarOpenHandlers = {
   onOpenReview: (reviewItemId: string) => void;
 };
 
-/** Review suggestions take the right 44% of the day column (Blocks prototype). */
-export const REVIEW_LANE_WIDTH = 0.44;
-/** At most two side by side in the Review lane keeps every target 44 points wide at 320 points. */
+/**
+ * More than this many suggestions at once collapse into one "N suggestions" block (a crowd), so a
+ * suggestion's column never gets too narrow to read or tap.
+ */
 export const REVIEW_LANE_MAX_LANES = 2;
 /**
  * A short block's tap target is 44 points tall, centred on its drawn block (and kept inside the day
@@ -245,44 +248,6 @@ function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart:
   return { ...entry, startedAt: new Date(envelope.start).toISOString(), stoppedAt: new Date(envelope.end).toISOString() };
 }
 
-/**
- * Logged blocks whose targets share any time with a Review target give the Review lane its columns:
- * their whole group (blocks linked by overlapping targets, so lanes inside it stay consistent) is
- * drawn in the left part of the day column. A Review target then never lies over a logged one, so
- * both keep their full 44-point targets. Logged blocks away from suggestions keep the full width.
- */
-function loggedIdsBesideReview(
-  confirmed: NativeCalendarEntry[],
-  review: NativeCalendarEntry[],
-  now: number,
-  dayStart: Date,
-  dayEnd: Date
-) {
-  const reviewSpans = review.flatMap((entry) => targetEnvelopeOf(entry, now, dayStart, dayEnd) ?? []);
-  const logged = confirmed
-    .map((entry) => ({ id: entry.id, span: targetEnvelopeOf(entry, now, dayStart, dayEnd) }))
-    .filter((item): item is { id: string; span: { start: number; end: number } } => item.span !== null)
-    .sort((left, right) => left.span.start - right.span.start);
-  const squeezed = new Set<string>();
-  let group: typeof logged = [];
-  let groupEnd = -Infinity;
-  const flush = () => {
-    const start = Math.min(...group.map((item) => item.span.start));
-    if (group.length && reviewSpans.some((span) => span.start < groupEnd && span.end > start)) {
-      for (const item of group) squeezed.add(item.id);
-    }
-    group = [];
-    groupEnd = -Infinity;
-  };
-  for (const item of logged) {
-    if (group.length && item.span.start >= groupEnd) flush();
-    group.push(item);
-    groupEnd = Math.max(groupEnd, item.span.end);
-  }
-  flush();
-  return squeezed;
-}
-const REVIEW_LANE_Z_INDEX = 1_000;
 
 /**
  * Logged blocks: overlap columns side by side (Trello 210, `layoutCalendarColumns`), laid out where
@@ -385,29 +350,12 @@ export function buildNativeCalendarBridgeState({
   );
   const analysisById = new Map(allEntryAnalysis.entries.map((entry) => [entry.id, entry]));
   const warningById = new Map(confirmedAnalysis.entries.map((entry) => [entry.id, entry.overlapCount]));
-  // Confirmed blocks overlap only each other; Review suggestions sit in their own lane on the right
-  // (REVIEW_LANE_WIDTH of the day column). Logged blocks whose targets meet a Review target move to
-  // the left part (loggedIdsBesideReview), so neither covers the other's target.
-  const reviewEntries = entries.filter((entry) => isCalendarReviewNeeded(entry));
-  const besideReview = loggedIdsBesideReview(confirmedEntries, reviewEntries, now, dayStart, dayEnd);
-  const reviewSpanDayEnd = new Date(dayStart.getTime() + DAY_MS);
-  const layoutById = new Map<string, TimeIntervalLayout>([
-    ...layoutLoggedColumns(confirmedEntries, dayStart, dayEnd, now).map((layout) => [layout.id, besideReview.has(layout.id) ? {
-      ...layout,
-      offsetFraction: layout.offsetFraction * (1 - REVIEW_LANE_WIDTH),
-      widthFraction: layout.widthFraction * (1 - REVIEW_LANE_WIDTH)
-    } : layout] as const),
-    // The lane is narrow: overlapping Review items always sit side by side (never an inset over a
-    // longer one, which would leave it a strip too thin to tap).
-    // Any overlap at all, even under a minute, splits lanes here: two suggestions must never share
-    // one tap target.
-    ...layoutDayEntries(reviewEntries.map((entry) => withReviewTargetSpan(entry, now, dayStart, dayEnd)), dayStart, reviewSpanDayEnd, now, { insetOverlays: false, minimumOverlapMs: 0 }).map((layout) => [layout.id, {
-      ...layout,
-      offsetFraction: 1 - REVIEW_LANE_WIDTH + layout.offsetFraction * REVIEW_LANE_WIDTH,
-      widthFraction: layout.widthFraction * REVIEW_LANE_WIDTH,
-      zIndex: REVIEW_LANE_Z_INDEX + layout.zIndex
-    }] as const)
-  ]);
+  // Dense-day rules (owner, 24 Oct 2026): logged blocks and Review suggestions share one set of
+  // side-by-side columns; nothing is drawn on top of another and suggestions need no lane. iOS lays
+  // them out at every zoom; these fractions are the fallback for a native build without that.
+  const layoutById = new Map<string, TimeIntervalLayout>(
+    layoutLoggedColumns(entries, dayStart, dayEnd, now).map((layout) => [layout.id, layout] as const)
+  );
 
   // Named patterns (location v3 PR 14b): the day's blocks in Calendar's order, as Today groups them;
   // only a trip wholly inside the day gets a bracket (none across midnight). Each part's own label
@@ -421,8 +369,7 @@ export function buildNativeCalendarBridgeState({
     bracket.memberIds.forEach((id, index) => bracketParts.set(id, `Part ${index + 1} of ${bracket.memberIds.length} of ${bracket.name}`));
   }
 
-  const reviewIds = new Set(reviewEntries.map((entry) => entry.id));
-  const envelopeById = new Map(confirmedEntries.map((entry) => [entry.id, targetEnvelopeOf(entry, now, dayStart, dayEnd)] as const));
+  const envelopeById = new Map(entries.map((entry) => [entry.id, targetEnvelopeOf(entry, now, dayStart, dayEnd)] as const));
   // A logged block's hit geometry counts every Review suggestion it overlaps, and the logged blocks
   // it overlaps only while they share horizontal space: overlap columns put them side by side, so a
   // short block's 44-point target stays inside its own column and never covers its neighbour.
@@ -436,11 +383,11 @@ export function buildNativeCalendarBridgeState({
     if (!analysis) return undefined;
     const own = layoutById.get(id);
     const counted = new Set(analysis.overlappingEntryIds.filter((otherId) =>
-      reviewIds.has(otherId) || sharesHorizontalSpace(own, layoutById.get(otherId))
+      sharesHorizontalSpace(own, layoutById.get(otherId))
     ));
     const envelope = envelopeById.get(id);
     if ((own?.laneCount ?? 1) > 1 && envelope) {
-      for (const other of confirmedEntries) {
+      for (const other of entries) {
         if (other.id === id || counted.has(other.id)) continue;
         if (!sharesHorizontalSpace(own, layoutById.get(other.id))) continue;
         const otherEnvelope = envelopeById.get(other.id);
@@ -474,16 +421,10 @@ export function buildNativeCalendarBridgeState({
         theme,
         clockFormat,
         layoutById.get(entry.id),
-        // Review-lane items never share a target (their lanes and crowds already use the target
-        // envelope), so iOS gives each its full 44-point height even when the times overlap.
-        isCalendarReviewNeeded(entry) ? { overlapCount: 0, overlapSeconds: 0 } : hitAnalysis(entry.id),
+        hitAnalysis(entry.id),
         isCalendarReviewNeeded(entry) ? 0 : warningById.get(entry.id) ?? 0,
         bracketParts.get(entry.id),
-        // Where iOS lays out each group's columns: the Review lane on the right, logged blocks
-        // that meet a suggestion left of it, every other logged block across the day.
-        reviewIds.has(entry.id)
-          ? { offset: 1 - REVIEW_LANE_WIDTH, width: REVIEW_LANE_WIDTH }
-          : besideReview.has(entry.id) ? { offset: 0, width: 1 - REVIEW_LANE_WIDTH } : { offset: 0, width: 1 },
+        { offset: 0, width: 1 },
         resolveActivityIcon({
           icon: data?.categories?.find((category) => category.id === entry.categoryId)?.icon,
           name: entry.categoryName
@@ -602,13 +543,15 @@ function serializeCalendarEntry(
     entryId: entry.id,
     glyph,
     isActive: entry.isActive,
+    // Dense-day rules: a finished block of a minute or less is a moment, drawn as a tick.
+    isMoment: !reviewNeeded && stoppedAtMs !== null && Number.isFinite(stoppedAtMs) && stoppedAtMs - startedAtMs <= 60_000,
     isReview: reviewNeeded,
     isUncategorized,
     laneCount: layout?.laneCount ?? 1,
     laneIndex: layout?.laneIndex ?? 0,
     layoutMode: layout?.mode ?? "full",
     lengthLabel: formatDuration(entryLengthSeconds(entry, now)),
-    meta: calendarBlockMeta(entry, now, reviewNeeded, continuation.continuesIntoNextDay, clockFormat),
+    meta: calendarBlockTimesAndLength(entry, now, clockFormat),
     offsetFraction: layout?.offsetFraction ?? 0,
     overlapCount: analysis?.overlapCount ?? 0,
     overlapSeconds: analysis?.overlapSeconds ?? 0,
@@ -905,23 +848,16 @@ function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
  * The detail line from 34 points (location v4 C6): "Deep work · 10:45–12:30" — the activity unless it
  * is already the title, then the times; a running block ends "now". Review and next-day notes lead.
  */
-function calendarBlockMeta(
-  entry: NativeCalendarEntry,
-  now: number,
-  reviewNeeded: boolean,
-  continuesIntoNextDay: boolean,
-  clockFormat: ClockFormat
-) {
+/**
+ * The time and length line (dense-day rules), shown only where a block has room: "07:05–07:40 · 35m",
+ * "+1" on a finish the next day, "now" for a running block.
+ */
+function calendarBlockTimesAndLength(entry: NativeCalendarEntry, now: number, clockFormat: ClockFormat) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
-  const timeLabel = `${formatClockTime(startedAt, clockFormat)}–${entry.stoppedAt ? formatClockTime(stoppedAt, clockFormat) : "now"}`;
-  const activity = entry.categoryName && entry.categoryName !== displayEntryTitle(entry) ? entry.categoryName : null;
-  return [
-    reviewNeeded ? REVIEW_COPY.needsReview : null,
-    continuesIntoNextDay ? "Continues next day" : null,
-    activity,
-    timeLabel
-  ].filter(Boolean).join(" · ");
+  const days = Math.round((startOfLocalDay(stoppedAt).getTime() - startOfLocalDay(startedAt).getTime()) / DAY_MS);
+  const finish = entry.stoppedAt ? `${formatClockTime(stoppedAt, clockFormat)}${days > 0 ? ` +${days}` : ""}` : "now";
+  return `${formatClockTime(startedAt, clockFormat)}–${finish} · ${formatDuration(entryLengthSeconds(entry, now))}`;
 }
 
 /** The block's real length from its own times (a running one up to now). */

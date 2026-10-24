@@ -20,8 +20,7 @@ describe("native Calendar draws Dayframe registry glyphs (UIA-064)", () => {
   it("draws the bundled registry glyphs and keeps the accessibility labels", () => {
     const rootView = readFileSync(`${iosRoot}DayframeCalendarRootView.swift`, "utf8");
     expect(rootView).toContain('DayframeCalendarGlyph(name: direction > 0 ? "zoom-in" : "zoom-out"');
-    expect(rootView).toContain('[("place", entry.placeText), ("tag", entry.tagText)]');
-    expect(rootView).toContain("DayframeCalendarGlyph(name: glyph, size: 11 * scale, followsTextSize: false)");
+    // Dense-day rules: place and tag lines leave the block face (their glyphs stay bundled).
     expect(rootView).toContain('.accessibilityLabel(direction > 0 ? "Zoom in" : "Zoom out")');
 
     const manifest = JSON.parse(readFileSync(`${iosRoot}Glyphs/manifest.json`, "utf8")) as Record<string, { glyph: string }>;

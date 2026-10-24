@@ -72,6 +72,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let entryId: String
   let glyph: String?
   let isActive: Bool
+  let isMoment: Bool
   let isReview: Bool
   let isUncategorized: Bool
   let laneCount: Int
@@ -110,6 +111,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     entryId = record.entryId
     glyph = record.glyph
     isActive = record.isActive
+    isMoment = record.isMoment ?? false
     isReview = record.isReview
     isUncategorized = record.isUncategorized
     laneCount = max(1, record.laneCount)
@@ -141,6 +143,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
       startedAtMs: startedAtMs,
       stoppedAtMs: stoppedAtMs,
       columnGroup: columnGroup,
+      isMoment: isMoment,
       regionOffsetFraction: regionOffsetFraction,
       regionWidthFraction: regionWidthFraction,
       fallbackOffsetFraction: offsetFraction,
@@ -235,10 +238,8 @@ struct DayframeCalendarPresentation: Equatable {
 
   static let empty = DayframeCalendarPresentation(DayframeCalendarPresentationRecord())
 
-  /// A day with a bracket keeps its rail left of every block (render and hit geometry alike).
-  var entryLeadingInset: Double {
-    brackets.isEmpty ? 0 : DayframeCalendarConstants.bracketRailWidth
-  }
+  /// Dense-day rules: a bracket's rail and name sit in the hour gutter, so blocks keep the full width.
+  var entryLeadingInset: Double { 0 }
 }
 
 /// One press of the header's zoom − / + buttons. The scroll coordinator, the timeline's only

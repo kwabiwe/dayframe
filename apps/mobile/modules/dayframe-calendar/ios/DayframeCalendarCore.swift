@@ -7,25 +7,22 @@ public enum DayframeCalendarConstants {
   public static let minutesPerDay = 24.0 * 60.0
   public static let minimumVisualBlockHeight = 1.0
   public static let blockCornerRadius = 10.0
-  public static let blockVisualGap = 1.0
-  // Calendar titles at every zoom (location v4 C6). Mirrors CALENDAR_BLOCK_LABEL in
+  public static let blockVisualGap = 2.0
+  // Dense-day rules (owner, 24 Oct 2026; calendar-dense-mockup v2). Mirrors CALENDAR_DENSE_LABEL in
   // packages/shared/src/calendarBlockLayout.ts; nativeCalendar.contract.test.ts keeps them equal.
-  /// Every block is drawn at least one label line tall: 15 pt at the default text size.
-  public static let labelLineMinimumHeight = 15.0
+  /// Every block is drawn at least one label line tall: 18 pt at the default text size.
+  public static let labelLineMinimumHeight = 18.0
   /// The label (and so the minimum height) grows with Dynamic Type up to this scale.
   public static let maximumLabelTextScale = 1.3
-  /// From this drawn height a block shows a detail line under its title.
-  public static let twoLineMinimumHeight = 34.0
   /// From this drawn height a trip block shows its leg strip (legs arrive in a later step).
   public static let legStripMinimumHeight = 44.0
-  /// A column narrower than this shows the activity icon only.
-  public static let iconOnlyMaximumWidth = 34.0
-  /// In a column narrower than this the length takes at most half the line, scaled to fit whole.
-  public static let compactLengthMaximumWidth = 72.0
-  /// From this drawn height a block also lists its place and tags under the detail line.
-  public static let extraLinesMinimumHeight = 58.0
-  /// Below this drawn height the title uses the smaller label size.
-  public static let compactTextMaximumHeight = 22.0
+  /// Below this drawn height, or `compactTextMaximumWidth` wide, the title uses compact type.
+  public static let compactTextMaximumHeight = 34.0
+  public static let compactTextMaximumWidth = 90.0
+  /// From this width (and with a title line to spare) a block shows its times and length.
+  public static let detailMinimumWidth = 120.0
+  /// A column narrower than this shows its colour only.
+  public static let sliverMaximumWidth = 22.0
   /// Drawn edges this close count as touching, not colliding.
   public static let columnTouchTolerance = 0.5
   /// The minimum an older JS bundle's model was laid out for (no `columnGroup`): such blocks keep it,
@@ -76,8 +73,8 @@ public enum DayframeCalendarHorizontalMath {
     )
     let width = safeAvailableWidth * safeWidthFraction
     let safeSemanticHeight = max(0, semanticHeight.isFinite ? semanticHeight : 0)
-    // Every column keeps its title (location v4 C6); one under 34 pt wide shows the icon only.
-    let wordsFit = width >= DayframeCalendarConstants.iconOnlyMaximumWidth
+    // Dense-day rules: a column under 22 pt shows its colour only.
+    let wordsFit = width >= DayframeCalendarConstants.sliverMaximumWidth
     return DayframeCalendarHorizontalMetrics(
       offset: safeAvailableWidth * safeOffsetFraction,
       width: width,
@@ -822,62 +819,126 @@ public struct DayframeCalendarInteractionState: Equatable {
 }
 
 public struct DayframeCalendarBlockMetrics: Equatable {
-  public let compact: Bool
   public let continuesIntoNextDay: Bool
   public let height: Double
-  public let showMeta: Bool
-  public let showTitle: Bool
   public let startsBeforeDay: Bool
-  public let tiny: Bool
   public let top: Double
 
   public init(
-    compact: Bool,
     continuesIntoNextDay: Bool,
     height: Double,
-    showMeta: Bool,
-    showTitle: Bool,
     startsBeforeDay: Bool,
-    tiny: Bool,
     top: Double
   ) {
-    self.compact = compact
     self.continuesIntoNextDay = continuesIntoNextDay
     self.height = height
-    self.showMeta = showMeta
-    self.showTitle = showTitle
     self.startsBeforeDay = startsBeforeDay
-    self.tiny = tiny
     self.top = top
   }
 }
 
-/// How many label lines fit a block (location v4 C6). Each line has a fixed height at the label's
-/// text scale, so what is drawn never outgrows the block it was laid out for.
-public enum DayframeCalendarLabelFit {
-  public static let topPadding = 3.0
-  public static let visualGap = DayframeCalendarConstants.blockVisualGap
-  public static func titleLineHeight(textScale: Double) -> Double { 16 * textScale }
-  public static func detailLineHeight(textScale: Double) -> Double { 14 * textScale }
+/// A block's label under the dense-day rules (owner, 24 Oct 2026): the title always wins and wraps to
+/// the whole lines that fit; the times and length only with a line to spare in a column at least 120
+/// points wide; compact type under 34 points tall or 90 wide; colour only under 22 wide.
+public struct DayframeCalendarDenseLabel: Equatable {
+  public let sliver: Bool
+  public let compact: Bool
+  public let detail: Bool
+  public let titleLines: Int
+  public let titleFontSize: Double
+  public let titleLineHeight: Double
+  public let detailFontSize: Double
+  public let detailLineHeight: Double
+  /// Inside the drawn block: the colour bar's side, the trailing side, and top and bottom.
+  public let leadingPadding: Double
+  public let trailingPadding: Double
+  public let verticalPadding: Double
+}
 
-  /// Two lines from 34 points at the default size and below, growing with larger text.
-  public static func twoLineMinimumHeight(textScale: Double) -> Double {
-    DayframeCalendarConstants.twoLineMinimumHeight * max(1, textScale)
+public enum DayframeCalendarDenseLabelMath {
+  /// `height` is the drawn height (after the gap), `width` the drawn width; both in points.
+  public static func label(height: Double, width: Double, textScale: Double = 1) -> DayframeCalendarDenseLabel {
+    let scale = DayframeCalendarDayLayout.clampedTextScale(textScale)
+    let safeHeight = max(0, height.isFinite ? height : 0)
+    let safeWidth = max(0, width.isFinite ? width : 0)
+    let sliver = safeWidth < DayframeCalendarConstants.sliverMaximumWidth
+    let compact = safeHeight < DayframeCalendarConstants.compactTextMaximumHeight * max(1, scale)
+      || safeWidth < DayframeCalendarConstants.compactTextMaximumWidth
+    let line = (compact ? 13.0 : 16.0) * scale
+    let detailLine = 15.0 * scale
+    let verticalPadding = compact ? 1.0 : 2.0
+    // The mock-up's room: the top padding is kept; the last line may use the bottom padding.
+    let room = safeHeight - verticalPadding
+    let detail = !sliver && !compact && safeWidth >= DayframeCalendarConstants.detailMinimumWidth && room >= line + detailLine
+    let titleLines = sliver ? 0 : max(1, Int(floor((room - (detail ? detailLine : 0)) / line)))
+    return DayframeCalendarDenseLabel(
+      sliver: sliver,
+      compact: compact,
+      detail: detail,
+      titleLines: titleLines,
+      titleFontSize: (compact ? 11.0 : 13.5) * scale,
+      titleLineHeight: line,
+      detailFontSize: 12.0 * scale,
+      detailLineHeight: detailLine,
+      leadingPadding: compact ? 7 : 8,
+      trailingPadding: compact ? 4 : 6,
+      verticalPadding: verticalPadding
+    )
   }
+}
 
-  /// The widest the length may be drawn in a column: the line inside the 6-point side padding, half
-  /// of it in a column under 72 points (the title keeps the rest). It scales down to fit, never wider.
-  public static func lengthMaximumWidth(columnWidth: Double) -> Double {
-    let line = max(0, columnWidth - 12)
-    return columnWidth < DayframeCalendarConstants.compactLengthMaximumWidth ? line / 2 : line
-  }
+/// Fits a title into whole lines (dense-day rules): words are never split. A line that runs out of room
+/// ends with an ellipsis after its last whole word; a word wider than a whole line is left out with
+/// every word after it, so nothing is ever shown in part, and no lines at all mean colour only.
+public enum DayframeCalendarTitleFit {
+  public static let ellipsis = "\u{2026}"
 
-  /// The place and tag lines (0, 1 or 2) that fit under the title and detail lines.
-  public static func extraLines(height: Double, textScale: Double) -> Int {
-    guard height >= DayframeCalendarConstants.extraLinesMinimumHeight * max(1, textScale) else { return 0 }
-    let used = topPadding + visualGap + titleLineHeight(textScale: textScale) + detailLineHeight(textScale: textScale)
-    let room = height - used
-    return max(0, min(2, Int(floor(room / detailLineHeight(textScale: textScale)))))
+  public static func lines(
+    words: [String],
+    maxLines: Int,
+    width: Double,
+    measure: (String) -> Double
+  ) -> [String] {
+    guard maxLines > 0, width > 0 else { return [] }
+    var lines: [[String]] = []
+    var current: [String] = []
+    var cut = false
+    for word in words where !word.isEmpty {
+      if measure((current + [word]).joined(separator: " ")) <= width {
+        current.append(word)
+        continue
+      }
+      if !current.isEmpty {
+        if lines.count < maxLines { lines.append(current) } else { cut = true }
+        current = []
+      }
+      if cut || lines.count >= maxLines || measure(word) > width {
+        cut = true
+        break
+      }
+      current = [word]
+    }
+    if !current.isEmpty {
+      if lines.count < maxLines { lines.append(current) } else { cut = true }
+    }
+    var out = lines.map { $0.joined(separator: " ") }
+    guard cut, var last = lines.last else { return out }
+    out.removeLast()
+    while true {
+      let text = last.joined(separator: " ") + ellipsis
+      if measure(text) <= width {
+        out.append(text)
+        break
+      }
+      if last.count > 1 {
+        last.removeLast()
+      } else {
+        // No room for the ellipsis beside the one whole word: the word alone.
+        out.append(last.joined(separator: " "))
+        break
+      }
+    }
+    return out
   }
 }
 
@@ -929,16 +990,10 @@ public enum DayframeCalendarBlockMath {
       minimumHeight.isFinite ? minimumHeight : DayframeCalendarConstants.labelLineMinimumHeight
     )
     let height = max(safeMinimumHeight, (durationMinutes / 60.0) * safeHourHeight)
-    // The tiers grow with the label's text size, so the lines they add always fit.
-    let scale = DayframeCalendarDayLayout.clampedTextScale(textScale)
     return DayframeCalendarBlockMetrics(
-      compact: height < DayframeCalendarLabelFit.twoLineMinimumHeight(textScale: scale),
       continuesIntoNextDay: effectiveStopMs > dayEndMs,
       height: height,
-      showMeta: height >= DayframeCalendarLabelFit.twoLineMinimumHeight(textScale: scale),
-      showTitle: true,
       startsBeforeDay: startedAtMs < dayStartMs,
-      tiny: height < DayframeCalendarConstants.compactTextMaximumHeight * scale,
       top: (startMinute / 60.0) * safeHourHeight
     )
   }
@@ -977,6 +1032,8 @@ public struct DayframeCalendarColumn: Equatable {
   public let id: String
   public let columnIndex: Int
   public let columnCount: Int
+  /// Columns it spans: 1, or more when it widens right into columns free for its whole drawn height.
+  public let spanCount: Int
   public let offsetFraction: Double
   public let widthFraction: Double
   public let zIndex: Int
@@ -985,13 +1042,15 @@ public struct DayframeCalendarColumn: Equatable {
 /// Side-by-side columns over drawn extents (location v4 C6), the same rule as the shared
 /// `layoutCalendarBlockColumns` on the web: blocks are taken by top, then id; a cluster
 /// grows while the next block starts above its lowest bottom; each block takes the leftmost column
-/// whose last block has ended by its top. Every block in a cluster is 1 / columns wide.
-/// O(n log n): one sort, then two heaps (columns in use by bottom, freed columns by index).
+/// whose last block has ended by its top. Every block in a cluster is 1 / columns wide, or, with
+/// `expandRight` (dense-day rules), widens right while the next column is free for its whole height.
+/// O(n log n) to place, plus the widening check within each cluster.
 public enum DayframeCalendarColumnMath {
-  /// `tolerance`: drawn edges this close count as touching. Review targets use 0 (strictly apart).
+  /// `tolerance`: drawn edges this close count as touching.
   public static func layout(
     _ blocks: [DayframeCalendarDrawnBlock],
-    tolerance: Double = DayframeCalendarConstants.columnTouchTolerance
+    tolerance: Double = DayframeCalendarConstants.columnTouchTolerance,
+    expandRight: Bool = false
   ) -> [DayframeCalendarColumn] {
     var seen = Set<String>()
     let items = blocks
@@ -1009,7 +1068,7 @@ public enum DayframeCalendarColumnMath {
 
     var out: [DayframeCalendarColumn] = []
     out.reserveCapacity(items.count)
-    var cluster: [(id: String, column: Int)] = []
+    var cluster: [(id: String, column: Int, top: Double, bottom: Double)] = []
     var clusterBottom = -Double.infinity
     var columnCount = 0
     var busy = DayframeMinHeap<(bottom: Double, column: Int)> { left, right in
@@ -1020,12 +1079,23 @@ public enum DayframeCalendarColumnMath {
       guard !cluster.isEmpty else { return }
       let count = columnCount
       for member in cluster {
+        var span = 1
+        if expandRight {
+          while member.column + span < count, !cluster.contains(where: { other in
+            other.column == member.column + span
+              && other.top < member.bottom - tolerance
+              && other.bottom > member.top + tolerance
+          }) {
+            span += 1
+          }
+        }
         out.append(DayframeCalendarColumn(
           id: member.id,
           columnIndex: member.column,
           columnCount: count,
+          spanCount: span,
           offsetFraction: Double(member.column) / Double(count),
-          widthFraction: 1 / Double(count),
+          widthFraction: Double(span) / Double(count),
           zIndex: count > 1 ? member.column + 1 : 0
         ))
       }
@@ -1050,7 +1120,7 @@ public enum DayframeCalendarColumnMath {
         columnCount += 1
       }
       busy.push((item.bottom, column))
-      cluster.append((item.id, column))
+      cluster.append((item.id, column, item.top, item.bottom))
       clusterBottom = max(clusterBottom, item.bottom)
     }
     flush()
@@ -1114,6 +1184,8 @@ public struct DayframeCalendarLayoutInput: Equatable {
   /// "logged" or "review": blocks are put in columns within their own group. Nil (a model from an
   /// older bundle) keeps the fractions React sent.
   public let columnGroup: String?
+  /// A finished block of a minute or less: a tick at the gutter's edge, outside the block layout.
+  public let isMoment: Bool
   /// The part of the day column the group draws in (logged blocks beside the Review lane use the left part).
   public let regionOffsetFraction: Double
   public let regionWidthFraction: Double
@@ -1126,6 +1198,7 @@ public struct DayframeCalendarLayoutInput: Equatable {
     startedAtMs: Double,
     stoppedAtMs: Double?,
     columnGroup: String?,
+    isMoment: Bool = false,
     regionOffsetFraction: Double,
     regionWidthFraction: Double,
     fallbackOffsetFraction: Double,
@@ -1136,6 +1209,7 @@ public struct DayframeCalendarLayoutInput: Equatable {
     self.startedAtMs = startedAtMs
     self.stoppedAtMs = stoppedAtMs
     self.columnGroup = columnGroup
+    self.isMoment = isMoment
     self.regionOffsetFraction = regionOffsetFraction
     self.regionWidthFraction = regionWidthFraction
     self.fallbackOffsetFraction = fallbackOffsetFraction
@@ -1182,7 +1256,7 @@ public enum DayframeCalendarDayLayout {
     let minimumHeight = labelMinimumHeight(textScale: textScale)
     var blocks: [String: DayframeCalendarBlockMetrics] = [:]
     var groups: [String: [DayframeCalendarDrawnBlock]] = [:]
-    for entry in entries {
+    for entry in entries where !entry.isMoment {
       guard let block = DayframeCalendarBlockMath.metrics(
         startedAtMs: entry.startedAtMs,
         stoppedAtMs: entry.stoppedAtMs,
@@ -1195,19 +1269,16 @@ public enum DayframeCalendarDayLayout {
         calendar: calendar
       ) else { continue }
       blocks[entry.id] = block
-      if let group = entry.columnGroup {
-        // Review suggestions never share a target: their columns are laid out over the 44-point
-        // target each one gets (as hit testing places it), not just over what is drawn.
-        let extent = group == "review"
-          ? targetExtent(top: block.top, height: block.height, timelineHeight: 24 * hourHeight)
-          : (top: block.top, bottom: block.top + block.height)
-        groups[group, default: []].append(DayframeCalendarDrawnBlock(id: entry.id, top: extent.top, bottom: extent.bottom))
+      if entry.columnGroup != nil {
+        // Dense-day rules: logged blocks and Review suggestions share one set of columns over what
+        // is drawn (the minimum label height and the gap below included), so nothing is ever drawn
+        // on top of another and a suggestion needs no lane of its own.
+        groups["day", default: []].append(DayframeCalendarDrawnBlock(id: entry.id, top: block.top, bottom: block.top + block.height))
       }
     }
     var columns: [String: DayframeCalendarColumn] = [:]
-    for (group, members) in groups {
-      // Review targets must not meet at all: no touching tolerance.
-      for column in DayframeCalendarColumnMath.layout(members, tolerance: group == "review" ? 0 : DayframeCalendarConstants.columnTouchTolerance) {
+    for (_, members) in groups {
+      for column in DayframeCalendarColumnMath.layout(members, expandRight: true) {
         columns[column.id] = column
       }
     }
@@ -1296,6 +1367,40 @@ public enum DayframeCalendarDayLayout {
     )
     let hitTop = vertical.hitCenterY - vertical.hitHeight / 2
     return (hitTop, hitTop + vertical.hitHeight)
+  }
+}
+
+/// A moment (dense-day rules): a finished block of a minute or less, drawn as a short tick with a dot
+/// at the gutter's edge, just left of the blocks, so it never crosses one. Its 44-point square target
+/// lies over the hour labels' edge, never over a block, and stays inside the day like a block's.
+public enum DayframeCalendarMomentMath {
+  public static let targetSize = 44.0
+  /// Where the tick is drawn: the day's own clipped start (one across midnight sits at the top).
+  public static func top(
+    startedAtMs: Double,
+    stoppedAtMs: Double,
+    dayStartMs: Double,
+    dayEndMs: Double,
+    hourHeight: Double,
+    calendar: Calendar = .current
+  ) -> Double? {
+    DayframeCalendarBlockMath.metrics(
+      startedAtMs: startedAtMs,
+      stoppedAtMs: stoppedAtMs,
+      nowMs: stoppedAtMs,
+      dayStartMs: dayStartMs,
+      dayEndMs: dayEndMs,
+      hourHeight: hourHeight,
+      minimumHeight: DayframeCalendarConstants.minimumVisualBlockHeight,
+      calendar: calendar
+    )?.top
+  }
+
+  /// The target ends where the blocks begin (`hourLabelWidth + 8`).
+  public static func hitFrame(top: Double, hourLabelWidth: Double, timelineHeight: Double) -> DayframeCalendarHitFrame {
+    let maxX = hourLabelWidth + 8
+    let minY = min(max(0, top - targetSize / 2), max(0, timelineHeight - targetSize))
+    return DayframeCalendarHitFrame(minX: maxX - targetSize, maxX: maxX, minY: minY, maxY: minY + targetSize)
   }
 }
 

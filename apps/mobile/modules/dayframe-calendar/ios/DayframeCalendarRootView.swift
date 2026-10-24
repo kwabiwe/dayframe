@@ -531,10 +531,10 @@ private struct DayframeCalendarEntriesLayer: View {
       textScale: labelTextScale
     )
     ZStack(alignment: .topLeading) {
-      // Named patterns (location v3 PR 14b): each bracket in the rail left of the blocks, spanning
-      // its parts as they are drawn (the blocks' own maths, part by part), so zoom, scroll and a
-      // day change carry it with them. It comes and goes like a block (the same fade, none under
-      // Reduce Motion) and never takes a touch.
+      // Named patterns (location v3 PR 14b; dense-day rules): each bracket's rail at the hour gutter's
+      // edge and its name level in the gutter, spanning its parts as they are drawn (the blocks' own
+      // maths, part by part), so zoom, scroll and a day change carry it with them. It comes and goes
+      // like a block (the same fade, none under Reduce Motion) and never takes a touch.
       ForEach(presentation.brackets) { bracket in
         if let metrics = DayframeCalendarBracketMath.span(
           parts: presentation.entries
@@ -547,9 +547,10 @@ private struct DayframeCalendarEntriesLayer: View {
           minimumHeight: DayframeCalendarDayLayout.labelMinimumHeight(textScale: labelTextScale)
         ) {
           let height = CGFloat(metrics.height)
-          DayframeCalendarBracketView(height: height, name: bracket.name, theme: presentation.theme)
+          DayframeCalendarBracketView(height: height, name: bracket.name, nameWidth: max(0, hourLabelWidth - 6), theme: presentation.theme)
+            .frame(width: hourLabelWidth + 4, height: height)
             .position(
-              x: hourLabelWidth + CGFloat(8 + DayframeCalendarConstants.bracketRailWidth) / 2,
+              x: (hourLabelWidth + 4) / 2,
               y: CGFloat(metrics.top) + height / 2
             )
             .allowsHitTesting(false)
@@ -596,6 +597,7 @@ private struct DayframeCalendarEntriesLayer: View {
               horizontal: horizontal,
               labelTextScale: labelTextScale,
               metrics: metrics,
+              visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
               theme: presentation.theme
@@ -631,19 +633,53 @@ private struct DayframeCalendarEntriesLayer: View {
           .accessibilityAddTraits(entry.isActive ? .isSelected : [])
         }
       }
+
+      // Moments (dense-day rules): a finished block of a minute or less is a tick at the gutter's edge
+      // with a 44-point target over the hour labels' edge (DayframeCalendarMomentMath), never a block.
+      ForEach(presentation.entries.filter(\.isMoment)) { entry in
+        if let stoppedAtMs = entry.stoppedAtMs, let top = DayframeCalendarMomentMath.top(
+          startedAtMs: entry.startedAtMs,
+          stoppedAtMs: stoppedAtMs,
+          dayStartMs: presentation.dayStartMs,
+          dayEndMs: presentation.dayEndMs,
+          hourHeight: Double(hourHeight)
+        ) {
+          let frame = DayframeCalendarMomentMath.hitFrame(
+            top: top,
+            hourLabelWidth: Double(hourLabelWidth),
+            timelineHeight: 24 * Double(hourHeight)
+          )
+          Button {
+            actions.open(entry.actionTarget)
+          } label: {
+            DayframeCalendarMomentTick(color: Color(dayframeCSS: entry.color))
+              .offset(x: CGFloat(frame.maxX - frame.minX) - 7, y: CGFloat(top - frame.minY) - 3)
+              .frame(width: CGFloat(frame.maxX - frame.minX), height: CGFloat(frame.maxY - frame.minY), alignment: .topLeading)
+          }
+          .buttonStyle(.plain)
+          .contentShape(Rectangle())
+          .position(x: CGFloat(frame.minX + frame.maxX) / 2, y: CGFloat(frame.minY + frame.maxY) / 2)
+          .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
+          .zIndex(Double(DayframeCalendarDayLayout.reviewZIndexBase * 2))
+          .accessibilityLabel(entry.accessibilityLabel)
+          .accessibilityHint("Opens entry editor")
+        }
+      }
     }
     .frame(width: availableWidth, height: 24 * hourHeight, alignment: .topLeading)
   }
 }
 
-// Blocks: a logged block is a solid activity fill with measured on-block text; the running block
-// adds a breathing inner ring; a Review suggestion is hatched in its suggested colour with theme text.
+// Blocks under the dense-day rules (owner, 24 Oct 2026; calendar-dense-mockup v2): a tinted fill with
+// a 3-point colour bar and no outline, primary text; the running block adds a breathing ring. A Review
+// suggestion is hatched with a dashed bar and a "?". The title always wins; see DayframeCalendarDenseLabelMath.
 private struct DayframeCalendarBlockView: View {
   let cornerRadius: CGFloat
   let entry: DayframeCalendarEntry
   let horizontal: DayframeCalendarHorizontalMetrics
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
+  let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
   let theme: DayframeCalendarTheme
@@ -655,105 +691,54 @@ private struct DayframeCalendarBlockView: View {
       startsBeforeDay: metrics.startsBeforeDay
     )
     let blockColor = UIColor(dayframeCSS: entry.color)
-    let textColor = Color(dayframeCSS: entry.textColor)
+    let dark = theme.mode == "dark"
+    // 20 % light / 30 % dark for blocks, 12 % / 16 % for suggestions (more under Reduce Transparency).
+    let tint: CGFloat = entry.isReview
+      ? (dark ? 0.16 : 0.12) + (reduceTransparency ? 0.1 : 0)
+      : (dark ? 0.30 : 0.20) + (reduceTransparency ? 0.1 : 0)
+    let fill = blockColor.dayframeBlended(over: UIColor(dayframeCSS: theme.surface), alpha: tint)
+    let label = DayframeCalendarDenseLabelMath.label(
+      height: Double(visualHeight),
+      width: horizontal.width,
+      textScale: labelTextScale
+    )
+    // The overlap dot keeps its own corner: titles fit beside it, never under it.
+    let showsWarning = entry.warningOverlapCount > 0 && horizontal.width >= 22
+    let warningRoom = showsWarning ? 12.0 : 0
 
     ZStack(alignment: .topLeading) {
+      shape.fill(Color(uiColor: fill))
       if entry.isReview {
-        let base = blockColor.dayframeBlended(
-          over: UIColor(dayframeCSS: theme.surface),
-          alpha: reduceTransparency ? 0.28 : 0.16
-        )
-        shape.fill(Color(uiColor: base))
-        DayframeCalendarHatch(color: Color(uiColor: blockColor))
-          .opacity(reduceTransparency ? 0.55 : 0.4)
+        DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))
+          .opacity(reduceTransparency ? 0.22 : 0.16)
           .clipShape(shape)
-        shape.strokeBorder(Color(uiColor: blockColor).opacity(0.7), lineWidth: 1.5)
-      } else {
-        shape.fill(Color(uiColor: blockColor))
-        if entry.isActive {
-          DayframeCalendarLiveRing(color: textColor, reduceMotion: reduceMotion, shape: shape)
-        }
+      }
+      DayframeCalendarColourBar(color: Color(uiColor: blockColor), dashed: entry.isReview)
+        .clipShape(shape)
+      if entry.isActive {
+        DayframeCalendarLiveRing(color: Color(uiColor: blockColor), reduceMotion: reduceMotion, shape: shape)
       }
 
-      // Titles at every zoom (location v4 C6, mock-up #ios-grid): one line "Title 11m" under 34 pt,
-      // a detail line from 34 pt, the activity icon alone in a column under 34 pt wide. Sizes follow
-      // Dynamic Type up to the metadata cap, like the one-line minimum height.
-      let scale = CGFloat(min(DayframeCalendarConstants.maximumLabelTextScale, max(0.8, labelTextScale)))
-      // A model from an older JS bundle (no column group) keeps its old label rules: its blocks keep
-      // the 4-point minimum React laid them out for, so text shows only where it used to fit.
-      let legacy = entry.columnGroup == nil
-      let showsTitle = horizontal.showTitle && (!legacy || (metrics.height >= 24 && horizontal.width >= 64))
-      let showsMeta = legacy ? metrics.height >= 58 && horizontal.width >= 150 : metrics.showMeta
-      if showsTitle {
-        VStack(alignment: .leading, spacing: 0) {
-          // A compact (under 22 × scale) block centres its one line in what it has.
-          titleLine(scale: scale)
-            .frame(
-              height: CGFloat(metrics.tiny
-                ? max(1, metrics.height - DayframeCalendarLabelFit.visualGap)
-                : DayframeCalendarLabelFit.titleLineHeight(textScale: Double(scale))),
-              alignment: .leading
-            )
-
-          if showsMeta && !entry.meta.isEmpty {
-            Text(entry.meta)
-              .font(.system(size: 11 * scale, weight: .semibold))
-              .monospacedDigit()
-              .foregroundStyle(textColor)
-              .lineLimit(1)
-              .frame(height: CGFloat(DayframeCalendarLabelFit.detailLineHeight(textScale: Double(scale))), alignment: .leading)
-          }
-
-          // Room for more: the place, then the tags, only as many lines as fit the block.
-          // Older bundles' blocks too: never more lines than fit (Codex r5 on #548).
-          let extraLines = !showsMeta ? 0 : DayframeCalendarLabelFit.extraLines(height: metrics.height, textScale: Double(scale))
-          let extras = [("place", entry.placeText), ("tag", entry.tagText)]
-            .compactMap { (pair: (String, String?)) -> (String, String)? in
-              guard let text = pair.1, !text.isEmpty else { return nil }
-              return (pair.0, text)
-            }
-            .prefix(extraLines)
-          ForEach(Array(extras), id: \.0) { glyph, text in
-            HStack(spacing: 4) {
-              DayframeCalendarGlyph(name: glyph, size: 11 * scale, followsTextSize: false)
-                .accessibilityHidden(true)
-              Text(text)
-                .font(.system(size: 11 * scale))
-                .lineLimit(1)
-            }
-            .foregroundStyle(textColor)
-            .frame(height: CGFloat(DayframeCalendarLabelFit.detailLineHeight(textScale: Double(scale))), alignment: .leading)
-          }
-        }
-        // Review text sits on an opaque surface plate: theme text on the theme surface is the
-        // measured pair, whatever the hatch colour underneath (Reduce Transparency included).
-        .padding(.horizontal, entry.isReview ? 4 : 0)
-        .background {
-          if entry.isReview {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-              .fill(Color(dayframeCSS: theme.surface))
-          }
-        }
-        .padding(.horizontal, entry.isReview ? 4 : 6)
-        .padding(.top, metrics.tiny ? 0 : 3)
-        .frame(maxHeight: metrics.tiny ? .infinity : nil, alignment: .center)
-      } else if !legacy, let glyph = entry.glyph {
-        DayframeCalendarGlyph(name: "activity-\(glyph)", size: 12)
-          .foregroundStyle(textColor)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .accessibilityHidden(true)
+      if !label.sliver {
+        DayframeCalendarDenseText(
+          detail: label.detail ? entry.meta : nil,
+          isReview: entry.isReview,
+          label: label,
+          theme: theme,
+          title: entry.title,
+          titleWidth: max(0, horizontal.width - label.leadingPadding - label.trailingPadding - warningRoom),
+          width: max(0, horizontal.width - label.leadingPadding - label.trailingPadding)
+        )
+        .padding(.leading, CGFloat(label.leadingPadding))
+        .padding(.trailing, CGFloat(label.trailingPadding))
+        .padding(.top, CGFloat(label.verticalPadding))
       }
     }
-    .shadow(
-      color: entry.isReview && !reduceTransparency ? Color(dayframeCSS: theme.shadow) : .clear,
-      radius: 6,
-      y: 2
-    )
     .overlay(alignment: .topTrailing) {
-      if entry.warningOverlapCount > 0 && horizontal.width >= 22 {
+      if showsWarning {
         Circle()
           .fill(Color(dayframeCSS: theme.warning))
-          .overlay(Circle().strokeBorder(textColor.opacity(0.6), lineWidth: 1))
+          .overlay(Circle().strokeBorder(Color(dayframeCSS: theme.surface), lineWidth: 1))
           .frame(width: 8, height: 8)
           .padding(5)
           .accessibilityHidden(true)
@@ -762,64 +747,132 @@ private struct DayframeCalendarBlockView: View {
   }
 }
 
-private extension DayframeCalendarBlockView {
-  /// "Coffee 4m": the title truncates on its own and the whole entry's length always shows. In a
-  /// column under 72 points the length takes at most half the line, scaled down to fit whole.
-  func titleLine(scale: CGFloat) -> some View {
-    let textColor = Color(dayframeCSS: entry.textColor)
-    let size: CGFloat = (metrics.tiny ? 11 : 12.5) * scale
-    return HStack(spacing: 4) {
-      Text(entry.isReview ? "\(entry.title) · review" : entry.title)
-        .font(.system(size: size, weight: .bold))
-        .lineLimit(1)
-        .truncationMode(.tail)
-      if let length = entry.lengthLabel, !length.isEmpty {
-        // Never wider than its share of the column: it scales down to fit whole (Codex r6 on #548).
-        Text(length)
-          .font(.system(size: size, weight: .semibold))
-          .monospacedDigit()
-          .lineLimit(1)
-          .minimumScaleFactor(0.3)
-          .frame(maxWidth: CGFloat(DayframeCalendarLabelFit.lengthMaximumWidth(columnWidth: horizontal.width)), alignment: .leading)
-          .fixedSize(horizontal: false, vertical: true)
-          .layoutPriority(1)
+/// The 3-point colour bar down a block's leading edge: solid for a block, dashed for a suggestion.
+private struct DayframeCalendarColourBar: View {
+  let color: Color
+  let dashed: Bool
+
+  var body: some View {
+    GeometryReader { geometry in
+      if dashed {
+        Path { path in
+          path.move(to: CGPoint(x: 1.5, y: 0))
+          path.addLine(to: CGPoint(x: 1.5, y: geometry.size.height))
+        }
+        .stroke(color, style: StrokeStyle(lineWidth: 3, dash: [4, 3]))
+      } else {
+        Rectangle().fill(color).frame(width: 3)
       }
     }
-    .foregroundStyle(textColor)
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
   }
 }
 
-/// A named pattern's bracket (location v3 PR 14b): a light "[" in muted text hugging the blocks,
-/// with the name in secondary text running down beside it while there is room. Decorative only:
-/// each part's own VoiceOver label says which trip it is part of.
-private struct DayframeCalendarBracketView: View {
-  let height: CGFloat
-  let name: String
+/// The title as whole words (DayframeCalendarTitleFit) in the lines the block holds, then the times and
+/// length where there is room. Measured with the same fonts it is drawn in, so no word is ever cut.
+private struct DayframeCalendarDenseText: View {
+  let detail: String?
+  let isReview: Bool
+  let label: DayframeCalendarDenseLabel
   let theme: DayframeCalendarTheme
+  let title: String
+  /// The title's lines leave the overlap dot its corner; the time line below has the full width.
+  let titleWidth: Double
+  let width: Double
 
   var body: some View {
-    ZStack(alignment: .topLeading) {
-      if Double(height) >= DayframeCalendarConstants.bracketLabelMinimumHeight {
-        // A fixed size: the rail is 12 points wide at every text size, and the parts' labels carry
-        // the name for VoiceOver and larger text.
-        Text(name)
-          .font(.system(size: 10, weight: .semibold))
+    let font = UIFont.systemFont(ofSize: CGFloat(label.titleFontSize), weight: .semibold)
+    let mark = isReview ? "? " : ""
+    let lines = DayframeCalendarTitleFit.lines(
+      words: (mark + title).split(whereSeparator: \.isWhitespace).map(String.init),
+      maxLines: label.titleLines,
+      width: titleWidth,
+      measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
+    )
+    VStack(alignment: .leading, spacing: 0) {
+      ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+        titleLine(index == 0 && isReview ? String(line.dropFirst(mark.count)) : line, mark: index == 0 && isReview && line.hasPrefix("?"))
+          .font(.system(size: CGFloat(label.titleFontSize), weight: .semibold))
+          .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
+          .lineLimit(1)
+          .fixedSize(horizontal: true, vertical: false)
+          .frame(height: CGFloat(label.titleLineHeight), alignment: .leading)
+      }
+      // Colour only when no whole word fits: the time line goes too.
+      if let detail, !detail.isEmpty, !lines.isEmpty {
+        Text(detail)
+          .font(.system(size: CGFloat(label.detailFontSize), weight: .medium))
+          .monospacedDigit()
           .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
           .lineLimit(1)
           .truncationMode(.tail)
-          .frame(width: max(0, height - 4), height: 12)
-          .rotationEffect(.degrees(90))
-          .position(x: 6, y: height / 2)
+          .frame(height: CGFloat(label.detailLineHeight), alignment: .leading)
       }
-      Path { path in
-        path.move(to: CGPoint(x: 18, y: 0.75))
-        path.addLine(to: CGPoint(x: 14.75, y: 0.75))
-        path.addLine(to: CGPoint(x: 14.75, y: max(0.75, height - 0.75)))
-        path.addLine(to: CGPoint(x: 18, y: max(0.75, height - 0.75)))
-      }
-      .stroke(Color(dayframeCSS: theme.textMuted), style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
     }
-    .frame(width: CGFloat(8 + DayframeCalendarConstants.bracketRailWidth), height: height)
+    .frame(width: CGFloat(max(0, width)), alignment: .leading)
+    .clipped()
+  }
+
+  private func titleLine(_ text: String, mark: Bool) -> Text {
+    guard mark else { return Text(text) }
+    return Text("? ").foregroundColor(Color(dayframeCSS: theme.warningText)).fontWeight(.bold) + Text(text)
+  }
+}
+
+/// A named pattern's bracket under the dense-day rules: a thin rail at the hour gutter's edge, from its
+/// first part's top to its last part's bottom, with the name written level in the gutter beside it in
+/// whole words (an ellipsis only after a whole word). Decorative only: each part's own VoiceOver label
+/// says which trip it is part of.
+private struct DayframeCalendarBracketView: View {
+  let height: CGFloat
+  let name: String
+  let nameWidth: CGFloat
+  let theme: DayframeCalendarTheme
+
+  var body: some View {
+    let font = UIFont.systemFont(ofSize: 10, weight: .bold)
+    let lines = DayframeCalendarTitleFit.lines(
+      words: name.split(whereSeparator: \.isWhitespace).map(String.init),
+      maxLines: max(1, Int(floor(Double(max(12, height - 4)) / 12))),
+      width: Double(nameWidth),
+      measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
+    )
+    HStack(alignment: .top, spacing: 0) {
+      VStack(alignment: .leading, spacing: 0) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+          Text(line)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(Color(dayframeCSS: theme.textSecondary))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(height: 12, alignment: .leading)
+        }
+      }
+      .padding(.top, 2)
+      .frame(width: nameWidth, alignment: .topLeading)
+      // Over the hour labels it passes, like the mock-up's gutter label.
+      .background(Color(dayframeCSS: theme.background).opacity(lines.isEmpty ? 0 : 1))
+      Spacer(minLength: 0)
+      RoundedRectangle(cornerRadius: 1)
+        .fill(Color(dayframeCSS: theme.textMuted).opacity(0.55))
+        .frame(width: 2, height: height)
+    }
+    .frame(height: height, alignment: .top)
+  }
+}
+
+/// A moment's tick: a 6-point line with a dot at the gutter's edge, in its activity colour.
+private struct DayframeCalendarMomentTick: View {
+  let color: Color
+
+  var body: some View {
+    ZStack(alignment: .leading) {
+      Rectangle().fill(color).frame(width: 6, height: 2)
+      Circle().fill(color).frame(width: 6, height: 6).offset(x: -3)
+    }
+    .frame(width: 6, height: 6, alignment: .leading)
+    .accessibilityHidden(true)
   }
 }
 

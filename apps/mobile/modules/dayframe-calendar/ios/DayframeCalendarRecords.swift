@@ -35,7 +35,7 @@ struct DayframeCalendarEntryRecord: Codable {
   var actionKind = "completed"
   var accessibilityLabel = ""
   var color = "#7F91AB"
-  /// "logged" or "review" (location v4 C6): Swift puts the group's blocks in columns at every zoom.
+  /// "logged" or "review" (location v4 C6): Swift puts both in one set of columns at every zoom.
   /// Absent from an older bundle, which keeps the fractions below.
   var columnGroup: String?
   var continuesIntoNextDay = false
@@ -43,6 +43,9 @@ struct DayframeCalendarEntryRecord: Codable {
   /// The activity's registry glyph, drawn alone in a column under 34 points wide.
   var glyph: String?
   var isActive = false
+  /// A finished block of a minute or less (dense-day rules): drawn as a tick at the gutter's edge,
+  /// never as a block. Absent from an older bundle (a block, as before).
+  var isMoment: Bool?
   var isReview = false
   var isUncategorized = false
   var laneCount = 1
