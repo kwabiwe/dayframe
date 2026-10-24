@@ -2098,13 +2098,23 @@ function CalendarTitleWords({ text }: { text: string }) {
   useEffect(() => {
     const title = wordsRef.current?.parentElement;
     if (!title || typeof ResizeObserver === "undefined") return;
+    let disposed = false;
     const measure = () => {
+      if (disposed) return;
       const spans = [...(wordsRef.current?.querySelectorAll<HTMLElement>(".calendar-entry-word") ?? [])];
       setFitCount(wholeWordsThatFit(spans.map((span) => span.offsetWidth), title.clientWidth));
     };
     const observer = new ResizeObserver(measure);
     observer.observe(title);
-    return () => observer.disconnect();
+    // A web font arriving changes word widths without resizing the title, so measure again then too.
+    const fonts = typeof document === "undefined" ? undefined : document.fonts;
+    fonts?.addEventListener?.("loadingdone", measure);
+    void fonts?.ready?.then(measure);
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      fonts?.removeEventListener?.("loadingdone", measure);
+    };
   }, [words]);
   const shown = Math.min(fitCount, words.length);
   return (
