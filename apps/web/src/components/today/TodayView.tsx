@@ -160,6 +160,10 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     else rowRefs.current.delete(id);
   }, []);
   const [openPatterns, setOpenPatterns] = useState<ReadonlySet<string>>(() => new Set());
+  // Today's things to check (location v4 step 14), and the last count shown, so the chip keeps its words while it closes.
+  const liveCheckCount = data.stats.dayCheckCount ?? 0;
+  const [shownCheckCount, setShownCheckCount] = useState(liveCheckCount);
+  if (liveCheckCount > 0 && liveCheckCount !== shownCheckCount) setShownCheckCount(liveCheckCount);
   const togglePattern = useCallback((key: string) => {
     setOpenPatterns((current) => {
       const next = new Set(current);
@@ -220,15 +224,16 @@ export function TodayView({ initialData }: { initialData: BootstrapData; rendere
     <div className="df-today">
       <h1 className="sr-only">Today</h1>
       {/* Location v4 step 14: the Review card is now one quiet chip, opening Calendar › List at the first "?". */}
-      {dayCheckCount > 0 ? (
-        <div className="df-today-checks">
+      <div aria-hidden={dayCheckCount > 0 ? undefined : true} className="df-today-checks" data-open={dayCheckCount > 0}
+        inert={dayCheckCount > 0 ? undefined : true}>
+        <div>
           <Link className="timeline-checks-chip" href="/timeline?view=list&scope=day&check=first">
             <DayframeIcon glyph={DAYFRAME_APP_ICONS.placeUnknown} size={16} />
-            {dayCheckCount} to check today
+            {shownCheckCount} to check today
             <ChevronRight aria-hidden="true" size={14} />
           </Link>
         </div>
-      ) : null}
+      </div>
       <section className="df-card df-today-hero" aria-labelledby="df-today-total">
         <div className="df-today-hero-top">
           <div>

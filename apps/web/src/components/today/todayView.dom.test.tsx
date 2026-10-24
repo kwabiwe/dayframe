@@ -255,13 +255,20 @@ describe("Today", () => {
     vi.setSystemTime(NOW);
     const data = bootstrap();
     const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 2 } });
+    expect(container.querySelector<HTMLElement>(".df-today-checks")?.dataset.open).toBe("true");
     const chip = container.querySelector<HTMLAnchorElement>(".df-today-checks a");
     expect(chip?.textContent).toContain("2 to check today");
     expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&check=first");
     // The Review card is gone; nothing shows when there is nothing to check today.
     expect(container.textContent).not.toContain("moments waiting");
     await act(async () => root.render(tree({ ...data, stats: { ...data.stats, dayCheckCount: 0 } })));
-    expect(container.querySelector(".df-today-checks")).toBeNull();
+    // It closes (its row folds away and fades; at once with Reduce Motion), hidden from assistive tech and the keyboard.
+    const closed = container.querySelector<HTMLElement>(".df-today-checks");
+    expect(closed?.dataset.open).toBe("false");
+    expect(closed?.getAttribute("aria-hidden")).toBe("true");
+    expect(closed?.hasAttribute("inert")).toBe(true);
+    // It keeps its words while it closes.
+    expect(closed?.textContent).toContain("2 to check today");
     await act(async () => root.unmount());
   });
 

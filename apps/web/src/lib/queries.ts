@@ -218,9 +218,9 @@ export type DashboardStats = {
   /** Review cards (an outing once, PRD D19); `reviewCount` stays every open suggestion for older iPhones. */
   reviewCardCount: number;
   /**
-   * Things to check (location v4 step 14): open cards, counted as `reviewCardCount`, whose time falls in the
-   * last 8 days up to now (today and the 7 before), for the Calendar badge; and those on this bootstrap's
-   * day, for Today's "N to check today". Older servers leave them out.
+   * Things to check (location v4 step 14): open cards, counted as `reviewCardCount`, with times overlapping
+   * midnight seven days before this bootstrap's day up to now, for the Calendar badge; and those overlapping
+   * this day, as Calendar › List shows them, for Today's "N to check today". Older servers leave them out.
    */
   checkCount?: number;
   dayCheckCount?: number;
@@ -1474,18 +1474,24 @@ async function getDashboardStats(
          left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
          where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "reviewCardCount",
-        -- Things to check (location v4 step 14): the same cards by when they happened.
-        (select count(*) filter (where coalesce(ri.suggested_started_at, ri.created_at) >= $7::timestamptz - interval '8 days')::int
+        -- Things to check (location v4 step 14): the same cards, counted as the List shows them — a suggestion
+        -- with times, overlapping the window (Codex r1 on #572): from midnight seven days before this
+        -- bootstrap's day up to now, and this day.
+        (select count(*)::int
          from review_items ri
          left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
          where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
+           and ri.suggested_started_at is not null
+           and ri.suggested_started_at < $7::timestamptz
+           and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $2::timestamptz - interval '7 days'
            and not ${foldedOutingMemberSql("ri", "ae")}) as "checkCount",
         (select count(*)::int
          from review_items ri
          left join activity_events ae on ae.id = ri.event_id and ae.workspace_id = ri.workspace_id and ae.user_id = ri.user_id
          where ri.workspace_id = $1 and ri.user_id = $6 and ri.status = 'open'
-           and coalesce(ri.suggested_started_at, ri.created_at) >= $2::timestamptz
-           and coalesce(ri.suggested_started_at, ri.created_at) < $3::timestamptz
+           and ri.suggested_started_at is not null
+           and ri.suggested_started_at < $3::timestamptz
+           and coalesce(ri.suggested_stopped_at, ri.suggested_started_at) > $2::timestamptz
            and not ${foldedOutingMemberSql("ri", "ae")}) as "dayCheckCount"
      from time_entries
       where workspace_id = $1

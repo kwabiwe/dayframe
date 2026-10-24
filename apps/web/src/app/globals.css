@@ -8021,9 +8021,10 @@ dialog.ui-dialog.df-palette {
  * This week) and Today's blocks. Solid blocks use `.df-block`; coral is only the live mark.
  */
 .df-today {
+  --df-today-gap: 16px;
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--df-today-gap);
   padding: 20px 32px 32px;
 }
 
@@ -8047,8 +8048,36 @@ dialog.ui-dialog.df-palette {
   grid-column: span 6;
 }
 
+/* One owner for the chip's arrival and departure (Codex r1 on #572): its row opens and closes in height and
+   fades, and while closed it gives back the grid's gap, so the cards below move instead of jumping. */
 .df-today-checks {
+  display: grid;
   grid-column: span 12;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease-out;
+}
+
+.df-today-checks > div {
+  min-height: 0;
+  overflow: hidden;
+  /* Room for the chip's focus ring inside the clip. */
+  padding: 3px;
+  margin: -3px;
+}
+
+.df-today-checks[data-open="false"] {
+  grid-template-rows: 0fr;
+  margin-bottom: calc(-1 * var(--df-today-gap));
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-today-checks {
+    transition: none;
+  }
 }
 
 .df-today-placeholder {
@@ -8976,7 +9005,7 @@ dialog.ui-dialog.df-palette {
 
 @media (max-width: 860px) {
   .df-today {
-    gap: 12px;
+    --df-today-gap: 12px;
     padding: 12px 12px 24px;
   }
 
