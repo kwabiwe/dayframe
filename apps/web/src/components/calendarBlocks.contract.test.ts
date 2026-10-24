@@ -10,8 +10,10 @@ describe("Calendar in Blocks contract", () => {
     expect(timeline).not.toContain('color: "var(--text-primary)"');
     expect(styles).toMatch(/\.calendar-time-block \{[^}]*color: color-mix\(in oklab, var\(--calendar-block-accent\) var\(--calendar-ink\), var\(--calendar-ink-mix\)\);/);
     expect(styles).toMatch(/--calendar-ink: 52%;\s*--calendar-ink-strong: 40%;\s*--calendar-ink-mix: #000000;/);
-    expect(styles).toMatch(/--calendar-ink: 62%;\s*--calendar-ink-strong: 48%;\s*--calendar-ink-mix: #ffffff;/);
-    // Selected and Reduce Transparency fills are stronger, so their text takes the stronger shade (Codex r2 on #583).
+    expect(styles).toMatch(/--calendar-ink: 62%;\s*--calendar-ink-strong: 40%;\s*--calendar-ink-mix: #ffffff;/);
+    // Selected and Reduce Transparency fills are stronger, so their text takes the stronger shade (Codex r2/r3
+    // on #583; a palette compositing probe puts the worst case at 4.83:1); nested suggestions are their own tint.
+    expect(styles).toMatch(/\.calendar-review-block\[data-depth\] \{[^}]*88%, transparent\);/);
     expect(styles).toMatch(/\.calendar-time-block\.is-selected \{\s*--calendar-ink: var\(--calendar-ink-strong\);/);
     expect(timeline).toContain("<CalendarDetailLines lines={calendarBlockDetailLines(displayEntry, capturedNow, clock)} />");
     expect(styles).toMatch(/\.calendar-entry-details \{[^}]*max-height: calc\(var\(--detail-lines, 0\) \* 15px\);/);

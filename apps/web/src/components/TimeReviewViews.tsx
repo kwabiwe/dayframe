@@ -1769,6 +1769,7 @@ export function CalendarReview({
                       aria-label={`${item.title}, needs review, ${range}. Open Review.`}
                       className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
                       data-calendar-block-key={key}
+                      data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
                       href={`/review#review-${item.id}`}
                       key={key}
                       tabIndex={visibleSelectedTarget ? -1 : undefined}
