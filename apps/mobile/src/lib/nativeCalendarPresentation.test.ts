@@ -232,7 +232,7 @@ describe("native Calendar presentation boundary", () => {
       const items = state.model.entries;
       expect(items.map((item) => item.actionId)).toEqual(["a", "b"]);
       for (const item of items) {
-        expect(item).toMatchObject({ columnGroup: "review", regionOffsetFraction: 0, regionWidthFraction: 1 });
+        expect(item).toMatchObject({ columnGroup: "logged", isReview: true, regionOffsetFraction: 0, regionWidthFraction: 1 });
         expect(item.widthFraction).toBeCloseTo(0.5);
       }
       expect(items[0].offsetFraction).not.toBeCloseTo(items[1].offsetFraction);
@@ -897,7 +897,7 @@ describe("native Calendar Blocks presentation", () => {
       const dayStart = new Date(year, month - 1, day).getTime();
       const dayEnd = new Date(year, month - 1, day + 1).getTime();
       // Crowds keep at most REVIEW_LANE_MAX_LANES suggestions at once; all share the day's columns.
-      for (const item of lane) expect(item).toMatchObject({ columnGroup: "review", regionOffsetFraction: 0, regionWidthFraction: 1 });
+      for (const item of lane) expect(item).toMatchObject({ columnGroup: "logged", isReview: true, regionOffsetFraction: 0, regionWidthFraction: 1 });
       for (const [index, a] of lane.entries()) {
         const meeting = lane.filter((b, other) => other !== index && b.startedAtMs < dayEnd && a.startedAtMs < dayEnd
           && reviewTargetEnvelope(a.startedAtMs, a.stoppedAtMs!, dayStart, dayEnd).start < reviewTargetEnvelope(b.startedAtMs, b.stoppedAtMs!, dayStart, dayEnd).end

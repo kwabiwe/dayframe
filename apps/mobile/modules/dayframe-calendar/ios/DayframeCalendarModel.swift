@@ -242,6 +242,33 @@ struct DayframeCalendarPresentation: Equatable {
   var entryLeadingInset: Double { 0 }
 }
 
+/// A moment as the entries layer draws it and the coordinator hit-tests it (dense-day rules).
+struct DayframeCalendarMomentPlacement {
+  let entry: DayframeCalendarEntry
+  let top: Double
+  let frame: DayframeCalendarHitFrame
+}
+
+enum DayframeCalendarMomentLayout {
+  /// The day's moments with their ticks and targets, resolved together (DayframeCalendarMomentMath.hitFrames).
+  static func layout(presentation: DayframeCalendarPresentation, hourHeight: Double, hourLabelWidth: Double) -> [DayframeCalendarMomentPlacement] {
+    let placed = presentation.entries.compactMap { entry -> (DayframeCalendarEntry, Double)? in
+      guard entry.isMoment, let stoppedAtMs = entry.stoppedAtMs, let top = DayframeCalendarMomentMath.top(
+        startedAtMs: entry.startedAtMs,
+        stoppedAtMs: stoppedAtMs,
+        dayStartMs: presentation.dayStartMs,
+        dayEndMs: presentation.dayEndMs,
+        hourHeight: hourHeight
+      ) else {
+        return nil
+      }
+      return (entry, top)
+    }
+    let frames = DayframeCalendarMomentMath.hitFrames(tops: placed.map(\.1), hourLabelWidth: hourLabelWidth, timelineHeight: 24 * hourHeight)
+    return zip(placed, frames).map { DayframeCalendarMomentPlacement(entry: $0.0.0, top: $0.0.1, frame: $0.1) }
+  }
+}
+
 /// One press of the header's zoom − / + buttons. The scroll coordinator, the timeline's only
 /// geometry owner, animates it around the viewport centre and records the token it has handled.
 struct DayframeCalendarZoomRequest: Equatable {

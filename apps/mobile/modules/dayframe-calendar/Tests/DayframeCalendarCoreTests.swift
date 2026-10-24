@@ -178,7 +178,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       calendar: calendar
     )
 
-    // Dense-day rules: one 18-point label line at least, in compact type with no time line.
+    // Dense-day rules: one 18-point label line at least, the gap included (the mock-up's MIN_H).
     XCTAssertEqual(tiny?.height, 18)
     let label = DayframeCalendarDenseLabelMath.label(height: 16, width: 200)
     XCTAssertTrue(label.compact)
@@ -1212,8 +1212,8 @@ final class DayframeCalendarCoreTests: XCTestCase {
       DayframeCalendarLayoutInput(id: "old", startedAtMs: try at("12:00"), stoppedAtMs: try at("13:00"), columnGroup: nil, regionOffsetFraction: 0, regionWidthFraction: 1, fallbackOffsetFraction: 0.25, fallbackWidthFraction: 0.5, fallbackZIndex: 3)
     ]
     let layout = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayEnd, dayStartMs: dayStart, dayEndMs: dayEnd, hourHeight: 48, calendar: calendar)
-    // One 18-point line at least: at 48 pt/h A's label reaches B (09:20), and the suggestion runs to
-    // 09:30, so the three sit side by side, the suggestion in the same columns as the blocks.
+    // One 18-point line at least (the gap included): at 48 pt/h A reaches B (09:20), and the
+    // suggestion runs to 09:30, so the three sit side by side, the suggestion in the blocks' columns.
     XCTAssertEqual(layout["a"]?.block.height, 18)
     XCTAssertEqual(layout["a"]?.offsetFraction ?? -1, 0, accuracy: 1e-9)
     XCTAssertEqual(layout["a"]?.widthFraction ?? -1, 1.0 / 3.0, accuracy: 1e-9)
@@ -1386,14 +1386,19 @@ final class DayframeCalendarCoreTests: XCTestCase {
           XCTAssertEqual(label.detail, !label.compact && width >= 120 && height - 2 >= label.titleLineHeight + label.detailLineHeight)
           // The top padding stays; the last line may use the bottom padding (calendar-dense-mockup v2).
           let used = Double(label.titleLines) * label.titleLineHeight + (label.detail ? label.detailLineHeight : 0) + label.verticalPadding
-          // One title line always shows; beyond it, never more lines than the block holds.
-          if label.titleLines > 1 || label.detail {
-            XCTAssertLessThanOrEqual(used, height + 0.001, "\(height) × \(width) at ×\(scale)")
-          }
+          // Never more lines than the block holds, and none at all where one would not fit whole.
+          XCTAssertLessThanOrEqual(used, height + 0.001, "\(height) × \(width) at ×\(scale)")
         }
       }
     }
     XCTAssertTrue(DayframeCalendarDenseLabelMath.label(height: 40, width: 21).sliver)
+    // An older bundle's 2-point block: no line fits, so colour only (Codex r1 on #580).
+    XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: 2, width: 200).titleLines, 0)
+    // What is painted at the minimum (the gap taken off) still holds one compact line at every size.
+    for scale in [0.8, 1.0, 1.3] {
+      let painted = DayframeCalendarDayLayout.labelMinimumHeight(textScale: scale) - DayframeCalendarConstants.blockVisualGap
+      XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: painted, width: 200, textScale: scale).titleLines, 1, "×\(scale)")
+    }
     XCTAssertFalse(DayframeCalendarDenseLabelMath.label(height: 40, width: 22).sliver)
   }
 
@@ -1496,5 +1501,29 @@ final class DayframeCalendarCoreTests: XCTestCase {
     ))
     XCTAssertEqual(midnight, 0)
     XCTAssertEqual(DayframeCalendarMomentMath.hitFrame(top: midnight, hourLabelWidth: 68, timelineHeight: 1_728).minY, 0)
+  }
+
+  func testNearbyMomentsSplitTheirTargetsSoATapOpensTheNearest() {
+    for hourHeight in [48.0, 72, 128] {
+      // 10:00 and 10:10, and two at 12:00 together.
+      let tops = [10 * hourHeight, (10 + 10.0 / 60) * hourHeight, 12 * hourHeight, 12 * hourHeight]
+      let frames = DayframeCalendarMomentMath.hitFrames(tops: tops, hourLabelWidth: 68, timelineHeight: 24 * hourHeight)
+      for (index, top) in tops.enumerated() {
+        let point = DayframeCalendarPoint(x: 60, y: top)
+        let hits = frames.indices.filter { frames[$0].contains(point) }
+        XCTAssertTrue(hits.contains(index) || tops.filter({ $0 == top }).count > 1, "moment \(index) at \(hourHeight)")
+        // Never more than the two sharing a tick.
+        XCTAssertLessThanOrEqual(hits.count, 2)
+      }
+      // Separate ticks never share a target point.
+      XCTAssertLessThanOrEqual(frames[0].maxY, frames[1].minY)
+      XCTAssertEqual(frames[0].maxY, (tops[0] + tops[1]) / 2, accuracy: 1e-9)
+      // Two at the same time: one keeps the half above, the other the half below.
+      XCTAssertEqual(frames[2].maxY, tops[2], accuracy: 1e-9)
+      XCTAssertEqual(frames[3].minY, tops[3], accuracy: 1e-9)
+      // A lone moment keeps its whole 44 points.
+      let lone = DayframeCalendarMomentMath.hitFrames(tops: [5 * hourHeight], hourLabelWidth: 68, timelineHeight: 24 * hourHeight)[0]
+      XCTAssertEqual(lone.maxY - lone.minY, 44)
+    }
   }
 }

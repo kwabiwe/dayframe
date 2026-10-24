@@ -636,34 +636,23 @@ private struct DayframeCalendarEntriesLayer: View {
 
       // Moments (dense-day rules): a finished block of a minute or less is a tick at the gutter's edge
       // with a 44-point target over the hour labels' edge (DayframeCalendarMomentMath), never a block.
-      ForEach(presentation.entries.filter(\.isMoment)) { entry in
-        if let stoppedAtMs = entry.stoppedAtMs, let top = DayframeCalendarMomentMath.top(
-          startedAtMs: entry.startedAtMs,
-          stoppedAtMs: stoppedAtMs,
-          dayStartMs: presentation.dayStartMs,
-          dayEndMs: presentation.dayEndMs,
-          hourHeight: Double(hourHeight)
-        ) {
-          let frame = DayframeCalendarMomentMath.hitFrame(
-            top: top,
-            hourLabelWidth: Double(hourLabelWidth),
-            timelineHeight: 24 * Double(hourHeight)
-          )
-          Button {
-            actions.open(entry.actionTarget)
-          } label: {
-            DayframeCalendarMomentTick(color: Color(dayframeCSS: entry.color))
-              .offset(x: CGFloat(frame.maxX - frame.minX) - 7, y: CGFloat(top - frame.minY) - 3)
-              .frame(width: CGFloat(frame.maxX - frame.minX), height: CGFloat(frame.maxY - frame.minY), alignment: .topLeading)
-          }
-          .buttonStyle(.plain)
-          .contentShape(Rectangle())
-          .position(x: CGFloat(frame.minX + frame.maxX) / 2, y: CGFloat(frame.minY + frame.maxY) / 2)
-          .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
-          .zIndex(Double(DayframeCalendarDayLayout.reviewZIndexBase * 2))
-          .accessibilityLabel(entry.accessibilityLabel)
-          .accessibilityHint("Opens entry editor")
+      let moments = DayframeCalendarMomentLayout.layout(presentation: presentation, hourHeight: Double(hourHeight), hourLabelWidth: Double(hourLabelWidth))
+      ForEach(moments, id: \.entry.entryId) { moment in
+        let frame = moment.frame
+        Button {
+          actions.open(moment.entry.actionTarget)
+        } label: {
+          DayframeCalendarMomentTick(color: Color(dayframeCSS: moment.entry.color))
+            .offset(x: CGFloat(frame.maxX - frame.minX) - 7, y: CGFloat(moment.top - frame.minY) - 3)
+            .frame(width: CGFloat(frame.maxX - frame.minX), height: CGFloat(frame.maxY - frame.minY), alignment: .topLeading)
         }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .position(x: CGFloat(frame.minX + frame.maxX) / 2, y: CGFloat(frame.minY + frame.maxY) / 2)
+        .transition(presentation.reduceMotion ? .identity : .opacity.animation(.easeOut(duration: 0.21)))
+        .zIndex(Double(DayframeCalendarDayLayout.reviewZIndexBase * 2))
+        .accessibilityLabel(moment.entry.accessibilityLabel)
+        .accessibilityHint("Opens entry editor")
       }
     }
     .frame(width: availableWidth, height: 24 * hourHeight, alignment: .topLeading)
@@ -783,16 +772,21 @@ private struct DayframeCalendarDenseText: View {
 
   var body: some View {
     let font = UIFont.systemFont(ofSize: CGFloat(label.titleFontSize), weight: .semibold)
+    // A suggestion's "? " is decoration ahead of its title (drawn bold): only real title words are
+    // fitted, beside it, so a title that fits no word is still colour only (Codex r1 on #580).
     let mark = isReview ? "? " : ""
+    let markWidth = isReview
+      ? Double((mark as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: CGFloat(label.titleFontSize), weight: .bold)]).width)
+      : 0
     let lines = DayframeCalendarTitleFit.lines(
-      words: (mark + title).split(whereSeparator: \.isWhitespace).map(String.init),
+      words: title.split(whereSeparator: \.isWhitespace).map(String.init),
       maxLines: label.titleLines,
-      width: titleWidth,
+      width: titleWidth - markWidth,
       measure: { text in Double((text as NSString).size(withAttributes: [.font: font]).width) }
     )
     VStack(alignment: .leading, spacing: 0) {
       ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-        titleLine(index == 0 && isReview ? String(line.dropFirst(mark.count)) : line, mark: index == 0 && isReview && line.hasPrefix("?"))
+        titleLine(line, mark: index == 0 && isReview)
           .font(.system(size: CGFloat(label.titleFontSize), weight: .semibold))
           .foregroundStyle(Color(dayframeCSS: theme.textPrimary))
           .lineLimit(1)

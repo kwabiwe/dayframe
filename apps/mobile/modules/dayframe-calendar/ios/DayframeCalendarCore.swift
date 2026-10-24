@@ -870,7 +870,8 @@ public enum DayframeCalendarDenseLabelMath {
     // The mock-up's room: the top padding is kept; the last line may use the bottom padding.
     let room = safeHeight - verticalPadding
     let detail = !sliver && !compact && safeWidth >= DayframeCalendarConstants.detailMinimumWidth && room >= line + detailLine
-    let titleLines = sliver ? 0 : max(1, Int(floor((room - (detail ? detailLine : 0)) / line)))
+    // Never a line that does not fit whole (an older bundle's 4-point blocks show colour only).
+    let titleLines = sliver ? 0 : max(0, Int(floor((room - (detail ? detailLine : 0)) / line)))
     return DayframeCalendarDenseLabel(
       sliver: sliver,
       compact: compact,
@@ -1233,7 +1234,9 @@ public struct DayframeCalendarLaidOutEntry: Equatable {
 public enum DayframeCalendarDayLayout {
   public static let reviewZIndexBase = 1_000
 
-  /// One label line at the given Dynamic Type scale (capped like the metadata text).
+  /// One label line at the given Dynamic Type scale (capped like the metadata text): the mock-up's
+  /// `MIN_H`, the gap below included, so columns form exactly where calendar-dense-mockup v2 forms
+  /// them. What is painted (2 points less) holds one compact line and its padding at every scale.
   public static func labelMinimumHeight(textScale: Double) -> Double {
     DayframeCalendarConstants.labelLineMinimumHeight * clampedTextScale(textScale)
   }
@@ -1401,6 +1404,24 @@ public enum DayframeCalendarMomentMath {
     let maxX = hourLabelWidth + 8
     let minY = min(max(0, top - targetSize / 2), max(0, timelineHeight - targetSize))
     return DayframeCalendarHitFrame(minX: maxX - targetSize, maxX: maxX, minY: minY, maxY: minY + targetSize)
+  }
+
+  /// Every moment's target, in the order given, resolved together (Codex r1 on #580): where two
+  /// targets would meet, each stops at the midpoint between the two ticks, so a tap always opens the
+  /// moment nearest it (two at the same time split the target above and below their tick).
+  public static func hitFrames(tops: [Double], hourLabelWidth: Double, timelineHeight: Double) -> [DayframeCalendarHitFrame] {
+    let order = tops.indices.sorted { tops[$0] != tops[$1] ? tops[$0] < tops[$1] : $0 < $1 }
+    var frames = tops.map { hitFrame(top: $0, hourLabelWidth: hourLabelWidth, timelineHeight: timelineHeight) }
+    for (rank, index) in order.enumerated() {
+      var frame = frames[index]
+      var minY = frame.minY
+      var maxY = frame.maxY
+      if rank > 0 { minY = max(minY, (tops[order[rank - 1]] + tops[index]) / 2) }
+      if rank + 1 < order.count { maxY = min(maxY, (tops[index] + tops[order[rank + 1]]) / 2) }
+      frame = DayframeCalendarHitFrame(minX: frame.minX, maxX: frame.maxX, minY: minY, maxY: max(minY, maxY))
+      frames[index] = frame
+    }
+    return frames
   }
 }
 

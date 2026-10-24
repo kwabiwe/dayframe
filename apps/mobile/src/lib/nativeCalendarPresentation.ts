@@ -5,7 +5,6 @@ import {
   CALENDAR_BLOCK_LABEL,
   calendarBlockContinuationEdges,
   formatClockTime,
-  layoutTimeIntervals,
   resolveActivityIcon,
   namedPatternBrackets,
   type ClockFormat,
@@ -59,7 +58,9 @@ export type NativeCalendarPresentationEntry = {
   color: string;
   /**
    * Location v4 C6 and the dense-day rules: iOS puts logged blocks and Review suggestions together in
-   * side-by-side columns over their drawn extents, recomputed at every zoom step.
+   * side-by-side columns over their drawn extents, recomputed at every zoom step. Every entry is sent
+   * in the one "logged" group (Codex r1 on #580), so a native build that still lays groups out apart
+   * also keeps them side by side; `isReview` says how each is drawn.
    */
   columnGroup: "logged" | "review";
   continuesIntoNextDay: boolean;
@@ -242,11 +243,6 @@ function targetEnvelopeOf(entry: NativeCalendarEntry, now: number, dayStart: Dat
   return reviewTargetEnvelope(start, end, dayStart.getTime(), dayEnd.getTime());
 }
 
-function withReviewTargetSpan(entry: NativeCalendarEntry, now: number, dayStart: Date, dayEnd: Date): NativeCalendarEntry {
-  const envelope = targetEnvelopeOf(entry, now, dayStart, dayEnd);
-  if (!envelope) return entry;
-  return { ...entry, startedAt: new Date(envelope.start).toISOString(), stoppedAt: new Date(envelope.end).toISOString() };
-}
 
 
 /**
@@ -286,23 +282,6 @@ function sharesHorizontalSpace(left: TimeIntervalLayout | undefined, right: Time
     && rightStart < leftStart + (left?.widthFraction ?? 1) - epsilon;
 }
 
-function layoutDayEntries(
-  entries: NativeCalendarEntry[],
-  dayStart: Date,
-  dayEnd: Date,
-  now: number,
-  options?: { insetOverlays?: boolean; minimumOverlapMs?: number }
-) {
-  return layoutTimeIntervals(
-    entries.map((entry) => ({
-      id: entry.id,
-      startedAt: Math.max(dayStart.getTime(), Date.parse(entry.startedAt)),
-      stoppedAt: Math.min(dayEnd.getTime(), entry.stoppedAt ? Date.parse(entry.stoppedAt) : now)
-    })),
-    now,
-    options
-  );
-}
 
 export function buildNativeCalendarBridgeState({
   clockFormat = "24h",
@@ -538,7 +517,7 @@ function serializeCalendarEntry(
       ? reviewCrowdAccessibilityLabel(entry.reviewCrowd, startedAtMs, effectiveStoppedAtMs, clockFormat)
       : `${reviewNeeded ? REVIEW_COPY.needsReview : entry.isActive ? "Edit running timer" : "Open time block"}: ${title}, ${timeRange}, ${length}${entry.placeName ? `. Place: ${entry.placeName}` : ""}${tagText ? `. Tags: ${tagText}` : ""}${partOf ? `. ${partOf}` : ""}${warningOverlapCount ? `. Overlaps ${warningOverlapCount} other ${warningOverlapCount === 1 ? "entry" : "entries"}.` : ""}`,
     color,
-    columnGroup: reviewNeeded ? "review" : "logged",
+    columnGroup: "logged",
     continuesIntoNextDay: continuation.continuesIntoNextDay,
     entryId: entry.id,
     glyph,
