@@ -2,11 +2,11 @@
 
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode, UIEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { analyzeTimeIntervals, calendarBlockContinuationEdges, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, resolveActivityIcon, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
+import { analyzeTimeIntervals, calendarBlockContinuationEdges, calendarDenseLabel, wholeWordsThatFit, formatClockHour, bracketsWithin, formatClockParts, namedPatternBrackets, type ClockFormat, type NamedPatternBracket } from "@dayframe/shared";
 import { useClockFormat } from "@/components/ClockFormat";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { CalendarEntryCompactEditor } from "@/components/CalendarEntryCompactEditor";
@@ -31,12 +31,13 @@ import {
 } from "@/lib/format";
 import {
   calendarBlockLaneInsets,
+  calendarBlockTimesAndLength,
+  calendarBracketDayRailPx,
   calendarBracketRailPx,
-  calendarBlockDetailLine,
-  calendarBlockDurationLabel,
   calendarBlockPrimaryParts,
   calendarBlockPrimaryLine,
   calendarBlockSecondaryLine,
+  calendarBlockVisualGapPx,
   calendarBlockVisualGeometry,
   canShowTimeBlockInlineAction,
   getTimeBlockDensity,
@@ -657,7 +658,7 @@ export function CalendarReview({
   onScroll: (event: UIEvent<HTMLDivElement>) => void;
   onSynced: () => Promise<void>;
   places?: PlaceRow[];
-  /** Open Review items; suggestions with a full window show as hatched blocks in a right-hand lane. */
+  /** Open Review items; suggestions with a full window show as hatched blocks in the grid, in its columns. */
   reviewItems?: readonly ReviewItemRow[];
   scrollContainerRef: (element: HTMLDivElement | null) => void;
   tags: BootstrapData["tags"];
@@ -786,11 +787,6 @@ export function CalendarReview({
   // Named patterns (location v3 PR 14b): a bracket beside each complete trip that lies wholly inside
   // one shown day (none across midnight), and each part's place in it for its block's name. Drawn
   // from the stored blocks, so a resize draft moves its block but not the bracket until it is saved.
-  // Narrow columns show the activity's icon instead of words (location v4 C6).
-  const categoryGlyphs = useMemo(
-    () => new Map(categories.map((category) => [category.id, resolveActivityIcon(category).glyph])),
-    [categories]
-  );
   const calendarBrackets = useMemo(() => {
     const byDay = new Map<string, NamedPatternBracket[]>();
     const parts = new Map<string, string>();
@@ -959,7 +955,11 @@ export function CalendarReview({
     if (restoreFocus) {
       window.requestAnimationFrame(() => {
         if (target.kind === "entry") {
-          target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary")?.focus({ preventScroll: true });
+          // A moment is its own button; a block's is inside it.
+          const button = target.anchor.matches(".calendar-moment")
+            ? target.anchor
+            : target.anchor.querySelector<HTMLButtonElement>(".calendar-entry-primary");
+          button?.focus({ preventScroll: true });
           return;
         }
         calendarScroller?.focus({ preventScroll: true });
@@ -1513,7 +1513,9 @@ export function CalendarReview({
               ? Math.round(((createLimitMinutes - calendarHours.startHour * 60) / 60) * rowHeight)
               : null;
             const dayBrackets = calendarBrackets.byDay.get(dayKey) ?? [];
-            const railPx = dayBrackets.length ? calendarBracketRailPx : 0;
+            // Day view's rail holds the pattern's name written level; Week view's keeps the bare bracket.
+            const dayView = visibleDays.length === 1;
+            const railPx = dayBrackets.length ? (dayView ? calendarBracketDayRailPx : calendarBracketRailPx) : 0;
             // The drag ghost and the draft slot start where a full-width block does, right of any
             // bracket rail (CSS keeps its 8 px inset on a day without one).
             const draftInsets = railPx ? { left: calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 }, railPx).left } : {};
@@ -1569,60 +1571,15 @@ export function CalendarReview({
                 return (
                   <span
                     aria-hidden="true"
-                    className="df-cal-bracket"
+                    className={`df-cal-bracket${dayView ? " is-day" : ""}`}
                     data-calendar-bracket={bracket.key}
                     key={`bracket:${bracket.key}`}
                     style={{ top, height }}
                   >
-                    {height >= 28 ? <span className="df-cal-bracket-label">{bracket.name}</span> : null}
+                    {dayView && height >= 14 ? (
+                      <span className="df-cal-bracket-label" style={{ maxHeight: height }}>{bracket.name}</span>
+                    ) : null}
                   </span>
-                );
-              })}
-              {pendingReviewSpans(gridReviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime()).map((item) => {
-                const geometry = calendarBlockStyle(
-                  { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
-                  null,
-                  day,
-                  rowHeight,
-                  calendarHeight,
-                  calendarHours,
-                  capturedNow
-                );
-                if (!geometry) return null;
-                const range = `${formatTime(new Date(item.fromMs), clock)} to ${formatTime(new Date(item.toMs), clock)}`;
-                return (
-                  <Link
-                    aria-label={`${item.title}, needs review, ${range}. Open Review.`}
-                    className={`calendar-review-block${item.color ? " df-block" : ""}`}
-                    href={`/review#review-${item.id}`}
-                    key={`review:${item.id}`}
-                    tabIndex={visibleSelectedTarget ? -1 : undefined}
-                    onClick={(event) => {
-                      // A press an open editor took for its own dismissal (and any discard
-                      // prompt) only dismisses, as on blank time: it never also leaves Calendar.
-                      const pointer = reviewLinkPointerRef.current;
-                      // While an editor is open its draft owns the page: a keyboard activation
-                      // (no pointer to consume) never leaves for Review either.
-                      if (
-                        (event.detail === 0 && visibleSelectedTarget) ||
-                        // Only a pointer click can be the press the editor consumed; a keyboard
-                        // Enter after a clean outside-click dismissal must still open Review.
-                        (event.detail > 0 && pressConsumedByEditorRef.current) ||
-                        (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
-                      ) {
-                        event.preventDefault();
-                      }
-                      pressConsumedByEditorRef.current = false;
-                    }}
-
-                    style={{
-                      ...(item.color ? activityBlockStyle(item.color, item.name) : {}),
-                      top: geometry.top,
-                      height: Math.max(14, geometry.height - 2)
-                    }}
-                  >
-                    {geometry.height >= 30 ? <b>{item.title}</b> : null}
-                  </Link>
                 );
               })}
               {createGhost?.dayKey === formatCalendarDateKey(day) ? (() => {
@@ -1683,8 +1640,14 @@ export function CalendarReview({
                 );
               })() : null}
               {(() => {
-                const blocks = gridEntries
-                  .filter((entry) => entryOverlapsDay(entry, day, capturedNow))
+                // Dense-day rules (owner, 24 Oct 2026): a finished block of a minute or less is a short line at
+                // the column's edge, never a block that crowds the grid.
+                const isMoment = (entry: TimeEntryRow) => Boolean(entry.stoppedAt) &&
+                  Date.parse(entry.stoppedAt!) - Date.parse(entry.startedAt) <= 60_000 && resizeDraft?.entryId !== entry.id;
+                const dayEntries = gridEntries.filter((entry) => entryOverlapsDay(entry, day, capturedNow));
+                const moments = dayEntries.filter(isMoment);
+                const blocks = dayEntries
+                  .filter((entry) => !isMoment(entry))
                   .map((entry) => {
                     const activeDraft = resizeDraft?.entryId === entry.id ? resizeDraft : null;
                     const blockStyle = calendarBlockStyle(
@@ -1725,15 +1688,107 @@ export function CalendarReview({
                     };
                   })
                   .filter((block): block is NonNullable<typeof block> => Boolean(block));
-                // Columns over the blocks as drawn (after the 1 px visual gap), so blocks whose drawn
-                // edges only touch stay full width (location v4 C6, Codex r2 on #545).
-                const lanes = layoutTimeBlockLanes(blocks.map((block) => ({
-                  key: block.blockKey,
-                  top: block.blockPositionStyle.top,
-                  height: block.blockPositionStyle.height
-                })));
+                // Suggestions are hatched blocks in the same grid, under the same column rules (no lane).
+                const suggestions = pendingReviewSpans(gridReviewItems, startOfDay(day).getTime(), addDays(startOfDay(day), 1).getTime(), capturedNow.getTime())
+                  .flatMap((item) => {
+                    const geometry = calendarBlockStyle(
+                      { startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() },
+                      null, day, rowHeight, calendarHeight, calendarHours, capturedNow
+                    );
+                    if (!geometry) return [];
+                    const visual = calendarBlockVisualGeometry({ top: geometry.top, height: geometry.height, continuesIntoNextDay: geometry.continuesIntoNextDay });
+                    return [{ item, key: `review:${item.id}`, top: visual.top, height: visual.height }];
+                  });
+                // Columns over everything drawn plus its 2 px gap below, so blocks whose drawn extents only
+                // touch stay full width (location v4 C6, Codex r2 on #545) and every pair keeps the whole
+                // gap (Codex r2 on #579); nothing is ever drawn on top of another.
+                const lanes = layoutTimeBlockLanes([
+                  ...blocks.map((block) => ({
+                    key: block.blockKey,
+                    top: block.blockPositionStyle.top,
+                    height: block.blockPositionStyle.height + calendarBlockVisualGapPx
+                  })),
+                  ...suggestions.map((suggestion) => ({ key: suggestion.key, top: suggestion.top, height: suggestion.height + calendarBlockVisualGapPx }))
+                ]);
+                const fullLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 } satisfies TimeBlockLane;
 
-                return blocks.map((block) => {
+                const momentLines = moments.map((entry) => {
+                  // The day's own clipped start (a moment across midnight sits at the top of its second day).
+                  const geometry = calendarBlockStyle(entry, null, day, rowHeight, calendarHeight, calendarHours, capturedNow);
+                  if (!geometry) return null;
+                  const top = Math.round(geometry.top);
+                  const blockKey = calendarBlockKey(entry.id, day);
+                  const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
+                  const label = calendarBlockDetailsLabel(entry, null, 0, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
+                  return (
+                    <button
+                      aria-label={label}
+                      aria-pressed={selected}
+                      className={`calendar-moment${selected ? " is-selected" : ""}`}
+                      data-calendar-block-key={blockKey}
+                      data-tip={label}
+                      key={`moment:${blockKey}`}
+                      onClick={(event) => selectCalendarEntry({ anchor: event.currentTarget, blockKey, entryId: entry.id, focusOnOpen: event.detail === 0 })}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      // The hit area fills the clear strip left of the blocks (the rail and its 8 px inset), so it
+                      // never covers a block while staying easy to reach (Codex r2 on #579).
+                      style={{ top, "--calendar-block-accent": timeEntryAccentColor(entry), "--calendar-moment-room": `${railPx + 8}px` } as CSSProperties}
+                      type="button"
+                    />
+                  );
+                });
+
+                const suggestionBlocks = suggestions.map(({ item, key, top, height }) => {
+                  const range = `${formatTime(new Date(item.fromMs), clock)} to ${formatTime(new Date(item.toMs), clock)}`;
+                  const lane = lanes.get(key) ?? fullLane;
+                  const label = denseBlockLabel(height);
+                  return (
+                    <Link
+                      aria-label={`${item.title}, needs review, ${range}. Open Review.`}
+                      className={["calendar-review-block", label.compact ? "is-dense-compact" : "", label.detail ? "has-detail-room" : ""].filter(Boolean).join(" ")}
+                      data-calendar-block-key={key}
+                      href={`/review#review-${item.id}`}
+                      key={key}
+                      tabIndex={visibleSelectedTarget ? -1 : undefined}
+                      onClick={(event) => {
+                        // A press an open editor took for its own dismissal (and any discard
+                        // prompt) only dismisses, as on blank time: it never also leaves Calendar.
+                        const pointer = reviewLinkPointerRef.current;
+                        // While an editor is open its draft owns the page: a keyboard activation
+                        // (no pointer to consume) never leaves for Review either.
+                        if (
+                          (event.detail === 0 && visibleSelectedTarget) ||
+                          // Only a pointer click can be the press the editor consumed; a keyboard
+                          // Enter after a clean outside-click dismissal must still open Review.
+                          (event.detail > 0 && pressConsumedByEditorRef.current) ||
+                          (pointer && calendarPointerMatchesConsumed(consumedPointerRef.current, pointer))
+                        ) {
+                          event.preventDefault();
+                        }
+                        pressConsumedByEditorRef.current = false;
+                      }}
+                      style={{
+                        ...calendarBlockLaneStyle(lane, railPx),
+                        top,
+                        height,
+                        ...label.vars,
+                        // The suggested activity's palette colour in both themes, as blocks have it.
+                        ...(item.color ? activityBlockStyle(item.color, item.name) : {}),
+                        "--calendar-block-accent": item.color ? "var(--block)" : "var(--text-muted)"
+                      } as CSSProperties}
+                    >
+                      {/* Padding inside the query container, so its width thresholds match a block's. */}
+                      <span className="calendar-review-content">
+                        <span className="calendar-entry-title"><span className="calendar-review-mark" aria-hidden="true">?</span><CalendarTitleWords text={item.title} /></span>
+                        <span className="calendar-entry-detail-line tabular" aria-hidden="true">
+                          {calendarBlockTimesAndLength({ startedAt: new Date(item.fromMs).toISOString(), stoppedAt: new Date(item.toMs).toISOString() }, capturedNow, clock)}
+                        </span>
+                      </span>
+                    </Link>
+                  );
+                });
+
+                const blockElements = blocks.map((block) => {
                   const {
                     activeDraft,
                     blockKey,
@@ -1745,14 +1800,8 @@ export function CalendarReview({
                     startsBeforeDay
                   } = block;
                   const detailsLabel = calendarBlockDetailsLabel(entry, activeDraft, durationSeconds, day, capturedNow, clock, calendarBrackets.parts.get(entry.id));
-                  const lane = lanes.get(blockKey) ?? {
-                    laneCount: 1,
-                    laneIndex: 0,
-                    mode: "full",
-                    offsetFraction: 0,
-                    widthFraction: 1,
-                    zIndex: 0
-                  } satisfies TimeBlockLane;
+                  const lane = lanes.get(blockKey) ?? fullLane;
+                  const label = denseBlockLabel(blockPositionStyle.height, density.canDirectResize);
                   const selected = visibleSelectedTarget?.kind === "entry" && visibleSelectedTarget.blockKey === blockKey;
                   const isResizing = resizingId === entry.id;
                   const isContinuing = continuingEntryId === entry.id;
@@ -1781,20 +1830,20 @@ export function CalendarReview({
                         entry.stoppedAt ? "" : "is-running",
                         startsBeforeDay ? "is-continuation-from-previous" : "",
                         continuesIntoNextDay ? "is-continuation-to-next" : "",
-                        entry.categoryId ? "df-block" : "is-uncategorized",
+                        entry.categoryId ? "" : "is-uncategorized",
+                        label.compact ? "is-dense-compact" : "",
+                        label.detail ? "has-detail-room" : "",
                         hasInlineActionSlot ? "has-inline-action-slot" : "",
                         ...timeBlockDensityClassNames(density)
                       ].join(" ")}
                       style={{
                         ...blockPositionStyle,
                         ...calendarBlockLaneStyle(lane, railPx),
-                        // Blocks: a solid activity fill with its measured on-block text colour.
+                        ...label.vars,
+                        // Dense-day rules (owner, 24 Oct 2026): a tinted fill and a 3 px colour bar, primary text.
                         ...(entry.categoryId ? activityBlockStyle(entry.categoryColor, entry.categoryName ?? "") : {}),
-                        "--calendar-block-accent": accent,
-                        "--calendar-block-fill": entry.categoryId ? "var(--block)" : `color-mix(in srgb, ${accent} 18%, var(--surface))`,
-                        "--calendar-block-selected-fill": entry.categoryId ? "var(--block)" : `color-mix(in srgb, ${accent} 26%, var(--surface-inset))`,
-                        "--calendar-block-border": entry.categoryId ? "transparent" : `color-mix(in srgb, ${accent} 42%, var(--line))`,
-                        color: entry.categoryId ? "var(--on-block)" : "var(--foreground)"
+                        "--calendar-block-accent": entry.categoryId ? "var(--block)" : accent,
+                        color: "var(--text-primary)"
                       } as CSSProperties}
                       data-entry-id={entry.id}
                       data-calendar-block-key={blockKey}
@@ -1834,15 +1883,9 @@ export function CalendarReview({
                         }}
                         onMouseDown={(event) => event.preventDefault()}
                       >
-                        <CalendarBlockTitleLine capturedNow={capturedNow} entry={displayEntry} />
-                        {density.showSecondary ? (
-                          <span className="calendar-entry-detail-line tabular">
-                            {calendarBlockDetailLine(displayEntry, capturedNow, clock)}
-                          </span>
-                        ) : null}
-                        <span className="calendar-entry-glyph" aria-hidden="true">
-                          <DayframeIcon glyph={categoryGlyphs.get(entry.categoryId ?? "") ?? resolveActivityIcon({ name: entry.categoryName }).glyph} size={12} />
-                        </span>
+                        {/* The title always wins: it wraps to the lines that fit, ending after a whole word. */}
+                        <span className="calendar-entry-title"><CalendarTitleWords text={calendarBlockPrimaryParts(displayEntry).description} /></span>
+                        <span className="calendar-entry-detail-line tabular">{calendarBlockTimesAndLength(displayEntry, capturedNow, clock)}</span>
                       </button>
                       {showInlineAction ? (
                         <button
@@ -1889,6 +1932,12 @@ export function CalendarReview({
                     </article>
                   );
                 });
+                // Entries keep the day's own order whichever way each is drawn (a moment or a block), so a
+                // tab stop never jumps when a block's length changes (Codex r1 on #579).
+                const byEntry = new Map<string, ReactNode>();
+                moments.forEach((entry, index) => byEntry.set(entry.id, momentLines[index]));
+                blocks.forEach((block, index) => byEntry.set(block.entry.id, blockElements[index]));
+                return [...suggestionBlocks, ...dayEntries.map((entry) => byEntry.get(entry.id) ?? null)];
               })()}
             </div>
             );
@@ -2004,24 +2053,81 @@ export function CalendarReview({
  * Every block's one label line (location v4 C6): its title and its real length, "Coffee 4m",
  * whatever its drawn height. The full description, activity, tags and times are in its name.
  */
-function CalendarBlockTitleLine({
-  capturedNow,
-  entry
-}: {
-  capturedNow: Date;
-  entry: Parameters<typeof calendarBlockPrimaryParts>[0];
-}) {
-  const { description } = calendarBlockPrimaryParts(entry);
-  const length = calendarBlockDurationLabel(entry, capturedNow);
+/** Line heights of the dense-day label (CSS keeps the same: 16 px title, 13 px compact, 15 px detail). */
+const CALENDAR_DENSE_LINES = { lineHeight: 16, compactLineHeight: 13, detailLineHeight: 15 } as const;
+/**
+ * The label's vertical padding as CSS draws it: 2 px top and bottom (1 px in compact type), and a
+ * 6 px top on a block tall enough for direct resize, which keeps its title clear of the handle.
+ */
+const CALENDAR_DENSE_PADDING = { regular: 4, compact: 2, resizeTop: 6, regularTop: 2, compactTop: 1 } as const;
+
+/**
+ * A block's label from its drawn height (dense-day rules): compact type under 34 px; the time and
+ * length line only with a title line to spare; and the whole title lines each type holds, counted
+ * from the same content height CSS lays out (Codex r1 on #579). Width rules stay in CSS.
+ */
+function denseBlockLabel(height: number, canDirectResize = false) {
+  const { lineHeight, compactLineHeight, detailLineHeight } = CALENDAR_DENSE_LINES;
+  const { compact } = calendarDenseLabel({ height, width: Number.POSITIVE_INFINITY, ...CALENDAR_DENSE_LINES });
+  const room = Math.max(0, height - CALENDAR_DENSE_PADDING.regular -
+    (canDirectResize ? CALENDAR_DENSE_PADDING.resizeTop - CALENDAR_DENSE_PADDING.regularTop : 0));
+  const compactRoom = Math.max(0, height - CALENDAR_DENSE_PADDING.compact -
+    (canDirectResize ? CALENDAR_DENSE_PADDING.resizeTop - CALENDAR_DENSE_PADDING.compactTop : 0));
+  const detail = !compact && room >= lineHeight + detailLineHeight;
+  return {
+    compact,
+    detail,
+    vars: {
+      "--title-lines": String(Math.max(1, Math.floor((room - (detail ? detailLineHeight : 0)) / lineHeight))),
+      "--title-lines-detailless": String(Math.max(1, Math.floor(room / lineHeight))),
+      "--title-lines-compact": String(Math.max(1, Math.floor(compactRoom / compactLineHeight)))
+    } as CSSProperties
+  };
+}
+
+/**
+ * A title as unbreakable words (dense-day rules): a line that runs out of room ends with the
+ * ellipsis after the last whole word that fits, never part-way through one. A word wider than
+ * the title itself is left out with every word after it (an ellipsis follows the words before
+ * it; none fit, colour only), measured whenever the title's width changes.
+ */
+function CalendarTitleWords({ text }: { text: string }) {
+  const words = useMemo(() => text.split(/\s+/).filter(Boolean), [text]);
+  const wordsRef = useRef<HTMLSpanElement>(null);
+  const [fitCount, setFitCount] = useState<number>(Number.POSITIVE_INFINITY);
+  useEffect(() => {
+    const title = wordsRef.current?.parentElement;
+    if (!title || typeof ResizeObserver === "undefined") return;
+    let disposed = false;
+    const measure = () => {
+      if (disposed) return;
+      const spans = [...(wordsRef.current?.querySelectorAll<HTMLElement>(".calendar-entry-word") ?? [])];
+      setFitCount(wholeWordsThatFit(spans.map((span) => span.offsetWidth), title.clientWidth));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(title);
+    // A web font arriving changes word widths without resizing the title, so measure again then too.
+    const fonts = typeof document === "undefined" ? undefined : document.fonts;
+    fonts?.addEventListener?.("loadingdone", measure);
+    void fonts?.ready?.then(measure);
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      fonts?.removeEventListener?.("loadingdone", measure);
+    };
+  }, [words]);
+  const shown = Math.min(fitCount, words.length);
   return (
-    <span className="calendar-entry-title-line">
-      <span className="calendar-entry-title">{description}</span>{" "}
-      <span
-        className="calendar-entry-length tabular"
-        style={{ "--calendar-length-chars": length.length } as CSSProperties}
-      >
-        {length}
-      </span>
+    // No whole word fits: colour only (CSS hides the title, its "?" and the time line too).
+    <span className={`calendar-entry-words${shown === 0 && words.length > 0 ? " is-none-fit" : ""}`} ref={wordsRef}>
+      {words.map((word, index) => (
+        <Fragment key={index}>
+          {index > 0 && index < shown ? " " : null}
+          {/* Words past the cut stay measurable (out of flow, unseen) for when the title widens. */}
+          <span className={`calendar-entry-word${index >= shown ? " is-beyond" : ""}`}>{word}</span>
+        </Fragment>
+      ))}
+      {shown > 0 && shown < words.length ? <span className="calendar-entry-word">{"\u2026"}</span> : null}
     </span>
   );
 }

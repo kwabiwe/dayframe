@@ -84,17 +84,18 @@ describe("command timer Description (H3, Trello 213)", () => {
   });
 });
 
-describe("flat Calendar blocks (H4, Trello 213)", () => {
-  it("draws no inner highlight, shade or edge on solid Calendar blocks", () => {
-    const block = rule(".calendar-time-block.df-block");
+describe("flat Calendar blocks (H4, Trello 213; dense-day rules, 24 Oct 2026)", () => {
+  it("draws a tinted fill and a colour bar with no outline, inner highlight or shade", () => {
+    const block = css.match(/\/\* Dense-day rules[^*]*\*\/\s*\.calendar-time-block \{([^}]*)\}/)?.[1] ?? "";
     expect(block).toContain("box-shadow: none;");
-    expect(block).not.toMatch(/inset/);
-    for (const match of css.matchAll(/\n\.calendar-time-block\.df-block(?::[\w-]+(?:\([^)]*\))?)*(?:\.is-selected)? \{([^}]*)\}/g)) {
+    expect(block).toContain("border: 0;");
+    expect(block).toContain("background-color: var(--calendar-block-fill);");
+    for (const match of css.matchAll(/\n\.calendar-time-block(?::[\w-]+(?:\([^)]*\))?)*(?:\.is-selected)? \{([^}]*)\}/g)) {
       expect(match[1]).not.toMatch(/box-shadow:[^;]*inset/);
     }
   });
 
   it("keeps the running block's breathing ring", () => {
-    expect(rule(".calendar-time-block.df-block.is-running::after")).toMatch(/inset 0 0 0 2px[\s\S]*animation: df-live-breathe/);
+    expect(rule(".calendar-time-block.is-running::after")).toMatch(/inset 0 0 0 2px[\s\S]*animation: df-live-breathe/);
   });
 });

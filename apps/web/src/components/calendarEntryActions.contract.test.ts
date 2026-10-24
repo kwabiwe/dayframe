@@ -107,27 +107,20 @@ describe("shared web time-entry quick editor", () => {
     expect(styles).not.toContain("dayframe-date-time");
   });
 
-  it("keeps the Calendar title hierarchy and the icon-only narrow column (location v4 C6)", () => {
-    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*font-size:\s*12\.5px;[^}]*font-weight:\s*700;/s);
-    expect(styles).toMatch(/\.calendar-time-block\.is-tiny \.calendar-entry-title-line \{[^}]*font-size:\s*11px;/s);
-    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*font-size:\s*11px;/s);
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 33\.98px\)[\s\S]*?\.calendar-entry-detail-line \{[^}]*display:\s*none;[\s\S]*?\.calendar-entry-glyph \{[^}]*display:\s*grid;/s);
-    // The title truncates while the length always shows (Codex r1 on #545).
-    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*display:\s*flex;/s);
-    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;/s);
-    expect(styles).toMatch(/\.calendar-entry-length \{[^}]*flex:\s*none;/s);
-    // Two lines fit at 34 px: 3 px padding + 16 + 13 inside a 1 px border.
-    expect(styles).toMatch(/\.calendar-entry-title-line \{[^}]*line-height:\s*16px;/s);
-    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*line-height:\s*13px;/s);
-    // The title sits below the 6 px top resize handle, and Play never covers an icon-only column.
+  it("lets the title win at every size, compact and narrow, whole words only (dense-day rules, 24 Oct 2026)", () => {
+    expect(styles).toMatch(/\.calendar-entry-title \{[^}]*-webkit-line-clamp: var\(--title-lines-detailless, 1\);[^}]*font-size: 13\.5px;[^}]*font-weight: 600;[^}]*line-height: 16px;[^}]*word-break: normal;/s);
+    expect(styles).toMatch(/\.calendar-time-block\.is-dense-compact \.calendar-entry-title,[\s\S]*?\{[^}]*font-size: 11px;[^}]*line-height: 13px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 89\.98px\)[\s\S]*?font-size: 11px;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(min-width: 120px\)[\s\S]*?\.calendar-entry-detail-line \{\s*display: block;/s);
+    expect(styles).toMatch(/@container calendar-time-block \(max-width: 21\.98px\)[\s\S]*?display: none;/s);
+    expect(styles).toMatch(/\.calendar-entry-detail-line \{[^}]*font-size: 12px;[^}]*line-height: 15px;/s);
+    // The title sits below the 6 px top resize handle.
     expect(styles).toMatch(/\.swiss-resize-handle\.top \{[^}]*height:\s*6px;/s);
     expect(styles).toMatch(/\.calendar-time-block\.can-direct-resize \.calendar-entry-primary \{[^}]*padding-top:\s*6px;/s);
-    // Under 72 px the title stays and the length takes at most half the line, scaled to fit whole.
-    expect(styles).toMatch(/@container calendar-time-block \(max-width: 71\.98px\) \{\s*\.calendar-entry-length \{[^}]*50cqw[^}]*var\(--calendar-length-chars/s);
     // Play's whole 44 px target (36 px in from the edge) sits inside the reserved 38 px.
     expect(styles).toMatch(/@container calendar-time-block \(min-width: 112px\) \{\s*\.calendar-time-block\.has-inline-action-slot \.calendar-entry-primary \{\s*padding-right: 38px;/s);
-    expect(timeline).toContain('"--calendar-length-chars": length.length');
-    // The retired structured metadata line and its 111 px fallback are gone.
+    // The retired length-on-the-title-line (accepted difference #2, replaced 24 Oct 2026) and metadata line are gone.
+    expect(timeline).not.toContain("--calendar-length-chars");
     expect(styles).not.toContain("calendar-entry-primary-metadata");
     expect(styles).not.toContain("calendar-entry-tag-count");
   });

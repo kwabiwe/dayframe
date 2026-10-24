@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
@@ -81,19 +81,139 @@ function calendarElement(entries: TimeEntryRow[], reviewItems: ReviewItemRow[], 
 }
 
 describe("Calendar in Blocks", () => {
-  it("draws categorised blocks solid, keeps the neutral hatch for no activity and marks the running one", () => {
+  it("draws categorised blocks tinted with their colour bar, keeps the neutral hatch for no activity and marks the running one (dense-day rules)", () => {
     renderCalendar([
       entry({ id: "a", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(9), stoppedAt: local(10) }),
       entry({ id: "b", startedAt: local(10), stoppedAt: local(10, 30) }),
       entry({ id: "c", categoryId: "focus", categoryName: "Focus", categoryColor: "mint", startedAt: local(11), stoppedAt: null })
     ]);
     const block = (id: string) => document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!;
-    expect(block("a").classList.contains("df-block")).toBe(true);
+    expect(block("a").classList.contains("df-block")).toBe(false);
     expect(block("a").style.getPropertyValue("--block")).toContain("light-dark(");
-    expect(block("a").style.color).toBe("var(--on-block)");
+    expect(block("a").style.getPropertyValue("--calendar-block-accent")).toBe("var(--block)");
+    expect(block("a").style.color).toBe("var(--text-primary)");
     expect(block("b").classList.contains("is-uncategorized")).toBe(true);
     expect(block("b").classList.contains("df-block")).toBe(false);
     expect(block("c").classList.contains("is-running")).toBe(true);
+  });
+
+  it("colours a suggestion from its activity's palette in both themes (Codex r1 on #579)", () => {
+    renderCalendar([], [review({
+      id: "r1", title: "Gym visit", suggestedCategoryId: "health", categoryName: "Health", categoryColor: "mint",
+      suggestedStartedAt: local(7), suggestedStoppedAt: local(8)
+    })]);
+    const link = document.querySelector<HTMLElement>(".calendar-review-block")!;
+    expect(link.style.getPropertyValue("--block")).toContain("light-dark(");
+    expect(link.style.getPropertyValue("--calendar-block-accent")).toBe("var(--block)");
+    expect(link.getAttribute("style")).not.toContain("var(--block-");
+    // Its padding sits inside the query container, so width rules match a block's.
+    expect(link.querySelector(".calendar-review-content .calendar-entry-title")).not.toBeNull();
+  });
+
+  it("never clamps more title lines than the drawn block holds, with the detail line and resize padding (Codex r1 on #579)", () => {
+    const entries = [30, 32, 33, 34, 35, 36, 37, 40, 45, 60, 95].map((minutes, index) => entry({
+      id: `m${minutes}`, description: "A long block title that wraps", startedAt: local(index + 1), stoppedAt: local(index + 1, minutes)
+    }));
+    renderCalendar(entries);
+    for (const { id } of entries) {
+      const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!;
+      const height = Number.parseFloat(block.style.height);
+      const resizeTop = block.classList.contains("can-direct-resize") ? 4 : 0;
+      const room = height - 4 - resizeTop;
+      const lines = Number(block.style.getPropertyValue("--title-lines"));
+      const detailless = Number(block.style.getPropertyValue("--title-lines-detailless"));
+      if (block.classList.contains("has-detail-room")) expect(lines * 16 + 15).toBeLessThanOrEqual(room);
+      if (!block.classList.contains("is-dense-compact")) expect(detailless * 16).toBeLessThanOrEqual(Math.max(16, room));
+      const compactLines = Number(block.style.getPropertyValue("--title-lines-compact"));
+      expect(compactLines * 13).toBeLessThanOrEqual(Math.max(13, height - 2 - (resizeTop ? 5 : 0)));
+    }
+  });
+
+  it("leaves out a word wider than its title, and every word after it, ending after a whole word (Codex r1 on #579)", () => {
+    const observed: Array<() => void> = [];
+    let titleWidth = 60;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: () => void) { observed.push(() => this.callback()); }
+      observe() { observed.at(-1)?.(); }
+      disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function width(this: HTMLElement) {
+      return this.textContent === "Supercalifragilistic" ? 120 : 30;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function width(this: HTMLElement) {
+      return this.classList.contains("calendar-entry-title") ? titleWidth : 0;
+    });
+    renderCalendar([
+      entry({ id: "cut", description: "Plan Supercalifragilistic review", startedAt: local(9), stoppedAt: local(10) }),
+      entry({ id: "none", description: "Supercalifragilistic", startedAt: local(11), stoppedAt: local(12) })
+    ]);
+    const shown = (id: string) => [...document.querySelectorAll<HTMLElement>(`[data-entry-id="${id}"] .calendar-entry-word:not(.is-beyond)`)]
+      .map((word) => word.textContent);
+    expect(shown("cut")).toEqual(["Plan", "\u2026"]);
+    // No whole word fits: colour only, the name still says it all.
+    expect(shown("none")).toEqual([]);
+    // …and the title, its "?" and the time line give way to colour only (CSS keys on this class).
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(true);
+    expect(document.querySelector('[data-entry-id="cut"] .calendar-entry-words')!.classList.contains("is-none-fit")).toBe(false);
+    // Stable across repeated measurements (the colour-only title keeps its width), and it comes back when the block widens.
+    act(() => { observed.forEach((measure) => measure()); observed.forEach((measure) => measure()); });
+    expect(shown("none")).toEqual([]);
+    expect(shown("cut")).toEqual(["Plan", "\u2026"]);
+    titleWidth = 200;
+    act(() => observed.forEach((measure) => measure()));
+    expect(shown("none")).toEqual(["Supercalifragilistic"]);
+    expect(shown("cut")).toEqual(["Plan", "Supercalifragilistic", "review"]);
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!.getAttribute("aria-label")).toContain("Supercalifragilistic");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the whole 2 px gap: a short block's label reaching within it puts the two side by side (Codex r2 on #579)", () => {
+    renderCalendar([
+      entry({ id: "coffee", description: "Coffee", startedAt: local(9), stoppedAt: local(9, 4) }),
+      entry({ id: "work", description: "Work", startedAt: local(9, 18), stoppedAt: local(10) })
+    ]);
+    // Coffee is drawn 18 px from 09:00 (to 09:16.9 at 64 px an hour); its gap reaches 09:18.75, past Work's start.
+    for (const id of ["coffee", "work"]) {
+      expect(document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)?.dataset.overlapLayout).toBe("lane");
+    }
+  });
+
+  it("gives a moment a 44 px tall hit area across the clear strip left of the blocks (Codex r2 on #579)", () => {
+    renderCalendar([entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() })]);
+    expect(document.querySelector<HTMLElement>(".calendar-moment")!.style.getPropertyValue("--calendar-moment-room")).toBe("8px");
+  });
+
+  it("draws a moment across midnight at the top of its second day (Codex r1 on #579)", () => {
+    renderCalendar([entry({ id: "tick", startedAt: new Date(2026, 7, 1, 23, 59, 40).toISOString(), stoppedAt: new Date(2026, 7, 2, 0, 0, 20).toISOString() })]);
+    const moment = document.querySelector<HTMLElement>(".calendar-moment")!;
+    expect(moment.style.top).toBe("0px");
+  });
+
+  it("keeps entries in the day's order for the keyboard whether drawn as moments or blocks (Codex r1 on #579)", () => {
+    renderCalendar([
+      entry({ id: "a", description: "First", startedAt: local(9), stoppedAt: local(10) }),
+      entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() }),
+      entry({ id: "b", description: "Last", startedAt: local(11), stoppedAt: local(12) })
+    ]);
+    const stops = [...document.querySelectorAll<HTMLElement>(".calendar-entry-primary, .calendar-moment")]
+      .map((element) => element.getAttribute("aria-label")?.split(",")[0]);
+    expect(stops.map((label) => label?.split(" ")[0])).toEqual(["First", "Moment", "Last"]);
+  });
+
+  it("returns focus to a moment when its editor closes, and marks it selected while open (Codex r1 on #579)", async () => {
+    installEditorGeometry();
+    renderCalendar([entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() })]);
+    const moment = document.querySelector<HTMLButtonElement>(".calendar-moment")!;
+    moment.focus();
+    await act(async () => {
+      moment.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }));
+    });
+    await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).not.toBeNull());
+    expect(document.querySelector(".calendar-moment")!.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".calendar-moment")));
+    expect(document.querySelector(".calendar-moment")!.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("shows a now line on today and open suggestions as Review links in their own lane", () => {
@@ -231,9 +351,10 @@ describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
     expect(bracket.style.height).toBe("85px");
     expect(bracket.textContent).toBe("School run");
     expect(bracket.querySelector("button, a, [tabindex]")).toBeNull();
-    // The parts stay three separate blocks; the whole day moves right of the bracket's rail.
+    // The parts stay three separate blocks; the whole day moves right of the bracket's rail, which in Day view
+    // is wide enough for the name written level (dense-day rules).
     expect(document.querySelectorAll(".calendar-time-block")).toHaveLength(4);
-    for (const id of ["there", "stay", "back", "work"]) expect(left(id)).toBe("20px");
+    for (const id of ["there", "stay", "back", "work"]) expect(left(id)).toBe("52px");
   });
 
   it("names each part's place in the trip once, on its own block", () => {
@@ -269,9 +390,9 @@ describe("Calendar brackets for named patterns (location v3 PR 14b)", () => {
     renderCalendar([entry({ id: "long", startedAt: local(7, 30), stoppedAt: local(8, 30) }), ...trip()]);
     expect(document.querySelectorAll(".df-cal-bracket")).toHaveLength(1);
     // The first lane starts right of the rail; the second shares what is left of the column.
-    expect(left("long")).toBe("20px");
-    expect(left("there")).toContain("(100% - 12px)");
-    expect(left("there")).toContain("12.5px");
+    expect(left("long")).toBe("52px");
+    expect(left("there")).toContain("(100% - 44px)");
+    expect(left("there")).toContain("45px");
   });
 
   it("draws no bracket for a trip across midnight, on either day", () => {

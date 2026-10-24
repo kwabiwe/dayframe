@@ -17,10 +17,10 @@ import {
 } from "./time-block-display";
 
 describe("time block display helpers", () => {
-  it("draws every block one 16 px label line tall and adds the detail line from 34 px (location v4 C6)", () => {
-    // 16 px drawn: the semantic minimum adds the 1 px visual gap.
-    expect(minimumTimeBlockHeight()).toBe(17);
-    expect(calendarBlockVisualGeometry({ top: 0, height: minimumTimeBlockHeight() }).height).toBe(16);
+  it("draws every block one 18 px label line tall and adds the detail line from 34 px (dense-day rules, 24 Oct 2026)", () => {
+    // 18 px drawn: the semantic minimum adds the 2 px visual gap.
+    expect(minimumTimeBlockHeight()).toBe(20);
+    expect(calendarBlockVisualGeometry({ top: 0, height: minimumTimeBlockHeight() }).height).toBe(18);
 
     const minimum = getTimeBlockDensity({ durationSeconds: 4 * 60, height: 15 });
     expect(minimum).toMatchObject({ isTiny: true, isShort: true, showSecondary: false, canShowInlineAction: false });
@@ -66,17 +66,17 @@ describe("time block display helpers", () => {
     expect([...lanes.values()].every((lane) => !("textDensity" in lane))).toBe(true);
   });
 
-  it("adds a one-pixel visual gap without changing semantic time geometry", () => {
+  it("adds a two-pixel visual gap without changing semantic time geometry (dense-day rules)", () => {
     const semantic = { top: 512, height: 18 };
     const visual = calendarBlockVisualGeometry(semantic);
 
     expect(semantic).toEqual({ top: 512, height: 18 });
-    expect(visual).toEqual({ top: 512, height: 17, visualGap: 1 });
+    expect(visual).toEqual({ top: 512, height: 16, visualGap: 2 });
     expect(visual.height).toBeGreaterThan(0);
     expect(calendarBlockVisualGeometry({ top: 512, height: 64 })).toEqual({
       top: 512,
-      height: 63,
-      visualGap: 1
+      height: 62,
+      visualGap: 2
     });
     expect(calendarBlockVisualGeometry({
       top: 512,
@@ -85,21 +85,21 @@ describe("time block display helpers", () => {
     })).toEqual({ top: 512, height: 64, visualGap: 0 });
   });
 
-  it("keeps the outer inset and splits one pixel across neighbouring overlap lanes", () => {
+  it("keeps the outer inset and splits two pixels across neighbouring overlap lanes (dense-day rules)", () => {
     expect(calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 1 })).toEqual({
       left: 8,
       right: 8
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 0.5 })).toEqual({
       left: 8,
-      right: "calc(50% + 0.5px)"
+      right: "calc(50% + 1px)"
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0.5, widthFraction: 0.5 })).toEqual({
-      left: "calc(50% + 0.5px)",
+      left: "calc(50% + 1px)",
       right: 8
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0.08, widthFraction: 0.92 })).toEqual({
-      left: "calc(8% + 0.5px)",
+      left: "calc(8% + 1px)",
       right: 8
     });
   });
@@ -112,10 +112,10 @@ describe("time block display helpers", () => {
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0, widthFraction: 0.5 }, calendarBracketRailPx)).toEqual({
       left: 20,
-      right: "calc((100% - 12px) * 0.5 + 0.5px)"
+      right: "calc((100% - 12px) * 0.5 + 1px)"
     });
     expect(calendarBlockLaneInsets({ offsetFraction: 0.5, widthFraction: 0.5 }, calendarBracketRailPx)).toEqual({
-      left: "calc(12px + (100% - 12px) * 0.5 + 0.5px)",
+      left: "calc(12px + (100% - 12px) * 0.5 + 1px)",
       right: 8
     });
   });

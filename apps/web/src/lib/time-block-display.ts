@@ -1,14 +1,14 @@
 import {
-  CALENDAR_BLOCK_LABEL,
   calendarBlockLabelTier,
+  CALENDAR_DENSE_LABEL,
   layoutCalendarBlockColumns,
   type ClockFormat
 } from "@dayframe/shared";
 import { timeEntryCategoryLabel } from "@/lib/display";
 import { dateTimeLocal, formatDuration, formatTime } from "@/lib/format";
 
-const calendarBlockVisualGapPx = 1;
-const calendarBlockLaneGapPx = 1;
+export const calendarBlockVisualGapPx = 2;
+const calendarBlockLaneGapPx = 2;
 const calendarBlockOuterInsetPx = 8;
 
 export const resizeDragThresholdPx = 6;
@@ -74,6 +74,11 @@ export function calendarBlockVisualGeometry({
  * the space right of it, so the bracket never lies under a block.
  */
 export const calendarBracketRailPx = 12;
+/**
+ * Dense-day rules (owner, 24 Oct 2026): in Day view the rail is wide enough for the pattern's name
+ * written level, wrapping whole words; Week view's narrow columns keep the bare bracket.
+ */
+export const calendarBracketDayRailPx = 44;
 
 export function calendarBlockLaneInsets({
   offsetFraction,
@@ -119,7 +124,8 @@ export function canShowTimeBlockInlineAction({
  * semantic minimum adds the 1 px visual gap the drawn shape gives up.
  */
 export function minimumTimeBlockHeight() {
-  return CALENDAR_BLOCK_LABEL.webMinimumHeight + calendarBlockVisualGapPx;
+  // Dense-day rules (owner, 24 Oct 2026): one 18 px label line.
+  return CALENDAR_DENSE_LABEL.minimumHeight + calendarBlockVisualGapPx;
 }
 
 /** What a block shows at its drawn height: always its title line, a detail line from 34 px. */
@@ -194,6 +200,14 @@ export function calendarBlockDurationLabel(
   )));
 }
 
+/** The time and length line (dense-day rules): "07:05–07:40 · 35m"; a running block ends "now". */
+export function calendarBlockTimesAndLength(entry: Pick<CalendarBlockDisplayEntry, "startedAt" | "stoppedAt">, capturedNow: Date, clock: ClockFormat) {
+  const stoppedAt = entry.stoppedAt ?? capturedNow.toISOString();
+  const dayOffset = localDayOffset(entry.startedAt, stoppedAt);
+  const finish = entry.stoppedAt ? `${formatTime(stoppedAt, clock)}${dayOffset > 0 ? ` +${dayOffset}` : ""}` : "now";
+  return `${formatTime(entry.startedAt, clock)}–${finish} · ${calendarBlockDurationLabel(entry, capturedNow)}`;
+}
+
 /**
  * The detail line from 34 px (location v4 C6): "Deep work · 10:45–12:30". A block titled by its
  * activity (no description) shows the times alone; a running one ends "now".
@@ -228,8 +242,10 @@ export function layoutTimeBlockLanes(
   blocks: ReadonlyArray<{ key: string; top: number; height: number }>
 ) {
   const lanes = new Map<string, TimeBlockLane>();
+  // Dense-day rules: a block widens right into columns free for its whole drawn height; nothing on top.
   for (const column of layoutCalendarBlockColumns(
-    blocks.map((block) => ({ id: block.key, top: block.top, bottom: block.top + block.height }))
+    blocks.map((block) => ({ id: block.key, top: block.top, bottom: block.top + block.height })),
+    { expandRight: true }
   )) {
     lanes.set(column.id, {
       laneCount: column.columnCount,

@@ -52,16 +52,16 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain("<CalendarEntryCompactEditor");
     expect(compactEditor).toContain("createPortal(");
     expect(timeline).toContain("onDoubleClick={(event) =>");
-    expect(timeline).toContain('className="calendar-entry-title-line"');
+    expect(timeline).toContain('className="calendar-entry-title"');
     expect(timeline).toContain('className="calendar-entry-detail-line tabular"');
-    expect(timeline).toContain('className="calendar-entry-glyph" aria-hidden="true"');
+    // Dense-day rules: a finished block of a minute or less is a short line, never a block.
+    expect(timeline).toContain('className={`calendar-moment${selected ? " is-selected" : ""}`}');
   });
 
   it("preserves a distinct running state and compact hover action", () => {
-    const calendarRunningRule = styles.match(/\.calendar-time-block\.is-running \{([^}]*)\}/)?.[1] ?? "";
-    expect(calendarRunningRule).toContain("border-style: dashed");
-    expect(calendarRunningRule).not.toContain("outline:");
-    expect(calendarRunningRule).not.toContain("opacity");
+    // Dense-day rules: no outline on any block; the running one keeps its breathing ring.
+    expect(styles).toMatch(/\.calendar-time-block\.is-running::after \{[^}]*animation: df-live-breathe/);
+    expect(styles).not.toMatch(/\.calendar-time-block\.is-running \{[^}]*outline:/);
     expect(styles).toContain(".calendar-start-again");
     expect(styles).toMatch(/\.calendar-start-again \{[^}]*bottom: 0;[^}]*width: 28px;[^}]*background: transparent;/s);
     expect(styles).toMatch(/\.calendar-time-block\.is-short \.calendar-start-again \{[^}]*top: 50%;[^}]*right: 0;/s);
@@ -75,12 +75,13 @@ describe("Calendar readability and restart contract", () => {
     expect(styles).not.toContain(".calendar-time-block:focus-within .calendar-start-again");
   });
 
-  it("keeps one compact radius, a real hairline border, and fill-led selection", () => {
+  it("keeps one compact radius, no outline, a colour bar and fill-led selection (dense-day rules)", () => {
     const blockRule = styles.match(/\.calendar-time-block \{([^}]*--calendar-block-radius:[^}]*)\}/)?.[1] ?? "";
     const selectedRule = styles.match(/\.calendar-time-block\.is-selected \{([^}]*)\}/)?.[1] ?? "";
 
     expect(blockRule).toContain("--calendar-block-radius: 6px");
-    expect(blockRule).toContain("border: 1px solid var(--calendar-block-border)");
+    expect(blockRule).toContain("border: 0;");
+    expect(styles).toMatch(/\.calendar-time-block::before,\s*\.calendar-review-block::before \{[^}]*width: 3px;[^}]*background: var\(--calendar-block-accent\);/s);
     expect(blockRule).toContain("border-radius: var(--calendar-block-radius)");
     expect(styles).not.toMatch(/\.calendar-time-block\.is-short\s*\{[^}]*border-radius:/s);
     expect(styles).not.toMatch(/\.calendar-time-block\.is-tiny\s*\{[^}]*border-radius:/s);
