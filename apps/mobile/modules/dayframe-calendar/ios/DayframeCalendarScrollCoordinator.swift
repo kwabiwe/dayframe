@@ -507,7 +507,12 @@ struct DayframeCalendarScrollResolver: UIViewRepresentable {
         dayStartMs: presentation.dayStartMs,
         dayEndMs: presentation.dayEndMs,
         hourHeight: hourHeight,
-        textScale: model.labelTextScale
+        textScale: model.labelTextScale,
+        laneWidth: DayframeCalendarEntryGeometryMath.laneWidth(
+          availableWidth: layout.availableWidth,
+          hourLabelWidth: layout.hourLabelWidth,
+          leadingInset: presentation.entryLeadingInset
+        )
       )
       let hitFrames = presentation.entries.compactMap { entry -> DayframeCalendarHitFrame? in
         guard let laidOut = dayLayout[entry.entryId] else {

@@ -7,6 +7,9 @@ struct DayframeCalendarThemeRecord: Codable {
   var background = "#050914"
   var border = "#2A3345"
   var borderStrong = "#3B465B"
+  /// Calendar v3's now line and time pill; an older bundle's model falls back to these.
+  var danger: String?
+  var dangerText: String?
   var mode = "dark"
   var onAccent = "#050914"
   var shadow = "rgba(0, 0, 0, 0.32)"
@@ -39,6 +42,8 @@ struct DayframeCalendarEntryRecord: Codable {
   /// Absent from an older bundle, which keeps the fractions below.
   var columnGroup: String?
   var continuesIntoNextDay = false
+  /// Calendar v3: the icon lines under the title. Absent from an older bundle (the time line only).
+  var detailLines: [DayframeCalendarDetailLineRecord]?
   var entryId = ""
   /// The activity's registry glyph, drawn alone in a column under 34 points wide.
   var glyph: String?
@@ -73,6 +78,12 @@ struct DayframeCalendarEntryRecord: Codable {
   var zIndex = 0
 }
 
+struct DayframeCalendarDetailLineRecord: Codable, Equatable {
+  /// "place", "trip", "health", "tag" or "time": the Calendar glyph drawn before the text.
+  var glyph = "time"
+  var text = ""
+}
+
 /// A named pattern's bracket (location v3 PR 14b): React finds the trip; Swift only draws it.
 struct DayframeCalendarBracketRecord: Codable {
   var key = ""
@@ -91,6 +102,8 @@ struct DayframeCalendarPresentationRecord: Codable {
   var emptyState = "No tracked time for this day."
   var entries: [DayframeCalendarEntryRecord] = []
   var framedLabel = ""
+  /// Calendar v3: the framed line with the full date, for VoiceOver.
+  var framedAccessibilityLabel: String?
   var hapticsEnabled = true
   /// "grid" or "list" (location v4 step 9); a model without it (an older bundle) is the Grid.
   var layout: String?

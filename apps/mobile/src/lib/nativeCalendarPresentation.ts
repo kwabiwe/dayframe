@@ -39,6 +39,8 @@ export type NativeCalendarTheme = Pick<
   | "background"
   | "border"
   | "borderStrong"
+  | "danger"
+  | "dangerText"
   | "onAccent"
   | "shadow"
   | "surface"
@@ -50,6 +52,8 @@ export type NativeCalendarTheme = Pick<
   | "warning"
   | "warningText"
 > & { mode: MobileTheme["mode"] };
+
+export type NativeCalendarDetailLine = { glyph: "place" | "trip" | "health" | "tag" | "time"; text: string };
 
 export type NativeCalendarPresentationEntry = {
   actionId: string;
@@ -79,6 +83,11 @@ export type NativeCalendarPresentationEntry = {
   lengthLabel: string;
   /** The time and length line, shown only with room (dense-day rules): "10:45–12:30 · 1h 45m". */
   meta: string;
+  /**
+   * Calendar v3: the lines under the title, each with its icon, shown while they fit: the place (a pin,
+   * or a route for a trip) or Apple Health, the tags, then the times ("09:00–10:20").
+   */
+  detailLines?: NativeCalendarDetailLine[];
   offsetFraction: number;
   /**
    * Blocks that could share a tap target: drives hit geometry (no 44-pt expansion while > 0).
@@ -127,8 +136,13 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
-  /** "5h 20m framed on Friday": confirmed time on the selected day (Review suggestions excluded). */
+  /**
+   * Calendar v3 (owner, 24 Oct 2026): "8h 41m framed", one line under the week strip; empty (hidden) on
+   * a day with nothing framed. Confirmed time on the selected day (Review suggestions excluded).
+   */
   framedLabel: string;
+  /** The same line for VoiceOver, with the full date: "8 hours 41 minutes framed on Friday 23 October". */
+  framedAccessibilityLabel?: string;
   hapticsEnabled: boolean;
   /** Calendar › Grid or List (location v4 step 9): in List the native view draws only its header and week strip. */
   layout?: "grid" | "list";
@@ -389,7 +403,8 @@ export function buildNativeCalendarBridgeState({
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "Nothing framed yet.",
-      framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds, selectedDate),
+      framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds),
+      framedAccessibilityLabel: formatFramedAccessibilityLabel(confirmedAnalysis.loggedSeconds, selectedDate),
       hapticsEnabled,
       clockFormat,
       entries: entries.map((entry) => serializeCalendarEntry(
@@ -428,7 +443,8 @@ export function buildNativeCalendarBridgeState({
       totalSeconds: confirmedAnalysis.loggedSeconds,
       transitionDirection: transitionDirection < 0 ? -1 : 1,
       weekDays: buildWeekStripDays(selectedDayKey).map(({ date, key }) => ({
-        accessibilityLabel: `Show ${formatSelectedDayTitle(date, todayKey)}`,
+        // Calendar v3: the strip carries the date ("Friday 23 October"), so it is read in full.
+        accessibilityLabel: `${formatFullDate(date)}${key === todayKey ? ", today" : ""}`,
         bars: weekDayBars(timeEntries, date, now, theme),
         dayKey: key,
         dayNumber: String(date.getDate()),
@@ -519,6 +535,7 @@ function serializeCalendarEntry(
     color,
     columnGroup: "logged",
     continuesIntoNextDay: continuation.continuesIntoNextDay,
+    detailLines: entry.reviewCrowd ? [] : calendarDetailLines(entry, tagText, now, clockFormat),
     entryId: entry.id,
     glyph,
     isActive: entry.isActive,
@@ -831,12 +848,26 @@ function entryOverlapsDay(entry: MobileTimeEntry, dayKey: string, now: number) {
  * The time and length line (dense-day rules), shown only where a block has room: "07:05–07:40 · 35m",
  * "+1" on a finish the next day, "now" for a running block.
  */
-function calendarBlockTimesAndLength(entry: NativeCalendarEntry, now: number, clockFormat: ClockFormat) {
+function calendarDetailLines(entry: NativeCalendarEntry, tagText: string | null, now: number, clockFormat: ClockFormat) {
+  const lines: NativeCalendarDetailLine[] = [];
+  if ((entry.source ?? "").startsWith("health")) lines.push({ glyph: "health", text: "From Apple Health" });
+  else if (entry.placeName) lines.push({ glyph: entry.automaticMoveEventId ? "trip" : "place", text: entry.placeName });
+  if (tagText) lines.push({ glyph: "tag", text: tagText });
+  lines.push({ glyph: "time", text: calendarBlockTimes(entry, now, clockFormat) });
+  return lines;
+}
+
+/** "09:00–10:20", "22:00–01:30 +1", "16:05–now". */
+function calendarBlockTimes(entry: NativeCalendarEntry, now: number, clockFormat: ClockFormat) {
   const startedAt = new Date(entry.startedAt);
   const stoppedAt = entry.stoppedAt ? new Date(entry.stoppedAt) : new Date(now);
   const days = Math.round((startOfLocalDay(stoppedAt).getTime() - startOfLocalDay(startedAt).getTime()) / DAY_MS);
   const finish = entry.stoppedAt ? `${formatClockTime(stoppedAt, clockFormat)}${days > 0 ? ` +${days}` : ""}` : "now";
-  return `${formatClockTime(startedAt, clockFormat)}–${finish} · ${formatDuration(entryLengthSeconds(entry, now))}`;
+  return `${formatClockTime(startedAt, clockFormat)}–${finish}`;
+}
+
+function calendarBlockTimesAndLength(entry: NativeCalendarEntry, now: number, clockFormat: ClockFormat) {
+  return `${calendarBlockTimes(entry, now, clockFormat)} · ${formatDuration(entryLengthSeconds(entry, now))}`;
 }
 
 /** The block's real length from its own times (a running one up to now). */
@@ -880,6 +911,8 @@ function nativeCalendarTheme(theme: MobileTheme): NativeCalendarTheme {
     background: theme.background,
     border: theme.border,
     borderStrong: theme.borderStrong,
+    danger: theme.danger,
+    dangerText: theme.dangerText,
     mode: theme.mode,
     onAccent: theme.onAccent,
     shadow: theme.shadow,
@@ -944,9 +977,19 @@ function formatMonthTitle(date: Date, today: Date) {
   );
 }
 
-function formatFramedLabel(seconds: number, date: Date) {
-  const weekday = formatLocaleDate(date, { weekday: "long" });
-  return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed on ${weekday}` : `Nothing framed on ${weekday}`;
+function formatFramedLabel(seconds: number) {
+  return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed` : "";
+}
+
+function formatFramedAccessibilityLabel(seconds: number, date: Date) {
+  return Math.round(seconds / 60) > 0
+    ? `${spokenDuration(seconds)} framed on ${formatFullDate(date)}`
+    : `Nothing framed on ${formatFullDate(date)}`;
+}
+
+/** "Friday 23 October", in the phone's own date order. */
+function formatFullDate(date: Date) {
+  return formatLocaleDate(date, { day: "numeric", month: "long", weekday: "long" });
 }
 
 function formatDuration(seconds: number) {

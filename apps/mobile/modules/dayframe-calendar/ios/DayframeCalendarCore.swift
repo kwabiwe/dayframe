@@ -6,7 +6,8 @@ public enum DayframeCalendarConstants {
   public static let maximumHourHeight = 128.0
   public static let minutesPerDay = 24.0 * 60.0
   public static let minimumVisualBlockHeight = 1.0
-  public static let blockCornerRadius = 10.0
+  /// Calendar v3 (owner, 24 Oct 2026): Apple-like corners.
+  public static let blockCornerRadius = 5.0
   public static let blockVisualGap = 2.0
   // Dense-day rules (owner, 24 Oct 2026; calendar-dense-mockup v2). Mirrors CALENDAR_DENSE_LABEL in
   // packages/shared/src/calendarBlockLayout.ts; nativeCalendar.contract.test.ts keeps them equal.
@@ -38,6 +39,15 @@ public enum DayframeCalendarConstants {
   /// the bracket and its name sit in the gutter beside them and never under one.
   public static let bracketRailWidth = 12.0
   public static let bracketLabelMinimumHeight = 28.0
+  // Calendar v3, Apple's hybrid overlap (owner, 24 Oct 2026; calendar-v3-mockup). Mirrors
+  // CALENDAR_V3_OVERLAP in packages/shared/src/calendarBlockLayout.ts.
+  /// A block starting within this many minutes of its group's first start (or within its title line)
+  /// sits beside it; a later start nests, indented and drawn on top.
+  public static let overlapCloseMinutes = 20.0
+  /// A nested block's inset from the left edge of the block it starts inside.
+  public static let overlapIndent = 14.0
+  /// A nested group is never narrower than this.
+  public static let overlapMinimumNestedWidth = 40.0
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -239,6 +249,11 @@ public struct DayframeCalendarEntryGeometryMetrics: Equatable {
 }
 
 public enum DayframeCalendarEntryGeometryMath {
+  /// The width blocks are laid out across: right of the hour labels and any bracket rail.
+  public static func laneWidth(availableWidth: Double, hourLabelWidth: Double, leadingInset: Double = 0) -> Double {
+    max(0, availableWidth - hourLabelWidth - 18 - max(0, leadingInset.isFinite ? leadingInset : 0))
+  }
+
   public static func metrics(
     availableWidth: Double,
     hourLabelWidth: Double,
@@ -266,7 +281,7 @@ public enum DayframeCalendarEntryGeometryMath {
 
     // Lanes share the column right of any bracket rail.
     let inset = max(0, leadingInset)
-    let blockWidth = max(0, availableWidth - hourLabelWidth - 18 - inset)
+    let blockWidth = laneWidth(availableWidth: availableWidth, hourLabelWidth: hourLabelWidth, leadingInset: inset)
     let horizontal = DayframeCalendarHorizontalMath.metrics(
       availableWidth: blockWidth,
       offsetFraction: offsetFraction,
@@ -837,22 +852,41 @@ public struct DayframeCalendarBlockMetrics: Equatable {
   }
 }
 
-/// A block's label under the dense-day rules (owner, 24 Oct 2026): the title always wins and wraps to
-/// the whole lines that fit; the times and length only with a line to spare in a column at least 120
-/// points wide; compact type under 34 points tall or 90 wide; colour only under 22 wide.
+/// A block's label (dense-day rules, Calendar v3): the title always wins and wraps to the whole lines
+/// that fit, in bold; under it, with room in a column at least 120 points wide, the icon lines (place,
+/// tags, times) while they fit. Compact type under 34 points tall or 90 wide; colour only under 22 wide.
 public struct DayframeCalendarDenseLabel: Equatable {
   public let sliver: Bool
   public let compact: Bool
-  public let detail: Bool
-  public let titleLines: Int
+  /// Icon lines the block has room for under one title line (0 when compact or narrower than 120).
+  public let detailLinesAvailable: Int
   public let titleFontSize: Double
   public let titleLineHeight: Double
   public let detailFontSize: Double
   public let detailLineHeight: Double
-  /// Inside the drawn block: the colour bar's side, the trailing side, and top and bottom.
+  /// Inside the drawn block: the colour bar's side, the trailing side, and the top.
   public let leadingPadding: Double
   public let trailingPadding: Double
   public let verticalPadding: Double
+  /// The room under the top padding (the last line may use the bottom padding, as the mock-up does).
+  public let room: Double
+
+  /// Title lines when `detailCount` icon lines are wanted: room is kept for as many of them as fit
+  /// under one title line, and the title takes every whole line left (at least one: the title wins).
+  public func titleLines(detailCount: Int) -> Int {
+    guard !sliver else { return 0 }
+    let reserved = Double(min(max(0, detailCount), detailLinesAvailable)) * detailLineHeight
+    // Never a line in a block too short to show one (an older bundle's 4-point blocks show colour only).
+    guard room >= titleLineHeight - 2 else { return 0 }
+    return max(1, Int(floor((room - reserved) / titleLineHeight)))
+  }
+
+  /// Icon lines that fit under `titleLines` title lines.
+  public func detailLines(titleLines: Int, detailCount: Int) -> Int {
+    guard detailLinesAvailable > 0, titleLines > 0 else { return 0 }
+    let left = room - Double(titleLines) * titleLineHeight
+    return min(max(0, detailCount), max(0, Int(floor(left / detailLineHeight))))
+  }
 }
 
 public enum DayframeCalendarDenseLabelMath {
@@ -864,26 +898,26 @@ public enum DayframeCalendarDenseLabelMath {
     let sliver = safeWidth < DayframeCalendarConstants.sliverMaximumWidth
     let compact = safeHeight < DayframeCalendarConstants.compactTextMaximumHeight * max(1, scale)
       || safeWidth < DayframeCalendarConstants.compactTextMaximumWidth
-    let line = (compact ? 13.0 : 16.0) * scale
+    // calendar-v3-mockup: compact 11.5 on 14, regular 14 on 17, icon lines 12 on 15.
+    let line = (compact ? 14.0 : 17.0) * scale
     let detailLine = 15.0 * scale
-    let verticalPadding = compact ? 1.0 : 2.0
-    // The mock-up's room: the top padding is kept; the last line may use the bottom padding.
+    let verticalPadding = 2.0
     let room = safeHeight - verticalPadding
-    let detail = !sliver && !compact && safeWidth >= DayframeCalendarConstants.detailMinimumWidth && room >= line + detailLine
-    // Never a line that does not fit whole (an older bundle's 4-point blocks show colour only).
-    let titleLines = sliver ? 0 : max(0, Int(floor((room - (detail ? detailLine : 0)) / line)))
+    let detailLinesAvailable = !sliver && !compact && safeWidth >= DayframeCalendarConstants.detailMinimumWidth
+      ? max(0, Int(floor((room - line) / detailLine)))
+      : 0
     return DayframeCalendarDenseLabel(
       sliver: sliver,
       compact: compact,
-      detail: detail,
-      titleLines: titleLines,
-      titleFontSize: (compact ? 11.0 : 13.5) * scale,
+      detailLinesAvailable: detailLinesAvailable,
+      titleFontSize: (compact ? 11.5 : 14.0) * scale,
       titleLineHeight: line,
       detailFontSize: 12.0 * scale,
       detailLineHeight: detailLine,
-      leadingPadding: compact ? 7 : 8,
-      trailingPadding: compact ? 4 : 6,
-      verticalPadding: verticalPadding
+      leadingPadding: 8,
+      trailingPadding: 6,
+      verticalPadding: verticalPadding,
+      room: room
     )
   }
 }
@@ -898,9 +932,26 @@ public enum DayframeCalendarTitleFit {
     words: [String],
     maxLines: Int,
     width: Double,
+    cutFirstWord: Bool = false,
     measure: (String) -> Double
   ) -> [String] {
     guard maxLines > 0, width > 0 else { return [] }
+    let fitted = wholeWordLines(words: words, maxLines: maxLines, width: width, measure: measure)
+    // Calendar v3 (owner OK, 24 Oct 2026): when not even the first word fits, the title still wins, cut
+    // with an ellipsis as Apple does ("Quart…"), keeping at least two letters; otherwise colour only.
+    guard cutFirstWord, fitted.isEmpty, let first = words.first(where: { !$0.isEmpty }) else { return fitted }
+    var letters = Array(first)
+    while letters.count > 2, measure(String(letters) + ellipsis) > width { letters.removeLast() }
+    let cut = String(letters) + ellipsis
+    return letters.count >= 2 && measure(cut) <= width ? [cut] : []
+  }
+
+  private static func wholeWordLines(
+    words: [String],
+    maxLines: Int,
+    width: Double,
+    measure: (String) -> Double
+  ) -> [String] {
     var lines: [[String]] = []
     var current: [String] = []
     var cut = false
@@ -1129,6 +1180,163 @@ public enum DayframeCalendarColumnMath {
   }
 }
 
+public struct DayframeCalendarHybridBlock: Equatable {
+  public let id: String
+  public let top: Double
+  public let bottom: Double
+
+  public init(id: String, top: Double, bottom: Double) {
+    self.id = id
+    self.top = top
+    self.bottom = bottom
+  }
+}
+
+public struct DayframeCalendarHybridPlacement: Equatable {
+  public let id: String
+  /// Points from the lane's left edge, and the width, before the visual gap.
+  public let x: Double
+  public let width: Double
+  /// 0 for a block on the lane, +1 for each block it nests inside.
+  public let depth: Int
+  public let columnIndex: Int
+  public let columnCount: Int
+}
+
+/// Calendar v3: Apple Calendar's hybrid overlap (calendar-v3-mockup `layout`). Blocks are taken by top,
+/// longer first. A block whose start is close to the first start of a group still running here joins
+/// that group, and the group's members share equal columns (spreading right while free). Any other
+/// block that starts while blocks are running nests: it starts a group of its own, indented
+/// `overlapIndent` from the left edge of the latest-starting running block, drawn on top of it, and
+/// reaching right until a block not under it is still running there.
+public enum DayframeCalendarHybridMath {
+  public static func layout(
+    _ blocks: [DayframeCalendarHybridBlock],
+    laneWidth: Double,
+    closeDistance: Double,
+    tolerance: Double = DayframeCalendarConstants.columnTouchTolerance
+  ) -> [DayframeCalendarHybridPlacement] {
+    let width = max(0, laneWidth.isFinite ? laneWidth : 0)
+    let close = max(0, closeDistance.isFinite ? closeDistance : 0)
+    var seen = Set<String>()
+    let items = blocks
+      .filter { block in
+        guard !block.id.isEmpty, block.top.isFinite, block.bottom.isFinite, !seen.contains(block.id) else { return false }
+        seen.insert(block.id)
+        return true
+      }
+      .map { DayframeCalendarHybridBlock(id: $0.id, top: $0.top, bottom: max($0.top, $0.bottom)) }
+      .sorted { left, right in
+        if left.top != right.top { return left.top < right.top }
+        let leftHeight = left.bottom - left.top, rightHeight = right.bottom - right.top
+        if leftHeight != rightHeight { return leftHeight > rightHeight }
+        return left.id.utf16.lexicographicallyPrecedes(right.id.utf16)
+      }
+
+    struct Group {
+      let firstTop: Double
+      let firstBottom: Double
+      let parent: Int?
+      let depth: Int
+      var members: [Int] = []
+      var columns: [[Int]] = []
+    }
+    var groups: [Group] = []
+    var groupOf: [Int] = []
+    var column: [Int] = []
+    // Indices of blocks still running at the current top, so each step looks only at live blocks.
+    var running: [Int] = []
+    for (index, item) in items.enumerated() {
+      running.removeAll { items[$0].bottom <= item.top + tolerance }
+      let joined = running
+        .map { groupOf[$0] }
+        .filter { item.top - groups[$0].firstTop < close }
+        .min()
+      let group: Int
+      if let joined {
+        group = joined
+      } else {
+        // Nested inside the latest-starting running block (the deepest when tied, then the first placed,
+        // as the mock-up's stable sort); on the lane when none runs.
+        var parent: Int?
+        for candidate in running {
+          guard let best = parent else { parent = candidate; continue }
+          let later = items[candidate].top > items[best].top
+          let deeper = items[candidate].top == items[best].top && groups[groupOf[candidate]].depth > groups[groupOf[best]].depth
+          if later || deeper { parent = candidate }
+        }
+        groups.append(Group(
+          firstTop: item.top,
+          firstBottom: item.bottom,
+          parent: parent,
+          depth: parent.map { groups[groupOf[$0]].depth + 1 } ?? 0
+        ))
+        group = groups.count - 1
+      }
+      groups[group].members.append(index)
+      let free = groups[group].columns.firstIndex { lane in items[lane.last!].bottom <= item.top + tolerance }
+      if let free {
+        groups[group].columns[free].append(index)
+        column.append(free)
+      } else {
+        groups[group].columns.append([index])
+        column.append(groups[group].columns.count - 1)
+      }
+      groupOf.append(group)
+      running.append(index)
+    }
+
+    var x = [Double](repeating: 0, count: items.count)
+    var placedWidth = [Double](repeating: 0, count: items.count)
+    var resolved = [Bool](repeating: false, count: items.count)
+    var out: [DayframeCalendarHybridPlacement] = []
+    out.reserveCapacity(items.count)
+    for (groupIndex, group) in groups.enumerated() {
+      var left = 0.0
+      var right = width
+      if let parent = group.parent {
+        left = x[parent] + DayframeCalendarConstants.overlapIndent
+        // Stop short of a block already placed to the right of the parent, at its depth or shallower,
+        // that is still running beside this group's first block.
+        let parentDepth = groups[groupOf[parent]].depth
+        for other in items.indices where resolved[other]
+          && other != parent
+          && groupOf[other] != groupIndex
+          && items[other].top < group.firstBottom
+          && items[other].bottom > group.firstTop
+          && x[other] > x[parent]
+          && groups[groupOf[other]].depth <= parentDepth {
+          right = min(right, x[other] - DayframeCalendarConstants.blockVisualGap)
+        }
+        left = min(left, max(0, width - DayframeCalendarConstants.overlapMinimumNestedWidth))
+        right = min(width, max(left + DayframeCalendarConstants.overlapMinimumNestedWidth, right))
+      }
+      let count = max(1, group.columns.count)
+      let columnWidth = (right - left) / Double(count)
+      for member in group.members {
+        var span = 1
+        while column[member] + span < count, !group.columns[column[member] + span].contains(where: { other in
+          items[other].top < items[member].bottom - tolerance && items[other].bottom > items[member].top + tolerance
+        }) {
+          span += 1
+        }
+        x[member] = left + Double(column[member]) * columnWidth
+        placedWidth[member] = columnWidth * Double(span)
+        resolved[member] = true
+        out.append(DayframeCalendarHybridPlacement(
+          id: items[member].id,
+          x: x[member],
+          width: placedWidth[member],
+          depth: group.depth,
+          columnIndex: column[member],
+          columnCount: count
+        ))
+      }
+    }
+    return out
+  }
+}
+
 /// A small binary min-heap for the column sweep.
 struct DayframeMinHeap<Element> {
   private var items: [Element] = []
@@ -1254,6 +1462,7 @@ public enum DayframeCalendarDayLayout {
     dayEndMs: Double,
     hourHeight: Double,
     textScale: Double = 1,
+    laneWidth: Double? = nil,
     calendar: Calendar = .current
   ) -> [String: DayframeCalendarLaidOutEntry] {
     let minimumHeight = labelMinimumHeight(textScale: textScale)
@@ -1280,9 +1489,33 @@ public enum DayframeCalendarDayLayout {
       }
     }
     var columns: [String: DayframeCalendarColumn] = [:]
-    for (_, members) in groups {
-      for column in DayframeCalendarColumnMath.layout(members, expandRight: true) {
-        columns[column.id] = column
+    if let laneWidth, laneWidth.isFinite, laneWidth > 0 {
+      // Calendar v3: Apple's hybrid overlap in the lane's own points (the indent is in points), sent on
+      // as fractions of the lane. Close starts share columns; a later start nests on top, indented.
+      let close = max(DayframeCalendarConstants.overlapCloseMinutes / 60 * hourHeight, minimumHeight)
+      for (_, members) in groups {
+        let placements = DayframeCalendarHybridMath.layout(
+          members.map { DayframeCalendarHybridBlock(id: $0.id, top: $0.top, bottom: $0.bottom) },
+          laneWidth: laneWidth,
+          closeDistance: close
+        )
+        for placement in placements {
+          columns[placement.id] = DayframeCalendarColumn(
+            id: placement.id,
+            columnIndex: placement.columnIndex,
+            columnCount: placement.columnCount,
+            spanCount: 1,
+            offsetFraction: placement.x / laneWidth,
+            widthFraction: placement.width / laneWidth,
+            zIndex: placement.depth * 100 + placement.columnIndex + 1
+          )
+        }
+      }
+    } else {
+      for (_, members) in groups {
+        for column in DayframeCalendarColumnMath.layout(members, expandRight: true) {
+          columns[column.id] = column
+        }
       }
     }
 

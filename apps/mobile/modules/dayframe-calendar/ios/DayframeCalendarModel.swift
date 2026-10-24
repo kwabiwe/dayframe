@@ -8,6 +8,8 @@ struct DayframeCalendarTheme: Equatable {
   let background: String
   let border: String
   let borderStrong: String
+  let danger: String
+  let dangerText: String
   let mode: String
   let onAccent: String
   let shadow: String
@@ -27,6 +29,8 @@ struct DayframeCalendarTheme: Equatable {
     background = record.background
     border = record.border
     borderStrong = record.borderStrong
+    danger = record.danger ?? (record.mode == "light" ? "#D94F4F" : "#FF6B6B")
+    dangerText = record.dangerText ?? (record.mode == "light" ? "#B42318" : "#FF6B6B")
     mode = record.mode
     onAccent = record.onAccent
     shadow = record.shadow
@@ -69,6 +73,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
   let color: String
   let columnGroup: String?
   let continuesIntoNextDay: Bool
+  let detailLines: [DayframeCalendarDetailLineRecord]
   let entryId: String
   let glyph: String?
   let isActive: Bool
@@ -108,6 +113,7 @@ struct DayframeCalendarEntry: Equatable, Identifiable {
     color = record.color
     columnGroup = record.columnGroup
     continuesIntoNextDay = record.continuesIntoNextDay
+    detailLines = record.detailLines ?? [DayframeCalendarDetailLineRecord(glyph: "time", text: record.meta)]
     entryId = record.entryId
     glyph = record.glyph
     isActive = record.isActive
@@ -179,6 +185,7 @@ struct DayframeCalendarPresentation: Equatable {
   let emptyState: String
   let entries: [DayframeCalendarEntry]
   let framedLabel: String
+  let framedAccessibilityLabel: String
   let hapticsEnabled: Bool
   /// Calendar › Grid or List (location v4 step 9): in List the view draws only its header and week
   /// strip, and the app draws the List under it.
@@ -212,6 +219,7 @@ struct DayframeCalendarPresentation: Equatable {
     emptyState = record.emptyState
     entries = record.entries.map(DayframeCalendarEntry.init)
     framedLabel = record.framedLabel
+    framedAccessibilityLabel = record.framedAccessibilityLabel ?? record.framedLabel
     hapticsEnabled = record.hapticsEnabled
     isList = record.layout == "list"
     clockFormat = record.clockFormat == "12h" ? "12h" : "24h"

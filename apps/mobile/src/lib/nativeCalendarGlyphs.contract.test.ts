@@ -19,19 +19,24 @@ describe("native Calendar draws Dayframe registry glyphs (UIA-064)", () => {
 
   it("draws the bundled registry glyphs and keeps the accessibility labels", () => {
     const rootView = readFileSync(`${iosRoot}DayframeCalendarRootView.swift`, "utf8");
-    expect(rootView).toContain('DayframeCalendarGlyph(name: direction > 0 ? "zoom-in" : "zoom-out"');
-    // Dense-day rules: place and tag lines leave the block face (their glyphs stay bundled).
-    expect(rootView).toContain('.accessibilityLabel(direction > 0 ? "Zoom in" : "Zoom out")');
+    // Calendar v3: the view menu's Day and List, and the icon lines under a block's title.
+    expect(rootView).toContain('DayframeCalendarGlyph(name: presentation.isList ? "view-list" : "view-day"');
+    expect(rootView).toContain('.accessibilityLabel("Calendar view")');
+    expect(rootView).toContain("DayframeCalendarGlyph(name: detailGlyph(detail.glyph), size: iconSize, followsTextSize: false)");
 
     const manifest = JSON.parse(readFileSync(`${iosRoot}Glyphs/manifest.json`, "utf8")) as Record<string, { glyph: string }>;
     // Plus every activity glyph as "activity-<glyph>" (location v4 C6: icon-only narrow columns).
     const own = Object.fromEntries(Object.entries(manifest).filter(([key]) => !key.startsWith("activity-")).map(([key, value]) => [key, value.glyph]));
     expect(Object.entries(manifest).filter(([key]) => key.startsWith("activity-")).every(([key, value]) => key === `activity-${value.glyph}`)).toBe(true);
     expect(own).toEqual({
+      check: "check",
+      health: "heart-pulse",
       place: "map-pin",
       tag: "tag",
-      "zoom-in": "plus",
-      "zoom-out": "minus"
+      time: "clock",
+      trip: "route",
+      "view-day": "calendar-days",
+      "view-list": "list"
     });
     for (const stem of Object.keys(manifest)) {
       for (const suffix of ["", "@2x", "@3x"]) expect(existsSync(`${iosRoot}Glyphs/${stem}${suffix}.png`)).toBe(true);

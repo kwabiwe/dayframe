@@ -182,8 +182,8 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(tiny?.height, 18)
     let label = DayframeCalendarDenseLabelMath.label(height: 16, width: 200)
     XCTAssertTrue(label.compact)
-    XCTAssertFalse(label.detail)
-    XCTAssertEqual(label.titleLines, 1)
+    XCTAssertEqual(label.detailLinesAvailable, 0)
+    XCTAssertEqual(label.titleLines(detailCount: 3), 1)
   }
 
   func testVisualGeometryAddsTwoPointGapWithoutChangingSemanticHeight() {
@@ -192,7 +192,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       continuesIntoNextDay: false
     )
 
-    XCTAssertEqual(visual.cornerRadius, 10)
+    XCTAssertEqual(visual.cornerRadius, 5)
     XCTAssertEqual(visual.semanticHeight, 72)
     XCTAssertEqual(visual.visualHeight, 70)
     XCTAssertEqual(visual.visualGap, 2)
@@ -207,7 +207,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
       )
     }
 
-    XCTAssertEqual(metrics.map(\.cornerRadius), [10, 10, 10])
+    XCTAssertEqual(metrics.map(\.cornerRadius), [5, 5, 5])
     XCTAssertEqual(metrics.last?.visualHeight, 2)
     XCTAssertEqual(metrics.last?.visualGap, 2)
   }
@@ -1371,6 +1371,24 @@ final class DayframeCalendarCoreTests: XCTestCase {
     let started = Date()
     _ = DayframeCalendarDayLayout.layout(entries: entries, nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, calendar: calendar)
     XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)
+    // Calendar v3's hybrid overlap: the same crowd, and a staircase of 500 long blocks one every 2.83
+    // minutes, so about 60 groups each nest inside the one before (deeper than the lane is wide).
+    let staircase = (0..<500).map { (index: Int) -> DayframeCalendarLayoutInput in
+      DayframeCalendarLayoutInput(
+        id: "s\(index)", startedAtMs: dayStart + Double(index) * 170_000, stoppedAtMs: dayStart + 86_000_000,
+        columnGroup: "logged", regionOffsetFraction: 0, regionWidthFraction: 1,
+        fallbackOffsetFraction: 0, fallbackWidthFraction: 1, fallbackZIndex: 0
+      )
+    }
+    for crowd in [entries, staircase] {
+      let hybridStarted = Date()
+      let laidOut = DayframeCalendarDayLayout.layout(entries: crowd, nowMs: dayStart + 86_400_000, dayStartMs: dayStart, dayEndMs: dayStart + 86_400_000, hourHeight: 48, laneWidth: 300, calendar: calendar)
+      XCTAssertLessThan(Date().timeIntervalSince(hybridStarted), 0.25)
+      XCTAssertEqual(laidOut.count, 500)
+      for entry in laidOut.values {
+        XCTAssertLessThanOrEqual(entry.offsetFraction + entry.widthFraction, 1 + 1e-9)
+      }
+    }
   }
 
   func testDenseLabelLinesNeverOutgrowTheDrawnBlock() {
@@ -1379,25 +1397,34 @@ final class DayframeCalendarCoreTests: XCTestCase {
         for height in stride(from: 16.0, through: 140, by: 0.5) {
           let label = DayframeCalendarDenseLabelMath.label(height: height, width: width, textScale: scale)
           if label.sliver {
-            XCTAssertEqual(label.titleLines, 0)
+            XCTAssertEqual(label.titleLines(detailCount: 0), 0)
             continue
           }
           XCTAssertEqual(label.compact, height < 34 * max(1, scale) || width < 90)
-          XCTAssertEqual(label.detail, !label.compact && width >= 120 && height - 2 >= label.titleLineHeight + label.detailLineHeight)
-          // The top padding stays; the last line may use the bottom padding (calendar-dense-mockup v2).
-          let used = Double(label.titleLines) * label.titleLineHeight + (label.detail ? label.detailLineHeight : 0) + label.verticalPadding
-          // Never more lines than the block holds, and none at all where one would not fit whole.
-          XCTAssertLessThanOrEqual(used, height + 0.001, "\(height) × \(width) at ×\(scale)")
+          XCTAssertEqual(label.detailLinesAvailable > 0, !label.compact && width >= 120 && height - 2 >= label.titleLineHeight + label.detailLineHeight)
+          for wanted in 0...3 {
+            let titleLines = label.titleLines(detailCount: wanted)
+            let details = label.detailLines(titleLines: titleLines, detailCount: wanted)
+            XCTAssertLessThanOrEqual(details, wanted)
+            // The title wins: at least one line in every block drawn at least the minimum height.
+            if height >= DayframeCalendarDayLayout.labelMinimumHeight(textScale: scale) - DayframeCalendarConstants.blockVisualGap {
+              XCTAssertGreaterThanOrEqual(titleLines, 1)
+            }
+            // The top padding stays; only the one title line of the shortest blocks may reach into the
+            // bottom 2 points (calendar-v3-mockup clips it there), never an extra line.
+            let used = Double(titleLines) * label.titleLineHeight + Double(details) * label.detailLineHeight + label.verticalPadding
+            XCTAssertLessThanOrEqual(used, max(height, label.titleLineHeight + label.verticalPadding) + 0.001, "\(height) × \(width) at ×\(scale)")
+          }
         }
       }
     }
     XCTAssertTrue(DayframeCalendarDenseLabelMath.label(height: 40, width: 21).sliver)
     // An older bundle's 2-point block: no line fits, so colour only (Codex r1 on #580).
-    XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: 2, width: 200).titleLines, 0)
+    XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: 2, width: 200).titleLines(detailCount: 0), 0)
     // What is painted at the minimum (the gap taken off) still holds one compact line at every size.
     for scale in [0.8, 1.0, 1.3] {
       let painted = DayframeCalendarDayLayout.labelMinimumHeight(textScale: scale) - DayframeCalendarConstants.blockVisualGap
-      XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: painted, width: 200, textScale: scale).titleLines, 1, "×\(scale)")
+      XCTAssertEqual(DayframeCalendarDenseLabelMath.label(height: painted, width: 200, textScale: scale).titleLines(detailCount: 0), 1, "×\(scale)")
     }
     XCTAssertFalse(DayframeCalendarDenseLabelMath.label(height: 40, width: 22).sliver)
   }
@@ -1540,6 +1567,79 @@ final class DayframeCalendarCoreTests: XCTestCase {
       // A lone moment keeps its whole 44 points.
       let lone = DayframeCalendarMomentMath.hitFrames(tops: [5 * hourHeight], hourLabelWidth: 68, timelineHeight: 24 * hourHeight)[0]
       XCTAssertEqual(lone.maxY - lone.minY, 44)
+    }
+  }
+
+  // Calendar v3: Apple's hybrid overlap, on calendar-v3-mockup's synthetic Friday at 72 pt/h.
+  func testHybridOverlapPutsCloseStartsSideBySideAndNestsLaterStartsIndentedOnTop() {
+    let hourHeight = 72.0, laneWidth = 324.0
+    func block(_ id: String, _ start: String, _ end: String) -> DayframeCalendarHybridBlock {
+      func minutes(_ text: String) -> Double {
+        let parts = text.split(separator: ":").compactMap { Double($0) }
+        return parts[0] * 60 + parts[1]
+      }
+      let top = minutes(start) / 60 * hourHeight
+      return DayframeCalendarHybridBlock(id: id, top: top, bottom: max(minutes(end) / 60 * hourHeight, top + 18))
+    }
+    let day = [
+      block("overnight", "01:00", "09:00"), block("gym", "05:00", "06:30"), block("walk", "06:30", "07:00"),
+      block("prep", "07:00", "08:00"), block("plan", "09:00", "10:20"), block("sync", "09:00", "09:45"),
+      block("inbox", "09:00", "09:05"), block("reply", "09:02", "09:06"), block("coffee", "09:05", "09:10"),
+      block("party", "11:00", "13:30"), block("unknown", "11:00", "11:20"), block("parcel", "13:20", "13:40"),
+      block("games", "18:00", "19:00"), block("bedtime", "18:45", "19:05"), block("shift", "20:00", "23:55"),
+      block("stretch", "20:00", "20:40"), block("journal", "20:00", "20:20"), block("f1", "22:00", "22:45")
+    ]
+    let placed = Dictionary(uniqueKeysWithValues: DayframeCalendarHybridMath.layout(
+      day, laneWidth: laneWidth, closeDistance: 20.0 / 60 * hourHeight
+    ).map { ($0.id, $0) })
+
+    // A long block alone takes the lane; blocks starting inside it nest 14 pt in, drawn on top.
+    XCTAssertEqual(placed["overnight"]?.x, 0)
+    XCTAssertEqual(placed["overnight"]?.width, laneWidth)
+    for id in ["gym", "walk", "prep"] {
+      XCTAssertEqual(placed[id]?.depth, 1, id)
+      XCTAssertEqual(placed[id]?.x, 14, id)
+      XCTAssertEqual(placed[id]?.width, laneWidth - 14, id)
+    }
+    // Five starts within 20 minutes share five equal columns.
+    let nine = ["plan", "sync", "inbox", "reply", "coffee"].compactMap { placed[$0] }
+    XCTAssertEqual(nine.map(\.columnCount), [5, 5, 5, 5, 5])
+    XCTAssertEqual(nine.map(\.columnIndex), [0, 1, 2, 3, 4])
+    XCTAssertEqual(nine.map(\.depth), [0, 0, 0, 0, 0])
+    // Starts together sit beside each other; a later start nests in the latest-starting block running.
+    XCTAssertEqual(placed["unknown"]?.columnIndex, 1)
+    XCTAssertEqual(placed["parcel"]?.depth, 1)
+    XCTAssertEqual(placed["parcel"]?.x, placed["party"]!.x + 14)
+    XCTAssertEqual(placed["bedtime"]?.depth, 1)
+    XCTAssertEqual(placed["bedtime"]?.x, 14)
+    // F1 nests inside the evening shift and stops short of nothing: Stretch and Journal have ended.
+    XCTAssertEqual(placed["f1"]?.depth, 1)
+    XCTAssertEqual(placed["f1"]!.x + placed["f1"]!.width, laneWidth, accuracy: 0.001)
+    XCTAssertEqual(placed["shift"]?.columnCount, 3)
+  }
+
+  func testHybridOverlapStopsANestedGroupShortOfABlockStillRunningToItsRight() {
+    let placed = Dictionary(uniqueKeysWithValues: DayframeCalendarHybridMath.layout([
+      DayframeCalendarHybridBlock(id: "a", top: 0, bottom: 200),
+      DayframeCalendarHybridBlock(id: "b", top: 0, bottom: 200),
+      DayframeCalendarHybridBlock(id: "nested", top: 100, bottom: 150)
+    ], laneWidth: 300, closeDistance: 24).map { ($0.id, $0) })
+    XCTAssertEqual(placed["a"]?.width, 150)
+    // Nested in a (tied starts: the first placed), 14 in from its left edge, and stopping 2 points
+    // short of b, which is still running to its right.
+    XCTAssertEqual(placed["nested"]?.depth, 1)
+    XCTAssertEqual(placed["nested"]?.x, 14)
+    XCTAssertEqual(placed["nested"]!.x + placed["nested"]!.width, 148, accuracy: 0.001)
+    // Nested in a narrow column at the lane's edge: never narrower than 40 points, never past the lane.
+    let edge = DayframeCalendarHybridMath.layout([
+      DayframeCalendarHybridBlock(id: "wide", top: 0, bottom: 300),
+      DayframeCalendarHybridBlock(id: "one", top: 50, bottom: 300),
+      DayframeCalendarHybridBlock(id: "two", top: 100, bottom: 300),
+      DayframeCalendarHybridBlock(id: "three", top: 150, bottom: 300)
+    ], laneWidth: 60, closeDistance: 24)
+    for placement in edge {
+      XCTAssertGreaterThanOrEqual(placement.width, min(40, 60 - placement.x) - 0.001, placement.id)
+      XCTAssertLessThanOrEqual(placement.x + placement.width, 60 + 0.001, placement.id)
     }
   }
 }

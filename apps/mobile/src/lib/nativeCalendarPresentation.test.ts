@@ -611,16 +611,39 @@ describe("native Calendar presentation boundary", () => {
 });
 
 describe("native Calendar Blocks presentation", () => {
-  it("titles the screen with the month and says how much was framed on the selected day", () => {
+  it("titles the screen with the month and puts one short framed line under the week strip (Calendar v3)", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt: iso(localTime(2026, 7, 10, 10, 20)) })]));
-    const weekday = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { weekday: "long" });
+    const fullDate = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" });
 
     expect(state.model.monthTitle).toBe(new Date(now).toLocaleDateString(undefined, { month: "long" }));
-    expect(state.model.framedLabel).toBe(`1h 20m framed on ${weekday}`);
+    // The week strip and the month already show the date: the line says only the time.
+    expect(state.model.framedLabel).toBe("1h 20m framed");
+    expect(state.model.framedAccessibilityLabel).toBe(`1 hour 20 minutes framed on ${fullDate}`);
+    // The selected day in the strip reads its full date; today says so.
+    const friday = state.model.weekDays.find((day) => day.isSelected);
+    expect(friday?.accessibilityLabel).toBe(`${fullDate}, today`);
+    expect(state.model.weekDays.find((day) => !day.isToday)?.accessibilityLabel).not.toContain("today");
 
+    // Hidden on an empty day, still said in full to VoiceOver.
     const empty = build(now, bootstrap([]));
-    expect(empty.model.framedLabel).toBe(`Nothing framed on ${weekday}`);
+    expect(empty.model.framedLabel).toBe("");
+    expect(empty.model.framedAccessibilityLabel).toBe(`Nothing framed on ${fullDate}`);
+  });
+
+  it("gives a block its icon lines: the place, a trip's route or Apple Health, the tags, then the times (Calendar v3)", () => {
+    const now = localTime(2026, 7, 10, 23, 0);
+    const stoppedAt = iso(localTime(2026, 7, 10, 10, 20));
+    const lines = (overrides: Parameters<typeof entry>[0]) =>
+      build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt, ...overrides })])).model.entries[0]?.detailLines;
+    expect(lines({ placeName: "Exampleton Library", tags: [{ id: "t", name: "planning" } as never] })).toEqual([
+      { glyph: "place", text: "Exampleton Library" },
+      { glyph: "tag", text: "planning" },
+      { glyph: "time", text: "09:00–10:20" }
+    ]);
+    expect(lines({ placeName: "Exampleton Station", automaticMoveEventId: "move-1" })?.[0]).toEqual({ glyph: "trip", text: "Exampleton Station" });
+    expect(lines({ source: "health_workout", placeName: "Exampleton Park" })?.[0]).toEqual({ glyph: "health", text: "From Apple Health" });
+    expect(lines({})).toEqual([{ glyph: "time", text: "09:00–10:20" }]);
   });
 
   it("adds the year to the month title outside the current year", () => {

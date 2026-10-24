@@ -57,6 +57,20 @@ export const CALENDAR_DENSE_LABEL = {
   sliverMaximumWidth: 22
 } as const;
 
+/**
+ * Calendar v3 (owner, 24 Oct 2026; calendar-v3-mockup): Apple Calendar's hybrid overlap. A block that
+ * starts within `closeMinutes` of its group's first start (or within its title line) sits beside it in
+ * equal columns; a later start nests, indented `indent` from the block it starts inside and drawn on
+ * top, never narrower than `minimumNestedWidth`. Blocks have `cornerRadius` corners. The iPhone's
+ * DayframeCalendarConstants mirror these (nativeCalendar.contract.test.ts).
+ */
+export const CALENDAR_V3_OVERLAP = {
+  closeMinutes: 20,
+  indent: 14,
+  minimumNestedWidth: 40,
+  cornerRadius: 5
+} as const;
+
 /** What a block of this drawn height and width shows in the dense-day rules. */
 export function calendarDenseLabel({ height, width, lineHeight, compactLineHeight, detailLineHeight }: {
   height: number; width: number; lineHeight: number; compactLineHeight: number; detailLineHeight: number;
