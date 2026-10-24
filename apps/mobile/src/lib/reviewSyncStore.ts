@@ -3167,9 +3167,14 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
  * surface is never followed by a second one.
  */
 export async function reviewItemsDecidedLocally(bootstrap: MobileBootstrap, ids: readonly string[]) {
+  return (await reviewItemIdsDecidedLocally(bootstrap, ids)).size > 0;
+}
+
+/** Which of these suggestions are already decided on this phone (the same read, item by item, for a batch). */
+export async function reviewItemIdsDecidedLocally(bootstrap: MobileBootstrap, ids: readonly string[]) {
   const key = accountKey({ workspaceId: bootstrap.workspace.id, userId: bootstrap.user.id });
   const suppressed = await suppressedReviewItemIds(key, await presentationBackendIdForBootstrap(key, bootstrap));
-  return ids.some((id) => suppressed.has(id));
+  return new Set(ids.filter((id) => suppressed.has(id)));
 }
 
 /**

@@ -47,6 +47,12 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(batch).toContain("const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId) && claimReviewAnswer([entry.itemId]));");
     expect(batch).toContain("const busy = held.items.filter((entry) => !claimed.includes(entry));");
     expect(batch).toContain("releaseReviewAnswer(claimed.map((entry) => entry.itemId));");
+    // Holding the claims, it reads the outbox first: what Calendar › List decided meanwhile is resolved, and
+    // an unreadable outbox fails every write (Codex r7 on #582).
+    expect(batch.indexOf("await reviewAnswersDecided(")).toBeGreaterThan(batch.indexOf("claimReviewAnswer([entry.itemId])"));
+    expect(batch.indexOf("await reviewAnswersDecided(")).toBeLessThan(batch.indexOf("runReviewBulkSkip<MobileReviewItem>(claimed"));
+    expect(batch).toContain("decided: readFailed ? new Set() : decided,");
+    expect(batch).toContain("if (readFailed) throw decided.error;");
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {

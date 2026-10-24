@@ -141,7 +141,7 @@ import {
   heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
 import { reviewAnswerMutation } from "@/lib/reviewAnswer";
-import { claimReviewAnswer, releaseReviewAnswer, reviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
+import { claimReviewAnswer, releaseReviewAnswer, reviewAnswersDecided, reviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -1604,8 +1604,24 @@ export default function ReviewScreen() {
       return known && isOpenReviewItem(known) ? known : undefined;
     };
     void (async () => {
+      // Holding the claims, read the outbox for these moments first (Codex r7 on #582): one Calendar ›
+      // List decided meanwhile is resolved, never skipped again from the copy the deck remembered. An
+      // outbox that cannot be read leaves every moment unsaved and still here, as a failed write would.
+      const loaded = dataRef.current;
+      const rememberedItems = claimed.flatMap((entry) => {
+        const remembered = !loaded?.reviewItems.some((candidate) => candidate.id === entry.itemId) ? knownDeckItem(entry.itemId) : undefined;
+        return remembered ? [remembered] : [];
+      });
+      const decided = loaded
+        ? await reviewAnswersDecided(
+          rememberedItems.length ? { ...loaded, reviewItems: [...loaded.reviewItems, ...rememberedItems] } : loaded,
+          claimed.map((entry) => entry.itemId)
+        ).catch((error: unknown) => ({ error }))
+        : { error: new Error("Review data is not loaded.") };
+      const readFailed = "error" in decided;
       const outcome = await runReviewBulkSkip<MobileReviewItem>(claimed, {
         enqueue: async (item) => {
+          if (readFailed) throw decided.error;
           const current = dataRef.current;
           if (!current) throw new Error("Review data is not loaded.");
           const bootstrap = current.reviewItems.some((candidate) => candidate.id === item.id)
@@ -1622,6 +1638,7 @@ export default function ReviewScreen() {
           const current = reviewMutations.current.get(itemId);
           return current !== undefined && current !== claim;
         },
+        decided: readFailed ? new Set() : decided,
         openItem,
         ownerMatches,
         signature: reviewDeckProposalSignature
