@@ -87,7 +87,7 @@ describe("Calendar range and toolbar contract", () => {
     // Today is always shown in List, greyed and inert, even for the current period (Codex r2 on #584).
     expect(timeline).toContain("{showsToday && !isList ? null : (");
     // Location days belong to the owner and the selected week (Codex r2 on #584).
-    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`);");
+    expect(timeline).toContain("data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);");
     // In read order, so a trip read on two days shows its freshest copy (Codex r5 on #584).
     expect(timeline).toContain("locationTimelines={[...listTimelines.values()].filter((timeline) => listDays.includes(timeline.date))}");
     // Alt+← / → (the shell's period shortcut) does nothing in List either (Codex r1 on #584).

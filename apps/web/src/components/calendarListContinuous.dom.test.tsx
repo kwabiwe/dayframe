@@ -240,6 +240,17 @@ describe("useLocationTimelines refreshes and teardown (Codex r1 on #584)", () =>
     expect(clientFetch).toHaveBeenCalledTimes(LOCATION_TIMELINE_CONCURRENCY);
   });
 
+  it("stops reading while the List isn't shown (Codex r9 on #584)", async () => {
+    const answers: Array<(value: unknown) => void> = [];
+    clientFetch.mockImplementation(() => new Promise((resolve) => answers.push(resolve)));
+    const dates = ["2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16"];
+    const { rerender } = renderHook(({ enabled }) => useLocationTimelines(enabled ? dates : [], [], "data", 0, "w1:u1", enabled), { initialProps: { enabled: true } });
+    expect(clientFetch).toHaveBeenCalledTimes(LOCATION_TIMELINE_CONCURRENCY);
+    rerender({ enabled: false });
+    await act(async () => answers.shift()!({ ok: true, json: async () => day("2026-10-19") }));
+    expect(clientFetch).toHaveBeenCalledTimes(LOCATION_TIMELINE_CONCURRENCY);
+  });
+
   it("never brings an owner's days back after A → B → A", async () => {
     clientFetch.mockImplementation((url: string) => Promise.resolve({ ok: true, json: async () => day(decodeURIComponent(url.split("date=")[1])) }));
     const { result, rerender } = renderHook(({ owner, dates }) => useLocationTimelines(dates, [], "data", 0, owner),
@@ -309,13 +320,15 @@ describe("Calendar › List trips across midnight (Codex r2 on #584)", () => {
 });
 
 describe("Calendar › List selected day (Codex r3 on #584)", () => {
-  // jsdom has no layout: each List row is 100 px tall, the List 500 px, and the browser clamps scrollTop
-  // to what lies below, as a real browser does.
+  // jsdom has no layout: each List row is 100 px tall, the List 500 px, the "N to check" chip above the
+  // table 52 px, and the browser clamps scrollTop to what lies below, as a real browser does.
   const ROW = 100;
   const VIEW = 500;
   const scrollTops = new WeakMap<Element, number>();
   const listOf = (element: Element) => element.closest(".timeline-list-scroll");
   const rowsOf = (root: Element) => [...root.querySelectorAll("tbody > tr")];
+  const CHIP = 52;
+  const above = (root: Element) => (root.querySelector(".timeline-checks-bar") ? CHIP : 0);
   let restore: () => void = () => undefined;
   beforeEach(() => {
     const rowRect = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "getBoundingClientRect");
@@ -326,11 +339,11 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
       if (this.classList.contains("timeline-list-scroll")) return rect(0, VIEW);
       const root = listOf(this);
-      if (root && this.tagName === "TR" && this.parentElement?.tagName === "TBODY") return rect(rowsOf(root).indexOf(this) * ROW - (scrollTops.get(root) ?? 0), ROW);
+      if (root && this.tagName === "TR" && this.parentElement?.tagName === "TBODY") return rect(above(root) + rowsOf(root).indexOf(this) * ROW - (scrollTops.get(root) ?? 0), ROW);
       return rect(0, 0);
     } });
     Object.defineProperty(Element.prototype, "scrollHeight", { configurable: true, get(this: Element) {
-      return this.classList.contains("timeline-list-scroll") ? rowsOf(this).length * ROW : 0;
+      return this.classList.contains("timeline-list-scroll") ? above(this) + rowsOf(this).length * ROW : 0;
     } });
     Object.defineProperty(Element.prototype, "clientHeight", { configurable: true, get(this: Element) {
       return this.classList.contains("timeline-list-scroll") ? VIEW : 0;
@@ -452,6 +465,24 @@ describe("Calendar › List selected day (Codex r3 on #584)", () => {
     rerender(view([{ date: "2026-10-14", timeZone: "", dayStart: fourteenth.start.toISOString(), dayEnd: fourteenth.end.toISOString(), gaps: [],
       items: [cafe, library], openTrip: null }]));
     expect(open().getBoundingClientRect().top).toBe(0);
+  });
+
+  it("brings the first heading to the top too when the \"N to check\" chip sits above the table (Codex r9 on #584)", () => {
+    const iso = (hour: number) => new Date(2026, 9, 14, hour).toISOString();
+    const check: ReviewItemRow = {
+      id: "q-sleep", type: "suggestion", title: "Sleep", eventSource: "health_sleep", eventType: "health_sleep_import_suggestion", projectName: null,
+      categoryName: null, categoryColor: null, placeName: null, suggestedProjectId: null, suggestedCategoryId: null, suggestedPlaceId: null,
+      suggestedStartedAt: iso(1), suggestedStoppedAt: iso(6), confidence: "medium", status: "open", notes: null, rawPayload: null, createdAt: iso(12)
+    };
+    render(
+      <EntriesTable capturedNow={new Date(2026, 9, 24, 12)} categories={[]} groupByDay checksDays={[{ start: new Date(2026, 9, 14), end: new Date(2026, 9, 15) }]}
+        continuous={{ error: null, focusDayStartMs: new Date(2026, 9, 20).getTime(), focusRequest: "2026-10-20", loading: null, onLoad: vi.fn(),
+          reachedEarliest: false, reachedLatest: true }}
+        entries={days(10, 20)} reviewItems={[check]} onChanged={vi.fn(async () => undefined)}
+        onDeleteEntries={vi.fn()} onScroll={vi.fn()} scrollContainerRef={vi.fn()} tags={[]} />
+    );
+    expect(document.querySelector(".timeline-checks-bar")).not.toBeNull();
+    expect(headingTop(20)).toBe(0);
   });
 
   it("stops at the person's own scrolling, and when no earlier week can come", () => {

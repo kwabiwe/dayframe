@@ -483,10 +483,9 @@ export function EntriesTable({
       // and keep waiting for the nearest earlier day while one can still come (Codex r4 on #584).
       root.scrollTop = root.scrollHeight;
       if (!focusCanGrow) focusDoneRef.current = focusRequest;
-    } else if (target === headings[0]) {
-      root.scrollTop = 0;
-      focusDoneRef.current = focusRequest;
     } else {
+      // Measured like any heading, the first too: the "N to check" chip and the later edge sit above the
+      // table (Codex r9 on #584).
       root.scrollTop += target.getBoundingClientRect().top - root.getBoundingClientRect().top;
       const off = target.getBoundingClientRect().top - root.getBoundingClientRect().top;
       if (Math.abs(off) < 1 || !focusCanGrow) focusDoneRef.current = focusRequest;

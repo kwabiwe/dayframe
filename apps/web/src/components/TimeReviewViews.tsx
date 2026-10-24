@@ -408,7 +408,7 @@ export function TimeReviewViews({
   // Per owner and selected week: another week (or workspace) starts a new lifetime, so a return to a week
   // reads its days again rather than showing an earlier visit's (Codex r2 on #584).
   const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
-    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`);
+    data, listRefreshToken, `${listOwner}|${toTimelineDateKey(ranges.week.start)}`, isList);
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,

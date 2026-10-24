@@ -58,7 +58,7 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * copy; a day without one shows blocks (and its checks) only, as before.
  */
 export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
-  owner: string): ReadonlyMap<string, LocationTimeline> {
+  owner: string, enabled = true): ReadonlyMap<string, LocationTimeline> {
   // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
   const [scope, setScope] = useState({ owner, generation: 0 });
   let generation = scope.generation;
@@ -87,23 +87,33 @@ export function useLocationTimelines(dates: readonly string[], liveDates: readon
     return queueRef.current;
   };
 
+  // Not shown (Calendar instead of List): the queue stops and its reads are aborted; the days read stay,
+  // and a return reads the shown days again (Codex r9 on #584).
+  useEffect(() => {
+    if (enabled) return;
+    queueRef.current?.dispose();
+    queueRef.current = null;
+  }, [enabled]);
   // Any day not asked for yet is due.
   useEffect(() => {
+    if (!enabled) return;
     const queue = queueFor(generation);
     queue.want(datesKey ? datesKey.split(",") : [], false);
-  }, [datesKey, generation]);
+  }, [datesKey, enabled, generation]);
   // The selected day and today again with each bootstrap refresh.
   useEffect(() => {
+    if (!enabled) return;
     queueFor(generation).want(liveDatesKey ? liveDatesKey.split(",") : [], true);
-  }, [liveDatesKey, liveKey, generation]);
+  }, [enabled, liveDatesKey, liveKey, generation]);
   // Every day again after an edit.
   const lastStaleRef = useRef(staleKey);
   useEffect(() => {
     if (lastStaleRef.current === staleKey) return;
     lastStaleRef.current = staleKey;
+    if (!enabled) return;
     const queue = queueFor(generation);
     queue.want([...queue.asked], true);
-  }, [generation, staleKey]);
+  }, [enabled, generation, staleKey]);
   // Leaving: every read is aborted and the queue stops.
   useEffect(() => () => {
     queueRef.current?.dispose();
