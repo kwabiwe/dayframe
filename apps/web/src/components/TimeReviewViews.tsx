@@ -1726,7 +1726,7 @@ export function CalendarReview({
                 const lanes = laneWidth > 0
                   ? layoutTimeBlockHybrid(laneBlocks, { laneWidth, pixelsPerHour: rowHeight })
                   : layoutTimeBlockLanes(laneBlocks);
-                const fullLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 } satisfies TimeBlockLane;
+                const fullLane: TimeBlockLane = { laneCount: 1, laneIndex: 0, mode: "full", offsetFraction: 0, widthFraction: 1, zIndex: 0 };
 
                 const momentLines = moments.map((entry) => {
                   // The day's own clipped start (a moment across midnight sits at the top of its second day).
@@ -1864,6 +1864,7 @@ export function CalendarReview({
                       data-calendar-semantic-height={block.semanticBlockPositionStyle.height}
                       data-calendar-semantic-top={block.semanticBlockPositionStyle.top}
                       data-overlap-layout={lane.mode}
+                      data-depth={lane.px?.depth ? Math.min(lane.px.depth, 9) : undefined}
                     >
                       <button
                         type="button"

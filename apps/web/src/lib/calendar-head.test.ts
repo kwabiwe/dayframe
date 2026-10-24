@@ -108,4 +108,19 @@ describe("Calendar page head (Trello: Calendar page improvements)", () => {
     expect(empty.framedLine).toBe("");
     expect(empty.framedLabel).toBe("Nothing framed on Wednesday 7 October");
   });
+
+  it("shows a day with under a minute framed, and says the shown figure (Codex r1 on #583)", () => {
+    const head = (seconds: number) => calendarHeadModel({
+      dayLoggedSeconds: seconds,
+      entries: [] as never,
+      nowMs: new Date(2026, 9, 11, 14, 48).getTime(),
+      selectedDay: day(7),
+      weekDays: [5, 6, 7, 8, 9, 10, 11].map(day),
+      weekLoggedSeconds: seconds
+    });
+    expect(head(20).framedLine).toBe("<1m framed");
+    expect(head(20).framedLabel).toBe("under a minute framed on Wednesday 7 October");
+    expect(head(119).framedLine).toBe("1m framed");
+    expect(head(119).framedLabel).toBe("1 minute framed on Wednesday 7 October");
+  });
 });

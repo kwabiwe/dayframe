@@ -32,9 +32,10 @@ const WEEKDAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long" });
 const DAY_LONG = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" });
 const WEEK_OF = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
 
-/** "8 hours 41 minutes", "1 hour", "5 minutes" for assistive tech. */
+/** "8 hours 41 minutes", "1 hour", "5 minutes", "under a minute" for assistive tech: the shown figure's minutes. */
 function spokenDuration(seconds: number) {
-  const minutes = Math.max(0, Math.round(seconds / 60));
+  if (seconds > 0 && seconds < 60) return "under a minute";
+  const minutes = Math.max(0, Math.floor(seconds / 60));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   const parts = [
@@ -85,9 +86,10 @@ export function calendarHeadModel({
   const total = (seconds: number) => (hydrated ? formatDuration(seconds) : "–");
   return {
     month: MONTH.format(selectedDay),
-    framedLine: hydrated && Math.round(dayLoggedSeconds / 60) <= 0 ? "" : `${total(dayLoggedSeconds)} framed`,
+    // Empty only with no time at all: a day with 20 seconds framed shows "<1m framed" (Codex r1 on #583).
+    framedLine: hydrated && !(dayLoggedSeconds > 0) ? "" : `${total(dayLoggedSeconds)} framed`,
     framedLabel: hydrated
-      ? `${Math.round(dayLoggedSeconds / 60) > 0 ? spokenDuration(dayLoggedSeconds) : "Nothing"} framed on ${DAY_LONG.format(selectedDay)}`
+      ? `${dayLoggedSeconds > 0 ? spokenDuration(dayLoggedSeconds) : "Nothing"} framed on ${DAY_LONG.format(selectedDay)}`
       : `Framed on ${DAY_LONG.format(selectedDay)}`,
     days: weekDays.map((day, index) => {
       const key = toTimelineDateKey(day);

@@ -225,4 +225,20 @@ describe("time block display helpers", () => {
     // Drawn in px: right of the 8 px inset (and any rail), giving up the 2 px gap on the right.
     expect(calendarBlockLanePxInsets({ x: 14, width: 100, depth: 1 }, 12)).toEqual({ left: 8 + 12 + 14, width: 98, right: "auto" });
   });
+
+  it("keeps every nested block above the one it starts inside, below the block in hand (Codex r1 on #583)", () => {
+    // A staircase of shared-column groups, each nesting inside the last.
+    const blocks = Array.from({ length: 12 }, (_, depth) => [
+      { key: `d${depth}a`, top: depth * 40, height: 1000 },
+      { key: `d${depth}b`, top: depth * 40 + 2, height: 1000 }
+    ]).flat();
+    const lanes = layoutTimeBlockHybrid(blocks, { laneWidth: 2000, pixelsPerHour: 64 });
+    for (let depth = 1; depth < 12; depth += 1) {
+      const parent = lanes.get(`d${depth - 1}b`)!;
+      const child = lanes.get(`d${depth}a`)!;
+      expect(child.px?.depth).toBeGreaterThan(parent.px!.depth);
+      expect(child.zIndex).toBeGreaterThanOrEqual(parent.zIndex);
+      expect(2 + child.zIndex).toBeLessThan(36);
+    }
+  });
 });

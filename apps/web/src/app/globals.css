@@ -1162,6 +1162,39 @@ textarea.ui-control {
   justify-content: center;
 }
 
+/* Calendar v3 List rows (owner choice A; Apple's layout): the start over the end, right-aligned, in tabular
+   figures, the end in secondary text. Each time stays its own 24 px inline edit (WCAG 2.5.8). */
+.timeline-list-table .timeline-list-time-content {
+  justify-content: flex-end;
+}
+
+.timeline-list-table .timeline-inline-time,
+.timeline-list-table .timeline-inline-time.is-running,
+.timeline-list-table .timeline-inline-time[data-clock="12h"],
+.timeline-list-table .timeline-inline-time[data-clock="12h"].is-running {
+  height: auto;
+  min-height: 0;
+  grid-template-columns: max-content;
+  grid-auto-rows: 24px;
+  justify-items: end;
+  padding: 2px 8px;
+}
+
+.timeline-list-table .timeline-inline-time-separator {
+  display: none;
+}
+
+.timeline-list-table .timeline-inline-time-control,
+.timeline-list-table .timeline-inline-time-input {
+  height: 24px;
+  min-height: 24px;
+  text-align: right;
+}
+
+.timeline-list-table .timeline-inline-time > :last-child {
+  color: var(--text-secondary);
+}
+
 /* The later shared picker grid must not give triggerless inline wrappers a box. */
 .swiss-timeline-surface .timeline-inline-time-control > .timeline-inline-date-picker {
   display: contents;
@@ -2025,11 +2058,26 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
     box-shadow 140ms ease;
 }
 
-/* Reduce Transparency: opaque over the surface, a little stronger. */
+/* A nested block (drawn on top of the one it starts inside) is its own tint over the surface, 88 % opaque:
+   the block underneath still shows faintly, but tints never stack, so its text keeps the single block's
+   contrast (Codex r1 on #583: two stacked Midnight tints fell to 3.6:1). */
+.calendar-time-block[data-depth] {
+  --calendar-block-fill: color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-tint), var(--surface)) 88%, transparent);
+  --calendar-block-selected-fill: color-mix(in srgb, color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface)) 88%, transparent);
+}
+
+/* Reduce Transparency: opaque over the surface, a little stronger; suggestions too, hatch and bar kept. */
 @media (prefers-reduced-transparency: reduce) {
-  .calendar-time-block {
+  .calendar-time-block,
+  .calendar-time-block[data-depth] {
     --calendar-block-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 10%), var(--surface));
     --calendar-block-selected-fill: color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-tint) + 20%), var(--surface));
+  }
+
+  .calendar-review-block {
+    background:
+      repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 22%, transparent) 0 2px, transparent 2px 7px),
+      color-mix(in oklab, var(--calendar-block-accent) calc(var(--calendar-dense-review-tint) + 10%), var(--surface));
   }
 }
 
@@ -2235,6 +2283,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 
 @container calendar-time-block (max-width: 21.98px) {
   .calendar-entry-title,
+  .calendar-entry-title:has(.calendar-entry-words.is-cut-first),
   .calendar-time-block.has-detail-room .calendar-entry-details {
     display: none;
   }
@@ -9296,11 +9345,13 @@ dialog.ui-dialog.df-palette {
   }
 }
 
+/* Above every nested depth (Calendar v3 lanes: 2 + up to 33), so the block in hand is always on top, and
+   below the sticky day headings (40). */
 .calendar-time-block:hover,
 .calendar-time-block.is-selected,
 .calendar-time-block.is-resizing,
 .calendar-time-block:has(:focus-visible) {
-  z-index: 14 !important;
+  z-index: 36 !important;
 }
 
 /* Calendar v3 (owner, 24 Oct 2026; Apple): a red line exactly on the minute across the day, with the time
@@ -12998,6 +13049,12 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
   line-height: 16px;
   white-space: nowrap;
+}
+
+/* Calendar v3: the second line's pin, route or tag icon. */
+.timeline-task-secondary-line > svg {
+  flex: none;
+  align-self: center;
 }
 
 .timeline-task-secondary-line .timeline-task-meta,

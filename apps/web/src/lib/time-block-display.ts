@@ -128,9 +128,11 @@ export function layoutTimeBlockHybrid(
       mode: placement.columnCount > 1 || placement.depth > 0 ? "lane" : "full",
       offsetFraction: laneWidth > 0 ? placement.x / laneWidth : 0,
       widthFraction: laneWidth > 0 ? placement.width / laneWidth : 1,
-      // Deeper blocks are drawn above the ones they start inside; hover, selection and resizing (14)
-      // still lift any block above them all.
-      zIndex: Math.min(placement.depth, 5) * 2 + (placement.columnCount > 1 ? 1 : 0),
+      // Deeper blocks are drawn above the ones they start inside: the order never reverses (Codex r1 on
+      // #583). Past 16 depths it holds at 33, where the later-starting child still paints last (DOM
+      // order). Hover, selection and resizing (36) lift any block above them all; sticky day headings (40)
+      // stay above every block.
+      zIndex: Math.min(placement.depth * 2 + (placement.columnCount > 1 ? 1 : 0), 33),
       px: { x: placement.x, width: placement.width, depth: placement.depth }
     });
   }
