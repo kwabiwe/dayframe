@@ -454,6 +454,22 @@ describe("Live Activity durable remote sync", () => {
     expect(serialized).not.toContain(process.env.APNS_BUNDLE_ID);
   });
 
+  it("retires the token when the topic mismatch is on an end, so a stopped block's token never lingers", async () => {
+    configureApns();
+    http2Mocks.status = 400;
+    http2Mocks.responseBody = JSON.stringify({ reason: "DeviceTokenNotForTopic" });
+    database.claimRows = [outboxRow({ event: "end" })];
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await drainLiveActivityOutbox({ session });
+
+    expect(result).toMatchObject({ permanentFailures: 1, retryScheduled: 0 });
+    const tokenFailure = database.writes.find((write) =>
+      write.sql.includes("consecutive_failures = consecutive_failures + 1")
+    );
+    expect(tokenFailure?.params).toEqual(["token-row", 400, "DeviceTokenNotForTopic", true]);
+  });
+
   it("invalidates expired tokens and never logs token or provider secrets", async () => {
     configureApns();
     http2Mocks.status = 410;
