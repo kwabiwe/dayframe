@@ -739,6 +739,7 @@ textarea.ui-control {
    still focusable so its reason ("Not used in List") is read and shown as its tooltip. */
 .ui-segmented-control button[aria-disabled="true"],
 .timeline-range-navigation[aria-disabled="true"] .ui-icon-button,
+.timeline-range-navigation[aria-disabled="true"] button[aria-disabled="true"],
 .timeline-range-navigation[aria-disabled="true"] button:disabled {
   color: var(--muted);
   cursor: not-allowed;

@@ -49,78 +49,124 @@ export const LOCATION_TIMELINE_CONCURRENCY = 3;
  * Calendar › List's continuous days (owner, 24 Oct 2026): each shown day's location timeline, read at
  * most LOCATION_TIMELINE_CONCURRENCY at a time. A day is read once; `liveDates` (the selected day and
  * today) again whenever `liveKey` changes (the runtime's bootstrap refresh), and every day again when
- * `staleKey` changes (an edit or a correction). Kept per owner (workspace and user): another owner's
- * days are never returned, and its answers in flight are dropped. A failed read keeps the day's last
+ * `staleKey` changes (an edit or a correction). A day asked for again while its read is out is read
+ * once more when that read lands, so no refresh is lost.
+ *
+ * Days belong to one owner lifetime (workspace and user): every owner change starts a new generation,
+ * dropping the days read and aborting the reads in flight, so even an A → B → A round trip never shows
+ * A's earlier days. Unmounting aborts every read and stops the queue. A failed read keeps the day's last
  * copy; a day without one shows blocks (and its checks) only, as before.
  */
 export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
   owner: string): ReadonlyMap<string, LocationTimeline> {
-  const [loaded, setLoaded] = useState<{ owner: string; days: ReadonlyMap<string, LocationTimeline> }>({ owner, days: new Map() });
-  // Days wanted again (or for the first time), the reads in flight and the days ever asked, for one owner.
+  // The owner lifetime, kept in state so the render that sees a change already shows nothing of the owner left.
+  const [scope, setScope] = useState({ owner, generation: 0 });
+  let generation = scope.generation;
+  if (scope.owner !== owner) {
+    generation = scope.generation + 1;
+    setScope({ owner, generation });
+  }
+  const [loaded, setLoaded] = useState<{ generation: number; days: ReadonlyMap<string, LocationTimeline> }>({ generation: 0, days: new Map() });
   const queueRef = useRef<TimelineQueue | null>(null);
   const datesKey = dates.join(",");
   const liveDatesKey = liveDates.join(",");
 
-  const queueFor = (forOwner: string) => {
-    if (queueRef.current?.owner !== forOwner) queueRef.current = { owner: forOwner, due: new Set(), inFlight: new Set(), asked: new Set() };
-    return queueRef.current;
-  };
-  /** Starts reads while fewer than LOCATION_TIMELINE_CONCURRENCY are in flight; each answer starts the next. */
-  const drain = (queue: TimelineQueue) => {
-    while (queue.inFlight.size < LOCATION_TIMELINE_CONCURRENCY && queue.due.size) {
-      const date = queue.due.values().next().value as string;
-      queue.due.delete(date);
-      queue.inFlight.add(date);
-      queue.asked.add(date);
-      clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store" })
-        .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
-        .catch(() => null)
-        .then((next) => {
-          queue.inFlight.delete(date);
-          // Another owner since: this answer is not theirs.
-          if (queueRef.current !== queue) return;
-          if (next && next.date === date) {
-            setLoaded((current) => {
-              const days = new Map(current.owner === queue.owner ? current.days : []);
-              days.set(date, next);
-              return { owner: queue.owner, days };
-            });
-          }
-          drain(queue);
+  const queueFor = (forGeneration: number) => {
+    if (queueRef.current?.generation !== forGeneration) {
+      queueRef.current?.dispose();
+      queueRef.current = createTimelineQueue(forGeneration, (date, timeline) => {
+        setLoaded((current) => {
+          const days = new Map(current.generation === forGeneration ? current.days : []);
+          days.set(date, timeline);
+          return { generation: forGeneration, days };
         });
+      });
     }
+    return queueRef.current;
   };
 
   // Any day not asked for yet is due.
   useEffect(() => {
-    const queue = queueFor(owner);
-    for (const date of datesKey ? datesKey.split(",") : []) if (!queue.asked.has(date)) queue.due.add(date);
-    drain(queue);
-    // queueFor and drain only read and write the queue ref.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datesKey, owner]);
+    const queue = queueFor(generation);
+    queue.want(datesKey ? datesKey.split(",") : [], false);
+  }, [datesKey, generation]);
   // The selected day and today again with each bootstrap refresh.
   useEffect(() => {
-    const queue = queueFor(owner);
-    for (const date of liveDatesKey ? liveDatesKey.split(",") : []) if (queue.asked.has(date) && !queue.inFlight.has(date)) queue.due.add(date);
-    drain(queue);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveDatesKey, liveKey, owner]);
+    queueFor(generation).want(liveDatesKey ? liveDatesKey.split(",") : [], true);
+  }, [liveDatesKey, liveKey, generation]);
   // Every day again after an edit.
   const lastStaleRef = useRef(staleKey);
   useEffect(() => {
     if (lastStaleRef.current === staleKey) return;
     lastStaleRef.current = staleKey;
-    const queue = queueFor(owner);
-    for (const date of queue.asked) if (!queue.inFlight.has(date)) queue.due.add(date);
-    drain(queue);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [owner, staleKey]);
+    const queue = queueFor(generation);
+    queue.want([...queue.asked], true);
+  }, [generation, staleKey]);
+  // Leaving: every read is aborted and the queue stops.
+  useEffect(() => () => {
+    queueRef.current?.dispose();
+    queueRef.current = null;
+  }, []);
 
-  return loaded.owner === owner ? loaded.days : EMPTY_TIMELINES;
+  return loaded.generation === generation ? loaded.days : EMPTY_TIMELINES;
 }
 
-type TimelineQueue = { owner: string; due: Set<string>; inFlight: Set<string>; asked: Set<string> };
+type TimelineQueue = {
+  generation: number;
+  /** Days ever asked for in this lifetime. */
+  asked: Set<string>;
+  /** Asks for days: unread ones always; with `again`, read ones too (after a read in flight lands). */
+  want: (dates: readonly string[], again: boolean) => void;
+  dispose: () => void;
+};
+
+function createTimelineQueue(generation: number, onRead: (date: string, timeline: LocationTimeline) => void): TimelineQueue {
+  const due = new Set<string>();
+  const inFlight = new Map<string, AbortController>();
+  const againAfterFlight = new Set<string>();
+  const asked = new Set<string>();
+  let disposed = false;
+  const drain = () => {
+    while (!disposed && inFlight.size < LOCATION_TIMELINE_CONCURRENCY && due.size) {
+      const date = due.values().next().value as string;
+      due.delete(date);
+      const controller = new AbortController();
+      inFlight.set(date, controller);
+      asked.add(date);
+      clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store", signal: controller.signal })
+        .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
+        .catch(() => null)
+        .then((next) => {
+          if (disposed) return;
+          inFlight.delete(date);
+          if (next && next.date === date) onRead(date, next);
+          if (againAfterFlight.delete(date)) due.add(date);
+          drain();
+        });
+    }
+  };
+  return {
+    generation,
+    asked,
+    want(dates, again) {
+      if (disposed) return;
+      for (const date of dates) {
+        if (inFlight.has(date)) {
+          if (again) againAfterFlight.add(date);
+        } else if (again ? asked.has(date) : !asked.has(date)) {
+          due.add(date);
+        }
+      }
+      drain();
+    },
+    dispose() {
+      disposed = true;
+      for (const controller of inFlight.values()) controller.abort();
+      inFlight.clear();
+      due.clear();
+    }
+  };
+}
 
 const EMPTY_TIMELINES: ReadonlyMap<string, LocationTimeline> = new Map();
 

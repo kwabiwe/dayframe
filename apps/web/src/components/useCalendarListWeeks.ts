@@ -1,19 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 import { clientFetch } from "@/lib/client-auth-fetch";
-import { addCalendarDays, toTimelineDateKey } from "@/lib/timeline-view";
+import { addCalendarDays, parseTimelineDateKey, toTimelineDateKey } from "@/lib/timeline-view";
 
-/** Weeks loaded at a time, and how many empty weeks in a row end the List's way back. */
+/** Empty weeks in a row that end the List's way back. */
 export const LIST_EMPTY_WEEKS_BEFORE_END = 8;
 
 type WeekPage = { startKey: string; entries: TimeEntryRow[] };
 
 type ListWeeksState = {
-  /** Whose weeks these are (`workspace:user`) and around which week: anything else is never shown. */
-  owner: string;
-  anchorKey: string;
+  /** The scope lifetime these weeks were read in: only that lifetime ever shows them. */
+  generation: number;
   /** Weeks before the anchor's, newest first, and after it, oldest first. */
   earlier: WeekPage[];
   later: WeekPage[];
@@ -34,8 +33,6 @@ export type CalendarListWeeks = {
   reachedEarliest: boolean;
   /** The anchor week, or the newest loaded one, is the current week. */
   reachedLatest: boolean;
-  /** Weeks prepended at the top (later weeks), so the List can keep what was in view in place. */
-  laterCount: number;
   load: (direction: ListWeeksDirection) => void;
 };
 
@@ -44,10 +41,12 @@ const NO_ENTRIES: readonly TimeEntryRow[] = [];
 /**
  * Calendar › List's continuous days (owner, 24 Oct 2026): the List shows the selected week (from the
  * shell's own data, which keeps it fresh) and loads whole weeks before and after it as it scrolls,
- * through the workspace-scoped bootstrap read. Weeks belong to their owner and anchor: a workspace or
- * account switch, or another anchor week, drops them at once (never shown), and an answer that
- * arrives after such a change is discarded. `refreshToken` re-reads every loaded week (after an edit or
- * a delete), keeping the shown copy until each answer arrives.
+ * through the workspace-scoped bootstrap read.
+ *
+ * Weeks belong to one scope lifetime: every change of owner (workspace and user) or anchor week starts a
+ * new one (a generation), which drops the stored weeks and every read still in flight, so even an
+ * A → B → A round trip never brings back A's earlier weeks or answers. Each week's reads are numbered:
+ * only its newest read commits, and a read that started before an edit (`refreshToken`) is read again.
  */
 export function useCalendarListWeeks({
   anchorWeekStart,
@@ -64,86 +63,123 @@ export function useCalendarListWeeks({
   refreshToken: number;
 }): CalendarListWeeks {
   const anchorKey = toTimelineDateKey(anchorWeekStart);
+  const scopeKey = `${owner}|${anchorKey}|${enabled ? "on" : "off"}`;
+  // The scope lifetime: a new generation for every scope change, kept in state so the render that sees
+  // the change already shows nothing of the scope left (a guarded render-phase update).
+  const [scope, setScope] = useState({ key: scopeKey, generation: 0 });
   const [stored, setStored] = useState<ListWeeksState | null>(null);
-  const [loading, setLoading] = useState<{ key: string; direction: ListWeeksDirection } | null>(null);
-  const [error, setError] = useState<{ key: string; direction: ListWeeksDirection } | null>(null);
-  const scopeKey = `${owner}|${anchorKey}`;
-  const scopeRef = useRef(scopeKey);
-  useEffect(() => {
-    scopeRef.current = scopeKey;
-  }, [scopeKey]);
-  const inFlightRef = useRef<{ key: string; direction: ListWeeksDirection } | null>(null);
+  const [status, setStatus] = useState<{ generation: number; loading: ListWeeksDirection | null; error: ListWeeksDirection | null }>(
+    { generation: 0, loading: null, error: null });
+  let generation = scope.generation;
+  if (scope.key !== scopeKey) {
+    generation = scope.generation + 1;
+    setScope({ key: scopeKey, generation });
+  }
+  const generationRef = useRef(generation);
+  const refreshTokenRef = useRef(refreshToken);
+  useLayoutEffect(() => {
+    generationRef.current = generation;
+    refreshTokenRef.current = refreshToken;
+  }, [generation, refreshToken]);
+  // The newest read of each week ("generation:startKey"), so an older answer never replaces a newer one.
+  const readSeqRef = useRef(new Map<string, number>());
+  const inFlightRef = useRef<{ generation: number; direction: ListWeeksDirection } | null>(null);
 
-  // Weeks for another owner or anchor are never shown, even for the render before they are dropped.
-  const state: ListWeeksState = stored && stored.owner === owner && stored.anchorKey === anchorKey
+  const state: ListWeeksState = stored && stored.generation === generation
     ? stored
-    : { owner, anchorKey, earlier: [], later: [], emptyEarlierRun: 0 };
-  const shownLoading = enabled && loading?.key === scopeKey ? loading.direction : null;
-  const shownError = enabled && error?.key === scopeKey ? error.direction : null;
+    : { generation, earlier: [], later: [], emptyEarlierRun: 0 };
+  const shown = status.generation === generation ? status : { loading: null, error: null };
 
   const currentKey = currentWeekStart ? toTimelineDateKey(currentWeekStart) : null;
   const newestKey = state.later.length ? state.later[state.later.length - 1].startKey : anchorKey;
   const reachedLatest = currentKey === null || newestKey >= currentKey;
   const reachedEarliest = state.emptyEarlierRun >= LIST_EMPTY_WEEKS_BEFORE_END;
 
-  const readWeek = useCallback(async (startKey: string) => {
-    const response = await clientFetch(`/api/bootstrap?date=${startKey}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Unable to load the week of ${startKey}: ${response.status}`);
-    const payload = (await response.json()) as BootstrapData;
-    return payload;
+  /** Reads one week for this lifetime; commits only if it is still the week's newest read. */
+  const readWeek = useCallback((startKey: string, forGeneration: number, commit: (entries: TimeEntryRow[]) => void) => {
+    const read = (): Promise<boolean> => {
+      const seqKey = `${forGeneration}:${startKey}`;
+      const seq = (readSeqRef.current.get(seqKey) ?? 0) + 1;
+      readSeqRef.current.set(seqKey, seq);
+      const tokenAtStart = refreshTokenRef.current;
+      return clientFetch(`/api/bootstrap?date=${startKey}`, { cache: "no-store" })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`Unable to load the week of ${startKey}: ${response.status}`);
+          return (await response.json()) as BootstrapData;
+        })
+        .then((payload) => {
+          if (generationRef.current !== forGeneration || readSeqRef.current.get(seqKey) !== seq) return false;
+          if (`${payload.workspace.id}:${payload.user.id}` !== owner) return false;
+          commit(payload.weekEntries);
+          // An edit landed while this read was out: what it read may predate it, so read the week again.
+          if (refreshTokenRef.current !== tokenAtStart) void read().catch(() => undefined);
+          return true;
+        });
+    };
+    return read();
+  }, [owner]);
+
+  const replaceWeek = useCallback((forGeneration: number, startKey: string) => (entries: TimeEntryRow[]) => {
+    setStored((current) => current && current.generation === forGeneration ? {
+      ...current,
+      earlier: current.earlier.map((page) => page.startKey === startKey ? { ...page, entries } : page),
+      later: current.later.map((page) => page.startKey === startKey ? { ...page, entries } : page)
+    } : current);
   }, []);
 
   const load = useCallback((direction: ListWeeksDirection) => {
-    if (!enabled || inFlightRef.current?.key === scopeKey) return;
+    if (!enabled || inFlightRef.current?.generation === generation) return;
     if (direction === "earlier" && reachedEarliest) return;
     if (direction === "later" && reachedLatest) return;
     const offsetWeeks = direction === "earlier" ? -(state.earlier.length + 1) : state.later.length + 1;
-    const startKey = toTimelineDateKey(addCalendarDays(anchorWeekStart, offsetWeeks * 7));
-    const ticket = { key: scopeKey, direction };
+    const anchor = parseTimelineDateKey(anchorKey);
+    if (!anchor) return;
+    const startKey = toTimelineDateKey(addCalendarDays(anchor, offsetWeeks * 7));
+    const ticket = { generation, direction };
     inFlightRef.current = ticket;
-    setLoading(ticket);
-    setError(null);
-    void readWeek(startKey).then((payload) => {
-      // The workspace or the anchor changed while this loaded: its week is not this List's.
-      if (scopeRef.current !== ticket.key || `${payload.workspace.id}:${payload.user.id}` !== owner) return;
-      const page: WeekPage = { startKey, entries: payload.weekEntries };
+    setStatus({ generation, loading: direction, error: null });
+    let added = false;
+    void readWeek(startKey, generation, (entries) => {
+      if (added) {
+        replaceWeek(generation, startKey)(entries);
+        return;
+      }
+      added = true;
+      const page: WeekPage = { startKey, entries };
       setStored((current) => {
-        const base = current && current.owner === owner && current.anchorKey === anchorKey
+        const base = current && current.generation === generation
           ? current
-          : { owner, anchorKey, earlier: [], later: [], emptyEarlierRun: 0 };
-        if (direction === "earlier") {
-          if (base.earlier.some((week) => week.startKey === startKey)) return base;
-          return { ...base, earlier: [...base.earlier, page], emptyEarlierRun: page.entries.length ? 0 : base.emptyEarlierRun + 1 };
-        }
-        if (base.later.some((week) => week.startKey === startKey)) return base;
-        return { ...base, later: [...base.later, page] };
+          : { generation, earlier: [], later: [], emptyEarlierRun: 0 };
+        if ([...base.earlier, ...base.later].some((week) => week.startKey === startKey)) return base;
+        return direction === "earlier"
+          ? { ...base, earlier: [...base.earlier, page], emptyEarlierRun: entries.length ? 0 : base.emptyEarlierRun + 1 }
+          : { ...base, later: [...base.later, page] };
       });
+    }).then(() => {
+      if (generationRef.current === generation) setStatus({ generation, loading: null, error: null });
     }).catch(() => {
-      if (scopeRef.current === ticket.key) setError(ticket);
+      if (generationRef.current === generation) setStatus({ generation, loading: null, error: direction });
     }).finally(() => {
       if (inFlightRef.current === ticket) inFlightRef.current = null;
-      setLoading((current) => (current === ticket ? null : current));
     });
-  }, [anchorKey, anchorWeekStart, enabled, owner, readWeek, reachedEarliest, reachedLatest, scopeKey, state.earlier.length, state.later.length]);
+  }, [anchorKey, enabled, generation, readWeek, reachedEarliest, reachedLatest, replaceWeek, state.earlier.length, state.later.length]);
 
-  // An edit or a delete: read every loaded week again, keeping the shown copy until each answer lands.
+  // An edit or a delete: read every loaded week again (a week still loading is read again when it
+  // lands), keeping the shown copy until each newer answer arrives.
+  const storedRef = useRef(stored);
+  useLayoutEffect(() => {
+    storedRef.current = stored;
+  }, [stored]);
   const lastRefreshRef = useRef(refreshToken);
   useEffect(() => {
     if (lastRefreshRef.current === refreshToken) return;
     lastRefreshRef.current = refreshToken;
-    if (!enabled || !stored || stored.owner !== owner || stored.anchorKey !== anchorKey) return;
-    const key = scopeKey;
-    for (const week of [...stored.earlier, ...stored.later]) {
-      void readWeek(week.startKey).then((payload) => {
-        if (scopeRef.current !== key || `${payload.workspace.id}:${payload.user.id}` !== owner) return;
-        setStored((current) => current && current.owner === owner && current.anchorKey === anchorKey ? {
-          ...current,
-          earlier: current.earlier.map((page) => page.startKey === week.startKey ? { ...page, entries: payload.weekEntries } : page),
-          later: current.later.map((page) => page.startKey === week.startKey ? { ...page, entries: payload.weekEntries } : page)
-        } : current);
-      }).catch(() => undefined);
+    const current = storedRef.current;
+    if (!enabled || !current || current.generation !== generation) return;
+    for (const week of [...current.earlier, ...current.later]) {
+      void readWeek(week.startKey, generation, replaceWeek(generation, week.startKey)).catch(() => undefined);
     }
-  }, [anchorKey, enabled, owner, readWeek, refreshToken, scopeKey, stored]);
+  }, [enabled, generation, readWeek, refreshToken, replaceWeek]);
 
   const entries = enabled && (state.earlier.length || state.later.length)
     ? [...state.earlier, ...state.later].flatMap((week) => week.entries)
@@ -152,11 +188,10 @@ export function useCalendarListWeeks({
     entries,
     rangeStart: addCalendarDays(anchorWeekStart, -7 * (enabled ? state.earlier.length : 0)),
     rangeEnd: addCalendarDays(anchorWeekStart, 7 * (1 + (enabled ? state.later.length : 0))),
-    loading: shownLoading,
-    error: shownError,
+    loading: enabled ? shown.loading : null,
+    error: enabled ? shown.error : null,
     reachedEarliest,
     reachedLatest,
-    laterCount: enabled ? state.later.length : 0,
     load
   };
 }

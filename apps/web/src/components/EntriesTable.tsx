@@ -4,6 +4,7 @@ import {
   Fragment,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type RefObject,
   type UIEvent,
   useEffect,
@@ -336,14 +337,46 @@ export function EntriesTable({
     const read = new Set(timelines.map((timeline) => Date.parse(timeline.dayStart)));
     return [...timelines, ...days.filter((day) => !read.has(day.start.getTime())).map(emptyDayTimeline)];
   }, [checksDay, checksDays, locationTimeline, locationTimelines]);
-  const locationRows = useMemo(() => {
+  // Each row belongs to the day it was read for (a place spanning midnight is a row on each day, clipped
+  // to it), placed at its time within that day. A suggestion is one "?": on its place row when any day
+  // has one (the newest), otherwise on its own newest row (Codex r1 on #584).
+  const locationRows = useMemo((): DayLocationRow[] => {
     if (!localTimeReady) return [];
-    // A check spanning midnight is a row on its first day only.
-    const seen = new Set<string>();
-    return dayTimelines
-      .flatMap((timeline) => locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks }))
-      .filter((row) => (seen.has(row.key) ? false : (seen.add(row.key), true)))
-      .sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
+    const days = dayTimelines
+      .map((timeline) => ({
+        dayStartMs: Date.parse(timeline.dayStart),
+        dayLabel: formatDate(timeline.dayStart),
+        rows: locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks })
+      }))
+      .sort((a, b) => b.dayStartMs - a.dayStartMs);
+    const onPlace = new Set<string>();
+    const out: DayLocationRow[] = [];
+    for (const day of days) {
+      for (const row of day.rows) {
+        if (row.kind !== "place") continue;
+        const checkIds = row.checkIds.filter((id) => !onPlace.has(id));
+        for (const id of checkIds) onPlace.add(id);
+        out.push({ ...row, checkIds, key: `${row.key}@${day.dayStartMs}`, atMs: row.fromMs, dayLabel: day.dayLabel, dayStartMs: day.dayStartMs });
+      }
+    }
+    const seenChecks = new Set<string>();
+    let openTrip = false;
+    for (const day of days) {
+      for (const row of day.rows) {
+        if (row.kind === "check") {
+          if (onPlace.has(row.checkId) || seenChecks.has(row.checkId)) continue;
+          seenChecks.add(row.checkId);
+        } else if (row.kind === "open_trip") {
+          if (openTrip) continue;
+          openTrip = true;
+        } else {
+          continue;
+        }
+        const atMs = Number.isFinite(row.atMs) ? Math.max(row.atMs, day.dayStartMs) : day.dayStartMs;
+        out.push({ ...row, atMs, dayLabel: day.dayLabel, dayStartMs: day.dayStartMs });
+      }
+    }
+    return out.sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
   }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
   const tripByBlock = useMemo(
     () => new Map(dayTimelines.flatMap((timeline) => [...tripsByBlockId(timeline)])),
@@ -371,31 +404,42 @@ export function EntriesTable({
     if (loadsEarlier && earlierSentinelRef.current) observer.observe(earlierSentinelRef.current);
     if (loadsLater && laterSentinelRef.current) observer.observe(laterSentinelRef.current);
     return () => observer.disconnect();
-  }, [continuousError, continuousLoading, entries, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
+  }, [continuousError, continuousLoading, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
   // What is in view stays in place when rows are added above it (a later week, a day's places arriving):
   // the first row in view keeps its position, in every browser (the List turns native anchoring off).
-  const scrollAnchorRef = useRef<{ element: Element; top: number } | null>(null);
+  // Found by a binary search over the rows (they are in top order), and reconciled only when the List's
+  // height changed, so neither scrolling nor a running block's tick rescans the loaded history.
+  // `contentTop`: the row's offset within the List's content, so a shift is measured apart from scrolling.
+  const scrollAnchorRef = useRef<{ element: Element; contentTop: number; scrollHeight: number } | null>(null);
   const recordScrollAnchor = () => {
     const root = listScrollRef.current;
     if (!root || !continuous) return;
     const rootTop = root.getBoundingClientRect().top;
     const rows = root.querySelectorAll("tbody > tr");
-    for (const row of rows) {
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom > rootTop + 1) {
-        scrollAnchorRef.current = { element: row, top: rect.top - rootTop };
-        return;
-      }
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (rows[mid].getBoundingClientRect().bottom > rootTop + 1) high = mid;
+      else low = mid + 1;
     }
-    scrollAnchorRef.current = null;
+    const element = rows[low];
+    scrollAnchorRef.current = element
+      ? { element, contentTop: element.getBoundingClientRect().top - rootTop + root.scrollTop, scrollHeight: root.scrollHeight }
+      : null;
   };
+  const anchorFrameRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (anchorFrameRef.current !== null) cancelAnimationFrame(anchorFrameRef.current);
+  }, []);
   useLayoutEffect(() => {
     const root = listScrollRef.current;
     const anchor = scrollAnchorRef.current;
     if (!root || !continuous) return;
+    if (anchor && root.scrollHeight === anchor.scrollHeight && anchor.element.isConnected) return;
     // Also at the very top: a later week loading there must not pull the List up to today.
     if (anchor && anchor.element.isConnected) {
-      const moved = anchor.element.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.top;
+      const moved = anchor.element.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop - anchor.contentTop;
       if (Math.abs(moved) >= 1) root.scrollTop += moved;
     }
     recordScrollAnchor();
@@ -582,12 +626,21 @@ export function EntriesTable({
   // Location rows go before the first group that started before them (newest first, like the blocks).
   // An expanded group lists its occurrences under its heading: a row that falls among them goes before
   // the first occurrence that started before it, so the expanded run stays in time order (Codex r1 on #565).
+  // Rows stay inside their own day (Codex r1 on #584): a row on a day with blocks goes among that day's
+  // groups (after its last group when it is earlier than all of them); a row on a day without blocks
+  // goes under that day's own heading (see extraDays).
   const locationRowsByGroup = useMemo(() => {
-    const before: LocationListRow[][] = grouped.map(() => []);
-    const byOccurrence = new Map<string, LocationListRow[]>();
-    const after: LocationListRow[] = [];
+    const before: DayLocationRow[][] = grouped.map(() => []);
+    const dayTail = new Map<number, DayLocationRow[]>();
+    const byOccurrence = new Map<string, DayLocationRow[]>();
+    const byExtraDay = new Map<string, DayLocationRow[]>();
     for (const row of locationRows) {
-      const expanded = grouped.find((group) => group.entries.length > 1 &&
+      const dayGroups = grouped.map((group, index) => ({ group, index })).filter(({ group }) => group.day === row.dayLabel);
+      if (!dayGroups.length) {
+        byExtraDay.set(row.dayLabel, [...(byExtraDay.get(row.dayLabel) ?? []), row]);
+        continue;
+      }
+      const expanded = dayGroups.map(({ group }) => group).find((group) => group.entries.length > 1 &&
         (expandedGroups.has(group.key) || group.entries.some((occurrence) => occurrence.id === highlightedEntryId)) &&
         row.atMs < Date.parse(group.representative.startedAt) &&
         group.entries.some((occurrence) => row.atMs >= Date.parse(occurrence.startedAt)));
@@ -596,11 +649,15 @@ export function EntriesTable({
         byOccurrence.set(occurrence.id, [...(byOccurrence.get(occurrence.id) ?? []), row]);
         continue;
       }
-      const index = grouped.findIndex((group) => row.atMs >= Date.parse(group.representative.startedAt));
-      if (index >= 0) before[index].push(row);
-      else after.push(row);
+      const placed = dayGroups.find(({ group }) => row.atMs >= Date.parse(group.representative.startedAt));
+      if (placed) {
+        before[placed.index].push(row);
+      } else {
+        const last = dayGroups[dayGroups.length - 1].index;
+        dayTail.set(last, [...(dayTail.get(last) ?? []), row]);
+      }
     }
-    return { after, before, byOccurrence };
+    return { before, byExtraDay, byOccurrence, dayTail };
   }, [expandedGroups, grouped, highlightedEntryId, locationRows]);
   // Each day heading carries that day's time: every block's shown interval clipped to the local day
   // (an overnight block counts on both days; a running one up to the captured time).
@@ -609,15 +666,21 @@ export function EntriesTable({
     [capturedNow, displayRange, displayedEntries]
   );
   const categoriesById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories]);
-  // Days that only continue a block started earlier (overnight, or still running) have time but no
-  // row of their own; they still get a heading with their total, in date order (newest first).
-  const continuedDays = useMemo(() => {
+  // Days without a group of their own still get a heading, in date order (newest first): days that only
+  // continue a block started earlier (overnight, or still running) with their total, and days that only
+  // have places or checks, with those rows under it (Codex r1 on #584).
+  const extraDays = useMemo((): ExtraListDay[] => {
     const groupDays = new Set(grouped.map((group) => group.day));
-    return [...dayTotals.entries()]
-      .filter(([label]) => !groupDays.has(label))
-      .map(([label, total]) => ({ label, ...total }))
-      .sort((left, right) => right.dayStartMs - left.dayStartMs);
-  }, [dayTotals, grouped]);
+    const days = new Map<string, ExtraListDay>();
+    for (const [label, total] of dayTotals) {
+      if (!groupDays.has(label)) days.set(label, { label, dayStartMs: total.dayStartMs, seconds: total.seconds, continued: true, rows: [] });
+    }
+    for (const [label, rows] of locationRowsByGroup.byExtraDay) {
+      const day = days.get(label) ?? { label, dayStartMs: rows[0].dayStartMs, seconds: 0, continued: false, rows: [] };
+      days.set(label, { ...day, rows });
+    }
+    return [...days.values()].sort((left, right) => right.dayStartMs - left.dayStartMs);
+  }, [dayTotals, grouped, locationRowsByGroup.byExtraDay]);
 
   useEffect(() => {
     if (!highlightedEntryId) return;
@@ -1034,7 +1097,12 @@ export function EntriesTable({
         }}
         data-continuous={continuous ? "true" : undefined}
         onScroll={(event) => {
-          recordScrollAnchor();
+          if (continuous && anchorFrameRef.current === null) {
+            anchorFrameRef.current = requestAnimationFrame(() => {
+              anchorFrameRef.current = null;
+              recordScrollAnchor();
+            });
+          }
           onScroll(event);
         }}
         // Focus can land on the List itself when no "?" or chip is left to take it.
@@ -1092,10 +1160,10 @@ export function EntriesTable({
               return (
                 <Fragment key={group.key}>
                   {shouldShowDate
-                    ? continuedDays
+                    ? extraDays
                       .filter((day) => day.dayStartMs > (dayTotals.get(group.day)?.dayStartMs ?? 0) &&
                         (previousDate === null || day.dayStartMs < (dayTotals.get(previousDate)?.dayStartMs ?? Infinity)))
-                      .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
+                      .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
                     : null}
                   {shouldShowDate ? (
                     <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading"
@@ -1335,17 +1403,15 @@ export function EntriesTable({
                     </Fragment>
                   );
                 }) : null}
+                {(locationRowsByGroup.dayTail.get(index) ?? []).map((row) => renderLocationRow(row))}
                 </Fragment>
               );
             })}
-            {locationRowsByGroup.after.map((row) => (
-              renderLocationRow(row)
-            ))}
-            {groupByDay && grouped.length
-              ? continuedDays
-                .filter((day) => day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
-                .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
-              : null}
+            {groupByDay
+              ? extraDays
+                .filter((day) => !grouped.length || day.dayStartMs < (dayTotals.get(grouped[grouped.length - 1].day)?.dayStartMs ?? -Infinity))
+                .map((day) => <ExtraDayRows day={day} key={`extra-${day.label}`} renderRow={renderLocationRow} />)
+              : extraDays.flatMap((day) => day.rows).map((row) => renderLocationRow(row))}
           </tbody>
         </table>
         {continuous && localTimeReady ? (
@@ -1452,19 +1518,31 @@ export function listDayTotals(
   return totals;
 }
 
-/** A day that only continues an earlier block: its heading and total, and a note saying so. */
-function ContinuedDayRows({ day }: { day: { label: string; seconds: number } }) {
+/** A shown day's location row, placed by its time within the day it was read for. */
+type DayLocationRow = LocationListRow & { dayLabel: string; dayStartMs: number };
+
+/** A day without a group of its own: one that only continues an earlier block, or only has places or checks. */
+type ExtraListDay = { label: string; dayStartMs: number; seconds: number; continued: boolean; rows: DayLocationRow[] };
+
+/**
+ * A day without a group of its own: its heading (with its total when a block continues into it, and its
+ * start for scrolling to it), a note when it only continues an earlier block, and its places and checks.
+ */
+function ExtraDayRows({ day, renderRow }: { day: ExtraListDay; renderRow: (row: DayLocationRow) => ReactNode }) {
   return (
     <>
-      <tr className="timeline-list-day-heading">
+      <tr className="timeline-list-day-heading" data-day-start-ms={day.dayStartMs}>
         <td colSpan={4}>
           <span>{day.label}</span>
-          <span className="tabular">{formatDuration(day.seconds)}</span>
+          <span className="tabular">{day.continued ? formatDuration(day.seconds) : ""}</span>
         </td>
       </tr>
-      <tr className="timeline-list-continued">
-        <td colSpan={4}>Continues from the day before</td>
-      </tr>
+      {day.continued ? (
+        <tr className="timeline-list-continued">
+          <td colSpan={4}>Continues from the day before</td>
+        </tr>
+      ) : null}
+      {day.rows.map((row) => renderRow(row))}
     </>
   );
 }

@@ -282,6 +282,9 @@ export function TimeReviewViews({
   useLayoutEffect(() => {
     const container = activeScrollContainerRef.current;
     if (!container) return;
+    // The List positions itself (continuous days: the selected day at the top), so only the Calendar
+    // restores where it was left (Codex r1 on #584).
+    if (state.view === "list") return;
     const position = scrollPositionsRef.current[state.view];
     if (!position) return;
     container.scrollLeft = position.left;
@@ -515,8 +518,9 @@ export function TimeReviewViews({
             <ChevronLeft size={18} />
           </IconButton>
           <DatePickerPopover
-            disabled={isDateLoading || isList}
+            disabled={isDateLoading}
             label={periodLabel}
+            unavailable={isList ? "Not used in List" : undefined}
             onChange={(date) => void navigate({ date })}
             portal
             portalAlign="center"
@@ -534,11 +538,16 @@ export function TimeReviewViews({
           >
             <ChevronRight size={18} />
           </IconButton>
-          {showsToday || isList ? null : (
+          {showsToday ? null : (
             <button
+              aria-disabled={isList || undefined}
+              aria-label={isList ? "Today, not used in List" : undefined}
               className="timeline-today-button"
+              data-tip={isList ? "Not used in List" : undefined}
               disabled={isDateLoading}
-              onClick={() => void navigate({ date: todayKey })}
+              onClick={() => {
+                if (!isList) void navigate({ date: todayKey });
+              }}
               type="button"
             >
               Today

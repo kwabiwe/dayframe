@@ -61,6 +61,7 @@ export function DatePickerPopover({
   panelLabel = "Choose date",
   portal = false,
   showTrigger = true,
+  unavailable,
   today,
   triggerClassName = "",
   value
@@ -84,6 +85,11 @@ export function DatePickerPopover({
   panelLabel?: string;
   portal?: boolean;
   showTrigger?: boolean;
+  /**
+   * Why the date doesn't apply here ("Not used in List"): the trigger stays visible and focusable, greyed
+   * and inert (aria-disabled), with the reason as its tooltip and in its name.
+   */
+  unavailable?: string;
   today: string;
   triggerClassName?: string;
   value: string;
@@ -330,13 +336,17 @@ export function DatePickerPopover({
     <div className={`timeline-date-picker${className ? ` ${className}` : ""}`} ref={rootRef}>
       {showTrigger ? (
         <button
-          aria-label={ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
+          aria-disabled={unavailable ? true : undefined}
+          aria-label={unavailable ? `${label}, ${unavailable.toLowerCase()}` : ariaLabel ?? (iconOnly ? `Choose date, currently ${label}` : undefined)}
           aria-controls={panelId}
           aria-expanded={effectiveOpen}
           aria-haspopup="dialog"
           className={`timeline-period-trigger${iconOnly ? " is-icon-only" : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
           disabled={disabled}
-          onClick={() => updateOpen(!open)}
+          data-tip={unavailable}
+          onClick={() => {
+            if (!unavailable) updateOpen(!open);
+          }}
           ref={triggerRef}
           title={iconOnly ? (ariaLabel ?? `Choose date, currently ${label}`) : undefined}
           type="button"

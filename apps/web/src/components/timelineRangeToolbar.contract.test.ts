@@ -80,7 +80,10 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).toContain('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}');
     expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
     expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
-    expect(timeline).toContain("disabled={isDateLoading || isList}");
+    expect(timeline).toContain('unavailable={isList ? "Not used in List" : undefined}');
+    expect(timeline).toContain('aria-label={isList ? "Today, not used in List" : undefined}');
+    // Alt+← / → (the shell's period shortcut) does nothing in List either (Codex r1 on #584).
+    expect(source("./AppShell.tsx")).toContain('if (pathname !== "/timeline" || timelineState.view === "list") return;');
   });
 
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {
@@ -102,7 +105,7 @@ describe("Calendar range and toolbar contract", () => {
   it("keeps date navigation on Timeline only (Today is always today) and makes its shortcuts scope-aware", () => {
     expect(shell).toContain('const showDateNavigation = pathname === "/timeline"');
     expect(shell).not.toContain("DateContextRow");
-    expect(shell).toContain('if (pathname !== "/timeline") return;');
+    expect(shell).toContain('if (pathname !== "/timeline" || timelineState.view === "list") return;');
     expect(shell).toContain('shiftTimelineState(timelineState, direction)');
     expect(shell.match(/window\.addEventListener\("keydown"/g)).toHaveLength(1);
   });
