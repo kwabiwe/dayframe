@@ -104,4 +104,15 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label))).toEqual(["Commute", "Work"]);
     expect(textOf(tree)).not.toContain("Show Home and every place");
   });
+
+  it("reads the journey in progress whole: where from, since when and its legs so far (Codex r2 on #570)", () => {
+    const travelling: LocationTimeline = { ...timeline, openTrip: {
+      startedAt: iso(17, 30), lastObservedAt: iso(17, 50), fromId: "seg-unknown", fromPlaceId: null, mode: "walking",
+      legs: [{ startedAt: iso(17, 30), stoppedAt: iso(17, 50), mode: "walking", confidence: "sure", distanceMeters: 1_200 }]
+    } as never };
+    const { tree } = render({ timeline: travelling });
+    const label = labels(tree).find((text) => text.startsWith("Travelling from"));
+    expect(label).toMatch(/^Travelling from .+ since \d{2}:\d{2}\. Legs: Walk\. Logs when you arrive\.$/);
+  });
 });
+

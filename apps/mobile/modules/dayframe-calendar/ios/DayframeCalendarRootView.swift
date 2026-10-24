@@ -83,6 +83,8 @@ struct DayframeCalendarRootView: View {
     }
     .padding(3)
     .background(Capsule(style: .continuous).fill(Color(dayframeCSS: theme.surface)))
+    // Only the pill's selection animates (it slides); the app owns the List's own fade (Codex r2 on #570).
+    .animation(presentation.reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: presentation.isList)
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Calendar view")
   }

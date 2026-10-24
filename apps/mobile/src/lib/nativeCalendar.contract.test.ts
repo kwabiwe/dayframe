@@ -407,8 +407,11 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(rootView).toContain("actions.changeLayout(layout)");
     expect(rootView).toContain("actions.reportHeaderHeight(");
     expect(rootView).toContain("if !presentation.isList {");
-    // The app owns the Grid ↔ List handoff: its List fades over the native view, which switches at once.
-    expect(rootView).not.toContain("value: presentation.isList");
+    // The app owns the Grid ↔ List handoff: its List fades over the native view, which switches at once;
+    // only the pill's selection animates, scoped to the pill (Codex r2 on #570).
+    const pill = rootView.slice(rootView.indexOf("private func layoutPill("), rootView.indexOf("private func layoutButton("));
+    expect(pill).toContain(".animation(presentation.reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: presentation.isList)");
+    expect(rootView.match(/value: presentation\.isList/g)?.length).toBe(1);
     expect(dashboard).toContain("exiting={localPresenceExiting(reduceMotion)}");
     expect(moduleSource).toContain('"onChangeLayout"');
     expect(moduleSource).toContain('"onHeaderHeight"');
