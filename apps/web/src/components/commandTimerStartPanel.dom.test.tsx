@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BootstrapData, TimeEntryRow } from "@/lib/queries";
 
 let runtime: Record<string, unknown>;
@@ -15,7 +15,22 @@ const { PersistentTimerBar } = await import("./PersistentTimerBar");
 
 const MINUTE = 60_000;
 
+// These tests reason about "today": the clock is pinned to midday local time, so they pass at any hour
+// (they failed between midnight and 01:30, when "90 minutes ago" was yesterday). Only Date is faked,
+// and it keeps moving, so real timers and waits behave as before.
+function pinClockToMidday() {
+  const midday = new Date();
+  midday.setHours(12, 0, 0, 0);
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(midday);
+}
+
+beforeEach(() => {
+  pinClockToMidday();
+});
+
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   document.body.innerHTML = "";
 });
