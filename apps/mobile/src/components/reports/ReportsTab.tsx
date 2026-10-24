@@ -58,6 +58,7 @@ import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDonutCard } from "./ReportsDonut";
+import { ReportGettingAround, ReportNotLogged } from "./ReportGettingAround";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
   ReportGoalStreak,
@@ -753,6 +754,10 @@ function ReportsTabView({
             total={compactDuration(heroSeconds)}
           />
         ) : null}
+        {report && summary?.notLoggedSeconds ? (
+          // Location v4 step 18: time at places you haven't named, outside the total and goals.
+          <ReportNotLogged seconds={summary.notLoggedSeconds} theme={theme} />
+        ) : null}
         {report && choice === "week" && days.length === 7 ? (
           <ReportWeekColumns
             animate={playBlocks && choice === "week"}
@@ -858,6 +863,9 @@ function ReportsTabView({
             semanticContextKey={`${requestKey}:${JSON.stringify(selection)}:${isFocused}:${foreground}:${Boolean(datePresentation)}:${Boolean(filterPresentation)}`}
             outsidePressDismissal={tooltipOutsidePress}
           />
+        ) : null}
+        {report && summary?.gettingAround && summary.gettingAround.totalSeconds > 0 ? (
+          <ReportGettingAround reduceMotion={reduceMotion} summary={summary.gettingAround} theme={theme} />
         ) : null}
         {onSheetPortalChange ? null : presentedSheet}
       </View>
