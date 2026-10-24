@@ -54,7 +54,7 @@ describe("reviewAnswerMutation (the deck's and the List's one rule, step 14 part
 describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
   it("asks a place, with More… for picking another on its own screen", () => {
     expect(reviewAnswerQuestion({ ...locationV2, categoryName: "Reading" }, "24h")).toEqual({
-      question: "Log Exampleton Library, 10:00–11:30?", detail: "As Reading.", logLabel: "Log it", skipLabel: "Not now", more: true
+      question: "Log Exampleton Library, 10:00–11:30?", detail: "As Reading.", logLabel: "Log it", skipLabel: "Not now", more: true, opens: false
     });
   });
 
@@ -75,10 +75,11 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     });
   });
 
-  it("asks without times when the suggestion has none", () => {
-    // Without a whole window it can be skipped (or opened) but not logged here.
-    expect(reviewAnswerQuestion(item({ suggestedStartedAt: null, suggestedStoppedAt: null }), "24h")).toMatchObject({
-      question: "Log Exampleton Library?", logLabel: null, skipLabel: "Skip", more: false
+  it("asks without times when the suggestion has none, and offers its own screen instead of answers", () => {
+    // Without a whole window the outbox refuses every answer (Codex r3 on #582): it opens instead.
+    expect(reviewAnswerQuestion(item({ suggestedStartedAt: null, suggestedStoppedAt: null }), "24h")).toEqual({
+      question: "Log Exampleton Library?", detail: "It has no complete time yet, so it can't be answered here.",
+      logLabel: null, skipLabel: null, more: false, opens: true
     });
   });
 });

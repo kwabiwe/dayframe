@@ -275,7 +275,7 @@ export function CalendarListView({
                 return id && question ? (
                   <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)}>
                     <CheckQuestion onAnswer={(logged) => answerCheck(id, logged)} onMore={question.more && onOpenCheck ? () => onOpenCheck(id) : undefined}
-                      question={question} theme={theme} />
+                      onOpen={question.opens && onOpenCheck ? () => onOpenCheck(id) : undefined} question={question} theme={theme} />
                   </Animated.View>
                 ) : null;
               })()}
@@ -461,10 +461,11 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
 
 /**
  * A "?"'s question under its row (mock-up #ios-list): what it asks, why, and one-tap answers in 44-point
- * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen).
+ * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen). A
+ * suggestion without a complete time cannot be answered here: it says so and offers "Open it" instead.
  */
-function CheckQuestion({ onAnswer, onMore, question, theme }: {
-  onAnswer: (logged: boolean) => void; onMore?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
+function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
+  onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
 }) {
   return (
     <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="calendar-list-question">
@@ -477,10 +478,18 @@ function CheckQuestion({ onAnswer, onMore, question, theme }: {
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.surface }]}>{question.logLabel}</Text>
           </Pressable>
         ) : null}
-        <Pressable accessibilityRole="button" onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
-          style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
-          <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
-        </Pressable>
+        {question.skipLabel ? (
+          <Pressable accessibilityRole="button" onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
+          </Pressable>
+        ) : null}
+        {question.opens && onOpen ? (
+          <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" onPress={onOpen} testID="calendar-list-answer-open"
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
+          </Pressable>
+        ) : null}
         {onMore ? (
           <Pressable accessibilityHint="Pick or name another place" accessibilityRole="button" onPress={onMore} testID="calendar-list-answer-more"
             style={({ pressed }) => [styles.answer, { backgroundColor: "transparent", opacity: pressed ? 0.7 : 1 }]}>

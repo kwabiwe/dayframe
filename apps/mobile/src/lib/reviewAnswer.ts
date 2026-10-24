@@ -28,9 +28,11 @@ export function reviewAnswerMutation(
 export type ReviewAnswerQuestion = {
   question: string;
   detail: string | null;
-  /** Null when the suggestion has no complete window: it can be skipped, or opened, but not logged here. */
+  /** Null when the suggestion has no complete window: the outbox refuses every answer without one. */
   logLabel: string | null;
-  skipLabel: string;
+  skipLabel: string | null;
+  /** No complete window: it is answered on its own screen ("Open it") instead of here. */
+  opens: boolean;
   /** A place can be picked or named on the suggestion's own screen ("More…"). */
   more: boolean;
 };
@@ -41,8 +43,11 @@ export function reviewAnswerQuestion(
   options: { outing?: boolean } = {}
 ): ReviewAnswerQuestion {
   const question = reviewAnswerWords(item, clockFormat, options);
-  // Logging needs the whole window, as on the suggestion's deck card (Codex r1 on #582).
-  return hasSuggestedTimeWindow(item) ? question : { ...question, logLabel: null };
+  // Every answer needs the whole window, as on the suggestion's deck card, which only moves such a card
+  // back (Codex r1 and r3 on #582): it opens on its own screen instead.
+  return hasSuggestedTimeWindow(item)
+    ? question
+    : { ...question, detail: "It has no complete time yet, so it can't be answered here.", logLabel: null, skipLabel: null, more: false, opens: true };
 }
 
 function reviewAnswerWords(
@@ -56,17 +61,17 @@ function reviewAnswerWords(
   const at = window ? `, ${window}` : "";
   const title = item.title?.trim() || "this";
   if (item.eventType === "health_sleep_import") {
-    return { question: `Log your sleep${at}?`, detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false };
+    return { question: `Log your sleep${at}?`, detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false };
   }
   if (item.eventType === "health_workout_import") {
     const activity = item.categoryName?.trim() || "Workout";
-    return { question: `Log the workout${at}?`, detail: "From Apple Health.", logLabel: `Log as ${activity}`, skipLabel: "Not a workout", more: false };
+    return { question: `Log the workout${at}?`, detail: "From Apple Health.", logLabel: `Log as ${activity}`, skipLabel: "Not a workout", more: false, opens: false };
   }
   if (options.outing) {
-    return { question: `Log ${title} with the trips there and back${at}?`, detail: "One answer for the whole outing.", logLabel: "Log it", skipLabel: "Skip", more: false };
+    return { question: `Log ${title} with the trips there and back${at}?`, detail: "One answer for the whole outing.", logLabel: "Log it", skipLabel: "Skip", more: false, opens: false };
   }
   if (item.eventType === "commute_detected") {
-    return { question: `Log the trip${at}?`, detail: title === "this" ? null : title, logLabel: "Log it", skipLabel: "Not a trip", more: false };
+    return { question: `Log the trip${at}?`, detail: title === "this" ? null : title, logLabel: "Log it", skipLabel: "Not a trip", more: false, opens: false };
   }
   // A place: logged as suggested here; picking or naming another place happens on its own screen.
   const place = isLocationReviewItem(item);
@@ -75,6 +80,7 @@ function reviewAnswerWords(
     detail: item.categoryName?.trim() ? `As ${item.categoryName.trim()}.` : null,
     logLabel: "Log it",
     skipLabel: place ? "Not now" : "Skip",
-    more: place && hasV2LocationEvidence(item)
+    more: place && hasV2LocationEvidence(item),
+    opens: false
   };
 }

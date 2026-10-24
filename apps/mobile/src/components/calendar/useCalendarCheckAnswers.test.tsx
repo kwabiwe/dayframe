@@ -27,7 +27,7 @@ vi.mock("../../lib/reviewSyncStore", () => store);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, Alert } from "react-native";
 import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
@@ -182,8 +182,9 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     releaseReviewAnswer(["a"]);
     act(() => { result.current.answer("b", true); });
     expect(result.current.held).toBeNull();
+    // Nor skipped: the outbox refuses every answer without a whole window (Codex r3 on #582).
     act(() => { result.current.answer("b", false); });
-    expect(result.current.held).toMatchObject({ itemId: "b", logged: false });
+    expect(result.current.held).toBeNull();
   });
 
   it("never saves a remembered copy this phone decided meanwhile, as on the deck (Codex r2 on #582)", async () => {
@@ -250,5 +251,41 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("Logged Exampleton Library. Undo is available for a few seconds.");
     act(() => { result.current.undo(); });
     expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("Exampleton Library is back.");
+  });
+
+  it("checks a paged-out answer as its suggestion was last seen, and again after the outbox read (Codex r3 on #582)", async () => {
+    const other = suggestion("b", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) });
+    const { result, rerender } = mount(bootstrap([suggestion("a"), other]));
+    act(() => { result.current.answer("a", true); });
+    // A refresh changes its times, and a later one pages it out: the answer was about something else.
+    rerender(bootstrap([suggestion("a", { suggestedStoppedAt: at(11, 30) }), other]));
+    rerender(bootstrap([other]));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("Exampleton Library changed, so it was not saved. Check it again.");
+
+    // A refresh while the outbox is read: checked again after it, as it is now.
+    let finishRead!: (decided: boolean) => void;
+    store.reviewItemsDecidedLocally.mockImplementation(() => new Promise<boolean>((resolve) => { finishRead = resolve; }));
+    const again = mount(bootstrap([suggestion("c"), other]));
+    act(() => { again.result.current.answer("c", true); });
+    again.rerender(bootstrap([other]));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.reviewItemsDecidedLocally).toHaveBeenCalledOnce();
+    again.rerender(bootstrap([suggestion("c", { status: "confirmed" }), other]));
+    await act(async () => { finishRead(false); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("treats an outbox it could not read as a failed save: the answer comes back with an alert (Codex r3 on #582)", async () => {
+    const { result, rerender } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", false); });
+    rerender(bootstrap([]));
+    store.reviewItemsDecidedLocally.mockImplementation(async () => { throw new Error("database locked"); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.size).toBe(0);
+    expect(result.current.data?.reviewItems.map((item) => item.id)).toEqual(["a"]);
+    expect(Alert.alert).toHaveBeenCalledWith("Calendar", "Couldn’t save this answer on this iPhone.");
   });
 });

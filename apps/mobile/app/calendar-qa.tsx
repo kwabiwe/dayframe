@@ -87,8 +87,8 @@ const QA_CHECKS = [
 const QA_CHECK_TITLES = new Map([["qa-check-unknown", "Unknown place"], ["qa-check-sleep", "Sleep"]]);
 // Their questions (step 14 part 3b), as reviewAnswerQuestion words them; answers here do nothing.
 const QA_CHECK_QUESTIONS = new Map([
-  ["qa-check-unknown", { question: "Log Unknown place, 16:26–17:00?", detail: null, logLabel: "Log it", skipLabel: "Not now", more: true }],
-  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false }]
+  ["qa-check-unknown", { question: "Log Unknown place, 16:26–17:00?", detail: null, logLabel: "Log it", skipLabel: "Not now", more: true, opens: false }],
+  ["qa-check-sleep", { question: "Log your sleep, 23:10–06:50?", detail: "From Apple Health.", logLabel: "Log as Sleep", skipLabel: "Not sleep", more: false, opens: false }]
 ]);
 
 export default function CalendarQaRoute() {

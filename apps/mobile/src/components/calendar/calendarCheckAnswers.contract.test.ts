@@ -26,9 +26,13 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
 
   it("saves a card's remembered copy only while this phone has not decided it, by the List's own rule", () => {
     expect(review).toContain("void rememberedReviewAnswerStillOpen(");
-    // Decided elsewhere meanwhile: nothing saved, the card not this visit's decision.
-    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held) => {"), review.indexOf("function resolveItem("));
-    expect(commit).toMatch(/if \(open\) \{\s*start\(\);\s*return;\s*\}\s*\/\/ Decided elsewhere meanwhile[^\n]*\n\s*settled\(\);\s*restoreMembers\(\);\s*undoCount\(\);/);
+    const commit = review.slice(review.indexOf("commitHeldDeckDecisionRef.current = (held, checkedRemembered = new Set()) => {"), review.indexOf("function resolveItem("));
+    // Fenced to the account it began in, a failed read is a failed save, decided meanwhile saves nothing,
+    // and otherwise everything is validated again as it is now (Codex r3 on #582).
+    expect(commit).toContain("if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {");
+    expect(commit).toMatch(/if \("error" in outcome\) \{[^}]*failed\(\);/);
+    expect(commit).toMatch(/if \(!outcome\.open\) \{[^}]*settled\(\);\s*restoreMembers\(\);\s*undoCount\(\);/);
+    expect(commit).toContain("commitHeldDeckDecisionRef.current(held, new Set([...checkedRemembered, ...remembered.map((candidate) => candidate.id)]));");
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {

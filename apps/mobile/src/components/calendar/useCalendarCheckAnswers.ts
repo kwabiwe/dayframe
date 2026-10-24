@@ -80,7 +80,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
     if (listed) return isOpen(listed) ? listed : undefined;
     const copy = known.current.get(itemId);
-    return copy && !decidedRef.current.has(itemId) ? copy : undefined;
+    return copy && isOpenReviewItem(copy) && !decidedRef.current.has(itemId) ? copy : undefined;
   };
   // Copies the loaded data no longer lists come back to the List, for the account that answered.
   const restore = (owner: string | null, itemIds: readonly string[]) => {
@@ -99,17 +99,33 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     });
   };
 
-  const save = (decision: HeldAnswer) => {
+  // `checked`: remembered copies the outbox has already been read for. Everything is validated again after
+  // that read, against the suggestion as it is now (Codex r3 on #582).
+  const save = (decision: HeldAnswer, checked: ReadonlySet<string> = new Set()) => {
     if (decision.owner !== ownerRef.current) return; // Another account now: never saved there.
     const owner = decision.owner;
     const heldIds = [decision.itemId, ...(decision.outing?.members.map((member) => member.itemId) ?? [])];
+    const unhide = (ids: readonly string[]) => {
+      if (ownerRef.current !== owner) return;
+      setSaving((now) => now && now.owner === owner ? { ...now, ids: new Set([...now.ids].filter((id) => !ids.includes(id))) } : now);
+    };
+    const notSaved = (error: unknown) => {
+      unhide(heldIds);
+      restore(owner, heldIds);
+      AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
+      Alert.alert("Calendar", friendlyMobileErrorMessage(error, "Couldn’t save this answer on this iPhone."));
+    };
     const item = resolveOpen(decision.itemId);
-    if (!item) return; // Decided elsewhere while held: it has already left the List.
+    if (!item) {
+      unhide(heldIds);
+      return; // Decided elsewhere while held: it has already left the List.
+    }
     const members = decision.outing
       ? heldOutingStillSame(decision.outing.members, outingKeyOf(item) === decision.outing.key ? decision.outing.key : null,
         resolveOpen, reviewDeckProposalSignature)
       : [];
-    if (reviewDeckProposalSignature(item) !== decision.proposal || members === null) {
+    if (reviewDeckProposalSignature(item) !== decision.proposal || members === null || !hasSuggestedTimeWindow(item)) {
+      unhide(heldIds);
       restore(owner, heldIds);
       AccessibilityInfo.announceForAccessibility(`${decision.title} changed, so it was not saved. Check it again.`);
       return;
@@ -118,7 +134,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const ids = affected.map((candidate) => candidate.id);
     const bootstrap = shownRef.current;
     const loadedData = dataRef.current;
-    if (!bootstrap || !loadedData || ids.some((id) => isReviewAnswerClaimed(id))) return;
+    if (!bootstrap || !loadedData || ids.some((id) => isReviewAnswerClaimed(id))) {
+      unhide(heldIds);
+      return;
+    }
     const loaded = new Set(loadedData.reviewItems.map((candidate) => candidate.id));
     // Copies the List remembered (a capped refresh only paged them out, or brought back by Undo).
     const remembered = affected.filter((candidate) => !loaded.has(candidate.id));
@@ -130,43 +149,45 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     setSaving((now) => now?.owner === owner
       ? { ...now, ids: new Set([...now.ids, ...ids]) }
       : { owner, ids: new Set(ids), awaiting: new Set() });
-    const unhide = () => {
-      if (ownerRef.current !== owner) return;
-      setSaving((now) => now && now.owner === owner ? { ...now, ids: new Set([...now.ids].filter((id) => !ids.includes(id))) } : now);
-    };
-    void rememberedReviewAnswerStillOpen(current, remembered.map((candidate) => candidate.id)).catch(() => false).then((open) => {
-      if (ownerRef.current !== owner) return;
-      // Decided meanwhile on this phone (the deck), or being saved there now: not this answer's to save.
-      if (!open || !claimReviewAnswer(ids)) {
-        unhide();
-        return;
-      }
-      const settle = (ok: boolean) => {
-        releaseReviewAnswer(ids);
-        if (ownerRef.current !== owner) return; // Late for another account: no word of it there.
-        if (ok) setSaving((now) => now && now.owner === owner ? { ...now, awaiting: new Set([...now.awaiting, ...ids]) } : now);
-        else {
-          unhide();
-          restore(owner, ids);
-        }
-      };
-      void enqueueReviewMutation({
-        bootstrap: current,
-        item,
-        mutation: reviewAnswerMutation(item, decision.logged, { outingMemberIds: members.length ? ids.slice(1) : undefined }),
-        clientMutationId: createReviewClientMutationId(),
-        ...(members.length ? { affectedItems: affected } : {})
-      }).then(() => {
-        settle(true);
+    const unchecked = remembered.filter((candidate) => !checked.has(candidate.id)).map((candidate) => candidate.id);
+    if (unchecked.length) {
+      void rememberedReviewAnswerStillOpen(current, unchecked).then((open) => {
         if (ownerRef.current !== owner) return;
-        AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`);
-        void synchroniseReviewMutations().catch(() => undefined);
-      }).catch((error) => {
-        settle(false);
+        // Decided meanwhile on this phone (the deck): not this answer's to save.
+        if (!open) unhide(heldIds);
+        else saveRef.current(decision, new Set([...checked, ...unchecked]));
+      }, (error: unknown) => {
         if (ownerRef.current !== owner) return;
-        AccessibilityInfo.announceForAccessibility("The answer wasn’t saved. It is still here to check.");
-        Alert.alert("Calendar", friendlyMobileErrorMessage(error, "Couldn’t save this answer on this iPhone."));
+        // The outbox could not be read: not saved, and the answer is still here, as after a failed save.
+        notSaved(error);
       });
+      return;
+    }
+    // Being saved on the deck now: that decision comes first.
+    if (!claimReviewAnswer(ids)) {
+      unhide(heldIds);
+      return;
+    }
+    const settle = (ok: boolean) => {
+      releaseReviewAnswer(ids);
+      if (ownerRef.current !== owner) return; // Late for another account: no word of it there.
+      if (ok) setSaving((now) => now && now.owner === owner ? { ...now, awaiting: new Set([...now.awaiting, ...ids]) } : now);
+    };
+    void enqueueReviewMutation({
+      bootstrap: current,
+      item,
+      mutation: reviewAnswerMutation(item, decision.logged, { outingMemberIds: members.length ? ids.slice(1) : undefined }),
+      clientMutationId: createReviewClientMutationId(),
+      ...(members.length ? { affectedItems: affected } : {})
+    }).then(() => {
+      settle(true);
+      if (ownerRef.current !== owner) return;
+      AccessibilityInfo.announceForAccessibility(`${decision.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`);
+      void synchroniseReviewMutations().catch(() => undefined);
+    }).catch((error) => {
+      settle(false);
+      if (ownerRef.current !== owner) return;
+      notSaved(error);
     });
   };
   const saveRef = useRef(save);
@@ -174,6 +195,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   useLayoutEffect(() => {
     dataRef.current = data;
     shownRef.current = shown;
+    // A remembered copy follows every newer read of its suggestion, so one paged out later is checked as it
+    // was last seen, never as it was when answered (Codex r3 on #582).
+    for (const item of data?.reviewItems ?? []) if (known.current.has(item.id)) known.current.set(item.id, item);
     decidedRef.current = locallyDecidedIds;
     syncStatesRef.current = syncStateIds;
     saveRef.current = save;
@@ -221,8 +245,9 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
   const answer = useCallback((itemId: string, logged: boolean) => {
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
     if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return;
-    // Logging needs the suggestion's whole window, as on its deck card.
-    if (logged && !hasSuggestedTimeWindow(listed)) return;
+    // Every answer needs the suggestion's whole window (the outbox refuses one without): such a "?" offers
+    // its own screen instead (Codex r3 on #582).
+    if (!hasSuggestedTimeWindow(listed)) return;
     // The outing the List asks about (the one map it folds and counts with).
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate));
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];

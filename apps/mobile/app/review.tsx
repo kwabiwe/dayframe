@@ -313,7 +313,7 @@ export default function ReviewScreen() {
   logAsDraftsRef.current = logAsDrafts;
   const logAsNames = useRef(new Map<string, string>());
   const [logAsPickerItemId, setLogAsPickerItemId] = useState<string | null>(null);
-  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld) => void>(() => undefined);
+  const commitHeldDeckDecisionRef = useRef<(held: ReviewDeckHeld, checkedRemembered?: ReadonlySet<string>) => void>(() => undefined);
   const deckHold = useRef(createReviewDeckHold({
     onChange: setHeldDeckDecision,
     onCommit: (held) => commitHeldDeckDecisionRef.current(held)
@@ -1677,7 +1677,9 @@ export default function ReviewScreen() {
     })();
   }
 
-  commitHeldDeckDecisionRef.current = (held) => {
+  // `checkedRemembered`: remembered copies the outbox has already been read for (a second pass after that
+  // read validates everything again, as it is now).
+  commitHeldDeckDecisionRef.current = (held, checkedRemembered = new Set()) => {
     if (held.kind === "batch") {
       commitHeldBulkSkip(held);
       return;
@@ -1709,6 +1711,8 @@ export default function ReviewScreen() {
       return known && isOpenReviewItem(known) ? known : undefined;
     };
     if (!item) {
+      // (After the outbox read the card may already be marked as committing.)
+      if (checkedRemembered.size) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       // Resolved elsewhere while held: this visit did not decide it (its Moves show on their own).
       restoreMembers();
@@ -1723,6 +1727,7 @@ export default function ReviewScreen() {
       // A refresh changed the suggestion while the decision was held: the user decided about
       // something else, so nothing is saved and the card comes back as it is now.
       deferGenerations.current.set(held.key, (deferGenerations.current.get(held.key) ?? 0) + 1);
+      if (checkedRemembered.size) setDeckKeysCommitting([held.key, ...memberKeys], false);
       setFlyingDeckKey((current) => (current === held.key ? null : current));
       restorePagedOutDeckItem(held.itemId);
       restoreMembers();
@@ -1770,22 +1775,36 @@ export default function ReviewScreen() {
     const loadedData = dataRef.current;
     const remembered = (outing ? [item, ...members] : [item])
       .filter((candidate) => !loadedData?.reviewItems.some((loaded) => loaded.id === candidate.id));
-    if (!remembered.length || !loadedData) {
+    if (!loadedData || remembered.every((candidate) => checkedRemembered.has(candidate.id))) {
       start();
       return;
     }
+    const owner = reviewDataOwnerKey(loadedData);
     void rememberedReviewAnswerStillOpen(
       { ...loadedData, reviewItems: [...loadedData.reviewItems, ...remembered] },
       remembered.map((candidate) => candidate.id)
-    ).catch(() => false).then((open) => {
-      if (open) {
-        start();
+    ).then((open) => ({ open }), (error: unknown) => ({ error })).then((outcome) => {
+      // Another account now (Codex r3 on #582): nothing of this one is saved, counted or said there.
+      if (!dataRef.current || reviewDataOwnerKey(dataRef.current) !== owner) {
+        settled();
         return;
       }
-      // Decided elsewhere meanwhile: not this visit's decision, and nothing more is saved.
-      settled();
-      restoreMembers();
-      undoCount();
+      if ("error" in outcome) {
+        // The outbox could not be read: not saved, and the card is still here, as after a failed save.
+        failed();
+        AccessibilityInfo.announceForAccessibility("The Review choice wasn’t saved. The moment is still here.");
+        Alert.alert("Review", friendlyMobileErrorMessage(outcome.error, "Couldn’t save this Review choice on this iPhone."));
+        return;
+      }
+      if (!outcome.open) {
+        // Decided elsewhere meanwhile: not this visit's decision, and nothing more is saved.
+        settled();
+        restoreMembers();
+        undoCount();
+        return;
+      }
+      // Checked against the suggestion as it is now: a refresh during the read may have changed it.
+      commitHeldDeckDecisionRef.current(held, new Set([...checkedRemembered, ...remembered.map((candidate) => candidate.id)]));
     });
   };
 
