@@ -1,4 +1,4 @@
-import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaceSeconds, type GettingAroundSummary, type MotionTravelMode, type TripLeg } from "@dayframe/shared";
+import { analyzeTimeIntervals, gettingAroundSummary, notLoggedPlaceSeconds, type GettingAroundSummary, type TripLeg } from "@dayframe/shared";
 import type { CategoryRow, PlaceRow, TagRow, TimeEntryRow } from "@/lib/queries";
 import { query } from "@/lib/db";
 import { formatSourceLabel } from "@/lib/format";
@@ -281,7 +281,7 @@ export async function getReports(session: RequestSession, input: ReportQueryInpu
 }
 
 /** Getting around: the range's (filtered) blocks in the Getting around and Commute activities, with their trips' legs. */
-async function getGettingAround(
+export async function getGettingAround(
   session: RequestSession, entries: ReadonlyArray<{ id: string; categoryId?: string }>, range: { start: string; end: string }, capturedNow: string
 ) {
   const ids = entries.filter((entry) => entry.categoryId && entry.categoryId !== "uncategorized").map((entry) => entry.id);
@@ -327,7 +327,7 @@ function reportLegs(value: unknown): TripLeg[] | null {
 }
 
 /** Time at places you haven't named and haven't logged in the range (never filtered: it is outside the blocks). */
-async function getNotLoggedSeconds(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
+export async function getNotLoggedSeconds(session: RequestSession, range: { start: string; end: string }, capturedNow: string) {
   const lookback = new Date(Date.parse(range.start) - 31 * 24 * 60 * 60_000).toISOString();
   const [places, entries] = await Promise.all([
     query<{ startedAt: Date; stoppedAt: Date | null }>(

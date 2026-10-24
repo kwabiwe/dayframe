@@ -2567,6 +2567,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     });
     router.navigate("/(tabs)/reports");
   }, []);
+  // Reports › Not logged › Check them (location v4 step 18): the places are on Calendar.
+  const openCalendarFromReports = useCallback(() => {
+    router.navigate("/(tabs)/calendar");
+  }, []);
   const acknowledgeReportsRangeRequest = useCallback((token: number) => {
     setReportsRangeRequest((current) => (current?.token === token ? null : current));
   }, []);
@@ -3483,6 +3487,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
               timeZoneId={timeZoneId}
               // Today's "Where today went" asks for Today once (D15); Reports acknowledges it.
               onRangeRequestApplied={acknowledgeReportsRangeRequest}
+              onCheckNotLogged={openCalendarFromReports}
               rangeRequest={reportsRangeRequest}
               styles={styles}
               theme={theme}

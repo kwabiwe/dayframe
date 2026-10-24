@@ -1,3 +1,4 @@
+import { UNLOGGED_PLACE_MINIMUM_SECONDS } from "./timelineRows";
 import type { MotionTravelMode, TripLeg } from "./types";
 
 /** A leg's mode (walk to drive now; rail, Underground and tram with legs part 2). */
@@ -28,8 +29,8 @@ export type GettingAroundSummary = {
   stopsSeconds: number;
 };
 
-/** A place shows as not logged from this long outside your blocks (as Calendar › List). */
-export const NOT_LOGGED_PLACE_MINIMUM_SECONDS = 600;
+/** A place shows as not logged from this long outside your blocks, as Calendar › List counts it. */
+export const NOT_LOGGED_PLACE_MINIMUM_SECONDS = UNLOGGED_PLACE_MINIMUM_SECONDS;
 
 type Interval = { startedAt: string; stoppedAt: string | null };
 

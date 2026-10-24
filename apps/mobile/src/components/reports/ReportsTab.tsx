@@ -58,6 +58,7 @@ import { fetchReportSummary, ReportRangeCache } from "@/lib/reportsClient";
 import { subscribeAuthenticatedSession } from "@/lib/secure-session";
 import { ReportActivityChart } from "./ReportActivityChart";
 import { ReportDonutCard } from "./ReportsDonut";
+import { ReportGettingAround, ReportNotLogged } from "./ReportGettingAround";
 import { ReportDateSheet, ReportFiltersSheet } from "./ReportSheets";
 import {
   ReportGoalStreak,
@@ -93,6 +94,7 @@ function ReportsTabView({
   initialChoice = "week",
   isFocused,
   onRangeRequestApplied,
+  onCheckNotLogged,
   onScrubbingChange,
   nowMs,
   rangeRequest = null,
@@ -106,6 +108,8 @@ function ReportsTabView({
   isFocused: boolean;
   /** Reports applied `rangeRequest` (its token): the Dashboard drops the request. */
   onRangeRequestApplied?: (token: number) => void;
+  /** "Check them" under Not logged (location v4 step 18): opens Calendar, where the places are. */
+  onCheckNotLogged?: () => void;
   /** The donut is being scrubbed: the screen's scroll view turns scrolling off meanwhile. */
   onScrubbingChange?: (scrubbing: boolean) => void;
   nowMs: number;
@@ -753,6 +757,10 @@ function ReportsTabView({
             total={compactDuration(heroSeconds)}
           />
         ) : null}
+        {report && summary?.notLoggedSeconds ? (
+          // Location v4 step 18: time at places you haven't named, outside the total and goals.
+          <ReportNotLogged onCheck={() => onCheckNotLogged?.()} seconds={summary.notLoggedSeconds} theme={theme} />
+        ) : null}
         {report && choice === "week" && days.length === 7 ? (
           <ReportWeekColumns
             animate={playBlocks && choice === "week"}
@@ -858,6 +866,9 @@ function ReportsTabView({
             semanticContextKey={`${requestKey}:${JSON.stringify(selection)}:${isFocused}:${foreground}:${Boolean(datePresentation)}:${Boolean(filterPresentation)}`}
             outsidePressDismissal={tooltipOutsidePress}
           />
+        ) : null}
+        {report && summary?.gettingAround && summary.gettingAround.totalSeconds > 0 ? (
+          <ReportGettingAround reduceMotion={reduceMotion} summary={summary.gettingAround} theme={theme} />
         ) : null}
         {onSheetPortalChange ? null : presentedSheet}
       </View>
