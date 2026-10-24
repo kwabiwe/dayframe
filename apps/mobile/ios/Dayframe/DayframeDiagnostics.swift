@@ -16,8 +16,9 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   private let ioQueue = DispatchQueue(label: "com.layereight.dayframe.diagnostics.io", qos: .utility)
   /// Samples a stalled main thread. Naming frames can wait on dyld's lock, so it never runs on `queue`.
   private let samplerQueue = DispatchQueue(label: "com.layereight.dayframe.diagnostics.sampler", qos: .utility)
-  /// Main's thread port, read on main at launch.
+  /// Main's thread port and stack range, read on main at launch.
   private var mainThread: thread_act_t = 0
+  private var mainStack = DayframeThreadSampler.Stack(low: 0, high: 0)
   private let appBinary = DayframeThreadSampler.mainBinaryUUID()
 
   private var tracker = DayframeStallTracker()
@@ -35,7 +36,11 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     guard !started else { return }
     started = true
     let mainThread = DayframeThreadSampler.currentThread()
-    queue.async { self.mainThread = mainThread }
+    let mainStack = DayframeThreadSampler.currentStack()
+    queue.async {
+      self.mainThread = mainThread
+      self.mainStack = mainStack
+    }
     let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("DayframeDiagnostics", isDirectory: true)
     MXMetricManager.shared.add(self)
@@ -144,7 +149,7 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   private func probe() {
     let uptime = ProcessInfo.processInfo.systemUptime
     tracker.check(uptime: uptime, context: context(for: .js)).forEach(save)
-    if tracker.mainSampleDue(uptime: uptime) { sampleMain() }
+    if let reservation = tracker.reserveMainSample(uptime: uptime) { sampleMain(reservation) }
     tracker.sentMainProbe(uptime: uptime)
     DispatchQueue.main.async { [weak self] in
       let answeredAt = ProcessInfo.processInfo.systemUptime
@@ -155,15 +160,18 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     }
   }
 
-  /// Where main is during an open stall; attached only if main is still stuck when the sample is back.
-  private func sampleMain() {
-    let thread = mainThread
+  /// Where main is during an open stall: captured here at once (the C copy takes microseconds and no
+  /// locks), named on `samplerQueue` (dladdr can wait on dyld's lock), then attached to the stall it was
+  /// reserved for, timed from the capture (Codex r1 on #577).
+  private func sampleMain(_ reservation: (stallId: String, atMs: Int)) {
+    let addresses = DayframeThreadSampler.capture(mainThread, stack: mainStack)
     samplerQueue.async { [weak self] in
-      let sample = DayframeThreadSampler.sample(thread)
-      let sampledAt = ProcessInfo.processInfo.systemUptime
+      let named = DayframeThreadSampler.describe(addresses)
       self?.queue.async {
         guard let self else { return }
-        _ = self.tracker.attachMainSample(frames: sample.frames, images: sample.images, uptime: sampledAt).map(self.save)
+        _ = self.tracker.attachMainSample(
+          stallId: reservation.stallId, atMs: reservation.atMs, frames: named.frames, images: named.images
+        ).map(self.save)
       }
     }
   }

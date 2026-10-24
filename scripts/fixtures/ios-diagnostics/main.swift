@@ -236,27 +236,41 @@ check(store.energyDays().isEmpty, "clear removes energy days")
 var sampled = DayframeStallTracker()
 sampled.becameActive(uptime: 0)
 sampled.sentMainProbe(uptime: 0)
-check(!sampled.mainSampleDue(uptime: 1), "no sample before a stall opens")
+check(sampled.reserveMainSample(uptime: 1) == nil, "no sample before a stall opens")
 var sampleContext = context(3)
 sampleContext.appBinary = "BINARY-UUID"
-_ = sampled.check(uptime: 3, context: sampleContext)
-check(sampled.mainSampleDue(uptime: 3), "a sample as the stall opens")
-check(!sampled.mainSampleDue(uptime: 4), "then not within 10 s")
-var withSample = sampled.attachMainSample(frames: ["Dayframe+0x10", "CoreLocation+0x20"], images: ["Dayframe": "A"], uptime: 3.2)
-check(withSample?.mainSamples == [DayframeStackSample(atMs: 3200, frames: ["Dayframe+0x10", "CoreLocation+0x20"])], "sample attached: \(String(describing: withSample))")
+let opened = sampled.check(uptime: 3, context: sampleContext)
+let stallA = opened[0].id
+let first = sampled.reserveMainSample(uptime: 3)
+check(first?.stallId == stallA && first?.atMs == 3000, "a sample as the stall opens, timed at capture: \(String(describing: first))")
+check(sampled.reserveMainSample(uptime: 20) == nil, "one sample out at a time (Codex r1 on #577)")
+var withSample = sampled.attachMainSample(stallId: stallA, atMs: 3000, frames: ["Dayframe+0x10", "CoreLocation+0x20"], images: ["Dayframe": "A"])
+check(withSample?.mainSamples == [DayframeStackSample(atMs: 3000, frames: ["Dayframe+0x10", "CoreLocation+0x20"])], "sample attached: \(String(describing: withSample))")
 check(withSample?.appBinary == "BINARY-UUID" && withSample?.images == ["Dayframe": "A"], "binary and images recorded")
-for second in stride(from: 13.0, through: 63.0, by: 10) where sampled.mainSampleDue(uptime: second) {
-  withSample = sampled.attachMainSample(frames: ["Dayframe+0x\(Int(second))"], images: ["Dayframe": "B"], uptime: second)
+check(sampled.reserveMainSample(uptime: 4) == nil, "then not within 10 s")
+// Reserved samples count against the budget even when they come back empty.
+var reservations = 1
+for second in stride(from: 13.0, through: 93.0, by: 10) {
+  if let next = sampled.reserveMainSample(uptime: second) {
+    reservations += 1
+    withSample = sampled.attachMainSample(stallId: next.stallId, atMs: next.atMs, frames: reservations == 2 ? [] : ["Dayframe+0x\(Int(second))"], images: ["Dayframe": "B"]) ?? withSample
+  }
 }
-check(withSample?.mainSamples?.count == DayframeStallTracker.maxSamples, "at most 4 samples: \(String(describing: withSample?.mainSamples))")
-check(withSample?.images == ["Dayframe": "A"], "the first UUID for an image is kept")
-check(sampled.attachMainSample(frames: ["late"], images: [:], uptime: 70) == nil, "no fifth sample")
-let ended = sampled.answered(.main, uptime: 80, context: context(80))
-check(ended?.outcome == .recovered && ended?.mainSamples?.count == 4, "samples kept when main recovers")
-check(sampled.attachMainSample(frames: ["after"], images: [:], uptime: 81) == nil, "no sample once main answered")
-sampled.sentMainProbe(uptime: 90)
-_ = sampled.check(uptime: 93, context: context(93))
-check(sampled.mainSampleDue(uptime: 93), "a new stall is sampled afresh")
+check(reservations == DayframeStallTracker.maxSamples, "at most 4 reserved: \(reservations)")
+check(withSample?.mainSamples?.count == 3 && withSample?.images == ["Dayframe": "A"], "the empty one is not kept; the first UUID stays: \(String(describing: withSample?.mainSamples))")
+let ended = sampled.answered(.main, uptime: 100, context: context(100))
+check(ended?.outcome == .recovered && ended?.mainSamples?.count == 3, "samples kept when main recovers")
+// A sample still being named when its stall ends never joins the next stall.
+sampled.sentMainProbe(uptime: 110)
+let stallB = sampled.check(uptime: 113, context: context(113))[0].id
+let late = sampled.reserveMainSample(uptime: 113)
+check(late?.stallId == stallB, "a new stall is sampled afresh")
+_ = sampled.answered(.main, uptime: 114, context: context(114))
+sampled.sentMainProbe(uptime: 120)
+let stallC = sampled.check(uptime: 123, context: context(123))[0].id
+check(sampled.reserveMainSample(uptime: 123) == nil, "nothing new while B's sample is still out")
+check(sampled.attachMainSample(stallId: stallB, atMs: late!.atMs, frames: ["late"], images: [:]) == nil, "B's late sample is dropped, not given to C")
+check(sampled.reserveMainSample(uptime: 124)?.stallId == stallC, "then C is sampled")
 let roundTrip = try JSONDecoder().decode(DayframeStallRecord.self, from: JSONEncoder().encode(ended!))
 check(roundTrip == ended, "samples survive encoding")
 let oldRecord = #"{"id":"x","thread":"main","startedAt":0,"durationMs":3000,"jsTasks":[]}"#
@@ -267,28 +281,51 @@ check((try? JSONDecoder().decode(DayframeStallRecord.self, from: Data(oldRecord.
   ready.signal()
   semaphore.wait()
 }
-final class ThreadBox: @unchecked Sendable { var port: thread_act_t = 0 }
-let park = DispatchSemaphore(value: 0)
-let ready = DispatchSemaphore(value: 0)
-let box = ThreadBox()
-let parked = Thread {
-  box.port = DayframeThreadSampler.currentThread()
-  parkedInKnownFunction(park, ready)
+@inline(never) func deep(_ depth: Int, _ semaphore: DispatchSemaphore, _ ready: DispatchSemaphore) -> Int {
+  if depth == 0 { parkedInKnownFunction(semaphore, ready); return 0 }
+  return deep(depth - 1, semaphore, ready) + 1
 }
-parked.start()
-ready.wait()
-Thread.sleep(forTimeInterval: 0.05)
-let sample = DayframeThreadSampler.sample(box.port)
-park.signal()
+final class ThreadBox: @unchecked Sendable { var port: thread_act_t = 0; var stack = DayframeThreadSampler.Stack(low: 0, high: 0) }
+func parkThread(depth: Int) -> (ThreadBox, DispatchSemaphore) {
+  let park = DispatchSemaphore(value: 0)
+  let ready = DispatchSemaphore(value: 0)
+  let box = ThreadBox()
+  let thread = Thread {
+    box.port = DayframeThreadSampler.currentThread()
+    box.stack = DayframeThreadSampler.currentStack()
+    _ = deep(depth, park, ready)
+  }
+  thread.stackSize = 4 << 20
+  thread.start()
+  ready.wait()
+  Thread.sleep(forTimeInterval: 0.05)
+  return (box, park)
+}
+let (box, park) = parkThread(depth: 0)
+let sample = DayframeThreadSampler.sample(box.port, stack: box.stack)
 if ProcessInfo.processInfo.environment["DAYFRAME_PRINT_SAMPLE"] != nil { print(sample.frames.joined(separator: "\n")) }
+let outsideStack = DayframeThreadSampler.capture(box.port, stack: .init(low: 0, high: 1))
+park.signal()
 let executable = (CommandLine.arguments[0] as NSString).lastPathComponent
 check(sample.frames.count >= 4, "frames read: \(sample.frames)")
 check(sample.frames.contains { $0.hasPrefix("libsystem_kernel.dylib+0x") }, "innermost frames are in the kernel wait: \(sample.frames)")
 check(sample.frames.contains { $0.hasPrefix("\(executable)+0x") }, "the fixture's own frames are named: \(sample.frames)")
 check(sample.images[executable] == DayframeThreadSampler.mainBinaryUUID() && sample.images[executable] != "?", "binary UUID recorded: \(sample.images)")
-check(DayframeThreadSampler.sample(DayframeThreadSampler.currentThread()).frames.isEmpty, "never samples the calling thread")
-check(DayframeThreadSampler.sample(0).frames.isEmpty, "no port, no sample")
+check(outsideStack.count <= 2, "a frame chain outside the thread's stack is not followed: \(outsideStack.count)")
+// A deep stack stops at the frame cap after a bounded walk.
+let (deepBox, deepPark) = parkThread(depth: 500)
+let walkStarted = Date()
+let deepSample = DayframeThreadSampler.capture(deepBox.port, stack: deepBox.stack)
+let walkSeconds = Date().timeIntervalSince(walkStarted)
+deepPark.signal()
+// Recursion repeats one return address, which is kept once: the walk ends at its 96-record bound (it
+// would otherwise read all 500), never at the 48-frame cap (Codex r1 on #577).
+check(deepSample.count > 2 && deepSample.count < 10, "deep recursion: bounded walk, repeats kept once: \(deepSample.count)")
+check(walkSeconds < 0.05, "and quick: \(walkSeconds) s")
+check(DayframeThreadSampler.sample(DayframeThreadSampler.currentThread(), stack: DayframeThreadSampler.currentStack()).frames.isEmpty, "never samples the calling thread")
+check(DayframeThreadSampler.capture(0, stack: box.stack).isEmpty, "no port, no sample")
 check(DayframeThreadSampler.describe([1]).frames == ["?"], "an unknown address is kept as ?")
+check(dayframe_thread_sample_address_mask() == 0x0000_000F_FFFF_FFFF, "36-bit pointer-authentication mask")
 
 // Any other MetricKit diagnostics list is kept through the same allowlist, not saved empty.
 let newKind: [String: Any] = [

@@ -84,6 +84,10 @@ struct DayframeStallTracker {
   private var open: [DayframeStallThread: DayframeStallRecord] = [:]
   private var lastPersisted: [DayframeStallThread: TimeInterval] = [:]
   private var lastMainSample: TimeInterval?
+  /// Samples reserved for the open main stall, attached or not.
+  private var reservedSamples = 0
+  /// A reserved sample has not come back yet (it may be from an earlier stall).
+  private var sampleOutstanding = false
 
   /// Coming to the front starts every probe afresh: time in the background is never a stall. JS is
   /// watched from this moment once its watchdog has ever answered, so a JS thread that is stuck when
@@ -95,6 +99,7 @@ struct DayframeStallTracker {
     open = [:]
     lastPersisted = [:]
     lastMainSample = nil
+    reservedSamples = 0
   }
 
   /// Leaving the front ends every stall, open or overdue, as `left`; the caller saves what comes back.
@@ -112,6 +117,7 @@ struct DayframeStallTracker {
     open = [:]
     lastPersisted = [:]
     lastMainSample = nil
+    reservedSamples = 0
     return ended
   }
 
@@ -133,6 +139,7 @@ struct DayframeStallTracker {
     if thread == .main {
       pendingMainProbe = nil
       lastMainSample = nil
+      reservedSamples = 0
     } else {
       lastJsAnswer = uptime
       jsInstalled = true
@@ -164,28 +171,35 @@ struct DayframeStallTracker {
     return due
   }
 
-  /// True when an open main stall is due a stack sample; the caller samples, then `attachMainSample`.
-  mutating func mainSampleDue(uptime: TimeInterval) -> Bool {
-    guard active, let record = open[.main], (record.mainSamples?.count ?? 0) < Self.maxSamples else { return false }
-    if let lastMainSample, uptime - lastMainSample < Self.sampleInterval { return false }
+  /// Reserves the next stack sample of the open main stall, when one is due: its stall id and how far
+  /// into the stall it is taken. One sample is out at a time and each counts against the stall's budget
+  /// from the moment it is reserved, so samples whose naming is slow never pile up (Codex r1 on #577).
+  /// The caller captures at once, then hands the frames back with `attachMainSample`.
+  mutating func reserveMainSample(uptime: TimeInterval) -> (stallId: String, atMs: Int)? {
+    guard active, !sampleOutstanding, let record = open[.main], let since = pendingMainProbe,
+          reservedSamples < Self.maxSamples else { return nil }
+    if let lastMainSample, uptime - lastMainSample < Self.sampleInterval { return nil }
     lastMainSample = uptime
-    return true
+    reservedSamples += 1
+    sampleOutstanding = true
+    return (record.id, milliseconds(uptime - since))
   }
 
-  /// Adds a sample taken at `uptime` to the open main stall and returns it to be saved, or nil when
-  /// main answered meanwhile (the sample would show where main went next, not where it was stuck).
+  /// Ends the outstanding sample. Its frames join the stall it was reserved for, and only while that
+  /// stall is still open; a stall that has ended (or a later one) never gets them.
   mutating func attachMainSample(
+    stallId: String,
+    atMs: Int,
     frames: [String],
-    images: [String: String],
-    uptime: TimeInterval
+    images: [String: String]
   ) -> DayframeStallRecord? {
-    guard active, !frames.isEmpty, var record = open[.main], let since = pendingMainProbe else { return nil }
+    sampleOutstanding = false
+    guard active, !frames.isEmpty, var record = open[.main], record.id == stallId else { return nil }
     var samples = record.mainSamples ?? []
     guard samples.count < Self.maxSamples else { return nil }
-    samples.append(DayframeStackSample(atMs: milliseconds(uptime - since), frames: frames))
+    samples.append(DayframeStackSample(atMs: atMs, frames: frames))
     record.mainSamples = samples
     record.images = (record.images ?? [:]).merging(images) { current, _ in current }
-    record.durationMs = max(record.durationMs, milliseconds(uptime - since))
     open[.main] = record
     return record
   }
@@ -598,29 +612,43 @@ struct DayframeDiagnosticsStore {
   }()
 }
 
-/// Where a stalled thread is: its return addresses, read while it is briefly suspended, then named as
-/// `image+0xoffset` (staging QA 24 Oct 2026). Nothing allocates or takes a lock while the thread is
-/// suspended, because it may hold the malloc or dyld lock; images are looked up after it resumes.
-/// arm64 only (every iPhone, and the Apple silicon Mac that runs the fixture).
+/// Where a stalled thread is: its return addresses, copied by `dayframe_thread_sample` (C, in
+/// `DayframeThreadSampler.c`) while the thread is briefly suspended, then named here as `image+0xoffset`
+/// after it has resumed (staging QA 24 Oct 2026). The copy is in C so nothing between suspend and
+/// resume can reach the Swift runtime, which in a Debug build looks up type metadata under locks the
+/// suspended thread may hold (Codex r1 on #577). arm64 only.
 enum DayframeThreadSampler {
   static let maxFrames = 48
-  /// Pointer-authentication bits are cleared with the same 36-bit mask crash reporters use on iOS.
-  static let addressMask: UInt = 0x0000_000F_FFFF_FFFF
+  /// Frame records read at most, whatever the deduplication of repeated return addresses keeps.
+  static let maxSteps = 96
 
-  /// The calling thread's port, to be sampled later from another thread. Call it on that thread.
+  struct Stack { var low: UInt64; var high: UInt64 }
+
+  /// The calling thread's port and stack range, to be sampled later from another thread.
   static func currentThread() -> thread_act_t {
     pthread_mach_thread_np(pthread_self())
   }
 
-  /// The thread's frames (never the calling thread's), or [] when it cannot be read.
-  static func sample(_ thread: thread_act_t) -> (frames: [String], images: [String: String]) {
-    guard thread != 0, thread != currentThread() else { return ([], [:]) }
-    let buffer = UnsafeMutablePointer<UInt>.allocate(capacity: maxFrames)
-    defer { buffer.deallocate() }
-    let count = addresses(of: thread, into: buffer, capacity: maxFrames)
-    return describe(Array(UnsafeBufferPointer(start: buffer, count: count)))
+  static func currentStack() -> Stack {
+    var low: UInt64 = 0
+    var high: UInt64 = 0
+    dayframe_thread_stack_bounds(&low, &high)
+    return Stack(low: low, high: high)
   }
 
+  /// The thread's return addresses, innermost first (never the calling thread's), or [].
+  static func capture(_ thread: thread_act_t, stack: Stack) -> [UInt] {
+    guard thread != 0, thread != currentThread() else { return [] }
+    var buffer = [UInt64](repeating: 0, count: maxFrames)
+    let count = buffer.withUnsafeMutableBufferPointer { pointer in
+      Int(dayframe_thread_sample(thread, stack.low, stack.high, pointer.baseAddress, Int32(maxFrames), Int32(maxSteps)))
+    }
+    return buffer.prefix(max(0, count)).map { UInt($0) }
+  }
+
+  static func sample(_ thread: thread_act_t, stack: Stack) -> (frames: [String], images: [String: String]) {
+    describe(capture(thread, stack: stack))
+  }
   /// `image+0xoffset` for each address and each image's UUID; unknown addresses are kept as `?`.
   static func describe(_ addresses: [UInt]) -> (frames: [String], images: [String: String]) {
     var frames: [String] = []
@@ -665,53 +693,5 @@ enum DayframeThreadSampler {
     }
     #endif
     return nil
-  }
-
-  /// Suspends the thread, copies its pc, lr and frame-pointer chain into `buffer`, and resumes it.
-  /// Only system calls and stack reads between suspend and resume: no allocation, no locks.
-  static func addresses(of thread: thread_act_t, into buffer: UnsafeMutablePointer<UInt>, capacity: Int) -> Int {
-    #if arch(arm64)
-    guard thread_suspend(thread) == KERN_SUCCESS else { return 0 }
-    defer { thread_resume(thread) }
-    var state = arm_thread_state64_t()
-    var stateCount = mach_msg_type_number_t(MemoryLayout<arm_thread_state64_t>.size / MemoryLayout<natural_t>.size)
-    let result = withUnsafeMutablePointer(to: &state) { pointer in
-      pointer.withMemoryRebound(to: natural_t.self, capacity: Int(stateCount)) {
-        thread_get_state(thread, thread_state_flavor_t(ARM_THREAD_STATE64), $0, &stateCount)
-      }
-    }
-    guard result == KERN_SUCCESS else { return 0 }
-    var count = 0
-    append(UInt(state.__pc), to: buffer, count: &count, capacity: capacity)
-    append(UInt(state.__lr), to: buffer, count: &count, capacity: capacity)
-    var framePointer = UInt(state.__fp) & addressMask
-    var record: (UInt, UInt) = (0, 0)
-    while framePointer != 0, framePointer % 8 == 0, count < capacity {
-      var read: vm_size_t = 0
-      let copied = withUnsafeMutablePointer(to: &record) { pointer in
-        vm_read_overwrite(mach_task_self_, vm_address_t(framePointer), vm_size_t(MemoryLayout<(UInt, UInt)>.size),
-          vm_address_t(UInt(bitPattern: pointer)), &read)
-      }
-      guard copied == KERN_SUCCESS, read == vm_size_t(MemoryLayout<(UInt, UInt)>.size) else { break }
-      let returnAddress = record.1 & addressMask
-      guard returnAddress != 0 else { break }
-      append(returnAddress, to: buffer, count: &count, capacity: capacity)
-      let next = record.0 & addressMask
-      // The stack grows down: a caller's frame is always higher. Anything else is a broken chain.
-      guard next > framePointer else { break }
-      framePointer = next
-    }
-    return count
-    #else
-    return 0
-    #endif
-  }
-
-  /// No closure captures, so nothing is boxed on the heap even in a Debug build.
-  private static func append(_ address: UInt, to buffer: UnsafeMutablePointer<UInt>, count: inout Int, capacity: Int) {
-    let stripped = address & addressMask
-    guard stripped != 0, count < capacity, count == 0 || buffer[count - 1] != stripped else { return }
-    buffer[count] = stripped
-    count += 1
   }
 }
