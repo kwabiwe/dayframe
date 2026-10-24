@@ -120,6 +120,17 @@ export function syncHelpStatus(input: {
  * (a parked Apple Health event settles its journal delivery first), and Try again sends them all now;
  * parked items are also retried now and then on passes that run anyway (no wake is scheduled).
  */
+/**
+ * Sync help's "Needs attention" footer names only the buttons on screen: per-change rows offer Discard,
+ * the "Couldn't be sent" and unreadable rows offer Clear (staging QA, 24 Oct 2026: the buttons said
+ * "Try again" and "Clear" while the footer said "Discard").
+ */
+export function needsAttentionFoot(input: { tryAgain: boolean; discard: boolean; clear: boolean }) {
+  const verbs = [input.discard ? "Discard" : null, input.clear ? "Clear" : null].filter(Boolean).join(" or ");
+  const resend = input.tryAgain ? "Try again resends it. " : "";
+  return verbs ? `${resend}${verbs} keeps your account as it is.` : resend.trim() || null;
+}
+
 export function couldntBeSentDetail(input: { permanentFailedCount: number; parkedFailedCount: number }) {
   const total = nonNegativeCount(input.permanentFailedCount);
   const parked = Math.min(total, nonNegativeCount(input.parkedFailedCount));

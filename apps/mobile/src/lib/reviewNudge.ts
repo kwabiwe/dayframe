@@ -34,7 +34,8 @@ export const DEFAULT_REVIEW_NUDGE_STATE: ReviewNudgeState = {
 export type ReviewNudgePlan = { fireAt: Date; body: string };
 
 export function reviewNudgeBody(count: number) {
-  return count === 1 ? "1 suggestion is ready to review." : `${count} suggestions are ready to review.`;
+  // Location v4 step 14: things to check, opening Calendar › List (every open one, so no "today").
+  return count === 1 ? "1 thing to check." : `${count} things to check.`;
 }
 
 export function clampReviewNudgeMinutes(minutes: number) {
