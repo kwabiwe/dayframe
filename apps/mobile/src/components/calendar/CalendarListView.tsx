@@ -151,7 +151,8 @@ function BlockRow({ entry, legs, legsOpen, onOpen, onToggleLegs, route, theme }:
 }) {
   return (
     <View style={styles.row}>
-      <Pressable accessibilityHint="Opens the block" accessibilityLabel={entry.accessibilityLabel} accessibilityRole="button" onPress={onOpen}
+      <Pressable accessibilityHint="Opens the block" accessibilityLabel={[entry.accessibilityLabel, legs?.length ? modesLabel(legs, route) : null].filter(Boolean).join(". ")}
+        accessibilityRole="button" onPress={onOpen}
         style={({ pressed }) => [styles.rowMain, { opacity: pressed ? 0.7 : 1 }]}>
         <View style={[styles.mark, { backgroundColor: entry.color }]}>
           <DayframeIcon color={entry.textColor} glyph={entry.glyph as DayframeGlyph} size={18} />
@@ -175,10 +176,15 @@ function BlockRow({ entry, legs, legsOpen, onOpen, onToggleLegs, route, theme }:
   );
 }
 
-/** A trip's route and modes on one line; an unsure leg's name in amber with its "?". */
+/** What VoiceOver reads for a trip's route and modes, inside its row's own label (Codex r1 on #570). */
+function modesLabel(legs: readonly TripLeg[], route?: string) {
+  return `${route ? `${route}. ` : ""}Legs: ${legs.map((leg) => legModeLabel(leg)).join(", ")}`;
+}
+
+/** A trip's route and modes on one line; an unsure leg's name in amber with its "?". Read as part of its row. */
 function ModesLine({ legs, route, theme }: { legs: readonly TripLeg[]; route?: string; theme: MobileTheme }) {
   return (
-    <View accessibilityLabel={`${route ? `${route}. ` : ""}Legs: ${legs.map((leg) => legModeLabel(leg)).join(", ")}`} accessible style={styles.modes}>
+    <View importantForAccessibility="no-hide-descendants" style={styles.modes}>
       {route ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{route}</Text> : null}
       {legs.map((leg, index) => (
         <View key={`${leg.startedAt}-${index}`} style={styles.mode}>
@@ -218,7 +224,8 @@ function LegRows({ legs, theme, time }: { legs: readonly TripLeg[]; theme: Mobil
 function LocationRow({ row, theme, time }: { row: LocationListRow; theme: MobileTheme; time: (ms: number) => string }) {
   if (row.kind === "open_trip") {
     return (
-      <View accessible accessibilityLabel={`Travelling since ${time(Date.parse(row.startedAt))}. Logs when you arrive.`} style={styles.rowMain}>
+      <View accessible accessibilityLabel={[`Travelling from ${row.fromName ?? "Unknown place"} since ${time(Date.parse(row.startedAt))}`,
+        row.legs.length ? modesLabel(row.legs) : null, "Logs when you arrive."].filter(Boolean).join(". ")} style={styles.rowMain}>
         <View style={[styles.mark, { backgroundColor: theme.surfaceMuted }]}>
           <DayframeIcon color={theme.textSecondary} glyph={DAYFRAME_APP_ICONS.openTrip} size={18} />
         </View>

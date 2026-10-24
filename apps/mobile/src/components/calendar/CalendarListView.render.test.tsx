@@ -65,7 +65,7 @@ const textOf = (tree: ReturnType<typeof create>) => JSON.stringify(tree.toJSON()
 describe("CalendarListView (location v4 step 9)", () => {
   it("lists the day's blocks oldest first, with an unlogged unknown place between them, and opens a block's editor", () => {
     const { tree, onOpenEntry } = render();
-    const order = labels(tree).filter((label) => ["Commute", "Work"].includes(label));
+    const order = labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label));
     expect(order).toEqual(["Commute", "Work"]);
     const text = textOf(tree);
     expect(text).toContain("Unknown place");
@@ -81,7 +81,8 @@ describe("CalendarListView (location v4 step 9)", () => {
 
   it("shows a trip block's route and modes, and opens its legs", () => {
     const { tree } = render();
-    expect(labels(tree)).toContain("Home → Office. Legs: Walk, Bus?");
+    // VoiceOver reads the route and modes with the block itself (Codex r1 on #570).
+    expect(labels(tree)).toContain("Commute. Home → Office. Legs: Walk, Bus?");
     const toggle = tree.root.findByProps({ accessibilityLabel: "Show the legs of Commute" });
     expect(toggle.props.accessibilityState).toEqual({ expanded: false });
     act(() => { toggle.props.onPress(); });
@@ -100,7 +101,7 @@ describe("CalendarListView (location v4 step 9)", () => {
 
   it("keeps the blocks when the day's places could not be read", () => {
     const { tree } = render({ timeline: null });
-    expect(labels(tree).filter((label) => ["Commute", "Work"].includes(label))).toEqual(["Commute", "Work"]);
+    expect(labels(tree).map((label) => label.split(".")[0]).filter((label) => ["Commute", "Work"].includes(label))).toEqual(["Commute", "Work"]);
     expect(textOf(tree)).not.toContain("Show Home and every place");
   });
 });

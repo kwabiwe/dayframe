@@ -26,13 +26,12 @@ struct DayframeCalendarRootView: View {
           .onAppear { actions.reportHeaderHeight(Double(geometry.size.height)) }
           .onChange(of: geometry.size.height) { height in actions.reportHeaderHeight(Double(height)) }
       })
+      // The app owns the Grid ↔ List handoff (its List fades over this view), so the timeline switches at once.
       if !presentation.isList {
         timeline(presentation: presentation, theme: theme)
-          .transition(.opacity)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    .animation(presentation.reduceMotion ? nil : .easeOut(duration: 0.2), value: presentation.isList)
     .background(Color(dayframeCSS: theme.background).ignoresSafeArea())
     .preferredColorScheme(theme.mode == "light" ? .light : .dark)
   }

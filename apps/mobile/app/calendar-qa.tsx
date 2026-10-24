@@ -1,7 +1,7 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import type { LocationTimeline } from "@dayframe/shared";
 import { CalendarListView } from "@/components/calendar/CalendarListView";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LogBox, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { DayframeCalendarView } from "../modules/dayframe-calendar";
@@ -79,13 +79,16 @@ const timeline: LocationTimeline = {
   ]
 };
 
-// Screenshots of the harness carry no development toasts.
-if (__DEV__) LogBox.ignoreAllLogs(true);
-
 export default function CalendarQaRoute() {
   const params = useLocalSearchParams<{ layout?: string }>();
   const [layout, setLayout] = useState<"grid" | "list">(params.layout === "list" ? "list" : "grid");
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  // Screenshots of the harness carry no development toasts; only while it is open (Codex r1 on #570).
+  useEffect(() => {
+    if (!__DEV__) return;
+    LogBox.ignoreAllLogs(true);
+    return () => LogBox.ignoreAllLogs(false);
+  }, []);
   const { theme } = useMobileTheme();
   const clockFormat = useClockFormat();
   const [now] = useState(() => new Date(2026, 9, 22, 17, 5).getTime());

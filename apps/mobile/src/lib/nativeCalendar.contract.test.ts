@@ -407,7 +407,9 @@ describe("native Calendar titles at every zoom (location v4 C6)", () => {
     expect(rootView).toContain("actions.changeLayout(layout)");
     expect(rootView).toContain("actions.reportHeaderHeight(");
     expect(rootView).toContain("if !presentation.isList {");
-    expect(rootView).toContain("presentation.reduceMotion ? nil : .easeOut(duration: 0.2)");
+    // The app owns the Grid ↔ List handoff: its List fades over the native view, which switches at once.
+    expect(rootView).not.toContain("value: presentation.isList");
+    expect(dashboard).toContain("exiting={localPresenceExiting(reduceMotion)}");
     expect(moduleSource).toContain('"onChangeLayout"');
     expect(moduleSource).toContain('"onHeaderHeight"');
     expect(dashboard).toContain("<CalendarListView");

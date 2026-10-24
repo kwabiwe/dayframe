@@ -35,7 +35,7 @@ describe("iPhone sign-in (A15)", () => {
   });
 
   it("keeps a reply on the view that sent it: no view change while a request runs (Codex r1)", () => {
-    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'));
+    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'), dashboard.indexOf("function renderTodayTab("));
     for (const label of [">Forgot password?</Text>", '{authView === "login" ? "Create one" : "Log in"}']) {
       const control = card.slice(card.lastIndexOf("<Pressable", card.indexOf(label)), card.indexOf(label));
       expect(control).toContain("disabled={authSubmitting}");
@@ -44,7 +44,7 @@ describe("iPhone sign-in (A15)", () => {
   });
 
   it("gives the card one Reanimated motion owner and the primary action button semantics (Codex r1)", () => {
-    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'));
+    const card = dashboard.slice(dashboard.indexOf('if (authState === "signedOut")'), dashboard.indexOf("function renderTodayTab("));
     expect(card).toContain("<Reanimated.View layout={localLayoutTransition(reduceMotion)} style={styles.authCard}>");
     expect(card.match(/entering=\{localPresenceEntering\(reduceMotion\)\}/g)?.length).toBe(4);
     expect(card).toContain("accessibilityState={{ busy: authSubmitting, disabled: authSubmitting }}");
