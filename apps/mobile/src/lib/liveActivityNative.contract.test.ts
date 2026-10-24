@@ -51,9 +51,51 @@ describe("native Live Activity presentation contract", () => {
     expect(shortcuts).toContain("localId = clientEventId");
     expect(stopCase).toContain("DayframeLiveActivityController.immediatePushToken(");
     expect(stopCase).toContain("DayframeShortcutDirectEventClient.submitLiveActivityStop(");
-    expect(stopCase).toMatch(
-      /if delivered \{\s+_ = await DayframeLiveActivityController\.stop\(\s+activityId: activityId,\s+entryId: entryId\s+\)/
-    );
+    // Optimistic once durable (owner decision 24 Oct 2026, option A): the token is read while the Activity
+    // still runs, the Activity shows stopped (an update, which cannot end this process) only when the Stop
+    // is queued, the Stop is delivered, and the Activity ends after delivery, delivered or queued.
+    const order = [
+      // A repeat tap on an Activity already shown stopped does nothing: the first run delivers and ends
+      // it, and ending it here could end the process before that request finishes (Codex r1 on #578).
+      // One run per Activity, claimed before any suspension; it owns delivery and the end (Codex r4 on #578).
+      "guard DayframeLiveActivityStopClaims.claim(claim) else {\n        return\n      }",
+      "defer { DayframeLiveActivityStopClaims.release(claim) }",
+      "guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {\n        return\n      }",
+      "let pushToken = DayframeLiveActivityController.immediatePushToken(",
+      "if queued {\n        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)",
+      "delivered = await DayframeShortcutDirectEventClient.submitLiveActivityStop(",
+      "if delivered || queued {\n        _ = await DayframeLiveActivityController.stop("
+    ].map((line) => stopCase.indexOf(line));
+    expect(order.every((index) => index >= 0), String(order)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(stopCase).not.toMatch(/end\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
+    // No await between the start of the case and the claim.
+    expect(stopCase.slice(0, stopCase.indexOf("DayframeLiveActivityStopClaims.claim(claim)"))).not.toContain("await");
+    const claims = shortcuts.slice(shortcuts.indexOf("private enum DayframeLiveActivityStopClaims"), shortcuts.indexOf("/// Whether a Shortcut Stop for this event's account ran at or after it."));
+    expect(claims).toContain("return claimed.insert(key).inserted");
+    expect(claims.match(/lock\.lock\(\)/g)).toHaveLength(2);
+    const controller = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`, "utf8");
+    const isRunning = controller.slice(controller.indexOf("static func isRunning("), controller.indexOf("static func showStopped("));
+    expect(isRunning).toContain("$0.content.state.isRunning");
+    expect(isRunning).toContain("$0.id == activityId &&");
+    // The Dashboard shows a Lock Screen Stop still in the native queue as stopped: it is read with the
+    // durable work, and re-projected before the fetch that moves the queue (Codex r1 on #578).
+    const durableWork = readFileSync(`${mobileRoot}src/lib/durableLocalWork.ts`, "utf8");
+    expect(durableWork).toContain("readPendingNativeEntryStops(owner)");
+    const dashboard = readFileSync(`${mobileRoot}src/components/DayframeDashboard.tsx`, "utf8");
+    const load = dashboard.slice(dashboard.indexOf("const load = useCallback(async (options?: DashboardLoadOptions) => {"));
+    // Before the offline return, and on every return to the front (Codex r2 on #578).
+    expect(load.indexOf("await applyWaitingLockScreenStops();")).toBeLessThan(load.indexOf("connectivityCurrent.current.isOffline &&"));
+    expect(dashboard).toContain('if (state === "active") void applyWaitingLockScreenStops();');
+    // The Dashboard as shown now, only the waiting Stops, published as a mutation (behaviour:
+    // waitingLockScreenStops.test.ts).
+    expect(dashboard).toContain("shown: () => latestData.current,");
+    expect(dashboard).toContain("readStops: readQueuedAndNativeStops,");
+    expect(dashboard).toMatch(/publishAsMutation: \(next\) => \{\s+dashboardMutationRevision\.current \+= 1;\s+publishDashboardData\(next\);/);
+    const showStopped = controller.slice(controller.indexOf("static func showStopped("), controller.indexOf("static func cleanupActivities("));
+    expect(showStopped).toContain("$0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active");
+    expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: nil))");
+    expect(showStopped).not.toContain(".end(");
     expect(stopCase).not.toContain("Task(priority:");
     expect(stopCase).not.toContain("guard queued else");
     expect(shortcuts).not.toContain("DayframeLiveActivityController.stopLegacyActivities()");
@@ -75,7 +117,7 @@ describe("native Live Activity presentation contract", () => {
     );
     expect(scopedSubmit).not.toContain('forHTTPHeaderField: "Authorization"');
     expect(scopedSubmit).toContain("pushToken.lowercased()");
-    expect(stopCase).toContain("if delivered {");
+    expect(stopCase).toContain("if delivered, queued {");
     // Deliver first (ending an Activity can end the intent process), then end the Activities of blocks
     // started before the Stop, read after delivery, whether or not delivery worked (Codex r6 on #403).
     expect(ordinaryStop).toMatch(
