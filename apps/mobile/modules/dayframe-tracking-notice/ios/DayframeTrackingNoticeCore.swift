@@ -9,15 +9,17 @@ public enum DayframeTrackingNoticeCore {
   /// - Parameters:
   ///   - armed: JavaScript's latest word: the switch is on, notifications are
   ///     allowed, and this account's location tracking is on with Always access.
-  ///   - alwaysAuthorized: Location is Always right now (read at termination).
+  ///     Nothing is re-read at termination: iOS kills an app whose main thread
+  ///     is still busy after 5 s, and a CoreLocation read waits on locationd
+  ///     (staging iPhone, 23 Oct 2026: 0x8BADF00D while `CLLocationManager()`
+  ///     waited at a serious thermal state).
   ///   - lastNoticeAt: when the previous notice was posted, if ever.
   public static func shouldNotify(
     armed: Bool,
-    alwaysAuthorized: Bool,
     lastNoticeAt: Date?,
     now: Date
   ) -> Bool {
-    guard armed, alwaysAuthorized else { return false }
+    guard armed else { return false }
     guard let lastNoticeAt else { return true }
     // A clock moved backwards counts as recent, never as a reason to repeat.
     let elapsed = now.timeIntervalSince(lastNoticeAt)
