@@ -63,9 +63,20 @@ vi.setConfig({ testTimeout: 20_000 });
 const { AppShellRuntimeProvider, useAppShellRuntime } = await import("./AppShellRuntime");
 const { PersistentTimerBar, PREVIOUS_END_CHANGED_NOTICE } = await import("./PersistentTimerBar");
 
+// These tests reason about "today": the clock is pinned to midday local time, so they pass at any hour
+// (they failed between midnight and 01:30, when "90 minutes ago" was yesterday). Only Date is faked,
+// and it keeps moving, so real timers and waits behave as before.
+function pinClockToMidday() {
+  const midday = new Date();
+  midday.setHours(12, 0, 0, 0);
+  vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+  vi.setSystemTime(midday);
+}
+
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 beforeEach(() => {
+  pinClockToMidday();
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
   server.finished = [entry({ id: "prev", description: "Write report", startedAt: minutesAgo(90), stoppedAt: minutesAgo(30) })];
   server.active = null;
@@ -77,6 +88,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   delete (document as { visibilityState?: unknown }).visibilityState;
   cleanup();
   document.body.innerHTML = "";
