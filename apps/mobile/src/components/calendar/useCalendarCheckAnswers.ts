@@ -128,8 +128,11 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     };
     const item = resolveOpen(decision.itemId);
     if (!item) {
+      // Decided elsewhere while held: it has already left the List. An outing's parts still open come back
+      // to be asked on their own, even when a refresh paged them out (Codex r9 on #582).
       unhide(heldIds);
-      return; // Decided elsewhere while held: it has already left the List.
+      restore(owner, heldIds);
+      return;
     }
     const members = decision.outing
       ? heldOutingStillSame(decision.outing.members, outingKeyOf(item) === decision.outing.key ? decision.outing.key : null,

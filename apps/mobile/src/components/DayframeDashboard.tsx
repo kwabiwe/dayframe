@@ -1938,9 +1938,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
-    // The account (workspace and user) always, with the backend when the build has one, so a build without a
-    // backend identity still keeps each account's answers apart (Codex r8 on #582).
-    ownerKey: data ? `${scopedOwnerKey ?? "local"}|${data.workspace.id}:${data.user.id}` : null,
+    // The backend, workspace and user. A build without a backend identity has none: its List offers no answers
+    // (Codex r8 and r9 on #582).
+    ownerKey: scopedOwnerKey ?? null,
     syncStateIds: reviewSyncStateIds
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a
@@ -3611,7 +3611,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   loggedLabel={nativeCalendarModel.loggedLabel}
                   nowMs={minuteNow}
                   // A "?" is answered in place (step 14, part 3b); "More…" opens it on its own screen to pick a place.
-                  onAnswerCheck={checkAnswers.answer}
+                  // Without a backend identity the outbox's record is not read here, so an answer could never
+                  // hand over: there a "?" opens the suggestion instead (Codex r9 on #582).
+                  onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}
                   onOpenCheck={(reviewItemId) => router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}

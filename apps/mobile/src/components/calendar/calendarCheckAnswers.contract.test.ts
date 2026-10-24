@@ -55,8 +55,10 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(batch).toContain("if (readFailed) throw decided.error;");
   });
 
-  it("keeps each account's answers apart even in a build without a backend identity (Codex r8 on #582)", () => {
-    expect(dashboard).toContain("ownerKey: data ? `${scopedOwnerKey ?? \"local\"}|${data.workspace.id}:${data.user.id}` : null,");
+  it("offers no answers in a build without a backend identity, where the outbox's record is not read (Codex r9 on #582)", () => {
+    expect(dashboard).toContain("ownerKey: scopedOwnerKey ?? null,");
+    expect(dashboard).toContain("onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}");
+    expect(dashboard).not.toContain('"local"');
   });
 
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {

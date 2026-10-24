@@ -389,4 +389,15 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     await act(async () => { vi.advanceTimersByTime(4_800); });
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
+
+  it("brings back an outing's open parts when its stay was decided elsewhere while held, even paged out (Codex r9 on #582)", async () => {
+    const { result, update } = mount(bootstrap(outing()));
+    act(() => { result.current.answer("stay", false); });
+    // The outbox's record says the stay is decided (the deck), and a refresh pages the outing out.
+    update({ value: bootstrap([]), decided: new Set(["stay"]) });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.size).toBe(0);
+    expect(result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "there"]);
+  });
 });
