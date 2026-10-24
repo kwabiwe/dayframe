@@ -40,9 +40,13 @@ export type ReviewAnswerQuestion = {
 export function reviewAnswerQuestion(
   item: MobileReviewItem,
   clockFormat: ClockFormat,
-  options: { outing?: boolean } = {}
+  options: { outing?: boolean; pendingChange?: boolean } = {}
 ): ReviewAnswerQuestion {
   const question = reviewAnswerWords(item, clockFormat, options);
+  // A waiting or rejected change of its own: the deck locks the card, so it opens instead (Codex r10 on #582).
+  if (options.pendingChange) {
+    return { ...question, detail: "A change to it is waiting or wasn't accepted, so it can't be answered here.", logLabel: null, skipLabel: null, more: false, opens: true };
+  }
   // Every answer needs the whole window, as on the suggestion's deck card, which only moves such a card
   // back (Codex r1 and r3 on #582): it opens on its own screen instead.
   return hasSuggestedTimeWindow(item)

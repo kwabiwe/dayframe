@@ -33,7 +33,7 @@ const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
-import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
@@ -399,5 +399,36 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
     expect(result.current.hiddenIds.size).toBe(0);
     expect(result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "there"]);
+  });
+
+  it("yields a paged-out outing to a save on the deck without losing its open parts (Codex r10 on #582)", async () => {
+    const { result, rerender } = mount(bootstrap(outing()));
+    act(() => { result.current.answer("stay", true); });
+    rerender(bootstrap([]));
+    // The deck claims one trip before the List's answer is saved.
+    claimReviewAnswer(["back"]);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.size).toBe(0);
+    expect(result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "stay", "there"]);
+    releaseReviewAnswer(["back"]);
+  });
+
+  it("answers nothing with a waiting or rejected change of its own, as the deck locks it (Codex r10 on #582)", async () => {
+    const { result, update } = mount(bootstrap([suggestion("a")]));
+    update({ states: new Set(["a"]) });
+    act(() => { result.current.answer("a", false); });
+    expect(result.current.held).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+  });
+
+  it("opens a place's evidence on its details screen and anything else on the deck, focused on it (Codex r10 on #582)", () => {
+    const place = suggestion("a");
+    expect(calendarCheckRoute(place, "a")).toEqual({ pathname: "/review/[id]", params: { id: "a" } });
+    const sleep = suggestion("s", { eventSource: "health_sleep", eventType: "health_sleep_import", rawPayload: null });
+    expect(calendarCheckRoute(sleep, "s")).toEqual({ pathname: "/review", params: { focusReviewId: "s" } });
+    // Not loaded here (paged out): the deck finds it.
+    expect(calendarCheckRoute(undefined, "x")).toEqual({ pathname: "/review", params: { focusReviewId: "x" } });
   });
 });

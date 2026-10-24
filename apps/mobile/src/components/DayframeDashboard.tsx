@@ -247,7 +247,7 @@ import {
 } from "@/lib/nativeCalendarPresentation";
 import { isOpenReviewItem, isReviewNeededEntry } from "@/lib/review";
 import { reviewAnswerQuestion } from "@/lib/reviewAnswer";
-import { calendarCheckOutings, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
+import { calendarCheckOutings, calendarCheckRoute, useCalendarCheckAnswers } from "@/components/calendar/useCalendarCheckAnswers";
 import { drainNativeShortcutQueue, syncShortcutCatalog } from "@/lib/shortcuts";
 import {
   MOBILE_MOTION,
@@ -1967,7 +1967,10 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         stoppedAt: item.suggestedStoppedAt
       })),
       titles: new Map(items.map((item) => [item.id, item.title] as const)),
-      questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, { outing: outings.has(item.id) })] as const))
+      questions: new Map(items.map((item) => [item.id, reviewAnswerQuestion(item, clockFormat, {
+        outing: outings.has(item.id),
+        pendingChange: reviewSyncStateIds.has(item.id)
+      })] as const))
     };
   }, [shownCalendarData?.reviewItems, checkAnswers.hiddenIds, clockFormat, locallyDecidedIds, reviewSyncStateIds]);
   // Counted by the List's own rule (listCheckOverlaps), so a count always matches its "?" (Codex r1 on #573);
@@ -3614,7 +3617,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                   // Without a backend identity the outbox's record is not read here, so an answer could never
                   // hand over: there a "?" opens the suggestion instead (Codex r9 on #582).
                   onAnswerCheck={scopedOwnerKey ? checkAnswers.answer : undefined}
-                  onOpenCheck={(reviewItemId) => router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)}
+                  // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
+                  onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(
+                    shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
+                    reviewItemId
+                  ) as never)}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}

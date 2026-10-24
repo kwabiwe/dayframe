@@ -4,7 +4,7 @@ import { outingKeyOf } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
-import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
+import { hasSuggestedTimeWindow, hasV2LocationEvidence, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
@@ -29,6 +29,22 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
   const folded = new Set<string>();
   for (const outing of outings.values()) for (const member of outing.members) folded.add(member.id);
   return { outings, folded };
+}
+
+/** Whether a "?" can be answered in the List: a complete window and no waiting or rejected change of its own. */
+export function calendarCheckAnswerable(item: MobileReviewItem, syncStateIds: ReadonlySet<string>) {
+  return hasSuggestedTimeWindow(item) && !syncStateIds.has(item.id);
+}
+
+/**
+ * Where a "?" opens on its own screen (Codex r10 on #582): a place's Location evidence on its details
+ * screen; anything else (Apple Health, a trip without evidence) on the Review deck, focused on it, as
+ * Today opens it.
+ */
+export function calendarCheckRoute(item: MobileReviewItem | undefined, reviewItemId: string) {
+  return item && hasV2LocationEvidence(item)
+    ? { pathname: "/review/[id]" as const, params: { id: reviewItemId } }
+    : { pathname: "/review" as const, params: { focusReviewId: reviewItemId } };
 }
 
 /**
@@ -149,7 +165,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     const bootstrap = shownRef.current;
     const loadedData = dataRef.current;
     if (!bootstrap || !loadedData || ids.some((id) => isReviewAnswerClaimed(id))) {
+      // Yielding to a save on the deck: every part comes back (paged-out ones from their copies), and what
+      // that save decides leaves again at the outbox's next read; if it fails, it is still here (Codex r10).
       unhide(heldIds);
+      restore(owner, heldIds);
       return;
     }
     const loaded = new Set(loadedData.reviewItems.map((candidate) => candidate.id));
@@ -163,9 +182,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     setSaving((now) => now?.owner === owner
       ? { ...now, ids: new Set([...now.ids, ...ids]) }
       : { owner, ids: new Set(ids), awaiting: new Set() });
-    // Being saved on the deck now: that decision comes first.
+    // Being saved on the deck now: that decision comes first, and the parts come back as above.
     if (!claimReviewAnswer(ids)) {
       unhide(heldIds);
+      restore(owner, heldIds);
       return;
     }
     if (!verified) {
@@ -278,9 +298,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       : [];
     const savingNow = savingRef.current && savingRef.current.owner === ownerRef.current ? savingRef.current.ids : new Set<string>();
     if (heldNow.includes(itemId) || savingNow.has(itemId)) return;
-    // Every answer needs the suggestion's whole window (the outbox refuses one without): such a "?" offers
-    // its own screen instead (Codex r3 on #582).
-    if (!hasSuggestedTimeWindow(listed)) return;
+    // Every answer needs the suggestion's whole window (the outbox refuses one without), and none may have a
+    // waiting or rejected change of its own (the deck's rule): such a "?" offers its own screen instead
+    // (Codex r3 and r10 on #582).
+    if (!calendarCheckAnswerable(listed, syncStatesRef.current)) return;
     // The outing the List asks about: the one map it folds and counts with, over the items it shows (none
     // held or saving), so a trip answered on its own never joins it (Codex r5 on #582).
     const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)

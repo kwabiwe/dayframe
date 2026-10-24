@@ -82,4 +82,11 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
       logLabel: null, skipLabel: null, more: false, opens: true
     });
   });
+
+  it("opens, never answers, a suggestion with a waiting or rejected change of its own (Codex r10 on #582)", () => {
+    expect(reviewAnswerQuestion(locationV2, "24h", { pendingChange: true })).toMatchObject({
+      detail: "A change to it is waiting or wasn't accepted, so it can't be answered here.",
+      logLabel: null, skipLabel: null, more: false, opens: true
+    });
+  });
 });
