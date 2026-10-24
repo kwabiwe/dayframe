@@ -1194,8 +1194,10 @@ textarea.ui-control {
   text-align: right;
 }
 
+/* The secondary text nudged toward primary, as the row's second line: AA on the card and the hover fill
+   (plain textSecondary is 4.39:1 on Daylight's surfaceMuted; Codex r5 on #583). */
 .timeline-list-table .timeline-inline-time > :last-child {
-  color: var(--text-secondary);
+  color: color-mix(in oklab, var(--text-secondary) 85%, var(--text-primary));
 }
 
 /* A running row's "Running" sits in the end's 24 px line like a finished end time (Codex r3 on #583). */
@@ -9509,6 +9511,16 @@ dialog.ui-dialog.df-palette {
   margin-right: 3px;
   color: var(--warning-text);
   font-weight: 700;
+}
+
+/* Reduce Transparency's stronger hatch would put the "?" under 3:1 on some fills: it sits on a small surface
+   chip there, where the warning text is AA by design (Codex r5 on #583). */
+@media (prefers-reduced-transparency: reduce) {
+  .calendar-review-mark {
+    border-radius: 3px;
+    padding: 0 2px;
+    background: var(--surface);
+  }
 }
 
 /* A finished block of a minute or less: a short line with a dot at the column's left edge, inside the

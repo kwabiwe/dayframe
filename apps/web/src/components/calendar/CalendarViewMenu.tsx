@@ -88,7 +88,9 @@ export function CalendarViewMenu({
       const right = Math.min(Math.max(12, window.innerWidth - rect.right), Math.max(12, window.innerWidth - width - 12));
       const below = rect.bottom + 6;
       const fitsBelow = below + height <= window.innerHeight - 12;
-      const top = fitsBelow ? below : Math.max(12, Math.min(rect.top - 6 - height, window.innerHeight - 12 - height));
+      const candidate = fitsBelow ? below : rect.top - 6 - height;
+      // Both branches end inside the viewport, even with the trigger scrolled out (Codex r5 on #583).
+      const top = Math.max(12, Math.min(candidate, window.innerHeight - 12 - height));
       setAnchor({ top, right });
     };
     place();

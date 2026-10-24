@@ -67,4 +67,15 @@ describe("Calendar view menu (Calendar v3, owner 24 Oct 2026)", () => {
     expect(top).toBeGreaterThanOrEqual(12);
     vi.unstubAllGlobals();
   });
+
+  it("keeps the menu inside the viewport when its trigger has scrolled above it (Codex r5 on #583)", () => {
+    vi.stubGlobal("innerWidth", 1280);
+    vi.stubGlobal("innerHeight", 800);
+    render(<CalendarViewMenu onChange={() => undefined} value="calendar" />);
+    const trigger = screen.getByRole("button", { name: "Calendar view: Calendar. Change view" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ top: -90, bottom: -46, left: 1200, right: 1244, width: 44, height: 44, x: 1200, y: -90, toJSON: () => ({}) });
+    fireEvent.click(trigger);
+    expect(Number.parseFloat(screen.getByRole("menu").style.getPropertyValue("--df-cal-view-top"))).toBeGreaterThanOrEqual(12);
+    vi.unstubAllGlobals();
+  });
 });
