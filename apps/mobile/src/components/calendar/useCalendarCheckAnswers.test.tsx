@@ -21,7 +21,10 @@ const store = vi.hoisted(() => ({
   enqueueReviewMutation: vi.fn(async (_input: Record<string, unknown>) => undefined),
   synchroniseReviewMutations: vi.fn(async () => undefined),
   createReviewClientMutationId: () => "client-id",
-  reviewItemsDecidedLocally: vi.fn(async (_bootstrap: unknown, _ids: readonly string[]) => false)
+  reviewItemsDecidedLocally: vi.fn(async (_bootstrap: unknown, _ids: readonly string[]) => false),
+  // Item by item (the List reads which parts are decided): every id, or none, as the flag above says.
+  reviewItemIdsDecidedLocally: vi.fn(async (bootstrap: unknown, ids: readonly string[]): Promise<Set<string>> =>
+    (await store.reviewItemsDecidedLocally(bootstrap, ids)) ? new Set(ids) : new Set())
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
@@ -364,5 +367,26 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
     expect(other.result.current.hiddenIds.has("b")).toBe(false);
     releaseReviewAnswer(["b"]);
+  });
+
+  it("brings back the parts of a paged-out outing still open when another was decided meanwhile (Codex r8 on #582)", async () => {
+    const items = outing();
+    const { result, rerender } = mount(bootstrap(items));
+    act(() => { result.current.answer("stay", true); });
+    rerender(bootstrap([]));
+    store.reviewItemIdsDecidedLocally.mockImplementationOnce(async () => new Set(["there"]));
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.size).toBe(0);
+    expect(result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "stay"]);
+  });
+
+  it("answers nothing without an account to answer for (Codex r8 on #582)", async () => {
+    const { result, update } = mount(bootstrap([suggestion("a")]));
+    update({ owner: null });
+    act(() => { result.current.answer("a", true); });
+    expect(result.current.held).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
   });
 });

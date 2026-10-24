@@ -1938,7 +1938,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const checkAnswers = useCalendarCheckAnswers({
     data: calendarData,
     locallyDecidedIds,
-    ownerKey: scopedOwnerKey ?? null,
+    // The account (workspace and user) always, with the backend when the build has one, so a build without a
+    // backend identity still keeps each account's answers apart (Codex r8 on #582).
+    ownerKey: data ? `${scopedOwnerKey ?? "local"}|${data.workspace.id}:${data.user.id}` : null,
     syncStateIds: reviewSyncStateIds
   });
   // What the Calendar shows: its data, plus answers brought back (Undo, a failed save) for suggestions a

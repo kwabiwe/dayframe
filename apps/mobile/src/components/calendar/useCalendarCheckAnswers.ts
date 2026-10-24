@@ -6,7 +6,7 @@ import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
 import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation } from "../../lib/reviewAnswer";
-import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswerStillOpen } from "../../lib/reviewAnswerClaims";
+import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, reviewAnswersDecided } from "../../lib/reviewAnswerClaims";
 import { createReviewDeckHold, reviewDeckProposalSignature, type ReviewDeckHeld, type ReviewDeckHeldDecision } from "../../lib/reviewDeckHold";
 import { heldOutingStillSame, reviewDeckOutings } from "../../lib/reviewDeckOutings";
 import { createReviewClientMutationId, enqueueReviewMutation, synchroniseReviewMutations } from "../../lib/reviewSyncStore";
@@ -40,7 +40,7 @@ export function calendarCheckOutings(open: readonly MobileReviewItem[], syncStat
  * (`heldOutingStillSame`) or that was decided elsewhere while held is not saved; one a capped refresh only
  * left out of the loaded list is saved from the copy the List showed, once this phone is known not to have
  * decided it meanwhile; every save claims its suggestions, reads the outbox for them and checks again before
- * it is written (`reviewAnswerStillOpen`), so nothing the deck is saving or has saved is saved
+ * it is written (`reviewAnswersDecided`), so nothing the deck is saving or has saved is saved
  * again (`reviewAnswerClaims`); and Undo, or a save that fails or is refused, brings back a copy the loaded
  * list no longer has (outing included) until the next read replaces it (`data`). Everything belongs to the
  * account that answered: switching account drops a held answer unsaved and silences any late result. While
@@ -166,12 +166,17 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       return;
     }
     if (!verified) {
-      void reviewAnswerStillOpen(current, ids).then((open) => {
+      void reviewAnswersDecided(current, ids).then((decided) => {
         releaseReviewAnswer(ids);
         if (ownerRef.current !== owner) return;
-        // Decided meanwhile on this phone (the deck): not this answer's to save.
-        if (!open) unhide(heldIds);
-        else saveRef.current(decision, true);
+        if (!decided.size) {
+          saveRef.current(decision, true);
+          return;
+        }
+        // Decided meanwhile on this phone (the deck): not this answer's to save. Parts of an outing that are
+        // still open come back to be asked on their own, even when a refresh paged them out (Codex r8 on #582).
+        unhide(heldIds);
+        restore(owner, heldIds.filter((id) => !decided.has(id)));
       }, (error: unknown) => {
         releaseReviewAnswer(ids);
         if (ownerRef.current !== owner) return;
@@ -258,6 +263,8 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
 
   /** "Log it" (true) or "Skip" (false) on a "?"; a new answer saves the one held before it. */
   const answer = useCallback((itemId: string, logged: boolean) => {
+    // No account to answer for (Codex r8 on #582): nothing is held or saved.
+    if (!ownerRef.current) return;
     const listed = shownRef.current?.reviewItems?.find((candidate) => candidate.id === itemId);
     if (!listed || !isOpen(listed) || isReviewAnswerClaimed(itemId)) return;
     // Already answered (held, or saving and not yet handed over): a repeat tap never saves the first answer
