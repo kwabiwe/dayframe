@@ -1518,9 +1518,25 @@ final class DayframeCalendarCoreTests: XCTestCase {
       // Separate ticks never share a target point.
       XCTAssertLessThanOrEqual(frames[0].maxY, frames[1].minY)
       XCTAssertEqual(frames[0].maxY, (tops[0] + tops[1]) / 2, accuracy: 1e-9)
-      // Two at the same time: one keeps the half above, the other the half below.
-      XCTAssertEqual(frames[2].maxY, tops[2], accuracy: 1e-9)
-      XCTAssertEqual(frames[3].minY, tops[3], accuracy: 1e-9)
+      // Two at the same time share their group's target in equal slices, each with its own area.
+      XCTAssertEqual(frames[2].maxY, frames[3].minY, accuracy: 1e-9)
+      XCTAssertGreaterThan(frames[2].maxY - frames[2].minY, 0)
+      XCTAssertEqual(frames[2].maxY - frames[2].minY, frames[3].maxY - frames[3].minY, accuracy: 1e-9)
+      // At the day's edges and in threes, every moment still has a target of its own (Codex r2 on #580).
+      for edgeTops in [[0.0, 0.0], [24 * hourHeight, 24 * hourHeight], [9 * hourHeight, 9 * hourHeight, 9 * hourHeight], [0.0, 0.2, 30]] {
+        let edgeFrames = DayframeCalendarMomentMath.hitFrames(tops: edgeTops, hourLabelWidth: 68, timelineHeight: 24 * hourHeight)
+        for frame in edgeFrames {
+          XCTAssertGreaterThan(frame.maxY - frame.minY, 1, "\(edgeTops) at \(hourHeight)")
+          XCTAssertGreaterThanOrEqual(frame.minY, 0)
+          XCTAssertLessThanOrEqual(frame.maxY, 24 * hourHeight)
+        }
+        // No two targets overlap.
+        for (a, left) in edgeFrames.enumerated() {
+          for right in edgeFrames[(a + 1)...] {
+            XCTAssertTrue(left.maxY <= right.minY + 1e-9 || right.maxY <= left.minY + 1e-9, "\(edgeTops)")
+          }
+        }
+      }
       // A lone moment keeps its whole 44 points.
       let lone = DayframeCalendarMomentMath.hitFrames(tops: [5 * hourHeight], hourLabelWidth: 68, timelineHeight: 24 * hourHeight)[0]
       XCTAssertEqual(lone.maxY - lone.minY, 44)

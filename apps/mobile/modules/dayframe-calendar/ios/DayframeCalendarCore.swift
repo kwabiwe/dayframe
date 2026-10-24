@@ -1406,20 +1406,33 @@ public enum DayframeCalendarMomentMath {
     return DayframeCalendarHitFrame(minX: maxX - targetSize, maxX: maxX, minY: minY, maxY: minY + targetSize)
   }
 
-  /// Every moment's target, in the order given, resolved together (Codex r1 on #580): where two
-  /// targets would meet, each stops at the midpoint between the two ticks, so a tap always opens the
-  /// moment nearest it (two at the same time split the target above and below their tick).
+  /// Every moment's target, in the order given, resolved together (Codex r1 and r2 on #580). Ticks at
+  /// the same time form one group with one target; between groups each target stops at the midpoint to
+  /// its neighbour, so a tap opens the nearest. A group's target is split into equal slices, one per
+  /// moment in the order given, so every moment keeps a target of its own, at the day's edges too.
   public static func hitFrames(tops: [Double], hourLabelWidth: Double, timelineHeight: Double) -> [DayframeCalendarHitFrame] {
     let order = tops.indices.sorted { tops[$0] != tops[$1] ? tops[$0] < tops[$1] : $0 < $1 }
+    var groups: [[Int]] = []
+    for index in order {
+      if let last = groups.last?.last, abs(tops[last] - tops[index]) < 0.5 {
+        groups[groups.count - 1].append(index)
+      } else {
+        groups.append([index])
+      }
+    }
     var frames = tops.map { hitFrame(top: $0, hourLabelWidth: hourLabelWidth, timelineHeight: timelineHeight) }
-    for (rank, index) in order.enumerated() {
-      var frame = frames[index]
-      var minY = frame.minY
-      var maxY = frame.maxY
-      if rank > 0 { minY = max(minY, (tops[order[rank - 1]] + tops[index]) / 2) }
-      if rank + 1 < order.count { maxY = min(maxY, (tops[index] + tops[order[rank + 1]]) / 2) }
-      frame = DayframeCalendarHitFrame(minX: frame.minX, maxX: frame.maxX, minY: minY, maxY: max(minY, maxY))
-      frames[index] = frame
+    for (rank, group) in groups.enumerated() {
+      let top = tops[group[0]]
+      let base = hitFrame(top: top, hourLabelWidth: hourLabelWidth, timelineHeight: timelineHeight)
+      var minY = base.minY
+      var maxY = base.maxY
+      if rank > 0 { minY = max(minY, (tops[groups[rank - 1][0]] + top) / 2) }
+      if rank + 1 < groups.count { maxY = min(maxY, (top + tops[groups[rank + 1][0]]) / 2) }
+      let slice = (maxY - minY) / Double(group.count)
+      for (position, index) in group.sorted().enumerated() {
+        let sliceTop = minY + Double(position) * slice
+        frames[index] = DayframeCalendarHitFrame(minX: base.minX, maxX: base.maxX, minY: sliceTop, maxY: sliceTop + slice)
+      }
     }
     return frames
   }
