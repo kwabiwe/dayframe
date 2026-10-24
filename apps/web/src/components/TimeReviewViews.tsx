@@ -207,6 +207,8 @@ export function TimeReviewViews({
   // The shown day's location timeline for the List (location v4 step 10), fetched again with each bootstrap refresh.
   const locationTimeline = useLocationTimeline(state.view === "list" && state.scope === "day" ? state.date : null, data,
     `${data.workspace.id}:${data.user.id}`);
+  // Saved places a location row can be corrected to (location v4 step 13): names and roles only.
+  const correctionPlaces = useMemo(() => data.places.map(({ id, name, role }) => ({ id, name, role })), [data.places]);
   const preferenceState = useMemo(
     () => ({ scope: state.scope, view: state.view }),
     [state.scope, state.view]
@@ -567,6 +569,9 @@ export function TimeReviewViews({
             onDeleteEntries={requestTimelineDelete}
             groupByDay
             locationTimeline={locationTimeline}
+            places={correctionPlaces}
+            reviewItems={data.reviewItems}
+            checksDay={state.view === "list" && state.scope === "day" ? ranges.active : null}
             onChanged={refreshData}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}

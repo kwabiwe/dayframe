@@ -8,25 +8,19 @@ import Link from "next/link";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
-import { validReviewAcknowledgement, type ReviewMutationEnvelope } from "@dayframe/shared";
 import { useAppShellRuntime, useRuntimePageData } from "@/components/AppShellRuntime";
 import { ActivityChipFace } from "@/components/blocks/ActivityChipGroup";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
+import { useReviewDecisions } from "@/components/review/useReviewDecisions";
+import type { ReviewDecisionState } from "@/lib/review-decision-controller";
 import { OverlapLine } from "@/components/OverlapNotice";
 import { ReviewVisual } from "@/components/review/ReviewVisual";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
 import { blockStyle } from "@/lib/block-style";
 import { prefersReducedMotion, springTransition } from "@/lib/blocks-motion";
-import { clientFetch } from "@/lib/client-auth-fetch";
 import { hasOpenDialog, isTypingTarget } from "@/lib/keyboard-ownership";
-import { onBeforeSessionChange } from "@/lib/session-change";
 import type { BootstrapData, CategoryRow, ReviewItemRow, TimeEntryRow } from "@/lib/queries";
-import {
-  ReviewDecisionController,
-  initialReviewDecisionState,
-  type ReviewDecisionState
-} from "@/lib/review-decision-controller";
 import {
   activeDraft,
   adjacentV2StayReviewId,
@@ -1024,84 +1018,4 @@ function useMinuteClock(hydrated: boolean) {
     return () => clearInterval(interval);
   }, [hydrated]);
   return nowMs;
-}
-
-function useReviewDecisions(
-  openItems: readonly ReviewItemRow[], refresh: () => Promise<unknown>,
-  onOutingConflict: (stayId: string, statuses: Record<string, string>) => void
-) {
-  const [state, setState] = useState<ReviewDecisionState>(initialReviewDecisionState);
-  const [controller] = useState(() => new ReviewDecisionController(setState));
-  // The save reads the newest data: a held suggestion a refresh changed is not what the user
-  // decided about. One a refresh no longer lists (decided elsewhere, or past the newest 100) is
-  // still sent, and the server says.
-  useEffect(() => {
-    const items = new Map(openItems.map((item) => [item.id, item]));
-    controller.setCommit(async (decision, options) => {
-      const current = items.get(decision.itemId);
-      if (current && reviewProposalSignature(current) !== decision.signature) return "changed";
-      const envelope: ReviewMutationEnvelope = { clientMutationId: decision.clientMutationId, mutation: decision.mutation };
-      const response = await clientFetch(`/api/review/${decision.itemId}`, {
-        body: JSON.stringify(envelope),
-        headers: { "Content-Type": "application/json" },
-        keepalive: options.keepalive,
-        method: "POST"
-      });
-      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
-      // An outing that changed (one of its cards decided elsewhere or retired) saved nothing: its Stay
-      // comes back with the reason, and the next data shows whatever is still open (Codex r1 on #466).
-      const outingAction = decision.mutation.action === "confirm_outing" || decision.mutation.action === "ignore_outing";
-      if (outingAction && response.status === 409 && body.code === "resolution_conflict") {
-        void refresh().catch(() => undefined);
-        // The server says which cards are still open (Codex r2 on #466): a Stay decided elsewhere is
-        // gone (its open Moves then show on their own); otherwise the outing comes back, open cards only.
-        const statuses = body.canonicalReviewStatuses && typeof body.canonicalReviewStatuses === "object"
-          ? body.canonicalReviewStatuses as Record<string, string> : null;
-        if (statuses) onOutingConflict(decision.itemId, statuses);
-        if (statuses && statuses[decision.itemId] !== undefined && statuses[decision.itemId] !== "open") return "gone";
-        return "changed";
-      }
-      // Decided elsewhere (another device or tab): nothing to save and nothing to bring back.
-      if (
-        response.status === 404 ||
-        (response.status === 409 && body.code === "resolution_conflict") ||
-        (response.ok && body.alreadyResolved === true)
-      ) {
-        void refresh().catch(() => undefined);
-        return "gone";
-      }
-      if (!response.ok) {
-        const message = typeof body.message === "string" ? body.message : typeof body.error === "string" ? body.error : null;
-        throw new Error(message ?? "Couldn’t save that decision.");
-      }
-      if (!validReviewAcknowledgement(body, envelope, decision.itemId)) {
-        throw new Error("Couldn’t confirm that decision was saved.");
-      }
-      void refresh().catch(() => undefined);
-      return "saved";
-    });
-  }, [controller, onOutingConflict, openItems, refresh]);
-
-  useEffect(() => onBeforeSessionChange(() => controller.flushAndSettle()), [controller]);
-
-  useEffect(() => {
-    const flush = () => controller.flush();
-    window.addEventListener("pagehide", flush);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      // Leaving Review saves a held decision at once (a remount after this keeps working).
-      controller.flush();
-    };
-  }, [controller]);
-
-  useEffect(() => {
-    controller.reconcileItemIds(new Set(openItems.map((item) => item.id)));
-  }, [controller, openItems]);
-
-  return {
-    state,
-    decide: useCallback((request: Parameters<ReviewDecisionController["decide"]>[0]) => controller.decide(request), [controller]),
-    undo: useCallback(() => controller.undo(), [controller]),
-    clearError: useCallback(() => controller.clearError(), [controller])
-  };
 }

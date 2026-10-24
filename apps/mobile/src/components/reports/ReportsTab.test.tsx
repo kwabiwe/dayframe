@@ -49,6 +49,7 @@ vi.mock("react-native-reanimated", () => ({
 }));
 vi.mock("react-native-svg", () => ({ default: "Svg", Path: "Path" }));
 vi.mock("./ReportsDonut", () => ({ ReportDonutCard: "ReportDonutCard" }));
+vi.mock("./ReportGettingAround", () => ({ ReportGettingAround: "ReportGettingAround", ReportNotLogged: "ReportNotLogged" }));
 vi.mock("./ReportActivityChart", () => ({
   ReportActivityChart: "ReportActivityChart",
 }));

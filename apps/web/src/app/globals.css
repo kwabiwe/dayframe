@@ -13326,6 +13326,89 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
 }
 
+/* Reports › Not logged (location v4 step 18): time at places you haven't named, outside the total. */
+.df-report-not-logged {
+  color: var(--text-secondary);
+}
+
+/* "Check them": a 44 px target inside the footnote's line (Codex r1 on #569); it wraps with the text. */
+.df-report-not-logged-check {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-block: -14px;
+  padding-inline: 4px;
+  color: var(--text-primary);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  vertical-align: middle;
+}
+
+/* Reports › Getting around (location v4 step 18, mock-up #web-reports): time by leg mode, neutral shades. */
+.df-getting-around-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.df-getting-around-bar {
+  display: flex;
+  height: 10px;
+  margin: 12px 0 8px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-muted);
+}
+
+.df-getting-around-bar span {
+  min-width: 2px;
+  background: color-mix(in oklab, var(--text-primary) 45%, var(--surface));
+}
+
+.df-getting-around-bar span:nth-child(1) { background: var(--text-primary); }
+.df-getting-around-bar span:nth-child(2) { background: color-mix(in oklab, var(--text-primary) 70%, var(--surface)); }
+.df-getting-around-bar span:nth-child(3) { background: color-mix(in oklab, var(--text-primary) 52%, var(--surface)); }
+.df-getting-around-bar span:nth-child(n + 4) { background: color-mix(in oklab, var(--text-primary) 34%, var(--surface)); }
+.df-getting-around-bar span[data-mode="stops"] { background: var(--border); }
+
+.df-getting-around-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.df-getting-around-rows li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-top: 1px solid var(--border);
+}
+
+.df-getting-around-rows li:first-child {
+  border-top: 0;
+}
+
+.df-getting-around-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--r-block);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.df-getting-around-note {
+  margin: 8px 0 0;
+  font-size: var(--type-meta);
+}
+
 @media (max-width: 640px) {
   .df-report-head .df-page-head-actions {
     justify-content: flex-start;
@@ -13906,6 +13989,245 @@ dialog.ui-dialog.df-palette {
 .timeline-location-chip[aria-pressed="true"] {
   background: var(--foreground);
   color: var(--surface);
+}
+
+/* A leg whose mode can be set is one button laid out as the leg (location v4 step 13). */
+.timeline-trip-leg-button {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Things to check (location v4 step 14): the day's "N to check" chip, and a "?" question under its row. */
+.timeline-checks-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 0;
+}
+
+.timeline-checks-chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  color: var(--warning-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.timeline-check-row > td {
+  padding: 0 12px 12px 60px;
+}
+
+.timeline-check-question {
+  display: grid;
+  gap: 6px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in oklab, var(--warning) 10%, var(--surface));
+}
+
+/* On a phone the List's table scrolls sideways: the question stays in view, as wide as the screen. */
+@media (max-width: 760px) {
+  /* No row indent: the panel starts at the screen's edge even before the table scrolls (Codex r5 on #568). */
+  .timeline-check-row > td {
+    padding-left: 0;
+  }
+
+  .timeline-check-question {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    max-width: calc(100vw - 48px);
+  }
+}
+
+.timeline-check-question small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.timeline-check-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.timeline-check-toggle[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--warning) 16%, var(--surface));
+  color: var(--warning-text);
+}
+
+/* Correcting the location timeline (location v4 step 13): the dialog's sections. */
+.location-correction {
+  display: grid;
+  gap: 10px;
+}
+
+.location-correction-label {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.location-correction-options {
+  display: grid;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.location-correction-option {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-height: 52px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-correction-option:first-child {
+  border-top: 0;
+}
+
+.location-correction-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.location-correction-option small,
+.location-correction-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.location-correction-option[data-checked="true"] {
+  background: var(--foreground);
+  color: var(--surface);
+}
+
+/* The radio itself is visually hidden: the whole row shows the choice, and keeps the radio's keyboard. */
+.location-correction-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.location-correction-option:has(.location-correction-radio:focus-visible) {
+  /* The shared neutral focus ring, inside the row. */
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.location-correction-option[data-checked="true"] small {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.location-correction-hint {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.location-correction-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.location-correction-time {
+  display: grid;
+  gap: 4px;
+  border-radius: 14px;
+  padding: 10px 14px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.location-correction-time input {
+  min-height: 44px;
+  border: var(--web-control-border-width) solid var(--control-border);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.location-correction-modes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.location-correction-mode {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-height: 64px;
+  border: 0;
+  border-radius: 14px;
+  padding: 10px 4px;
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.location-correction-mode[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--surface);
+}
+
+.location-correction-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .location-correction-modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
