@@ -1589,10 +1589,11 @@ export default function ReviewScreen() {
       forgetBulkDecisions(held.items.map((entry) => entry.key));
       return;
     }
-    // The batch claims its items, so no single decision can start for them while it saves.
+    // The batch claims its items, so no single decision can start for them while it saves, here or in
+    // Calendar › List (the shared claims, Codex r5 on #582).
     const claim = -held.token;
-    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId));
-    const busy = held.items.filter((entry) => reviewMutations.current.has(entry.itemId));
+    const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId) && claimReviewAnswer([entry.itemId]));
+    const busy = held.items.filter((entry) => !claimed.includes(entry));
     for (const entry of claimed) reviewMutations.current.set(entry.itemId, claim);
     setDeckKeysCommitting(claimed.map((entry) => entry.key), true);
     // An item a capped refresh paged out is still open: it is saved from the copy the deck showed.
@@ -1639,6 +1640,7 @@ export default function ReviewScreen() {
       for (const entry of claimed) {
         if (reviewMutations.current.get(entry.itemId) === claim) reviewMutations.current.delete(entry.itemId);
       }
+      releaseReviewAnswer(claimed.map((entry) => entry.itemId));
       setDeckKeysCommitting(claimed.map((entry) => entry.key), false);
       const notSaved = [...busy, ...outcome.changed, ...outcome.failed];
       forgetBulkDecisions([...notSaved, ...outcome.resolved, ...outcome.abandoned].map((entry) => entry.key));

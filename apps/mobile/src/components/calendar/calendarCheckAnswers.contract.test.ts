@@ -35,6 +35,13 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
     expect(commit).toContain("commitHeldDeckDecisionRef.current(held, new Set([...checkedRemembered, ...remembered.map((candidate) => candidate.id)]));");
   });
 
+  it("claims a held bulk skip's moments for both surfaces while it saves, and lets them go after (Codex r5 on #582)", () => {
+    const batch = review.slice(review.indexOf("function commitHeldBulkSkip("), review.indexOf("function commitHeldBulkSkip(") + 6_000);
+    expect(batch).toContain("const claimed = held.items.filter((entry) => !reviewMutations.current.has(entry.itemId) && claimReviewAnswer([entry.itemId]));");
+    expect(batch).toContain("const busy = held.items.filter((entry) => !claimed.includes(entry));");
+    expect(batch).toContain("releaseReviewAnswer(claimed.map((entry) => entry.itemId));");
+  });
+
   it("folds, asks, counts and saves the List's outings with the deck's eligibility", () => {
     expect(dashboard).toContain("const { outings, folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("Promise.all([readSuppressedReviewItemIds(scopedOwner), getReviewItemSyncStates()])");

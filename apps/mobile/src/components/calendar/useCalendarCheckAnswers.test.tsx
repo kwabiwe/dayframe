@@ -26,6 +26,8 @@ const store = vi.hoisted(() => ({
 vi.mock("../../lib/reviewSyncStore", () => store);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
+const haptics = vi.hoisted(() => ({ playHaptic: vi.fn() }));
+vi.mock("../../lib/haptics", () => haptics);
 
 import { AccessibilityInfo, Alert } from "react-native";
 import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
@@ -311,5 +313,25 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     await act(async () => { fail(new Error("disk full")); });
     expect(Alert.alert).not.toHaveBeenCalled();
     expect(AccessibilityInfo.announceForAccessibility).not.toHaveBeenCalled();
+  });
+
+  it("never folds a trip answered on its own into a later outing answer, and plays the deck's answer haptic once (Codex r5 on #582)", async () => {
+    haptics.playHaptic.mockClear();
+    const [there, stay, back] = outing();
+    const { result, rerender } = mount(bootstrap([there]));
+    act(() => { result.current.answer("there", false); });
+    expect(haptics.playHaptic).toHaveBeenCalledOnce();
+    expect(haptics.playHaptic).toHaveBeenLastCalledWith("reviewSkip");
+    // A refresh brings its Stay and the trip back; the Stay is answered while the first trip is held.
+    rerender(bootstrap([there, stay, back]));
+    await act(async () => { result.current.answer("stay", true); });
+    expect(haptics.playHaptic).toHaveBeenLastCalledWith("reviewLog");
+    expect(result.current.held).toMatchObject({ itemId: "stay", outing: { members: [{ itemId: "back" }] } });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    const mutations = store.enqueueReviewMutation.mock.calls.map((call) => (call[0] as { mutation: unknown }).mutation);
+    expect(mutations).toEqual([
+      { action: "ignore_once" },
+      { action: "confirm_outing", memberReviewItemIds: ["back"] }
+    ]);
   });
 });

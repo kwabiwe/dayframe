@@ -3,6 +3,7 @@ import { AccessibilityInfo, Alert, AppState } from "react-native";
 import { outingKeyOf } from "@dayframe/shared";
 import type { MobileBootstrap, MobileReviewItem } from "../../lib/api";
 import { friendlyMobileErrorMessage } from "../../lib/friendlyError";
+import { playHaptic } from "../../lib/haptics";
 import { hasSuggestedTimeWindow, isLocationReviewItem, isOpenReviewItem } from "../../lib/review";
 import { reviewAnswerMutation } from "../../lib/reviewAnswer";
 import { claimReviewAnswer, isReviewAnswerClaimed, releaseReviewAnswer, rememberedReviewAnswerStillOpen } from "../../lib/reviewAnswerClaims";
@@ -266,8 +267,10 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
     // Every answer needs the suggestion's whole window (the outbox refuses one without): such a "?" offers
     // its own screen instead (Codex r3 on #582).
     if (!hasSuggestedTimeWindow(listed)) return;
-    // The outing the List asks about (the one map it folds and counts with).
-    const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate));
+    // The outing the List asks about: the one map it folds and counts with, over the items it shows (none
+    // held or saving), so a trip answered on its own never joins it (Codex r5 on #582).
+    const open = (shownRef.current?.reviewItems ?? []).filter((candidate) => isOpen(candidate)
+      && !heldNow.includes(candidate.id) && !savingNow.has(candidate.id));
     const members = calendarCheckOutings(open, syncStatesRef.current).outings.get(listed.id)?.members ?? [];
     // A trip of it already saving on the deck: that decision comes first, and the outing leaves the List with it.
     if (members.some((member) => isReviewAnswerClaimed(member.id))) return;
@@ -293,6 +296,7 @@ export function useCalendarCheckAnswers({ data, locallyDecidedIds, ownerKey, syn
       } : {})
     };
     hold.hold(decision);
+    playHaptic(logged ? "reviewLog" : "reviewSkip");
     // As the deck says it (Codex r2 on #582): the answer, and that Undo is there while its window runs.
     AccessibilityInfo.announceForAccessibility(`${logged ? "Logged" : "Skipped"} ${title}. Undo is available for a few seconds.`);
     // The answers read the hook's refs, which hold the latest data.
