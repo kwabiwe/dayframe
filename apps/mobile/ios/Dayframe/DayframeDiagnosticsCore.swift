@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(MachO)
+import MachO
+#endif
 
 /// Freeze and crash evidence kept on this iPhone until the person shares it from Sync help (staging
 /// freeze, 22 Oct 2026: no hang report, no requests, nothing to diagnose). Foundation only, so
@@ -29,6 +32,22 @@ struct DayframeStallRecord: Codable, Equatable {
   var jsTasks: [String]
   var lastJsTask: String?
   var appBuild: String?
+  /// The app binary's UUID, which names the dSYM that symbolicates `mainSamples` (staging builds all
+  /// share build number 1; staging QA 24 Oct 2026).
+  var appBinary: String?
+  /// For a main stall: where main was while it did not answer, sampled as the stall opens and then
+  /// every `DayframeStallTracker.sampleInterval` (staging QA 24 Oct 2026: six main pauses of up to
+  /// 135 s with no stack to name them).
+  var mainSamples: [DayframeStackSample]?
+  /// Binary name → UUID for every image in `mainSamples`.
+  var images: [String: String]?
+}
+
+/// One look at a thread's stack: `image+0xoffset` frames, innermost first (binary names and offsets
+/// only, as in MetricKit's call stacks), taken `atMs` into the stall.
+struct DayframeStackSample: Codable, Equatable {
+  var atMs: Int
+  var frames: [String]
 }
 
 /// What a new stall record is stamped with.
@@ -39,6 +58,7 @@ struct DayframeStallContext {
   var jsTasks: [String]
   var lastJsTask: String?
   var appBuild: String?
+  var appBinary: String? = nil
   var makeId: () -> String
 }
 
@@ -52,6 +72,9 @@ struct DayframeStallTracker {
   static let threshold: TimeInterval = 3
   /// An open stall is saved again at most this often, so a force-close keeps its length.
   static let persistInterval: TimeInterval = 5
+  /// An open main stall's stack is sampled as it opens and then this often, at most `maxSamples` times.
+  static let sampleInterval: TimeInterval = 10
+  static let maxSamples = 4
 
   private(set) var active = false
   private var pendingMainProbe: TimeInterval?
@@ -60,6 +83,7 @@ struct DayframeStallTracker {
   private var jsInstalled = false
   private var open: [DayframeStallThread: DayframeStallRecord] = [:]
   private var lastPersisted: [DayframeStallThread: TimeInterval] = [:]
+  private var lastMainSample: TimeInterval?
 
   /// Coming to the front starts every probe afresh: time in the background is never a stall. JS is
   /// watched from this moment once its watchdog has ever answered, so a JS thread that is stuck when
@@ -70,6 +94,7 @@ struct DayframeStallTracker {
     lastJsAnswer = jsInstalled ? uptime : nil
     open = [:]
     lastPersisted = [:]
+    lastMainSample = nil
   }
 
   /// Leaving the front ends every stall, open or overdue, as `left`; the caller saves what comes back.
@@ -86,6 +111,7 @@ struct DayframeStallTracker {
     lastJsAnswer = nil
     open = [:]
     lastPersisted = [:]
+    lastMainSample = nil
     return ended
   }
 
@@ -106,6 +132,7 @@ struct DayframeStallTracker {
     let record = finish(thread, uptime: uptime, outcome: .recovered, context: context)
     if thread == .main {
       pendingMainProbe = nil
+      lastMainSample = nil
     } else {
       lastJsAnswer = uptime
       jsInstalled = true
@@ -135,6 +162,32 @@ struct DayframeStallTracker {
       }
     }
     return due
+  }
+
+  /// True when an open main stall is due a stack sample; the caller samples, then `attachMainSample`.
+  mutating func mainSampleDue(uptime: TimeInterval) -> Bool {
+    guard active, let record = open[.main], (record.mainSamples?.count ?? 0) < Self.maxSamples else { return false }
+    if let lastMainSample, uptime - lastMainSample < Self.sampleInterval { return false }
+    lastMainSample = uptime
+    return true
+  }
+
+  /// Adds a sample taken at `uptime` to the open main stall and returns it to be saved, or nil when
+  /// main answered meanwhile (the sample would show where main went next, not where it was stuck).
+  mutating func attachMainSample(
+    frames: [String],
+    images: [String: String],
+    uptime: TimeInterval
+  ) -> DayframeStallRecord? {
+    guard active, !frames.isEmpty, var record = open[.main], let since = pendingMainProbe else { return nil }
+    var samples = record.mainSamples ?? []
+    guard samples.count < Self.maxSamples else { return nil }
+    samples.append(DayframeStackSample(atMs: milliseconds(uptime - since), frames: frames))
+    record.mainSamples = samples
+    record.images = (record.images ?? [:]).merging(images) { current, _ in current }
+    record.durationMs = max(record.durationMs, milliseconds(uptime - since))
+    open[.main] = record
+    return record
   }
 
   private func silentSince(_ thread: DayframeStallThread) -> TimeInterval? {
@@ -174,7 +227,8 @@ struct DayframeStallTracker {
       outcome: nil,
       jsTasks: context.jsTasks,
       lastJsTask: context.lastJsTask,
-      appBuild: context.appBuild
+      appBuild: context.appBuild,
+      appBinary: context.appBinary
     )
   }
 
@@ -209,13 +263,22 @@ enum DayframeMetricKitSummary {
     "binaryUUID", "binaryName", "offsetIntoBinaryTextSegment", "address", "sampleCount"
   ]
 
+  /// The known kinds, and any other `…Diagnostics` list Apple adds: its metadata and call stacks go
+  /// through the same allowlist, so only its key name is new. A payload kept only by name used to be
+  /// saved empty (staging QA 24 Oct 2026: a report with nothing in it).
+  static func diagnosticKeys(_ payload: [String: Any]) -> [String] {
+    payload.keys.filter { key in
+      kinds[key] != nil || (key.hasSuffix("Diagnostics") && leadingIdentifier(key) == key && payload[key] is [[String: Any]])
+    }.sorted()
+  }
+
   /// The payload reduced to the allowlist; every report is saved and shared only in this form.
   static func sanitize(_ payload: [String: Any]) -> [String: Any] {
     var clean: [String: Any] = [:]
     for key in ["timeStampBegin", "timeStampEnd"] {
       if let value = payload[key] as? String { clean[key] = value }
     }
-    for key in kinds.keys {
+    for key in diagnosticKeys(payload) {
       guard let diagnostics = payload[key] as? [[String: Any]] else { continue }
       clean[key] = diagnostics.map { diagnostic -> [String: Any] in
         var item: [String: Any] = [:]
@@ -234,7 +297,7 @@ enum DayframeMetricKitSummary {
   static func summarize(_ payload: [String: Any]) -> [[String: Any]] {
     let begin = payload["timeStampBegin"] as? String
     let end = payload["timeStampEnd"] as? String
-    return kinds.keys.sorted().flatMap { key -> [[String: Any]] in
+    return diagnosticKeys(payload).flatMap { key -> [[String: Any]] in
       guard let diagnostics = payload[key] as? [[String: Any]] else { return [] }
       return diagnostics.map { diagnostic in
         var summary: [String: Any] = ["kind": kinds[key] ?? key]
@@ -533,4 +596,122 @@ struct DayframeDiagnosticsStore {
     decoder.dateDecodingStrategy = .iso8601
     return decoder
   }()
+}
+
+/// Where a stalled thread is: its return addresses, read while it is briefly suspended, then named as
+/// `image+0xoffset` (staging QA 24 Oct 2026). Nothing allocates or takes a lock while the thread is
+/// suspended, because it may hold the malloc or dyld lock; images are looked up after it resumes.
+/// arm64 only (every iPhone, and the Apple silicon Mac that runs the fixture).
+enum DayframeThreadSampler {
+  static let maxFrames = 48
+  /// Pointer-authentication bits are cleared with the same 36-bit mask crash reporters use on iOS.
+  static let addressMask: UInt = 0x0000_000F_FFFF_FFFF
+
+  /// The calling thread's port, to be sampled later from another thread. Call it on that thread.
+  static func currentThread() -> thread_act_t {
+    pthread_mach_thread_np(pthread_self())
+  }
+
+  /// The thread's frames (never the calling thread's), or [] when it cannot be read.
+  static func sample(_ thread: thread_act_t) -> (frames: [String], images: [String: String]) {
+    guard thread != 0, thread != currentThread() else { return ([], [:]) }
+    let buffer = UnsafeMutablePointer<UInt>.allocate(capacity: maxFrames)
+    defer { buffer.deallocate() }
+    let count = addresses(of: thread, into: buffer, capacity: maxFrames)
+    return describe(Array(UnsafeBufferPointer(start: buffer, count: count)))
+  }
+
+  /// `image+0xoffset` for each address and each image's UUID; unknown addresses are kept as `?`.
+  static func describe(_ addresses: [UInt]) -> (frames: [String], images: [String: String]) {
+    var frames: [String] = []
+    var images: [String: String] = [:]
+    for address in addresses {
+      var info = Dl_info()
+      guard dladdr(UnsafeRawPointer(bitPattern: address), &info) != 0, let base = info.dli_fbase else {
+        frames.append("?")
+        continue
+      }
+      let path = info.dli_fname.map { String(cString: $0) } ?? "?"
+      let name = (path as NSString).lastPathComponent
+      let offset = address - UInt(bitPattern: base)
+      frames.append("\(name)+0x\(String(offset, radix: 16))")
+      if images[name] == nil { images[name] = imageUUID(UnsafeRawPointer(base)) ?? "?" }
+    }
+    return (frames, images)
+  }
+
+  /// The main executable's UUID: which build's dSYM symbolicates a sample.
+  static func mainBinaryUUID() -> String? {
+    #if canImport(MachO)
+    guard let header = _dyld_get_image_header(0) else { return nil }
+    return imageUUID(UnsafeRawPointer(header))
+    #else
+    return nil
+    #endif
+  }
+
+  static func imageUUID(_ base: UnsafeRawPointer) -> String? {
+    #if canImport(MachO)
+    let header = base.assumingMemoryBound(to: mach_header_64.self).pointee
+    guard header.magic == MH_MAGIC_64 else { return nil }
+    var command = base + MemoryLayout<mach_header_64>.size
+    for _ in 0..<header.ncmds {
+      let load = command.assumingMemoryBound(to: load_command.self).pointee
+      if load.cmd == UInt32(LC_UUID) {
+        let uuid = command.assumingMemoryBound(to: uuid_command.self).pointee.uuid
+        return UUID(uuid: uuid).uuidString
+      }
+      command += Int(load.cmdsize)
+    }
+    #endif
+    return nil
+  }
+
+  /// Suspends the thread, copies its pc, lr and frame-pointer chain into `buffer`, and resumes it.
+  /// Only system calls and stack reads between suspend and resume: no allocation, no locks.
+  static func addresses(of thread: thread_act_t, into buffer: UnsafeMutablePointer<UInt>, capacity: Int) -> Int {
+    #if arch(arm64)
+    guard thread_suspend(thread) == KERN_SUCCESS else { return 0 }
+    defer { thread_resume(thread) }
+    var state = arm_thread_state64_t()
+    var stateCount = mach_msg_type_number_t(MemoryLayout<arm_thread_state64_t>.size / MemoryLayout<natural_t>.size)
+    let result = withUnsafeMutablePointer(to: &state) { pointer in
+      pointer.withMemoryRebound(to: natural_t.self, capacity: Int(stateCount)) {
+        thread_get_state(thread, thread_state_flavor_t(ARM_THREAD_STATE64), $0, &stateCount)
+      }
+    }
+    guard result == KERN_SUCCESS else { return 0 }
+    var count = 0
+    append(UInt(state.__pc), to: buffer, count: &count, capacity: capacity)
+    append(UInt(state.__lr), to: buffer, count: &count, capacity: capacity)
+    var framePointer = UInt(state.__fp) & addressMask
+    var record: (UInt, UInt) = (0, 0)
+    while framePointer != 0, framePointer % 8 == 0, count < capacity {
+      var read: vm_size_t = 0
+      let copied = withUnsafeMutablePointer(to: &record) { pointer in
+        vm_read_overwrite(mach_task_self_, vm_address_t(framePointer), vm_size_t(MemoryLayout<(UInt, UInt)>.size),
+          vm_address_t(UInt(bitPattern: pointer)), &read)
+      }
+      guard copied == KERN_SUCCESS, read == vm_size_t(MemoryLayout<(UInt, UInt)>.size) else { break }
+      let returnAddress = record.1 & addressMask
+      guard returnAddress != 0 else { break }
+      append(returnAddress, to: buffer, count: &count, capacity: capacity)
+      let next = record.0 & addressMask
+      // The stack grows down: a caller's frame is always higher. Anything else is a broken chain.
+      guard next > framePointer else { break }
+      framePointer = next
+    }
+    return count
+    #else
+    return 0
+    #endif
+  }
+
+  /// No closure captures, so nothing is boxed on the heap even in a Debug build.
+  private static func append(_ address: UInt, to buffer: UnsafeMutablePointer<UInt>, count: inout Int, capacity: Int) {
+    let stripped = address & addressMask
+    guard stripped != 0, count < capacity, count == 0 || buffer[count - 1] != stripped else { return }
+    buffer[count] = stripped
+    count += 1
+  }
 }

@@ -55,6 +55,26 @@ describe("native freeze and crash diagnostics", () => {
     expect(service.slice(service.indexOf("func didReceive"), service.indexOf("func didReceive") + 120)).toContain("ioQueue.async");
   });
 
+  it("samples a stalled main thread off the watchdog's queue, with the binary that names it", () => {
+    const service = read("ios/Dayframe/DayframeDiagnostics.swift");
+    const core = read("ios/Dayframe/DayframeDiagnosticsCore.swift");
+    const start = service.slice(service.indexOf("func start()"), service.indexOf("func didReceive"));
+    // Main's port is read on main itself, at launch (staging QA 24 Oct 2026: main pauses had no stack).
+    expect(start).toContain("let mainThread = DayframeThreadSampler.currentThread()");
+    const probe = service.slice(service.indexOf("private func probe()"), service.indexOf("private func sampleMain()"));
+    expect(probe).toContain("if tracker.mainSampleDue(uptime: uptime) { sampleMain() }");
+    const sampleMain = service.slice(service.indexOf("private func sampleMain()"), service.indexOf("private func context("));
+    // Naming frames can wait on dyld's lock, so sampling never runs on the queue that times answers.
+    expect(sampleMain.indexOf("samplerQueue.async")).toBeLessThan(sampleMain.indexOf("DayframeThreadSampler.sample(thread)"));
+    expect(sampleMain).toContain("self.tracker.attachMainSample(");
+    expect(service).toContain("appBinary: appBinary");
+    // Nothing allocates while the thread is suspended: the buffer is allocated before, frames named after.
+    const sampler = core.slice(core.indexOf("static func addresses(of thread"), core.indexOf("private static func append("));
+    expect(sampler.indexOf("thread_suspend(thread)")).toBeGreaterThan(-1);
+    expect(sampler.indexOf("defer { thread_resume(thread) }")).toBeGreaterThan(sampler.indexOf("thread_suspend(thread)"));
+    expect(sampler).not.toMatch(/\bdladdr\b|\bString\(|\bArray\(|\.append\(|\bprint\(|\[\s*\]|func add\(/);
+  });
+
   it("compiles the diagnostics into the app target only and runs the core fixture in CI", () => {
     const project = read("ios/Dayframe.xcodeproj/project.pbxproj");
     for (const file of ["DayframeDiagnosticsCore.swift", "DayframeDiagnostics.swift", "DayframeDiagnosticsModuleBridge.m"]) {

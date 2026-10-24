@@ -232,4 +232,78 @@ check((energy?.dictionary["bestAccuracyBudgetSeconds"] as? Double) == 1200, "bud
 store.clear()
 check(store.energyDays().isEmpty, "clear removes energy days")
 
+// Main stalls carry stack samples (staging QA 24 Oct 2026: six main pauses, none with a stack).
+var sampled = DayframeStallTracker()
+sampled.becameActive(uptime: 0)
+sampled.sentMainProbe(uptime: 0)
+check(!sampled.mainSampleDue(uptime: 1), "no sample before a stall opens")
+var sampleContext = context(3)
+sampleContext.appBinary = "BINARY-UUID"
+_ = sampled.check(uptime: 3, context: sampleContext)
+check(sampled.mainSampleDue(uptime: 3), "a sample as the stall opens")
+check(!sampled.mainSampleDue(uptime: 4), "then not within 10 s")
+var withSample = sampled.attachMainSample(frames: ["Dayframe+0x10", "CoreLocation+0x20"], images: ["Dayframe": "A"], uptime: 3.2)
+check(withSample?.mainSamples == [DayframeStackSample(atMs: 3200, frames: ["Dayframe+0x10", "CoreLocation+0x20"])], "sample attached: \(String(describing: withSample))")
+check(withSample?.appBinary == "BINARY-UUID" && withSample?.images == ["Dayframe": "A"], "binary and images recorded")
+for second in stride(from: 13.0, through: 63.0, by: 10) where sampled.mainSampleDue(uptime: second) {
+  withSample = sampled.attachMainSample(frames: ["Dayframe+0x\(Int(second))"], images: ["Dayframe": "B"], uptime: second)
+}
+check(withSample?.mainSamples?.count == DayframeStallTracker.maxSamples, "at most 4 samples: \(String(describing: withSample?.mainSamples))")
+check(withSample?.images == ["Dayframe": "A"], "the first UUID for an image is kept")
+check(sampled.attachMainSample(frames: ["late"], images: [:], uptime: 70) == nil, "no fifth sample")
+let ended = sampled.answered(.main, uptime: 80, context: context(80))
+check(ended?.outcome == .recovered && ended?.mainSamples?.count == 4, "samples kept when main recovers")
+check(sampled.attachMainSample(frames: ["after"], images: [:], uptime: 81) == nil, "no sample once main answered")
+sampled.sentMainProbe(uptime: 90)
+_ = sampled.check(uptime: 93, context: context(93))
+check(sampled.mainSampleDue(uptime: 93), "a new stall is sampled afresh")
+let roundTrip = try JSONDecoder().decode(DayframeStallRecord.self, from: JSONEncoder().encode(ended!))
+check(roundTrip == ended, "samples survive encoding")
+let oldRecord = #"{"id":"x","thread":"main","startedAt":0,"durationMs":3000,"jsTasks":[]}"#
+check((try? JSONDecoder().decode(DayframeStallRecord.self, from: Data(oldRecord.utf8)))?.mainSamples == nil, "records saved before samples still load")
+
+// A real sample: a thread parked in a known function is found there, named by image and offset.
+@inline(never) func parkedInKnownFunction(_ semaphore: DispatchSemaphore, _ ready: DispatchSemaphore) {
+  ready.signal()
+  semaphore.wait()
+}
+final class ThreadBox: @unchecked Sendable { var port: thread_act_t = 0 }
+let park = DispatchSemaphore(value: 0)
+let ready = DispatchSemaphore(value: 0)
+let box = ThreadBox()
+let parked = Thread {
+  box.port = DayframeThreadSampler.currentThread()
+  parkedInKnownFunction(park, ready)
+}
+parked.start()
+ready.wait()
+Thread.sleep(forTimeInterval: 0.05)
+let sample = DayframeThreadSampler.sample(box.port)
+park.signal()
+if ProcessInfo.processInfo.environment["DAYFRAME_PRINT_SAMPLE"] != nil { print(sample.frames.joined(separator: "\n")) }
+let executable = (CommandLine.arguments[0] as NSString).lastPathComponent
+check(sample.frames.count >= 4, "frames read: \(sample.frames)")
+check(sample.frames.contains { $0.hasPrefix("libsystem_kernel.dylib+0x") }, "innermost frames are in the kernel wait: \(sample.frames)")
+check(sample.frames.contains { $0.hasPrefix("\(executable)+0x") }, "the fixture's own frames are named: \(sample.frames)")
+check(sample.images[executable] == DayframeThreadSampler.mainBinaryUUID() && sample.images[executable] != "?", "binary UUID recorded: \(sample.images)")
+check(DayframeThreadSampler.sample(DayframeThreadSampler.currentThread()).frames.isEmpty, "never samples the calling thread")
+check(DayframeThreadSampler.sample(0).frames.isEmpty, "no port, no sample")
+check(DayframeThreadSampler.describe([1]).frames == ["?"], "an unknown address is kept as ?")
+
+// Any other MetricKit diagnostics list is kept through the same allowlist, not saved empty.
+let newKind: [String: Any] = [
+  "timeStampBegin": "2026-10-23 14:10:43", "timeStampEnd": "2026-10-23 14:10:43",
+  "appTerminationDiagnostics": [[
+    "diagnosticMetaData": ["appBuildVersion": "1", "secretField": "secret"],
+    "callStackTree": ["callStacks": [["threadAttributed": true, "callStackRootFrames": [["binaryName": "Dayframe", "offsetIntoBinaryTextSegment": 16, "label": "secret"]]]]]
+  ]],
+  "notDiagnostics": "secret",
+  "weird key Diagnostics": [["diagnosticMetaData": ["appBuildVersion": "1"]]]
+]
+let newKindClean = DayframeMetricKitSummary.sanitize(newKind)
+let newKindText = String(data: try JSONSerialization.data(withJSONObject: newKindClean, options: [.sortedKeys]), encoding: .utf8)!
+check(newKindClean["appTerminationDiagnostics"] != nil && newKindText.contains("Dayframe"), "a new kind keeps its call stacks: \(newKindText)")
+check(!newKindText.contains("secret") && newKindClean["weird key Diagnostics"] == nil, "and only allowlisted fields: \(newKindText)")
+check(DayframeMetricKitSummary.summarize(newKindClean).first?["kind"] as? String == "appTerminationDiagnostics", "summarised by its key")
+
 print("Native diagnostics validation passed: \(checks) checks.")

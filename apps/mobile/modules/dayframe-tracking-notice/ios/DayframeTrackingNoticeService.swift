@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 import UserNotifications
 
@@ -8,7 +7,8 @@ import UserNotifications
 /// running in the background), so the notice is added from there, before the
 /// process exits. A suspended app gets no callback; when iOS itself ends
 /// Dayframe, location relaunches it and tracking resumes, so no notice is due.
-/// JavaScript keeps `armed` current; nothing here reads location or account data.
+/// JavaScript keeps `armed` current; nothing here reads location or account data,
+/// and nothing here waits on locationd: it runs while iOS gives the process 5 s.
 final class DayframeTrackingNoticeService {
   static let shared = DayframeTrackingNoticeService()
 
@@ -37,11 +37,9 @@ final class DayframeTrackingNoticeService {
   func applicationWillTerminate() {
     let now = Date()
     defaults.set(now.timeIntervalSince1970, forKey: Self.lastTerminationKey)
-    let alwaysAuthorized = CLLocationManager().authorizationStatus == .authorizedAlways
     let previousNoticeAt = storedDate(Self.lastNoticeKey)
     guard DayframeTrackingNoticeCore.shouldNotify(
       armed: defaults.bool(forKey: Self.armedKey),
-      alwaysAuthorized: alwaysAuthorized,
       lastNoticeAt: previousNoticeAt,
       now: now
     ) else { return }

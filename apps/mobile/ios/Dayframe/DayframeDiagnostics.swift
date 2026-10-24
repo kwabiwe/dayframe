@@ -14,6 +14,11 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   let queue = DispatchQueue(label: "com.layereight.dayframe.diagnostics", qos: .utility)
   /// Owns `store`: every file read and write, and MetricKit's payloads.
   private let ioQueue = DispatchQueue(label: "com.layereight.dayframe.diagnostics.io", qos: .utility)
+  /// Samples a stalled main thread. Naming frames can wait on dyld's lock, so it never runs on `queue`.
+  private let samplerQueue = DispatchQueue(label: "com.layereight.dayframe.diagnostics.sampler", qos: .utility)
+  /// Main's thread port, read on main at launch.
+  private var mainThread: thread_act_t = 0
+  private let appBinary = DayframeThreadSampler.mainBinaryUUID()
 
   private var tracker = DayframeStallTracker()
   private var store: DayframeDiagnosticsStore?
@@ -29,6 +34,8 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   func start() {
     guard !started else { return }
     started = true
+    let mainThread = DayframeThreadSampler.currentThread()
+    queue.async { self.mainThread = mainThread }
     let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
       .appendingPathComponent("DayframeDiagnostics", isDirectory: true)
     MXMetricManager.shared.add(self)
@@ -137,6 +144,7 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
   private func probe() {
     let uptime = ProcessInfo.processInfo.systemUptime
     tracker.check(uptime: uptime, context: context(for: .js)).forEach(save)
+    if tracker.mainSampleDue(uptime: uptime) { sampleMain() }
     tracker.sentMainProbe(uptime: uptime)
     DispatchQueue.main.async { [weak self] in
       let answeredAt = ProcessInfo.processInfo.systemUptime
@@ -147,12 +155,26 @@ final class DayframeDiagnosticsService: NSObject, MXMetricManagerSubscriber {
     }
   }
 
+  /// Where main is during an open stall; attached only if main is still stuck when the sample is back.
+  private func sampleMain() {
+    let thread = mainThread
+    samplerQueue.async { [weak self] in
+      let sample = DayframeThreadSampler.sample(thread)
+      let sampledAt = ProcessInfo.processInfo.systemUptime
+      self?.queue.async {
+        guard let self else { return }
+        _ = self.tracker.attachMainSample(frames: sample.frames, images: sample.images, uptime: sampledAt).map(self.save)
+      }
+    }
+  }
+
   private func context(for thread: DayframeStallThread) -> DayframeStallContext {
     DayframeStallContext(
       date: Date(),
       jsTasks: thread == .js ? jsTasksSinceAnswer.sorted() : jsTasks,
       lastJsTask: lastJsTask,
       appBuild: appBuild,
+      appBinary: appBinary,
       makeId: { UUID().uuidString }
     )
   }
