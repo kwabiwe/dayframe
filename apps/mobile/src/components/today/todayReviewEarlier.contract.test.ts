@@ -16,7 +16,11 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
     expect(dashboard).not.toContain("<TodayReviewNudge");
     expect(dashboard).toContain('router.navigate("/(tabs)/calendar");');
     expect(dashboard).toContain("setCalendarCheckScroll((current) => current + 1);");
-    // The evening reminder opens the same place.
+    // Counts use the List's own rule, and leave suggestions decided on this phone at once (Codex r1 on #573).
+    expect(dashboard).toContain("listCheckOverlaps(check, todayStart, tomorrowStart)");
+    expect(dashboard).toContain("!locallyDecidedIds.has(item.id)");
+    // The evening reminder opens the latest day with one, or Review when none is loaded.
+    expect(dashboard).toContain('latestCheckDayKey ? openChecksOn(latestCheckDayKey) : router.push("/review")');
     expect(dashboard).toContain("if (!cancelled && current) openTodayChecksRef.current();");
   });
 

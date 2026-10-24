@@ -52,6 +52,7 @@ export function CalendarListView({
   nowMs,
   onOpenCheck,
   onOpenEntry,
+  onScrolledToFirstCheck,
   scrollToFirstCheck,
   onRefresh,
   reduceMotion,
@@ -76,6 +77,8 @@ export function CalendarListView({
   onOpenEntry: (entry: NativeCalendarPresentationEntry) => void;
   /** Changes when Today's "N to check today" opens the List: it scrolls to the first "?". */
   scrollToFirstCheck?: number;
+  /** The request was used, so a List shown again later does not jump. */
+  onScrolledToFirstCheck?: () => void;
   onRefresh: () => void;
   reduceMotion: boolean;
   refreshing: boolean;
@@ -106,17 +109,31 @@ export function CalendarListView({
   const checkKeys = items.flatMap((item) => item.kind === "location" && checkIdOf(item.row) ? [item.key] : []);
   const firstCheckId = items.flatMap((item) => item.kind === "location" ? [checkIdOf(item.row)].filter(Boolean) as string[] : [])[0];
   // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
+  // A request stays pending until this day's first "?" has laid out, then is used once (Codex r1 on #573):
+  // a List mounting fresh from Grid, a day change or places arriving later all still land on it.
   const scroller = useRef<ScrollView>(null);
-  const cardY = useRef(0);
+  const cardY = useRef<number | null>(null);
   const rowY = useRef(new Map<string, number>());
-  useEffect(() => {
-    if (!scrollToFirstCheck || !checkKeys.length) return;
-    const y = rowY.current.get(checkKeys[0]);
+  const pendingScroll = useRef(false);
+  const firstCheckKey = checkKeys[0];
+  const tryScroll = () => {
+    if (!pendingScroll.current || !firstCheckKey || cardY.current === null) return;
+    const y = rowY.current.get(firstCheckKey);
     if (y === undefined) return;
+    pendingScroll.current = false;
     scroller.current?.scrollTo({ y: Math.max(0, cardY.current + y - 24), animated: !reduceMotion });
-    // Only when the chip asks again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    onScrolledToFirstCheck?.();
+  };
+  // Another day's rows are not this day's.
+  useEffect(() => {
+    rowY.current = new Map();
+  }, [dayStartMs]);
+  useEffect(() => {
+    if (scrollToFirstCheck) pendingScroll.current = true;
   }, [scrollToFirstCheck]);
+  useEffect(() => {
+    tryScroll();
+  });
   const time = (ms: number) => formatClockTime(new Date(ms), clockFormat);
   const toggleLegs = (id: string) => setOpenLegs((current) => {
     const next = new Set(current);
@@ -146,7 +163,7 @@ export function CalendarListView({
           </Pressable>
         ) : null}
       </View>
-      <Animated.View layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { cardY.current = event.nativeEvent.layout.y; }}
+      <Animated.View layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { cardY.current = event.nativeEvent.layout.y; tryScroll(); }}
         style={[styles.card, { backgroundColor: theme.surface }]}>
         {items.length === 0 ? (
           <Text {...mobileTextProps("body")} style={[styles.empty, { color: theme.textSecondary }]}>Nothing framed yet.</Text>
@@ -169,7 +186,7 @@ export function CalendarListView({
           }
           return (
             <Animated.View entering={localPresenceEntering(reduceMotion)} exiting={localPresenceExiting(reduceMotion)} key={item.key}
-              layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { rowY.current.set(item.key, event.nativeEvent.layout.y); }}
+              layout={localLayoutTransition(reduceMotion)} onLayout={(event) => { rowY.current.set(item.key, event.nativeEvent.layout.y); tryScroll(); }}
               style={divider}>
               <LocationRow checkTitles={checkTitles} onOpenCheck={onOpenCheck} row={item.row} theme={theme} time={time} />
             </Animated.View>

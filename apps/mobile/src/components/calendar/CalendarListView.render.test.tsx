@@ -6,14 +6,24 @@ vi.mock("react", async () => {
   // @ts-expect-error Renderer peer lives at the repository root.
   return import("../../../../../node_modules/react/index.js");
 });
-vi.mock("react-native", () => ({
+const scrollTo = vi.hoisted(() => vi.fn());
+vi.mock("react-native", async () => {
+  // @ts-expect-error Renderer peer lives at the repository root.
+  const React = await import("../../../../../node_modules/react/index.js");
+  // A ScrollView whose ref can scroll, to see the jump to the first "?" (step 14).
+  const ScrollView = React.forwardRef((props: Record<string, unknown>, ref: unknown) => {
+    React.useImperativeHandle(ref, () => ({ scrollTo }));
+    return React.createElement("ScrollView", props);
+  });
+  return {
   StyleSheet: { create: <T,>(styles: T) => styles, flatten: (style: unknown) => style, hairlineWidth: 1 },
   Pressable: "Pressable",
   RefreshControl: "RefreshControl",
-  ScrollView: "ScrollView",
+  ScrollView,
   Text: "Text",
   View: "View",
-}));
+  };
+});
 vi.mock("react-native-reanimated", () => ({ default: { View: "AnimatedView" } }));
 vi.mock("../../lib/motion", () => ({
   localLayoutTransition: () => undefined, localPresenceEntering: () => undefined, localPresenceExiting: () => undefined
@@ -140,6 +150,31 @@ describe("CalendarListView (location v4 step 9)", () => {
     const { tree } = render({ timeline: null, checks: [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }],
       checkTitles: new Map([["c-sleep", "Sleep"]]), onOpenCheck: vi.fn() });
     expect(labels(tree).some((label) => label.startsWith("Check Sleep"))).toBe(true);
+  });
+
+  it("scrolls to the first \"?\" once it has laid out, once per request, then reports it (Codex r1 on #573)", () => {
+    scrollTo.mockClear();
+    const onScrolled = vi.fn();
+    const checks = [{ id: "c-unknown", segmentId: "seg-unknown", startedAt: iso(12), stoppedAt: iso(13) }];
+    const props = { checks, checkTitles: new Map([["c-unknown", "Unknown place"]]), onOpenCheck: vi.fn(), onScrolledToFirstCheck: onScrolled };
+    const { tree } = render({ ...props, scrollToFirstCheck: 1 });
+    // Nothing has laid out yet: the request waits.
+    expect(scrollTo).not.toHaveBeenCalled();
+    const layout = (node: { props: { onLayout?: (event: unknown) => void } }, y: number) =>
+      act(() => { node.props.onLayout?.({ nativeEvent: { layout: { y } } }); });
+    const card = tree.root.findAll((node) => node.type === ("AnimatedView" as never) && typeof node.props.onLayout === "function"
+      && node.props.style?.[0]?.borderRadius !== undefined)[0];
+    layout(card, 100);
+    expect(scrollTo).not.toHaveBeenCalled();
+    const row = tree.root.findAll((node) => node.type === ("AnimatedView" as never) && typeof node.props.onLayout === "function")
+      .find((node) => node !== card)!;
+    layout(row, 300);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    expect(scrollTo.mock.calls[0][0]).toMatchObject({ y: 376, animated: true });
+    expect(onScrolled).toHaveBeenCalledTimes(1);
+    // Another layout pass does not jump again.
+    layout(row, 300);
+    expect(scrollTo).toHaveBeenCalledTimes(1);
   });
 });
 

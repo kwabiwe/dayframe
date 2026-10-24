@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LocationTimeline, TimelinePlace, TimelineTrip } from "../src/location/timeline";
-import { hasLocationPlaces, legDetail, legModeLabel, locationListRows, tripsByBlockId, uncoveredSeconds } from "../src/location/timelineRows";
+import { hasLocationPlaces, legDetail, legModeLabel, locationListRows, tripsByBlockId, uncoveredSeconds, listCheckOverlaps } from "../src/location/timelineRows";
 
 const at = (minutes: number) => new Date(Date.parse("2026-10-22T00:00:00.000Z") + minutes * 60_000).toISOString();
 const ms = (minutes: number) => Date.parse(at(minutes));
@@ -78,3 +78,14 @@ describe("Calendar › List location rows (location v4 steps 9–10)", () => {
     expect(rows.find((row) => row.key === "check-c-trip")).toMatchObject({ trip: { id: "trip-1", route: "Home → Unknown place" } });
   });
 });
+
+describe("listCheckOverlaps (location v4 step 14)", () => {
+  const day = [Date.parse("2026-10-22T00:00:00.000Z"), Date.parse("2026-10-23T00:00:00.000Z")] as const;
+  it("counts a check exactly at midnight in its day, as its row shows it (Codex r1 on #573)", () => {
+    expect(listCheckOverlaps({ startedAt: "2026-10-22T00:00:00.000Z", stoppedAt: null }, ...day)).toBe(true);
+    expect(listCheckOverlaps({ startedAt: "2026-10-21T23:00:00.000Z", stoppedAt: "2026-10-22T06:00:00.000Z" }, ...day)).toBe(true);
+    expect(listCheckOverlaps({ startedAt: "2026-10-21T23:00:00.000Z", stoppedAt: "2026-10-22T00:00:00.000Z" }, ...day)).toBe(false);
+    expect(listCheckOverlaps({ startedAt: null, stoppedAt: null }, ...day)).toBe(false);
+  });
+});
+
