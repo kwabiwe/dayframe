@@ -22,7 +22,7 @@ const tabManifestPath = join(tabIconDir, "manifest.json");
 // Lucide glyphs used anywhere in Dayframe: activities, navigation, actions, sources and sync state.
 const GLYPHS = [
   "arrow-left", "baby", "bell", "bike", "book-open", "brain", "briefcase", "building-2", "bus", "calendar-days", "camera",
-  "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-question-mark", "circle-user-round", "cloud-alert", "cloud-check",
+  "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-question-mark", "circle-user-round", "clock", "cloud-alert", "cloud-check",
   "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "folder", "footprints", "funnel", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
   "laptop", "library", "list", "list-checks", "log-out", "mail", "map-pin", "message-circle", "minus", "moon", "mountain", "music", "palette",
@@ -61,8 +61,13 @@ const ACTIVITY_GLYPHS = [...new Set([
 const CALENDAR_ICONS = {
   place: "map-pin",
   tag: "tag",
-  "zoom-in": "plus",
-  "zoom-out": "minus",
+  // Calendar v3 (owner, 24 Oct 2026): the second-line icons and the Day / List view menu.
+  time: "clock",
+  trip: "route",
+  health: "heart-pulse",
+  "view-day": "calendar-days",
+  "view-list": "list",
+  check: "check",
   ...Object.fromEntries(ACTIVITY_GLYPHS.map((glyph) => [`activity-${glyph}`, glyph]))
 };
 const CALENDAR_POINTS = 24;
