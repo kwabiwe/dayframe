@@ -57,6 +57,9 @@ describe("native Live Activity presentation contract", () => {
     const order = [
       // A repeat tap on an Activity already shown stopped does nothing: the first run delivers and ends
       // it, and ending it here could end the process before that request finishes (Codex r1 on #578).
+      // One run per Activity, claimed before any suspension; it owns delivery and the end (Codex r4 on #578).
+      "guard DayframeLiveActivityStopClaims.claim(claim) else {\n        return\n      }",
+      "defer { DayframeLiveActivityStopClaims.release(claim) }",
       "guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {\n        return\n      }",
       "let pushToken = DayframeLiveActivityController.immediatePushToken(",
       "if queued {\n        await DayframeLiveActivityController.showStopped(activityId: activityId, entryId: entryId)",
@@ -66,6 +69,11 @@ describe("native Live Activity presentation contract", () => {
     expect(order.every((index) => index >= 0), String(order)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(stopCase).not.toMatch(/end\(|\.stop\([^)]*\)[\s\S]*submitLiveActivityStop\(/);
+    // No await between the start of the case and the claim.
+    expect(stopCase.slice(0, stopCase.indexOf("DayframeLiveActivityStopClaims.claim(claim)"))).not.toContain("await");
+    const claims = shortcuts.slice(shortcuts.indexOf("private enum DayframeLiveActivityStopClaims"), shortcuts.indexOf("/// Whether a Shortcut Stop for this event's account ran at or after it."));
+    expect(claims).toContain("return claimed.insert(key).inserted");
+    expect(claims.match(/lock\.lock\(\)/g)).toHaveLength(2);
     const controller = readFileSync(`${mobileRoot}ios/Dayframe/DayframeLiveActivityController.swift`, "utf8");
     const isRunning = controller.slice(controller.indexOf("static func isRunning("), controller.indexOf("static func showStopped("));
     expect(isRunning).toContain("$0.content.state.isRunning");

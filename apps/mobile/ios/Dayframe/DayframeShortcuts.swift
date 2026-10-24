@@ -241,9 +241,16 @@ private enum DayframeShortcutPerformer {
       // The push token is the server-registered, activity-scoped capability, so this locked-screen path
       // never depends on a broad account bearer or App Group/Keychain availability. It is read while the
       // Activity still shows running (only a running Activity gives one), before the stopped update.
-      // An Activity that no longer shows running is being stopped by an earlier tap: that run delivers
-      // and ends it (Codex r1 on #578). Ending it here could end the process before that request
-      // finishes; the queued copy, if delivery fails, goes out with the app.
+      // One run per Activity owns delivery and the end: the claim is taken synchronously, before any
+      // suspension, so a repeat tap, however close, returns at once (Codex r1 and r4 on #578). An
+      // Activity that no longer shows running is being, or has been, stopped by an earlier tap. Ending
+      // it from a second run could end the process before the owner's request finishes; the queued
+      // copy, if delivery fails, goes out with the app.
+      let claim = "\(activityId)|\(entryId)"
+      guard DayframeLiveActivityStopClaims.claim(claim) else {
+        return
+      }
+      defer { DayframeLiveActivityStopClaims.release(claim) }
       guard DayframeLiveActivityController.isRunning(activityId: activityId, entryId: entryId) else {
         return
       }
@@ -276,6 +283,24 @@ private enum DayframeShortcutPerformer {
         )
       }
     }
+  }
+}
+
+/// Lock Screen Stops in progress in this process, by Activity and block (Codex r4 on #578).
+private enum DayframeLiveActivityStopClaims {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var claimed = Set<String>()
+
+  static func claim(_ key: String) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return claimed.insert(key).inserted
+  }
+
+  static func release(_ key: String) {
+    lock.lock()
+    claimed.remove(key)
+    lock.unlock()
   }
 }
 
