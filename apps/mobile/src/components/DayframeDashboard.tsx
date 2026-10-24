@@ -171,7 +171,8 @@ import {
 import {
   projectDurableLocalWork
 } from "@/lib/durableLocalProjection";
-import { isWaitingLockScreenStop, readDurableLocalWork } from "@/lib/durableLocalWork";
+import { readDurableLocalWork, readQueuedAndNativeStops } from "@/lib/durableLocalWork";
+import { createWaitingLockScreenStopsApplier } from "@/lib/waitingLockScreenStops";
 import { readOwnedAuthenticatedSessionSnapshot } from "@/lib/secure-session";
 import {
   shouldDismissExternallyStoppedActiveEditor,
@@ -959,30 +960,19 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
     );
   }
 
-  /**
-   * Shows a Lock Screen Stop made while Dayframe was away (its Live Activity has already ended; owner
-   * option A) on the Dashboard as it is now, before any fetch: offline, the fetch never comes (Codex r1
-   * and r2 on #578). Only the waiting entry-scoped Stops are applied, each only to its own block, and
-   * nothing is published if the Dashboard changed meanwhile.
-   */
-  const applyWaitingLockScreenStops = useCallback(async () => {
-    const shown = latestData.current;
-    if (!shown?.activeEntry) return;
-    const revision = dashboardMutationRevision.current;
-    const work = await readDurableLocalWork(timerStopOwner(shown)).catch(() => null);
-    const stops = work?.activityEvents.filter(isWaitingLockScreenStop) ?? [];
-    if (!work || !stops.length) return;
-    if (latestData.current !== shown || dashboardMutationRevision.current !== revision) return;
-    const next = projectDurableLocalWork(shown, {
-      owner: work.owner,
-      activityEvents: stops,
-      timeEntryCommands: [],
-      timerStops: [],
-      correlations: new Map()
-    });
-    if (next.activeEntry?.id === shown.activeEntry.id) return;
-    publishDashboardData(next);
-  }, []);
+  // A Lock Screen Stop made while Dayframe was away, shown before any refresh lands (Codex r1–r3 on #578).
+  const waitingLockScreenStops = useRef<(() => Promise<void>) | null>(null);
+  waitingLockScreenStops.current ??= createWaitingLockScreenStopsApplier({
+    shown: () => latestData.current,
+    ownerOf: (bootstrap) => timerStopOwner(bootstrap),
+    readStops: readQueuedAndNativeStops,
+    revision: () => dashboardMutationRevision.current,
+    publishAsMutation: (next) => {
+      dashboardMutationRevision.current += 1;
+      publishDashboardData(next);
+    }
+  });
+  const applyWaitingLockScreenStops = useCallback(() => waitingLockScreenStops.current!(), []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {

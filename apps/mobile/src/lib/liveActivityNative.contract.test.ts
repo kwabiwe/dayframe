@@ -79,12 +79,11 @@ describe("native Live Activity presentation contract", () => {
     // Before the offline return, and on every return to the front (Codex r2 on #578).
     expect(load.indexOf("await applyWaitingLockScreenStops();")).toBeLessThan(load.indexOf("connectivityCurrent.current.isOffline &&"));
     expect(dashboard).toContain('if (state === "active") void applyWaitingLockScreenStops();');
-    const apply = dashboard.slice(dashboard.indexOf("const applyWaitingLockScreenStops = useCallback("), dashboard.indexOf("const load = useCallback("));
-    // The Dashboard as shown now, only the waiting Stops, fenced against changes while reading.
-    expect(apply).toContain("const shown = latestData.current;");
-    expect(apply).toContain("work?.activityEvents.filter(isWaitingLockScreenStop)");
-    expect(apply).toContain("if (latestData.current !== shown || dashboardMutationRevision.current !== revision) return;");
-    expect(apply).not.toContain("loadedBootstrap");
+    // The Dashboard as shown now, only the waiting Stops, published as a mutation (behaviour:
+    // waitingLockScreenStops.test.ts).
+    expect(dashboard).toContain("shown: () => latestData.current,");
+    expect(dashboard).toContain("readStops: readQueuedAndNativeStops,");
+    expect(dashboard).toMatch(/publishAsMutation: \(next\) => \{\s+dashboardMutationRevision\.current \+= 1;\s+publishDashboardData\(next\);/);
     const showStopped = controller.slice(controller.indexOf("static func showStopped("), controller.indexOf("static func cleanupActivities("));
     expect(showStopped).toContain("$0.id == activityId && $0.attributes.entryId == entryId && $0.activityState == .active");
     expect(showStopped).toContain("await activity.update(ActivityContent(state: stoppedState(activity), staleDate: nil))");
