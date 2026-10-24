@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(MachO)
+import MachO
+#endif
 
 /// Freeze and crash evidence kept on this iPhone until the person shares it from Sync help (staging
 /// freeze, 22 Oct 2026: no hang report, no requests, nothing to diagnose). Foundation only, so
@@ -29,6 +32,22 @@ struct DayframeStallRecord: Codable, Equatable {
   var jsTasks: [String]
   var lastJsTask: String?
   var appBuild: String?
+  /// The app binary's UUID, which names the dSYM that symbolicates `mainSamples` (staging builds all
+  /// share build number 1; staging QA 24 Oct 2026).
+  var appBinary: String?
+  /// For a main stall: where main was while it did not answer, sampled as the stall opens and then
+  /// every `DayframeStallTracker.sampleInterval` (staging QA 24 Oct 2026: six main pauses of up to
+  /// 135 s with no stack to name them).
+  var mainSamples: [DayframeStackSample]?
+  /// Binary name → UUID for every image in `mainSamples`.
+  var images: [String: String]?
+}
+
+/// One look at a thread's stack: `image+0xoffset` frames, innermost first (binary names and offsets
+/// only, as in MetricKit's call stacks), taken `atMs` into the stall.
+struct DayframeStackSample: Codable, Equatable {
+  var atMs: Int
+  var frames: [String]
 }
 
 /// What a new stall record is stamped with.
@@ -39,6 +58,7 @@ struct DayframeStallContext {
   var jsTasks: [String]
   var lastJsTask: String?
   var appBuild: String?
+  var appBinary: String? = nil
   var makeId: () -> String
 }
 
@@ -52,6 +72,9 @@ struct DayframeStallTracker {
   static let threshold: TimeInterval = 3
   /// An open stall is saved again at most this often, so a force-close keeps its length.
   static let persistInterval: TimeInterval = 5
+  /// An open main stall's stack is sampled as it opens and then this often, at most `maxSamples` times.
+  static let sampleInterval: TimeInterval = 10
+  static let maxSamples = 4
 
   private(set) var active = false
   private var pendingMainProbe: TimeInterval?
@@ -60,6 +83,11 @@ struct DayframeStallTracker {
   private var jsInstalled = false
   private var open: [DayframeStallThread: DayframeStallRecord] = [:]
   private var lastPersisted: [DayframeStallThread: TimeInterval] = [:]
+  private var lastMainSample: TimeInterval?
+  /// Samples reserved for the open main stall, attached or not.
+  private var reservedSamples = 0
+  /// A reserved sample has not come back yet (it may be from an earlier stall).
+  private var sampleOutstanding = false
 
   /// Coming to the front starts every probe afresh: time in the background is never a stall. JS is
   /// watched from this moment once its watchdog has ever answered, so a JS thread that is stuck when
@@ -70,6 +98,8 @@ struct DayframeStallTracker {
     lastJsAnswer = jsInstalled ? uptime : nil
     open = [:]
     lastPersisted = [:]
+    lastMainSample = nil
+    reservedSamples = 0
   }
 
   /// Leaving the front ends every stall, open or overdue, as `left`; the caller saves what comes back.
@@ -86,6 +116,8 @@ struct DayframeStallTracker {
     lastJsAnswer = nil
     open = [:]
     lastPersisted = [:]
+    lastMainSample = nil
+    reservedSamples = 0
     return ended
   }
 
@@ -106,6 +138,8 @@ struct DayframeStallTracker {
     let record = finish(thread, uptime: uptime, outcome: .recovered, context: context)
     if thread == .main {
       pendingMainProbe = nil
+      lastMainSample = nil
+      reservedSamples = 0
     } else {
       lastJsAnswer = uptime
       jsInstalled = true
@@ -135,6 +169,39 @@ struct DayframeStallTracker {
       }
     }
     return due
+  }
+
+  /// Reserves the next stack sample of the open main stall, when one is due: its stall id and how far
+  /// into the stall it is taken. One sample is out at a time and each counts against the stall's budget
+  /// from the moment it is reserved, so samples whose naming is slow never pile up (Codex r1 on #577).
+  /// The caller captures at once, then hands the frames back with `attachMainSample`.
+  mutating func reserveMainSample(uptime: TimeInterval) -> (stallId: String, atMs: Int)? {
+    guard active, !sampleOutstanding, let record = open[.main], let since = pendingMainProbe,
+          reservedSamples < Self.maxSamples else { return nil }
+    if let lastMainSample, uptime - lastMainSample < Self.sampleInterval { return nil }
+    lastMainSample = uptime
+    reservedSamples += 1
+    sampleOutstanding = true
+    return (record.id, milliseconds(uptime - since))
+  }
+
+  /// Ends the outstanding sample. Its frames join the stall it was reserved for, and only while that
+  /// stall is still open; a stall that has ended (or a later one) never gets them.
+  mutating func attachMainSample(
+    stallId: String,
+    atMs: Int,
+    frames: [String],
+    images: [String: String]
+  ) -> DayframeStallRecord? {
+    sampleOutstanding = false
+    guard active, !frames.isEmpty, var record = open[.main], record.id == stallId else { return nil }
+    var samples = record.mainSamples ?? []
+    guard samples.count < Self.maxSamples else { return nil }
+    samples.append(DayframeStackSample(atMs: atMs, frames: frames))
+    record.mainSamples = samples
+    record.images = (record.images ?? [:]).merging(images) { current, _ in current }
+    open[.main] = record
+    return record
   }
 
   private func silentSince(_ thread: DayframeStallThread) -> TimeInterval? {
@@ -174,7 +241,8 @@ struct DayframeStallTracker {
       outcome: nil,
       jsTasks: context.jsTasks,
       lastJsTask: context.lastJsTask,
-      appBuild: context.appBuild
+      appBuild: context.appBuild,
+      appBinary: context.appBinary
     )
   }
 
@@ -209,13 +277,22 @@ enum DayframeMetricKitSummary {
     "binaryUUID", "binaryName", "offsetIntoBinaryTextSegment", "address", "sampleCount"
   ]
 
+  /// The known kinds, and any other `…Diagnostics` list Apple adds: its metadata and call stacks go
+  /// through the same allowlist, so only its key name is new. A payload kept only by name used to be
+  /// saved empty (staging QA 24 Oct 2026: a report with nothing in it).
+  static func diagnosticKeys(_ payload: [String: Any]) -> [String] {
+    payload.keys.filter { key in
+      kinds[key] != nil || (key.hasSuffix("Diagnostics") && leadingIdentifier(key) == key && payload[key] is [[String: Any]])
+    }.sorted()
+  }
+
   /// The payload reduced to the allowlist; every report is saved and shared only in this form.
   static func sanitize(_ payload: [String: Any]) -> [String: Any] {
     var clean: [String: Any] = [:]
     for key in ["timeStampBegin", "timeStampEnd"] {
       if let value = payload[key] as? String { clean[key] = value }
     }
-    for key in kinds.keys {
+    for key in diagnosticKeys(payload) {
       guard let diagnostics = payload[key] as? [[String: Any]] else { continue }
       clean[key] = diagnostics.map { diagnostic -> [String: Any] in
         var item: [String: Any] = [:]
@@ -234,7 +311,7 @@ enum DayframeMetricKitSummary {
   static func summarize(_ payload: [String: Any]) -> [[String: Any]] {
     let begin = payload["timeStampBegin"] as? String
     let end = payload["timeStampEnd"] as? String
-    return kinds.keys.sorted().flatMap { key -> [[String: Any]] in
+    return diagnosticKeys(payload).flatMap { key -> [[String: Any]] in
       guard let diagnostics = payload[key] as? [[String: Any]] else { return [] }
       return diagnostics.map { diagnostic in
         var summary: [String: Any] = ["kind": kinds[key] ?? key]
@@ -533,4 +610,88 @@ struct DayframeDiagnosticsStore {
     decoder.dateDecodingStrategy = .iso8601
     return decoder
   }()
+}
+
+/// Where a stalled thread is: its return addresses, copied by `dayframe_thread_sample` (C, in
+/// `DayframeThreadSampler.c`) while the thread is briefly suspended, then named here as `image+0xoffset`
+/// after it has resumed (staging QA 24 Oct 2026). The copy is in C so nothing between suspend and
+/// resume can reach the Swift runtime, which in a Debug build looks up type metadata under locks the
+/// suspended thread may hold (Codex r1 on #577). arm64 only.
+enum DayframeThreadSampler {
+  static let maxFrames = 48
+  /// Frame records read at most, whatever the deduplication of repeated return addresses keeps.
+  static let maxSteps = 96
+
+  struct Stack { var low: UInt64; var high: UInt64 }
+
+  /// The calling thread's port and stack range, to be sampled later from another thread.
+  static func currentThread() -> thread_act_t {
+    pthread_mach_thread_np(pthread_self())
+  }
+
+  static func currentStack() -> Stack {
+    var low: UInt64 = 0
+    var high: UInt64 = 0
+    dayframe_thread_stack_bounds(&low, &high)
+    return Stack(low: low, high: high)
+  }
+
+  /// The thread's return addresses, innermost first (never the calling thread's), or [].
+  static func capture(_ thread: thread_act_t, stack: Stack) -> [UInt] {
+    guard thread != 0, thread != currentThread() else { return [] }
+    var buffer = [UInt64](repeating: 0, count: maxFrames)
+    let count = buffer.withUnsafeMutableBufferPointer { pointer in
+      Int(dayframe_thread_sample(thread, stack.low, stack.high, pointer.baseAddress, Int32(maxFrames), Int32(maxSteps)))
+    }
+    return buffer.prefix(max(0, count)).map { UInt($0) }
+  }
+
+  static func sample(_ thread: thread_act_t, stack: Stack) -> (frames: [String], images: [String: String]) {
+    describe(capture(thread, stack: stack))
+  }
+  /// `image+0xoffset` for each address and each image's UUID; unknown addresses are kept as `?`.
+  static func describe(_ addresses: [UInt]) -> (frames: [String], images: [String: String]) {
+    var frames: [String] = []
+    var images: [String: String] = [:]
+    for address in addresses {
+      var info = Dl_info()
+      guard dladdr(UnsafeRawPointer(bitPattern: address), &info) != 0, let base = info.dli_fbase else {
+        frames.append("?")
+        continue
+      }
+      let path = info.dli_fname.map { String(cString: $0) } ?? "?"
+      let name = (path as NSString).lastPathComponent
+      let offset = address - UInt(bitPattern: base)
+      frames.append("\(name)+0x\(String(offset, radix: 16))")
+      if images[name] == nil { images[name] = imageUUID(UnsafeRawPointer(base)) ?? "?" }
+    }
+    return (frames, images)
+  }
+
+  /// The main executable's UUID: which build's dSYM symbolicates a sample.
+  static func mainBinaryUUID() -> String? {
+    #if canImport(MachO)
+    guard let header = _dyld_get_image_header(0) else { return nil }
+    return imageUUID(UnsafeRawPointer(header))
+    #else
+    return nil
+    #endif
+  }
+
+  static func imageUUID(_ base: UnsafeRawPointer) -> String? {
+    #if canImport(MachO)
+    let header = base.assumingMemoryBound(to: mach_header_64.self).pointee
+    guard header.magic == MH_MAGIC_64 else { return nil }
+    var command = base + MemoryLayout<mach_header_64>.size
+    for _ in 0..<header.ncmds {
+      let load = command.assumingMemoryBound(to: load_command.self).pointee
+      if load.cmd == UInt32(LC_UUID) {
+        let uuid = command.assumingMemoryBound(to: uuid_command.self).pointee.uuid
+        return UUID(uuid: uuid).uuidString
+      }
+      command += Int(load.cmdsize)
+    }
+    #endif
+    return nil
+  }
 }

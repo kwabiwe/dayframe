@@ -25,6 +25,12 @@ export type NativeStallRecord = {
   jsTasks: string[];
   lastJsTask?: string | null;
   appBuild?: string | null;
+  /** The app binary's UUID: which dSYM symbolicates `mainSamples` (staging builds share build 1). */
+  appBinary?: string | null;
+  /** A main stall's stack, sampled as it opens and every 10 s (at most 4): `image+0xoffset` frames. */
+  mainSamples?: Array<{ atMs: number; frames: string[] }>;
+  /** Binary name → UUID for the images in `mainSamples`. */
+  images?: Record<string, string>;
 };
 
 export type NativeDiagnosticsSnapshot = {
