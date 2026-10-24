@@ -10,13 +10,22 @@ function reviewLabel(count: number) {
   return `Review, ${count} to review`;
 }
 
+function checkLabel(count: number) {
+  return `Calendar, ${count} to check`;
+}
+
 /**
  * The sidebar's five sections with one sliding neutral thumb. The thumb is the only animated
  * element: its first placement is still, later moves use the `snap` spring as a CSS transition
  * (which retargets from wherever it is when the route changes again), and Reduce Motion moves it
  * without travel. Pages outside the five sections (Settings) fade the thumb out.
  */
-export function ShellSidebarNav({ activeId, reviewCount }: { activeId: ShellSectionId | null; reviewCount: number }) {
+export function ShellSidebarNav({ activeId, checkCount = 0, reviewCount }: {
+  activeId: ShellSectionId | null;
+  /** Things to check today and the 7 days before, on Calendar (location v4 step 14). */
+  checkCount?: number;
+  reviewCount: number;
+}) {
   const navRef = useRef<HTMLElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
   const placedRef = useRef(false);
@@ -64,14 +73,14 @@ export function ShellSidebarNav({ activeId, reviewCount }: { activeId: ShellSect
       <span ref={thumbRef} className="df-nav-thumb" aria-hidden="true" />
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
-        const count = section.id === "review" ? reviewCount : 0;
+        const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
             href={section.href}
             data-section={section.id}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? reviewLabel(count) : undefined}
+            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
           >
             <DayframeIcon glyph={section.glyph} size={19} />
             <span>{section.label}</span>
@@ -84,18 +93,18 @@ export function ShellSidebarNav({ activeId, reviewCount }: { activeId: ShellSect
 }
 
 /** Below 860 px the sections move to a glass bar along the bottom edge. */
-export function ShellTabBar({ activeId, reviewCount }: { activeId: ShellSectionId | null; reviewCount: number }) {
+export function ShellTabBar({ activeId, checkCount = 0, reviewCount }: { activeId: ShellSectionId | null; checkCount?: number; reviewCount: number }) {
   return (
     <nav className="df-tabbar" aria-label="Main navigation">
       {SHELL_SECTIONS.map((section) => {
         const active = section.id === activeId;
-        const count = section.id === "review" ? reviewCount : 0;
+        const count = section.id === "review" ? reviewCount : section.id === "calendar" ? checkCount : 0;
         return (
           <Link
             key={section.id}
             href={section.href}
             aria-current={active ? "page" : undefined}
-            aria-label={count > 0 ? reviewLabel(count) : undefined}
+            aria-label={count > 0 ? (section.id === "calendar" ? checkLabel(count) : reviewLabel(count)) : undefined}
           >
             <span className="df-tab-icon">
               <DayframeIcon glyph={section.glyph} size={22} />

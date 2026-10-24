@@ -323,6 +323,18 @@ export function EntriesTable({
       .find((element) => element.dataset.locationRow === anchor)
       ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" }));
   };
+  // Today's "N to check today" links here with `check=first`: the first "?" opens once the day's rows are in
+  // (location v4 step 14), once per visit.
+  const openFirstCheck = searchParams.get("check") === "first";
+  const openedFromLink = useRef(false);
+  useEffect(() => {
+    if (!openFirstCheck || openedFromLink.current || !checkRows.length) return;
+    const frame = requestAnimationFrame(() => {
+      openedFromLink.current = true;
+      nextCheck();
+    });
+    return () => cancelAnimationFrame(frame);
+  });
   /** A location row, its "?" and, while open, its question. */
   const renderLocationRow = (row: LocationListRow) => {
     const item = checkOf(row);

@@ -8041,10 +8041,14 @@ dialog.ui-dialog.df-palette {
   grid-column: span 12;
 }
 
+/* Location v4 step 14: the Review card became Today's "N to check today" chip, so these two share the row. */
 .df-today-went,
-.df-today-review,
 .df-today-week {
-  grid-column: span 4;
+  grid-column: span 6;
+}
+
+.df-today-checks {
+  grid-column: span 12;
 }
 
 .df-today-placeholder {
@@ -8374,75 +8378,6 @@ dialog.ui-dialog.df-palette {
   to {
     transform: none;
   }
-}
-
-.df-review-teaser {
-  display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  align-items: center;
-  gap: 16px;
-}
-
-.df-review-stack {
-  position: relative;
-  height: 74px;
-}
-
-.df-review-stack span {
-  position: absolute;
-  left: 8px;
-  width: 56px;
-  height: 42px;
-  border-radius: 10px;
-}
-
-.df-review-stack .df-review-stack-none {
-  background: var(--surface-muted);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-
-.df-review-stack span:nth-child(1) {
-  top: 2px;
-  opacity: 0.5;
-  transform: rotate(-9deg);
-}
-
-.df-review-stack span:nth-child(2) {
-  top: 10px;
-  opacity: 0.75;
-  transform: rotate(6deg);
-}
-
-.df-review-stack span:nth-child(3) {
-  top: 20px;
-}
-
-.df-review-teaser b {
-  display: block;
-  font-size: 16px;
-}
-
-.df-review-teaser p {
-  margin: 2px 0 10px;
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
-.df-pill-action {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 16px;
-  background: var(--text-primary);
-  color: var(--surface);
-  font-size: 13px;
-  font-weight: 750;
-  text-decoration: none;
-}
-
-.df-pill-action:hover {
-  background: color-mix(in oklab, var(--text-primary) 86%, var(--surface));
 }
 
 .df-mini-week {
@@ -9034,13 +8969,8 @@ dialog.ui-dialog.df-palette {
 
 @media (max-width: 1100px) {
   .df-today-went,
-  .df-today-review,
   .df-today-week {
     grid-column: span 6;
-  }
-
-  .df-today-week {
-    grid-column: span 12;
   }
 }
 
@@ -9051,7 +8981,6 @@ dialog.ui-dialog.df-palette {
   }
 
   .df-today-went,
-  .df-today-review,
   .df-today-week {
     grid-column: span 12;
   }
@@ -13782,9 +13711,8 @@ dialog.ui-dialog.df-palette {
 }
 
 /* Up to the sidebar layout (≤860 px), small actions are 44 px targets whatever the pointer
-   (WUI-035): Today's Review now and This week rows, and the Reports range controls. */
+   (WUI-035): Today's This week rows and the Reports range controls. */
 @media (max-width: 860px) {
-  .df-pill-action,
   .df-mw-row,
   .df-range-nav,
   .df-range-trigger {
@@ -14246,7 +14174,6 @@ dialog.ui-dialog.df-palette {
   .df-pe-seg span,
   .df-flist-search input,
   .df-logas input,
-  .df-pill-action,
   .df-mw-row {
     min-height: 44px;
   }

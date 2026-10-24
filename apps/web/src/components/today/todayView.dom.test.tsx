@@ -250,14 +250,18 @@ describe("Today", () => {
     await act(async () => root.unmount());
   });
 
-  it("counts an outing once in the moments waiting (PRD D19, PR 12c)", async () => {
+  it("says what is left to check today in one quiet chip that opens Calendar's List at the first one (location v4 step 14)", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
     const data = bootstrap();
-    // Three suggestions waiting, an outing (a stop and its two trips) and one more: two cards.
-    const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2 } });
-    expect(container.textContent).toContain("2 moments waiting");
-    expect(container.textContent).not.toContain("4 moments waiting");
+    const { container, root } = await mount({ ...data, stats: { ...data.stats, reviewCount: 4, reviewCardCount: 2, checkCount: 5, dayCheckCount: 2 } });
+    const chip = container.querySelector<HTMLAnchorElement>(".df-today-checks a");
+    expect(chip?.textContent).toContain("2 to check today");
+    expect(chip?.getAttribute("href")).toBe("/timeline?view=list&scope=day&check=first");
+    // The Review card is gone; nothing shows when there is nothing to check today.
+    expect(container.textContent).not.toContain("moments waiting");
+    await act(async () => root.render(tree({ ...data, stats: { ...data.stats, dayCheckCount: 0 } })));
+    expect(container.querySelector(".df-today-checks")).toBeNull();
     await act(async () => root.unmount());
   });
 

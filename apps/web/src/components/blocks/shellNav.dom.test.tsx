@@ -34,6 +34,13 @@ describe("Blocks sidebar navigation", () => {
     expect(screen.getByRole("link", { name: "Library" }).getAttribute("href")).toBe("/categories");
   });
 
+  it("badges Calendar with the things to check, and says so (location v4 step 14)", () => {
+    setReducedMotion(false);
+    render(<ShellSidebarNav activeId="today" checkCount={3} reviewCount={0} />);
+    const calendar = screen.getByRole("link", { name: "Calendar, 3 to check" });
+    expect(calendar.querySelector(".df-nav-count")?.textContent).toBe("3");
+  });
+
   it("places the thumb without travel first, then springs it, and fades it out on Settings", () => {
     setReducedMotion(false);
     const { rerender } = render(<ShellSidebarNav activeId="today" reviewCount={0} />);
