@@ -5,6 +5,7 @@ import { ReportFiltersPanel } from "@/components/ReportFiltersPanel";
 import { ReportRangeControls } from "@/components/ReportRangeControls";
 import { ReportsOverview } from "@/components/ReportsOverview";
 import { ReportsBlocksPanel } from "@/components/reports/ReportsBlocksPanel";
+import { ReportsGettingAround, ReportsNotLogged } from "@/components/reports/ReportsGettingAround";
 import { ReportsTop } from "@/components/reports/ReportsTop";
 import { springLinearEasing } from "@/lib/blocks-motion";
 import { formatDuration } from "@/lib/format";
@@ -93,6 +94,7 @@ export default async function ReportsPage({
         </div>
       </div>
       <ReportsTop dailyGoalMinutes={user.dailyGoalMinutes} report={report} />
+      <ReportsNotLogged day={report.notLoggedDay} seconds={report.notLoggedSeconds} />
       <ReportsBlocksPanel
         blocks={reportBlocksModel(report, formatDuration)}
         exactRows={report.byCategory}
@@ -101,6 +103,7 @@ export default async function ReportsPage({
         totalLabel={preset === "this-week" ? "logged this week" : preset === "this-month" ? "logged this month" : "logged in this range"}
         totalSeconds={report.totalSeconds}
       />
+      <ReportsGettingAround summary={report.gettingAround} />
       <ReportsOverview report={report} showTrend={reportBlocksLayout(report) === null} />
       <ReportDetailsTable report={report} />
     </div>

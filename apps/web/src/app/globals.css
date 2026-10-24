@@ -13326,6 +13326,89 @@ dialog.ui-dialog.df-palette {
   font-size: 12px;
 }
 
+/* Reports › Not logged (location v4 step 18): time at places you haven't named, outside the total. */
+.df-report-not-logged {
+  color: var(--text-secondary);
+}
+
+/* "Check them": a 44 px target inside the footnote's line (Codex r1 on #569); it wraps with the text. */
+.df-report-not-logged-check {
+  display: inline-flex;
+  align-items: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-block: -14px;
+  padding-inline: 4px;
+  color: var(--text-primary);
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  vertical-align: middle;
+}
+
+/* Reports › Getting around (location v4 step 18, mock-up #web-reports): time by leg mode, neutral shades. */
+.df-getting-around-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.df-getting-around-bar {
+  display: flex;
+  height: 10px;
+  margin: 12px 0 8px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-muted);
+}
+
+.df-getting-around-bar span {
+  min-width: 2px;
+  background: color-mix(in oklab, var(--text-primary) 45%, var(--surface));
+}
+
+.df-getting-around-bar span:nth-child(1) { background: var(--text-primary); }
+.df-getting-around-bar span:nth-child(2) { background: color-mix(in oklab, var(--text-primary) 70%, var(--surface)); }
+.df-getting-around-bar span:nth-child(3) { background: color-mix(in oklab, var(--text-primary) 52%, var(--surface)); }
+.df-getting-around-bar span:nth-child(n + 4) { background: color-mix(in oklab, var(--text-primary) 34%, var(--surface)); }
+.df-getting-around-bar span[data-mode="stops"] { background: var(--border); }
+
+.df-getting-around-rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.df-getting-around-rows li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border-top: 1px solid var(--border);
+}
+
+.df-getting-around-rows li:first-child {
+  border-top: 0;
+}
+
+.df-getting-around-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: var(--r-block);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.df-getting-around-note {
+  margin: 8px 0 0;
+  font-size: var(--type-meta);
+}
+
 @media (max-width: 640px) {
   .df-report-head .df-page-head-actions {
     justify-content: flex-start;

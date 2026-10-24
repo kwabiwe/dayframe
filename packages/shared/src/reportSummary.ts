@@ -70,6 +70,19 @@ export const ReportSummarySchema = z.object({
       goalIntervals: z.array(z.object({ start: instant, end: instant })).optional(),
     }),
   ),
+  // Reports › Getting around (location v4 step 18): time by leg mode inside Getting around and Commute
+  // blocks, each trip once; times only. Older servers leave it out.
+  gettingAround: z.object({
+    tripCount: z.number().int().nonnegative(),
+    totalSeconds: seconds,
+    byMode: z.array(z.object({
+      mode: z.enum(["walking", "running", "cycling", "automotive", "bus", "train", "underground", "tram", "unknown"]),
+      seconds,
+    })),
+    stopsSeconds: seconds,
+  }).nullable().optional(),
+  // Time at places you haven't named, outside every block (never part of activities or goals). Older servers leave it out.
+  notLoggedSeconds: seconds.optional(),
   // Only the current timer's bounded contribution, never historical entry payloads.
   active: z
     .object({
