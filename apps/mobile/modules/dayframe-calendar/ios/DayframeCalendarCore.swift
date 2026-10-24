@@ -48,6 +48,9 @@ public enum DayframeCalendarConstants {
   public static let overlapIndent = 14.0
   /// A nested group is never narrower than this.
   public static let overlapMinimumNestedWidth = 40.0
+  /// A nested block lays this much of the canvas under its tint (CALENDAR_V3_TINT.nestedCanvasWash), so
+  /// the block underneath shows through without taking its text below AA.
+  public static let nestedCanvasWash = 0.6
 }
 
 public struct DayframeCalendarHorizontalMetrics: Equatable {
@@ -1436,6 +1439,8 @@ public struct DayframeCalendarLaidOutEntry: Equatable {
   /// Another block is drawn inside this block's 44-point target in the same horizontal space, so the
   /// target stays the block's own height and a tap never lands on the wrong block.
   public let sharesTarget: Bool
+  /// Calendar v3: drawn on top of the block it starts inside (it lays the canvas wash under its tint).
+  public var nested = false
 }
 
 /// One layout for the day at one zoom and text size, used by drawing and by hit testing alike.
@@ -1598,7 +1603,8 @@ public enum DayframeCalendarDayLayout {
         widthFraction: item.width,
         columnCount: item.count,
         zIndex: item.z,
-        sharesTarget: sharesTarget
+        sharesTarget: sharesTarget,
+        nested: nested.contains(item.id)
       )
     }
     return out

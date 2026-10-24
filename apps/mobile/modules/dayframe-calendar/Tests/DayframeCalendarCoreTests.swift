@@ -1655,6 +1655,8 @@ final class DayframeCalendarCoreTests: XCTestCase {
     }
     let nestedShort = layout([try input("parent", "09:00", "12:00", group: "logged"), try input("child", "10:00", "10:02", group: "logged")])
     XCTAssertTrue(nestedShort["child"]!.sharesTarget)
+    XCTAssertTrue(nestedShort["child"]!.nested)
+    XCTAssertFalse(nestedShort["parent"]!.nested)
     XCTAssertGreaterThan(nestedShort["child"]!.zIndex, nestedShort["parent"]!.zIndex)
 
     let pair = layout([try input("a", "09:00", "10:00", group: "logged"), try input("b", "09:00", "10:00", group: "logged")])

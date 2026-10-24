@@ -9,6 +9,7 @@ import {
   activityControlColor,
   blockColorsFor,
   calendarBlockInk,
+  calendarNestedBase,
   CALENDAR_V3_TINT,
   contrastRatio,
   onBlockTextColor,
@@ -212,12 +213,39 @@ describe("calendarBlockInk (Calendar v3)", () => {
           const ink = calendarBlockInk(fill, mode, { background: theme.background, surface: theme.surface, review });
           const tint = review ? (mode === "dark" ? CALENDAR_V3_TINT.reviewDark : CALENDAR_V3_TINT.reviewLight) : (mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light);
           const over = (base: string, amount: number) => mix(base, fill, amount);
-          for (const surface of [over(theme.background, tint), over(theme.surface, tint + CALENDAR_V3_TINT.reduceTransparencyBoost), over(over(theme.background, tint), tint)]) {
+          for (const surface of [over(theme.background, tint), over(theme.surface, tint + CALENDAR_V3_TINT.reduceTransparencyBoost), mix(calendarNestedBase(over(theme.background, tint), theme.background), fill, tint)]) {
             expect(contrastRatio(ink, surface), `${colour.key} ${mode}${review ? " review" : ""}`).toBeGreaterThanOrEqual(4.5);
           }
         }
       }
     }
+  });
+
+  it("meets AA when nested over a block of any other colour, three levels deep (Codex r6 on #580)", () => {
+    for (const mode of modes) {
+      const theme = DAYFRAME_THEME[mode];
+      const tint = mode === "dark" ? CALENDAR_V3_TINT.dark : CALENDAR_V3_TINT.light;
+      const fills = [...DAYFRAME_PALETTE.map((colour) => (mode === "dark" ? colour.darkHex : colour.lightHex)), mode === "dark" ? "#323946" : "#EEF2F6"];
+      const onCanvas = fills.map((fill) => mix(theme.background, fill, tint));
+      const nestedOn = (under: string, fill: string) => mix(calendarNestedBase(under, theme.background), fill, tint);
+      const level2 = onCanvas.flatMap((under) => fills.map((fill) => nestedOn(under, fill)));
+      // A sample of the third level keeps the run short; the wash brings deeper levels closer to the canvas.
+      const level3 = level2.filter((_, index) => index % 7 === 0).flatMap((under) => fills.filter((_, index) => index % 5 === 0).map((fill) => nestedOn(under, fill)));
+      for (const fill of fills) {
+        const ink = calendarBlockInk(fill, mode, { background: theme.background, surface: theme.surface });
+        for (const under of [...onCanvas, ...level2, ...level3]) {
+          expect(contrastRatio(ink, nestedOn(under, fill)), `${fill} ${mode} over ${under}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  }, 60_000);
+
+  it("is cheap enough to run per block on every render", () => {
+    const started = performance.now();
+    for (let index = 0; index < 200; index += 1) {
+      calendarBlockInk(`#${(0x204060 + index * 4111).toString(16).padStart(6, "0").slice(-6)}`, index % 2 ? "dark" : "light", { background: "#F4F6F9", surface: "#FFFFFF" });
+    }
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 
   it("keeps the block's own hue: a darker shade in light mode, a lighter one in dark", () => {

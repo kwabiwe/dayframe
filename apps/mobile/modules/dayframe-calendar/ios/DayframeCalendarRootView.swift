@@ -598,6 +598,7 @@ private struct DayframeCalendarEntriesLayer: View {
               horizontal: horizontal,
               labelTextScale: labelTextScale,
               metrics: metrics,
+              nested: laidOut.nested,
               visualHeight: visualHeight,
               reduceMotion: presentation.reduceMotion,
               reduceTransparency: presentation.reduceTransparency,
@@ -671,6 +672,7 @@ private struct DayframeCalendarBlockView: View {
   let horizontal: DayframeCalendarHorizontalMetrics
   let labelTextScale: Double
   let metrics: DayframeCalendarBlockMetrics
+  let nested: Bool
   let visualHeight: CGFloat
   let reduceMotion: Bool
   let reduceTransparency: Bool
@@ -705,6 +707,11 @@ private struct DayframeCalendarBlockView: View {
     // overlap dot; VoiceOver still says "Overlaps N other entries".
 
     ZStack(alignment: .topLeading) {
+      // A nested block lays a canvas wash under its tint: the block underneath still shows through, but
+      // never takes the text below AA (calendarBlockInk measures against these bases).
+      if nested && !reduceTransparency {
+        shape.fill(Color(dayframeCSS: theme.background).opacity(DayframeCalendarConstants.nestedCanvasWash))
+      }
       shape.fill(fill)
       if entry.isReview {
         DayframeCalendarHatch(color: Color(dayframeCSS: theme.textPrimary))

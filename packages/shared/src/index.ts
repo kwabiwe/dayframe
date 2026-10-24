@@ -117,6 +117,7 @@ export {
   activityControlColor,
   blockColorsFor,
   calendarBlockInk,
+  calendarNestedBase,
   CALENDAR_V3_TINT,
   contrastRatio,
   onBlockTextColor,
