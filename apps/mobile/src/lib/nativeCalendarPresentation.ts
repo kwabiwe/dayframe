@@ -127,6 +127,8 @@ export type NativeCalendarPresentation = {
   /** "5h 20m framed on Friday": confirmed time on the selected day (Review suggestions excluded). */
   framedLabel: string;
   hapticsEnabled: boolean;
+  /** Calendar › Grid or List (location v4 step 9): in List the native view draws only its header and week strip. */
+  layout?: "grid" | "list";
   /** The phone's 12/24-hour format (PRD D18) for the hour grid, now marker and drag preview. */
   clockFormat: ClockFormat;
   modelVersion: 4;

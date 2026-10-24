@@ -5,6 +5,7 @@ struct DayframeCalendarRootView: View {
   @ObservedObject var model: DayframeCalendarViewModel
   let actions: DayframeCalendarActions
   @Namespace private var weekStripSelection
+  @Namespace private var layoutSelection
   @State private var selectionHaptic = UISelectionFeedbackGenerator()
 
   var body: some View {
@@ -12,14 +13,25 @@ struct DayframeCalendarRootView: View {
     let theme = presentation.theme
 
     VStack(spacing: 10) {
-      calendarHeader(presentation: presentation, theme: theme)
-        .padding(.horizontal, 18)
-      weekStrip(presentation: presentation, theme: theme)
-        .padding(.horizontal, 12)
-      timeline(presentation: presentation, theme: theme)
+      VStack(spacing: 10) {
+        calendarHeader(presentation: presentation, theme: theme)
+          .padding(.horizontal, 18)
+        weekStrip(presentation: presentation, theme: theme)
+          .padding(.horizontal, 12)
+      }
+      .padding(.top, 4)
+      // In List the app sizes this view to its header and week strip, and draws the List under it.
+      .background(GeometryReader { geometry in
+        Color.clear
+          .onAppear { actions.reportHeaderHeight(Double(geometry.size.height)) }
+          .onChange(of: geometry.size.height) { height in actions.reportHeaderHeight(Double(height)) }
+      })
+      // The app owns the Grid ↔ List handoff (its List fades over this view), so the timeline switches at once.
+      if !presentation.isList {
+        timeline(presentation: presentation, theme: theme)
+      }
     }
-    .padding(.top, 4)
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     .background(Color(dayframeCSS: theme.background).ignoresSafeArea())
     .preferredColorScheme(theme.mode == "light" ? .light : .dark)
   }
@@ -54,9 +66,54 @@ struct DayframeCalendarRootView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityElement(children: .combine)
 
-      zoomPill(theme: theme)
+      layoutPill(presentation: presentation, theme: theme)
+      if !presentation.isList {
+        zoomPill(theme: theme)
+      }
     }
     .dynamicTypeSize(.xSmall ... .xxxLarge)
+  }
+
+  /// Grid · List (location v4 step 9, mock-up #ios-list): the selection slides between the two.
+  @ViewBuilder
+  private func layoutPill(presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme) -> some View {
+    HStack(spacing: 2) {
+      layoutButton(title: "Grid", layout: "grid", selected: !presentation.isList, presentation: presentation, theme: theme)
+      layoutButton(title: "List", layout: "list", selected: presentation.isList, presentation: presentation, theme: theme)
+    }
+    .padding(3)
+    .background(Capsule(style: .continuous).fill(Color(dayframeCSS: theme.surface)))
+    // Only the pill's selection animates (it slides); the app owns the List's own fade (Codex r2 on #570).
+    .animation(presentation.reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.82), value: presentation.isList)
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Calendar view")
+  }
+
+  @ViewBuilder
+  private func layoutButton(
+    title: String, layout: String, selected: Bool, presentation: DayframeCalendarPresentation, theme: DayframeCalendarTheme
+  ) -> some View {
+    Button {
+      guard !selected else { return }
+      playSelectionHaptic()
+      actions.changeLayout(layout)
+    } label: {
+      Text(title)
+        .font(.subheadline.weight(.bold))
+        .foregroundStyle(Color(dayframeCSS: selected ? theme.textPrimary : theme.textSecondary))
+        .padding(.horizontal, 14)
+        .frame(minHeight: 44)
+        .background {
+          if selected {
+            Capsule(style: .continuous)
+              .fill(Color(dayframeCSS: theme.surfaceRaised))
+              .matchedGeometryEffect(id: "selected-layout", in: layoutSelection)
+          }
+        }
+        .contentShape(Capsule())
+    }
+    .buttonStyle(.plain)
+    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
   }
 
   @ViewBuilder

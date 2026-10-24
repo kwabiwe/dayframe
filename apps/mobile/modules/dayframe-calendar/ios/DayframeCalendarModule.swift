@@ -13,7 +13,9 @@ public final class DayframeCalendarModule: Module {
         "onOpenReviewItem",
         "onRequestCreateEntry",
         "onRequestRefresh",
-        "onSelectDay"
+        "onSelectDay",
+        "onChangeLayout",
+        "onHeaderHeight"
       )
 
       Prop("modelJSON") { (view, modelJSON: String) in

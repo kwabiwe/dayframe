@@ -49,6 +49,9 @@ import {
   type TimerStateFingerprint
 } from "@dayframe/shared";
 import { DayframeCalendarView } from "../../modules/dayframe-calendar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CalendarListView } from "./calendar/CalendarListView";
+import { useCalendarTimeline } from "@/lib/useCalendarTimeline";
 import { ActiveTimerEditSheet } from "@/components/ActiveTimerEditSheet";
 import { ConnectivityStatusIndicator, useSyncAttentionCount } from "@/components/ConnectivityStatusStrip";
 import { ReportsTab } from "@/components/reports/ReportsTab";
@@ -115,6 +118,7 @@ import {
   createTag,
   enqueueEvent,
   fetchBootstrap,
+  fetchLocationTimeline,
   fetchTimerState,
   isQueuedTimerMutationEvent,
   login,
@@ -294,6 +298,8 @@ type RejectedOptimisticStart = {
   /** False when the block was never on screen (a refused queued Start nobody could see). */
   alert?: boolean;
 };
+
+const CALENDAR_LAYOUT_KEY = "dayframe.calendar.layout";
 export type DayframeDashboardTab = "timer" | "calendar" | "reports";
 
 function StagingBadge({ styles }: { styles: MobileStyles }) {
@@ -360,6 +366,11 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const [calendarEditPresentation, setCalendarEditPresentation] = useState<TimeEntrySheetPresentation | null>(null);
   const [calendarEditDismissRequestId, setCalendarEditDismissRequestId] = useState<number | null>(null);
   const [calendarTransitionDirection, setCalendarTransitionDirection] = useState(1);
+  // Calendar › Grid or List (location v4 step 9), remembered on this phone.
+  const [calendarLayout, setCalendarLayout] = useState<"grid" | "list">("grid");
+  const [calendarHeaderHeight, setCalendarHeaderHeight] = useState<number | null>(null);
+  // A layout the person picked here wins over the stored one, however late that read lands (Codex r1 on #570).
+  const calendarLayoutChosen = useRef(false);
   const [reportsScrubbing, setReportsScrubbing] = useState(false);
   // A rejected change badges the avatar, which then opens Settings › Sync help.
   const syncAttentionCount = useSyncAttentionCount();
@@ -1907,13 +1918,33 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   );
   // Stable objects, so DayframeCalendarView re-serialises only when the model or refresh state changes.
   const nativeCalendarModel = useMemo(
-    () => ({ ...nativeCalendarBridge.model, refreshing: false }),
-    [nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: false }),
+    [calendarLayout, nativeCalendarBridge.model]
   );
   const nativeCalendarModelRefreshing = useMemo(
-    () => ({ ...nativeCalendarBridge.model, refreshing: true }),
-    [nativeCalendarBridge.model]
+    () => ({ ...nativeCalendarBridge.model, layout: calendarLayout, refreshing: true }),
+    [calendarLayout, nativeCalendarBridge.model]
   );
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(CALENDAR_LAYOUT_KEY).then((stored) => {
+      if (!cancelled && !calendarLayoutChosen.current && stored === "list") setCalendarLayout("list");
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+  const changeCalendarLayout = useCallback((layout: "grid" | "list") => {
+    calendarLayoutChosen.current = true;
+    setCalendarLayout(layout);
+    void AsyncStorage.setItem(CALENDAR_LAYOUT_KEY, layout).catch(() => undefined);
+  }, []);
+  // The List's places and trips: the selected day's timeline for this account, read again after each refresh.
+  const calendarTimeline = useCalendarTimeline({
+    dayKey: selectedDayKey,
+    enabled: calendarLayout === "list",
+    fetchTimeline: fetchLocationTimeline,
+    owner: authState === "authenticated" && data ? `${data.workspace.id}:${data.user.id}` : null,
+    refreshKey: calendarData
+  });
   useEffect(() => {
     if (liveActivityReconciliationDeferred.current) return;
     void syncLiveActivityForEntry(data?.activeEntry ?? null);
@@ -3417,6 +3448,8 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
             </Animated.View>
             <DayframeCalendarView
               model={isFocused && refreshing ? nativeCalendarModelRefreshing : nativeCalendarModel}
+              onChangeLayout={(event) => changeCalendarLayout(event.nativeEvent.layout === "list" ? "list" : "grid")}
+              onHeaderHeight={(event) => setCalendarHeaderHeight(Math.ceil(event.nativeEvent.height))}
               onChangeDay={(event) => shiftSelectedCalendarDay(event.nativeEvent.days)}
               onChangeWeek={(event) => shiftSelectedCalendarWeek(event.nativeEvent.weeks)}
               onOpenActiveTimer={(event) => routeOpenEvent("active", event.nativeEvent.entryId)}
@@ -3434,8 +3467,34 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                 });
               }}
               onSelectDay={(event) => selectCalendarDay(event.nativeEvent.dayKey)}
-              style={styles.nativeCalendarView}
+              // In List the native view is only its header and week strip, at the height it reports.
+              style={calendarLayout === "list" && calendarHeaderHeight
+                ? [styles.nativeCalendarView, { flex: 0, height: calendarHeaderHeight }]
+                : styles.nativeCalendarView}
             />
+            {calendarLayout === "list" ? (
+              // The one owner of the Grid ↔ List handoff (Codex r1 on #570): the List fades in over the
+              // header's new height and out over the Grid, which the native view switches at once beneath it.
+              <Reanimated.View
+                entering={localPresenceEntering(reduceMotion)}
+                exiting={localPresenceExiting(reduceMotion)}
+                style={{ flex: 1 }}
+              >
+                <CalendarListView
+                  clockFormat={clockFormat}
+                  dayStartMs={nativeCalendarModel.dayStartMs}
+                  entries={nativeCalendarModel.entries}
+                  loggedLabel={nativeCalendarModel.loggedLabel}
+                  nowMs={minuteNow}
+                  onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
+                  onRefresh={() => routeNativeCalendarRefresh(() => { void load({ visibleRefresh: true }); })}
+                  reduceMotion={reduceMotion}
+                  refreshing={isFocused && refreshing}
+                  theme={theme}
+                  timeline={calendarTimeline}
+                />
+              </Reanimated.View>
+            ) : null}
           </View>
         </SafeAreaView>
       );

@@ -177,6 +177,9 @@ struct DayframeCalendarPresentation: Equatable {
   let entries: [DayframeCalendarEntry]
   let framedLabel: String
   let hapticsEnabled: Bool
+  /// Calendar › Grid or List (location v4 step 9): in List the view draws only its header and week
+  /// strip, and the app draws the List under it.
+  let isList: Bool
   /// "12h" or "24h" (PRD D18): the hour grid, now marker and drag preview follow it.
   let clockFormat: String
   let modelVersion: Int
@@ -207,6 +210,7 @@ struct DayframeCalendarPresentation: Equatable {
     entries = record.entries.map(DayframeCalendarEntry.init)
     framedLabel = record.framedLabel
     hapticsEnabled = record.hapticsEnabled
+    isList = record.layout == "list"
     clockFormat = record.clockFormat == "12h" ? "12h" : "24h"
     modelVersion = record.modelVersion
     monthTitle = record.monthTitle
@@ -373,4 +377,8 @@ struct DayframeCalendarActions {
   let requestCreateEntry: (DayframeCalendarCreateRequest) -> Void
   let requestRefresh: () -> Void
   let selectDay: (String) -> Void
+  /// Grid · List in the header (location v4 step 9).
+  let changeLayout: (String) -> Void
+  /// In List: the height the header and week strip need, so the app sizes the view to them.
+  let reportHeaderHeight: (Double) -> Void
 }

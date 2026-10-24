@@ -89,6 +89,8 @@ struct DayframeCalendarPresentationRecord: Codable {
   var entries: [DayframeCalendarEntryRecord] = []
   var framedLabel = ""
   var hapticsEnabled = true
+  /// "grid" or "list" (location v4 step 9); a model without it (an older bundle) is the Grid.
+  var layout: String?
   /// "12h" or "24h" (PRD D18); a model without it (an older bundle) keeps 24-hour.
   var clockFormat: String?
   var modelVersion = 4
