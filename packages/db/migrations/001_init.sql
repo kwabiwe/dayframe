@@ -959,6 +959,23 @@ create index if not exists idx_stay_segments_venue_history
   on stay_segments using gist(centre)
   where venue_place_id is not null;
 
+-- Aligned with 021_location_timeline_indexes.sql.
+create index if not exists idx_commute_segments_user_time
+  on commute_segments(workspace_id, user_id, started_at)
+  include (stopped_at)
+  where status <> 'superseded';
+create index if not exists idx_stay_segments_open_or_long
+  on stay_segments(workspace_id, user_id, started_at)
+  include (stopped_at)
+  where status <> 'superseded' and client_segment_id is not null
+    and (stopped_at is null or stopped_at - started_at > interval '31 days');
+create index if not exists idx_activity_events_client_segment
+  on activity_events(workspace_id, user_id, (raw_payload ->> 'clientSegmentId'))
+  where raw_payload ? 'clientSegmentId';
+create index if not exists idx_activity_events_segment
+  on activity_events(workspace_id, user_id, (raw_payload ->> 'segmentId'))
+  where raw_payload ? 'segmentId';
+
 -- Keep the clean base fixture aligned with 022_location_timeline_corrections.sql (timeline corrections).
 create table if not exists location_timeline_corrections (
   id uuid primary key default gen_random_uuid(),

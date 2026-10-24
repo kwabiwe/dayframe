@@ -147,7 +147,7 @@ export function deriveTripLegs({
   /** A reading's speed when it is credible (native from any copy, else an accurate fix's implied speed), or null. */
   speedOf: (item: ClassifiedEvidence) => number | null;
   config: LocationEngineConfig;
-  /** When genuine readings too broad to accept but better than cell-only were taken (epoch ms): they break a silence too. */
+  /** When genuine readings too broad to accept but better than cell-only were taken (epoch ms): each one breaks a silence. */
   broadReadingTimes?: readonly number[];
 }): TripLeg[] {
   if (!(endMs > startMs)) return [];
@@ -160,16 +160,19 @@ export function deriveTripLegs({
   });
   const fixes = timed.filter(({ item }) => genuineLegFix(item, config))
     .map(({ item, atMs }) => ({ atMs, point: { latitude: item.evidence.latitude!, longitude: item.evidence.longitude! } }));
-  // Genuine readings better than cell-only accuracy (design §8). A run between distant fixes stays a
-  // silence while they are sparse: underground, station Wi-Fi gives a reading of 70–130 m now and then
-  // (one to three in 5–24 minutes in the owner's week), where a drive gives one every minute.
+  // Genuine accepted readings better than cell-only accuracy (design §8). A run between distant fixes
+  // stays a silence while they are sparse: underground, station Wi-Fi gives a reading of 70–130 m now and
+  // then (one to three in 5–24 minutes in the owner's week), where a drive gives one every minute. A
+  // reading too broad to accept but better than cell-only (200–500 m) breaks it outright (Codex r4 on #563).
   const observedTimes = timed.filter(({ item }) => {
     const { kind, isSimulated, latitude, longitude, horizontalAccuracyMeters } = item.evidence;
     return (kind === "standard_location" || kind === "significant_change") && isSimulated !== true &&
       latitude != null && longitude != null && horizontalAccuracyMeters != null &&
       horizontalAccuracyMeters < config.tripUnseenObservedAccuracyMeters;
-  }).map(({ atMs }) => atMs).concat(broadReadingTimes.filter((atMs) => atMs >= startMs && atMs <= endMs)).sort((a, b) => a - b);
+  }).map(({ atMs }) => atMs).sort((a, b) => a - b);
+  const broadTimes = broadReadingTimes.filter((atMs) => atMs >= startMs && atMs <= endMs).sort((a, b) => a - b);
   let observedFrom = 0;
+  let broadFrom = 0;
   // Unseen stretches: nothing much observed between two distant genuine fixes, at train or Underground speed.
   const unseen = fixes.slice(1).flatMap((next, index) => {
     const before = fixes[index];
@@ -177,6 +180,8 @@ export function deriveTripLegs({
     let inside = 0;
     while (observedFrom + inside < observedTimes.length && observedTimes[observedFrom + inside] < next.atMs) inside += 1;
     if (inside * config.tripUnseenSparseReadingIntervalMs > next.atMs - before.atMs) return [];
+    while (broadFrom < broadTimes.length && broadTimes[broadFrom] <= before.atMs) broadFrom += 1;
+    if (broadFrom < broadTimes.length && broadTimes[broadFrom] < next.atMs) return [];
     const gapMs = next.atMs - before.atMs;
     const meters = distanceMeters(before.point, next.point);
     const mps = meters / (gapMs / 1_000);
