@@ -22,7 +22,7 @@ const tabManifestPath = join(tabIconDir, "manifest.json");
 // Lucide glyphs used anywhere in Dayframe: activities, navigation, actions, sources and sync state.
 const GLYPHS = [
   "arrow-left", "baby", "bell", "bike", "book-open", "brain", "briefcase", "building-2", "bus", "calendar-days", "camera",
-  "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-user-round", "cloud-alert", "cloud-check",
+  "car", "chart-column", "check", "chef-hat", "chevron-right", "circle-dot", "circle-question-mark", "circle-user-round", "cloud-alert", "cloud-check",
   "cloud-off", "code-xml", "coffee", "download", "dumbbell", "ellipsis", "flame", "flower-2", "folder", "footprints", "funnel", "gamepad-2",
   "git-merge", "graduation-cap", "guitar", "hand-heart", "heart", "heart-pulse", "house", "inbox", "languages",
   "laptop", "library", "list", "list-checks", "log-out", "mail", "map-pin", "message-circle", "minus", "moon", "mountain", "music", "palette",

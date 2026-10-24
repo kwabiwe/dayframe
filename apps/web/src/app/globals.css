@@ -13715,6 +13715,209 @@ dialog.ui-dialog.df-palette {
 
 /* Touch screens: every segment, text field and small action is a 44 px target (WUI-019, WUI-035,
    WUI-046). Last in the file, so no base size declared later wins the cascade (Codex r1 on #472). */
+/* Calendar › List location rows, read-only (location v4 step 10, mock-up #web-list, placement A): a place
+   not in a block is one row in time order with a hatched "?" mark; Home and logged places are faint rows
+   behind "Show Home and every place"; a journey in progress is one row; a trip's block lists its legs. */
+.timeline-location-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  align-self: center;
+  border-radius: calc(36px * 0.3);
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+}
+
+.timeline-location-mark.is-unknown {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in oklab, var(--warning) 32%, transparent) 0 3px, transparent 3px 7px),
+    color-mix(in oklab, var(--warning) 12%, var(--surface));
+  box-shadow: inset 0 0 0 1.5px var(--warning);
+  color: var(--warning-text);
+}
+
+.timeline-location-mark.is-faint {
+  height: 24px;
+  background: transparent;
+}
+
+.timeline-location-row.is-faint .timeline-task-primary-line {
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.timeline-location-secondary,
+.timeline-location-note {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.timeline-trip-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timeline-trip-route {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.timeline-trip-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.timeline-trip-mode .is-unsure,
+.timeline-trip-leg.is-unsure b {
+  color: var(--warning-text);
+  font-weight: 700;
+}
+
+.timeline-trip-legs-toggle {
+  position: relative;
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.timeline-trip-legs-toggle svg {
+  transition: transform 220ms ease-out;
+}
+
+/* A 44 × 44 target around the 32 px chevron. */
+.timeline-trip-legs-toggle::before {
+  position: absolute;
+  inset: -6px;
+  content: "";
+}
+
+.timeline-trip-legs-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.timeline-trip-legs-row > td {
+  padding: 0 12px 0 60px;
+}
+
+/* The legs row opens and closes its own height, so the rows below move with it (motion contract in TripLegRows). */
+.timeline-trip-legs-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 220ms ease-out, opacity 220ms ease-out;
+}
+
+.timeline-trip-legs-wrap[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.timeline-trip-legs-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.timeline-trip-legs {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 10px;
+  list-style: none;
+}
+
+.timeline-trip-leg {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  border-radius: 12px;
+  padding: 6px 8px;
+  background: var(--surface-muted);
+}
+
+.timeline-trip-leg-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+
+.timeline-trip-leg-text {
+  display: grid;
+  min-width: 0;
+}
+
+.timeline-trip-leg-text b {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.timeline-trip-leg-text small,
+.timeline-trip-leg-time {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.timeline-location-foot {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0 16px;
+}
+
+.timeline-location-chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.timeline-location-chip[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-trip-legs-wrap {
+    transition: none;
+  }
+
+  .timeline-trip-legs-toggle svg {
+    transition: none;
+  }
+}
+
 @media (any-pointer: coarse) {
   .df-seg a,
   .ui-segmented-control button,

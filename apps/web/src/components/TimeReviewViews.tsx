@@ -96,6 +96,7 @@ import {
 } from "@/lib/calendar-click-create";
 import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
+import { useLocationTimeline } from "@/components/location/LocationListRows";
 
 type CalendarHoursMode = "fullDay";
 
@@ -203,6 +204,9 @@ export function TimeReviewViews({
   } = useAppShellRuntime();
   const searchParams = useSearchParams();
   const state = timelineStateFromSearchParams(searchParams, { preference: initialPreference });
+  // The shown day's location timeline for the List (location v4 step 10), fetched again with each bootstrap refresh.
+  const locationTimeline = useLocationTimeline(state.view === "list" && state.scope === "day" ? state.date : null, data,
+    `${data.workspace.id}:${data.user.id}`);
   const preferenceState = useMemo(
     () => ({ scope: state.scope, view: state.view }),
     [state.scope, state.view]
@@ -562,6 +566,7 @@ export function TimeReviewViews({
             displayRange={ranges.active}
             onDeleteEntries={requestTimelineDelete}
             groupByDay
+            locationTimeline={locationTimeline}
             onChanged={refreshData}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
