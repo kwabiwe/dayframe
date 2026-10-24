@@ -28,8 +28,9 @@ describe("Today's way into earlier Review moments (14 Oct 2026)", () => {
   });
 
   it("counts open Review moments per earlier day from the same items the Calendar draws", () => {
-    expect(dashboard).toContain("const open = (calendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
-    // An outing counts once on its day (PRD D19, PR 12c).
+    expect(dashboard).toContain("const open = (shownCalendarData?.reviewItems ?? []).filter(isOpenReviewItem);");
+    // An outing counts once on its day (PRD D19, PR 12c), folded as the deck and the List fold it (Codex r2 on #582).
+    expect(dashboard).toContain("const { folded } = calendarCheckOutings(open, reviewSyncStateIds);");
     expect(dashboard).toContain("return earlierDayReviewCounts(earlierDays, open.filter((item) => !folded.has(item.id)));");
     expect(dashboard).toContain("reviewCounts={earlierDayReviewCountMap}");
   });

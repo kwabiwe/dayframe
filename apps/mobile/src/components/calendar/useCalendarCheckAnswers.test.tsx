@@ -20,13 +20,15 @@ vi.mock("react-native", () => ({
 const store = vi.hoisted(() => ({
   enqueueReviewMutation: vi.fn(async (_input: Record<string, unknown>) => undefined),
   synchroniseReviewMutations: vi.fn(async () => undefined),
-  createReviewClientMutationId: () => "client-id"
+  createReviewClientMutationId: () => "client-id",
+  reviewItemsDecidedLocally: vi.fn(async (_bootstrap: unknown, _ids: readonly string[]) => false)
 }));
 vi.mock("../../lib/reviewSyncStore", () => store);
 vi.mock("../../lib/friendlyError", () => ({ friendlyMobileErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("expo-secure-store", () => ({}));
 
-import { useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
+import { AccessibilityInfo } from "react-native";
+import { calendarCheckOutings, useCalendarCheckAnswers } from "./useCalendarCheckAnswers";
 import { claimReviewAnswer, releaseReviewAnswer } from "../../lib/reviewAnswerClaims";
 
 // Synthetic suggestions in Exampleton (made-up names and ids).
@@ -38,13 +40,24 @@ const suggestion = (id: string, overrides: Partial<MobileReviewItem> = {}): Mobi
 });
 const bootstrap = (reviewItems: MobileReviewItem[]) => ({ reviewItems } as unknown as MobileBootstrap);
 
+// The deck's own outing fixture (reviewDeckOutings.test.ts): a Stay with a Move there and back.
+const part = (id: string, start: string | null, stop: string | null, role: string) => suggestion(id, {
+  title: id, eventType: role === "stay" ? "unknown_stay" : "commute_detected", suggestedStartedAt: start, suggestedStoppedAt: stop,
+  rawPayload: { outingKey: "outing:a", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
+});
+const outing = (stayStart: string | null = "2026-10-17T10:10:00.000Z") => [
+  part("there", "2026-10-17T10:04:00.000Z", "2026-10-17T10:10:00.000Z", "in"),
+  part("stay", stayStart, "2026-10-17T10:25:00.000Z", "stay"),
+  part("back", "2026-10-17T10:25:00.000Z", "2026-10-17T10:30:00.000Z", "out")
+];
+
 type Hook = ReturnType<typeof useCalendarCheckAnswers>;
 const NONE: ReadonlySet<string> = new Set();
 function mount(data: MobileBootstrap) {
   const result: { current: Hook } = { current: null as unknown as Hook };
-  let props = { value: data, decided: NONE, owner: "owner-a" as string | null };
-  function Harness({ value, decided, owner }: typeof props) {
-    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner });
+  let props = { value: data, decided: NONE, owner: "owner-a" as string | null, states: NONE };
+  function Harness({ value, decided, owner, states }: typeof props) {
+    result.current = useCalendarCheckAnswers({ data: value, locallyDecidedIds: decided, ownerKey: owner, syncStateIds: states });
     return null;
   }
   let tree!: ReturnType<typeof create>;
@@ -59,7 +72,11 @@ function mount(data: MobileBootstrap) {
 describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    store.enqueueReviewMutation.mockClear();
+    store.enqueueReviewMutation.mockReset();
+    store.enqueueReviewMutation.mockImplementation(async () => undefined);
+    store.reviewItemsDecidedLocally.mockReset();
+    store.reviewItemsDecidedLocally.mockImplementation(async () => false);
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -113,16 +130,7 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
   });
 
   it("decides an outing with its trips in one row, as the deck does", async () => {
-    // The deck's own outing fixture (reviewDeckOutings.test.ts): a Stay with a Move there and back.
-    const part = (id: string, start: string, stop: string, role: string) => suggestion(id, {
-      title: id, eventType: role === "stay" ? "unknown_stay" : "commute_detected", suggestedStartedAt: start, suggestedStoppedAt: stop,
-      rawPayload: { outingKey: "outing:a", outingRole: role, ...(role === "stay" ? {} : { travelMode: "automotive" }) }
-    });
-    const items = [
-      part("there", "2026-10-17T10:04:00.000Z", "2026-10-17T10:10:00.000Z", "in"),
-      part("stay", "2026-10-17T10:10:00.000Z", "2026-10-17T10:25:00.000Z", "stay"),
-      part("back", "2026-10-17T10:25:00.000Z", "2026-10-17T10:30:00.000Z", "out")
-    ];
+    const items = outing();
     const { result } = mount(bootstrap(items));
     act(() => { result.current.answer("stay", false); });
     expect([...result.current.hiddenIds].sort()).toEqual(["back", "stay", "there"]);
@@ -176,5 +184,71 @@ describe("Calendar › List answers (location v4 step 14, iPhone part 3b)", () =
     expect(result.current.held).toBeNull();
     act(() => { result.current.answer("b", false); });
     expect(result.current.held).toMatchObject({ itemId: "b", logged: false });
+  });
+
+  it("never saves a remembered copy this phone decided meanwhile, as on the deck (Codex r2 on #582)", async () => {
+    const { result, rerender } = mount(bootstrap([suggestion("a"), suggestion("b", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) })]));
+    act(() => { result.current.answer("a", false); });
+    // A refresh pages it out while the deck logs the same suggestion: the outbox now has its decision.
+    rerender(bootstrap([suggestion("b", { suggestedStartedAt: at(14), suggestedStoppedAt: at(15) })]));
+    store.reviewItemsDecidedLocally.mockImplementation(async () => true);
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.reviewItemsDecidedLocally).toHaveBeenCalledWith(expect.anything(), ["a"]);
+    expect(store.enqueueReviewMutation).not.toHaveBeenCalled();
+    expect(result.current.hiddenIds.has("a")).toBe(false);
+    // A listed suggestion needs no outbox read: it is saved as before.
+    act(() => { result.current.answer("b", true); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation).toHaveBeenCalledOnce();
+  });
+
+  it("brings a paged-out answer back to the List on Undo and after a failed save, outing whole (Codex r2 on #582)", async () => {
+    const items = outing();
+    const { result, rerender } = mount(bootstrap(items));
+    act(() => { result.current.answer("stay", true); });
+    const pagedOut = bootstrap([]);
+    rerender(pagedOut);
+    act(() => { result.current.undo(); });
+    expect(result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "stay", "there"]);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("stay is back.");
+    // The next read replaces the copies like any other loaded item.
+    rerender(bootstrap([]));
+    expect(result.current.data?.reviewItems).toEqual([]);
+
+    // A save that fails brings the paged-out copies back too.
+    const again = mount(bootstrap(items));
+    act(() => { again.result.current.answer("stay", false); });
+    again.rerender(pagedOut);
+    store.enqueueReviewMutation.mockImplementation(async () => { throw new Error("disk full"); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(again.result.current.hiddenIds.size).toBe(0);
+    expect(again.result.current.data?.reviewItems.map((item) => item.id).sort()).toEqual(["back", "stay", "there"]);
+  });
+
+  it("folds, asks and saves outings with one map: the deck's eligibility (Codex r2 on #582)", async () => {
+    // A Stay without a complete window is no outing: its trips are asked on their own, from the start.
+    expect(calendarCheckOutings(outing(null), NONE).folded.size).toBe(0);
+    // Nor is one with a waiting or rejected change of a part.
+    expect(calendarCheckOutings(outing(), new Set(["back"])).outings.get("stay")?.members.map((member) => member.id)).toEqual(["there"]);
+    expect([...calendarCheckOutings(outing(), NONE).folded].sort()).toEqual(["back", "there"]);
+    const { result, update } = mount(bootstrap(outing()));
+    update({ states: new Set(["back"]) });
+    act(() => { result.current.answer("stay", true); });
+    await act(async () => { vi.advanceTimersByTime(4_800); });
+    expect(store.enqueueReviewMutation.mock.calls[0][0]).toMatchObject({ mutation: { action: "confirm_outing", memberReviewItemIds: ["there"] } });
+    // A trip of it already saving on the deck: the List leaves the answer to it.
+    const other = mount(bootstrap(outing()));
+    claimReviewAnswer(["there"]);
+    act(() => { other.result.current.answer("stay", true); });
+    expect(other.result.current.held).toBeNull();
+    releaseReviewAnswer(["there"]);
+  });
+
+  it("tells VoiceOver the answer and its Undo, then that it is back, as the deck does (Codex r2 on #582)", () => {
+    const { result } = mount(bootstrap([suggestion("a")]));
+    act(() => { result.current.answer("a", true); });
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("Logged Exampleton Library. Undo is available for a few seconds.");
+    act(() => { result.current.undo(); });
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenLastCalledWith("Exampleton Library is back.");
   });
 });

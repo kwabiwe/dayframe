@@ -3161,6 +3161,18 @@ async function hiddenReviewItemIds(accountKeyValue: string) {
 }
 
 /**
+ * Whether any of these suggestions is already decided on this phone for the bootstrap's account (a local
+ * decision hiding it, or a terminal source in force): checked before a copy a surface remembered for a
+ * suggestion a refresh left out is saved (step 14 part 3b), so a decision made meanwhile on another
+ * surface is never followed by a second one.
+ */
+export async function reviewItemsDecidedLocally(bootstrap: MobileBootstrap, ids: readonly string[]) {
+  const key = accountKey({ workspaceId: bootstrap.workspace.id, userId: bootstrap.user.id });
+  const suppressed = await suppressedReviewItemIds(key, await presentationBackendIdForBootstrap(key, bootstrap));
+  return ids.some((id) => suppressed.has(id));
+}
+
+/**
  * Review items this account must not show again: hidden by a local decision, or terminal in a
  * newer read (the same suppression the cached bootstrap uses), for that backend.
  */

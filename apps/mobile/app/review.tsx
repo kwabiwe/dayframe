@@ -141,7 +141,7 @@ import {
   heldOutingStillSame, outingFocusSegment, outingTravelSeconds, reviewDeckOutingLine, reviewDeckOutings
 } from "@/lib/reviewDeckOutings";
 import { reviewAnswerMutation } from "@/lib/reviewAnswer";
-import { claimReviewAnswer, releaseReviewAnswer } from "@/lib/reviewAnswerClaims";
+import { claimReviewAnswer, releaseReviewAnswer, rememberedReviewAnswerStillOpen } from "@/lib/reviewAnswerClaims";
 import { BlocksConfirmHost, useBlocksConfirm } from "@/components/blocks/BlocksConfirmSheet";
 import { BlocksToast, useBlocksNotice } from "@/components/blocks/BlocksToast";
 import {
@@ -1752,17 +1752,41 @@ export default function ReviewScreen() {
     // One outbox row for the whole outing, sent on the Stay's card; its Moves are hidden with it. The
     // mutation is the one rule Calendar › List answers with too (reviewAnswer.ts, step 14 part 3b).
     const outing = Boolean(held.outing && members.length);
-    const started = resolveItem(
-      item,
-      reviewAnswerMutation(item, held.logged, { edit, outingMemberIds: outing ? members.map((member) => member.id) : undefined }),
-      `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
-      settled,
-      failed,
-      outing ? { unlisted, affectedItems: [item, ...members] } : { unlisted }
-    );
-    // Not started (a change for this item is already saving, or the item has gone): the card is
-    // not this visit's decision.
-    if (!started) failed();
+    const start = () => {
+      const started = resolveItem(
+        item,
+        reviewAnswerMutation(item, held.logged, { edit, outingMemberIds: outing ? members.map((member) => member.id) : undefined }),
+        `${held.logged ? "Logged" : "Skipped"}. Saved on this iPhone. Waiting to sync.`,
+        settled,
+        failed,
+        outing ? { unlisted, affectedItems: [item, ...members] } : { unlisted }
+      );
+      // Not started (a change for this item is already saving, or the item has gone): the card is
+      // not this visit's decision.
+      if (!started) failed();
+    };
+    // Copies the deck remembered for cards a refresh left out are saved only while this phone has not
+    // decided them meanwhile (Calendar › List answering the same suggestion; reviewAnswerClaims.ts).
+    const loadedData = dataRef.current;
+    const remembered = (outing ? [item, ...members] : [item])
+      .filter((candidate) => !loadedData?.reviewItems.some((loaded) => loaded.id === candidate.id));
+    if (!remembered.length || !loadedData) {
+      start();
+      return;
+    }
+    void rememberedReviewAnswerStillOpen(
+      { ...loadedData, reviewItems: [...loadedData.reviewItems, ...remembered] },
+      remembered.map((candidate) => candidate.id)
+    ).catch(() => false).then((open) => {
+      if (open) {
+        start();
+        return;
+      }
+      // Decided elsewhere meanwhile: not this visit's decision, and nothing more is saved.
+      settled();
+      restoreMembers();
+      undoCount();
+    });
   };
 
   // A committing card whose item has left the open list and has no save still in flight no longer

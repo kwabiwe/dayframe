@@ -1316,6 +1316,12 @@ function createStyles(theme: MobileTheme) {
       right: 20,
       bottom: 92
     },
+    // Today's toasts in one column (an answer's above a delete's or a notice), each as tall as it measures.
+    todayToastStack: {
+      flexDirection: "column",
+      justifyContent: "flex-end",
+      gap: 8
+    },
     accountValue: {
       color: theme.textPrimary,
       fontFamily: monoFont,

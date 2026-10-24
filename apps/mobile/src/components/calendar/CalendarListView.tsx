@@ -129,8 +129,10 @@ export function CalendarListView({
   });
   const checkKeys = checkRows.map((row) => row.key);
   const firstCheckId = checkRows[0]?.id;
-  // A question whose "?" has left (answered, decided elsewhere, another day) closes.
+  // A question whose "?" has left (answered, decided elsewhere, another day) closes, and stays closed: coming
+  // back to the day or the row coming back does not reopen it (Codex r2 on #582).
   const shownOpenCheckId = openCheckId && checkRows.some((row) => row.id === openCheckId) ? openCheckId : null;
+  if (openCheckId && !shownOpenCheckId) setOpenCheckId(null);
   // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
   // A request stays pending until its "?" has laid out, then is used once (Codex r1 on #573): a List
   // mounting fresh from Grid, a day change or places arriving later all still land on it. "N to check"
@@ -162,12 +164,19 @@ export function CalendarListView({
   useEffect(() => {
     if (scrollToFirstCheck) pendingScroll.current = "first";
   }, [scrollToFirstCheck]);
-  // Today's chip also opens the first question, once its "?" is here.
-  const [openFirstRequest, setOpenFirstRequest] = useState(0);
-  if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest && firstCheckId && onAnswerCheck) {
-    setOpenFirstRequest(scrollToFirstCheck);
+  // Today's chip also opens the first question, once its "?" is here, and VoiceOver hears it as when a "?"
+  // is tapped (Codex r2 on #582).
+  const [openFirstRequest, setOpenFirstRequest] = useState<{ request: number; id: string | null }>({ request: 0, id: null });
+  if (scrollToFirstCheck && scrollToFirstCheck !== openFirstRequest.request && firstCheckId && onAnswerCheck) {
+    setOpenFirstRequest({ request: scrollToFirstCheck, id: firstCheckId });
     setOpenCheckId(firstCheckId);
   }
+  const openedFirstQuestion = openFirstRequest.id ? checkQuestions?.get(openFirstRequest.id)?.question : undefined;
+  useEffect(() => {
+    if (openedFirstQuestion) AccessibilityInfo.announceForAccessibility(openedFirstQuestion);
+    // Once per request: the question's words are read when the chip opened it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFirstRequest.request]);
   // A "?" opens (or closes) its question; with no answers here it opens the suggestion instead.
   const toggleCheck = (id: string) => {
     if (!onAnswerCheck) {

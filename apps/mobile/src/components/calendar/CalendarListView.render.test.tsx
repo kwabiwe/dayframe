@@ -168,6 +168,36 @@ describe("CalendarListView (location v4 step 9)", () => {
     expect(onOpenCheck).toHaveBeenCalledTimes(1);
   });
 
+  it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
+    const { AccessibilityInfo } = await import("react-native");
+    vi.mocked(AccessibilityInfo.announceForAccessibility).mockClear();
+    const question = (text: string) => ({ question: text, detail: null, logLabel: "Log it", skipLabel: "Not now", more: false });
+    const checks = [{ id: "c-sleep", segmentId: null, startedAt: iso(1), stoppedAt: iso(6) }];
+    const props = {
+      checks,
+      checkTitles: new Map([["c-sleep", "Sleep"]]),
+      checkQuestions: new Map([["c-sleep", question("Log your sleep?")]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheck: vi.fn()
+    };
+    const { tree } = render({ ...props, scrollToFirstCheck: 1 });
+    const questions = () => tree.root.findAll((node) => node.props.testID === "calendar-list-question" && typeof node.type === "string");
+    // Today's chip opened it: VoiceOver hears the question, as when its "?" is tapped.
+    expect(questions()).toHaveLength(1);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledWith("Log your sleep?");
+    const rerender = (next: Partial<Parameters<typeof CalendarListView>[0]>) => act(() => {
+      tree.update(<CalendarListView clockFormat="24h" dayEndMs={at(24)} dayStartMs={at(0)} entries={[block("commute", "Commute", 8, 9), block("work", "Work", 9, 12)]}
+        loggedLabel="4h" nowMs={at(18)} onOpenEntry={vi.fn()} onRefresh={vi.fn()} reduceMotion={false} refreshing={false}
+        theme={theme} timeline={timeline} {...props} scrollToFirstCheck={1} {...next} />);
+    });
+    // Its row leaves (another day, a refresh) and comes back: the question stays closed until asked again.
+    rerender({ checks: [] });
+    expect(questions()).toHaveLength(0);
+    rerender({ checks });
+    expect(questions()).toHaveLength(0);
+    expect(AccessibilityInfo.announceForAccessibility).toHaveBeenCalledTimes(1);
+  });
+
   it("puts each open suggestion on the row it is about, counts them, and opens one to answer (location v4 step 14)", () => {
     const onOpenCheck = vi.fn();
     const { tree } = render({
