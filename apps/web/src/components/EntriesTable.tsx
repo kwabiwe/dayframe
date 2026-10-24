@@ -364,6 +364,7 @@ export function EntriesTable({
   // Undo or a refused save brings a "?" back, or the Today link opens one: its toggle takes focus once its
   // row is listed (again).
   const pendingRestore = useRef<string | null>(null);
+  const focusedToggleItem = useRef<string | null>(null);
   const focusCheck = (key: string | null) => {
     pendingRestore.current = null;
     pendingFocus.current = key;
@@ -382,7 +383,14 @@ export function EntriesTable({
       pendingFocus.current = restoredRow.key;
     }
     const key = pendingFocus.current;
-    if (key === undefined) return;
+    if (key === undefined) {
+      // A "?" that held focus was replaced by its suggestion's new row (the day's places arrived): focus follows it.
+      const lost = !document.activeElement || document.activeElement === document.body;
+      const itemId = focusedToggleItem.current;
+      const moved = lost && itemId ? checkRows.find((row) => checkOf(row)?.id === itemId) : undefined;
+      if (moved) [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === moved.key)?.focus();
+      return;
+    }
     const row = key ? [...document.querySelectorAll<HTMLElement>("[data-check-key]")].find((element) => element.dataset.checkKey === key) : null;
     // Wait while the "?" it moves to has not rendered yet.
     if (key && !row && checkRows.some((other) => other.key === key)) return;
@@ -907,6 +915,12 @@ export function EntriesTable({
       <div
         aria-busy={localTimeReady ? undefined : true}
         className="timeline-list-scroll"
+        onFocus={(event) => {
+          // Which suggestion's "?" holds focus, so it keeps it when its row is replaced (Codex r2 on #572).
+          const key = (event.target as HTMLElement).dataset.checkKey;
+          const row = key ? checkRows.find((other) => other.key === key) : undefined;
+          focusedToggleItem.current = row ? checkOf(row)?.id ?? null : null;
+        }}
         onScroll={onScroll}
         // Focus can land on the List itself when no "?" or chip is left to take it.
         tabIndex={-1}

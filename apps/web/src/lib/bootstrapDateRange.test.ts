@@ -25,6 +25,14 @@ function entry(startedAt: string, stoppedAt: string) {
 // owner-approved 17 Oct 2026): the bootstrap's day and week start at the viewer's midnights when the
 // browser sent its zone, and keep the server's when it did not (the iPhone never sends it).
 describe("bootstrap day and week ranges", () => {
+  it("starts the Calendar badge's checks at the viewer's midnight seven days back, across both clock changes (Codex r2 on #572)", () => {
+    process.env.TZ = "UTC";
+    // Autumn: Monday 26 October is GMT; 19 October was BST, so its midnight is 18 October 23:00Z.
+    expect(buildDashboardDateRange("2026-10-26", "Europe/London").checksStart).toBe("2026-10-18T23:00:00.000Z");
+    // Spring: Thursday 2 April is BST; 26 March was GMT, so its midnight is 26 March 00:00Z.
+    expect(buildDashboardDateRange("2026-04-02", "Europe/London").checksStart).toBe("2026-03-26T00:00:00.000Z");
+  });
+
   it("starts a past week at the viewer's Monday midnight, so a block at 00:30 BST is inside it", () => {
     process.env.TZ = "UTC";
     const range = buildDashboardDateRange("2026-10-12", "Europe/London");
@@ -35,7 +43,8 @@ describe("bootstrap day and week ranges", () => {
       dayStart: "2026-10-11T23:00:00.000Z",
       dayEnd: "2026-10-12T23:00:00.000Z",
       weekStart: "2026-10-11T23:00:00.000Z",
-      weekEnd: "2026-10-18T23:00:00.000Z"
+      weekEnd: "2026-10-18T23:00:00.000Z",
+      checksStart: "2026-10-04T23:00:00.000Z"
     });
     const block = new Date("2026-10-11T23:30:00.000Z"); // 00:30 BST on Monday 12 October
     expect(block >= new Date(range.weekStart) && block < new Date(range.weekEnd)).toBe(true);

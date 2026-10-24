@@ -323,6 +323,8 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       // The places arrive: the question moves onto the place's row and stays open.
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
       expect(screen.getByRole("group", { name: /^Where were you/ })).toBeTruthy();
+      // Focus moves with it to the place row's "?" (Codex r2 on #572).
+      await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Check Office"));
       // Closing it is final for this visit: it does not open again.
       fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
