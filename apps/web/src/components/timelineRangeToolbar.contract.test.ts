@@ -76,7 +76,11 @@ describe("Calendar range and toolbar contract", () => {
     expect(timeline).not.toContain("forwardVerticalCalendarWheel");
     expect(timeline).toContain('aria-label="Calendar period and view controls"');
     expect(timeline).toContain('ariaLabel="Calendar view"');
-    expect(timeline).toContain('ariaLabel="Calendar scope"');
+    // In List the period controls don't apply (continuous days, owner 24 Oct 2026): shown, greyed and inert.
+    expect(timeline).toContain('ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}');
+    expect(timeline).toContain('unavailable: isList ? "Not used in List" : undefined');
+    expect(timeline).toContain('<span className="sr-only" id="timeline-period-not-used">Not used in List</span>');
+    expect(timeline).toContain("disabled={isDateLoading || isList}");
   });
 
   it("canonicalizes direct URLs before one selected-date bootstrap read", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import {
   DAYFRAME_APP_ICONS,
@@ -41,6 +41,88 @@ export function useLocationTimeline(date: string | null, refreshKey: unknown, ow
   }, [date, owner, refreshKey]);
   return date && loaded?.owner === owner && loaded.timeline.date === date ? loaded.timeline : null;
 }
+
+/** Location reads in flight at once while the List loads its days. */
+export const LOCATION_TIMELINE_CONCURRENCY = 3;
+
+/**
+ * Calendar › List's continuous days (owner, 24 Oct 2026): each shown day's location timeline, read at
+ * most LOCATION_TIMELINE_CONCURRENCY at a time. A day is read once; `liveDates` (the selected day and
+ * today) again whenever `liveKey` changes (the runtime's bootstrap refresh), and every day again when
+ * `staleKey` changes (an edit or a correction). Kept per owner (workspace and user): another owner's
+ * days are never returned, and its answers in flight are dropped. A failed read keeps the day's last
+ * copy; a day without one shows blocks (and its checks) only, as before.
+ */
+export function useLocationTimelines(dates: readonly string[], liveDates: readonly string[], liveKey: unknown, staleKey: unknown,
+  owner: string): ReadonlyMap<string, LocationTimeline> {
+  const [loaded, setLoaded] = useState<{ owner: string; days: ReadonlyMap<string, LocationTimeline> }>({ owner, days: new Map() });
+  // Days wanted again (or for the first time), the reads in flight and the days ever asked, for one owner.
+  const queueRef = useRef<TimelineQueue | null>(null);
+  const datesKey = dates.join(",");
+  const liveDatesKey = liveDates.join(",");
+
+  const queueFor = (forOwner: string) => {
+    if (queueRef.current?.owner !== forOwner) queueRef.current = { owner: forOwner, due: new Set(), inFlight: new Set(), asked: new Set() };
+    return queueRef.current;
+  };
+  /** Starts reads while fewer than LOCATION_TIMELINE_CONCURRENCY are in flight; each answer starts the next. */
+  const drain = (queue: TimelineQueue) => {
+    while (queue.inFlight.size < LOCATION_TIMELINE_CONCURRENCY && queue.due.size) {
+      const date = queue.due.values().next().value as string;
+      queue.due.delete(date);
+      queue.inFlight.add(date);
+      queue.asked.add(date);
+      clientFetch(`/api/timeline?date=${encodeURIComponent(date)}`, { cache: "no-store" })
+        .then(async (response) => (response.ok ? (await response.json()) as LocationTimeline : null))
+        .catch(() => null)
+        .then((next) => {
+          queue.inFlight.delete(date);
+          // Another owner since: this answer is not theirs.
+          if (queueRef.current !== queue) return;
+          if (next && next.date === date) {
+            setLoaded((current) => {
+              const days = new Map(current.owner === queue.owner ? current.days : []);
+              days.set(date, next);
+              return { owner: queue.owner, days };
+            });
+          }
+          drain(queue);
+        });
+    }
+  };
+
+  // Any day not asked for yet is due.
+  useEffect(() => {
+    const queue = queueFor(owner);
+    for (const date of datesKey ? datesKey.split(",") : []) if (!queue.asked.has(date)) queue.due.add(date);
+    drain(queue);
+    // queueFor and drain only read and write the queue ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datesKey, owner]);
+  // The selected day and today again with each bootstrap refresh.
+  useEffect(() => {
+    const queue = queueFor(owner);
+    for (const date of liveDatesKey ? liveDatesKey.split(",") : []) if (queue.asked.has(date) && !queue.inFlight.has(date)) queue.due.add(date);
+    drain(queue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveDatesKey, liveKey, owner]);
+  // Every day again after an edit.
+  const lastStaleRef = useRef(staleKey);
+  useEffect(() => {
+    if (lastStaleRef.current === staleKey) return;
+    lastStaleRef.current = staleKey;
+    const queue = queueFor(owner);
+    for (const date of queue.asked) if (!queue.inFlight.has(date)) queue.due.add(date);
+    drain(queue);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owner, staleKey]);
+
+  return loaded.owner === owner ? loaded.days : EMPTY_TIMELINES;
+}
+
+type TimelineQueue = { owner: string; due: Set<string>; inFlight: Set<string>; asked: Set<string> };
+
+const EMPTY_TIMELINES: ReadonlyMap<string, LocationTimeline> = new Map();
 
 /** A place's span on the shown day: from where the day clips it, to its end (or "since" while you are there). */
 function timeSpan(fromMs: number, endMs: number, open: boolean, clock: ClockFormat) {

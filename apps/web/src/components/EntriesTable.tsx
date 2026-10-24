@@ -4,8 +4,10 @@ import {
   Fragment,
   type FocusEvent as ReactFocusEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
   type UIEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -220,6 +222,22 @@ function TimelineInlineTimeControl({
 const NO_CORRECTION_PLACES: readonly CorrectionPlace[] = [];
 const NO_REVIEW_ITEMS: readonly ReviewItemRow[] = [];
 
+/** Calendar › List's continuous days (owner, 24 Oct 2026): what the List needs to load weeks at either end. */
+export type ContinuousListProps = {
+  loading: "earlier" | "later" | null;
+  error: "earlier" | "later" | null;
+  reachedEarliest: boolean;
+  reachedLatest: boolean;
+  onLoad: (direction: "earlier" | "later") => void;
+  /** The selected day: the List scrolls its heading (or the nearest earlier one) to the top on each request. */
+  focusDayStartMs: number;
+  /** A new value asks for the scroll again (the selected day's key). */
+  focusRequest: string;
+};
+
+/** How far ahead of either end the List starts loading the next week. */
+const CONTINUOUS_LOAD_MARGIN_PX = 600;
+
 /** A day with nothing from location: its checks are then rows of their own. */
 function emptyDayTimeline(day: DateRange): LocationTimeline {
   return { date: "", timeZone: "", dayStart: day.start.toISOString(), dayEnd: day.end.toISOString(), items: [], openTrip: null, gaps: [] };
@@ -237,9 +255,12 @@ export function EntriesTable({
   displayRange,
   capturedNow = new Date(),
   locationTimeline = null,
+  locationTimelines,
   places = NO_CORRECTION_PLACES,
   reviewItems = NO_REVIEW_ITEMS,
-  checksDay = null
+  checksDay = null,
+  checksDays,
+  continuous
 }: {
   entries: TimeEntryRow[];
   categories: CategoryRow[];
@@ -259,6 +280,12 @@ export function EntriesTable({
   reviewItems?: readonly ReviewItemRow[];
   /** The shown day in day scope, so its checks show without the location read; null otherwise. */
   checksDay?: DateRange | null;
+  /** Calendar › List's continuous days: every shown day's location timeline, in place of `locationTimeline`. */
+  locationTimelines?: readonly LocationTimeline[];
+  /** Every shown day, so each day's checks show without its location read, in place of `checksDay`. */
+  checksDays?: readonly DateRange[];
+  /** Calendar › List's continuous days: loads weeks at either end as the List scrolls. */
+  continuous?: ContinuousListProps;
 }) {
   const router = useRouter();
   const clock = useClockFormat();
@@ -301,13 +328,97 @@ export function EntriesTable({
   // arrive after the bootstrap (Codex r1 on #572).
   const [focusedCheck, setFocusedCheck] = useState<string | null>(null);
   // Read-only location rows in time order beside the blocks (placement A); none before hydration.
-  const locationRows = useMemo(
-    // Without the location read (it failed, or hasn't arrived), the day's checks still show on rows of their own (Codex r1 on #568).
-    () => (localTimeReady ? locationListRows(locationTimeline ?? (checksDay ? emptyDayTimeline(checksDay) : null), entries,
-      { nowMs, showAll: showEveryPlace, checks: listChecks.checks }) : []),
-    [checksDay, entries, listChecks.checks, localTimeReady, locationTimeline, nowMs, showEveryPlace]
+  // One timeline per shown day: the day's location read, or (without it) an empty day so its checks still
+  // show on rows of their own (Codex r1 on #568).
+  const dayTimelines = useMemo(() => {
+    const timelines = locationTimelines ?? (locationTimeline ? [locationTimeline] : []);
+    const days = checksDays ?? (checksDay ? [checksDay] : []);
+    const read = new Set(timelines.map((timeline) => Date.parse(timeline.dayStart)));
+    return [...timelines, ...days.filter((day) => !read.has(day.start.getTime())).map(emptyDayTimeline)];
+  }, [checksDay, checksDays, locationTimeline, locationTimelines]);
+  const locationRows = useMemo(() => {
+    if (!localTimeReady) return [];
+    // A check spanning midnight is a row on its first day only.
+    const seen = new Set<string>();
+    return dayTimelines
+      .flatMap((timeline) => locationListRows(timeline, entries, { nowMs, showAll: showEveryPlace, checks: listChecks.checks }))
+      .filter((row) => (seen.has(row.key) ? false : (seen.add(row.key), true)))
+      .sort((a, b) => b.atMs - a.atMs || a.key.localeCompare(b.key));
+  }, [dayTimelines, entries, listChecks.checks, localTimeReady, nowMs, showEveryPlace]);
+  const tripByBlock = useMemo(
+    () => new Map(dayTimelines.flatMap((timeline) => [...tripsByBlockId(timeline)])),
+    [dayTimelines]
   );
-  const tripByBlock = useMemo(() => tripsByBlockId(locationTimeline), [locationTimeline]);
+  // Continuous days: a sentinel at each end loads the next week as it nears the view.
+  const earlierSentinelRef = useRef<HTMLDivElement | null>(null);
+  const laterSentinelRef = useRef<HTMLDivElement | null>(null);
+  const continuousLoading = continuous?.loading ?? null;
+  const continuousError = continuous?.error ?? null;
+  const onContinuousLoad = continuous?.onLoad;
+  const loadsEarlier = Boolean(continuous && !continuous.reachedEarliest);
+  const loadsLater = Boolean(continuous && !continuous.reachedLatest);
+  useEffect(() => {
+    const root = listScrollRef.current;
+    if (!root || !onContinuousLoad || continuousLoading || continuousError || !localTimeReady || typeof IntersectionObserver === "undefined") return;
+    // A new observer reports where each sentinel is now, so a week that still leaves it in view loads the next.
+    const observer = new IntersectionObserver((records) => {
+      for (const record of records) {
+        if (!record.isIntersecting) continue;
+        onContinuousLoad(record.target === laterSentinelRef.current ? "later" : "earlier");
+        return;
+      }
+    }, { root, rootMargin: `${CONTINUOUS_LOAD_MARGIN_PX}px 0px` });
+    if (loadsEarlier && earlierSentinelRef.current) observer.observe(earlierSentinelRef.current);
+    if (loadsLater && laterSentinelRef.current) observer.observe(laterSentinelRef.current);
+    return () => observer.disconnect();
+  }, [continuousError, continuousLoading, entries, loadsEarlier, loadsLater, localTimeReady, onContinuousLoad]);
+  // What is in view stays in place when rows are added above it (a later week, a day's places arriving):
+  // the first row in view keeps its position, in every browser (the List turns native anchoring off).
+  const scrollAnchorRef = useRef<{ element: Element; top: number } | null>(null);
+  const recordScrollAnchor = () => {
+    const root = listScrollRef.current;
+    if (!root || !continuous) return;
+    const rootTop = root.getBoundingClientRect().top;
+    const rows = root.querySelectorAll("tbody > tr");
+    for (const row of rows) {
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom > rootTop + 1) {
+        scrollAnchorRef.current = { element: row, top: rect.top - rootTop };
+        return;
+      }
+    }
+    scrollAnchorRef.current = null;
+  };
+  useLayoutEffect(() => {
+    const root = listScrollRef.current;
+    const anchor = scrollAnchorRef.current;
+    if (!root || !continuous) return;
+    // Also at the very top: a later week loading there must not pull the List up to today.
+    if (anchor && anchor.element.isConnected) {
+      const moved = anchor.element.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.top;
+      if (Math.abs(moved) >= 1) root.scrollTop += moved;
+    }
+    recordScrollAnchor();
+  });
+  // The selected day's heading (or the nearest earlier one: the List is newest first) at the top, once
+  // per request, as soon as its rows are drawn.
+  const focusDoneRef = useRef<string | null>(null);
+  const focusRequest = continuous?.focusRequest ?? null;
+  const focusDayStartMs = continuous?.focusDayStartMs ?? null;
+  useLayoutEffect(() => {
+    const root = listScrollRef.current;
+    if (!root || focusRequest === null || focusDayStartMs === null || focusDoneRef.current === focusRequest || !localTimeReady) return;
+    const headings = [...root.querySelectorAll<HTMLElement>("tr[data-day-start-ms]")];
+    if (!headings.length) return;
+    const target = headings.find((heading) => Number(heading.dataset.dayStartMs) <= focusDayStartMs);
+    focusDoneRef.current = focusRequest;
+    if (!target || target === headings[0]) {
+      root.scrollTop = 0;
+    } else {
+      root.scrollTop += target.getBoundingClientRect().top - root.getBoundingClientRect().top;
+    }
+    recordScrollAnchor();
+  });
   /** The open suggestion a location row's "?" is about, if any. */
   const checkOf = (row: LocationListRow) => {
     const id = row.kind === "check" ? row.checkId : row.kind === "place" ? row.checkIds[0] : undefined;
@@ -913,7 +1024,7 @@ export function EntriesTable({
       {inlineStatus ? <p className="sr-only" aria-live="polite" role="status">{inlineStatus}</p> : null}
 
       <div
-        aria-busy={localTimeReady ? undefined : true}
+        aria-busy={localTimeReady && !continuousLoading ? undefined : true}
         className="timeline-list-scroll"
         onFocus={(event) => {
           // Which suggestion's "?" holds focus, so it keeps it when its row is replaced (Codex r2 on #572).
@@ -921,7 +1032,11 @@ export function EntriesTable({
           const row = key ? checkRows.find((other) => other.key === key) : undefined;
           focusedToggleItem.current = row ? checkOf(row)?.id ?? null : null;
         }}
-        onScroll={onScroll}
+        data-continuous={continuous ? "true" : undefined}
+        onScroll={(event) => {
+          recordScrollAnchor();
+          onScroll(event);
+        }}
         // Focus can land on the List itself when no "?" or chip is left to take it.
         tabIndex={-1}
         ref={(element) => {
@@ -930,6 +1045,10 @@ export function EntriesTable({
         }}
       >
         {localTimeReady ? <ChecksChip count={checkRows.length} onNext={nextCheck} /> : null}
+        {continuous && localTimeReady ? (
+          <ContinuousEdge direction="later" error={continuousError === "later"} loading={continuousLoading === "later"}
+            onRetry={() => continuous.onLoad("later")} reachedEnd={continuous.reachedLatest} sentinelRef={laterSentinelRef} />
+        ) : null}
         <table className="timeline-list-table" data-clock={clock}>
           {/* Column names stay for screen readers; the rows read as Blocks rows (as on Today). */}
           {/* Column widths live here: the header row is visually hidden, so it can't size the columns. */}
@@ -979,7 +1098,8 @@ export function EntriesTable({
                       .map((day) => <ContinuedDayRows day={day} key={`continued-${day.label}`} />)
                     : null}
                   {shouldShowDate ? (
-                    <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading">
+                    <tr key={`${group.day}-${entry.id}-group`} className="timeline-list-day-heading"
+                      data-day-start-ms={dayTotals.get(group.day)?.dayStartMs}>
                       <td colSpan={4}>
                         <span>{group.day}</span>
                         <span className="tabular">{formatDuration(dayTotals.get(group.day)?.seconds ?? 0)}</span>
@@ -1228,7 +1348,11 @@ export function EntriesTable({
               : null}
           </tbody>
         </table>
-        {localTimeReady && hasLocationPlaces(locationTimeline) ? (
+        {continuous && localTimeReady ? (
+          <ContinuousEdge direction="earlier" error={continuousError === "earlier"} loading={continuousLoading === "earlier"}
+            onRetry={() => continuous.onLoad("earlier")} reachedEnd={continuous.reachedEarliest} sentinelRef={earlierSentinelRef} />
+        ) : null}
+        {localTimeReady && dayTimelines.some((timeline) => hasLocationPlaces(timeline)) ? (
           <ShowEveryPlaceToggle onToggle={() => setShowEveryPlace((current) => !current)} pressed={showEveryPlace} />
         ) : null}
         {listChecks.state.error ? <ErrorBanner message={listChecks.state.error} onDismiss={listChecks.clearError} /> : null}
@@ -1368,5 +1492,33 @@ function intervalSeconds(
     Math.round(
       ((interval.stoppedAt ? Date.parse(interval.stoppedAt) : capturedNow.getTime()) - Date.parse(interval.startedAt)) / 1000
     )
+  );
+}
+
+/**
+ * One end of Calendar › List's continuous days: an invisible sentinel that loads the next week as it
+ * nears the view, and a status line while it loads, if it fails (with Try again) or at the List's start.
+ */
+function ContinuousEdge({ direction, error, loading, onRetry, reachedEnd, sentinelRef }: {
+  direction: "earlier" | "later";
+  error: boolean;
+  loading: boolean;
+  onRetry: () => void;
+  reachedEnd: boolean;
+  sentinelRef: RefObject<HTMLDivElement | null>;
+}) {
+  const days = direction === "earlier" ? "earlier" : "later";
+  return (
+    <div className={`timeline-list-edge is-${direction}`} data-list-edge={direction}>
+      {reachedEnd ? null : <div aria-hidden="true" className="timeline-list-sentinel" ref={sentinelRef} />}
+      <p aria-live="polite" className="timeline-list-edge-status" role="status">
+        {error ? (
+          <>
+            {`Couldn't load ${days} days.`}
+            <button className="timeline-list-edge-retry" onClick={onRetry} type="button">Try again</button>
+          </>
+        ) : loading ? `Loading ${days} days…` : reachedEnd && direction === "earlier" ? "No earlier blocks." : ""}
+      </p>
+    </div>
   );
 }

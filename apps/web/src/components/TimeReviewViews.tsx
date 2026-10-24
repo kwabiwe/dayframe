@@ -97,7 +97,8 @@ import {
 } from "@/lib/calendar-click-create";
 import { calendarInitialScrollHour } from "@/lib/calendar-initial-scroll";
 import { useIsHydrated } from "@/components/useHydrationSafeNow";
-import { useLocationTimeline } from "@/components/location/LocationListRows";
+import { useLocationTimelines } from "@/components/location/LocationListRows";
+import { useCalendarListWeeks } from "@/components/useCalendarListWeeks";
 
 type CalendarHoursMode = "fullDay";
 
@@ -205,9 +206,8 @@ export function TimeReviewViews({
   } = useAppShellRuntime();
   const searchParams = useSearchParams();
   const state = timelineStateFromSearchParams(searchParams, { preference: initialPreference });
-  // The shown day's location timeline for the List (location v4 step 10), fetched again with each bootstrap refresh.
-  const locationTimeline = useLocationTimeline(state.view === "list" && state.scope === "day" ? state.date : null, data,
-    `${data.workspace.id}:${data.user.id}`);
+  const isList = state.view === "list";
+  const listOwner = `${data.workspace.id}:${data.user.id}`;
   // Saved places a location row can be corrected to (location v4 step 13): names and roles only.
   const correctionPlaces = useMemo(() => data.places.map(({ id, name, role }) => ({ id, name, role })), [data.places]);
   const preferenceState = useMemo(
@@ -241,6 +241,12 @@ export function TimeReviewViews({
   const initialTodayKeyRef = useRef(initialTodayKey);
 
   const refreshData = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+  // An edit or delete in the List also reads its loaded weeks (and their places) again.
+  const [listRefreshToken, setListRefreshToken] = useState(0);
+  const refreshList = useCallback(async () => {
+    setListRefreshToken((token) => token + 1);
     await refresh();
   }, [refresh]);
 
@@ -385,6 +391,20 @@ export function TimeReviewViews({
     navigate({ scope });
   }
 
+  // Calendar › List shows continuous days (owner, 24 Oct 2026): the selected week from the shell's data,
+  // and whole weeks before and after it, loaded as the List scrolls. The period controls don't apply.
+  const listTodayKey = hydrated ? toTimelineDateKey(capturedNow) : initialTodayKey;
+  const listWeeks = useCalendarListWeeks({
+    anchorWeekStart: ranges.week.start,
+    currentWeekStart: listTodayKey ? resolveTimelineRanges({ ...state, date: listTodayKey }).week.start : null,
+    enabled: isList && hydrated,
+    owner: listOwner,
+    refreshToken: listRefreshToken
+  });
+  const listRange = { start: listWeeks.rangeStart, end: listWeeks.rangeEnd };
+  const listDays = isList ? timelineDayKeys(listRange, listTodayKey) : NO_DAY_KEYS;
+  const listTimelines = useLocationTimelines(listDays, isList ? [state.date, ...(listTodayKey ? [listTodayKey] : [])] : NO_DAY_KEYS,
+    data, listRefreshToken, listOwner);
   const dayEntries = clipTimelineEntries(mergeTimelineEntries(
     data.dayEntries,
     data.entries,
@@ -395,7 +415,7 @@ export function TimeReviewViews({
     data.entries,
     data.activeEntry ? [data.activeEntry] : []
   ), ranges.week, capturedNow);
-  const timelineEntryIds = new Set([...dayEntries, ...weekEntries].map((entry) => entry.id));
+  const timelineEntryIds = new Set([...dayEntries, ...weekEntries, ...listWeeks.entries].map((entry) => entry.id));
   const {
     error: deleteError,
     hiddenEntryIds,
@@ -404,7 +424,7 @@ export function TimeReviewViews({
     failedDelete,
     dismissDeleteError,
     undoPendingDelete
-  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshData });
+  } = useTimelineDeleteUndo({ entryIds: timelineEntryIds, onSynced: refreshList });
   const [deletedEntrySwatch, setDeletedEntrySwatch] = useState<CSSProperties | undefined>(undefined);
   // One automatic Move deleted: offer "Don't log trips like this" (PRD D19, A4).
   const [deletedMoveEventId, setDeletedMoveEventId] = useState<string | null>(null);
@@ -418,6 +438,16 @@ export function TimeReviewViews({
   const visibleDayEntries = dayEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
   const visibleWeekEntries = weekEntries.filter((entry) => !hiddenEntryIds.has(entry.id));
   const activeEntries = state.scope === "day" ? visibleDayEntries : visibleWeekEntries;
+  // The shell's data last, so the selected week (and any block it knows newer) wins over a loaded copy.
+  const listEntries = isList
+    ? clipTimelineEntries(mergeTimelineEntries(
+      listWeeks.entries,
+      data.weekEntries,
+      data.dayEntries,
+      data.entries,
+      data.activeEntry ? [data.activeEntry] : []
+    ), listRange, capturedNow).filter((entry) => !hiddenEntryIds.has(entry.id))
+    : [];
   const dayAnalysis = analyzeTimeIntervals(
     visibleDayEntries.map((entry) => ({
       id: entry.id,
@@ -470,16 +500,22 @@ export function TimeReviewViews({
         aria-busy={isDateLoading}
         aria-label="Calendar period and view controls"
       >
-        <div className="timeline-range-navigation">
+        {/* In List the period controls don't apply (continuous days): shown, greyed and inert. */}
+        <div aria-disabled={isList || undefined} className="timeline-range-navigation" data-unused-in-list={isList || undefined}>
+          {isList ? <span className="sr-only" id="timeline-period-not-used">Not used in List</span> : null}
           <IconButton
+            aria-describedby={isList ? "timeline-period-not-used" : undefined}
+            aria-disabled={isList || undefined}
             disabled={isDateLoading}
-            label={`Previous ${state.scope}`}
-            onClick={() => navigate(shiftTimelineState(state, "previous"))}
+            label={isList ? `Previous ${state.scope}: not used in List` : `Previous ${state.scope}`}
+            onClick={() => {
+              if (!isList) void navigate(shiftTimelineState(state, "previous"));
+            }}
           >
             <ChevronLeft size={18} />
           </IconButton>
           <DatePickerPopover
-            disabled={isDateLoading}
+            disabled={isDateLoading || isList}
             label={periodLabel}
             onChange={(date) => void navigate({ date })}
             portal
@@ -488,13 +524,17 @@ export function TimeReviewViews({
             value={state.date}
           />
           <IconButton
+            aria-describedby={isList ? "timeline-period-not-used" : undefined}
+            aria-disabled={isList || undefined}
             disabled={isDateLoading}
-            label={`Next ${state.scope}`}
-            onClick={() => navigate(shiftTimelineState(state, "next"))}
+            label={isList ? `Next ${state.scope}: not used in List` : `Next ${state.scope}`}
+            onClick={() => {
+              if (!isList) void navigate(shiftTimelineState(state, "next"));
+            }}
           >
             <ChevronRight size={18} />
           </IconButton>
-          {showsToday ? null : (
+          {showsToday || isList ? null : (
             <button
               className="timeline-today-button"
               disabled={isDateLoading}
@@ -519,12 +559,16 @@ export function TimeReviewViews({
             value={state.view}
           />
           <SegmentedControl
-            ariaLabel="Calendar scope"
-            onChange={updateScope}
+            ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}
+            className={isList ? "is-unused-in-list" : undefined}
+            onChange={(scope) => {
+              if (!isList) updateScope(scope);
+            }}
             options={scopeItems.map((item) => ({
               value: item.id,
               label: item.label,
-              disabled: isDateLoading
+              disabled: isDateLoading,
+              unavailable: isList ? "Not used in List" : undefined
             }))}
             value={state.scope}
           />
@@ -564,16 +608,25 @@ export function TimeReviewViews({
         {state.view === "list" ? (
           <EntriesTable
             capturedNow={capturedNow}
-            entries={activeEntries}
+            entries={listEntries}
             categories={data.categories}
-            displayRange={ranges.active}
+            continuous={{
+              error: listWeeks.error,
+              focusDayStartMs: ranges.day.start.getTime(),
+              focusRequest: state.date,
+              loading: listWeeks.loading,
+              onLoad: listWeeks.load,
+              reachedEarliest: listWeeks.reachedEarliest,
+              reachedLatest: listWeeks.reachedLatest
+            }}
+            displayRange={listRange}
             onDeleteEntries={requestTimelineDelete}
             groupByDay
-            locationTimeline={locationTimeline}
+            locationTimelines={listDays.flatMap((day) => listTimelines.get(day) ?? [])}
             places={correctionPlaces}
             reviewItems={data.reviewItems}
-            checksDay={state.view === "list" && state.scope === "day" ? ranges.active : null}
-            onChanged={refreshData}
+            checksDays={listDays.map(timelineDayRange)}
+            onChanged={refreshList}
             onScroll={(event) => rememberScrollPosition("list", event)}
             scrollContainerRef={registerScrollContainer}
             tags={data.tags}
@@ -2376,4 +2429,23 @@ function calendarCreateTargetKind(
   return target === dayBody || (target.parentElement === dayBody && target.hasAttribute("data-calendar-future-zone"))
     ? "day-body"
     : "other";
+}
+
+const NO_DAY_KEYS: readonly string[] = [];
+
+/** The List's days, newest first, up to today (none after it). */
+function timelineDayKeys(range: { start: Date; end: Date }, todayKey: string | null) {
+  const days: string[] = [];
+  for (let day = range.start; day < range.end; day = addDays(day, 1)) {
+    const key = toTimelineDateKey(day);
+    if (todayKey && key > todayKey) break;
+    days.push(key);
+  }
+  return days.reverse();
+}
+
+/** A day key's local day. */
+function timelineDayRange(key: string) {
+  const start = startOfDay(new Date(`${key}T12:00:00`));
+  return { start, end: addDays(start, 1) };
 }
