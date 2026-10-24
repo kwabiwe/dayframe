@@ -69,6 +69,17 @@ export function calendarDenseLabel({ height, width, lineHeight, compactLineHeigh
   return { sliver, compact, detail, titleLines };
 }
 
+/**
+ * How many of a title's words to show (dense-day rules): every word up to, not including, the
+ * first one wider than the title itself, so no word is ever shown in part. Nothing measured yet
+ * (a width of 0, as before layout) cuts nothing.
+ */
+export function wholeWordsThatFit(wordWidths: readonly number[], available: number) {
+  if (!(available > 0)) return wordWidths.length;
+  const first = wordWidths.findIndex((width) => width > available);
+  return first === -1 ? wordWidths.length : first;
+}
+
 export type CalendarDrawnBlock = {
   id: string;
   /** Where the block is drawn, in the renderer's own units (px or pt), minimum height included. */

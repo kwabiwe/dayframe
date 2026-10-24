@@ -55,7 +55,7 @@ describe("Calendar readability and restart contract", () => {
     expect(timeline).toContain('className="calendar-entry-title"');
     expect(timeline).toContain('className="calendar-entry-detail-line tabular"');
     // Dense-day rules: a finished block of a minute or less is a short line, never a block.
-    expect(timeline).toContain('className="calendar-moment"');
+    expect(timeline).toContain('className={`calendar-moment${selected ? " is-selected" : ""}`}');
   });
 
   it("preserves a distinct running state and compact hover action", () => {

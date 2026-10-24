@@ -5,6 +5,7 @@ import {
   calendarDenseLabel,
   calendarDrawnExtent,
   layoutCalendarBlockColumns,
+  wholeWordsThatFit,
   type CalendarDrawnBlock
 } from "./calendarBlockLayout";
 
@@ -167,3 +168,16 @@ describe("calendar block label tiers", () => {
   });
 });
 
+describe("wholeWordsThatFit (dense-day rules)", () => {
+  it("keeps every word that fits and cuts from the first one wider than the title", () => {
+    expect(wholeWordsThatFit([40, 20, 30], 50)).toBe(3);
+    expect(wholeWordsThatFit([40, 60, 30], 50)).toBe(1);
+    expect(wholeWordsThatFit([60, 20], 50)).toBe(0);
+    expect(wholeWordsThatFit([50], 50)).toBe(1);
+  });
+
+  it("cuts nothing before layout", () => {
+    expect(wholeWordsThatFit([60, 20], 0)).toBe(2);
+    expect(wholeWordsThatFit([], 40)).toBe(0);
+  });
+});

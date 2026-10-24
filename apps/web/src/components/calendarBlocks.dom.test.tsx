@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { createElement } from "react";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewItemRow, TimeEntryRow } from "@/lib/queries";
 
@@ -95,6 +95,97 @@ describe("Calendar in Blocks", () => {
     expect(block("b").classList.contains("is-uncategorized")).toBe(true);
     expect(block("b").classList.contains("df-block")).toBe(false);
     expect(block("c").classList.contains("is-running")).toBe(true);
+  });
+
+  it("colours a suggestion from its activity's palette in both themes (Codex r1 on #579)", () => {
+    renderCalendar([], [review({
+      id: "r1", title: "Gym visit", suggestedCategoryId: "health", categoryName: "Health", categoryColor: "mint",
+      suggestedStartedAt: local(7), suggestedStoppedAt: local(8)
+    })]);
+    const link = document.querySelector<HTMLElement>(".calendar-review-block")!;
+    expect(link.style.getPropertyValue("--block")).toContain("light-dark(");
+    expect(link.style.getPropertyValue("--calendar-block-accent")).toBe("var(--block)");
+    expect(link.getAttribute("style")).not.toContain("var(--block-");
+    // Its padding sits inside the query container, so width rules match a block's.
+    expect(link.querySelector(".calendar-review-content .calendar-entry-title")).not.toBeNull();
+  });
+
+  it("never clamps more title lines than the drawn block holds, with the detail line and resize padding (Codex r1 on #579)", () => {
+    const entries = [30, 32, 33, 34, 35, 36, 37, 40, 45, 60, 95].map((minutes, index) => entry({
+      id: `m${minutes}`, description: "A long block title that wraps", startedAt: local(index + 1), stoppedAt: local(index + 1, minutes)
+    }));
+    renderCalendar(entries);
+    for (const { id } of entries) {
+      const block = document.querySelector<HTMLElement>(`[data-entry-id="${id}"]`)!;
+      const height = Number.parseFloat(block.style.height);
+      const resizeTop = block.classList.contains("can-direct-resize") ? 4 : 0;
+      const room = height - 4 - resizeTop;
+      const lines = Number(block.style.getPropertyValue("--title-lines"));
+      const detailless = Number(block.style.getPropertyValue("--title-lines-detailless"));
+      if (block.classList.contains("has-detail-room")) expect(lines * 16 + 15).toBeLessThanOrEqual(room);
+      if (!block.classList.contains("is-dense-compact")) expect(detailless * 16).toBeLessThanOrEqual(Math.max(16, room));
+      const compactLines = Number(block.style.getPropertyValue("--title-lines-compact"));
+      expect(compactLines * 13).toBeLessThanOrEqual(Math.max(13, height - 2 - (resizeTop ? 5 : 0)));
+    }
+  });
+
+  it("leaves out a word wider than its title, and every word after it, ending after a whole word (Codex r1 on #579)", () => {
+    const observed: Array<() => void> = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: () => void) { observed.push(() => this.callback()); }
+      observe() { observed.at(-1)?.(); }
+      disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function width(this: HTMLElement) {
+      return this.textContent === "Supercalifragilistic" ? 120 : 30;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function width(this: HTMLElement) {
+      return this.classList.contains("calendar-entry-title") ? 60 : 0;
+    });
+    renderCalendar([
+      entry({ id: "cut", description: "Plan Supercalifragilistic review", startedAt: local(9), stoppedAt: local(10) }),
+      entry({ id: "none", description: "Supercalifragilistic", startedAt: local(11), stoppedAt: local(12) })
+    ]);
+    const shown = (id: string) => [...document.querySelectorAll<HTMLElement>(`[data-entry-id="${id}"] .calendar-entry-word:not(.is-beyond)`)]
+      .map((word) => word.textContent);
+    expect(shown("cut")).toEqual(["Plan", "\u2026"]);
+    // No whole word fits: colour only, the name still says it all.
+    expect(shown("none")).toEqual([]);
+    expect(document.querySelector('[data-entry-id="none"] .calendar-entry-primary')!.getAttribute("aria-label")).toContain("Supercalifragilistic");
+    vi.unstubAllGlobals();
+  });
+
+  it("draws a moment across midnight at the top of its second day (Codex r1 on #579)", () => {
+    renderCalendar([entry({ id: "tick", startedAt: new Date(2026, 7, 1, 23, 59, 40).toISOString(), stoppedAt: new Date(2026, 7, 2, 0, 0, 20).toISOString() })]);
+    const moment = document.querySelector<HTMLElement>(".calendar-moment")!;
+    expect(moment.style.top).toBe("0px");
+  });
+
+  it("keeps entries in the day's order for the keyboard whether drawn as moments or blocks (Codex r1 on #579)", () => {
+    renderCalendar([
+      entry({ id: "a", description: "First", startedAt: local(9), stoppedAt: local(10) }),
+      entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() }),
+      entry({ id: "b", description: "Last", startedAt: local(11), stoppedAt: local(12) })
+    ]);
+    const stops = [...document.querySelectorAll<HTMLElement>(".calendar-entry-primary, .calendar-moment")]
+      .map((element) => element.getAttribute("aria-label")?.split(",")[0]);
+    expect(stops.map((label) => label?.split(" ")[0])).toEqual(["First", "Moment", "Last"]);
+  });
+
+  it("returns focus to a moment when its editor closes, and marks it selected while open (Codex r1 on #579)", async () => {
+    installEditorGeometry();
+    renderCalendar([entry({ id: "m", description: "Moment", startedAt: local(10, 30), stoppedAt: new Date(2026, 7, 2, 10, 30, 30).toISOString() })]);
+    const moment = document.querySelector<HTMLButtonElement>(".calendar-moment")!;
+    moment.focus();
+    await act(async () => {
+      moment.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }));
+    });
+    await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).not.toBeNull());
+    expect(document.querySelector(".calendar-moment")!.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(document.querySelector("[data-testid='calendar-compact-editor']")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(".calendar-moment")));
+    expect(document.querySelector(".calendar-moment")!.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("shows a now line on today and open suggestions as Review links in their own lane", () => {

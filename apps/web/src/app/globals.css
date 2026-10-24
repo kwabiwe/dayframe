@@ -2104,9 +2104,19 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
   hyphens: auto;
 }
 
-/* Whole words only: a word never splits across the clamp's ellipsis (one wider than its column is cut at the edge). */
+/* Whole words only: a word never splits across the clamp's ellipsis. A word wider than the whole title is
+   left out with the words after it (CalendarTitleWords), kept out of flow and unseen so it can be measured again. */
+.calendar-entry-words {
+  display: contents;
+}
+
 .calendar-entry-word {
   display: inline-block;
+}
+
+.calendar-entry-word.is-beyond {
+  position: absolute;
+  visibility: hidden;
 }
 
 .calendar-entry-detail-line {
@@ -2133,7 +2143,7 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 }
 
 .calendar-time-block.is-dense-compact .calendar-entry-primary,
-.calendar-review-block.is-dense-compact {
+.calendar-review-block.is-dense-compact .calendar-review-content {
   padding: 1px 4px 1px 7px;
 }
 
@@ -2145,7 +2155,8 @@ dialog.ui-dialog.ui-popover-panel.is-anchored {
 }
 
 @container calendar-time-block (max-width: 89.98px) {
-  .calendar-entry-primary {
+  .calendar-entry-primary,
+  .calendar-review-content {
     padding: 1px 4px 1px 7px;
   }
 
@@ -9334,7 +9345,8 @@ dialog.ui-dialog.df-palette {
   min-width: 0;
   overflow: hidden;
   border-radius: 6px;
-  padding: 2px 6px 2px 8px;
+  /* No padding here: the query container measures its own content box (see .calendar-review-content). */
+  padding: 0;
   background:
     repeating-linear-gradient(135deg, color-mix(in oklab, var(--text-primary) 16%, transparent) 0 2px, transparent 2px 7px),
     color-mix(in oklab, var(--calendar-block-accent) var(--calendar-dense-review-tint), var(--surface));
@@ -9346,6 +9358,14 @@ dialog.ui-dialog.df-palette {
 
 .calendar-review-block::before {
   background: repeating-linear-gradient(180deg, var(--calendar-block-accent) 0 4px, transparent 4px 7px);
+}
+
+.calendar-review-content {
+  display: block;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 2px 6px 2px 8px;
 }
 
 .calendar-review-mark {
@@ -9393,6 +9413,11 @@ dialog.ui-dialog.df-palette {
 .calendar-moment:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
+}
+
+/* Selected while its editor is open: a neutral ring, as a selected block's is fill-led. */
+.calendar-moment.is-selected::after {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {
