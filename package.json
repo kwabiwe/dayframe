@@ -39,7 +39,8 @@
     "validate:health-sync-units": "tsx scripts/validate-health-sync-units.ts",
     "validate:location-reliability": "tsx scripts/validate-location-reliability.ts",
     "validate:location-replay-scalability": "tsx scripts/validate-location-replay-scalability.ts",
-    "score:location": "npm run -s score -w @dayframe/location-quality --"
+    "score:location": "npm run -s score -w @dayframe/location-quality --",
+    "integration-token": "tsx scripts/integration-token.ts"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

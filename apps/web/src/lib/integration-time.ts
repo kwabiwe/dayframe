@@ -142,7 +142,9 @@ export async function getIntegrationTimeCurrentSnapshot(
     ),
     query<TodayTotalRow>(
       `with bounds as (
-         select (($3::timestamptz at time zone $4)::date at time zone $4) as day_start,
+         -- A date is cast to a wall-clock timestamp first: date at time zone would read it in the
+         -- server's zone and return a timestamp without one (off by the London offset in summer).
+         select (($3::timestamptz at time zone $4)::date::timestamp at time zone $4) as day_start,
                 ((($3::timestamptz at time zone $4)::date + interval '1 day') at time zone $4) as day_end
        )
        select coalesce(
