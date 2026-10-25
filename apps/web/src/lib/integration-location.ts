@@ -1,8 +1,8 @@
-import { LOCATION_ENGINE_V2_CONFIG } from "@dayframe/shared";
 import { query } from "./db";
 import { encodeIntegrationTimeCursor } from "./integration-time";
 import { timelineLegs } from "./location/location-timeline-service";
 import { placeDisplayNameSql } from "./place-display";
+import { getOpenTrip } from "./queries";
 import type { RequestSession } from "./session";
 
 /**
@@ -72,8 +72,9 @@ async function confirmedTrips(
        from commute_segments c
        join stay_segments fs on fs.id = c.from_stay_segment_id and fs.workspace_id = c.workspace_id and fs.user_id = c.user_id
        join stay_segments ts on ts.id = c.to_stay_segment_id and ts.workspace_id = c.workspace_id and ts.user_id = c.user_id
-       join places fp on fp.id = coalesce(fs.place_id, c.from_place_id) and fp.workspace_id = c.workspace_id
-       join places tp on tp.id = coalesce(ts.place_id, c.to_place_id) and tp.workspace_id = c.workspace_id
+       -- The stays decide the places: a correction rewrites the stay, not the trip's cached place ids (Codex r1 on #586).
+       join places fp on fp.id = fs.place_id and fp.workspace_id = c.workspace_id
+       join places tp on tp.id = ts.place_id and tp.workspace_id = c.workspace_id
       where c.workspace_id = $1 and c.user_id = $2 and c.status <> 'superseded'
         and c.started_at >= $3::timestamptz and c.started_at < $4::timestamptz
         and fp.id <> tp.id
@@ -82,6 +83,9 @@ async function confirmedTrips(
         and (not $6::boolean or fp.role = 'home')
         and (not $7::boolean or (
           c.metadata ->> 'travelMode' = 'automotive'
+          -- Legs, when the trip holds any, include a driving leg (all of this before the limit; Codex r1 on #586).
+          and (coalesce(jsonb_array_length(case when jsonb_typeof(c.metadata -> 'legs') = 'array' then c.metadata -> 'legs' end), 0) = 0
+            or exists (select 1 from jsonb_array_elements(c.metadata -> 'legs') leg where leg ->> 'mode' = 'automotive'))
           and not exists (
             select 1 from jsonb_array_elements(case when jsonb_typeof(c.metadata -> 'legs') = 'array' then c.metadata -> 'legs' else '[]'::jsonb end) leg
              where leg ->> 'mode' = any($8::text[]))))
@@ -138,14 +142,12 @@ export async function getIntegrationDrives(
   const until = now.toISOString();
   const since = new Date(now.getTime() - options.days * 86_400_000).toISOString();
   const result = await confirmedTrips(session, { since, until, limit: options.limit, homeOnly: true, drivingOnly: true });
-  const samples = result.rows.slice(0, options.limit).flatMap((row): IntegrationDriveSample[] => {
+  // Every eligibility rule is in the query, before its limit, so a page is never short of valid drives.
+  const samples = result.rows.slice(0, options.limit).map((row): IntegrationDriveSample => {
     const legs = timelineLegs(row.legs);
-    // A trip's stored legs must agree it was a drive: at least one driving leg when it has legs at all.
-    if (legs.length && !legs.some((leg) => leg.mode === "automotive")) return [];
-    if (row.fromRole !== "home" || !row.toName.trim()) return [];
     const departedAt = new Date(row.startedAt).toISOString();
     const arrivedAt = new Date(row.stoppedAt).toISOString();
-    return [{
+    return {
       routeId: driveRouteId(row.toName),
       departedAt,
       arrivedAt,
@@ -157,7 +159,7 @@ export async function getIntegrationDrives(
       durationSeconds: Math.round((Date.parse(arrivedAt) - Date.parse(departedAt)) / 1000),
       drivingSeconds: drivingSeconds(legs),
       destination: { placeId: row.toPlaceId, name: row.toName, role: row.toRole }
-    }];
+    };
   });
   return {
     ok: true,
@@ -200,8 +202,11 @@ export async function getIntegrationRoutes(
   const groups = new Map<string, { rows: ConfirmedTripRow[]; mode: string }>();
   for (const row of result.rows.slice(0, ROUTE_TRIP_READ_LIMIT)) {
     const mode = publicMode(row.travelMode);
-    // A trip whose legs name another vehicle than its own mode is not a sample of that mode.
-    if (!mode || timelineLegs(row.legs).some((leg) => leg.mode !== row.travelMode && leg.mode !== "walking")) continue;
+    // A trip whose legs name another vehicle than its own mode, or (when it has legs) none of its mode,
+    // is not a sample of that mode: a leg correction can leave a "driving" trip that was only a walk.
+    const legs = timelineLegs(row.legs);
+    if (!mode || legs.some((leg) => leg.mode !== row.travelMode && leg.mode !== "walking") ||
+      (legs.length > 0 && !legs.some((leg) => leg.mode === row.travelMode))) continue;
     const key = `${row.fromPlaceId}|${row.toPlaceId}|${mode}`;
     const group = groups.get(key) ?? { rows: [], mode };
     group.rows.push(row);
@@ -330,28 +335,29 @@ export type IntegrationCurrentPlace = {
  */
 export async function getIntegrationCurrentPlace(session: RequestSession, now = new Date()): Promise<IntegrationCurrentPlace> {
   const nowIso = now.toISOString();
-  const [stay, observed] = await Promise.all([
-    query<{ placeId: string | null; name: string | null; role: string | null; startedAt: Date; open: boolean; openTrip: boolean }>(
-      `select p.id as "placeId", ${placeDisplayNameSql("p")} as name, p.role, s.started_at as "startedAt", s.stopped_at is null as "open",
-              coalesce((s.metadata -> 'openTrip' ->> 'lastObservedAt')::timestamptz
-                >= $3::timestamptz - make_interval(secs => $4::double precision / 1000), false) as "openTrip"
+  const [stay, observed, openTrip] = await Promise.all([
+    query<{ placeId: string | null; name: string | null; role: string | null; startedAt: Date; open: boolean }>(
+      `select p.id as "placeId", ${placeDisplayNameSql("p")} as name, p.role, s.started_at as "startedAt", s.stopped_at is null as "open"
          from stay_segments s
          left join places p on p.id = s.place_id and p.workspace_id = s.workspace_id
         where s.workspace_id = $1 and s.user_id = $2 and s.status <> 'superseded' and s.client_segment_id is not null
           and s.started_at <= $3::timestamptz
         order by s.started_at desc, s.id desc
         limit 1`,
-      [session.workspaceId, session.userId, nowIso, LOCATION_ENGINE_V2_CONFIG.maxContinuityGapMs]),
+      [session.workspaceId, session.userId, nowIso]),
     query<{ observedAt: Date | null }>(
       `select max(occurred_at) as "observedAt" from location_evidence
         where workspace_id = $1 and user_id = $2 and accepted
           and occurred_at >= $3::timestamptz - interval '1 day' and occurred_at <= $3::timestamptz`,
-      [session.workspaceId, session.userId, nowIso])
+      [session.workspaceId, session.userId, nowIso]),
+    // The journey in progress, read as bootstrap reads it: an older replay may supersede its origin stay
+    // while keeping the newer journey (Codex r1 on #586).
+    getOpenTrip(session, nowIso)
   ]);
   const row = stay.rows[0];
   const observedAt = observed.rows[0]?.observedAt ? new Date(observed.rows[0].observedAt).toISOString() : null;
   const stale = !observedAt || now.getTime() - Date.parse(observedAt) > INTEGRATION_LOCATION_FRESH_MS;
-  const travelling = Boolean(row?.openTrip);
+  const travelling = openTrip != null;
   const atPlace = row && row.open && !travelling ? row : null;
   return {
     place: atPlace?.placeId && atPlace.name ? { id: atPlace.placeId, name: atPlace.name, role: atPlace.role } : null,

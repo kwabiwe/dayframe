@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import pg from "pg";
 import type { RequestSession } from "./session";
 
@@ -100,6 +100,21 @@ describeWithDatabase("integration location and summary reads on disposable Postg
     await trip("unknown-place", { d: 15, from: homeId, to: null, block: "confirmed" });
     await trip("member-drive", { d: 16, from: homeId, to: poolId, owner: memberId, block: "confirmed" });
     await trip("stranger-drive", { d: 17, from: otherHomeId, to: otherPoolId, ws: otherWorkspaceId, owner: strangerId, block: "confirmed" });
+    // Corrections rewrite the stays, not the trip's cached place ids (Codex r1 on #586): an origin and a
+    // destination corrected to unknown keep from/to_place_id, and a leg correction leaves only a walk.
+    await trip("corrected-origin", { d: 18, from: null, to: poolId, block: "confirmed" });
+    await trip("corrected-destination", { d: 19, from: homeId, to: null, block: "confirmed" });
+    await db.query(`update commute_segments set from_place_id = $1, to_place_id = $2
+      where client_segment_id in ('corrected-origin', 'corrected-destination') and workspace_id = $3`, [homeId, poolId, workspaceId]);
+    await trip("walk-legs", { d: 20, from: homeId, to: poolId, block: "confirmed", metadata: { travelMode: "automotive", legs: [
+      { startedAt: day(20, 520), stoppedAt: day(20, 535), mode: "walking", confidence: "sure", distanceMeters: 1200, setByYou: true }] } });
+    // The member is travelling: an older replay superseded the origin stay but kept the newer journey.
+    await db.query(
+      `insert into stay_segments (workspace_id, user_id, client_segment_id, device_id, place_id, status, started_at, stopped_at, centre, metadata)
+       values ($1, $2, 'member-origin', 'device-1', $3, 'superseded', '2026-10-25T10:00:00.000Z', '2026-10-25T11:00:00.000Z',
+         ST_SetSRID(ST_MakePoint(20, 10), 4326)::geography, $4::jsonb)`,
+      [workspaceId, memberId, homeId, JSON.stringify({ openTrip: { startedAt: "2026-10-25T11:00:00.000Z",
+        lastObservedAt: "2026-10-25T11:55:00.000Z", travelMode: "automotive" } })]);
 
     // Now: at Home since 09:00 on the 25th, last seen 11:50; an unknown stay before it.
     await stay(workspaceId, userId, null, "2026-10-25T06:00:00.000Z", "2026-10-25T08:30:00.000Z");
@@ -169,6 +184,9 @@ describeWithDatabase("integration location and summary reads on disposable Postg
     const limited = await getIntegrationDrives(session, { days: 180, limit: 2, now });
     expect(limited.samples).toHaveLength(2);
     expect(limited.truncated).toBe(true);
+    // Newer ineligible trips never use up the limit (Codex r1 on #586).
+    const one = await getIntegrationDrives(session, { days: 180, limit: 1, now });
+    expect(one.samples.map((sample) => sample.provenance)).toEqual(["dayframe-location-drive:drive-3"]);
     const recent = await getIntegrationDrives(session, { days: 22, limit: 1000, now });
     expect(recent.samples.map((sample) => sample.provenance)).toEqual(["dayframe-location-drive:drive-3"]);
   });
@@ -211,7 +229,8 @@ describeWithDatabase("integration location and summary reads on disposable Postg
       observedAt: "2026-10-25T11:50:00.000Z", stale: false });
     const later = await getIntegrationCurrentPlace(session, new Date("2026-10-25T13:00:00.000Z"));
     expect(later.stale).toBe(true);
-    expect(await getIntegrationCurrentPlace({ ...session, userId: memberId }, now)).toMatchObject({ observedAt: null, stale: true });
+    expect(await getIntegrationCurrentPlace({ ...session, userId: memberId }, now)).toEqual({
+      place: null, since: null, travelling: true, observedAt: null, stale: true });
   });
 
   it("summarises the London day across the clock change, logged entries only", async () => {
@@ -226,6 +245,17 @@ describeWithDatabase("integration location and summary reads on disposable Postg
       { id: categoryId, name: "Family", color: "rose", seconds: 1800, entryCount: 1 }]);
     const week = await getIntegrationTimeSummary(session, { period: "week", date: "2026-10-21", now });
     expect(week).toMatchObject({ date: "2026-10-19", range: { from: "2026-10-18T23:00:00.000Z", to: "2026-10-26T00:00:00.000Z" } });
+  });
+
+  it("counts today's London time from 23:00 UTC on the day the clocks go back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    try {
+      const { getIntegrationTimeCurrentSnapshot } = await import("./integration-time");
+      // Family 23:00–23:30Z (1,800 s), the awaiting-Review half hour (1,800 s) and the running hour (3,600 s).
+      expect((await getIntegrationTimeCurrentSnapshot(session)).todaySeconds).toBe(7200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts open Review cards by kind for this user only", async () => {
