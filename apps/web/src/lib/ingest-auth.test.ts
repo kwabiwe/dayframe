@@ -109,6 +109,26 @@ describe("resolveRequestSession", () => {
     )).rejects.toMatchObject({ status: 403, code: "insufficient_scope" });
   });
 
+  it("keeps location:read separate from time:read on bearer integration tokens", async () => {
+    process.env.DAYFRAME_AUTH_MODE = "provider";
+    delete process.env.DAYFRAME_INGEST_TOKEN;
+    mocks.query.mockResolvedValueOnce({
+      rows: [{
+        id: "token-1",
+        userId: "00000000-0000-4000-8000-000000000001",
+        workspaceId: "00000000-0000-4000-8000-000000000010",
+        scopes: ["time:read"]
+      }]
+    });
+
+    await expect(resolveRequestSession(
+      new Request("https://dayframe.test/api/integrations/v1/location/drives", {
+        headers: { Authorization: "Bearer time-only-token" }
+      }),
+      { allowIngestToken: true, allowBearerIntegrationToken: true, requiredScopes: ["location:read"] }
+    )).rejects.toMatchObject({ status: 403, code: "insufficient_scope" });
+  });
+
   it("returns a typed 403 when a valid session lacks a required scope", async () => {
     await expect(
       resolveRequestSession(new Request("https://dayframe.test/api/export"), {
