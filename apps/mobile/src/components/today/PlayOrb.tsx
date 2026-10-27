@@ -30,6 +30,9 @@ import { PrimaryTimerGlyph } from "../PrimaryTimerAction";
 import { ActivityIcon } from "../icons/DayframeIcon";
 
 const RING = { inset: 5, stroke: 3, opacity: 0.55 } as const;
+/** A bloom bubble's corner radius, and the running bubble's ring: concentric, 4 points outside it. */
+const BUBBLE_RADIUS = 18;
+const RUNNING_RING_GAP = 4;
 const SCRIM = { dark: "rgba(3, 6, 14, 0.66)", light: "rgba(17, 20, 29, 0.55)" } as const;
 /** Under Reduce Transparency there is no blur; the scrim alone hides what's behind a little more. */
 const SCRIM_SOLID = { dark: "rgba(3, 6, 14, 0.8)", light: "rgba(17, 20, 29, 0.7)" } as const;
@@ -535,21 +538,21 @@ const styles = StyleSheet.create({
   labelEyebrow: { color: "rgba(255, 255, 255, 0.7)", fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   labelTitle: { color: "#FFFFFF", fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 40, letterSpacing: -1.2, lineHeight: 42 },
   labelHint: { color: "rgba(255, 255, 255, 0.75)", fontSize: 14 },
-  // The ring sits 4 points outside the bubble, in white: it reads on every tile colour over the dark scrim.
+  // The ring sits outside the bubble, in white: it reads on every tile colour over the dark scrim.
   bubbleRunningRing: {
     borderColor: "#FFFFFF",
-    borderRadius: 22,
+    borderRadius: BUBBLE_RADIUS + RUNNING_RING_GAP,
     borderWidth: 2.5,
-    bottom: -4,
-    left: -4,
+    bottom: -RUNNING_RING_GAP,
+    left: -RUNNING_RING_GAP,
     position: "absolute",
-    right: -4,
-    top: -4,
+    right: -RUNNING_RING_GAP,
+    top: -RUNNING_RING_GAP,
   },
   bubbleSlot: { height: PLAY_ORB.bubbleSize, position: "absolute", width: PLAY_ORB.bubbleSize },
   bubble: {
     alignItems: "center",
-    borderRadius: 18,
+    borderRadius: BUBBLE_RADIUS,
     flex: 1,
     justifyContent: "center",
     shadowColor: "#000000",
