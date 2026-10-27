@@ -10,6 +10,7 @@ import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
   outingMutationFor,
   reviewCardCategory,
+  hasV2Evidence,
   reviewDefaultName,
   reviewMutationFor,
   reviewOutings,
@@ -201,8 +202,10 @@ export function CheckQuestionRow({
   const detail = visited ? when ?? reviewSourceLabel(picture)
     : span ? `${formatDuration(Math.round((span.stopMs - span.startMs) / 1000))} · ${reviewSourceLabel(picture)}` : reviewSourceLabel(picture);
   // Yes confirms what it asks: a trip, a place it names, or anything else as suggested. A place it cannot
-  // name is answered with Edit.
-  const canConfirm = !visited || visited.guess != null;
+  // name is answered with Edit; one from before Location V2 has no editor here, so it keeps "Log …" (Codex r1
+  // on #594).
+  const legacyUnnamed = Boolean(visited && visited.guess == null && !hasV2Evidence(item));
+  const canConfirm = !visited || visited.guess != null || legacyUnnamed;
   return (
     // Keyed by its suggestion, so the List finds it again when its row is rebuilt (a day's places
     // arriving turn its own "?" row into a place row's; Codex r8 on #584).
@@ -216,7 +219,7 @@ export function CheckQuestionRow({
                 stays for Play/Stop and live recording. An outing's trips there and back are logged with it. */}
             {canConfirm ? (
               <button className="ui-button timeline-check-log is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
-                {trip || visited ? "Yes" : `Log ${reviewDefaultName(item)}`}
+                {(trip || visited) && !legacyUnnamed ? "Yes" : `Log ${reviewDefaultName(item)}`}
               </button>
             ) : null}
             {(trip || visited) && onEdit ? (

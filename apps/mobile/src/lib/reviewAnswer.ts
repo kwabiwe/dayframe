@@ -87,7 +87,8 @@ function reviewAnswerWords(
   if (options.outing || isLocationReviewItem(item)) {
     const { question, guess } = placeQuestion(item.title);
     const edit = hasV2LocationEvidence(item);
-    return { question, detail: window, logLabel: guess ? "Yes" : null, skipLabel: "Not now", more: edit,
+    // A place from before Location V2 has no editor to name it: it keeps "Log it" (Codex r1 on #594).
+    return { question, detail: window, logLabel: guess ? "Yes" : edit ? null : "Log it", skipLabel: "Not now", more: edit,
       ...(edit ? { moreLabel: "Edit" } : {}), opens: false };
   }
   return {

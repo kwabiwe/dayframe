@@ -211,6 +211,16 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
+  it("keeps Log for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
+    const legacy = suggestion("00000000-0000-4000-8000-0000000000a9", { title: "Unknown place", eventSource: "geofence_specific",
+      suggestedStartedAt: at(10), suggestedStoppedAt: at(11) });
+    render(<EntriesTable {...baseProps()} entries={[entry("planning", "Planning", at(11), at(11, 45))]} reviewItems={[legacy]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log Unknown place" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
   it("moves from one check to the next with the chip", async () => {
     renderList();
     fireEvent.click(await screen.findByRole("button", { name: "3 to check" }));

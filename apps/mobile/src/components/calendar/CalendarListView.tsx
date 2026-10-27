@@ -532,7 +532,7 @@ function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
           </Pressable>
         ) : null}
         {edit && onMore ? (
-          <Pressable accessibilityHint="Opens the trip on its own screen to edit it" accessibilityRole="button" onPress={onMore}
+          <Pressable accessibilityHint="Opens it on its own screen to edit it" accessibilityRole="button" onPress={onMore}
             testID="calendar-list-answer-edit"
             style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.moreLabel}</Text>

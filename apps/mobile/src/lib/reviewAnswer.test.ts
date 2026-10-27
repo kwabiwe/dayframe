@@ -58,6 +58,12 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
     });
   });
 
+  it("keeps Log it for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
+    expect(reviewAnswerQuestion(item({ eventType: "unknown_stay", eventSource: "geofence_specific", title: "Unknown place" }), "24h")).toEqual({
+      question: "Where were you?", detail: "10:00–11:30", logLabel: "Log it", skipLabel: "Not now", more: false, opens: false
+    });
+  });
+
   it("asks where you were when it cannot name the place: Edit names it, there is no Yes (card B)", () => {
     expect(reviewAnswerQuestion({ ...locationV2, title: "Unknown place" }, "24h")).toEqual({
       question: "Where were you?", detail: "10:00–11:30", logLabel: null, skipLabel: "Not now", more: true, moreLabel: "Edit", opens: false
