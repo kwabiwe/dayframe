@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { DAYFRAME_APP_ICONS, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
+import { DAYFRAME_APP_ICONS, placeQuestion, type ClockFormat, type ListCheck, type LocationListRow } from "@dayframe/shared";
 import { CheckToggle, TripModesLine } from "@/components/location/LocationListRows";
 import { DayframeIcon } from "@/components/blocks/DayframeIcon";
 import { useReviewDecisions } from "@/components/review/useReviewDecisions";
@@ -9,9 +9,8 @@ import { formatDuration, formatTime } from "@/lib/format";
 import type { CategoryRow, ReviewItemRow } from "@/lib/queries";
 import {
   outingMutationFor,
-  outingSummary,
-  type ReviewOuting,
   reviewCardCategory,
+  hasV2Evidence,
   reviewDefaultName,
   reviewMutationFor,
   reviewOutings,
@@ -164,28 +163,23 @@ export function ChecksChip({ count, onNext }: { count: number; onNext: () => voi
 
 /**
  * A suggestion's question under its row, with the deck's answers. A trip asks by its title, "Getting
- * around, 14:44–16:31?", with Yes, Edit (its editor, opened under the question) and Not now (card A).
+ * around, 14:44–16:31?", with Yes, Edit (its editor, opened under the question) and Not now (card A); a
+ * place asks "Visited {guess}?" (or "Where were you?") with its times, and the same answers (card B).
  */
 export function CheckQuestionRow({
   clock,
   editor,
   item,
   onAnswer,
-  onEdit,
-  onPickPlace,
-  outing
+  onEdit
 }: {
   clock: ClockFormat;
-  /** The trip's editor while it is open, under the question. */
+  /** The trip's or place's editor while it is open, under the question. */
   editor?: ReactNode;
   item: ReviewItemRow;
-  /** The trips there and back this answer decides too, as the deck shows them. */
-  outing?: ReviewOuting;
   onAnswer: (kind: ReviewDecisionKind) => void;
-  /** Open (or close) a trip's editor. */
+  /** Open (or close) the trip's or place's editor. */
   onEdit?: () => void;
-  /** Correct the place first (step 13): the suggestion then offers the place you picked. */
-  onPickPlace?: () => void;
 }) {
   const span = reviewWindow(item);
   const when = span ? `${formatTime(new Date(span.startMs), clock)}–${formatTime(new Date(span.stopMs), clock)}` : null;
@@ -200,10 +194,18 @@ export function CheckQuestionRow({
     if (wasEditing.current && !editing) editRef.current?.focus();
     wasEditing.current = editing;
   }, [editing]);
-  const question = !trip && picture === "place"
-    ? `Where were you${when ? `, ${when}` : ""}?`
-    : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
-  const detail = span ? `${formatDuration(Math.round((span.stopMs - span.startMs) / 1000))} · ${reviewSourceLabel(picture)}` : reviewSourceLabel(picture);
+  // A place asks "Visited {guess}?" (or "Where were you?") with its times under it (card B); anything
+  // else asks by its title with its times.
+  const place = !trip && picture === "place";
+  const visited = place ? placeQuestion(reviewTitle(item)) : null;
+  const question = visited ? visited.question : `${reviewTitle(item)}${when ? `, ${when}` : ""}?`;
+  const detail = visited ? when ?? reviewSourceLabel(picture)
+    : span ? `${formatDuration(Math.round((span.stopMs - span.startMs) / 1000))} · ${reviewSourceLabel(picture)}` : reviewSourceLabel(picture);
+  // Yes confirms what it asks: a trip, a place it names, or anything else as suggested. A place it cannot
+  // name is answered with Edit; one from before Location V2 has no editor here, so it keeps "Log …" (Codex r1
+  // on #594).
+  const legacyUnnamed = Boolean(visited && visited.guess == null && !hasV2Evidence(item));
+  const canConfirm = !visited || visited.guess != null || legacyUnnamed;
   return (
     // Keyed by its suggestion, so the List finds it again when its row is rebuilt (a day's places
     // arriving turn its own "?" row into a place row's; Codex r8 on #584).
@@ -212,17 +214,17 @@ export function CheckQuestionRow({
         <div className="timeline-check-question" role="group" aria-label={question}>
           <b>{question}</b>
           <small>{detail}</small>
-          {outing ? <small>With its trips: {outingSummary(outing)}. Your answer covers them too.</small> : null}
           <div className="timeline-check-answers">
             {/* Card D item 9: the answer is a neutral dark pill on the inset surface, as on iPhone; coral
-                stays for Play/Stop and live recording. */}
-            <button className="ui-button timeline-check-log is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
-              {trip ? "Yes" : `Log ${reviewDefaultName(item)}`}
-            </button>
-            {trip && onEdit ? (
+                stays for Play/Stop and live recording. An outing's trips there and back are logged with it. */}
+            {canConfirm ? (
+              <button className="ui-button timeline-check-log is-compact" disabled={!span} onClick={() => onAnswer("log")} type="button">
+                {(trip || visited) && !legacyUnnamed ? "Yes" : `Log ${reviewDefaultName(item)}`}
+              </button>
+            ) : null}
+            {(trip || visited) && onEdit ? (
               <button aria-expanded={editing} className="ui-button ui-button-secondary is-compact" onClick={onEdit} ref={editRef} type="button">Edit</button>
             ) : null}
-            {onPickPlace ? <button className="ui-button ui-button-secondary is-compact" onClick={onPickPlace} type="button">Pick a place…</button> : null}
             <button className="ui-button ui-button-ghost is-compact" onClick={() => onAnswer("skip")} type="button">Not now</button>
           </div>
           {editor}

@@ -53,7 +53,7 @@ import { hasLocationPlaces, locationListRows, tripsByBlockId, type LocationListR
 import { LocationCorrectionDialog, type CorrectionPlace, type LocationCorrectionTarget } from "@/components/location/LocationCorrectionDialog";
 import { CheckQuestionRow, CheckRowView, ChecksChip, useListChecks } from "@/components/location/ListChecks";
 import { LocationReviewPanel } from "@/components/location/LocationReviewPanel";
-import { hasV2Evidence } from "@/lib/review-deck";
+import { hasV2Evidence, reviewPicture } from "@/lib/review-deck";
 import { BlocksToast } from "@/components/blocks/BlocksToast";
 import { ErrorBanner } from "@/components/blocks/ErrorBanner";
 import { blockStyle } from "@/lib/block-style";
@@ -530,14 +530,13 @@ export function EntriesTable({
     // The List's own transition owns every change a "?" makes (open, close, answer, Undo); none with Reduce Motion.
     const check = item ? { expanded, onToggle: () => applyTimelineRegroup(() => setFocusedCheck((current) => current === item.id ? null : item.id)) }
       : undefined;
-    const label = row.kind === "place" ? row.place.name ?? "Unknown place" : "";
     return (
       <Fragment key={row.key}>
         {row.kind === "check"
           ? item && check ? <CheckRowView check={check} clock={clock} item={item} row={row} /> : null
           : <LocationListRowView check={check} clock={clock} nowMs={nowMs} onCorrect={correctPlace} row={row} />}
         {item && expanded ? (
-          <CheckQuestionRow clock={clock} item={item} outing={listChecks.outings.get(item.id)}
+          <CheckQuestionRow clock={clock} item={item}
             editor={editingCheck === item.id ? (
               <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
                 // Only its own editor: a late save closes after resolving, by then perhaps over another trip's
@@ -554,7 +553,7 @@ export function EntriesTable({
                 }}
                 reviewItemId={item.id} />
             ) : undefined}
-            onEdit={item.eventType === "commute_detected" && hasV2Evidence(item)
+            onEdit={hasV2Evidence(item) && (item.eventType === "commute_detected" || reviewPicture(item) === "place")
               ? () => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : item.id)) : undefined}
             onAnswer={(kind) => {
               // Focus goes to the next "?" down the List, else the chip, else the List itself (Codex r1 on #568).
@@ -564,8 +563,7 @@ export function EntriesTable({
                 setFocusedCheck(null);
               });
               focusCheck(following?.key ?? null);
-            }}
-            onPickPlace={row.kind === "place" && !row.place.blockIds.length ? () => correctPlace(row.place, label) : undefined} />
+            }} />
         ) : null}
       </Fragment>
     );

@@ -340,6 +340,19 @@ export async function readPendingTimeEntryCommands(
   return all.filter((command) => mobileAccountOwnersEqual(command, resolvedOwner));
 }
 
+/**
+ * Whether this one command is now a sync issue (permanently rejected, or refused at enqueue). An
+ * edit's "not saved" feedback asks about its own command: other, older issues on the account stay in
+ * Settings › Sync help and the avatar badge, not in every later edit's result.
+ */
+export async function isTimeEntryCommandRejected(
+  owner: MobileAccountOwner,
+  clientCommandId: string
+) {
+  return (await readPendingTimeEntryCommands(owner)).some((command) =>
+    command.clientCommandId === clientCommandId && command.failureKind === "permanent");
+}
+
 export async function resolvePendingTimeEntryCommandTargets(
   owner: MobileAccountOwner,
   correlations: ReadonlyMap<string, string>
