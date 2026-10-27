@@ -159,4 +159,14 @@ describe("timeline corrections (location v4 step 11)", () => {
     expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "boat" })).toBe(false);
     expect(parse({ kind: "split", subject: "place", itemId: "a" })).toBe(false);
   });
+
+  it("carries the app's own id for a correction, a UUID, so a retry is safe (step 12)", () => {
+    const parse = (value: unknown) => TimelineCorrectionRequestSchema.safeParse(value);
+    const id = "8b0d8c8e-5d0f-4c5e-9f0e-3b1c2d3e4f50";
+    expect(parse({ kind: "delete", subject: "trip", itemId: "t", clientCorrectionId: id }).data).toMatchObject({ clientCorrectionId: id });
+    expect(parse({ kind: "place", subject: "place", itemId: "a", placeId: null, learnedPlaceId: null, clientCorrectionId: id }).success).toBe(true);
+    expect(parse({ kind: "times", subject: "place", itemId: "a", startedAt: at(1), stoppedAt: at(2), clientCorrectionId: id }).success).toBe(true);
+    expect(parse({ kind: "leg_mode", subject: "leg", itemId: "t", legStartedAt: at(70), legStoppedAt: at(90), mode: "bus", clientCorrectionId: id }).success).toBe(true);
+    expect(parse({ kind: "delete", subject: "trip", itemId: "t", clientCorrectionId: "retry-1" }).success).toBe(false);
+  });
 });
