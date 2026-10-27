@@ -137,7 +137,8 @@ export function QuickStartMosaic({
           accessibilityRole="header"
           style={[styles.heading, { color: theme.textPrimary }]}
         >
-          {timerRunning ? "Switch to" : "Start a block"}
+          {/* Card D item 10: the section is "Your activities"; the coral pill alone says "Start a block". */}
+          {timerRunning ? "Switch to" : "Your activities"}
         </Text>
         <Text {...mobileTextProps("metadata")} style={[styles.caption, { color: theme.textSecondary }]}>
           Sized by the last 7 days

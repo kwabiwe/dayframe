@@ -763,7 +763,7 @@ export function TimeEntryQuickEditorPanel({
           ) : null}
         </div>
         {/* The block's own actions as icon buttons, top right (owner, 21 Oct 2026, superseding
-            WUI-006's footer pills): ↺ Start again · trash Delete (Discard while running) · gap · ✕,
+            WUI-006's footer pills): ▶ Start again · trash Delete (Discard while running) · gap · ✕,
             with the registry glyphs and tooltips the List and Today rows use. */}
         <div className="calendar-compact-editor-icons">
           {entry?.stoppedAt && props.mode === "entry" && props.onStartAgain ? (
@@ -776,7 +776,7 @@ export function TimeEntryQuickEditorPanel({
               disabled={controlsDisabled || props.isTimerBusy}
               onClick={() => void controller.startAgain()}
             >
-              <DayframeIcon glyph="rotate-ccw" size={18} />
+              <DayframeIcon fill="currentColor" glyph="play" size={15} strokeWidth={0} />
             </button>
           ) : null}
           {props.mode === "entry" && props.onDelete ? (

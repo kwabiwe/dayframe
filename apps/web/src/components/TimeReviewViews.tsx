@@ -75,7 +75,6 @@ import {
 import { reportsHrefForCustomRange } from "@/lib/report-filters";
 import { calendarHeadModel } from "@/lib/calendar-head";
 import { CalendarHead } from "@/components/calendar/CalendarHead";
-import { CalendarViewMenu } from "@/components/calendar/CalendarViewMenu";
 import type {
   CalendarEntryCompactCreatePlan,
   CalendarEntryCompactSavePlan
@@ -116,6 +115,10 @@ const CALENDAR_CREATE_NOTICE_EXIT_MS = 160;
 const scopeItems: Array<{ id: TimelineScope; label: string }> = [
   { id: "day", label: "Day" },
   { id: "week", label: "Week" }
+];
+const viewItems: Array<{ id: TimelineView; label: string }> = [
+  { id: "calendar", label: "Calendar" },
+  { id: "list", label: "List" }
 ];
 
 const calendarHourModes: Record<CalendarHoursMode, { label: string; startHour: number; endHour: number }> = {
@@ -452,14 +455,6 @@ export function TimeReviewViews({
       data.activeEntry ? [data.activeEntry] : []
     ), listRange, capturedNow).filter((entry) => !hiddenEntryIds.has(entry.id))
     : [];
-  const dayAnalysis = analyzeTimeIntervals(
-    visibleDayEntries.map((entry) => ({
-      id: entry.id,
-      startedAt: entry.startedAt,
-      stoppedAt: entry.stoppedAt
-    })),
-    { range: ranges.day, now: capturedNow }
-  );
   const weekAnalysis = analyzeTimeIntervals(
     visibleWeekEntries.map((entry) => ({
       id: entry.id,
@@ -474,13 +469,10 @@ export function TimeReviewViews({
   const periodLabel = formatTimelinePeriodLabel(state.scope, ranges, todayKey);
   const showsToday = todayKey === null
     || (todayKey >= toTimelineDateKey(ranges.active.start) && todayKey < toTimelineDateKey(ranges.active.end));
-  const dayReportFrom = toTimelineDateKey(ranges.day.start);
-  const dayReportTo = toTimelineDateKey(addDays(ranges.day.end, -1));
   const weekReportFrom = toTimelineDateKey(ranges.week.start);
   const weekReportTo = toTimelineDateKey(addDays(ranges.week.end, -1));
 
   const headModel = calendarHeadModel({
-    dayLoggedSeconds: dayAnalysis.totalLoggedSeconds,
     entries: visibleWeekEntries,
     hydrated,
     nowMs: capturedNow.getTime(),
@@ -492,15 +484,12 @@ export function TimeReviewViews({
 
   return (
     <section className="timeline-workspace">
-      <CalendarHead
-        dayReportHref={reportsHrefForCustomRange(dayReportFrom, dayReportTo)}
-        disabled={isDateLoading}
-        model={headModel}
-        onSelectDay={(date) => void navigate({ date })}
-        weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
-      />
+      {/* #259 (owner, 27 Oct 2026): one compact row — ‹ date › Today, the week strip with its day and
+          week totals, Day | Week and Calendar | List — wrapping only where the screen is too narrow.
+          The month stays the page's heading for assistive tech; the period label shows the date. */}
+      <h1 className="sr-only">{headModel.month}</h1>
       <section
-        className="timeline-range-toolbar"
+        className="timeline-range-toolbar df-cal-toolbar"
         aria-busy={isDateLoading}
         aria-label="Calendar period and view controls"
       >
@@ -539,15 +528,13 @@ export function TimeReviewViews({
           >
             <ChevronRight size={18} />
           </IconButton>
-          {showsToday && !isList ? null : (
+          {/* List has its own way back to today (it scrolls there), so only the grid shows this one. */}
+          {showsToday || isList ? null : (
             <button
-              aria-disabled={isList || undefined}
-              aria-label={isList ? "Today, not used in List" : undefined}
               className="timeline-today-button"
-              data-tip={isList ? "Not used in List" : undefined}
               disabled={isDateLoading}
               onClick={() => {
-                if (!isList && todayKey) void navigate({ date: todayKey });
+                if (todayKey) void navigate({ date: todayKey });
               }}
               type="button"
             >
@@ -556,9 +543,14 @@ export function TimeReviewViews({
           )}
         </div>
 
+        <CalendarHead
+          disabled={isDateLoading}
+          model={headModel}
+          onSelectDay={(date) => void navigate({ date })}
+          weekReportHref={reportsHrefForCustomRange(weekReportFrom, weekReportTo)}
+        />
+
         <div className="timeline-range-controls">
-          {/* Calendar v3: one round button opening Calendar and List (no Multi Day). */}
-          <CalendarViewMenu disabled={isDateLoading} onChange={updateView} value={state.view} />
           <SegmentedControl
             ariaLabel={isList ? "Calendar scope, not used in List" : "Calendar scope"}
             className={isList ? "is-unused-in-list" : undefined}
@@ -572,6 +564,14 @@ export function TimeReviewViews({
               unavailable: isList ? "Not used in List" : undefined
             }))}
             value={state.scope}
+          />
+          {/* Card C item 5 (owner, 25 Oct 2026): a visible Calendar | List switch like Day | Week; the
+              round view-icon menu is the iPhone's only. */}
+          <SegmentedControl
+            ariaLabel="Calendar view"
+            onChange={updateView}
+            options={viewItems.map((item) => ({ value: item.id, label: item.label, disabled: isDateLoading }))}
+            value={state.view}
           />
         </div>
       </section>
@@ -1453,6 +1453,24 @@ export function CalendarReview({
   const nowTop = localTimeReady && visibleDays.some(isToday)
     ? Math.round(((minutesFromDate(capturedNow) - calendarHours.startHour * 60) / 60) * rowHeight)
     : null;
+  // #255 (owner, 27 Oct 2026): an hour label hides only where the now pill actually covers its text,
+  // measured as drawn (a wide gutter fits "06:00" beside a 05:57 pill; a phone's narrow one doesn't).
+  // Measured once per minute, zoom step or gutter resize, never per frame.
+  const timeAxisRef = useRef<HTMLDivElement | null>(null);
+  const [coveredAxisLabel, setCoveredAxisLabel] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const axis = timeAxisRef.current;
+    if (!axis || nowTop === null) {
+      setCoveredAxisLabel(null);
+      return undefined;
+    }
+    const measure = () => setCoveredAxisLabel(axisLabelUnderNowPill(axis));
+    measure();
+    if (typeof ResizeObserver !== "function") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(axis);
+    return () => observer.disconnect();
+  }, [axisMarks, clock, nowTop]);
 
   return (
     <section className="timeline-calendar-workspace">
@@ -1547,7 +1565,7 @@ export function CalendarReview({
             );
           })}
 
-          <div className="calendar-time-axis" style={{ height: calendarHeight }}>
+          <div className="calendar-time-axis" ref={timeAxisRef} style={{ height: calendarHeight }}>
             {nowTop !== null ? (
               <span
                 aria-hidden="true"
@@ -1571,11 +1589,12 @@ export function CalendarReview({
                 />
                 <span
                   className={`tabular absolute left-0 right-0 px-2 pt-1 text-xs text-[var(--muted)]${
-                    // Calendar v3: the now pill takes the place of the hour label it would cover.
-                    nowTop !== null && Math.abs(nowTop - mark.top) < 12 ? " calendar-axis-label-under-now" : ""}`}
+                    // Calendar v3: the now pill takes the place of the hour label it covers (#255: only then).
+                    nowTop !== null && coveredAxisLabel === mark.key ? " calendar-axis-label-under-now" : ""}`}
+                  data-axis-label={mark.key}
                   style={{ top: mark.labelTop }}
                 >
-                  {mark.label}
+                  <span>{mark.label}</span>
                 </span>
               </div>
             ))}
@@ -2428,6 +2447,22 @@ function formatCalendarAxisMinutes(minutes: number, clock: ClockFormat, exact = 
   const minute = minutes % 60;
   if (clock === "12h" && minute === 0 && !exact) return formatClockHour(hour, clock);
   return formatClockParts(hour, minute, clock);
+}
+
+/** The hour label whose text the now pill covers, as drawn (#255), or null when every label is clear. */
+function axisLabelUnderNowPill(axis: HTMLElement): string | null {
+  const pill = axis.querySelector(".calendar-now-pill")?.getBoundingClientRect();
+  if (!pill || pill.width <= 0 || pill.height <= 0) return null;
+  for (const label of axis.querySelectorAll<HTMLElement>("[data-axis-label]")) {
+    // The text's own (inline) box, not the full-width label row.
+    const text = label.firstElementChild?.getBoundingClientRect();
+    if (text && text.width > 0 && rectsOverlap(text, pill)) return label.dataset.axisLabel ?? null;
+  }
+  return null;
+}
+
+function rectsOverlap(a: DOMRect, b: DOMRect) {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
 function clampAxisLabelTop(top: number, height: number) {

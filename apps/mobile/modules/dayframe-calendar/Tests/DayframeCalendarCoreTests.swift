@@ -1053,7 +1053,7 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(later.entries.first?.overlapCount, 1)
     XCTAssertEqual(later.entries.first?.textColor, "#0B1020")
     XCTAssertEqual(later.monthTitle, "July")
-    XCTAssertEqual(later.framedLabel, "Nothing framed on Sunday")
+    // Card C item 1: the framed line is gone; an older bundle's extra "framedLabel" still decodes.
     XCTAssertFalse(later.hapticsEnabled)
     XCTAssertEqual(later.theme.textMuted, "#707B91")
     XCTAssertNil(later.clockFormat)
@@ -1081,6 +1081,17 @@ final class DayframeCalendarCoreTests: XCTestCase {
     XCTAssertEqual(DayframeClockText.hour(0, clockFormat: "12h"), "12 AM")
     XCTAssertEqual(DayframeClockText.hour(12, clockFormat: "12h"), "12 PM")
     XCTAssertEqual(DayframeClockText.hour(18, clockFormat: "12h"), "6 PM")
+  }
+
+  func testNowPillHidesAnHourLabelOnlyWhereItCoversIt() {
+    // #255: an 18-point pill and 8-point digits, centred on their own y, overlap within 13 points.
+    XCTAssertTrue(DayframeCalendarNowPillMath.coversHourLabel(nowY: 357, labelCenterY: 360, labelGlyphHeight: 8))
+    XCTAssertTrue(DayframeCalendarNowPillMath.coversHourLabel(nowY: 347.5, labelCenterY: 360, labelGlyphHeight: 8))
+    XCTAssertFalse(DayframeCalendarNowPillMath.coversHourLabel(nowY: 347, labelCenterY: 360, labelGlyphHeight: 8))
+    XCTAssertFalse(DayframeCalendarNowPillMath.coversHourLabel(nowY: 374, labelCenterY: 360, labelGlyphHeight: 8))
+    // Larger text has taller digits, so the pill covers them from further away.
+    XCTAssertTrue(DayframeCalendarNowPillMath.coversHourLabel(nowY: 345, labelCenterY: 360, labelGlyphHeight: 14))
+    XCTAssertFalse(DayframeCalendarNowPillMath.coversHourLabel(nowY: .nan, labelCenterY: 360, labelGlyphHeight: 8))
   }
 
   private func decodePresentation(
