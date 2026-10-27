@@ -1515,7 +1515,8 @@ export function EntriesTable({
           onStartAgain={editingEntry.stoppedAt ? () => continueEntry(editingEntry, "editor") : undefined}
           onSplit={async (atMs) => {
             const outcome = await splitTimeEntry(clientFetch, editingEntry, atMs);
-            if (outcome.ok) {
+            // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
+            if (outcome.ok || outcome.changed) {
               await onChanged?.();
               startTransition(() => router.refresh());
             }
@@ -1523,7 +1524,8 @@ export function EntriesTable({
           }}
           onDuplicate={async () => {
             const outcome = await duplicateTimeEntry(clientFetch, editingEntry);
-            if (outcome.ok) {
+            // A failure that may have changed the day (changed elsewhere, or unknown) shows it again too.
+            if (outcome.ok || outcome.changed) {
               await onChanged?.();
               startTransition(() => router.refresh());
             }

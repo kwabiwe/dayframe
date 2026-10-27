@@ -6387,6 +6387,36 @@ dialog.ui-dialog.df-range-custom {
    by a vertical minute-step slider over the whole bar; each half's length and times inside it, live. The
    slider's own thumb is transparent: the mark is drawn where the thumb sits (its centre runs from half a
    thumb to the bar's height less half a thumb). The global neutral focus ring outlines the bar. */
+/* The split row's single transition owner (as `.df-rf-more-panel`): rows 0fr ↔ 1fr with opacity, from
+   closed on entry; at once with Reduce Motion. */
+.calendar-compact-split-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease-out;
+}
+
+.calendar-compact-split-wrap[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+@starting-style {
+  .calendar-compact-split-wrap[data-open="true"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.calendar-compact-split-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-compact-split-wrap { transition: none; }
+}
+
 .calendar-compact-split {
   display: grid;
   gap: 10px;

@@ -2979,6 +2979,155 @@ export async function splitActiveEntry(session: RequestSession = getDevSession()
   }
 }
 
+/**
+ * Card G: Split a finished block at `splitAt`, or Duplicate it right after itself, in one transaction on
+ * the normal entries endpoint. The new block is a manual block (its own event first) with every detail of
+ * the original: activity, project, saved or one-time place, description and tags. A split also ends the
+ * original at `splitAt`, recorded as an end the person set. `expectedUpdatedAt` refuses (409) a block
+ * written elsewhere since the editor read it. A `clientCommandId` makes a retry safe: the new block's
+ * event keeps it, and a repeat is answered with the block it already made.
+ */
+export async function splitFinishedEntry(
+  id: string,
+  input: { splitAt: string; expectedUpdatedAt?: string; clientCommandId?: string },
+  session: RequestSession = getDevSession()
+) {
+  return copyFinishedEntry(id, { kind: "split", ...input }, session);
+}
+
+export async function duplicateFinishedEntry(
+  id: string,
+  input: { expectedUpdatedAt?: string; clientCommandId?: string; now?: Date },
+  session: RequestSession = getDevSession()
+) {
+  return copyFinishedEntry(id, { kind: "duplicate", ...input }, session);
+}
+
+async function copyFinishedEntry(
+  id: string,
+  input: { kind: "split" | "duplicate"; splitAt?: string; expectedUpdatedAt?: string; clientCommandId?: string; now?: Date },
+  session: RequestSession
+) {
+  const clientEventId = input.clientCommandId ? `time_entry_${input.kind}:${input.clientCommandId}` : null;
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const locked = await client.query(
+      `select id from time_entries where id = $1 and workspace_id = $2 and user_id = $3 for update`,
+      [id, session.workspaceId, session.userId]
+    );
+    if (clientEventId) {
+      // Already done (its reply was lost): the block it made, not a second one.
+      const earlier = await client.query<{ id: string }>(
+        `select te.id from activity_events e
+         join time_entries te on te.created_from_event_id = e.id and te.workspace_id = e.workspace_id
+         where e.workspace_id = $1 and e.user_id = $2 and e.client_event_id = $3`,
+        [session.workspaceId, session.userId, clientEventId]
+      );
+      if (earlier.rows[0]) {
+        await client.query("commit");
+        return { id, newEntryId: earlier.rows[0].id, replayed: true as const };
+      }
+    }
+    if (!locked.rows[0]) throw new TimeEntryNotFoundError();
+    // A fresh statement after the lock sees a write that committed while this one waited.
+    const stored = await client.query<{
+      startedAt: Date; stoppedAt: Date | null; updatedAt: Date; projectId: string | null; categoryId: string | null;
+      placeId: string | null; placeLabel: string | null; description: string | null; tagNames: string[];
+    }>(
+      `select te.started_at as "startedAt", te.stopped_at as "stoppedAt", te.updated_at as "updatedAt",
+              te.project_id as "projectId", te.category_id as "categoryId", te.place_id as "placeId",
+              te.place_label as "placeLabel", te.description,
+              coalesce((
+                select array_agg(t.name order by t.name)
+                from time_entry_tags tet
+                join tags t on t.id = tet.tag_id and t.workspace_id = te.workspace_id
+                where tet.time_entry_id = te.id and tet.workspace_id = te.workspace_id
+              ), array[]::text[]) as "tagNames"
+       from time_entries te
+       where te.id = $1 and te.workspace_id = $2 and te.user_id = $3`,
+      [id, session.workspaceId, session.userId]
+    );
+    const row = stored.rows[0];
+    if (!row) throw new TimeEntryNotFoundError();
+    if (input.expectedUpdatedAt && versionChangedSince(row.updatedAt, input.expectedUpdatedAt)) throw new TimeEntryConflictError();
+    if (!row.stoppedAt) {
+      throw new TimeEntryValidationError(input.kind === "split" ? "Stop this block before splitting it." : "Stop this block before duplicating it.");
+    }
+    const startMs = row.startedAt.getTime();
+    const stopMs = row.stoppedAt.getTime();
+    let window: { startedAt: string; stoppedAt: string };
+    if (input.kind === "split") {
+      const atMs = Date.parse(input.splitAt ?? "");
+      if (!Number.isFinite(atMs) || atMs <= startMs || atMs >= stopMs) {
+        throw new TimeEntryValidationError("Choose a split time inside the block.");
+      }
+      window = { startedAt: new Date(atMs).toISOString(), stoppedAt: row.stoppedAt.toISOString() };
+    } else {
+      const endMs = stopMs + (stopMs - startMs);
+      if (endMs > (input.now ?? new Date()).getTime()) throw new TimeEntryValidationError("That would end in the future.");
+      window = { startedAt: row.stoppedAt.toISOString(), stoppedAt: new Date(endMs).toISOString() };
+    }
+    const event = await client.query<{ id: string }>(
+      `insert into activity_events (
+          workspace_id, user_id, source, event_type, occurred_at, confidence, raw_payload,
+          suggested_project_id, suggested_category_id, suggested_place_id, review_status, client_event_id
+       )
+       values ($1, $2, 'manual_app', 'timer_start', $3, 'high', $4::jsonb, $5, $6, $7, 'confirmed', $8)
+       returning id`,
+      [
+        session.workspaceId,
+        session.userId,
+        window.startedAt,
+        // No `origin` key: a manual block, as createManualEntry's.
+        JSON.stringify({ description: row.description ?? "Manual entry", tagNames: row.tagNames, [`${input.kind}From`]: id }),
+        row.projectId,
+        row.categoryId,
+        row.placeId,
+        clientEventId
+      ]
+    );
+    if (input.kind === "split") {
+      await client.query(
+        `update time_entries set stopped_at = $4, user_edited_at = now(), updated_at = now()
+         where id = $1 and workspace_id = $2 and user_id = $3`,
+        [id, session.workspaceId, session.userId, window.startedAt]
+      );
+      // The original's new end is one the person set: an earlier queued Stop never pulls it back.
+      await recordTimeEntryEdits(client, [id], session, [id], input.clientCommandId);
+    }
+    const inserted = await client.query<{ id: string }>(
+      `insert into time_entries (
+          workspace_id, user_id, project_id, category_id, place_id, place_label, source, confidence, review_status,
+          description, started_at, stopped_at, created_from_event_id
+       )
+       values ($1, $2, $3, $4, $5, $6, 'manual_app', 'high', 'confirmed', $7, $8, $9, $10)
+       returning id`,
+      [
+        session.workspaceId,
+        session.userId,
+        row.projectId,
+        row.categoryId,
+        row.placeId,
+        row.placeLabel,
+        row.description,
+        window.startedAt,
+        window.stoppedAt,
+        event.rows[0].id
+      ]
+    );
+    const newEntryId = inserted.rows[0].id;
+    await syncTimeEntryTags(client, newEntryId, row.tagNames, session);
+    await client.query("commit");
+    return { id, newEntryId, replayed: false as const };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function resolveReviewItem(
   id: string,
   action: unknown,

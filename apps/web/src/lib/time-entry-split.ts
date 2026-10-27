@@ -1,10 +1,11 @@
+import { TIME_ENTRY_CLIENT_COMMAND_ID_HEADER } from "@dayframe/shared";
 import type { TimeEntryRow } from "./queries";
 
 /**
- * Split and Duplicate a finished block (card G, Toggl #261). Event-first through the normal entry endpoints:
- * a split shortens the block (PATCH) and adds its second half as a manual block (POST) with the same activity,
- * project, place, description and tags; if the second write fails, the first is put back. A duplicate is one
- * manual block with the same details.
+ * Split and Duplicate a finished block (card G, Toggl #261), each one request to the normal entries endpoint
+ * (`POST /api/time-entries`, modes `split` and `duplicate`), which does it in one transaction with every
+ * detail of the block. The block's version (`expectedUpdatedAt`) refuses a block changed elsewhere since the
+ * editor read it; the client command id makes the one retry after a dropped connection safe.
  */
 
 const MINUTE_MS = 60_000;
@@ -33,52 +34,49 @@ export function defaultSplit(bounds: SplitBounds) {
   return clampSplit(bounds, (bounds.startMs + bounds.stopMs) / 2);
 }
 
-/** The manual block that copies an entry's details over a window. */
-export function manualCopy(entry: TimeEntryRow, startedAt: string, stoppedAt: string) {
-  return {
-    mode: "manual" as const,
-    startedAt,
-    stoppedAt,
-    categoryId: entry.categoryId,
-    projectId: entry.projectId,
-    placeId: entry.placeId,
-    description: entry.description,
-    tagNames: entry.tags.map((tag) => tag.name)
-  };
-}
-
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
-export type BlockMutationOutcome = { ok: true } | { ok: false; error: string };
+/**
+ * `changed`: the request may have changed the day although it failed (the block changed elsewhere, or the
+ * outcome is unknown), so the caller shows the day again.
+ */
+export type BlockMutationOutcome = { ok: true } | { ok: false; error: string; changed?: boolean };
 
-async function failure(response: Response, fallback: string): Promise<BlockMutationOutcome> {
-  const body = await response.json().catch(() => null) as { error?: unknown } | null;
-  return { ok: false, error: typeof body?.error === "string" && body.error.trim() ? body.error : fallback };
+const CHANGED_ELSEWHERE = "This block changed somewhere else. Open it again to see it as it is now.";
+
+async function send(fetcher: Fetch, body: Record<string, unknown>, fallback: string): Promise<BlockMutationOutcome> {
+  const init: RequestInit = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", [TIME_ENTRY_CLIENT_COMMAND_ID_HEADER]: `web-${body.mode}-${crypto.randomUUID()}` },
+    body: JSON.stringify(body)
+  };
+  let response: Response;
+  try {
+    response = await fetcher("/api/time-entries", init);
+  } catch {
+    // The connection dropped: the same command again is safe (the server answers a repeat with what it did).
+    try {
+      response = await fetcher("/api/time-entries", init);
+    } catch {
+      return { ok: false, error: "Couldn't reach Dayframe, so this may not have saved. Check the day before trying again.", changed: true };
+    }
+  }
+  if (response.ok) return { ok: true };
+  if (response.status === 409) return { ok: false, error: CHANGED_ELSEWHERE, changed: true };
+  const json = await response.json().catch(() => null) as { error?: unknown } | null;
+  return { ok: false, error: typeof json?.error === "string" && json.error.trim() ? json.error : fallback };
 }
-
-const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-const patch = (body: unknown): RequestInit => ({ method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 /** Splits a finished block at `atMs` (snapped and clamped): two blocks with the same details. */
 export async function splitTimeEntry(fetcher: Fetch, entry: TimeEntryRow, atMs: number): Promise<BlockMutationOutcome> {
   const bounds = splitBounds(entry);
   if (!bounds) return { ok: false, error: "This block is too short to split." };
-  const at = new Date(clampSplit(bounds, atMs)).toISOString();
-  const shortened = await fetcher(`/api/time-entries/${entry.id}`, patch({ stoppedAt: at }));
-  if (!shortened.ok) return failure(shortened, "Couldn't split this block.");
-  const second = await fetcher("/api/time-entries", json(manualCopy(entry, at, entry.stoppedAt!)));
-  if (second.ok) return { ok: true };
-  const outcome = await failure(second, "Couldn't split this block.");
-  // Put the block back as it was, so a failed split changes nothing.
-  await fetcher(`/api/time-entries/${entry.id}`, patch({ stoppedAt: entry.stoppedAt })).catch(() => undefined);
-  return outcome;
+  return send(fetcher, {
+    mode: "split", entryId: entry.id, splitAt: new Date(clampSplit(bounds, atMs)).toISOString(), expectedUpdatedAt: entry.updatedAt
+  }, "Couldn't split this block.");
 }
 
 /** Duplicates a finished block: a new block with the same details, starting where the original ends. */
 export async function duplicateTimeEntry(fetcher: Fetch, entry: TimeEntryRow): Promise<BlockMutationOutcome> {
   if (!entry.stoppedAt) return { ok: false, error: "Stop this block before duplicating it." };
-  const lengthMs = Date.parse(entry.stoppedAt) - Date.parse(entry.startedAt);
-  const startedAt = entry.stoppedAt;
-  const stoppedAt = new Date(Date.parse(entry.stoppedAt) + lengthMs).toISOString();
-  const response = await fetcher("/api/time-entries", json(manualCopy(entry, startedAt, stoppedAt)));
-  return response.ok ? { ok: true } : failure(response, "Couldn't duplicate this block.");
+  return send(fetcher, { mode: "duplicate", entryId: entry.id, expectedUpdatedAt: entry.updatedAt }, "Couldn't duplicate this block.");
 }

@@ -64,7 +64,10 @@ describe("TimeEntryQuickEditorModal", () => {
     expect(screen.getByRole("group", { name: "Split this block" }).textContent).toMatch(/24m.*36m/);
     // "Keep as one" closes it and gives focus back to Split.
     fireEvent.click(screen.getByRole("button", { name: "Keep as one" }));
-    expect(screen.queryByRole("slider", { name: "Split at" })).toBeNull();
+    // The row closes (it stays drawn, inert, only while its close runs: jsdom never ends a transition).
+    const row = document.querySelector(".calendar-compact-split-wrap");
+    expect(row?.getAttribute("data-open")).toBe("false");
+    expect(row?.hasAttribute("inert")).toBe(true);
     await waitFor(() => expect(document.activeElement).toBe(split));
     fireEvent.click(split);
     fireEvent.change(screen.getByRole("slider", { name: "Split at" }), { target: { value: String(Date.parse("2026-08-04T09:40:00.000Z")) } });
@@ -86,6 +89,27 @@ describe("TimeEntryQuickEditorModal", () => {
     render(createElement(TimeEntryQuickEditorModal, { ...modalProps({}), onSplit }));
     fireEvent.change(await screen.findByLabelText("Description"), { target: { value: "Plan the launch" } });
     expect((screen.getByRole("button", { name: /^Split / }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("closes only the split row on Escape from any of its controls, and never splits over unsaved edits (Codex r1 on #596)", async () => {
+    const onSplit = vi.fn<(atMs: number) => Promise<{ ok: true }>>(async () => ({ ok: true as const }));
+    const onClose = vi.fn();
+    render(createElement(TimeEntryQuickEditorModal, { ...modalProps({ onClose }), onSplit }));
+    const split = await screen.findByRole("button", { name: "Split Plan release" });
+    fireEvent.click(split);
+    const keep = screen.getByRole("button", { name: "Keep as one" });
+    keep.focus();
+    fireEvent.keyDown(keep, { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(split));
+    expect(split.getAttribute("aria-expanded")).toBe("false");
+    expect(onClose).not.toHaveBeenCalled();
+    // Opened, then the description changed: the split would act on the block as saved, so it waits.
+    fireEvent.click(split);
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Plan the launch" } });
+    const confirm = screen.getByRole("button", { name: /^Split at / }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("slider", { name: "Split at" }), { key: "Enter" });
+    expect(onSplit).not.toHaveBeenCalled();
   });
 
   it("says where an auto-logged visit's block came from, and nothing for other blocks (PRD D17)", async () => {

@@ -26,35 +26,41 @@ describe("splitting a block (card G)", () => {
     expect(splitBounds(block({ stoppedAt: "2026-03-02T10:01:30.000Z" }))).toBeNull();
   });
 
-  it("shortens the block, then adds its second half with the same details", async () => {
+  it("asks the server to split it, fenced to the block's version, with a command id", async () => {
     const fetcher = vi.fn<Fetcher>(async () => ok());
-    expect(await splitTimeEntry(fetcher, block(), ms("2026-03-02T10:24:00.000Z"))).toEqual({ ok: true });
-    expect(fetcher.mock.calls.map(([url, init]) => [url, init?.method, JSON.parse(init?.body as string)])).toEqual([
-      ["/api/time-entries/entry-1", "PATCH", { stoppedAt: "2026-03-02T10:24:00.000Z" }],
-      ["/api/time-entries", "POST", { mode: "manual", startedAt: "2026-03-02T10:24:00.000Z", stoppedAt: "2026-03-02T11:00:00.000Z",
-        categoryId: "cat-1", projectId: null, placeId: "place-1", description: "Chapter four", tagNames: ["deep"] }]
-    ]);
-  });
-
-  it("puts the block back when its second half is refused, and says why", async () => {
-    const fetcher = vi.fn(async (url: string, init?: RequestInit) => init?.method === "POST" ? refused("That place no longer exists.") : ok());
-    expect(await splitTimeEntry(fetcher, block(), ms("2026-03-02T10:30:00.000Z"))).toEqual({ ok: false, error: "That place no longer exists." });
-    expect(JSON.parse(fetcher.mock.calls.at(-1)![1]!.body as string)).toEqual({ stoppedAt: "2026-03-02T11:00:00.000Z" });
-  });
-
-  it("changes nothing when the block can't be shortened", async () => {
-    const fetcher = vi.fn<Fetcher>(async () => refused("Times overlap a locked block."));
-    expect(await splitTimeEntry(fetcher, block(), ms("2026-03-02T10:30:00.000Z"))).toEqual({ ok: false, error: "Times overlap a locked block." });
+    expect(await splitTimeEntry(fetcher, block(), ms("2026-03-02T10:24:20.000Z"))).toEqual({ ok: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
+    const [url, init] = fetcher.mock.calls[0];
+    expect([url, init?.method, JSON.parse(init?.body as string)]).toEqual(["/api/time-entries", "POST",
+      { mode: "split", entryId: "entry-1", splitAt: "2026-03-02T10:24:00.000Z", expectedUpdatedAt: "2026-03-02T11:00:00.000Z" }]);
+    expect((init?.headers as Record<string, string>)["X-Dayframe-Client-Command-Id"]).toMatch(/^web-split-[0-9a-f-]{36}$/);
+  });
+
+  it("sends the same command once more when the connection drops, and says when it can't tell (Codex r1 on #596)", async () => {
+    const dropped = vi.fn<Fetcher>().mockRejectedValueOnce(new TypeError("Failed to fetch")).mockResolvedValueOnce(ok());
+    expect(await splitTimeEntry(dropped, block(), ms("2026-03-02T10:30:00.000Z"))).toEqual({ ok: true });
+    const ids = dropped.mock.calls.map(([, init]) => (init?.headers as Record<string, string>)["X-Dayframe-Client-Command-Id"]);
+    expect(ids[0]).toBe(ids[1]);
+    const gone = vi.fn<Fetcher>(async () => { throw new TypeError("Failed to fetch"); });
+    expect(await splitTimeEntry(gone, block(), ms("2026-03-02T10:30:00.000Z"))).toMatchObject({ ok: false, changed: true });
+  });
+
+  it("says when the block changed elsewhere, so the day shows again, and passes a refusal on", async () => {
+    const conflict = vi.fn<Fetcher>(async () => new Response(JSON.stringify({ error: "changed" }), { status: 409 }));
+    expect(await splitTimeEntry(conflict, block(), ms("2026-03-02T10:30:00.000Z"))).toEqual({ ok: false, changed: true,
+      error: "This block changed somewhere else. Open it again to see it as it is now." });
+    const refusedSplit = vi.fn<Fetcher>(async () => refused("Choose a split time inside the block."));
+    expect(await splitTimeEntry(refusedSplit, block(), ms("2026-03-02T10:30:00.000Z"))).toEqual({ ok: false, error: "Choose a split time inside the block." });
+    expect(await splitTimeEntry(refusedSplit, block({ stoppedAt: "2026-03-02T10:01:00.000Z" }), ms("2026-03-02T10:00:30.000Z")))
+      .toEqual({ ok: false, error: "This block is too short to split." });
   });
 });
 
 describe("duplicating a block (card G)", () => {
-  it("adds a block with the same details right after it", async () => {
+  it("asks the server to add the same block right after it, fenced to its version", async () => {
     const fetcher = vi.fn<Fetcher>(async () => ok());
     expect(await duplicateTimeEntry(fetcher, block())).toEqual({ ok: true });
-    expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toMatchObject({ mode: "manual",
-      startedAt: "2026-03-02T11:00:00.000Z", stoppedAt: "2026-03-02T12:00:00.000Z", categoryId: "cat-1", tagNames: ["deep"] });
+    expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toEqual({ mode: "duplicate", entryId: "entry-1", expectedUpdatedAt: "2026-03-02T11:00:00.000Z" });
     expect(await duplicateTimeEntry(fetcher, block({ stoppedAt: null }))).toEqual({ ok: false, error: "Stop this block before duplicating it." });
   });
 });
