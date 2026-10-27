@@ -119,8 +119,11 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
     renderList();
     fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
-    expect(screen.getByRole("group", { name: /^Where were you, \d\d:00–\d\d:00\?$/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Log Office" }));
+    // Card B: "Visited {guess}?" with its times under it, and Yes / Edit / Not now.
+    const asked = screen.getByRole("group", { name: "Visited Office?" });
+    expect(asked.textContent).toMatch(/\d\d:00–\d\d:00/);
+    expect(asked.textContent).not.toContain("not in a block");
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
     expect(screen.getByText("Logged Office")).toBeTruthy();
     expect(clientFetch).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
@@ -208,6 +211,16 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
+  it("keeps Log for an unnamed place from before Location V2, which has no editor (Codex r1 on #594)", () => {
+    const legacy = suggestion("00000000-0000-4000-8000-0000000000a9", { title: "Unknown place", eventSource: "geofence_specific",
+      suggestedStartedAt: at(10), suggestedStoppedAt: at(11) });
+    render(<EntriesTable {...baseProps()} entries={[entry("planning", "Planning", at(11), at(11, 45))]} reviewItems={[legacy]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
+    expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log Unknown place" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
   it("moves from one check to the next with the chip", async () => {
     renderList();
     fireEvent.click(await screen.findByRole("button", { name: "3 to check" }));
@@ -230,7 +243,12 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
     );
     expect(screen.getByRole("button", { name: "1 to check" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Check Unknown place" }));
-    expect(screen.getByText(/With its trips: .*Your answer covers them too\./)).toBeTruthy();
+    // Card B: the outing's trips are decided with it, silently.
+    expect(screen.getByRole("group", { name: "Where were you?" })).toBeTruthy();
+    expect(screen.queryByText(/With its trips/)).toBeNull();
+    // With no guess there is nothing to say Yes to: Edit names it.
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
     expect(JSON.parse(clientFetch.mock.calls[0][1].body).mutation).toEqual({ action: "ignore_outing", memberReviewItemIds: [outing[1].id] });
@@ -399,17 +417,17 @@ describe("things to check in Calendar › List (location v4 step 14)", () => {
       const props = { ...baseProps(), checksDay: { start: new Date(at(0)), end: new Date(at(24)) } };
       // The location read has not arrived: the suggestion sits on a row of its own.
       const { rerender } = render(<EntriesTable {...props} locationTimeline={null} reviewItems={[office]} />);
-      await waitFor(() => expect(screen.getByRole("group", { name: /^Where were you/ })).toBeTruthy());
+      await waitFor(() => expect(screen.getByRole("group", { name: /^Visited Office\?/ })).toBeTruthy());
       await waitFor(() => expect((document.activeElement as HTMLElement | null)?.dataset.checkKey).toBeTruthy());
       // The places arrive: the question moves onto the place's row and stays open.
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
-      expect(screen.getByRole("group", { name: /^Where were you/ })).toBeTruthy();
+      expect(screen.getByRole("group", { name: /^Visited Office\?/ })).toBeTruthy();
       // Focus moves with it to the place row's "?" (Codex r2 on #572).
       await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Check Office"));
       // Closing it is final for this visit: it does not open again.
       fireEvent.click(screen.getByRole("button", { name: "Check Office" }));
       rerender(<EntriesTable {...props} locationTimeline={timeline} reviewItems={[office]} />);
-      expect(screen.queryByRole("group", { name: /^Where were you/ })).toBeNull();
+      expect(screen.queryByRole("group", { name: /^Visited Office\?/ })).toBeNull();
     } finally {
       search.params = "";
     }

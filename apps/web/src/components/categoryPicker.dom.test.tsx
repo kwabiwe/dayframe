@@ -144,6 +144,12 @@ describe("CategoryPicker", () => {
     expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
     expect(document.activeElement).toBe(iconTrigger());
     expect((input as HTMLInputElement).value).toBe("Zorblax");
+    // From the Name field too: Escape closes the open icons and keeps the draft (Codex r2 on #593).
+    await user.click(iconTrigger());
+    await user.click(input);
+    await user.keyboard("{Escape}");
+    expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();
+    expect((input as HTMLInputElement).value).toBe("Zorblax");
     await user.click(iconTrigger());
     await user.click(within(dialog).getByRole("radio", { name: "Boat" }));
     expect(within(dialog).queryByRole("radiogroup", { name: "Activity icon" })).toBeNull();

@@ -482,6 +482,48 @@ describe("durable time-entry outbox", () => {
     })).resolves.toMatchObject({ deliveredCount: 1, needsAttentionCount: 0 });
   });
 
+  it("reports a rejection only for the edit's own command, not an older sync issue", async () => {
+    // A stale Needs-attention item from days ago (TF133 staging, 27 Oct): the new edit still saves.
+    storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
+      commandFixture({ clientCommandId: "stale-issue", failureKind: "permanent" })
+    ]));
+    const saved = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "entry-saved" },
+      patch: { description: "Saved edit" }
+    });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "Entry not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      })));
+
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({ deliveredCount: 1, needsAttentionCount: 1 });
+    await expect(outbox.isTimeEntryCommandRejected(OWNER_A, saved.clientCommandId))
+      .resolves.toBe(false);
+
+    const refused = await outbox.enqueueTimeEntryUpdate({
+      owner: OWNER_A,
+      target: { targetEntryId: "deleted-on-server" },
+      patch: { description: "Refused edit" }
+    });
+    await expect(outbox.synchroniseTimeEntryCommands({
+      owner: OWNER_A,
+      correlations: new Map(),
+      force: true
+    })).resolves.toMatchObject({ deliveredCount: 0, needsAttentionCount: 2 });
+    await expect(outbox.isTimeEntryCommandRejected(OWNER_A, refused.clientCommandId))
+      .resolves.toBe(true);
+    // Another account never sees this account's rejection.
+    await expect(outbox.isTimeEntryCommandRejected(OWNER_B, refused.clientCommandId))
+      .resolves.toBe(false);
+  });
+
   it("discards only an owned permanent issue", async () => {
     storage.set("dayframe.timeEntryOutbox.v1", JSON.stringify([
       commandFixture({ clientCommandId: "issue-a", failureKind: "permanent" }),

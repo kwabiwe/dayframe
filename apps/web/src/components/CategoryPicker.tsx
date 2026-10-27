@@ -665,7 +665,9 @@ export function CategoryPicker({
       event.preventDefault();
       event.stopPropagation();
       event.nativeEvent.stopImmediatePropagation();
-      cancelCreate();
+      // With the icon choices open, Escape closes them and keeps the draft (Codex r2 on #593).
+      if (isIconGridOpen) setIsIconGridOpen(false);
+      else cancelCreate();
     }
   }
 

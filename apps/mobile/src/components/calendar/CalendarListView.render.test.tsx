@@ -1,4 +1,6 @@
 import { act, create } from "react-test-renderer";
+import { reviewAnswerQuestion } from "../../lib/reviewAnswer";
+import type { MobileReviewItem } from "../../lib/api";
 import { describe, expect, it, vi } from "vitest";
 import { formatClockTime, type LocationTimeline } from "@dayframe/shared";
 
@@ -218,6 +220,27 @@ describe("CalendarListView (location v4 step 9)", () => {
     act(() => { edit.props.onPress(); });
     expect(onOpenCheck).toHaveBeenCalledWith("c-trip");
     expect(onAnswerCheck).not.toHaveBeenCalled();
+  });
+
+  it("asks a place Visited {guess}? with Yes, Edit, Not now from the real question words (card B; Codex r1 on #594)", () => {
+    const onOpenCheck = vi.fn();
+    const place = { id: "c-place", title: "Exampleton Library", eventSource: "location_learning", eventType: "unknown_stay",
+      suggestedStartedAt: iso(12), suggestedStoppedAt: iso(13), rawPayload: { clientSegmentId: "seg-place" } } as unknown as MobileReviewItem;
+    const { tree } = render({
+      checks: [{ id: "c-place", segmentId: null, startedAt: iso(12), stoppedAt: iso(13) }],
+      checkTitles: new Map([["c-place", "Exampleton Library"]]),
+      checkQuestions: new Map([["c-place", reviewAnswerQuestion(place, "24h")]]),
+      onAnswerCheck: vi.fn(),
+      onOpenCheck
+    });
+    act(() => { tree.root.findByProps({ accessibilityHint: "Opens the next one" }).props.onPress(); });
+    const answers = tree.root.findAll((node) => typeof node.props.testID === "string" && node.props.testID.startsWith("calendar-list-answer-") &&
+      typeof node.props.onPress === "function").map((node) => node.props.testID);
+    expect(answers).toEqual(["calendar-list-answer-log", "calendar-list-answer-edit", "calendar-list-answer-skip"]);
+    const edit = tree.root.findByProps({ testID: "calendar-list-answer-edit" });
+    expect(edit.props.accessibilityHint).toBe("Opens it on its own screen to edit it");
+    act(() => { edit.props.onPress(); });
+    expect(onOpenCheck).toHaveBeenCalledWith("c-place");
   });
 
   it("reads Today's opened question to VoiceOver, and keeps a closed question closed when its row comes back (Codex r2 on #582)", async () => {
