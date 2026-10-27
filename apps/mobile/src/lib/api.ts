@@ -7,6 +7,8 @@ import { AppState } from "react-native";
 import {
   ActivityEventInputSchema,
   LocationReviewEvidenceDtoSchema,
+  TimelineItemEvidenceDtoSchema,
+  type TimelineItemEvidenceDto,
   REVIEW_COUNT_CARDS,
   REVIEW_COUNT_REQUEST_HEADER,
   type ActivityEventInput,
@@ -2077,6 +2079,32 @@ export async function fetchLocationReviewEvidence(
       timeoutMessage: "Location evidence is taking too long to load.",
       isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
       validate: (body, response) => response.ok ? LocationReviewEvidenceDtoSchema.parse(body) : null }
+  );
+  if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
+  if (!response.ok) throw new MobileHttpResponseError(response.status, "Unable to load location evidence");
+  if (!body) throw new InvalidMobileAcknowledgementError();
+  return body;
+}
+
+/**
+ * A timeline item's evidence (location v4 step 12, `GET /api/timeline/items/{id}/evidence`): the map at the
+ * top of a place, trip or leg correction sheet. Read only under the owner's own session, as a Review
+ * item's evidence is.
+ */
+export async function fetchTimelineItemEvidence(
+  itemId: string,
+  options: { signal?: AbortSignal; owner: MobileAccountOwner }
+): Promise<TimelineItemEvidenceDto> {
+  const session = await readOwnedAuthenticatedSessionSnapshot(options.owner);
+  if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
+  if (session.status !== "authenticated") throw new AuthRequiredError();
+  const { response, body } = await mobileJsonRequest<TimelineItemEvidenceDto | null>(
+    `${DAYFRAME_API_BASE}/api/timeline/items/${encodeURIComponent(itemId)}/evidence`,
+    { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal: options.signal },
+    { timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
+      timeoutMessage: "Location evidence is taking too long to load.",
+      isCurrent: () => isAuthenticatedSessionSnapshotCurrent(session.snapshot),
+      validate: (body, response) => response.ok ? TimelineItemEvidenceDtoSchema.parse(body) : null }
   );
   if (response.status === 401 || response.status === 403) throw new AuthRequiredError();
   if (!response.ok) throw new MobileHttpResponseError(response.status, "Unable to load location evidence");

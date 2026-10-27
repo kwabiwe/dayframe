@@ -12,6 +12,7 @@ import {
   legModeLabel,
   type ClockFormat,
   type DayframeGlyph,
+  type TimelineItemEvidenceDto,
   type TimelinePlace,
   type TimelineTrip,
   type TripLegMode
@@ -20,6 +21,7 @@ import type { DayframeTimeWheelChange } from "../../../modules/dayframe-time-whe
 import { BottomSheetShell } from "../sheets/BottomSheetShell";
 import { TimeWheelPanel } from "../TimeWheelPanel";
 import { DayframeIcon } from "../icons/DayframeIcon";
+import { LocationEvidenceMap } from "../location/LocationEvidenceMap";
 import { playHaptic } from "../../lib/haptics";
 import { MOBILE_MOTION, localPresenceEntering, localPresenceExiting } from "../../lib/motion";
 import type { MobileTheme } from "../../lib/mobileTheme";
@@ -63,6 +65,7 @@ const TIME_FIELD_ACCESSIBILITY_ACTIONS = [
 
 export function LocationCorrectionSheet({
   clockFormat,
+  evidence,
   onDismissed,
   onQueue,
   places,
@@ -73,6 +76,8 @@ export function LocationCorrectionSheet({
   theme
 }: {
   clockFormat: ClockFormat;
+  /** The item's map: null while it loads, "unavailable" when it couldn't be read. */
+  evidence: TimelineItemEvidenceDto | "unavailable" | null;
   onDismissed: (presentationId: number) => void;
   /** Keeps these corrections on the phone and sends them (the List shows them at once). */
   onQueue: (corrections: QueuedCorrection[]) => void;
@@ -185,6 +190,18 @@ export function LocationCorrectionSheet({
           <Text {...mobileTextProps("sectionHeading")} accessibilityRole="header" numberOfLines={2} style={[styles.title, { color: theme.textPrimary }]}>{title}</Text>
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{subtitle}</Text>
         </View>
+      </View>
+      {/* The map first, on every view (owner feedback, 27 Oct 2026); it stays put as a leg pushes and pops. */}
+      <View style={[styles.map, { backgroundColor: theme.surfaceMuted }]} testID="location-correction-map">
+        {evidence && evidence !== "unavailable" ? (
+          <LocationEvidenceMap accentColor={theme.textPrimary} appearance={theme.mode === "dark" ? "dark" : "light"} clockFormat={clockFormat}
+            dangerColor={theme.danger} evidence={evidence} reduceMotion={reduceMotion} showDetails={false} surfaceColor={theme.surfaceMuted}
+            textColor={theme.textSecondary} />
+        ) : (
+          <Text {...mobileTextProps("metadata")} style={[styles.hint, styles.mapNote, { color: theme.textSecondary }]}>
+            {evidence === "unavailable" ? "The map isn't available right now." : "Loading the map…"}
+          </Text>
+        )}
       </View>
       {/* The view inside the sheet: the leg pushes in from the right and pops back from the left. */}
       <Reanimated.View
@@ -435,6 +452,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: "700", lineHeight: 25 },
   meta: { fontSize: 13, lineHeight: 18, fontVariant: ["tabular-nums"] },
   view: { gap: 18 },
+  map: { minHeight: 180, borderRadius: 14, overflow: "hidden", justifyContent: "center", marginBottom: 6 },
+  mapNote: { textAlign: "center", padding: 16 },
   section: { gap: 8 },
   label: { fontSize: 12, fontWeight: "650" as never, letterSpacing: 0.4, textTransform: "uppercase" },
   hint: { fontSize: 13, lineHeight: 18 },

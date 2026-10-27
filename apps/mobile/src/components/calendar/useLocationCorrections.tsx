@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { placeDisplayName, type ClockFormat, type LocationTimeline, type TimelinePlace, type TimelineTrip } from "@dayframe/shared";
-import type { MobileBootstrap } from "../../lib/api";
+import {
+  placeDisplayName,
+  type ClockFormat,
+  type LocationTimeline,
+  type TimelineItemEvidenceDto,
+  type TimelinePlace,
+  type TimelineTrip
+} from "@dayframe/shared";
+import { fetchTimelineItemEvidence, type MobileBootstrap } from "../../lib/api";
 import type { MobileTheme } from "../../lib/mobileTheme";
 import type { QueuedCorrection } from "../../lib/locationCorrectionDraft";
 import {
@@ -42,6 +49,19 @@ export function useLocationCorrections({
   const [held, setHeld] = useState<LocationCorrectionTarget | null>(null);
   const userId = data?.user.id ?? null;
   const workspaceId = data?.workspace.id ?? null;
+  // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet).
+  const [evidence, setEvidence] = useState<{ itemId: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
+  const openItemId = open?.itemId ?? null;
+  useEffect(() => {
+    if (!openItemId || !userId || !workspaceId) return;
+    const controller = new AbortController();
+    fetchTimelineItemEvidence(openItemId, { owner: { userId, workspaceId }, signal: controller.signal }).then(
+      (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: result }); },
+      () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: null }); }
+    );
+    return () => controller.abort();
+  }, [openItemId, userId, workspaceId]);
+  const shownEvidence = evidence && evidence.itemId === openItemId ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
     presentations.current += 1;
@@ -97,6 +117,7 @@ export function useLocationCorrections({
     <LocationCorrectionSheet
       key={`location-correction-${open.id}`}
       clockFormat={clockFormat}
+      evidence={shownEvidence}
       onDismissed={(id) => setOpen((current) => current?.id === id ? null : current)}
       onQueue={queue}
       places={places}

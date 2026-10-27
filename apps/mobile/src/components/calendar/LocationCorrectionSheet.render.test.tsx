@@ -49,6 +49,7 @@ vi.mock("react-native-reanimated", () => ({
 vi.mock("../../lib/motion", () => ({ MOBILE_MOTION: { control: 140 }, localPresenceEntering: () => ({}), localPresenceExiting: () => ({}) }));
 vi.mock("../TimeWheelPanel", () => ({ TimeWheelPanel: "TimeWheelPanel" }));
 vi.mock("../icons/DayframeIcon", () => ({ DayframeIcon: "DayframeIcon" }));
+vi.mock("../location/LocationEvidenceMap", () => ({ LocationEvidenceMap: "LocationEvidenceMap" }));
 vi.mock("../../lib/haptics", () => ({ playHaptic: vi.fn() }));
 vi.mock("../../lib/timeWheel", () => ({ timeWheelAccessibilityStep: (ms: number, direction: number, _o: unknown, minutes: number) => ms + direction * minutes * 60_000 }));
 
@@ -76,7 +77,7 @@ function mount(target: LocationCorrectionTarget) {
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(
-      <LocationCorrectionSheet clockFormat="24h" onDismissed={onDismissed} onQueue={onQueue}
+      <LocationCorrectionSheet clockFormat="24h" evidence={null} onDismissed={onDismissed} onQueue={onQueue}
         places={[{ id: SAVED, name: "Exampleton Library", role: null }]} presentationId={1} reduceMotion={false} rootHosted={false}
         target={target} theme={theme} />
     );
@@ -87,6 +88,19 @@ function mount(target: LocationCorrectionTarget) {
 }
 
 describe("the iPhone correction sheets (location v4 step 12)", () => {
+  it("puts the item's map first, saying so while it loads or when it can't be read (owner feedback, 27 Oct 2026)", () => {
+    const sheet = mount({ kind: "place", place, label: "Unknown place" });
+    expect(JSON.stringify(sheet.tree.root.findByProps({ testID: "location-correction-map" }).props.children)).toContain("Loading the map");
+    const evidence = { map: { acceptedSamples: [] }, segment: { kind: "stay" } } as never;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<LocationCorrectionSheet clockFormat="24h" evidence={evidence} onDismissed={vi.fn()} onQueue={vi.fn()} places={[]}
+        presentationId={1} reduceMotion={false} rootHosted={false} target={{ kind: "trip", trip, legIndex: 1 }} theme={theme} />);
+    });
+    // On the leg view too: the map is there before anything else to change.
+    expect(tree.root.findAllByType("LocationEvidenceMap" as never)[0].props.evidence).toBe(evidence);
+  });
+
   it("names a place from the saved places and queues it on Done", () => {
     const sheet = mount({ kind: "place", place, label: "Unknown place" });
     expect(sheet.tree.root.findByProps({ testID: "location-correction-place-unknown" }).props.accessibilityState).toEqual({ checked: true });
