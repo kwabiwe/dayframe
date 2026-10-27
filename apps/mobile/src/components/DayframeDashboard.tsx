@@ -1801,6 +1801,9 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const activeCategoryLabel = activeTimerCopy.categoryLabel;
   const activeTitle = activeTimerCopy.title;
   const activeTitleIsPlaceholder = Boolean(displayedActiveEntry) && !displayTimerDescription(displayedActiveEntry);
+  // The bloom's "Now:" line names the block: its description, else its activity, never the
+  // live card's "Add a description" prompt (Codex r1 on #592).
+  const bloomRunningTitle = activeTitleIsPlaceholder ? displayedActiveEntry?.categoryName || "Untitled" : activeTitle;
   const stopFlightExit = useStopFlightExit({
     displayedEntryId: displayedActiveEntry?.id ?? null,
     flightEntryId: stopFlight?.entryId ?? null,
@@ -3754,7 +3757,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
         reduceMotion={reduceMotion}
         running={hasLiveActiveTimer}
         runningActivityId={hasLiveActiveTimer ? displayedActiveEntry?.categoryId ?? null : null}
-        runningTitle={hasLiveActiveTimer ? todayLivePresentation?.title : undefined}
+        runningTitle={hasLiveActiveTimer ? bloomRunningTitle : undefined}
         runningDurationSeconds={hasLiveActiveTimer ? todayLivePresentation?.durationSeconds : undefined}
         runningElapsedSeconds={hasLiveActiveTimer ? todayLivePresentation?.elapsedSeconds : undefined}
         runningHeldSeconds={orbHeldSeconds}

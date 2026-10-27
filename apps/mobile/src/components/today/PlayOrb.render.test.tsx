@@ -311,12 +311,20 @@ describe("PlayOrb", () => {
       hold().handlers.onStart({});
     });
     expect(bloom()).toBeDefined();
-    const nowLine = () => tree.root.findByProps({ testID: "play-orb-bloom-now" }).children.join("");
+    const nowLine = () =>
+      tree.root.findByProps({ testID: "play-orb-bloom-now" }).findAllByType("Text" as never).map((node) => node.children.join("")).join("");
     expect(nowLine()).toBe("Now: Quarterly report · 0:35:37");
     act(() => {
       vi.advanceTimersByTime(1000);
     });
     expect(nowLine()).toBe("Now: Quarterly report · 0:35:38");
+    // Only the title truncates; the time is its own line part, so it always shows in full.
+    const [title, time] = tree.root.findByProps({ testID: "play-orb-bloom-now" }).findAllByType("Text" as never);
+    expect(title.props.style).toContainEqual({ flexShrink: 1 });
+    expect(time.props.style).toEqual(expect.objectContaining({ flexShrink: 0 }));
+    // A new title while the bloom is open shows at once (the comparator lets it through).
+    act(() => tree.update(<PlayOrb {...(props as unknown as Parameters<typeof PlayOrb>[0])} runningTitle="Board pack" />));
+    expect(nowLine()).toBe("Now: Board pack · 0:35:38");
     // Only the running activity's bubble carries the ring, and it is announced as Edit.
     expect(tree.root.findAllByProps({ testID: "play-orb-bubble-running-ring" })).toHaveLength(1);
     expect(tree.root.findByProps({ testID: "play-orb-bubble-work" }).props.accessibilityLabel).toBe("Edit work, running now");

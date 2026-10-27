@@ -357,13 +357,22 @@ function useOrbRunningSeconds({ durationSeconds, elapsedSeconds, heldSeconds, st
   return heldSeconds ?? liveElapsedSecondsAt({ durationSeconds, elapsedSeconds, startedAt }, nowMs);
 }
 
-/** "Now: {title} · 0:35:37" at the top of the bloom while a block runs (Trello H). */
+/**
+ * "Now: {title} · 0:35:37" at the top of the bloom while a block runs (Trello H). Only the title
+ * truncates, so the time stays whole with a long title or large text (Codex r1 on #592).
+ */
 function BloomNowLine({ now }: { now: OrbRunningClock & { title: string } }) {
   const seconds = useOrbRunningSeconds(now);
+  const time = formatLiveClock(seconds);
   return (
-    <Text numberOfLines={1} style={styles.labelNow} testID="play-orb-bloom-now">
-      {`Now: ${now.title} · ${formatLiveClock(seconds)}`}
-    </Text>
+    <View
+      accessibilityLabel={`Now: ${now.title}, ${time}`}
+      style={styles.labelNowRow}
+      testID="play-orb-bloom-now"
+    >
+      <Text numberOfLines={1} style={[styles.labelNow, styles.labelNowTitle]}>{`Now: ${now.title}`}</Text>
+      <Text numberOfLines={1} style={styles.labelNow}>{` · ${time}`}</Text>
+    </View>
   );
 }
 
@@ -520,7 +529,9 @@ const styles = StyleSheet.create({
   },
   ring: { left: -RING.inset, position: "absolute", top: -RING.inset },
   label: { gap: 6, left: 24, position: "absolute", right: 24 },
-  labelNow: { color: "#FFFFFF", fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "600", marginBottom: 6 },
+  labelNow: { color: "#FFFFFF", flexShrink: 0, fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  labelNowRow: { flexDirection: "row", marginBottom: 6 },
+  labelNowTitle: { flexShrink: 1 },
   labelEyebrow: { color: "rgba(255, 255, 255, 0.7)", fontSize: 11, fontWeight: "600", letterSpacing: 0.9 },
   labelTitle: { color: "#FFFFFF", fontFamily: MOBILE_DISPLAY_FONT.bold, fontSize: 40, letterSpacing: -1.2, lineHeight: 42 },
   labelHint: { color: "rgba(255, 255, 255, 0.75)", fontSize: 14 },
