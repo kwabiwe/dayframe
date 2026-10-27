@@ -540,7 +540,9 @@ export function EntriesTable({
           <CheckQuestionRow clock={clock} item={item} outing={listChecks.outings.get(item.id)}
             editor={editingCheck === item.id ? (
               <LocationReviewPanel categories={categories} entries={entries} initialCategoryId={item.suggestedCategoryId ?? null}
-                onClose={() => applyTimelineRegroup(() => setEditingCheck(null))}
+                // Only its own editor: a late save closes after resolving, by then perhaps over another trip's
+                // editor (Codex r3 on #590).
+                onClose={() => applyTimelineRegroup(() => setEditingCheck((current) => current === item.id ? null : current))}
                 onResolved={() => {
                   void onChanged?.();
                   // Saved after the person opened another question: that one, and its editor, stay as they are.

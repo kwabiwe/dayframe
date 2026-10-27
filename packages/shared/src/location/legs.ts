@@ -28,8 +28,11 @@ import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, Tr
  * genuine location fixes (and the times of broad ones), Core Motion and the bundled stations only.
  */
 
-type Label = MotionTravelMode | "still" | "unseen";
 type GapStations = "underground" | "rail" | "mixed";
+/** A silence is labelled by its stations, so silences of different kinds never join (Codex r3 on #590). */
+type Unseen = `unseen_${GapStations}`;
+type Label = MotionTravelMode | "still" | Unseen;
+const isUnseen = (label: Label | null): label is Unseen => label != null && label.startsWith("unseen_");
 type SpeedClass = "still" | "foot" | "mid" | "vehicle";
 type Slice = {
   fromMs: number;
@@ -44,7 +47,7 @@ type Slice = {
 /** A run of slices [first, last] with one label; `observedMs` leaves indeterminate slices out. */
 type Run = { label: Label; first: number; last: number; observedMs: number; prev: Run | null; next: Run | null; alive: boolean };
 
-const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling", "unseen"]);
+const VEHICLE: ReadonlySet<Label> = new Set(["automotive", "cycling", "unseen_underground", "unseen_rail", "unseen_mixed"]);
 /** How long one reading's speed speaks for the time after it. */
 const SPEED_HOLD_MS = 120_000;
 /** A leg's end is witnessed by a fix this close to it, inside the leg. */
@@ -73,7 +76,7 @@ function sliceLabel(motion: Label | null, speed: SpeedClass | null): Label | nul
 
 /** Whether a speed regime supports a label: a moving mode's own range, or stillness for a stop. */
 function speedSupports(label: Label, speed: SpeedClass): boolean {
-  if (label === "unseen") return false;
+  if (isUnseen(label)) return false;
   return label === "still" ? speed === "still" : speedFits(label, speed);
 }
 
@@ -219,8 +222,9 @@ export function deriveTripLegs({
     const speed = speedIndex >= 0 && midMs - speeds[speedIndex].atMs <= SPEED_HOLD_MS ? speeds[speedIndex].speed : null;
     const reported = motion && !motion.carried ? motion.label : null;
     // A silence between distant fixes is its own leg; the gap itself is what was seen.
-    const silent = unseen.some((item) => item.fromMs <= midMs && midMs < item.toMs);
-    const label = silent ? "unseen" : sliceLabel(motion?.label ?? null, speed);
+    const silence = unseen.find((item) => item.fromMs <= midMs && midMs < item.toMs);
+    const silent = silence != null;
+    const label: Label | null = silence ? `unseen_${silence.stations}` : sliceLabel(motion?.label ?? null, speed);
     // Seen: Core Motion reported it, or a speed whose regime fits it (a speed that contradicts a carried label never holds it).
     slices.push({ fromMs, toMs, label, reported,
       seen: silent || reported != null || label != null && speed != null && speedSupports(label, speed) });
@@ -380,18 +384,15 @@ export function deriveTripLegs({
     const toMs = index === moving.length - 1 ? endMs : slices[run.last].toMs;
     const startedAt = new Date(fromMs).toISOString();
     const stoppedAt = new Date(toMs).toISOString();
-    if (run.label === "unseen") {
-      const gapFromMs = slices[run.first].fromMs;
-      const gapToMs = slices[run.last].toMs;
+    if (isUnseen(run.label)) {
       // Unseen runs merged across a stop keep every gap's anchors in their distance.
-      const distance = pathMeters(gapFromMs, gapToMs);
-      // Each silence by its own two anchors (Codex r1 on #590): all between Underground stations, the
-      // Underground; all between rail stations, a train; otherwise either.
-      const kinds = new Set(unseen.filter((gap) => gap.fromMs < gapToMs && gap.toMs > gapFromMs).map((gap) => gap.stations));
-      if (kinds.size === 1 && kinds.has("underground")) {
+      const distance = pathMeters(slices[run.first].fromMs, slices[run.last].toMs);
+      // Each silence by its own two anchors (Codex r1/r3 on #590): between Underground stations the
+      // Underground; between rail stations a train; between one of each, either.
+      if (run.label === "unseen_underground") {
         return { startedAt, stoppedAt, mode: "underground", confidence: "sure", unobserved: true, distanceMeters: distance };
       }
-      if (kinds.size === 1 && kinds.has("rail")) {
+      if (run.label === "unseen_rail") {
         return { startedAt, stoppedAt, mode: "train", confidence: "likely", unobserved: true, distanceMeters: distance };
       }
       return { startedAt, stoppedAt, mode: "underground", confidence: "unsure", runnerUp: "train", unobserved: true, distanceMeters: distance };

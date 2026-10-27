@@ -108,6 +108,17 @@ describe("trip legs, part 2 (location v4 step 7)", () => {
       .toMatchObject({ mode: "train", confidence: "likely" });
   });
 
+  it("keeps a rail silence and an Underground silence apart across a change (Codex r3 on #590)", () => {
+    // A silence between rail stations, a minute's wait, then one between Underground stations: a likely train,
+    // then the sure Underground, never one unsure leg.
+    const [railFrom, railTo] = pairOf("r", ["underground"]);
+    const [tubeFrom, tubeTo] = pairOf("u", ["rail"]);
+    const readings = [reading(0, railFrom, 1.2), reading(13, railTo, 0), reading(14, tubeFrom, 0), reading(27, tubeTo, 1.2)];
+    const result = legs(readings, [], 27).filter((leg) => leg.unobserved);
+    expect(result.map(({ mode, confidence }) => ({ mode, confidence })))
+      .toEqual([{ mode: "train", confidence: "likely" }, { mode: "underground", confidence: "sure" }]);
+  });
+
   it("never guesses a mode from a silence alone: without a station near both ends it joins the leg around it (card A, 24 Oct)", () => {
     // Two drives with a 1.8 km silence between them, beyond the northernmost bundled station: one drive.
     const north = packed.reduce((best, station) => station.latitude > best.latitude ? station : best);

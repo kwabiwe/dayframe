@@ -99,14 +99,16 @@ function legPart(leg: TripLeg, fromMs: number, toMs: number): TripLeg {
 /**
  * A trip's legs with the person's mode over the corrected span: every leg the span covers takes the mode
  * there, clamped to the leg, and keeps the engine's mode outside it (consecutive legs of one mode are one
- * leg, card A, so a later correction can cover parts of earlier ones; Codex r1–r2 on #590). Nothing changes
- * unless the legs cover at least half of the span, as a correction's item always must.
+ * leg, card A, so a later correction can cover parts of earlier ones; Codex r1–r3 on #590). Nothing changes
+ * unless the legs together cover at least half of the span, as a correction's item always must.
  */
 function legsWithMode(legs: readonly TripLeg[] | undefined, correction: TimelineCorrection): TripLeg[] | undefined {
   if (!legs?.length || !correction.target.mode) return legs ? [...legs] : undefined;
-  if (!bestOverlap(legs, correction, Number.POSITIVE_INFINITY)) return [...legs];
   const spanFrom = ms(correction.spanStartedAt);
   const spanTo = ms(correction.spanStoppedAt);
+  // The legs together, not one of them, must cover half the span (Codex r3 on #590).
+  const covered = legs.reduce((sum, leg) => sum + overlapMs(spanFrom, spanTo, ms(leg.startedAt), ms(leg.stoppedAt)), 0);
+  if (covered * 2 < spanTo - spanFrom) return [...legs];
   return legs.flatMap((leg) => {
     const legFrom = ms(leg.startedAt);
     const legTo = ms(leg.stoppedAt);

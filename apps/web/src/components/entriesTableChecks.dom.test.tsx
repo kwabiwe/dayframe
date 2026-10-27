@@ -20,7 +20,11 @@ vi.mock("@/lib/client-auth-fetch", () => ({ clientFetch }));
 const editors = vi.hoisted(() => ({ resolve: new Map<string, () => void>() }));
 vi.mock("@/components/location/LocationReviewPanel", () => ({
   LocationReviewPanel: ({ reviewItemId, onClose, onResolved }: { reviewItemId: string; onClose: () => void; onResolved?: () => void }) => {
-    editors.resolve.set(reviewItemId, () => onResolved?.());
+    // As the real editor does: a save resolves, then closes.
+    editors.resolve.set(reviewItemId, () => {
+      onResolved?.();
+      onClose();
+    });
     return (
       <div data-editor-for={reviewItemId}>
         <input aria-label={`Name for ${reviewItemId}`} />

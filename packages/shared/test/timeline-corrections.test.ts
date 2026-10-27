@@ -109,6 +109,21 @@ describe("timeline corrections (location v4 step 11)", () => {
       [mode, startedAt, stoppedAt, setByYou])).toEqual([["bus", at(60), at(90), true]]);
   });
 
+  it("applies a correction over three joined parts, none covering half of it alone (Codex r3 on #590)", () => {
+    const three = [trip("w", 0, 30, [
+      { startedAt: at(0), stoppedAt: at(10), mode: "walking", confidence: "sure", distanceMeters: 700 },
+      { startedAt: at(10), stoppedAt: at(20), mode: "automotive", confidence: "sure", distanceMeters: 5_000 },
+      { startedAt: at(20), stoppedAt: at(30), mode: "walking", confidence: "sure", distanceMeters: 700 }
+    ])];
+    const [result] = applyTimelineCorrections(three, [
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 0, 10, 1),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 20, 30, 2),
+      correction({ subject: "leg", kind: "leg_mode", target: { mode: "bus" } }, 0, 30, 3)
+    ], NOW);
+    expect((result as CommuteSegment).tripLegs!.map(({ mode, startedAt, stoppedAt }) => [mode, startedAt, stoppedAt]))
+      .toEqual([["bus", at(0), at(30)]]);
+  });
+
   it("makes a corrected leg one leg with a neighbour of the same mode, set by you", () => {
     const result = applyTimelineCorrections(segments, [correction({ subject: "leg", kind: "leg_mode", target: { mode: "automotive" } }, 60, 70)], NOW);
     expect((result.find((segment) => segment.clientSegmentId === "t") as CommuteSegment).tripLegs)
