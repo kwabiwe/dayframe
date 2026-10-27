@@ -130,6 +130,17 @@ describe("a trip starts at departure (card E, 25 Oct)", () => {
     expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
   });
 
+  it("needs the stop away in the same excursion as the readings away (Codex r3 on #589)", () => {
+    // An earlier short outing stopped somewhere; the later loop, after a moment at Home, did not.
+    const input = morning({ withMotion: false });
+    input.evidence = [...input.evidence.filter((item) => !["stop-visit", "stop-visit-done"].includes(item.clientEvidenceId)),
+      visit("early-stop", 32, { east: 2_300 }, 10, 33), crossing("home-enter-early", 34, "geofence_enter", HOME_ID),
+      fix("home-early", 34.1, { north: 3 }, 5, { speedMetersPerSecond: 0 }), crossing("home-exit-early", 34.7, "geofence_exit", HOME_ID)];
+    const toSchool = commutes(input).filter((trip) => trip.fromPlaceId === HOME_ID && trip.toPlaceId === SCHOOL_ID);
+    expect(toSchool).toHaveLength(1);
+    expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
+  });
+
   it("keeps the trip between its stays: it starts when Home ends at the latest and ends where the shop stay begins", () => {
     const all = segments(morning());
     const stays = all.filter((segment): segment is StaySegment => segment.kind === "stay");

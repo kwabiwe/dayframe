@@ -806,17 +806,20 @@ function originCircle(stay: StaySegment, place: SavedPlaceForMatching | null, co
  * independent accurate readings (more than `MIRROR_WINDOW_MS` apart, so never one observation and its
  * copy) at least `commuteSamePlaceMinimumExcursionMeters` from its circle's centre net of their accuracy,
  * or `LEAVING_MARGIN_METRES` beyond its radius if that is farther, with no sign of being back at the place
- * between them (both belong to one excursion; Codex r2 on #589). Null when it never was.
+ * between them (both belong to one excursion; Codex r2 on #589), with when that excursion began: the
+ * last sign of being at the place before it (the stay's end when there was none). Null when it never was.
  */
-function clearlyAwayFromOriginMs(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
-  snapshots: ReadonlySet<ClassifiedEvidence>, config: LocationEngineConfig) {
+function clearlyAwayFromOrigin(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
+  snapshots: ReadonlySet<ClassifiedEvidence>, stayEndMs: number, config: LocationEngineConfig) {
   const circle = originCircle(stay, place, config);
   if (!circle) return null;
   let firstMs: number | null = null;
+  let leftMs = stayEndMs;
   for (const item of gapEvidence) {
     if (snapshots.has(item) || item.evidence.isSimulated === true) continue;
     if (atOrigin(item, stay, circle, config)) {
       firstMs = null;
+      leftMs = Date.parse(item.evidence.occurredAt);
       continue;
     }
     const point = evidencePoint(item);
@@ -825,19 +828,23 @@ function clearlyAwayFromOriginMs(stay: StaySegment, place: SavedPlaceForMatching
     const atMs = Date.parse(item.evidence.occurredAt);
     if (firstMs == null) firstMs = atMs;
     // A copy of the same observation (a significant change mirroring a fix) is not a second reading.
-    else if (atMs - firstMs > MIRROR_WINDOW_MS) return firstMs;
+    else if (atMs - firstMs > MIRROR_WINDOW_MS) return { awayMs: firstMs, leftMs };
   }
   return null;
 }
 
-/** Whether the device stopped somewhere clearly away from a stay's place before `untilMs`: a completed Visit there. */
+/**
+ * Whether the device stopped somewhere clearly away from a stay's place within one excursion, after it
+ * left (`fromMs`) and before it was back (`untilMs`): a completed Visit there (Codex r3 on #589).
+ */
 function stoppedAwayFromOrigin(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
-  snapshots: ReadonlySet<ClassifiedEvidence>, untilMs: number, config: LocationEngineConfig) {
+  snapshots: ReadonlySet<ClassifiedEvidence>, fromMs: number, untilMs: number, config: LocationEngineConfig) {
   const circle = originCircle(stay, place, config);
   return circle != null && gapEvidence.some((item) => {
     const point = evidencePoint(item);
-    const { kind, endedAt, isSimulated, horizontalAccuracyMeters } = item.evidence;
-    return kind === "visit" && endedAt != null && Date.parse(endedAt) <= untilMs && point != null && isSimulated !== true &&
+    const { kind, occurredAt, endedAt, isSimulated, horizontalAccuracyMeters } = item.evidence;
+    return kind === "visit" && endedAt != null && Date.parse(occurredAt) > fromMs && Date.parse(endedAt) <= untilMs &&
+      point != null && isSimulated !== true &&
       !snapshots.has(item) && !evidenceMatchesStay(item, stay) &&
       distanceMeters(circle.centre, point) - (horizontalAccuracyMeters ?? 0) >= circle.awayMetres;
   });
@@ -934,19 +941,20 @@ export function deriveCommutes(
     // it began. Dropping the time before it left an outing with no segment and a one-minute drive
     // after it. A longer time back is time at the place, and a loop out and back with no stop (a
     // walk, then the drive) is its own outing: the next trip starts when it left again.
-    const awayMs = clearlyAwayFromOriginMs(from, fromPlace, gapEvidence, snapshots, config);
+    const away = clearlyAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, originalStartedAtMs, config);
+    const awayMs = away?.awayMs ?? null;
     const latestMs = latestFromSupport ? Date.parse(latestFromSupport.evidence.occurredAt) : null;
     const backMs = awayMs != null && latestMs != null && latestMs > awayMs
       ? firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, awayMs, config) : null;
     // Its stop away and its pass back through the origin were never stays, so the trip carries no
     // `stops`: it stands at low confidence, offered in Review as a trip with a stop is (PRD D19), never
     // logged automatically (Codex r1 on #589).
-    const departedMs = awayMs != null && backMs != null && latestMs != null && latestMs - backMs < config.savedPlaceMinimumDwellMs &&
-      stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, backMs, config) ? awayMs : null;
-    const throughOrigin = departedMs != null;
-    if (departedMs != null) {
+    const firstLeftMs = away != null && backMs != null && latestMs != null && latestMs - backMs < config.savedPlaceMinimumDwellMs &&
+      stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, away.leftMs, backMs, config) ? away.awayMs : null;
+    const throughOrigin = firstLeftMs != null;
+    if (firstLeftMs != null) {
       latestFromSupport = latestDepartureSupport(from, fromEvidence,
-        gapEvidence.filter((item) => Date.parse(item.evidence.occurredAt) < departedMs), config, farFrom, snapshots,
+        gapEvidence.filter((item) => Date.parse(item.evidence.occurredAt) < firstLeftMs), config, farFrom, snapshots,
         stoppedAtMs, sameKnownEndpoint(from, to), fromPlace);
     }
     let startedAtMs = latestFromSupport
