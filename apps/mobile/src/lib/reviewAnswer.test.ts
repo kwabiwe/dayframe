@@ -75,7 +75,7 @@ describe("reviewAnswerQuestion (mock-up #ios-list)", () => {
         more: true, moreLabel: "Edit", opens: false });
     expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: "Commute" }), "24h").question)
       .toBe("Commute, 10:00–11:30?");
-    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: null }), "24h").question)
+    expect(reviewAnswerQuestion(item({ eventType: "commute_detected", eventSource: "location_learning", title: undefined }), "24h").question)
       .toBe("Getting around, 10:00–11:30?");
     expect(reviewAnswerQuestion(locationV2, "24h", { outing: true })).toMatchObject({
       question: "Log Exampleton Library with the trips there and back, 10:00–11:30?", logLabel: "Log it", skipLabel: "Skip"
