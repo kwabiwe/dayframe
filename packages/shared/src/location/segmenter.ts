@@ -478,6 +478,33 @@ function iosPlacedInside(placeId: string, evidence: ClassifiedEvidence[], reused
 
 const GEOFENCE_SNAPSHOT_PAIR_MS = 5_000;
 
+/** Whether iOS reported leaving the stay's place between two times: a Visit of the stay, or its corroborated arrival, departed then. */
+function departedDuring(stay: WorkingStay, fromMs: number, toMs: number) {
+  const departures = [
+    ...stay.evidence.flatMap(({ evidence }) => evidence.kind === "visit" && evidence.endedAt ? [Date.parse(evidence.endedAt)] : []),
+    ...(stay.arrivalPresenceUntilAt ? [Date.parse(stay.arrivalPresenceUntilAt)] : [])
+  ];
+  return departures.some((departedMs) => departedMs >= fromMs && departedMs < toMs);
+}
+
+/**
+ * Whether iOS itself reported entering a saved stay's place during the stay: a genuine entry among its
+ * evidence (never a simulated one or half of a registration snapshot pair) with no exit for the place
+ * after it in the journal.
+ */
+function enteredSavedPlace(stay: WorkingStay, accepted: ClassifiedEvidence[]) {
+  const transitions = accepted.filter(({ evidence: callback }) =>
+    (callback.kind === "geofence_enter" || callback.kind === "geofence_exit") && callback.savedPlaceId === stay.placeId &&
+    callback.isSimulated !== true);
+  const genuine = transitions.filter((item) => !transitions.some((other) => other.evidence.kind !== item.evidence.kind &&
+    Math.abs(Date.parse(other.evidence.occurredAt) - Date.parse(item.evidence.occurredAt)) <= GEOFENCE_SNAPSHOT_PAIR_MS));
+  const entry = genuine.filter((item) => item.evidence.kind === "geofence_enter" && stay.evidence.includes(item)).at(-1);
+  if (!entry) return false;
+  const lastObservedMs = latestObservationMs(stay);
+  return !genuine.some((item) => item.evidence.kind === "geofence_exit" &&
+    Date.parse(item.evidence.occurredAt) > Date.parse(entry.evidence.occurredAt) && Date.parse(item.evidence.occurredAt) <= lastObservedMs);
+}
+
 /**
  * A saved-place stay with still GPS fixes, none of them inside the place's
  * circle (still matches only in the tolerance band or beyond), without a
@@ -1725,13 +1752,22 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
         active.arrivalPresence === true &&
         (active.arrivalPresenceUntilAt == null || atMs <= Date.parse(active.arrivalPresenceUntilAt)) &&
         atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
-      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap && !openVisitPresence) {
+      // After iOS's own entry into a saved place, with no exit or outside reading since, a silence ends where
+      // it began only if the device is seen elsewhere: back strongly inside the same place, it never left
+      // (card E, 25 Oct: home at 11:13, the phone quiet until 14:26, the trip ran to 14:26).
+      const enteredPresence = observationGapMs > input.config.maxContinuityGapMs &&
+        active.placeMatchKind === "saved" && !active.pendingExit && active.outside.length === 0 && !edgeOnly(active, input) &&
+        enteredSavedPlace(active, accepted) && strongSavedPoint(item, active.placeId, input) &&
+        !departedDuring(active, Date.parse(observedAt), atMs) &&
+        atMs - Date.parse(observedAt) <= input.config.savedPlaceOpenVisitPresenceMaximumMs;
+      if (observationGapMs > input.config.maxContinuityGapMs && !boundedSparseSameUnknown && !boundedSparseEdge && !boundedSavedGap &&
+        !openVisitPresence && !enteredPresence) {
         closeAtTransition(active, evidence.occurredAt, "uncertain_gap", input.config, true);
         completed.push(active);
         active = null;
       } else if (observationGapMs > input.config.maxContinuityGapMs) {
         active.continuityStatus = "uncertain_gap";
-        if (boundedSavedGap || openVisitPresence) active.inferredContinuity = true;
+        if (boundedSavedGap || openVisitPresence || enteredPresence) active.inferredContinuity = true;
       }
     }
 
