@@ -37,7 +37,7 @@ import { CalendarListView } from "./CalendarListView";
 // Location v4 step 9: a synthetic day in Exampleton, made-up names and ids.
 const at = (hour: number, minute = 0) => Date.UTC(2026, 9, 22, hour, minute);
 const iso = (hour: number, minute = 0) => new Date(at(hour, minute)).toISOString();
-const theme = { background: "#000", surface: "#111", surfaceMuted: "#222", border: "#333", accent: "#F66", textPrimary: "#FFF",
+const theme = { background: "#000", surface: "#111", surfaceInset: "#0A0", surfaceMuted: "#222", border: "#333", accent: "#F66", textPrimary: "#FFF",
   textSecondary: "#AAA", textMuted: "#777", warningText: "#FB0" } as never;
 const block = (entryId: string, title: string, start: number, stop: number) => ({
   entryId, actionId: entryId, title, meta: "", lengthLabel: "1h", accessibilityLabel: title, color: "#0AF", textColor: "#000",
@@ -170,6 +170,13 @@ describe("CalendarListView (location v4 step 9)", () => {
     act(() => { placeCheck.props.onPress(); });
     expect(questions()).toHaveLength(1);
     expect(JSON.stringify(questions()[0].props.children)).toContain("Log Unknown place, 12:00–13:00?");
+    // Card D item 9: the inset surface, "Log it" a neutral dark pill (textPrimary, background text), the skip muted.
+    const flat = (style: unknown) => Object.assign({}, ...[style].flat(3).filter(Boolean)) as Record<string, unknown>;
+    expect(flat(questions()[0].props.style).backgroundColor).toBe("#0A0");
+    const log = tree.root.findByProps({ testID: "calendar-list-answer-log" });
+    expect(flat(log.props.style({ pressed: false })).backgroundColor).toBe("#FFF");
+    expect(flat(log.findByType("Text" as never).props.style).color).toBe("#000");
+    expect(flat(tree.root.findByProps({ testID: "calendar-list-answer-skip" }).props.style({ pressed: false })).backgroundColor).toBe("#222");
     expect(tree.root.findByProps({ accessibilityLabel: "Check Unknown place" }).props.accessibilityState).toEqual({ expanded: true });
     act(() => { tree.root.findByProps({ testID: "calendar-list-answer-more" }).props.onPress(); });
     expect(onOpenCheck).toHaveBeenCalledWith("c-unknown");
@@ -358,4 +365,19 @@ describe("CalendarListView (location v4 step 9)", () => {
     });
   });
 });
+
+describe("CalendarListView modes line (card D item 12)", () => {
+  it("shows at most three legs, then +N, while VoiceOver still hears every leg", () => {
+    const legs = [0, 10, 20, 30, 40].map((minute, index) => ({
+      startedAt: iso(8, minute), stoppedAt: iso(8, minute + 10), mode: index % 2 ? "bus" : "walking", confidence: "sure", distanceMeters: 500
+    }));
+    const fiveLegs = { ...timeline, items: timeline.items.map((item) => (item.kind === "trip" ? { ...item, legs } : item)) } as LocationTimeline;
+    const { tree } = render({ timeline: fiveLegs });
+    expect(tree.root.findByProps({ testID: "calendar-list-modes-more" }).props.children).toEqual(["+", 2]);
+    expect(labels(tree)).toContain("Commute. Home → Office. Legs: Walk, Bus, Walk, Bus, Walk");
+    // Two legs: no "+N".
+    expect(render().tree.root.findAll((node) => node.props.testID === "calendar-list-modes-more")).toHaveLength(0);
+  });
+});
+
 

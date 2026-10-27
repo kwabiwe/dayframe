@@ -373,12 +373,16 @@ function modesLabel(legs: readonly TripLeg[], route?: string) {
   return `${route ? `${route}. ` : ""}Legs: ${legs.map((leg) => legModeLabel(leg)).join(", ")}`;
 }
 
+/** Card D item 12: a trip's modes line shows at most three legs, then "+N" (its row's label names every leg). */
+export const MODES_LINE_MAX_LEGS = 3;
+
 /** A trip's route and modes on one line; an unsure leg's name in amber with its "?". Read as part of its row. */
 function ModesLine({ legs, route, theme }: { legs: readonly TripLeg[]; route?: string; theme: MobileTheme }) {
+  const more = legs.length - MODES_LINE_MAX_LEGS;
   return (
     <View importantForAccessibility="no-hide-descendants" style={styles.modes}>
       {route ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{route}</Text> : null}
-      {legs.map((leg, index) => (
+      {legs.slice(0, MODES_LINE_MAX_LEGS).map((leg, index) => (
         <View key={`${leg.startedAt}-${index}`} style={styles.mode}>
           <DayframeIcon color={leg.confidence === "unsure" ? theme.warningText : theme.textSecondary} glyph={DAYFRAME_LEG_MODE_ICONS[leg.mode]} size={13} />
           <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: leg.confidence === "unsure" ? theme.warningText : theme.textSecondary }]}>
@@ -386,6 +390,9 @@ function ModesLine({ legs, route, theme }: { legs: readonly TripLeg[]; route?: s
           </Text>
         </View>
       ))}
+      {more > 0 ? (
+        <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]} testID="calendar-list-modes-more">+{more}</Text>
+      ) : null}
     </View>
   );
 }
@@ -504,30 +511,33 @@ function LocationRow({ answering, checkTitles, onToggleCheck, openCheckId, row, 
  * A "?"'s question under its row (mock-up #ios-list): what it asks, why, and one-tap answers in 44-point
  * pills ("Log it" first, then the skip, then "More…" for picking another place on its own screen). A
  * suggestion without a complete time cannot be answered here: it says so and offers "Open it" instead.
+ * Card D item 9 (owner, 25 Oct 2026): one style with the web — the standard inset surface, "Log it" a
+ * neutral dark pill (textPrimary fill, background text), the others surfaceMuted; coral stays for
+ * Play/Stop and live recording.
  */
 function CheckQuestion({ onAnswer, onMore, onOpen, question, theme }: {
   onAnswer: (logged: boolean) => void; onMore?: () => void; onOpen?: () => void; question: ReviewAnswerQuestion; theme: MobileTheme;
 }) {
   return (
-    <View style={[styles.question, { backgroundColor: theme.surfaceMuted }]} testID="calendar-list-question">
+    <View style={[styles.question, { backgroundColor: theme.surfaceInset }]} testID="calendar-list-question">
       <Text {...mobileTextProps("itemTitle")} accessibilityRole="header" style={[styles.questionTitle, { color: theme.textPrimary }]}>{question.question}</Text>
       {question.detail ? <Text {...mobileTextProps("metadata")} style={[styles.meta, { color: theme.textSecondary }]}>{question.detail}</Text> : null}
       <View style={styles.answers}>
         {question.logLabel ? (
           <Pressable accessibilityRole="button" onPress={() => onAnswer(true)} testID="calendar-list-answer-log"
             style={({ pressed }) => [styles.answer, { backgroundColor: theme.textPrimary, opacity: pressed ? 0.8 : 1 }]}>
-            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.surface }]}>{question.logLabel}</Text>
+            <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.background }]}>{question.logLabel}</Text>
           </Pressable>
         ) : null}
         {question.skipLabel ? (
           <Pressable accessibilityRole="button" onPress={() => onAnswer(false)} testID="calendar-list-answer-skip"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>{question.skipLabel}</Text>
           </Pressable>
         ) : null}
         {question.opens && onOpen ? (
           <Pressable accessibilityHint="Opens the suggestion on its own screen" accessibilityRole="button" onPress={onOpen} testID="calendar-list-answer-open"
-            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surface, opacity: pressed ? 0.8 : 1 }]}>
+            style={({ pressed }) => [styles.answer, { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.8 : 1 }]}>
             <Text {...mobileTextProps("control")} style={[styles.answerText, { color: theme.textPrimary }]}>Open it</Text>
           </Pressable>
         ) : null}

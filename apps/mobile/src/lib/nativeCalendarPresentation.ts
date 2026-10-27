@@ -143,13 +143,6 @@ export type NativeCalendarPresentation = {
   dayStartMs: number;
   emptyState: string;
   entries: NativeCalendarPresentationEntry[];
-  /**
-   * Calendar v3 (owner, 24 Oct 2026): "8h 41m framed", one line under the week strip; empty (hidden) on
-   * a day with nothing framed. Confirmed time on the selected day (Review suggestions excluded).
-   */
-  framedLabel: string;
-  /** The same line for VoiceOver, with the full date: "8 hours 41 minutes framed on Friday 23 October". */
-  framedAccessibilityLabel?: string;
   hapticsEnabled: boolean;
   /** Calendar › Grid or List (location v4 step 9): in List the native view draws only its header and week strip. */
   layout?: "grid" | "list";
@@ -410,8 +403,6 @@ export function buildNativeCalendarBridgeState({
       dayEndMs: dayEnd.getTime(),
       dayStartMs: dayStart.getTime(),
       emptyState: "Nothing framed yet.",
-      framedLabel: formatFramedLabel(confirmedAnalysis.loggedSeconds),
-      framedAccessibilityLabel: formatFramedAccessibilityLabel(confirmedAnalysis.loggedSeconds, selectedDate),
       hapticsEnabled,
       clockFormat,
       entries: entries.map((entry) => serializeCalendarEntry(
@@ -991,16 +982,6 @@ function formatWeekday(date: Date) {
 function formatMonthTitle(date: Date, today: Date) {
   return formatLocaleDate(date, date.getFullYear() === today.getFullYear() ? { month: "long" } : { month: "long", year: "numeric" }
   );
-}
-
-function formatFramedLabel(seconds: number) {
-  return Math.round(seconds / 60) > 0 ? `${formatDuration(seconds)} framed` : "";
-}
-
-function formatFramedAccessibilityLabel(seconds: number, date: Date) {
-  return Math.round(seconds / 60) > 0
-    ? `${spokenDuration(seconds)} framed on ${formatFullDate(date)}`
-    : `Nothing framed on ${formatFullDate(date)}`;
 }
 
 /** "Friday 23 October", in the phone's own date order. */

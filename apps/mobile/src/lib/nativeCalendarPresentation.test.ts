@@ -611,24 +611,18 @@ describe("native Calendar presentation boundary", () => {
 });
 
 describe("native Calendar Blocks presentation", () => {
-  it("titles the screen with the month and puts one short framed line under the week strip (Calendar v3)", () => {
+  it("titles the screen with the month and sends no framed line (card C item 1: the day heading says logged)", () => {
     const now = localTime(2026, 7, 10, 12, 0);
     const state = build(now, bootstrap([entry({ durationSeconds: 80 * 60, stoppedAt: iso(localTime(2026, 7, 10, 10, 20)) })]));
     const fullDate = new Date(localTime(2026, 7, 10, 0, 0)).toLocaleDateString(undefined, { day: "numeric", month: "long", weekday: "long" });
 
     expect(state.model.monthTitle).toBe(new Date(now).toLocaleDateString(undefined, { month: "long" }));
-    // The week strip and the month already show the date: the line says only the time.
-    expect(state.model.framedLabel).toBe("1h 20m framed");
-    expect(state.model.framedAccessibilityLabel).toBe(`1 hour 20 minutes framed on ${fullDate}`);
+    expect(state.model).not.toHaveProperty("framedLabel");
+    expect(state.model).not.toHaveProperty("framedAccessibilityLabel");
     // The selected day in the strip reads its full date; today says so.
     const friday = state.model.weekDays.find((day) => day.isSelected);
     expect(friday?.accessibilityLabel).toBe(`${fullDate}, today`);
     expect(state.model.weekDays.find((day) => !day.isToday)?.accessibilityLabel).not.toContain("today");
-
-    // Hidden on an empty day, still said in full to VoiceOver.
-    const empty = build(now, bootstrap([]));
-    expect(empty.model.framedLabel).toBe("");
-    expect(empty.model.framedAccessibilityLabel).toBe(`Nothing framed on ${fullDate}`);
   });
 
   it("gives a block its icon lines: the place, a trip's route or Apple Health, the tags, then the times (Calendar v3)", () => {
