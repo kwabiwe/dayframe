@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { visitedGuess } from "@dayframe/shared";
 import type { MobileReviewItem } from "../../lib/api";
 import { useAppForeground } from "../../lib/appForeground";
-import { readLocationReviewEvidence, revalidateLocationReviewEvidence } from "../../lib/locationReviewEvidenceCache";
+import { revalidateLocationReviewEvidence } from "../../lib/locationReviewEvidenceCache";
 import {
   createNativeNearbyPointOfInterestProvider,
   NearbyPointOfInterestController,
@@ -27,9 +27,6 @@ type Owner = { userId: string; workspaceId: string };
 const guesses = new Map<string, ReviewAnswerVenue | null>();
 const GUESSES_KEPT = 50;
 let guessesOwnerKey: string | null = null;
-// The version of each suggestion its evidence was last read for: a newer version reads it again from the
-// server, never from what the phone kept (Codex r2 on #600).
-const evidenceProposals = new Map<string, string>();
 
 function keepGuess(key: string, venue: ReviewAnswerVenue | null) {
   guesses.delete(key);
@@ -37,17 +34,11 @@ function keepGuess(key: string, venue: ReviewAnswerVenue | null) {
   while (guesses.size > GUESSES_KEPT) guesses.delete(guesses.keys().next().value!);
 }
 
-function keepEvidenceProposal(itemKey: string, proposal: string) {
-  evidenceProposals.delete(itemKey);
-  evidenceProposals.set(itemKey, proposal);
-  while (evidenceProposals.size > GUESSES_KEPT) evidenceProposals.delete(evidenceProposals.keys().next().value!);
-}
 
 /** Forgets every guess unless they are this account's. */
 function guessesFor(ownerKey: string | null) {
   if (ownerKey === guessesOwnerKey) return;
   guesses.clear();
-  evidenceProposals.clear();
   guessesOwnerKey = ownerKey;
 }
 
@@ -116,26 +107,18 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
     };
     void (async () => {
       try {
-        const owned = { reviewItemId: itemId, userId, workspaceId, signal: controller.signal };
-        const itemKey = `${userId}:${workspaceId}:${itemId}`;
-        const matches = (read: { segment: { startedAt: string; stoppedAt: string | null } }) =>
-          Date.parse(read.segment.startedAt) === Date.parse(startedAt ?? "") &&
-          Date.parse(read.segment.stoppedAt ?? "") === Date.parse(stoppedAt ?? "");
-        // Evidence read for an earlier version of the suggestion (it moved, or its segment changed), or kept
-        // with other times, is read again from the server; still another version's, it gives no guess
-        // (Codex r1, r2 on #600).
-        const known = evidenceProposals.get(itemKey);
-        const first = known != null && known !== proposal
-          ? await revalidateLocationReviewEvidence(owned, { fresh: true })
-          : await readLocationReviewEvidence(owned);
-        let { evidence } = first;
-        if (!matches(evidence) && first.source === "cache") ({ evidence } = await revalidateLocationReviewEvidence(owned, { fresh: true }));
+        // The evidence is read from the server, never from what the phone kept, and never by joining a read
+        // begun earlier: the phone cannot tell which version of the suggestion kept evidence describes (a
+        // replay can move its window or its segment), and the guess is searched once per version. Evidence
+        // whose times are not the question's gives no guess (Codex r1–r3 on #600).
+        const { evidence } = await revalidateLocationReviewEvidence(
+          { reviewItemId: itemId, userId, workspaceId, signal: controller.signal }, { fresh: true });
         if (controller.signal.aborted) return;
-        if (!matches(evidence)) {
+        if (Date.parse(evidence.segment.startedAt) !== Date.parse(startedAt ?? "") ||
+          Date.parse(evidence.segment.stoppedAt ?? "") !== Date.parse(stoppedAt ?? "")) {
           finish(null, false);
           return;
         }
-        keepEvidenceProposal(itemKey, proposal);
         const centre = evidence.map.centre;
         const provider = createNativeNearbyPointOfInterestProvider();
         if (controller.signal.aborted) return;
@@ -182,6 +165,5 @@ export function useCheckVenueGuess({ item, outing, owner, onScreen = true }: {
 
 export function __resetCheckVenueGuessesForTests() {
   guesses.clear();
-  evidenceProposals.clear();
   guessesOwnerKey = null;
 }

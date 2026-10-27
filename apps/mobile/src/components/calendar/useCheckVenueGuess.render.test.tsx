@@ -11,7 +11,7 @@ vi.mock("../../../modules/dayframe-place-search", () => ({
 }));
 vi.mock("expo-location", () => ({ getForegroundPermissionsAsync: vi.fn(), getLastKnownPositionAsync: vi.fn() }));
 const mocks = vi.hoisted(() => ({
-  readEvidence: vi.fn(), revalidate: vi.fn(), search: vi.fn(), cancel: vi.fn(async () => undefined),
+  readEvidence: vi.fn(), search: vi.fn(), cancel: vi.fn(async () => undefined),
   appState: { current: "active", listeners: new Set<(state: string) => void>() }
 }));
 vi.mock("react-native", () => ({
@@ -23,7 +23,7 @@ vi.mock("react-native", () => ({
     }
   }
 }));
-vi.mock("../../lib/locationReviewEvidenceCache", () => ({ readLocationReviewEvidence: mocks.readEvidence, revalidateLocationReviewEvidence: mocks.revalidate }));
+vi.mock("../../lib/locationReviewEvidenceCache", () => ({ revalidateLocationReviewEvidence: mocks.readEvidence }));
 vi.mock("../../lib/placeSearch", async () => {
   const actual = await vi.importActual<typeof import("../../lib/placeSearch")>("../../lib/placeSearch");
   return { ...actual, createNativeNearbyPointOfInterestProvider: () => ({ search: mocks.search, resolve: vi.fn(), cancel: mocks.cancel }) };
@@ -79,7 +79,7 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
   });
 
   it("names the place the ranker is confident about, searching once for its open question", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(async ({ requestId }: { requestId: string }) => ({
       requestId, areasOfInterest: [],
       places: [{ id: "p1", requestId, title: "Exampleton Bakery", subtitle: "12 Example Street, Exampleton", distanceMeters: 8,
@@ -111,7 +111,7 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
   });
 
   it("never searches with the app in the background or the Calendar off screen, and searches on return", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(bakery);
     mocks.appState.current = "background";
     let tree!: ReturnType<typeof create>;
@@ -130,13 +130,13 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
   it("stops a search already running when the app goes to the background", async () => {
     let resolveEvidence!: (value: unknown) => void;
     mocks.readEvidence.mockImplementationOnce(() => new Promise((resolve) => { resolveEvidence = resolve; }))
-      .mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+      .mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(bakery);
     await act(async () => { create(<Probe item={stay} />); });
     const signal = mocks.readEvidence.mock.calls[0][0].signal as AbortSignal;
     await setAppState("background");
     expect(signal.aborted).toBe(true);
-    await act(async () => { resolveEvidence({ evidence, source: "cache", cachedAt: null }); });
+    await act(async () => { resolveEvidence({ evidence, source: "network", cachedAt: null }); });
     await settle();
     expect(mocks.search).not.toHaveBeenCalled();
     await setAppState("active");
@@ -146,7 +146,7 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
 
   it("gives the native search up to the editor, then searches again once the Calendar is back", async () => {
     let searchCalls = 0;
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     // The first search never answers: the editor's search cancels it.
     mocks.search.mockImplementation((request: { requestId: string }) => (++searchCalls === 1 ? new Promise(() => undefined) : bakery(request)));
     let tree!: ReturnType<typeof create>;
@@ -165,7 +165,7 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
   });
 
   it("is not left searching when another search cancels it without a word", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockRejectedValueOnce(Object.assign(new Error("cancelled"), { code: "cancelled" })).mockImplementation(bakery);
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe item={stay} />); });
@@ -178,10 +178,10 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
   });
 
   it("guesses again, from fresh evidence, when a replay moves the suggestion", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
     const moved = { ...stay, suggestedStartedAt: "2026-10-27T09:10:00.000Z" } as MobileReviewItem;
     const movedEvidence = { ...evidence, segment: { ...evidence.segment, startedAt: "2026-10-27T09:10:00.000Z" } };
-    mocks.revalidate.mockResolvedValue({ evidence: movedEvidence, source: "network", cachedAt: null });
+    mocks.readEvidence.mockResolvedValueOnce({ evidence, source: "network", cachedAt: null })
+      .mockResolvedValue({ evidence: movedEvidence, source: "network", cachedAt: null });
     mocks.search.mockImplementationOnce(async ({ requestId }: { requestId: string }) => ({ requestId, areasOfInterest: [], places: [] }))
       .mockImplementation(bakery);
     let tree!: ReturnType<typeof create>;
@@ -190,13 +190,13 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     expect(venueOf(seen)).toEqual({ venue: null, searching: false });
     await act(async () => { tree.update(<Probe item={moved} />); });
     await settle();
-    expect(mocks.revalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.readEvidence).toHaveBeenCalledTimes(2);
     expect(mocks.search).toHaveBeenCalledTimes(2);
     expect(venueOf(seen)?.venue?.name).toBe("Exampleton Bakery");
   });
 
   it("forgets the last account's guesses when another signs in", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(bakery);
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe item={stay} />); });
@@ -208,30 +208,31 @@ describe("the iPhone's guess for an unnamed visit (card B part 2)", () => {
     expect(mocks.search).toHaveBeenCalledTimes(3);
   });
 
-  it("gives no guess when the evidence read again still describes the earlier suggestion", async () => {
+  it("reads the evidence from the server, never joining a read already under way, and refuses another version's", async () => {
     const moved = { ...stay, suggestedStartedAt: "2026-10-27T09:10:00.000Z" } as MobileReviewItem;
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
-    mocks.revalidate.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+    mocks.readEvidence.mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(bakery);
     await act(async () => { create(<Probe item={moved} />); });
     await settle();
-    expect(mocks.revalidate).toHaveBeenCalledWith(expect.objectContaining({ reviewItemId: "item-1" }), { fresh: true });
+    expect(mocks.readEvidence).toHaveBeenCalledWith(expect.objectContaining({ reviewItemId: "item-1" }), { fresh: true });
     expect(mocks.search).not.toHaveBeenCalled();
     expect(venueOf(seen)).toEqual({ venue: null, searching: false });
   });
 
-  it("reads the evidence again from the server when only the suggestion's segment changed", async () => {
-    mocks.readEvidence.mockResolvedValue({ evidence, source: "cache", cachedAt: null });
-    mocks.revalidate.mockResolvedValue({ evidence, source: "network", cachedAt: null });
+  it("starts a new read when the suggestion's segment changes while one is under way", async () => {
+    let first!: AbortSignal;
+    mocks.readEvidence.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
+      first = signal;
+      return new Promise(() => undefined);
+    }).mockResolvedValue({ evidence, source: "network", cachedAt: null });
     mocks.search.mockImplementation(bakery);
     let tree!: ReturnType<typeof create>;
     await act(async () => { tree = create(<Probe item={stay} />); });
-    await settle();
-    expect(mocks.revalidate).not.toHaveBeenCalled();
     await act(async () => { tree.update(<Probe item={{ ...stay, rawPayload: { clientSegmentId: "seg-2" } } as MobileReviewItem} />); });
     await settle();
-    expect(mocks.revalidate).toHaveBeenCalledTimes(1);
-    expect(mocks.revalidate.mock.calls[0][1]).toEqual({ fresh: true });
-    expect(mocks.search).toHaveBeenCalledTimes(2);
+    expect(first.aborted).toBe(true);
+    expect(mocks.readEvidence).toHaveBeenCalledTimes(2);
+    expect(mocks.readEvidence.mock.calls[1][1]).toEqual({ fresh: true });
+    expect(venueOf(seen)?.venue?.name).toBe("Exampleton Bakery");
   });
 });
