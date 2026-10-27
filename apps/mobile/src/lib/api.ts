@@ -2092,14 +2092,15 @@ export async function fetchLocationReviewEvidence(
  * item's evidence is.
  */
 export async function fetchTimelineItemEvidence(
-  itemId: string,
+  item: { id: string; kind: "place" | "trip"; startedAt: string },
   options: { signal?: AbortSignal; owner: MobileAccountOwner }
 ): Promise<TimelineItemEvidenceDto> {
   const session = await readOwnedAuthenticatedSessionSnapshot(options.owner);
   if (session.status === "changed" || session.status === "owner_mismatch") throw new StaleMobileSessionResponseError();
   if (session.status !== "authenticated") throw new AuthRequiredError();
   const { response, body } = await mobileJsonRequest<TimelineItemEvidenceDto | null>(
-    `${DAYFRAME_API_BASE}/api/timeline/items/${encodeURIComponent(itemId)}/evidence`,
+    // Its kind and start pick it exactly: a client segment id is unique per device only.
+    `${DAYFRAME_API_BASE}/api/timeline/items/${encodeURIComponent(item.id)}/evidence?kind=${item.kind}&startedAt=${encodeURIComponent(item.startedAt)}`,
     { headers: { Authorization: `Bearer ${session.snapshot.token}` }, cache: "no-store", signal: options.signal },
     { timeoutMilliseconds: MOBILE_LOCATION_REVIEW_EVIDENCE_TIMEOUT_MS,
       timeoutMessage: "Location evidence is taking too long to load.",

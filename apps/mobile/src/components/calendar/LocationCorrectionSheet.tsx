@@ -167,6 +167,7 @@ export function LocationCorrectionSheet({
   return (
     <BottomSheetShell
       action="Done"
+      actionTone="neutral"
       calendarLayout={false}
       commitRef={commitRef}
       disabled={!leg && Boolean(problem)}
@@ -309,7 +310,7 @@ function PlaceView({ choice, correctableItem, onChoose, place, places, theme }: 
     ...places.map((option) => ({
       key: option.id,
       title: option.name,
-      detail: option.role === "home" ? "Home" : option.role === "work" ? "Work" : "Saved place",
+      detail: "Saved place",
       glyph: (option.role === "home" ? "house" : DAYFRAME_APP_ICONS.places) as DayframeGlyph,
       pick: { kind: "saved", id: option.id } as PlaceChoice
     })),

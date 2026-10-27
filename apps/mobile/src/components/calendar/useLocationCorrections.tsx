@@ -52,15 +52,24 @@ export function useLocationCorrections({
   // The open item's map (owner feedback, 27 Oct 2026: the map comes first on every sheet).
   const [evidence, setEvidence] = useState<{ itemId: string; evidence: TimelineItemEvidenceDto | null } | null>(null);
   const openItemId = open?.itemId ?? null;
+  const openKind = open?.kind ?? null;
+  // The item's start as the timeline gave it when the sheet opened (its sheet's map stays with that item).
+  const [openedStart, setOpenedStart] = useState<{ id: number; startedAt: string } | null>(null);
+  if (open && openedStart?.id !== open.id) {
+    const item = timeline?.items.find((each) => each.id === open.itemId && each.kind === open.kind);
+    if (item) setOpenedStart({ id: open.id, startedAt: item.startedAt });
+  }
+  const openStartedAt = open && openedStart?.id === open.id ? openedStart.startedAt : null;
   useEffect(() => {
-    if (!openItemId || !userId || !workspaceId) return;
+    if (!openItemId || !openKind || !openStartedAt || !userId || !workspaceId) return;
     const controller = new AbortController();
-    fetchTimelineItemEvidence(openItemId, { owner: { userId, workspaceId }, signal: controller.signal }).then(
+    fetchTimelineItemEvidence({ id: openItemId, kind: openKind, startedAt: openStartedAt },
+      { owner: { userId, workspaceId }, signal: controller.signal }).then(
       (result) => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: result }); },
       () => { if (!controller.signal.aborted) setEvidence({ itemId: openItemId, evidence: null }); }
     );
     return () => controller.abort();
-  }, [openItemId, userId, workspaceId]);
+  }, [openItemId, openKind, openStartedAt, userId, workspaceId]);
   const shownEvidence = evidence && evidence.itemId === openItemId ? evidence.evidence ?? "unavailable" as const : null;
 
   const openPlace = useCallback((place: TimelinePlace, label: string) => {
