@@ -2004,10 +2004,13 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   // stop (at a silence, an exit or edge matches), so the stop replaces them.
   // It may only claim silences the saved-place rules would bridge. Otherwise
   // promoted stays keep precedence over the same time.
+  // Core Motion's history, built once: physical stops read it for still silences (card J), stays and trips after.
+  const motionTimeline = acceptedWithMotion.length === accepted.length ? null
+    : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt));
   const absorbed = new Set<StaySegment>();
   const physicalStays: StaySegment[] = [];
   const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
-  for (const stop of detectPhysicalStops(accepted, input.config)) {
+  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline)) {
     const stopStartMs = Date.parse(stop.startedAt);
     const stopEndMs = Date.parse(stop.stoppedAt);
     const overlapping = promotedStays.filter((stay) =>
@@ -2067,14 +2070,14 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
     const endMs = Math.max(stopEndMs, fragmentsEndMs);
     if (Math.max(fragmentsStartMs - startMs, endMs - fragmentsEndMs) < input.config.physicalStopAbsorbExtensionMs) continue;
     const fragmentSpans = overlapping.map((stay): [number, number] => [Date.parse(stay.startedAt), Date.parse(stay.stoppedAt!)]);
-    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, visitSpans) > input.config.savedPlaceQuietGapMaxMs) continue;
+    // A silence the device was still through (card J) is covered as a Visit's span is.
+    if (longestNewSilenceMs(startMs, endMs, observedMs, fragmentSpans, [...visitSpans, ...(stop.stillSpans ?? [])]) >
+      input.config.savedPlaceQuietGapMaxMs) continue;
     for (const stay of overlapping) absorbed.add(stay);
     physicalStays.push(stayAbsorbingFragments(stop, overlapping, identity, startMs, accepted, input));
   }
   const rawStays = [...promotedStays.filter((stay) => !absorbed.has(stay)), ...physicalStays]
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-  const motionTimeline = acceptedWithMotion.length === accepted.length ? null
-    : buildMotionTimeline(acceptedWithMotion, input.config, Date.parse(input.processingAt));
   const stays = refineStayDeparturesWithMotion(coalesceCompatibleUnknownStays(rawStays, accepted, input),
     motionTimeline, input.config, accepted, input.processingAt);
   // A stay inherits an inferred boundary from every promoted stay it absorbed

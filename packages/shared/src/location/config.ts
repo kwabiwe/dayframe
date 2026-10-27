@@ -100,6 +100,8 @@ export type LocationEngineConfig = {
   physicalStopVisitCarriedMinimumMs: number;
   physicalStopVisitDepartureLagMaximumMs: number;
   physicalStopAbsorbExtensionMs: number;
+  physicalStopStillSilenceMaximumMs: number;
+  physicalStopStillSilenceMovingAllowanceMs: number;
   physicalStopAbsorbToleranceMs: number;
   motionStillBridgeMs: number;
   motionMinimumBlockMovingMs: number;
@@ -248,6 +250,12 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // shortened one stop at a silence, an exit or edge matches. Across retained
   // traces, stops and promoted stays otherwise agree within about three minutes.
   physicalStopAbsorbExtensionMs: 300_000,
+  // Card J (owner, 27 Oct 2026): a phone left still (a meal, a cinema) can go quiet for well over an hour.
+  // A stop may bridge a silence longer than the usual bound when Core Motion covered it and saw no more
+  // than a few minutes of vehicle movement in it (parking, then pulling away), with no geofence crossing:
+  // the readings either side, close together, are one stop. Never longer than this.
+  physicalStopStillSilenceMaximumMs: 21_600_000,
+  physicalStopStillSilenceMovingAllowanceMs: 300_000,
   physicalStopAbsorbToleranceMs: 120_000,
   // Motion & Fitness activity (Core Motion) times journeys; it never places the
   // device. Movement separated by no more than this much stillness (a crossing,
