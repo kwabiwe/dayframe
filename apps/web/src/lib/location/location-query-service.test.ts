@@ -4,7 +4,7 @@ const query = vi.hoisted(() => vi.fn());
 
 vi.mock("../db", () => ({ query }));
 
-const { getLocationReviewEvidence } = await import("./location-query-service");
+const { getLocationReviewEvidence, getTimelineItemEvidence } = await import("./location-query-service");
 const { locationEvidenceCaption, locationEvidenceMapMode } = await import("./location-evidence-presentation");
 
 const session = {
@@ -13,6 +13,28 @@ const session = {
   authMode: "provider" as const,
   scopes: ["app:read"]
 };
+
+describe("a timeline item's evidence (location v4 step 12)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("finds the segment by the timeline's item id, never a superseded one, and builds the same map", async () => {
+    query.mockImplementationOnce(() => Promise.resolve({ rows: [{ ...reviewRow(), reviewItemId: null, eventId: null, title: "Unknown place" }] }));
+    query.mockImplementation(() => Promise.resolve({ rows: [] }));
+    const evidence = await getTimelineItemEvidence("seg-client-1", session);
+    expect(evidence).toMatchObject({ itemId: "seg-client-1", reviewItemId: null, eventId: null, segment: { kind: "stay" } });
+    const [sql, params] = query.mock.calls[0];
+    expect(String(sql)).toContain("client_segment_id = wanted.item");
+    expect(String(sql)).toContain("status <> 'superseded'");
+    expect(params).toEqual([session.workspaceId, session.userId, "seg-client-1"]);
+  });
+
+  it("says when the item is no longer in the day", async () => {
+    query.mockResolvedValue({ rows: [] });
+    await expect(getTimelineItemEvidence("gone", session)).rejects.toMatchObject({ status: 404 });
+  });
+});
 
 describe("Location Review evidence query", () => {
   beforeEach(() => {

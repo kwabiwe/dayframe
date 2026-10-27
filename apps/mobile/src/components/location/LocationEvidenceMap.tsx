@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker, Polyline, type MapPressEvent, type Region } from "react-native-maps";
-import type { LocationReviewEvidenceDto } from "@dayframe/shared";
+import { evidencePlainSummary, formatClockTime, type ClockFormat, type LocationReviewEvidenceDto } from "@dayframe/shared";
 
 type Props = {
   /** The map follows Dayframe's theme, so neutral overlays read on it (not the system's). */
   appearance?: "light" | "dark";
-  evidence: LocationReviewEvidenceDto;
+  /** A Review item's or a timeline item's evidence (step 12): only what the map draws and says. */
+  evidence: Pick<LocationReviewEvidenceDto, "map" | "segment" | "stops" | "evidenceExpired" | "rawEvidenceAvailable">;
+  /** The viewer's clock, for the map's words ("25 readings · No readings 18:06–19:21"). */
+  clockFormat: ClockFormat;
   accentColor: string;
   surfaceColor: string;
   textColor: string;
@@ -25,6 +28,7 @@ type Props = {
 
 export function LocationEvidenceMap({
   appearance,
+  clockFormat,
   evidence,
   accentColor,
   surfaceColor,
@@ -43,6 +47,8 @@ export function LocationEvidenceMap({
   // The opening token is already shown by the opening view; a replayed effect sees it as handled.
   const handledRevealRef = useRef(revealChoiceToken);
   const samples = evidence.map.acceptedSamples;
+  // Plain words, not the server's diagnostic summary (owner feedback, 27 Oct 2026).
+  const summary = evidencePlainSummary(evidence, (iso) => formatClockTime(iso, clockFormat));
   const shouldShowSavedPlaces = showDetails || evidence.segment.kind === "stay";
   // Time away has no route line, so its readings are the evidence to inspect.
   const shouldShowSamples = showDetails || evidence.segment.timeAway === true;
@@ -96,7 +102,7 @@ export function LocationEvidenceMap({
     return (
       <View style={[styles.fallback, { backgroundColor: surfaceColor }]}>
         {showDetails ? (
-          <Text style={[styles.fallbackText, { color: textColor }]}>{evidence.textualSummary}</Text>
+          <Text style={[styles.fallbackText, { color: textColor }]}>{summary}</Text>
         ) : null}
         <Text style={[styles.fallbackText, { color: textColor }]}>Mapped evidence has expired or is unavailable.</Text>
       </View>
@@ -118,7 +124,7 @@ export function LocationEvidenceMap({
     <View>
       <MapView
         accessibilityLabel={showDetails
-          ? `Location evidence map. ${evidence.textualSummary}`
+          ? `Location evidence map. ${summary}`
           : evidence.segment.timeAway
             ? "Map of readings while you were away."
             : evidence.segment.kind === "commute"
@@ -255,7 +261,7 @@ export function LocationEvidenceMap({
             <Text style={[styles.legendText, { color: textColor }]}>Outlined area · saved place</Text>
             <Text style={[styles.legendText, { color: textColor }]}>Dashed line · evidence gap</Text>
           </View>
-          <Text style={[styles.summary, { color: textColor }]}>{evidence.textualSummary}</Text>
+          <Text style={[styles.summary, { color: textColor }]}>{summary}</Text>
           {evidence.map.rejectedSamples.length ? (
             <Text style={[styles.legendText, { color: textColor }]}>Excluded noisy or invalid samples: {evidence.map.rejectedSamples.length}</Text>
           ) : null}

@@ -118,6 +118,19 @@ describeWithDatabase("timeline corrections on disposable PostgreSQL (location v4
     expect(timeline.items.find((item) => item.id === "seg-a")).not.toHaveProperty("setByYou");
   });
 
+  it("reads a timeline item's evidence for its sheet's map by the item, with its open Review item when it has one (step 12)", async () => {
+    const { getTimelineItemEvidence } = await import("./location-query-service");
+    const place = await getTimelineItemEvidence("seg-a", session);
+    expect(place).toMatchObject({ itemId: "seg-a", segment: { kind: "stay", startedAt: at(0), stoppedAt: at(480) }, display: { title: "Unknown place" } });
+    expect(place.reviewItemId).toEqual(expect.any(String));
+    const trip = await getTimelineItemEvidence("trip-2", session);
+    expect(trip).toMatchObject({ itemId: "trip-2", segment: { kind: "commute" } });
+    expect(trip.reviewItemId).toEqual(expect.any(String));
+    expect((await getTimelineItemEvidence("seg-c", session)).reviewItemId).toBeNull();
+    await expect(getTimelineItemEvidence("seg-missing", session)).rejects.toMatchObject({ status: 404 });
+    await expect(getTimelineItemEvidence("seg-a", { ...session, workspaceId: otherWorkspaceId })).rejects.toMatchObject({ status: 404 });
+  });
+
   it("refuses another workspace's place, an item that isn't there, and a trip that already has a block", async () => {
     const { correctLocationTimeline } = await import("./location-timeline-corrections");
     await expect(correctLocationTimeline({ kind: "place", subject: "place", itemId: "seg-a", placeId: otherPlaceId, learnedPlaceId: null }, session))

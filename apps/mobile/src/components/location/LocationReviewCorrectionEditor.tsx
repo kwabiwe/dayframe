@@ -974,6 +974,7 @@ export function LocationReviewCorrectionEditor({
               card shows above Where when the page is scrolled (staging feedback, 12 October). */}
           <Reanimated.View layout={localLayoutTransition(reduceMotion)}>
             <LocationEvidenceMap
+              clockFormat={clockFormat}
               appearance={theme.mode === "dark" ? "dark" : "light"}
               evidence={evidence}
               // Neutral map marks (UIA-027), as the place editor draws a place without an activity.

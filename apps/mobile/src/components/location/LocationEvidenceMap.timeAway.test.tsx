@@ -31,7 +31,7 @@ const evidence = (timeAway: boolean) => ({
 function render(value: LocationReviewEvidenceDto) {
   let tree: ReactTestRenderer | undefined;
   act(() => {
-    tree = create(<LocationEvidenceMap accentColor="#f00" dangerColor="#f00" evidence={value} showDetails={false}
+    tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#f00" dangerColor="#f00" evidence={value} showDetails={false}
       surfaceColor="#000" textColor="#fff" />);
   });
   return tree!;
@@ -52,7 +52,7 @@ describe("map appearance (UIA-027)", () => {
     for (const appearance of ["light", "dark"] as const) {
       let tree: ReactTestRenderer | undefined;
       act(() => {
-        tree = create(<LocationEvidenceMap accentColor="#f00" appearance={appearance} dangerColor="#f00" evidence={evidence(true)}
+        tree = create(<LocationEvidenceMap clockFormat="24h" accentColor="#f00" appearance={appearance} dangerColor="#f00" evidence={evidence(true)}
           showDetails={false} surfaceColor="#000" textColor="#fff" />);
       });
       expect(tree!.root.findByType("MapView" as never).props.userInterfaceStyle).toBe(appearance);

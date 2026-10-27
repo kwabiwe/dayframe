@@ -38,7 +38,7 @@ function mount(reduceMotion = false) {
   // StrictMode replays effects, as development builds do (Codex r4 on #482).
   const element = (value: LocationReviewEvidenceDto = stay) => (
     <StrictMode>
-      <LocationEvidenceMap accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
+      <LocationEvidenceMap clockFormat="24h" accentColor="#000" dangerColor="#f00" evidence={value} onSelectPoint={vi.fn()} reduceMotion={reduceMotion}
         revealChoiceToken={token} selectedPoint={point} selectedPointRadiusMeters={80} showDetails={false} surfaceColor="#fff" textColor="#111" />
     </StrictMode>
   );
