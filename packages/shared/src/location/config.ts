@@ -102,6 +102,9 @@ export type LocationEngineConfig = {
   physicalStopAbsorbExtensionMs: number;
   physicalStopStillSilenceMaximumMs: number;
   physicalStopStillSilenceMovingAllowanceMs: number;
+  physicalStopStillSilenceStationaryMinimumShare: number;
+  physicalStopStillSilenceWalkingMaximumShare: number;
+  physicalStopStillSilenceRestlessMaximumMs: number;
   physicalStopAbsorbToleranceMs: number;
   motionStillBridgeMs: number;
   motionMinimumBlockMovingMs: number;
@@ -251,11 +254,18 @@ export const LOCATION_ENGINE_V2_CONFIG: LocationEngineConfig = {
   // traces, stops and promoted stays otherwise agree within about three minutes.
   physicalStopAbsorbExtensionMs: 300_000,
   // Card J (owner, 27 Oct 2026): a phone left still (a meal, a cinema) can go quiet for well over an hour.
-  // A stop may bridge a silence longer than the usual bound when Core Motion covered it and saw no more
-  // than a few minutes of vehicle movement in it (parking, then pulling away), with no geofence crossing:
-  // the readings either side, close together, are one stop. Never longer than this.
+  // A stop may bridge a silence longer than the usual bound when nothing was received in it, no geofence
+  // was crossed, and Core Motion covered it with positive stillness: stationary for at least this share,
+  // walking for at most this share, driving, cycling or running for at most a few minutes at any confidence
+  // (parking, then pulling away), and never this long without a stationary reading (iOS reports "unknown"
+  // between them while a phone lies still; the owner's evening was 42 % stationary, 47 % unknown, 9 %
+  // walking, its longest spell without stationary 12 minutes). The readings either side, close together,
+  // are one stop. Never longer than this.
   physicalStopStillSilenceMaximumMs: 21_600_000,
   physicalStopStillSilenceMovingAllowanceMs: 300_000,
+  physicalStopStillSilenceStationaryMinimumShare: 0.3,
+  physicalStopStillSilenceWalkingMaximumShare: 0.25,
+  physicalStopStillSilenceRestlessMaximumMs: 1_200_000,
   physicalStopAbsorbToleranceMs: 120_000,
   // Motion & Fitness activity (Core Motion) times journeys; it never places the
   // device. Movement separated by no more than this much stillness (a crossing,

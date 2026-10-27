@@ -2010,7 +2010,7 @@ function runLocationEnginePass(input: LocationEngineInput): { output: LocationEn
   const absorbed = new Set<StaySegment>();
   const physicalStays: StaySegment[] = [];
   const reusedBySegment = new Map(rawStayRecords.map(({ working, segment }) => [segment, working.reusedVisits]));
-  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline)) {
+  for (const stop of detectPhysicalStops(accepted, input.config, motionTimeline, broadReadingTimes)) {
     const stopStartMs = Date.parse(stop.startedAt);
     const stopEndMs = Date.parse(stop.stoppedAt);
     const overlapping = promotedStays.filter((stay) =>
