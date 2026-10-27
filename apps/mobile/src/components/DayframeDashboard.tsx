@@ -1967,10 +1967,13 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
   const openCalendarCheck = openCalendarCheckId
     ? shownCalendarData?.reviewItems.find((item) => item.id === openCalendarCheckId) ?? null
     : null;
+  // Whether the Calendar tab is the screen in front, as its render last said (the search runs only then).
+  const [calendarOnScreen, setCalendarOnScreen] = useState(false);
   const openCheckVenue = useCheckVenueGuess({
     item: openCalendarCheck,
     outing: Boolean(openCalendarCheck?.id && calendarCheckBase.outings.has(openCalendarCheck.id)),
-    owner: authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null
+    owner: authState === "authenticated" && data ? { userId: data.user.id, workspaceId: data.workspace.id } : null,
+    onScreen: calendarOnScreen
   });
   const calendarChecks = useMemo(() => {
     // An outing is folded, asked once on its stay, counted and saved by one map: the deck's grouping and
@@ -3591,6 +3594,7 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
       return (
         <SafeAreaView collapsable={false} edges={["top", "left", "right"]} style={styles.safeArea}>
           <View style={styles.nativeCalendarScreen}>
+            <ScreenFocusReporter focused={isFocused} onChange={setCalendarOnScreen} />
             <Animated.View style={[styles.nativeCalendarHeader, enteringStyle]}>
               <DashboardBrandLockup isFocused={isFocused} styles={styles} theme={theme} />
               <AccountAvatarButton
@@ -3654,10 +3658,14 @@ export function DayframeDashboardProvider({ children }: { children: ReactNode })
                     : undefined}
                   onOpenCheckChange={setOpenCalendarCheckId}
                   // A place's evidence on its details screen; anything else on the deck, focused on it (Codex r10 on #582).
-                  onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(
-                    shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
-                    reviewItemId
-                  ) as never)}
+                  // The editor's Nearby search takes the native search over from the question first (Codex r1 on #600).
+                  onOpenCheck={(reviewItemId) => {
+                    openCheckVenue.release();
+                    router.push(calendarCheckRoute(
+                      shownCalendarData?.reviewItems.find((item) => item.id === reviewItemId),
+                      reviewItemId
+                    ) as never);
+                  }}
                   onOpenEntry={(entry) => routeOpenEvent(entry.isActive ? "active" : "completed", entry.entryId)}
                   onScrolledToFirstCheck={() => setCalendarCheckScroll(0)}
                   scrollToFirstCheck={calendarCheckScroll}
@@ -3897,6 +3905,15 @@ async function refreshLocationServices(bootstrap: MobileBootstrap) {
   } catch (error) {
     await recordLocationStoreError(error);
   }
+}
+
+/** Tells the provider whether a tab is the screen in front, and that it is not once the tab unmounts. */
+function ScreenFocusReporter({ focused, onChange }: { focused: boolean; onChange: (focused: boolean) => void }) {
+  useEffect(() => {
+    onChange(focused);
+  }, [focused, onChange]);
+  useEffect(() => () => onChange(false), [onChange]);
+  return null;
 }
 
 /** The Calendar tab's badge: things to check today and the 7 days before (location v4 step 14). */

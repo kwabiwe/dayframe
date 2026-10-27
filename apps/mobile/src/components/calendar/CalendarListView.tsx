@@ -137,9 +137,12 @@ export function CalendarListView({
   // back to the day or the row coming back does not reopen it (Codex r2 on #582).
   const shownOpenCheckId = openCheckId && checkRows.some((row) => row.id === openCheckId) ? openCheckId : null;
   if (openCheckId && !shownOpenCheckId) setOpenCheckId(null);
+  // Leaving the List (for Grid, or another day's screen) closes its question for whoever searches for it
+  // (Codex r1 on #600).
   useEffect(() => {
     onOpenCheckChange?.(shownOpenCheckId);
   }, [onOpenCheckChange, shownOpenCheckId]);
+  useEffect(() => () => onOpenCheckChange?.(null), [onOpenCheckChange]);
   // Today's chip opens the List at its first "?" (one scroll owner: this ScrollView; at once with Reduce Motion).
   // A request stays pending until its "?" has laid out, then is used once (Codex r1 on #573): a List
   // mounting fresh from Grid, a day change or places arriving later all still land on it. "N to check"

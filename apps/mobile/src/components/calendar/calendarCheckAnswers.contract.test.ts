@@ -63,7 +63,8 @@ describe("Calendar › List answers beside the deck and Today's toasts (Codex r2
   });
 
   it("opens each \"?\" where its kind is handled, and asks none with a pending change of its own (Codex r10 on #582)", () => {
-    expect(dashboard).toContain("onOpenCheck={(reviewItemId) => router.push(calendarCheckRoute(");
+    expect(dashboard).toContain("onOpenCheck={(reviewItemId) => {");
+    expect(dashboard).toContain("router.push(calendarCheckRoute(");
     expect(dashboard).not.toContain('router.push({ pathname: "/review/[id]", params: { id: reviewItemId } } as never)');
     expect(dashboard).toContain("pendingChange: reviewSyncStateIds.has(item.id)");
   });
