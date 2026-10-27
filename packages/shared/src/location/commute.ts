@@ -802,35 +802,41 @@ function originCircle(stay: StaySegment, place: SavedPlaceForMatching | null, co
 }
 
 /**
- * When the device was first clearly away from a stay's place after it ended: the first of two
+ * Each time the device was clearly away from a stay's place after it ended, in order: the first of two
  * independent accurate readings (more than `MIRROR_WINDOW_MS` apart, so never one observation and its
  * copy) at least `commuteSamePlaceMinimumExcursionMeters` from its circle's centre net of their accuracy,
  * or `LEAVING_MARGIN_METRES` beyond its radius if that is farther, with no sign of being back at the place
- * between them (both belong to one excursion; Codex r2 on #589), with when that excursion began: the
- * last sign of being at the place before it (the stay's end when there was none). Null when it never was.
+ * between them (both belong to one excursion; Codex r2 on #589), with when that excursion began: the last
+ * sign of being at the place before it (the stay's end when there was none).
  */
 function clearlyAwayFromOrigin(stay: StaySegment, place: SavedPlaceForMatching | null, gapEvidence: readonly ClassifiedEvidence[],
   snapshots: ReadonlySet<ClassifiedEvidence>, stayEndMs: number, config: LocationEngineConfig) {
+  const excursions: Array<{ awayMs: number; leftMs: number }> = [];
   const circle = originCircle(stay, place, config);
-  if (!circle) return null;
+  if (!circle) return excursions;
   let firstMs: number | null = null;
   let leftMs = stayEndMs;
+  let counted = false;
   for (const item of gapEvidence) {
     if (snapshots.has(item) || item.evidence.isSimulated === true) continue;
     if (atOrigin(item, stay, circle, config)) {
       firstMs = null;
+      counted = false;
       leftMs = Date.parse(item.evidence.occurredAt);
       continue;
     }
     const point = evidencePoint(item);
-    if (point == null || !accurateFix(item, config) || evidenceMatchesStay(item, stay)) continue;
+    if (counted || point == null || !accurateFix(item, config) || evidenceMatchesStay(item, stay)) continue;
     if (distanceMeters(circle.centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < circle.awayMetres) continue;
     const atMs = Date.parse(item.evidence.occurredAt);
     if (firstMs == null) firstMs = atMs;
     // A copy of the same observation (a significant change mirroring a fix) is not a second reading.
-    else if (atMs - firstMs > MIRROR_WINDOW_MS) return { awayMs: firstMs, leftMs };
+    else if (atMs - firstMs > MIRROR_WINDOW_MS) {
+      excursions.push({ awayMs: firstMs, leftMs });
+      counted = true;
+    }
   }
-  return null;
+  return excursions;
 }
 
 /**
@@ -941,11 +947,12 @@ export function deriveCommutes(
     // it began. Dropping the time before it left an outing with no segment and a one-minute drive
     // after it. A longer time back is time at the place, and a loop out and back with no stop (a
     // walk, then the drive) is its own outing: the next trip starts when it left again.
-    const away = clearlyAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, originalStartedAtMs, config);
-    const awayMs = away?.awayMs ?? null;
+    // The excursion just before the latest departure, the one whose pass home that departure ends (an
+    // earlier one that does not qualify never hides it; Codex r4 on #589).
     const latestMs = latestFromSupport ? Date.parse(latestFromSupport.evidence.occurredAt) : null;
-    const backMs = awayMs != null && latestMs != null && latestMs > awayMs
-      ? firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, awayMs, config) : null;
+    const away = latestMs == null ? null : clearlyAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, originalStartedAtMs, config)
+      .filter((excursion) => excursion.awayMs < latestMs).at(-1) ?? null;
+    const backMs = away != null ? firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, away.awayMs, config) : null;
     // Its stop away and its pass back through the origin were never stays, so the trip carries no
     // `stops`: it stands at low confidence, offered in Review as a trip with a stop is (PRD D19), never
     // logged automatically (Codex r1 on #589).

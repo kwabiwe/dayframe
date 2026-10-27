@@ -141,6 +141,17 @@ describe("a trip starts at departure (card E, 25 Oct)", () => {
     expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
   });
 
+  it("judges the excursion just before the pass home, so an earlier one without a stop never hides it (Codex r4 on #589)", () => {
+    // A short loop 1–1.3 km east at 27–28 with no stop, back Home at 29; then the morning's stopped excursion.
+    const input = morning({ withMotion: false });
+    input.evidence = [...input.evidence.filter((item) => item.clientEvidenceId !== "home-am-6"),
+      fix("early-0", 27, { east: 1_000 }, 6), fix("early-1", 28, { east: 1_300 }, 6), crossing("home-enter-early", 29, "geofence_enter", HOME_ID),
+      fix("home-early", 29.1, { north: 2 }, 5, { speedMetersPerSecond: 0 })];
+    const toSchool = commutes(input).filter((trip) => trip.fromPlaceId === HOME_ID && trip.toPlaceId === SCHOOL_ID);
+    expect(toSchool).toHaveLength(1);
+    expect(minutes(toSchool[0].startedAt)).toBeLessThanOrEqual(30.7);
+  });
+
   it("keeps the trip between its stays: it starts when Home ends at the latest and ends where the shop stay begins", () => {
     const all = segments(morning());
     const stays = all.filter((segment): segment is StaySegment => segment.kind === "stay");
