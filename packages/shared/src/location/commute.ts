@@ -948,8 +948,8 @@ export function deriveCommutes(
     // after it. A longer time back is time at the place, and a loop out and back with no stop (a
     // walk, then the drive) is its own outing: the next trip starts when it left again.
     // Back from the latest departure, excursion by excursion: each one whose pass home that departure
-    // ended within `savedPlaceMinimumDwellMs`, with a stop of its own, joins the trip; a long time back or
-    // an excursion without a stop ends the walk (Codex r4–r5 on #589). Its stops away and its passes back
+    // ended within `savedPlaceMinimumDwellMs`, with a stop of its own, joins the trip, and the walk goes on
+    // from its own departure; a long time back or an excursion without a stop ends it (Codex r4–r6 on #589). Its stops away and its passes back
     // through the origin were never stays, so the trip carries no `stops`: it stands at low confidence,
     // offered in Review as a trip with a stop is (PRD D19), never logged automatically (Codex r1 on #589).
     let firstLeftMs: number | null = null;
@@ -963,7 +963,12 @@ export function deriveCommutes(
         if (backMs == null || backMs > departureMs || departureMs - backMs >= config.savedPlaceMinimumDwellMs ||
           !stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, away.leftMs, backMs, config)) break;
         firstLeftMs = away.awayMs;
-        departureMs = away.leftMs;
+        // That excursion's own departure, by the same rule, is what the return before it is measured to
+        // (Codex r6 on #589).
+        const departure = latestDepartureSupport(from, fromEvidence,
+          gapEvidence.filter((item) => Date.parse(item.evidence.occurredAt) < away.awayMs), config, farFrom, snapshots,
+          stoppedAtMs, sameKnownEndpoint(from, to), fromPlace);
+        departureMs = departure ? Date.parse(departure.evidence.occurredAt) : originalStartedAtMs;
       }
     }
     const throughOrigin = firstLeftMs != null;
