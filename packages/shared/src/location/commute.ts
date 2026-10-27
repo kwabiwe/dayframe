@@ -803,7 +803,8 @@ function originCircle(stay: StaySegment, place: SavedPlaceForMatching | null, co
 
 /**
  * When the device was first clearly away from a stay's place after it ended: the first of two
- * independent accurate readings (a second apart or more) at least `commuteSamePlaceMinimumExcursionMeters`
+ * independent accurate readings (more than `MIRROR_WINDOW_MS` apart, so never one observation and its
+ * copy) at least `commuteSamePlaceMinimumExcursionMeters`
  * from its circle's centre net of their accuracy, or `LEAVING_MARGIN_METRES` beyond its radius if that is
  * farther. Null when it never was.
  */
@@ -819,7 +820,8 @@ function clearlyAwayFromOriginMs(stay: StaySegment, place: SavedPlaceForMatching
     if (distanceMeters(circle.centre, point) - (item.evidence.horizontalAccuracyMeters ?? 0) < circle.awayMetres) continue;
     const atMs = Date.parse(item.evidence.occurredAt);
     if (firstMs == null) firstMs = atMs;
-    else if (Math.floor(atMs / 1_000) !== Math.floor(firstMs / 1_000)) return firstMs;
+    // A copy of the same observation (a significant change mirroring a fix) is not a second reading.
+    else if (atMs - firstMs > MIRROR_WINDOW_MS) return firstMs;
   }
   return null;
 }
@@ -929,10 +931,15 @@ export function deriveCommutes(
     const latestMs = latestFromSupport ? Date.parse(latestFromSupport.evidence.occurredAt) : null;
     const backMs = awayMs != null && latestMs != null && latestMs > awayMs
       ? firstBackAtOriginMs(from, fromPlace, gapEvidence, snapshots, awayMs, config) : null;
-    if (latestFromSupport && awayMs != null && backMs != null && latestMs! - backMs < config.savedPlaceMinimumDwellMs &&
-      stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, backMs, config)) {
+    // Its stop away and its pass back through the origin were never stays, so the trip carries no
+    // `stops`: it stands at low confidence, offered in Review as a trip with a stop is (PRD D19), never
+    // logged automatically (Codex r1 on #589).
+    const departedMs = awayMs != null && backMs != null && latestMs != null && latestMs - backMs < config.savedPlaceMinimumDwellMs &&
+      stoppedAwayFromOrigin(from, fromPlace, gapEvidence, snapshots, backMs, config) ? awayMs : null;
+    const throughOrigin = departedMs != null;
+    if (departedMs != null) {
       latestFromSupport = latestDepartureSupport(from, fromEvidence,
-        gapEvidence.filter((item) => Date.parse(item.evidence.occurredAt) < awayMs), config, farFrom, snapshots,
+        gapEvidence.filter((item) => Date.parse(item.evidence.occurredAt) < departedMs), config, farFrom, snapshots,
         stoppedAtMs, sameKnownEndpoint(from, to), fromPlace);
     }
     let startedAtMs = latestFromSupport
@@ -1311,7 +1318,7 @@ export function deriveCommutes(
         gapDurationSeconds: Math.round((endedMs - beganMs) / 1_000),
         maximumObservationGapSeconds: summary.maximumObservationGapSeconds,
         continuityStatus: uncertainBoundary ? "uncertain_gap" : "continuous",
-        confidence: anyEndpointHasInferredBoundary || motionSupported || outingLeg
+        confidence: anyEndpointHasInferredBoundary || motionSupported || outingLeg || throughOrigin
           ? "low"
           : uncertainBoundary && qualification.confidence === "medium_high"
             ? "medium"

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assessAutomaticMove } from "../src/location/automaticPolicy";
 import { LOCATION_ENGINE_V2_CONFIG as config } from "../src/location/config";
 import { runLocationEngine } from "../src/location/segmenter";
 import type { CommuteSegment, LocationEngineInput, LocationEvidence, StaySegment } from "../src/location/types";
@@ -97,6 +98,43 @@ describe("a trip starts at departure (card E, 25 Oct)", () => {
     const short = commutes(morning()).filter((trip) => Date.parse(trip.stoppedAt) - Date.parse(trip.startedAt) < 3 * 60_000 &&
       trip.toPlaceId === SCHOOL_ID);
     expect(short).toEqual([]);
+  });
+
+  it("offers the widened trip in Review, never logs it, even with clean speeds: its stop and pass home were never stays (Codex r1 on #589)", () => {
+    const input = morning();
+    input.evidence = input.evidence.map((item) => ["out-1", "out-2", "back-1"].includes(item.clientEvidenceId)
+      ? { ...item, speedMetersPerSecond: 10 } : item);
+    const [trip] = commutes(input).filter((candidate) => candidate.fromPlaceId === HOME_ID && candidate.toPlaceId === SCHOOL_ID);
+    expect(minutes(trip.startedAt)).toBeLessThanOrEqual(30.7);
+    expect(trip.confidence).toBe("low");
+    expect(assessAutomaticMove(trip, true).eligible).toBe(false);
+  });
+
+  it("never counts one reading and its copy as two readings away (Codex r1 on #589)", () => {
+    // One accurate reading far away, mirrored a second later: not clearly away, so the later start stays.
+    const input = morning();
+    const far = input.evidence.find((item) => item.clientEvidenceId === "stop-0")!;
+    input.evidence = [...input.evidence.filter((item) => !["stop-1", "back-0", "back-1", "out-2"].includes(item.clientEvidenceId)),
+      { ...far, clientEvidenceId: "stop-0-copy", kind: "significant_change", occurredAt: at(36.1 + 1 / 60), sourceTimestamp: at(36.1 + 1 / 60) }];
+    const toSchool = commutes(input).filter((trip) => trip.fromPlaceId === HOME_ID && trip.toPlaceId === SCHOOL_ID);
+    expect(toSchool).toHaveLength(1);
+    expect(minutes(toSchool[0].startedAt)).toBeGreaterThanOrEqual(47);
+  });
+
+  it("keeps the trip between its stays: it starts when Home ends at the latest and ends where the shop stay begins", () => {
+    const all = segments(morning());
+    const stays = all.filter((segment): segment is StaySegment => segment.kind === "stay");
+    for (const trip of all.filter((segment): segment is CommuteSegment => segment.kind === "commute")) {
+      for (const stay of stays) {
+        const overlap = Math.min(Date.parse(trip.stoppedAt), Date.parse(stay.stoppedAt ?? at(1_000))) -
+          Math.max(Date.parse(trip.startedAt), Date.parse(stay.startedAt));
+        expect(overlap).toBeLessThanOrEqual(0);
+      }
+    }
+    const shop = stays.find((stay) => stay.placeId === SCHOOL_ID)!;
+    const [toSchool, home] = all.filter((segment): segment is CommuteSegment => segment.kind === "commute");
+    expect(toSchool.stoppedAt).toBe(shop.startedAt);
+    expect(Date.parse(home.startedAt)).toBeGreaterThanOrEqual(Date.parse(shop.stoppedAt!));
   });
 
   it("keeps a wander near the origin out of the trip: only an outing that could be a trip of its own moves the start", () => {
