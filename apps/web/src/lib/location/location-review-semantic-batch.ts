@@ -101,7 +101,7 @@ async function moveEndpoints(
       ? Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId) || Boolean(fromLearned && fromLearned === toLearned)
       : isTimeAway(segment) || segment.qualificationReason === "same_place_meaningful_round_trip" ||
         Boolean(segment.fromPlaceId && segment.fromPlaceId === segment.toPlaceId);
-    return [segment.clientSegmentId, moveName({ from, to, travelMode: segment.travelMode, sameEndpoint,
+    return [segment.clientSegmentId, moveName({ from, to, sameEndpoint,
       stopCount: segment.stops?.length ?? 0 })] as const;
   }));
 }
@@ -139,7 +139,7 @@ async function displayContext(
   return (segment: LocationSegment) => {
     if (segment.kind === "commute") {
       const move = moves.get(segment.clientSegmentId) ?? moveName({ from: { name: null, role: null }, to: { name: null, role: null },
-        travelMode: segment.travelMode, sameEndpoint: isTimeAway(segment), stopCount: segment.stops?.length ?? 0 });
+        sameEndpoint: isTimeAway(segment), stopCount: segment.stops?.length ?? 0 });
       return { trusted: null, title: move.title, move };
     }
     const trusted = segment.placeMatchKind === "saved" && segment.placeId

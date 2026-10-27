@@ -17,8 +17,10 @@ import type { ClassifiedEvidence, CommuteSegment, MotionTravelMode, OpenTrip, Tr
  *
  * Part 2 (build step 7): a silence of `tripUnseenLegMinimumMs` or more between genuine fixes
  * `tripUnseenLegMinimumMeters` apart at 5–25 m/s, with readings better than cell-only accuracy no more
- * often than one per `tripUnseenSparseReadingIntervalMs` in between, is a leg of its own, Underground
- * (sure when both ends are at Underground stations, otherwise unsure with train as runner-up). A vehicle
+ * often than one per `tripUnseenSparseReadingIntervalMs` in between, and a station (Underground or rail)
+ * near both ends, is a leg of its own: the Underground (sure between Underground stations), a train (likely,
+ * between rail stations), else unsure Underground with train as runner-up. Without stations at both ends the
+ * gap joins the leg around it: a gap alone never guesses a mode (card A, 24 Oct). A vehicle
  * leg with a sustained train speed and few stops is a train: sure between rail stations, and without
  * them, at a median above UK motorway limits, unsure with car as runner-up (a fast drive matches it).
  * A vehicle leg between Underground stations is the Underground, and a slower one between metro or
@@ -173,6 +175,8 @@ export function deriveTripLegs({
   const broadTimes = broadReadingTimes.filter((atMs) => atMs >= startMs && atMs <= endMs).sort((a, b) => a - b);
   let observedFrom = 0;
   let broadFrom = 0;
+  const stationNear = (point: { latitude: number; longitude: number }) =>
+    config.tripStationsEnabled && nearestStation(point, ["underground", "rail"], config.tripStationRadiusMeters) != null;
   // Unseen stretches: nothing much observed between two distant genuine fixes, at train or Underground speed.
   const unseen = fixes.slice(1).flatMap((next, index) => {
     const before = fixes[index];
@@ -185,8 +189,11 @@ export function deriveTripLegs({
     const gapMs = next.atMs - before.atMs;
     const meters = distanceMeters(before.point, next.point);
     const mps = meters / (gapMs / 1_000);
+    // Underground or train only with a station near both ends (card A, 24 Oct: a 1.8 km silence between
+    // two drives read "Underground or train?"): otherwise the gap joins the leg around it.
     return gapMs >= config.tripUnseenLegMinimumMs && meters >= config.tripUnseenLegMinimumMeters &&
-      mps >= config.tripUnseenLegMinimumSpeedMps && mps <= config.tripUnseenLegMaximumSpeedMps
+      mps >= config.tripUnseenLegMinimumSpeedMps && mps <= config.tripUnseenLegMaximumSpeedMps &&
+      stationNear(before.point) && stationNear(next.point)
       ? [{ fromMs: before.atMs, toMs: next.atMs }] : [];
   });
   // Elementary slices between every change of any input.
@@ -361,18 +368,26 @@ export function deriveTripLegs({
     const points = fixes.filter(({ atMs }) => atMs >= fromMs && atMs <= toMs).map(({ point }) => point);
     return points.length >= 2 ? Math.round(points.slice(1).reduce((sum, point, at) => sum + distanceMeters(points[at], point), 0)) : null;
   };
-  return moving.map((run, index): TripLeg => {
+  return mergeSameModeLegs(moving.map((run, index): TripLeg => {
     // Stillness at the trip's ends belongs to the first or last leg, whose times are the trip's own.
     const fromMs = index === 0 ? startMs : slices[run.first].fromMs;
     const toMs = index === moving.length - 1 ? endMs : slices[run.last].toMs;
     const startedAt = new Date(fromMs).toISOString();
     const stoppedAt = new Date(toMs).toISOString();
     if (run.label === "unseen") {
-      const sure = bothAt(slices[run.first].fromMs, slices[run.last].toMs, ["underground"]);
+      const gapFromMs = slices[run.first].fromMs;
+      const gapToMs = slices[run.last].toMs;
       // Unseen runs merged across a stop keep every gap's anchors in their distance.
-      return { startedAt, stoppedAt, mode: "underground", confidence: sure ? "sure" : "unsure",
-        ...(sure ? {} : { runnerUp: "train" as const }), unobserved: true,
-        distanceMeters: pathMeters(slices[run.first].fromMs, slices[run.last].toMs) };
+      const distance = pathMeters(gapFromMs, gapToMs);
+      // Between Underground stations it is the Underground; between rail stations a train; between one of
+      // each, either (every gap has a station near both ends).
+      if (bothAt(gapFromMs, gapToMs, ["underground"])) {
+        return { startedAt, stoppedAt, mode: "underground", confidence: "sure", unobserved: true, distanceMeters: distance };
+      }
+      if (bothAt(gapFromMs, gapToMs, ["rail"])) {
+        return { startedAt, stoppedAt, mode: "train", confidence: "likely", unobserved: true, distanceMeters: distance };
+      }
+      return { startedAt, stoppedAt, mode: "underground", confidence: "unsure", runnerUp: "train", unobserved: true, distanceMeters: distance };
     }
     const mode = run.label as MotionTravelMode;
     let covered = 0;
@@ -416,7 +431,40 @@ export function deriveTripLegs({
       if (transit) return { startedAt, stoppedAt, mode: transit, confidence: atRail || atUnderground ? "sure" : "likely", distanceMeters: meters };
     }
     return { startedAt, stoppedAt, mode, confidence, distanceMeters: meters };
-  });
+  }));
+}
+
+/**
+ * Consecutive legs of one mode are one leg (card A, owner feedback 25 Oct: "Underground 52m", not four
+ * Underground rows): a silence and a ride between Underground stations, or a train either side of a wait.
+ * The merged leg keeps the confidence (and runner-up) of the part that lasted longest, the earlier on a tie,
+ * is unobserved only when every part was, and adds up the parts' known distances.
+ */
+export function mergeSameModeLegs(legs: readonly TripLeg[]): TripLeg[] {
+  const merged: TripLeg[] = [];
+  let longestMs = 0;
+  for (const leg of legs) {
+    const previous = merged.at(-1);
+    const legMs = Date.parse(leg.stoppedAt) - Date.parse(leg.startedAt);
+    if (!previous || previous.mode !== leg.mode) {
+      merged.push({ ...leg });
+      longestMs = legMs;
+      continue;
+    }
+    const { runnerUp: _runnerUp, unobserved: _unobserved, ...rest } = previous;
+    const lead = legMs > longestMs ? leg : previous;
+    const distances = [previous.distanceMeters, leg.distanceMeters].filter((value): value is number => value != null);
+    merged[merged.length - 1] = {
+      ...rest,
+      stoppedAt: leg.stoppedAt,
+      confidence: lead.confidence,
+      ...(lead.runnerUp ? { runnerUp: lead.runnerUp } : {}),
+      ...(previous.unobserved && leg.unobserved ? { unobserved: true as const } : {}),
+      distanceMeters: distances.length ? distances.reduce((sum, value) => sum + value, 0) : null
+    };
+    longestMs = Math.max(longestMs, legMs);
+  }
+  return merged;
 }
 
 /**
