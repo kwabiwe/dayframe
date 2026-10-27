@@ -216,10 +216,13 @@ function maximumSpeedMps(mode: MotionTravelMode, config: LocationEngineConfig) {
 
 /**
  * The single journey Core Motion saw between two stays: the only moving block
- * overlapping the window, beginning and ending in observed stillness no more
- * than `motionBoundaryToleranceMs` beyond it, whose fastest sustained mode
+ * overlapping the window, beginning no more than `motionBoundaryToleranceMs`
+ * before it and ending in observed stillness no more than that after it, whose fastest sustained mode
  * could cover the endpoints' separation in its time. Two or more blocks mean an unobserved
- * stop may lie between them, so none is returned.
+ * stop may lie between them, so none is returned. The block may begin after indeterminate motion
+ * rather than stillness, as long as it begins inside the window: the window already bounds it, and the
+ * block proves the journey, never its times (card E, 25 Oct: a walk to the car after an unknown spell,
+ * then a two-minute drive home, was dropped).
  */
 export function motionJourneyBlock(
   timeline: MotionTimeline | null,
@@ -232,7 +235,7 @@ export function motionJourneyBlock(
   const blocks = overlapping(timeline, lowerMs, upperMs);
   if (blocks.length !== 1) return null;
   const [block] = blocks;
-  if (!block.onsetObserved || !block.stopObserved || block.startMs < lowerMs - config.motionBoundaryToleranceMs ||
+  if (!block.stopObserved || block.startMs < lowerMs - config.motionBoundaryToleranceMs ||
     block.endMs > upperMs + config.motionBoundaryToleranceMs) return null;
   const seconds = (block.endMs - block.startMs) / 1_000;
   const mode = blockFastestMode(block, config);
