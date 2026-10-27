@@ -104,9 +104,6 @@ struct DayframeCalendarPresentationRecord: Codable {
   var dayStartMs: Double = 0
   var emptyState = "No tracked time for this day."
   var entries: [DayframeCalendarEntryRecord] = []
-  var framedLabel = ""
-  /// Calendar v3: the framed line with the full date, for VoiceOver.
-  var framedAccessibilityLabel: String?
   var hapticsEnabled = true
   /// "grid" or "list" (location v4 step 9); a model without it (an older bundle) is the Grid.
   var layout: String?

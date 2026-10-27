@@ -161,6 +161,18 @@ public struct DayframeCalendarEmptyStateMetrics: Equatable {
   }
 }
 
+/// #255 (owner, 27 Oct 2026): an hour label hides only where the now pill actually covers it. Both sit
+/// at the hour gutter's trailing edge, so they always share columns and the test is vertical: the pill's
+/// height against the label's glyphs, each centred on its own y.
+public enum DayframeCalendarNowPillMath {
+  public static let pillHeight: Double = 18
+
+  public static func coversHourLabel(nowY: Double, labelCenterY: Double, labelGlyphHeight: Double) -> Bool {
+    guard nowY.isFinite, labelCenterY.isFinite, labelGlyphHeight.isFinite else { return false }
+    return abs(nowY - labelCenterY) < (pillHeight + max(0, labelGlyphHeight)) / 2
+  }
+}
+
 public enum DayframeCalendarEmptyStateMath {
   public static func metrics(
     availableWidth: Double,

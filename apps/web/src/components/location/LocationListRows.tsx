@@ -289,12 +289,17 @@ export function CheckToggle({ checkKey, expanded, label, onToggle }: { checkKey:
   );
 }
 
+/** Card D item 12: a trip's modes line shows at most three legs, then "+N" (its label still names every leg). */
+export const TRIP_MODES_LINE_MAX_LEGS = 3;
+
 /** A trip's route and modes on one line: where it went, then each leg's glyph and name (an unsure leg with "?"). */
 export function TripModesLine({ legs, route }: { legs: readonly TripLeg[]; route?: string }) {
+  const shown = legs.slice(0, TRIP_MODES_LINE_MAX_LEGS);
+  const more = legs.length - shown.length;
   return (
     <span className="timeline-trip-modes" aria-label={`${route ? `${route}. ` : ""}Legs: ${legs.map((leg) => legModeLabel(leg)).join(", ")}`}>
       {route ? <span className="timeline-trip-route">{route}</span> : null}
-      {legs.map((leg, index) => (
+      {shown.map((leg, index) => (
         <span className="timeline-trip-mode" key={`${leg.startedAt}-${index}`}>
           {index || route ? <span aria-hidden="true">·</span> : null}
           <DayframeIcon glyph={DAYFRAME_LEG_MODE_ICONS[leg.mode]} size={13} />
@@ -303,6 +308,7 @@ export function TripModesLine({ legs, route }: { legs: readonly TripLeg[]; route
           </span>
         </span>
       ))}
+      {more > 0 ? <span aria-hidden="true" className="timeline-trip-mode">· +{more}</span> : null}
     </span>
   );
 }
